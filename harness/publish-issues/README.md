@@ -43,7 +43,7 @@ A batch of N interdependent issues normally costs at least N model calls if each
 ├── settings.json                      # registers the UserPromptSubmit hook
 ├── skills/
 │   ├── map-issues/SKILL.md            # user-invocable, chat-only, proposes the breakdown
-│   ├── draft-issues/SKILL.md          # user-invocable, writes .issues-gateway/{id}-{i}.md
+│   ├── draft-issues/SKILL.md          # user-invocable, writes .issues-gateway/{session-id}/issue-{i}.md
 │   └── publish-issues/SKILL.md        # user-invocable, empty body (hook does the work)
 └── hooks/
     └── publish_issues.py              # UserPromptSubmit hook: gh calls, id resolution, labels
@@ -53,17 +53,18 @@ At runtime, `/draft-issues` creates a `.issues-gateway/` folder at the project r
 
 ```
 .issues-gateway/
-├── a1b2c3-0.md         # drafted, not yet published
-├── a1b2c3-1.md
-└── .published/         # created by the hook; files move here once gh confirms them
+└── 6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/   # one dir per drafting session
+    ├── issue-0.md      # drafted, not yet published
+    ├── issue-1.md
+    └── .published/     # created by the hook; files move here once gh confirms them
 ```
 
 ### File conventions the three skills agree on
 
-- **Batch id**: a random 6-hex-digit id shared by every issue in one `/draft-issues` run, generated once via Claude Code's `` !`command` `` dynamic-context injection (the shell command runs before the model sees the skill, so the agent only ever reuses the printed value — it never executes the command itself).
-- **Filename**: `{batch-id}-{i}.md`, `i` starting at 0 in publish order (blockers before what they block).
-- **Cross-references**: `{batch-id}-{i}` wrapped in curly braces inside a body (e.g. `{a1b2c3-0}`) means "blocked by that issue." The hook rewrites these to `#<real-number>` as each referenced issue gets published, and skips (without failing the whole batch) any file whose reference isn't resolvable yet.
-- **Labels**: the first non-empty line after the title, formatted exactly as `> difficulty:{low|medium|high}, mode:{afk|hitl}`. The hook parses this line into labels, strips it from the published body, and creates the five labels in the repo if they don't already exist.
+- **Batch id**: the Claude Code session id of the `/draft-issues` run, injected straight into the skill as `${CLAUDE_SESSION_ID}` (nothing to generate, and unique per session, so no collision handling is needed). A silent `` !`mkdir -p …` `` line in the skill creates the batch directory before the model sees it, and drops a `.gitignore` containing `*` at `.issues-gateway/` so drafts never get committed.
+- **Filename**: `{session-id}/issue-{i}.md`, `i` starting at 0 in publish order (blockers before what they block).
+- **Cross-references**: `{session-id}/{i}` wrapped in curly braces inside a body (e.g. `{6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0}`) means "blocked by that issue." The hook rewrites these to `#<real-number>` as each referenced issue gets published, and skips (without failing the whole batch) any file whose reference isn't resolvable yet.
+- **Labels**: the first non-empty line after the title, formatted exactly as `> difficulty:{low|medium|high}, mode:{afk|hitl}`. The hook maps that line to the real label names (`low-difficulty`, `medium-difficulty`, `high-difficulty`, `afk`, `hitl`), strips it from the published body, and creates the five labels in the repo if they don't already exist.
 
 ## Installation
 
@@ -104,11 +105,11 @@ At runtime, `/draft-issues` creates a `.issues-gateway/` folder at the project r
   → propose a breakdown in chat, iterate until it looks right
 
 /draft-issues
-  → writes .issues-gateway/{batch-id}-{i}.md, one per approved issue
+  → writes .issues-gateway/{session-id}/issue-{i}.md, one per approved issue
   → review/edit the files by hand if needed
 
 /publish-issues
   → hook creates the labels, publishes every file via gh in dependency order,
-    resolves {batch-id}-{i} references to real issue numbers,
-    moves published files to .issues-gateway/.published/
+    resolves {session-id}/{i} references to real issue numbers,
+    moves published files to .issues-gateway/{session-id}/.published/
 ```

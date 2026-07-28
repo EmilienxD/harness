@@ -7,11 +7,10 @@ with `gh` and exits 2, which erases the prompt and shows stderr to the user
 only - zero API calls for this step.
 
 Design notes:
-- Each batch lives in its own directory: ".issues-gateway/{batch-id}/". The
-  batch-id directory is created by /draft-issues with a plain `mkdir` (not
-  `mkdir -p` on an existing path) so directory creation is atomic and
-  collision-safe even if two /draft-issues runs happen to pick the same
-  random id at the same time.
+- Each batch lives in its own directory: ".issues-gateway/{session-id}/",
+  where the session id is the Claude Code session id the drafting run had
+  (${CLAUDE_SESSION_ID}). It is unique per session by construction, so no
+  collision handling is needed.
 - Draft files inside a batch dir are named "issue-{i}.md". Sorting by `i`
   gives a stable creation order, so an issue can only reference an issue
   created earlier in the same batch (no forward references), assuming
@@ -19,9 +18,11 @@ Design notes:
   *assumes* that ordering is perfect - see the retry pass below.
 - The first "# " header line in a draft file is the issue title. The first
   non-empty line after that must be "> difficulty:{low|medium|high}, mode:{afk|hitl}"
-  (see /draft-issues) - it is parsed into labels and stripped from the body
-  that gets posted, since the labels carry that information from then on.
-- A reference to another draft issue, written as "{id}-{i}" in the body, is
+  (see /draft-issues) - it is parsed and mapped to the flat label names
+  ("low-difficulty", "medium-difficulty", "high-difficulty", "afk", "hitl")
+  via LABEL_ALIASES, then stripped from the body that gets posted, since the
+  labels carry that information from then on.
+- A reference to another draft issue, written as "{session-id}/{i}" in the body, is
   rewritten to "#<real-issue-number>" once that draft has been published.
   This is how "blocked by" links get resolved without creating issues
   sequentially inside the agent loop.
@@ -57,11 +58,15 @@ from pathlib import Path
 
 GATEWAY_DIR = Path(".issues-gateway")
 
-# A reference to another draft issue inside a body, e.g. "{a1b2c3-0}"
-REF_PATTERN = re.compile(r"\{([0-9a-fA-F]{6})-(\d+)\}")
+# A reference to another draft issue inside a body, e.g.
+# "{6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0}"
+REF_PATTERN = re.compile(r"\{([0-9a-zA-Z_-]+)/(\d+)\}")
 
-# A batch directory name: exactly 6 hex digits.
-BATCHID_PATTERN = re.compile(r"^[0-9a-fA-F]{6}$")
+# A batch directory name: a Claude Code session id (a UUID).
+SESSION_ID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 # The draft filename convention produced by /draft-issues: "issue-{i}.md"
 FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
@@ -83,18 +88,31 @@ LABEL_LINE_PATTERN = re.compile(
 # (or updated) with --force at the start of every publish run, so they
 # always exist regardless of repo state.
 CANONICAL_LABELS = {
-    "difficulty:low": ("0E8A16", "Routine, well-understood work - safe for a lighter model."),
-    "difficulty:medium": ("FBCA04", "Multi-step work with real design decisions."),
-    "difficulty:high": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
-    "mode:afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
-    "mode:hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
+    "low-difficulty": ("0E8A16", "Routine, well-understood work - safe for a lighter model."),
+    "medium-difficulty": ("FBCA04", "Multi-step work with real design decisions."),
+    "high-difficulty": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
+    "afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
+    "hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
+}
+
+# The declaration line uses "difficulty:{level}" / "mode:{mode}" tokens; the
+# labels actually created and applied are the flat names above.
+LABEL_ALIASES = {
+    "difficulty:low": "low-difficulty",
+    "difficulty:medium": "medium-difficulty",
+    "difficulty:high": "high-difficulty",
+    "mode:afk": "afk",
+    "mode:hitl": "hitl",
 }
 
 
 def ensure_labels(dry_run: bool) -> list[str]:
     """Create or update the canonical labels. Returns warning lines, if any."""
     if dry_run:
-        return ["  DRY   would ensure 5 canonical labels exist (difficulty:*, mode:*)"]
+        return [
+            "  DRY   would ensure 5 canonical labels exist "
+            "(low/medium/high-difficulty, afk, hitl)"
+        ]
 
     warnings = []
     for name, (color, description) in CANONICAL_LABELS.items():
@@ -149,14 +167,17 @@ def extract_labels(rest: str) -> tuple[list[str], str]:
     if idx < len(lines):
         m = LABEL_LINE_PATTERN.match(lines[idx])
         if m:
-            labels = [m.group(1).lower(), m.group(2).lower()]
+            labels = [
+                LABEL_ALIASES[m.group(1).lower()],
+                LABEL_ALIASES[m.group(2).lower()],
+            ]
             remaining = "\n".join(lines[idx + 1:]).strip()
             return labels, remaining
     return [], rest.strip()
 
 
 def resolve_references(body: str, resolved: dict[str, str]) -> tuple[str, list[str]]:
-    """Replace {id}-{i} tokens with real issue numbers where already known.
+    """Replace {session-id}/{i} tokens with real issue numbers where known.
 
     Returns the rewritten body and any tokens that could not be resolved
     (e.g. a forward reference to a draft not yet published in this run).
@@ -164,7 +185,7 @@ def resolve_references(body: str, resolved: dict[str, str]) -> tuple[str, list[s
     unresolved: list[str] = []
 
     def _sub(match: re.Match) -> str:
-        key = f"{match.group(1)}-{match.group(2)}"
+        key = f"{match.group(1)}/{match.group(2)}"
         if key in resolved:
             return f"#{resolved[key]}"
         unresolved.append(key)
@@ -179,7 +200,7 @@ def gather_batch_dirs() -> list[Path]:
         return []
     return sorted(
         d for d in GATEWAY_DIR.iterdir()
-        if d.is_dir() and BATCHID_PATTERN.match(d.name)
+        if d.is_dir() and SESSION_ID_PATTERN.match(d.name)
     )
 
 
@@ -196,7 +217,7 @@ def gather_draft_files(batch_dir: Path) -> list[Path]:
 
 
 def load_resolved(batch_dir: Path) -> dict[str, str]:
-    """Rebuild {batch_id}-{i} -> real number from already-published files.
+    """Rebuild {session-id}/{i} -> real number from already-published files.
 
     This is what makes resolution survive across separate hook invocations:
     a rerun after a partial failure sees earlier successes in this batch as
@@ -209,7 +230,7 @@ def load_resolved(batch_dir: Path) -> dict[str, str]:
     for path in published_dir.glob("issue-*.md"):
         m = PUBLISHED_FILENAME_PATTERN.match(path.name)
         if m:
-            resolved[f"{batch_dir.name}-{m.group(1)}"] = m.group(2)
+            resolved[f"{batch_dir.name}/{m.group(1)}"] = m.group(2)
     return resolved
 
 
@@ -290,7 +311,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
 
             m = FILENAME_PATTERN.match(path.name)
             i = m.group(1)
-            key = f"{batch_dir.name}-{i}"
+            key = f"{batch_dir.name}/{i}"
 
             if dry_run:
                 report.append(
