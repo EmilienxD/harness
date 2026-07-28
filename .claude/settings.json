@@ -1,8 +1,21 @@
 {
-  "env": {
-  },
+  "env": {},
   "cleanupPeriodDays": 99999,
-  "hooks": {},
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_user_prompt_submit_hook.py"
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "defaultMode": "bypassPermissions",
     "allow": [

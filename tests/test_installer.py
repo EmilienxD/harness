@@ -2,7 +2,14 @@ import json
 
 import pytest
 
-from harness_cli.installer import InstallError, Target, apply_install, plan_install, uninstall
+from harness_cli.installer import (
+    InstallError,
+    Target,
+    apply_install,
+    is_installed,
+    plan_install,
+    uninstall,
+)
 from harness_cli.manifest import discover, load_tool
 
 TOOLS = discover()
@@ -17,10 +24,14 @@ def settings(target):
     return json.loads(target.settings_path.read_text(encoding="utf-8"))
 
 
-def install(name, target, **kw):
+def install(name, target):
     plan = plan_install(TOOLS[name], target)
-    apply_install(plan, **kw)
+    apply_install(plan)
     return plan
+
+
+def claude_files(target):
+    return sorted(p.relative_to(target.claude_dir).as_posix() for p in target.claude_dir.rglob("*") if p.is_file())
 
 
 def test_every_tool_has_a_valid_manifest():
@@ -29,16 +40,30 @@ def test_every_tool_has_a_valid_manifest():
         assert tool.expand(), f"{tool.name} resolves to no files"
 
 
-def test_install_skill_only_tool(target):
+def test_install_writes_only_the_tools_own_files(target):
     install("caveman", target)
-    assert (target.claude_dir / "skills/caveman/SKILL.md").is_file()
-    assert not target.settings_path.exists()  # no fragment -> no settings churn
+    assert claude_files(target) == ["skills/caveman/SKILL.md"]
+    assert is_installed(TOOLS["caveman"], target)
+
+
+def test_install_leaves_no_lock_or_backup(target):
+    target.claude_dir.mkdir(parents=True)
+    target.settings_path.write_text('{"model": "opus"}', encoding="utf-8")
+    install("commit", target)
+    install("publish-issues", target)
+    assert claude_files(target) == [
+        "hooks/commit_user_prompt_submit_hook.py",
+        "hooks/publish_issues.py",
+        "settings.json",
+        "skills/commit/SKILL.md",
+        "skills/draft-issues/SKILL.md",
+        "skills/map-issues/SKILL.md",
+        "skills/publish-issues/SKILL.md",
+    ]
 
 
 def test_install_hook_tool_writes_settings(target):
     install("commit", target)
-    assert (target.claude_dir / "hooks/commit_user_prompt_submit_hook.py").is_file()
-    assert (target.claude_dir / "skills/commit/SKILL.md").is_file()
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     assert entry["args"][0].endswith("/hooks/commit_user_prompt_submit_hook.py")
     assert "${PYTHON}" not in entry["command"]
@@ -63,7 +88,7 @@ def test_two_hook_tools_stack(target):
 def test_uninstall_removes_only_its_own(target):
     install("commit", target)
     install("publish-issues", target)
-    uninstall("commit", target)
+    uninstall(TOOLS["commit"], target)
     assert not (target.claude_dir / "hooks/commit_user_prompt_submit_hook.py").exists()
     assert not (target.claude_dir / "skills/commit").exists()
     assert (target.claude_dir / "hooks/publish_issues.py").is_file()
@@ -71,51 +96,61 @@ def test_uninstall_removes_only_its_own(target):
     assert sum(len(g["hooks"]) for g in groups) == 1
 
 
-def test_uninstall_restores_original_settings(target):
+def test_uninstall_restores_settings_and_leaves_nothing(target):
     target.claude_dir.mkdir(parents=True)
     target.settings_path.write_text('{"model": "opus"}', encoding="utf-8")
     install("commit", target)
-    uninstall("commit", target)
+    uninstall(TOOLS["commit"], target)
     assert settings(target) == {"model": "opus"}
-    assert not target.lock_path.exists()
+    assert claude_files(target) == ["settings.json"]
 
 
-def test_install_refuses_to_clobber_a_foreign_file(target):
-    path = target.claude_dir / "skills/caveman/SKILL.md"
-    path.parent.mkdir(parents=True)
-    path.write_text("mine", encoding="utf-8")
-    with pytest.raises(InstallError, match="locally modified"):
-        install("caveman", target)
-    assert path.read_text(encoding="utf-8") == "mine"
-    install("caveman", target, force=True)
-    assert path.read_text(encoding="utf-8") != "mine"
+def test_uninstall_drops_a_settings_file_it_created(target):
+    install("commit", target)
+    uninstall(TOOLS["commit"], target)
+    assert claude_files(target) == []
+
+
+def test_uninstall_of_absent_tool_is_harmless(target):
+    target.claude_dir.mkdir(parents=True)
+    assert uninstall(TOOLS["caveman"], target) == ["nothing to remove"]
 
 
 def test_locally_edited_file_is_kept_on_uninstall(target):
     install("caveman", target)
     path = target.claude_dir / "skills/caveman/SKILL.md"
     path.write_text("edited", encoding="utf-8")
-    uninstall("caveman", target)
+    notes = uninstall(TOOLS["caveman"], target)
     assert path.read_text(encoding="utf-8") == "edited"
+    assert any("modified since install" in n for n in notes)
+    uninstall(TOOLS["caveman"], target, force=True)
+    assert not path.exists()
 
 
-def test_upgrade_removes_files_dropped_from_the_manifest(target, tmp_path):
-    install("caveman", target)
-    stale = target.claude_dir / "skills/caveman/OLD.md"
-    stale.write_text("x", encoding="utf-8")
-    lock = target.read_lock()
-    lock["tools"]["caveman"]["files"].append({"path": "skills/caveman/OLD.md", "sha256": ""})
-    target.write_lock(lock)
-    apply_install(plan_install(TOOLS["caveman"], target))
-    assert not stale.exists()
+def test_install_overwrites_a_stale_copy(target):
+    path = target.claude_dir / "skills/caveman/SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("old version", encoding="utf-8")
+    plan = plan_install(TOOLS["caveman"], target)
+    assert [f.status for f in plan.files] == ["overwrite"]
+    apply_install(plan)
+    assert path.read_text(encoding="utf-8") != "old version"
 
 
-def test_settings_are_backed_up_before_the_first_write(target):
+def test_legacy_artifacts_are_swept(target):
+    target.claude_dir.mkdir(parents=True)
+    (target.claude_dir / ".harness.lock.json").write_text("{}", encoding="utf-8")
+    (target.claude_dir / "settings.json.bak").write_text("{}", encoding="utf-8")
+    notes = apply_install(plan_install(TOOLS["caveman"], target))
+    assert len(notes) == 2
+    assert claude_files(target) == ["skills/caveman/SKILL.md"]
+
+
+def test_settings_are_backed_up_nowhere(target):
     target.claude_dir.mkdir(parents=True)
     target.settings_path.write_text('{"model": "opus"}', encoding="utf-8")
     install("commit", target)
-    backup = target.claude_dir / "settings.json.bak"
-    assert json.loads(backup.read_text(encoding="utf-8")) == {"model": "opus"}
+    assert not (target.claude_dir / "settings.json.bak").exists()
 
 
 def test_local_settings_target(tmp_path):

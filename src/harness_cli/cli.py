@@ -13,6 +13,7 @@ from harness_cli.installer import (
     Plan,
     Target,
     apply_install,
+    is_installed,
     plan_install,
     substitute,
     uninstall,
@@ -21,10 +22,16 @@ from harness_cli.manifest import ManifestError, Tool, discover
 
 
 def _target_from_args(args: argparse.Namespace) -> Target:
-    settings_name = "settings.local.json" if args.local else "settings.json"
     if args.user:
-        return Target.for_user(settings_name)
-    return Target.for_project(Path(args.dir).resolve(), settings_name)
+        # Claude Code reads only settings.json at the user level, and --dir names
+        # a project, so both flags are meaningless here rather than merely odd.
+        if args.local:
+            raise InstallError("--user and --local are mutually exclusive")
+        if args.dir is not None:
+            raise InstallError("--dir applies to a project install; drop it or drop --user")
+        return Target.for_user()
+    settings_name = "settings.local.json" if args.local else "settings.json"
+    return Target.for_project(Path(args.dir or ".").resolve(), settings_name)
 
 
 def _resolve(names: list[str], available: dict[str, Tool]) -> list[Tool]:
@@ -46,14 +53,9 @@ def _settings_diff(plan: Plan) -> str:
 
 
 def _print_plan(plan: Plan) -> None:
-    label = plan.target.claude_dir
-    print(f"{plan.tool.name} {plan.tool.version} -> {label}")
-    if plan.previously_installed:
-        print(f"  (currently installed: {plan.previously_installed})")
+    print(f"{plan.tool.name} {plan.tool.version} -> {plan.target.claude_dir}")
     for action in sorted(plan.files, key=lambda a: a.dest):
         print(f"  {action.status:>10}  {action.dest}")
-    for orphan in plan.orphans:
-        print(f"  {'remove':>10}  {orphan}")
     if plan.settings_changed:
         print(f"  settings changes to {plan.target.settings_name}:")
         for line in _settings_diff(plan).splitlines():
@@ -67,19 +69,15 @@ def _print_plan(plan: Plan) -> None:
 def cmd_list(args: argparse.Namespace) -> int:
     available = discover()
     target = _target_from_args(args)
-    installed = target.read_lock()["tools"]
     width = max((len(n) for n in available), default=0)
+    any_installed = False
     for name, tool in available.items():
-        entry = installed.get(name)
-        if entry is None:
-            mark, state = " ", ""
-        elif entry.get("version") == tool.version:
-            mark, state = "*", f" [installed {entry['version']}]"
-        else:
-            mark, state = "^", f" [installed {entry['version']} -> {tool.version} available]"
-        print(f"{mark} {name.ljust(width)}  {tool.description}{state}")
-    if installed:
-        print(f"\n* installed  ^ upgradable   ({target.claude_dir})")
+        installed = is_installed(tool, target)
+        any_installed = any_installed or installed
+        mark = "*" if installed else " "
+        print(f"{mark} {name.ljust(width)}  {tool.description}")
+    if any_installed:
+        print(f"\n* installed in {target.claude_dir}")
     return 0
 
 
@@ -114,7 +112,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         if args.dry_run:
             pending = plan.settings_after
             continue
-        for note in apply_install(plan, force=args.force):
+        for note in apply_install(plan):
             print(f"  note: {note}")
 
     if args.dry_run:
@@ -125,29 +123,43 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
+    available = discover()
     target = _target_from_args(args)
-    names = list(target.read_lock()["tools"]) if args.tools == ["all"] else args.tools
-    for name in names:
-        for note in uninstall(name, target, force=args.force):
+    tools = (
+        [t for t in available.values() if is_installed(t, target)]
+        if args.tools == ["all"]
+        else _resolve(args.tools, available)
+    )
+    for tool in tools:
+        print(f"{tool.name} -> {target.claude_dir}")
+        for note in uninstall(tool, target, force=args.force):
             print(f"  note: {note}")
-        print(f"removed {name} from {target.claude_dir}")
     return 0
 
 
 def cmd_upgrade(args: argparse.Namespace) -> int:
+    available = discover()
     target = _target_from_args(args)
-    installed = target.read_lock()["tools"]
-    if not installed:
+    installed = [name for name, tool in available.items() if is_installed(tool, target)]
+    if not args.tools and not installed:
         print(f"nothing installed in {target.claude_dir}")
         return 0
-    args.tools = args.tools or list(installed)
+    args.tools = args.tools or installed
     return cmd_install(args)
 
 
 def _add_target_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--dir", default=".", help="project root to install into (default: cwd)")
-    parser.add_argument("--user", action="store_true", help="install into ~/.claude instead")
-    parser.add_argument("--local", action="store_true", help="use settings.local.json")
+    parser.add_argument("--dir", help="project root to install into (default: cwd)")
+    parser.add_argument(
+        "--user",
+        "--global",
+        dest="user",
+        action="store_true",
+        help="install machine-wide into ~/.claude, for every project",
+    )
+    parser.add_argument(
+        "--local", action="store_true", help="write to settings.local.json (project scope only)"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -169,7 +181,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_install.add_argument("tools", nargs="+")
     _add_target_flags(p_install)
     p_install.add_argument("--dry-run", action="store_true", help="show what would change")
-    p_install.add_argument("--force", action="store_true", help="overwrite locally modified files")
     p_install.set_defaults(func=cmd_install)
 
     p_remove = sub.add_parser("uninstall", help="remove installed tools (or 'all')")
@@ -182,7 +193,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_up.add_argument("tools", nargs="*")
     _add_target_flags(p_up)
     p_up.add_argument("--dry-run", action="store_true")
-    p_up.add_argument("--force", action="store_true")
     p_up.set_defaults(func=cmd_upgrade)
 
     return parser
