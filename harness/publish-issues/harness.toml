@@ -1,0 +1,22 @@
+name = "publish-issues"
+version = "1.0.0"
+description = "Plan -> reviewed, dependency-linked GitHub issues in 3 model calls"
+requires = ["git", "gh"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/publish-issues/README.md"
+
+[[files]]
+src = "hooks/publish_issues.py"
+dest = "hooks/publish_issues.py"
+executable = true
+
+[[files]]
+src = "skills/map-issues"
+dest = "skills/map-issues"
+
+[[files]]
+src = "skills/draft-issues"
+dest = "skills/draft-issues"
+
+[[files]]
+src = "skills/publish-issues"
+dest = "skills/publish-issues"

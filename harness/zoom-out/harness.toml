@@ -1,0 +1,8 @@
+name = "zoom-out"
+version = "1.0.0"
+description = "Gives a higher-level map of a codebase area"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/zoom-out/SKILL.md"
+
+[[files]]
+src = "SKILL.md"
+dest = "skills/zoom-out/SKILL.md"

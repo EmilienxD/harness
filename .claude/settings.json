@@ -1,0 +1,39 @@
+{
+  "env": {
+  },
+  "cleanupPeriodDays": 99999,
+  "hooks": {},
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Edit(~/AppData/Local/Temp/**)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(npm publish *)",
+      "Bash(rm -rf *)",
+      "Bash(pip* upload *)",
+      "Bash(twine upload *)",
+      "Bash(cargo publish *)",
+      "Bash(gem push *)",
+      "Bash(git remote set-url *)",
+      "Bash(git config --global *)",
+      "Bash(git filter-branch *)",
+      "Bash(git rebase -i *)",
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.production)",
+      "Read(**/.env.development)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+      "Read(**/*.pem)",
+      "Read(**/*.p12)",
+      "Read(**/*.key)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.gitconfig)",
+      "Read(~/.ssh/**)"
+    ]
+  }
+}

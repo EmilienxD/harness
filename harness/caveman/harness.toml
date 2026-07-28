@@ -1,0 +1,8 @@
+name = "caveman"
+version = "1.0.0"
+description = "Ultra-compressed communication mode (~75% fewer tokens)"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/caveman/SKILL.md"
+
+[[files]]
+src = "SKILL.md"
+dest = "skills/caveman/SKILL.md"

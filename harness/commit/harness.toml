@@ -1,0 +1,14 @@
+name = "commit"
+version = "1.0.0"
+description = "Zero-model-call /commit — stages and commits via a UserPromptSubmit hook"
+requires = ["git"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/commit/README.md"
+
+[[files]]
+src = "hooks/commit_user_prompt_submit_hook.py"
+dest = "hooks/commit_user_prompt_submit_hook.py"
+executable = true
+
+[[files]]
+src = "skills/commit"
+dest = "skills/commit"

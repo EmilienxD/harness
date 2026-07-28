@@ -1,0 +1,8 @@
+name = "senior-advisor"
+version = "1.0.0"
+description = "Read-only senior-developer advisory mode"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/senior-advisor/SKILL.md"
+
+[[files]]
+src = "SKILL.md"
+dest = "skills/senior-advisor/SKILL.md"

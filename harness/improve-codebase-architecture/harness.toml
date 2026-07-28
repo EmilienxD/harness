@@ -1,0 +1,20 @@
+name = "improve-codebase-architecture"
+version = "1.0.0"
+description = "Finds architectural friction and proposes concrete refactors"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/improve-codebase-architecture/SKILL.md"
+
+[[files]]
+src = "SKILL.md"
+dest = "skills/improve-codebase-architecture/SKILL.md"
+
+[[files]]
+src = "DEEPENING.md"
+dest = "skills/improve-codebase-architecture/DEEPENING.md"
+
+[[files]]
+src = "INTERFACE-DESIGN.md"
+dest = "skills/improve-codebase-architecture/INTERFACE-DESIGN.md"
+
+[[files]]
+src = "LANGUAGE.md"
+dest = "skills/improve-codebase-architecture/LANGUAGE.md"

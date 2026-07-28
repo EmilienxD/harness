@@ -1,0 +1,8 @@
+name = "handoff"
+version = "1.0.0"
+description = "Compacts the conversation into a handoff doc for another agent"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/handoff/SKILL.md"
+
+[[files]]
+src = "SKILL.md"
+dest = "skills/handoff/SKILL.md"

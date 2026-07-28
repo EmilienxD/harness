@@ -8,7 +8,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 primarily authored for Claude Code but intended to be portable to other agent CLIs later.
 
 Each tool lives under `harness/<tool-name>/`. Its `README.md` (or `SKILL.md` if no README exists) is the
-source of truth for what it does and how to install/use it — this file only indexes them.
+source of truth for what it does — this file only indexes them.
+
+Tools are installed individually with `uvx --from git+https://github.com/EmilienxD/harness harness
+install <tool>`, which copies files into the target project's `.claude/` and merges any settings the
+tool needs. The CLI is in `src/harness_cli/`; see the root `README.md`.
+
+## Adding or changing a tool
+
+Every installable tool needs a `harness.toml` in its directory declaring `name`, `version`,
+`description`, and one or more `[[files]]` entries (`src` relative to the tool dir, `dest` relative to
+the target `.claude/`). Settings go in a sibling `settings.fragment.json` — plain JSON, merged as-is,
+with `${PYTHON}` and `${CLAUDE_DIR}` resolved at install time. A tool without a manifest is invisible to
+the installer, so add one in the same change that adds the tool, and bump `version` whenever its files
+or fragment change. Run `uv run pytest` — the suite installs every manifest for real and round-trips
+uninstall.
 
 ## Tools
 

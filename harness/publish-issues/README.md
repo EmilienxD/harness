@@ -68,6 +68,19 @@ At runtime, `/draft-issues` creates a `.issues-gateway/` folder at the project r
 
 ## Installation
 
+```bash
+uvx --from git+https://github.com/EmilienxD/harness harness install publish-issues
+```
+
+That copies the three skills and the hook into `.claude/` and merges the hook
+registration below into `.claude/settings.json`, leaving any hooks you already
+had in place. Add `--dry-run` first to see the exact file list and settings
+diff. See the [repo README](../../README.md) for `--user`, `--local`, and
+`uninstall`.
+
+<details>
+<summary>Installing by hand</summary>
+
 1. Copy the `.claude/` folder into your repository root. If you already have a `.claude/settings.json`, merge the `hooks.UserPromptSubmit` array below into your existing file instead of overwriting it — Claude Code merges hook arrays, not whole files, so an overwrite would silently drop any hooks you already had.
 
 ```json
@@ -91,6 +104,8 @@ At runtime, `/draft-issues` creates a `.issues-gateway/` folder at the project r
    - `command` must resolve on the machine actually running Claude Code. `python` works out of the box on Windows via the `py`/`python` launcher; on Linux and macOS, confirm `python` exists on `PATH` — if only `python3` does, change this to `"python3"`.
    - `${CLAUDE_PROJECT_DIR}` is substituted by Claude Code at hook-run time to the project root, so the path resolves regardless of your current working directory inside the repo.
    - This hook only acts on prompts starting with `/publish-issues`; every other prompt passes through untouched (exit 0), so it's safe to add alongside other `UserPromptSubmit` hooks.
+
+</details>
 
 2. Make sure the GitHub CLI is installed and authenticated against this repo (`gh auth status`), since `/publish-issues` shells out to it directly.
 

@@ -46,9 +46,23 @@ changes.
 
 ## Installation
 
+```bash
+uvx --from git+https://github.com/EmilienxD/harness harness install commit
+```
+
+That copies the hook and the skill into `.claude/`, marks the hook executable,
+and merges the `UserPromptSubmit` registration below into `.claude/settings.json`
+without disturbing any hooks you already had. Add `--dry-run` first to see the
+exact file list and settings diff. See the [repo README](../../README.md) for
+`--user`, `--local`, and `uninstall`.
+
+<details>
+<summary>Installing by hand</summary>
+
 1. Copy `hooks/commit_user_prompt_submit_hook.py` into `.claude/hooks/` in your repo.
-2. Make it executable: `chmod +x .claude/hooks/commit_user_prompt_submit_hook.py`
-3. Add (or merge) the following into your repo's `.claude/settings.json`:
+2. Copy `skills/commit/SKILL.md` into `.claude/skills/commit/SKILL.md`.
+3. Make the hook executable: `chmod +x .claude/hooks/commit_user_prompt_submit_hook.py`
+4. Add (or merge) the following into your repo's `.claude/settings.json`:
 
 ```json
 {
@@ -58,7 +72,8 @@ changes.
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/commit_user_prompt_submit_hook.py"
+            "command": "python3",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_user_prompt_submit_hook.py"]
           }
         ]
       }
@@ -67,8 +82,13 @@ changes.
 }
 ```
 
-4. Restart or reload Claude Code so it picks up the new hook config.
-5. Test it: type `/commit test message` in a session with uncommitted
+`python3` must exist on `PATH` on the machine running Claude Code — on Windows
+that is usually `python` instead. (The installer picks the right one for you.)
+
+</details>
+
+Then restart or reload Claude Code so it picks up the new hook config, and test
+it: type `/commit test message` in a session with uncommitted
    changes. You should see a `Committed <sha>: test message` response with
    no model "thinking" delay, and the commit should appear in `git log` with
    a `Claude-session: <id>` trailer.

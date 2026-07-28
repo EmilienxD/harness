@@ -1,0 +1,8 @@
+name = "grill-me"
+version = "1.0.0"
+description = "Interviews you to stress-test a plan or design"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/grill-me/SKILL.md"
+
+[[files]]
+src = "SKILL.md"
+dest = "skills/grill-me/SKILL.md"
