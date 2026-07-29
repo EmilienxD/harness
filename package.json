@@ -1,0 +1,28 @@
+{
+  "name": "aboard",
+  "displayName": "aboard",
+  "description": "Visible, human-in-the-loop orchestration for Claude Code agents in VS Code.",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22",
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outfile=dist/extension.js --sourcemap",
+    "check": "tsc --noEmit",
+    "package": "npm run check && npm run build -- --minify"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/vscode": "1.125.0",
+    "esbuild": "0.28.1",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "npm@11.6.2"
+}
