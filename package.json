@@ -11,6 +11,20 @@
   "categories": [
     "Other"
   ],
+  "contributes": {
+    "configuration": {
+      "title": "aboard",
+      "properties": {
+        "aboard.bridge.port": {
+          "type": "integer",
+          "default": 4823,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Preferred loopback port. If occupied, aboard selects an ephemeral port."
+        }
+      }
+    }
+  },
   "activationEvents": [],
   "main": "./dist/extension.js",
   "scripts": {
