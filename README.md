@@ -73,6 +73,9 @@ Restart Claude Code after installing so it picks up new hooks and skills.
 | [`grill-me`](harness/grill-me/SKILL.md) | Interviews you to stress-test a plan or design |
 | [`handoff`](harness/handoff/SKILL.md) | Compacts a conversation into a handoff doc |
 | [`improve-codebase-architecture`](harness/improve-codebase-architecture/SKILL.md) | Finds architectural friction, proposes refactors |
+| [`on-edit-block`](harness/on-edit-block/README.md) | Blocks edits to protected files until Claude reads the required files |
+| [`on-read-reminder`](harness/on-read-reminder/README.md) | Reminds Claude to read your key files when it reads matching paths |
+| [`prefer-read-tool`](harness/prefer-read-tool/README.md) | Nudges Claude to use Read instead of `cat`/`sed` |
 | [`senior-advisor`](harness/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
 | [`zoom-out`](harness/zoom-out/SKILL.md) | Higher-level map of a codebase area |
 

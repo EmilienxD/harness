@@ -36,6 +36,13 @@ uninstall.
 - `harness/handoff/` — compacts a conversation into a handoff doc for another agent. See `SKILL.md`.
 - `harness/improve-codebase-architecture/` — finds architectural friction and proposes refactors. See
   `SKILL.md`.
+- `harness/on-edit-block/` — PreToolUse hook denying Write/Edit/MultiEdit on paths matching
+  gitignore-style patterns until user-picked files have been read that session. Same rules-file UX as
+  `on-read-reminder`. See `README.md`.
+- `harness/on-read-reminder/` — PostToolUse hook reminding the agent to read user-picked files when it
+  reads paths matching gitignore-style patterns. See `README.md`.
+- `harness/prefer-read-tool/` — PostToolUse hook reminding the agent to use Read instead of cat/sed.
+  See `README.md`.
 - `harness/senior-advisor/` — read-only senior-developer advisory mode. See `SKILL.md`.
 - `harness/zoom-out/` — gives a higher-level map of a codebase area. See `SKILL.md`.
 - `harness/itsclaudehistory/` — nested git repo; leave its internals alone unless asked.

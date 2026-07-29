@@ -1,0 +1,15 @@
+name = "on-edit-block"
+version = "1.0.0"
+description = "PreToolUse hook that denies Write/Edit/MultiEdit on files matching gitignore-style patterns until the agent has read the required files"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/on-edit-block/README.md"
+
+[[files]]
+src = "hooks/on_edit_block_hook.py"
+dest = "hooks/on_edit_block_hook.py"
+executable = true
+
+# Starter rules file: all comments, edited into real rules per project. A
+# `--user` install puts it at ~/.claude/ where the hook reads global rules.
+[[files]]
+src = "on-edit-block.rules"
+dest = "on-edit-block.rules"
