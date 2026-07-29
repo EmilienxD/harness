@@ -3,6 +3,11 @@
 A `/commit <message>` command for Claude Code that stages and commits your
 changes without spending a single additional model call.
 
+Optionally, `--ai` will write the message for you from the staged diff. That
+one flag does make a network call — but to a small, cheap model directly, not
+to Claude, so your conversation history is still never re-sent. See
+[`--ai`](#--ai--generated-commit-messages).
+
 ## Problem
 
 Asking the agent to commit at the end of a session is redundant and expensive.
@@ -38,11 +43,116 @@ No slash-command or skill definition is required. The hook matches on the
 raw prompt text (`^/commit ...`), so `/commit` doesn't need to be a
 registered command for this to work.
 
-**Note:** `commit_user_prompt_submit_hook.py` currently stages everything (`git add -A`) via a
-placeholder — `get_changed_paths()` — rather than parsing the session
-transcript for the exact files Claude touched. Replace that function with
-real transcript parsing if you want commits scoped to just this session's
-changes.
+## Usage
+
+```
+/commit <message>              stage this session's changes and commit
+/commit --dry-run <message>    show exactly what would happen, change nothing
+/commit --ai                   generate the message from the staged diff
+/commit --ai <guidance>        generate, but steer the emphasis
+/commit --dry-run --ai         preview the generated message without committing
+```
+
+Flags must come before the message, so `/commit mention --ai in the docs`
+commits with that literal message rather than parsing `--ai` as a flag.
+
+### What gets committed
+
+Only the files **Claude actually wrote this session**, not every dirty file
+in the repo. The hook reads the session's JSONL transcript, collects the
+`Edit`/`Write`/`NotebookEdit` tool calls, and stages exactly those paths.
+Writes that failed, writes outside the repo (`~/.claude/settings.json`), and
+files created then deleted are all dropped — `--dry-run` lists each discard
+so a "missing" file is never a mystery.
+
+The commit is pathspec-scoped, so anything you staged by hand beforehand
+stays staged and is left out. If the transcript can't be read at all, the
+hook falls back to `git add -A`; `--dry-run` says so loudly when that happens.
+
+### `--ai` — generated commit messages
+
+`--ai` makes the message optional. It sends one request to a small Gemini
+model containing the diff about to be committed, the file list, your recent
+commit subjects (so the generated message matches the repo's existing
+style), and a narrative of the session reconstructed from the transcript —
+which is the only source for *why* the change was made.
+
+This is the one place the tool spends money, and it is not a Claude turn:
+it's a direct API call to a cheap model, so the conversation history is
+never re-sent. The call happens **after** staging and only if there is
+genuinely something to commit.
+
+`--dry-run --ai` is the useful pairing: it generates and prints the message
+without staging or committing anything, so you can copy it, edit it, and
+replay it as `/commit <your edited message>` — or just run it again for a
+different draft.
+
+Large diffs are trimmed per-file rather than globally truncated, and lock
+files and other generated artefacts are listed but their contents omitted,
+so one `package-lock.json` can't crowd out the actual feature.
+
+**Setup.** `--ai` needs `google-genai` and a Google AI Studio API key
+(the free tier is far more than enough for commit messages):
+
+```bash
+pip install google-genai        # same interpreter Claude Code runs hooks with
+```
+
+Then provide the key one of three ways. Recommended first:
+
+1. **`env` in `.claude/settings.local.json`** — Claude Code's own mechanism for
+   handing environment variables to hooks. `settings.local.json` is
+   per-machine and never committed (the installer gitignores it for you), so
+   this is both persistent and safe:
+
+   ```json
+   { "env": { "GEMINI_API_KEY": "your-key-here" } }
+   ```
+
+   Restart Claude Code afterwards. This also works in `settings.json` and in
+   `~/.claude/settings.json`, but prefer `settings.local.json` — a repo's
+   `settings.json` gets committed.
+
+2. **Key file** — a single line in `.claude/commit-ai.key`, either in the repo
+   or in `~/.claude/`. Also gitignored by the installer, and needs no restart.
+
+3. **Environment variable** — `GEMINI_API_KEY` or `GOOGLE_API_KEY`. This is
+   what the `google-genai` SDK reads natively, so if you already use Gemini
+   anywhere else there is nothing to do.
+
+   ```bash
+   setx GEMINI_API_KEY "your-key-here"      # Windows, applies to new shells
+   export GEMINI_API_KEY="your-key-here"    # add to ~/.bashrc or ~/.zshrc
+   ```
+
+The resolution order is the reverse of the above, most-authoritative first:
+the live environment, then each `.claude/settings*.json` `env` dict, then each
+`.claude/commit-ai.key` — with project scope ahead of user scope throughout.
+So an exported variable always wins, and a per-repo key overrides your global
+one.
+
+Do **not** paste the key into a Claude prompt — prompts are written verbatim
+to the session transcript. Since the session narrative sent to Gemini is built
+from your own prompts, the hook also runs a redaction pass over it for
+key-shaped strings before anything leaves the machine.
+
+Set `COMMIT_AI_MODEL` to override the default `gemini-3.5-flash-lite`.
+
+Everything except `--ai` works with no key, no network, and no extra
+packages — the import is lazy, so a machine without `google-genai` still has
+a fully functioning `/commit`.
+
+### Debugging
+
+The hook doubles as a standalone CLI, which always runs dry and can be
+pointed at any historical transcript without touching a repo:
+
+```bash
+python .claude/hooks/commit_user_prompt_submit_hook.py \
+    --transcript ~/.claude/projects/<project>/<session>.jsonl \
+    --cwd /path/to/repo --ai
+```
+
 
 ## Installation
 
@@ -51,10 +161,14 @@ uvx --from git+https://github.com/EmilienxD/harness harness install commit
 ```
 
 That copies the hook and the skill into `.claude/`, marks the hook executable,
-and merges the `UserPromptSubmit` registration below into `.claude/settings.json`
-without disturbing any hooks you already had. Add `--dry-run` first to see the
-exact file list and settings diff. See the [repo README](../../README.md) for
-`--user`, `--local`, and `uninstall`.
+merges the `UserPromptSubmit` registration below into `.claude/settings.json`
+without disturbing any hooks you already had, and adds a small fenced block to
+the repo's `.gitignore` so the two places `--ai` looks for an API key
+(`.claude/commit-ai.key` and `.claude/settings.local.json`) can never be
+committed. Add `--dry-run` first to see the exact file list, settings diff, and
+`.gitignore` diff. Uninstalling removes the block again, leaving any rules you
+wrote yourself untouched. See the [repo README](../../README.md) for `--user`,
+`--local`, and `uninstall`.
 
 <details>
 <summary>Installing by hand</summary>
@@ -84,6 +198,14 @@ exact file list and settings diff. See the [repo README](../../README.md) for
 
 `python3` must exist on `PATH` on the machine running Claude Code — on Windows
 that is usually `python` instead. (The installer picks the right one for you.)
+
+5. If you plan to use `--ai`, add these to your `.gitignore` so a key can't be
+   committed:
+
+```gitignore
+.claude/commit-ai.key
+.claude/settings.local.json
+```
 
 </details>
 

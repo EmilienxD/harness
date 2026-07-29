@@ -4,6 +4,11 @@ description = "Zero-model-call /commit — stages and commits via a UserPromptSu
 requires = ["git"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/commit/README.md"
 
+# Both places `--ai` will look for a Google AI Studio key. Paths are relative to
+# the install directory, so a project install ignores `.claude/commit-ai.key`
+# and a user install ignores `commit-ai.key` inside `~/.claude`.
+gitignore = ["commit-ai.key", "settings.local.json"]
+
 [[files]]
 src = "hooks/commit_user_prompt_submit_hook.py"
 dest = "hooks/commit_user_prompt_submit_hook.py"

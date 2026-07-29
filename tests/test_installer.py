@@ -180,3 +180,69 @@ def test_manifest_rejects_unsafe_dest(tmp_path):
     )
     with pytest.raises(Exception, match="unsafe dest"):
         load_tool(tmp_path / "bad")
+
+
+def test_manifest_rejects_unsafe_gitignore_entry(tmp_path):
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad/harness.toml").write_text(
+        'name="bad"\nversion="1"\ndescription="d"\ngitignore=["../../etc/passwd"]\n'
+        '[[files]]\nsrc="a"\ndest="a"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(Exception, match="unsafe gitignore entry"):
+        load_tool(tmp_path / "bad")
+
+
+def test_install_gitignores_the_key_file(target, tmp_path):
+    # The repo root, not .claude/ — the patterns hide files inside the repo.
+    install("commit", target)
+    text = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert ".claude/commit-ai.key" in text
+    assert not (target.claude_dir / ".gitignore").exists()
+
+
+def test_install_appends_to_an_existing_gitignore(target, tmp_path):
+    path = tmp_path / ".gitignore"
+    path.write_text("*.pyc\nbuild/\n", encoding="utf-8")
+    install("commit", target)
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("*.pyc\nbuild/\n")
+    assert ".claude/commit-ai.key" in text
+
+
+def test_reinstall_does_not_duplicate_gitignore_entries(target, tmp_path):
+    install("commit", target)
+    plan = plan_install(TOOLS["commit"], target)
+    assert not plan.gitignore_changed
+    apply_install(plan)
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8").count("commit-ai.key") == 1
+
+
+def test_uninstall_removes_a_gitignore_it_created(target, tmp_path):
+    install("commit", target)
+    uninstall(TOOLS["commit"], target)
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_uninstall_keeps_the_users_own_gitignore_lines(target, tmp_path):
+    path = tmp_path / ".gitignore"
+    path.write_text("*.pyc\n", encoding="utf-8")
+    install("commit", target)
+    uninstall(TOOLS["commit"], target)
+    assert path.read_text(encoding="utf-8") == "*.pyc\n"
+
+
+def test_a_tool_without_gitignore_entries_writes_none(target, tmp_path):
+    install("caveman", target)
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_user_install_gitignores_inside_claude_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    target = Target.for_user()
+    install("commit", target)
+    # No repo to speak of, so the patterns are relative to ~/.claude itself —
+    # which is what matters when ~/.claude is kept in a dotfiles repo.
+    text = (target.claude_dir / ".gitignore").read_text(encoding="utf-8")
+    assert "commit-ai.key" in text
+    assert ".claude/" not in text

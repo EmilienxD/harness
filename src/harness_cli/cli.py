@@ -52,6 +52,18 @@ def _settings_diff(plan: Plan) -> str:
     return "".join(difflib.unified_diff(before, after, f"a/{name}", f"b/{name}"))
 
 
+def _gitignore_diff(plan: Plan) -> str:
+    name = plan.target.gitignore_path.name
+    return "".join(
+        difflib.unified_diff(
+            plan.gitignore_before.splitlines(keepends=True),
+            plan.gitignore_after.splitlines(keepends=True),
+            f"a/{name}",
+            f"b/{name}",
+        )
+    )
+
+
 def _print_plan(plan: Plan) -> None:
     print(f"{plan.tool.name} {plan.tool.version} -> {plan.target.claude_dir}")
     for action in sorted(plan.files, key=lambda a: a.dest):
@@ -62,6 +74,14 @@ def _print_plan(plan: Plan) -> None:
             print(f"    {line}")
     elif plan.tool.fragment:
         print(f"  {plan.target.settings_name}: already up to date")
+    if plan.gitignore_changed:
+        # Spelt out in full: for a project install this is the one file written
+        # outside .claude/, which is worth seeing before it happens.
+        print(f"  keeping secrets out of git, via {plan.target.gitignore_path}:")
+        for line in _gitignore_diff(plan).splitlines():
+            print(f"    {line}")
+    elif plan.tool.gitignore:
+        print(f"  {plan.target.gitignore_path.name}: already up to date")
     if plan.missing_requirements:
         print(f"  ! missing on PATH: {', '.join(plan.missing_requirements)}")
 
@@ -89,6 +109,10 @@ def cmd_info(args: argparse.Namespace) -> int:
     print("Files:")
     for _, dest, executable in tool.expand():
         print(f"  .claude/{dest}{'  (executable)' if executable else ''}")
+    if tool.gitignore:
+        print("\nAdded to .gitignore:")
+        for entry in tool.gitignore:
+            print(f"  .claude/{entry}")
     if tool.fragment:
         print("\nsettings.json fragment:")
         for line in settings_merge.dumps(substitute(tool.fragment)).splitlines():
@@ -104,13 +128,17 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     # Each tool's fragment must merge onto what the previous tool wrote, not
     # onto the original file — otherwise the last install wins and silently
-    # drops the others' hooks.
+    # drops the others' hooks. Same for the .gitignore block.
     pending: dict | None = None
+    pending_ignore: str | None = None
     for tool in tools:
-        plan = plan_install(tool, target, settings_override=pending)
+        plan = plan_install(
+            tool, target, settings_override=pending, gitignore_override=pending_ignore
+        )
         _print_plan(plan)
         if args.dry_run:
             pending = plan.settings_after
+            pending_ignore = plan.gitignore_after
             continue
         for note in apply_install(plan):
             print(f"  note: {note}")

@@ -16,7 +16,7 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from harness_cli import settings_merge
+from harness_cli import gitignore, settings_merge
 from harness_cli.manifest import Tool
 
 # Written by earlier versions of this installer; removed on sight.
@@ -46,6 +46,27 @@ class Target:
     @property
     def settings_path(self) -> Path:
         return self.claude_dir / self.settings_name
+
+    @property
+    def gitignore_path(self) -> Path:
+        """Where a `.gitignore` covering this install belongs.
+
+        A project install writes the repo's own root `.gitignore`, since the
+        secrets being hidden sit under `.claude/` inside that repo. A user
+        install has no repo, so it writes inside `~/.claude` — which matters
+        for the common case of dotfiles kept in git, and is inert otherwise.
+        """
+        if self.is_user:
+            return self.claude_dir / ".gitignore"
+        return self.claude_dir.parent / ".gitignore"
+
+    def gitignore_pattern(self, entry: str) -> str:
+        """Manifest entries are install-dir-relative, exactly like `dest`."""
+        return entry if self.is_user else f".claude/{entry}"
+
+    def read_gitignore(self) -> str:
+        path = self.gitignore_path
+        return path.read_text(encoding="utf-8-sig") if path.is_file() else ""
 
     def read_settings(self) -> dict:
         if not self.settings_path.is_file():
@@ -128,11 +149,17 @@ class Plan:
     files: list[FileAction] = field(default_factory=list)
     settings_before: dict = field(default_factory=dict)
     settings_after: dict = field(default_factory=dict)
+    gitignore_before: str = ""
+    gitignore_after: str = ""
     missing_requirements: list[str] = field(default_factory=list)
 
     @property
     def settings_changed(self) -> bool:
         return self.settings_before != self.settings_after
+
+    @property
+    def gitignore_changed(self) -> bool:
+        return self.gitignore_before != self.gitignore_after
 
 
 def is_installed(tool: Tool, target: Target) -> bool:
@@ -145,12 +172,17 @@ def is_installed(tool: Tool, target: Target) -> bool:
     return bool(expanded) and all((target.claude_dir / dest).is_file() for _, dest, _ in expanded)
 
 
-def plan_install(tool: Tool, target: Target, settings_override: dict | None = None) -> Plan:
+def plan_install(
+    tool: Tool,
+    target: Target,
+    settings_override: dict | None = None,
+    gitignore_override: str | None = None,
+) -> Plan:
     """Compute what installing `tool` would change.
 
-    `settings_override` lets a caller thread the result of a previous plan
-    through, so a batch install of several tools stacks their fragments instead
-    of each one merging onto the same original file.
+    `settings_override` and `gitignore_override` let a caller thread the result
+    of a previous plan through, so a batch install of several tools stacks their
+    changes instead of each one merging onto the same original file.
     """
     actions: list[FileAction] = []
     for source, dest, executable in tool.expand():
@@ -167,6 +199,14 @@ def plan_install(tool: Tool, target: Target, settings_override: dict | None = No
     before = target.read_settings() if settings_override is None else settings_override
     after = settings_merge.merge(before, fragment) if fragment else before
 
+    ignore_before = (
+        target.read_gitignore() if gitignore_override is None else gitignore_override
+    )
+    patterns = [target.gitignore_pattern(entry) for entry in tool.gitignore]
+    ignore_after = (
+        gitignore.apply(ignore_before, tool.name, patterns) if patterns else ignore_before
+    )
+
     return Plan(
         tool=tool,
         target=target,
@@ -174,6 +214,8 @@ def plan_install(tool: Tool, target: Target, settings_override: dict | None = No
         files=actions,
         settings_before=before,
         settings_after=after,
+        gitignore_before=ignore_before,
+        gitignore_after=ignore_after,
         missing_requirements=[c for c in tool.requires if shutil.which(c) is None],
     )
 
@@ -201,6 +243,11 @@ def apply_install(plan: Plan) -> list[str]:
 
     if plan.settings_changed:
         target.settings_path.write_text(settings_merge.dumps(plan.settings_after), encoding="utf-8")
+
+    if plan.gitignore_changed:
+        path = target.gitignore_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(plan.gitignore_after, encoding="utf-8")
 
     return [f"removed leftover {name}" for name in target.sweep_legacy()]
 
@@ -253,6 +300,19 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
                 notes.append(f"removed now-empty {target.settings_name}")
 
     notes += [f"removed leftover {name}" for name in target.sweep_legacy()]
+
+    # Back out the .gitignore block. Patterns the user had written themselves
+    # were never inside our fence, so they survive untouched.
+    if tool.gitignore:
+        before = target.read_gitignore()
+        after = gitignore.remove(before, tool.name)
+        if after != before:
+            removed_any = True
+            if after.strip():
+                target.gitignore_path.write_text(after, encoding="utf-8")
+            else:
+                target.gitignore_path.unlink(missing_ok=True)
+                notes.append(f"removed now-empty {target.gitignore_path.name}")
 
     # If nothing is left in .claude/, we created it and should take it with us.
     if target.claude_dir.is_dir():

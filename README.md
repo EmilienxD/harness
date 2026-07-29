@@ -89,6 +89,7 @@ name = "commit"
 version = "1.0.0"
 description = "Zero-model-call /commit"
 requires = ["git"]
+gitignore = ["commit-ai.key"]                      # also relative to .claude/
 
 [[files]]
 src = "hooks/commit_user_prompt_submit_hook.py"
@@ -105,6 +106,14 @@ gets merged, so it stays diffable against what Claude Code expects. Two
 placeholders are resolved at install time: `${PYTHON}` becomes whichever of
 `python3`/`python` exists on the machine, and `${CLAUDE_DIR}` becomes
 `${CLAUDE_PROJECT_DIR}/.claude` (or an absolute path for `--user` installs).
+
+A tool that stores a secret next to itself lists it under `gitignore`, and the
+installer creates or extends the repo's root `.gitignore` accordingly. The
+patterns go in a fenced `# >>> harness:<tool> >>>` block, because `.gitignore`
+has no trailing-comment syntax — `commit-ai.key # harness` would make
+`# harness` part of the pattern and silently stop matching. A pattern you
+already had is left alone rather than duplicated, so uninstalling can't delete
+a line you wrote.
 
 **Installing leaves nothing behind but the tool's own files** — no lock file, no
 `.bak`, no metadata directory. Everything `uninstall` needs is already in the

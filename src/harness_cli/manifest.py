@@ -29,6 +29,7 @@ class Tool:
     root: Path
     files: tuple[FileSpec, ...]
     requires: tuple[str, ...] = ()
+    gitignore: tuple[str, ...] = ()
     fragment: dict = field(default_factory=dict)
     docs: str | None = None
 
@@ -108,6 +109,15 @@ def load_tool(directory: Path) -> Tool:
         if not isinstance(fragment, dict):
             raise ManifestError(f"{fragment_path}: settings fragment must be a JSON object")
 
+    # Like `dest`, gitignore entries are relative to the install directory, so
+    # one manifest works for both a project and a user install.
+    ignores = []
+    for entry in data.get("gitignore", []):
+        pattern = str(entry).replace("\\", "/").strip()
+        if not pattern or pattern.startswith("/") or pattern.startswith("../") or "/../" in pattern:
+            raise ManifestError(f"{manifest_path}: unsafe gitignore entry '{entry}'")
+        ignores.append(pattern)
+
     return Tool(
         name=data["name"],
         version=str(data["version"]),
@@ -115,6 +125,7 @@ def load_tool(directory: Path) -> Tool:
         root=directory,
         files=tuple(files),
         requires=tuple(data.get("requires", [])),
+        gitignore=tuple(ignores),
         fragment=fragment,
         docs=data.get("docs"),
     )
