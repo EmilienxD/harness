@@ -1,0 +1,18 @@
+name = "create-issue"
+version = "1.0.0"
+description = "One idea -> one reviewed, labeled GitHub issue in 2 model calls"
+requires = ["git", "gh"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/create-issue/README.md"
+
+[[files]]
+src = "hooks/publish_issue.py"
+dest = "hooks/publish_issue.py"
+executable = true
+
+[[files]]
+src = "skills/draft-issue"
+dest = "skills/draft-issue"
+
+[[files]]
+src = "skills/publish-issue"
+dest = "skills/publish-issue"

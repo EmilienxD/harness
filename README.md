@@ -67,11 +67,12 @@ Restart Claude Code after installing so it picks up new hooks and skills.
 |---|---|
 | [`caveman`](harness/caveman/SKILL.md) | Ultra-compressed communication mode |
 | [`commit`](harness/commit/README.md) | `/commit` that stages and commits with zero model calls |
+| [`create-issue`](harness/create-issue/README.md) | One idea → one reviewed, labeled GitHub issue |
+| [`create-issues`](harness/create-issues/README.md) | Plan → reviewed, dependency-linked GitHub issues |
 | [`create-skill`](harness/create-skill/SKILL.md) | Guide for authoring new Claude Skills |
 | [`grill-me`](harness/grill-me/SKILL.md) | Interviews you to stress-test a plan or design |
 | [`handoff`](harness/handoff/SKILL.md) | Compacts a conversation into a handoff doc |
 | [`improve-codebase-architecture`](harness/improve-codebase-architecture/SKILL.md) | Finds architectural friction, proposes refactors |
-| [`publish-issues`](harness/publish-issues/README.md) | Plan → reviewed, dependency-linked GitHub issues |
 | [`senior-advisor`](harness/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
 | [`zoom-out`](harness/zoom-out/SKILL.md) | Higher-level map of a codebase area |
 

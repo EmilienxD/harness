@@ -1,6 +1,8 @@
-# Publish Issues
+# Create Issues
 
 Turn a plan into reviewed, dependency-linked GitHub issues — `/map-issues` → `/draft-issues` → `/publish-issues` — in 2 turns and 3 model calls, with zero issues published before a human has looked at them.
+
+For publishing a single issue with no breakdown step, see [`create-issue`](../create-issue/README.md).
 
 ## Problem
 
@@ -69,7 +71,7 @@ At runtime, `/draft-issues` creates a `.issues-gateway/` folder at the project r
 ## Installation
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install publish-issues
+uvx --from git+https://github.com/EmilienxD/harness harness install create-issues
 ```
 
 That copies the three skills and the hook into `.claude/` and merges the hook
