@@ -76,7 +76,7 @@ export type AgentLifecycle =
 
 export type ResultDelivery =
   | { readonly mode: "tool-result" }
-  | { readonly mode: "mailbox" }
+  | { readonly mode: "mailbox"; readonly managerAgentId: AgentId }
   | { readonly mode: "none" };
 
 export type WorkerResult =
@@ -100,6 +100,15 @@ export interface AgentSession {
   readonly resultDelivery: ResultDelivery;
   readonly telemetry: AgentTelemetry;
   readonly issueNumber?: number;
+  readonly lastResult?: WorkerResult;
+}
+
+export interface ManagerPersistenceDto {
+  readonly version: 1;
+  readonly agentId: AgentId;
+  readonly sessionId: SessionId;
+  readonly terminalId: TerminalId;
+  readonly updatedAt: IsoTimestamp;
 }
 
 export function assertNever(value: never): never {
