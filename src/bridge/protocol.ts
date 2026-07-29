@@ -3,6 +3,9 @@ import type { IncomingHttpHeaders } from "node:http";
 export type BridgeErrorCode =
   | "unauthorized"
   | "malformed-request"
+  | "invalid-request"
+  | "conflict"
+  | "terminal-closed"
   | "not-found"
   | "internal-error";
 
