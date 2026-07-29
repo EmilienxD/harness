@@ -9,6 +9,17 @@ export const AGENT_TYPES = [
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 
+/**
+ * Agent types that perform a task and return a result rather than being handed
+ * to the user. They are never typed into, so their first prompt is mandatory
+ * (spec section 5.3).
+ */
+export const AUTOMATED_AGENT_TYPES = ["implementer", "reviewer", "fixer"] as const;
+
+export function isAutomatedAgentType(type: AgentType): boolean {
+  return (AUTOMATED_AGENT_TYPES as readonly AgentType[]).includes(type);
+}
+
 export type AgentId = string & { readonly __brand: "AgentId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
 export type TerminalId = string & { readonly __brand: "TerminalId" };

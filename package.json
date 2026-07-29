@@ -21,6 +21,27 @@
           "minimum": 0,
           "maximum": 65535,
           "description": "Preferred loopback port. If occupied, aboard selects an ephemeral port."
+        },
+        "aboard.launch.maxInlinePromptChars": {
+          "type": "integer",
+          "default": 4000,
+          "minimum": 0,
+          "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to .aboard/runtime/prompts and are referenced with @path."
+        },
+        "aboard.workers.permissionMode": {
+          "type": "string",
+          "enum": [
+            "bypass",
+            "acceptEdits",
+            "default"
+          ],
+          "enumDescriptions": [
+            "Launch workers with --dangerously-skip-permissions. Required for unattended afk work.",
+            "Launch workers with --permission-mode acceptEdits.",
+            "Launch workers with Claude Code's default permission behaviour."
+          ],
+          "default": "default",
+          "description": "Permission mode for worker launches. Applied per process; aboard never writes a permissions block into .claude/settings.json."
         }
       }
     }
