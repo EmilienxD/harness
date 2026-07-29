@@ -2,6 +2,26 @@
   "env": {},
   "cleanupPeriodDays": 99999,
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issue.py"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues.py"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "permissions": {
     "defaultMode": "bypassPermissions",

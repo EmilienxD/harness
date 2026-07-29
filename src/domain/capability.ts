@@ -22,6 +22,96 @@ export interface ToolRule {
   readonly specifier?: string;
 }
 
+export type AgentDefinitionToolsResult =
+  | { readonly ok: true; readonly tools: readonly string[] }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Reads the load-bearing `tools` field from an agent definition boundary.
+ * Claude documents it as a comma-separated scalar; a YAML sequence is also
+ * accepted so scaffold formatting can evolve without changing domain policy.
+ */
+export function parseAgentDefinitionTools(
+  definition: unknown,
+): AgentDefinitionToolsResult {
+  if (typeof definition !== "string") {
+    return { ok: false, reason: "Agent definition must be text" };
+  }
+  const lines = definition.replaceAll("\r\n", "\n").split("\n");
+  if (lines[0]?.trim() !== "---") {
+    return { ok: false, reason: "Agent definition has no frontmatter" };
+  }
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (end === -1) {
+    return { ok: false, reason: "Agent frontmatter is not terminated" };
+  }
+
+  const frontmatter = lines.slice(1, end);
+  const toolsIndex = frontmatter.findIndex((line) => /^tools\s*:/.test(line));
+  if (toolsIndex === -1) {
+    return { ok: false, reason: "Agent frontmatter has no tools field" };
+  }
+  const toolsLine = frontmatter[toolsIndex]!;
+  if (/^\s/.test(toolsLine)) {
+    return { ok: false, reason: "The tools field must be top-level" };
+  }
+  const scalar = toolsLine.slice(toolsLine.indexOf(":") + 1).trim();
+  if (scalar.length > 0) {
+    if (scalar.startsWith("[") || scalar.startsWith("{") || scalar.includes("#")) {
+      return { ok: false, reason: "Unsupported tools field syntax" };
+    }
+    const tools = splitToolRules(scalar);
+    return tools === undefined
+      ? { ok: false, reason: "The tools field contains malformed rules" }
+      : { ok: true, tools };
+  }
+
+  const tools: string[] = [];
+  for (let index = toolsIndex + 1; index < frontmatter.length; index += 1) {
+    const line = frontmatter[index]!;
+    if (line.trim().length === 0) continue;
+    const match = /^\s+-\s+(.+?)\s*$/.exec(line);
+    if (match === null) break;
+    const tool = match[1]!;
+    if (tool.includes("#")) {
+      return { ok: false, reason: "Unsupported tools field syntax" };
+    }
+    tools.push(tool);
+  }
+  return tools.length > 0
+    ? { ok: true, tools }
+    : { ok: false, reason: "The tools field is empty" };
+}
+
+function splitToolRules(value: string): readonly string[] | undefined {
+  const rules: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character === "(") depth += 1;
+    if (character === ")") {
+      depth -= 1;
+      if (depth < 0) return undefined;
+    }
+    if (character === "," && depth === 0) {
+      const rule = value.slice(start, index).trim();
+      if (rule.length === 0) return undefined;
+      rules.push(rule);
+      start = index + 1;
+    }
+  }
+  const finalRule = value.slice(start).trim();
+  if (depth !== 0 || finalRule.length === 0) return undefined;
+  rules.push(finalRule);
+  return rules;
+}
+
+export function deriveAgentDefinitionWriteCapability(definition: unknown): WriteCapability {
+  const parsed = parseAgentDefinitionTools(definition);
+  return deriveWriteCapability(parsed.ok ? parsed.tools : undefined);
+}
+
 /**
  * Parses one `ToolName` or `ToolName(specifier)` rule. Returns `undefined` for
  * a rule we cannot understand, which callers must treat as unknown capability
