@@ -168,11 +168,25 @@ export class TerminalController {
   }
 
   public create(request: CreateAboardTerminalRequest): TerminalSnapshot {
+    return this.#create(request, false);
+  }
+
+  public resume(request: CreateAboardTerminalRequest): TerminalSnapshot {
+    return this.#create(request, true);
+  }
+
+  #create(request: CreateAboardTerminalRequest, resume: boolean): TerminalSnapshot {
     if (this.#agentIds.has(request.agentId)) {
-      throw new TerminalControlError("duplicate-agent", `Agent ${request.agentId} already has an aboard terminal`);
+      const prior = [...this.#records.values()].reverse().find((record) => record.agentId === request.agentId);
+      if (!resume || prior?.status !== "closed" || prior.sessionId !== request.sessionId) {
+        throw new TerminalControlError("duplicate-agent", `Agent ${request.agentId} already has an aboard terminal`);
+      }
     }
     if (this.#sessionIds.has(request.sessionId)) {
-      throw new TerminalControlError("duplicate-session", `Session ${request.sessionId} already has an aboard terminal`);
+      const prior = [...this.#records.values()].reverse().find((record) => record.sessionId === request.sessionId);
+      if (!resume || prior?.status !== "closed" || prior.agentId !== request.agentId) {
+        throw new TerminalControlError("duplicate-session", `Session ${request.sessionId} already has an aboard terminal`);
+      }
     }
 
     const environment = this.options.environment();

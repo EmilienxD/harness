@@ -217,6 +217,25 @@ export class FleetRegistry {
     this.record({ type: "lifecycle-transitioned", agentId, from, to: lifecycle.status }, occurredAt);
   }
 
+  public restart(
+    agentId: AgentId,
+    terminal: AgentSession["terminal"],
+    startedAt: IsoTimestamp,
+  ): void {
+    const session = this.requireSession(agentId);
+    if (session.lifecycle.status !== "completed" && session.lifecycle.status !== "failed") {
+      throw new FleetStateError("invalid-transition", `Agent ${agentId} is still active`);
+    }
+    const from = session.lifecycle.status;
+    const { lastResult: _lastResult, ...withoutResult } = session;
+    this.sessionsByAgent.set(agentId, {
+      ...withoutResult,
+      terminal,
+      lifecycle: { status: "starting", startedAt },
+    });
+    this.record({ type: "lifecycle-transitioned", agentId, from, to: "starting" }, startedAt);
+  }
+
   public updateTelemetry(agentId: AgentId, telemetry: AgentTelemetry, occurredAt: IsoTimestamp): void {
     const session = this.requireSession(agentId);
     if (telemetry.compactionCount < session.telemetry.compactionCount) {
