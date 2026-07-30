@@ -70,10 +70,13 @@
         ,"aboard.manager.toolPreset": { "type": "string", "enum": ["read-only", "delegation-only"], "default": "read-only" }
         ,"aboard.manager.disallowedTools": { "type": "array", "items": { "type": "string" }, "default": [] }
         ,"aboard.review.autoReview": { "type": "string", "enum": ["never", "hitl", "all"], "default": "never", "description": "Controls the sole automatic review path. Explicit review actions are always available." }
+        ,"aboard.timeouts.managerStop": { "type": "integer", "default": 3600, "minimum": 1, "maximum": 86400, "description": "Manager Stop hook and foreground MCP timeout in seconds." }
+        ,"aboard.timeouts.managerPrompt": { "type": "integer", "default": 60, "minimum": 1, "maximum": 600, "description": "Manager UserPromptSubmit hook timeout in seconds." }
+        ,"aboard.timeouts.managerSessionStart": { "type": "integer", "default": 120, "minimum": 1, "maximum": 3600, "description": "Manager SessionStart briefing timeout in seconds." }
       }
     }
   },
-  "activationEvents": [],
+  "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
   "files": ["dist/extension.js", "dist/extension.js.map", "assets/aboard.svg", "assets/scaffold/", "README.md"],
   "scripts": {

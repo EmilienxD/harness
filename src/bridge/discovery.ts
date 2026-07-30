@@ -24,7 +24,7 @@ export class FileBridgeDiscoveryPersistence
   }
 
   public async write(metadata: BridgeDiscoveryMetadata): Promise<void> {
-    const temporaryPath = `${this.#path}.tmp`;
+    const temporaryPath = `${this.#path}.${process.pid}.tmp`;
     await mkdir(dirname(this.#path), { recursive: true });
     await writeFile(temporaryPath, `${JSON.stringify(metadata, null, 2)}\n`, {
       encoding: "utf8",
