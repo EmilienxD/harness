@@ -1,4 +1,9 @@
 {
+  "UserPromptSubmit": [
+    { "hooks": [
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/prompt", "timeout": 60 }
+    ] }
+  ],
   "SessionStart": [
     { "matcher": "startup|resume|clear|compact|fork", "hooks": [
       { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-git", "timeout": 120 },

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
+import { EOL } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ManagerBriefings, ManagerStopService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT } from "../src/bridge/manager-hooks.js";
+import { ManagerBriefings, ManagerPromptService, ManagerStopService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT } from "../src/bridge/manager-hooks.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId, WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
@@ -100,4 +102,72 @@ test("hook registration covers cold start, resume, explicit timeouts, and split 
   assert.match(parsed.SessionStart[0].matcher, /startup/); assert.match(parsed.SessionStart[0].matcher, /resume/);
   assert.deepEqual(parsed.SessionStart[0].hooks.map((hook: any) => hook.timeout), [120, 120, 120, 120]);
   assert.equal(parsed.Stop[0].hooks[0].timeout, 3600);
+  assert.equal(parsed.UserPromptSubmit[0].hooks[0].timeout, 60);
+});
+
+test("Manager prompt route launches both interactive command types and drains ordered notifications once", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const launches: unknown[] = [];
+  let next = 1;
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input) => {
+    launches.push(input); return { agentId: `interactive-${next++}` };
+  } }, () => new Date("2026-07-30T14:31:00.000Z"));
+  assert.deepEqual(await prompts.handle(managerId, "/brainstorm caching layer"), { intercepted: true, message: "Brainstorm session launched and focused." });
+  assert.deepEqual(await prompts.handle(managerId, "/raw"), { intercepted: true, message: "Raw session launched and focused." });
+  assert.deepEqual(launches, [
+    { type: "brainstormer", description: "interactive brainstorm session", prompt: "caching layer" },
+    { type: "raw", description: "raw interactive session" },
+  ]);
+  const drained = await prompts.handle(managerId, "what is the status?");
+  assert.match(String(drained.additionalContext), /At 2026-07-30T14:31:00.000Z: you started a brainstormer on "caching layer" \(agent interactive-1\)/);
+  assert.match(String(drained.additionalContext), /raw session \(agent interactive-2\)/);
+  assert.ok(String(drained.additionalContext).indexOf("interactive-1") < String(drained.additionalContext).indexOf("interactive-2"));
+  assert.deepEqual(await prompts.handle(managerId, "and now?"), {});
+});
+
+async function runPromptHook(responseStatus: number, responseBody: unknown, prompt: string, token = "secret"): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const server = createServer((request, response) => {
+    assert.equal(request.headers.authorization, `Bearer ${token}`);
+    response.writeHead(responseStatus, { "content-type": "application/json" });
+    response.end(JSON.stringify(responseBody));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const child = spawn("python", [script, "/hooks/manager/prompt"], {
+    env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: "manager", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = ""; let stderr = "";
+  child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  child.stdin.end(JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt }));
+  const status = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+  await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+  return { status, stdout, stderr };
+}
+
+test("Python prompt hook erases successful and failed commands with exact output channels", async () => {
+  const success = await runPromptHook(200, { intercepted: true, message: "Brainstorm session launched and focused." }, "/brainstorm caching layer");
+  assert.deepEqual(success, { status: 2, stdout: "", stderr: `${EOL}Brainstorm session launched and focused.${EOL}` });
+  const authFailure = await runPromptHook(401, { ok: false }, "/raw", "wrong-token");
+  assert.equal(authFailure.status, 2); assert.equal(authFailure.stdout, ""); assert.ok(authFailure.stderr.startsWith(`${EOL}Aboard did not launch the requested session:`));
+});
+
+test("Python prompt hook injects a drained queue on a real prompt", async () => {
+  const context = "Since your last message:\nAt 2026-07-30T14:31:00.000Z: launched one.\nAt 2026-07-30T14:36:00.000Z: launched two.";
+  const result = await runPromptHook(200, { additionalContext: context }, "what changed?");
+  assert.equal(result.status, 0); assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } });
+});
+
+test("aboard-owned launch skills are user-only command shims and raw has no agent definition", async () => {
+  const { readFile, access } = await import("node:fs/promises");
+  for (const name of ["brainstorm", "raw"]) {
+    const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
+    assert.match(skill, /disable-model-invocation: true/); assert.match(skill, /argument-hint:/); assert.match(skill, new RegExp(`/${name}`));
+  }
+  await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".claude", "agents", "raw.md")));
 });

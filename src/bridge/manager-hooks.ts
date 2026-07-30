@@ -1,11 +1,13 @@
 import type { AgentId, AgentSession, IsoTimestamp, WorkerResult } from "../domain/contracts.js";
 import type { FleetRegistry, MailboxEntry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
+import type { DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 
 export const HOOK_OUTPUT_LIMIT = 10_000;
 export const MANAGER_SESSION_START_TIMEOUT_SECONDS = 120;
 export const MANAGER_STOP_TIMEOUT_SECONDS = 3_600;
+export const MANAGER_PROMPT_TIMEOUT_SECONDS = 60;
 
 export type BriefingSlice = "git" | "github" | "fleet" | "todo";
 
@@ -164,7 +166,69 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-export function createManagerHookRoutes(briefings: ManagerBriefings, stop: ManagerStopService): BridgeRequestHandler {
+export interface InteractiveManagerLauncher {
+  spawnInteractive(input: DelegationLaunchInput): Promise<unknown>;
+}
+
+export class ManagerPromptService {
+  readonly #now: () => Date;
+
+  public constructor(
+    private readonly fleet: FleetRegistry,
+    private readonly launcher: InteractiveManagerLauncher,
+    now?: () => Date,
+  ) {
+    this.#now = now ?? (() => new Date());
+  }
+
+  public async handle(agentId: AgentId, prompt: string): Promise<Record<string, unknown>> {
+    const command = parseInteractiveCommand(prompt);
+    if (command === undefined) {
+      const deliveredAt = this.#now().toISOString() as IsoTimestamp;
+      const delivery = this.fleet.drainNotifications(agentId, deliveredAt);
+      if (delivery.notifications.length === 0 && delivery.summarized === undefined) return {};
+      const lines = [`Since your last message (delivered at ${deliveredAt}):`];
+      if (delivery.summarized !== undefined) {
+        lines.push(
+          `${delivery.summarized.count} earlier aboard action(s) occurred between ${delivery.summarized.firstOccurredAt} and ${delivery.summarized.lastOccurredAt}; details were summarized to keep this context bounded.`,
+        );
+      }
+      for (const notification of delivery.notifications) {
+        lines.push(`At ${notification.occurredAt}: ${notification.message}`);
+      }
+      return { additionalContext: lines.join("\n") };
+    }
+
+    const launched = await this.launcher.spawnInteractive(command.input) as Record<string, unknown>;
+    const occurredAt = this.#now().toISOString() as IsoTimestamp;
+    const launchedAgentId = typeof launched.agentId === "string" ? launched.agentId : "unknown";
+    const event = command.type === "raw"
+      ? `you started a raw session (agent ${launchedAgentId}).`
+      : `you started a brainstormer${command.topic === undefined ? "" : ` on ${JSON.stringify(command.topic)}`} (agent ${launchedAgentId}).`;
+    this.fleet.enqueueNotification(agentId, event, occurredAt);
+    return { intercepted: true, message: command.type === "raw" ? "Raw session launched and focused." : "Brainstorm session launched and focused." };
+  }
+}
+
+function parseInteractiveCommand(prompt: string): {
+  readonly type: "brainstormer" | "raw";
+  readonly topic?: string;
+  readonly input: DelegationLaunchInput;
+} | undefined {
+  const match = /^\s*\/(brainstorm|raw)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
+  if (match === null) return undefined;
+  const topic = match[2]?.trim();
+  if (match[1] === "raw") {
+    return { type: "raw", input: { type: "raw", description: "raw interactive session", ...(topic ? { prompt: topic } : {}) } };
+  }
+  return {
+    type: "brainstormer",
+    ...(topic ? { topic } : {}),
+    input: { type: "brainstormer", description: "interactive brainstorm session", ...(topic ? { prompt: topic } : {}) },
+  };
+}
+
+export function createManagerHookRoutes(briefings: ManagerBriefings, stop: ManagerStopService, prompts?: ManagerPromptService): BridgeRequestHandler {
   return async (request): Promise<BridgeResponse> => {
     if (request.method !== "POST") return protocolError(405, "invalid-request", "Method not allowed");
     const brief = /^\/hooks\/manager\/brief-(git|github|fleet|todo)$/.exec(request.url.pathname);
@@ -175,6 +239,17 @@ export function createManagerHookRoutes(briefings: ManagerBriefings, stop: Manag
         return protocolError(400, "invalid-request", "agentId and stopHookActive are required");
       }
       return { status: 200, body: await stop.poll({ agentId: body.agentId as AgentId, stopHookActive: (body.stopHookActive ?? body.stop_hook_active) as boolean }, request.signal) };
+    }
+    if (request.url.pathname === "/hooks/manager/prompt" && prompts !== undefined) {
+      const body = record(request.body);
+      if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "" || typeof body.prompt !== "string") {
+        return protocolError(400, "invalid-request", "agentId and prompt are required");
+      }
+      try {
+        return { status: 200, body: await prompts.handle(body.agentId as AgentId, body.prompt) };
+      } catch (error) {
+        return protocolError(error instanceof Error && "code" in error && error.code === "lease-conflict" ? 409 : 500, error instanceof Error && "code" in error && error.code === "lease-conflict" ? "conflict" : "internal-error", error instanceof Error ? error.message : "Interactive launch failed");
+      }
     }
     return protocolError(404, "not-found", "Route not found");
   };
