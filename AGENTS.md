@@ -19,7 +19,10 @@ tool needs. The CLI is in `src/harness_cli/`; see the root `README.md`.
 Every installable tool needs a `harness.toml` in its directory declaring `name`, `version`,
 `description`, and one or more `[[files]]` entries (`src` relative to the tool dir, `dest` relative to
 the target `.claude/`). Settings go in a sibling `settings.fragment.json` — plain JSON, merged as-is,
-with `${PYTHON}` and `${CLAUDE_DIR}` resolved at install time. A tool without a manifest is invisible to
+with `${PYTHON}` and `${CLAUDE_DIR}` resolved at install time. `${PYTHON}` becomes the absolute path of
+the first candidate among `python3`, `python`, `py` that actually runs (lookup alone is not enough: the
+Windows Store alias passes `which` without being a real interpreter), falling back to the platform's
+usual name plus an install-time warning when nothing works. A tool without a manifest is invisible to
 the installer, so add one in the same change that adds the tool, and bump `version` whenever its files
 or fragment change. Run `uv run pytest` — the suite installs every manifest for real and round-trips
 uninstall.

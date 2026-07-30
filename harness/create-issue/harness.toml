@@ -1,5 +1,5 @@
 name = "create-issue"
-version = "1.0.0"
+version = "1.0.1"
 description = "One idea -> one reviewed, labeled GitHub issue in 2 model calls"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/create-issue/README.md"

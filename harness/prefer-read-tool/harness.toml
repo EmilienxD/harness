@@ -1,5 +1,5 @@
 name = "prefer-read-tool"
-version = "1.0.0"
+version = "1.0.1"
 description = "PostToolUse nudge to prefer the Read tool over cat/sed for file reads"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/prefer-read-tool/README.md"
 

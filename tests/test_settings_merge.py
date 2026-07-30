@@ -86,3 +86,36 @@ def test_unmerge_leaves_user_edited_values_alone():
     merged = merge({}, {"model": "opus"})
     merged["model"] = "sonnet"
     assert unmerge(merged, {"model": "opus"}) == {"model": "sonnet"}
+
+
+def test_reinstall_with_reresolved_interpreter_replaces_in_place():
+    # The installer resolved ${PYTHON} to a bare name for an existing install
+    # but to an absolute path now: same hook, new command. It must replace the
+    # old entry, not stack a second one.
+    old = merge({}, {"hooks": {"PreToolUse": [group(hook("python3", "/x/h.py"), matcher="Edit")]}})
+    fragment = {"hooks": {"PreToolUse": [group(hook("/usr/bin/python3", "/x/h.py"), matcher="Edit")]}}
+    merged = merge(old, fragment)
+    assert merged["hooks"]["PreToolUse"][0]["hooks"] == [hook("/usr/bin/python3", "/x/h.py")]
+
+
+def test_unmerge_matches_hook_despite_interpreter_drift():
+    # Resolution can differ between install and uninstall (PATH changed,
+    # interpreter removed); the entry the installer wrote is still its own.
+    installed = merge({}, {"hooks": {"PreToolUse": [group(hook("/usr/bin/python3", "/x/h.py"), matcher="Edit")]}})
+    fragment = {"hooks": {"PreToolUse": [group(hook("python3", "/x/h.py"), matcher="Edit")]}}
+    assert unmerge(installed, fragment) == {}
+
+
+def test_exec_hooks_with_different_args_still_stack():
+    merged = merge(
+        {"hooks": {"PreToolUse": [group(hook("python", "/x/a.py"), matcher="Edit")]}},
+        {"hooks": {"PreToolUse": [group(hook("python", "/x/b.py"), matcher="Edit")]}},
+    )
+    assert len(merged["hooks"]["PreToolUse"][0]["hooks"]) == 2
+
+
+def test_empty_args_commands_are_identified_by_command():
+    a = {"hooks": {"PreToolUse": [group(hook("make lint"), matcher="Edit")]}}
+    b = {"hooks": {"PreToolUse": [group(hook("make test"), matcher="Edit")]}}
+    merged = merge(a, b)
+    assert len(merged["hooks"]["PreToolUse"][0]["hooks"]) == 2

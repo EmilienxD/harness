@@ -196,8 +196,11 @@ wrote yourself untouched. See the [repo README](../../README.md) for `--user`,
 }
 ```
 
-`python3` must exist on `PATH` on the machine running Claude Code — on Windows
-that is usually `python` instead. (The installer picks the right one for you.)
+`command` must resolve on the PATH of the machine running Claude Code
+(`python` on Windows, usually `python3` elsewhere). The `harness` installer
+sidesteps this: it checks each candidate (`python3`, `python`, `py`) actually
+runs and writes its absolute path into `settings.json`, so the hook no longer
+depends on PATH at all.
 
 5. If you plan to use `--ai`, add these to your `.gitignore` so a key can't be
    committed:
@@ -215,4 +218,6 @@ it: type `/commit test message` in a session with uncommitted
    no model "thinking" delay, and the commit should appear in `git log` with
    a `Claude-session: <id>` trailer.
 
-Requires `python3` and `git` on PATH inside the environment Claude Code runs in.
+Requires `git` on the PATH Claude Code sees, and a working Python 3 where the
+installer runs — its absolute path is baked into the hook config, so the
+interpreter does not need to stay on PATH afterwards.

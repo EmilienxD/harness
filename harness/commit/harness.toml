@@ -1,5 +1,5 @@
 name = "commit"
-version = "1.0.0"
+version = "1.0.1"
 description = "Zero-model-call /commit — stages and commits via a UserPromptSubmit hook"
 requires = ["git"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/commit/README.md"

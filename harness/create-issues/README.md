@@ -103,7 +103,7 @@ diff. See the [repo README](../../README.md) for `--user`, `--local`, and
 }
 ```
 
-   - `command` must resolve on the machine actually running Claude Code. `python` works out of the box on Windows via the `py`/`python` launcher; on Linux and macOS, confirm `python` exists on `PATH` — if only `python3` does, change this to `"python3"`.
+   - `command` must resolve on the PATH of the machine actually running Claude Code. For a manual install use whichever name works locally (`python` via the `py`/`python` launcher on Windows, usually `python3` on Linux/macOS). The `harness` installer sidesteps this: it checks each candidate (`python3`, `python`, `py`) actually runs and writes its absolute path into `settings.json`, so the hook no longer depends on PATH at all.
    - `${CLAUDE_PROJECT_DIR}` is substituted by Claude Code at hook-run time to the project root, so the path resolves regardless of your current working directory inside the repo.
    - This hook only acts on prompts starting with `/publish-issues`; every other prompt passes through untouched (exit 0), so it's safe to add alongside other `UserPromptSubmit` hooks.
 

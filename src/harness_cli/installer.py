@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -97,39 +98,72 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def python_command() -> str:
-    """The interpreter name hooks should invoke on this machine.
+# Last resort when no interpreter is found at all: install proceeds (with a
+# missing-requirements warning) under the platform's usual name, so a later
+# uninstall on the same still-broken machine predicts the same string and
+# backs the entry out cleanly.
+FALLBACK_PYTHON = "python" if os.name == "nt" else "python3"
 
-    `python3` does not exist on a stock Windows install and `python` is often
-    absent on Linux, so the manifest writes `${PYTHON}` and we resolve it here
-    rather than making every user edit their settings.json by hand.
+
+def _interpreter_works(path: str) -> bool:
+    """A python that exists on PATH is not necessarily a python that runs.
+
+    Windows' Microsoft Store 'app execution alias' ships python.exe and
+    python3.exe stubs that pass `shutil.which` but only open the Store when
+    launched; a stray Python 2 as `python` is the other classic trap. Running
+    a trivial program is the only reliable test, and checks both at once.
     """
-    for candidate in ("python3", "python"):
-        if shutil.which(candidate):
-            return candidate
-    return "python3"
+    try:
+        result = subprocess.run(
+            [path, "-c", "import sys; sys.exit(sys.version_info[0] != 3)"],
+            capture_output=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
-def substitute(value, target: "Target | None" = None):
+def python_command() -> str | None:
+    """Absolute path of a working Python 3 on this machine, or None.
+
+    Hooks run in exec form, which would resolve a bare `python`/`python3` on
+    whatever PATH Claude Code happens to see at hook time — not necessarily
+    the PATH the installer saw. Baking the full path sidesteps that entirely.
+    `py` covers the common Windows case of a python.org install that was never
+    added to PATH; the launcher itself lives at C:\\Windows\\py.exe.
+    """
+    for candidate in ("python3", "python", "py"):
+        found = shutil.which(candidate)
+        if found and _interpreter_works(found):
+            return found
+    return None
+
+
+def substitute(value, target: "Target | None" = None, python: str | None = None):
     """Expand manifest placeholders throughout a settings fragment.
 
-    `${PYTHON}` becomes the interpreter that exists on this machine.
+    `${PYTHON}` becomes the absolute path of a verified interpreter — resolved
+    here unless the caller already did (plan_install needs to know whether the
+    lookup failed, so it resolves once and passes the result down).
     `${CLAUDE_DIR}` becomes the directory the tool was installed into — Claude
     Code's own `${CLAUDE_PROJECT_DIR}/.claude` for a project install, and an
     absolute path for a user-level one (where `${CLAUDE_PROJECT_DIR}` would
     point at whatever project happens to be open, not at the hook).
     """
+    if python is None and "${PYTHON}" in json.dumps(value):
+        python = python_command() or FALLBACK_PYTHON
     if isinstance(value, str):
         claude_dir = (
             target.claude_dir.as_posix()
             if target and target.is_user
             else "${CLAUDE_PROJECT_DIR}/.claude"
         )
-        return value.replace("${PYTHON}", python_command()).replace("${CLAUDE_DIR}", claude_dir)
+        return value.replace("${PYTHON}", python or "").replace("${CLAUDE_DIR}", claude_dir)
     if isinstance(value, dict):
-        return {k: substitute(v, target) for k, v in value.items()}
+        return {k: substitute(v, target, python) for k, v in value.items()}
     if isinstance(value, list):
-        return [substitute(v, target) for v in value]
+        return [substitute(v, target, python) for v in value]
     return value
 
 
@@ -195,7 +229,9 @@ def plan_install(
             status = "overwrite"
         actions.append(FileAction(dest=dest, source=source, executable=executable, status=status))
 
-    fragment = substitute(tool.fragment, target)
+    needs_python = "${PYTHON}" in json.dumps(tool.fragment)
+    python = python_command() if needs_python else None
+    fragment = substitute(tool.fragment, target, python or FALLBACK_PYTHON)
     before = target.read_settings() if settings_override is None else settings_override
     after = settings_merge.merge(before, fragment) if fragment else before
 
@@ -207,6 +243,12 @@ def plan_install(
         gitignore.apply(ignore_before, tool.name, patterns) if patterns else ignore_before
     )
 
+    missing = [c for c in tool.requires if shutil.which(c) is None]
+    if needs_python and python is None:
+        # Settings are still written (with a fallback name) so there is a real
+        # entry to fix forward from once Python is installed — but say so.
+        missing.append("python")
+
     return Plan(
         tool=tool,
         target=target,
@@ -216,7 +258,7 @@ def plan_install(
         settings_after=after,
         gitignore_before=ignore_before,
         gitignore_after=ignore_after,
-        missing_requirements=[c for c in tool.requires if shutil.which(c) is None],
+        missing_requirements=missing,
     )
 
 

@@ -110,9 +110,11 @@ executable, and merges the `PostToolUse` registration below into
 }
 ```
 
-`python3` must exist on `PATH` on the machine running Claude Code — on
-Windows that is usually `python` instead. (The installer picks the right one
-for you.)
+`command` must resolve on the PATH of the machine running Claude Code
+(`python` on Windows, usually `python3` elsewhere). The `harness` installer
+sidesteps this: it checks each candidate (`python3`, `python`, `py`) actually
+runs and writes its absolute path into `settings.json`, so the hook no longer
+depends on PATH at all.
 
 </details>
 
@@ -120,5 +122,6 @@ Restart or reload Claude Code so it picks up the new hook config, then test
 it: write a rule, ask the agent to read a matching file, and the tool result
 should come back with your reminder attached as context.
 
-Requires `python3` (or `python`) on PATH inside the environment Claude Code
-runs in. No other dependencies — the hook is stdlib-only.
+Requires a working Python 3 where the installer runs — its absolute path is
+baked into the hook config, so the interpreter does not need to stay on PATH
+afterwards. No other dependencies — the hook is stdlib-only.

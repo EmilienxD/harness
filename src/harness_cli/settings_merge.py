@@ -26,8 +26,15 @@ def identity(item: Json) -> tuple:
             return ("matcher", item.get("matcher", ""))
         if "command" in item:
             args = item.get("args")
-            key = tuple(args) if isinstance(args, list) else ()
-            return ("command", item.get("type", "command"), item["command"], key)
+            if isinstance(args, list) and args:
+                # Exec-form hook: the script and its arguments are the entry's
+                # identity; which interpreter launches it (${PYTHON}) is a
+                # property of the machine, re-resolved on every install. Keying
+                # by args means an upgrade replaces the interpreter string in
+                # place instead of stacking a duplicate hook, and uninstall
+                # removes the entry even if the resolution drifted since.
+                return ("command", item.get("type", "command"), tuple(args))
+            return ("command", item.get("type", "command"), item["command"])
         return ("obj", json.dumps(item, sort_keys=True))
     if isinstance(item, (list, dict)):
         return ("obj", json.dumps(item, sort_keys=True))

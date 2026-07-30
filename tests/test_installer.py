@@ -1,7 +1,9 @@
 import json
+from pathlib import Path
 
 import pytest
 
+from harness_cli import installer
 from harness_cli.installer import (
     InstallError,
     Target,
@@ -67,6 +69,64 @@ def test_install_hook_tool_writes_settings(target):
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     assert entry["args"][0].endswith("/hooks/commit_user_prompt_submit_hook.py")
     assert "${PYTHON}" not in entry["command"]
+
+
+def test_python_is_baked_as_an_absolute_path(target):
+    if installer.python_command() is None:
+        pytest.skip("no python on PATH")
+    install("commit", target)
+    entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
+    # Absolute, so the hook works on whatever PATH Claude Code happens to see,
+    # not just the PATH the installer was run from.
+    assert Path(entry["command"]).is_absolute()
+
+
+def test_python_command_prefers_the_first_working_candidate(monkeypatch):
+    monkeypatch.setattr(
+        installer.shutil,
+        "which",
+        lambda name: {"python3": "/usr/bin/python3", "python": "/usr/bin/python"}.get(name),
+    )
+    monkeypatch.setattr(installer, "_interpreter_works", lambda path: True)
+    assert installer.python_command() == "/usr/bin/python3"
+
+
+def test_python_command_skips_candidates_that_only_look_installed(monkeypatch):
+    # Windows' Store alias passes `which` but errors when actually launched.
+    monkeypatch.setattr(
+        installer.shutil,
+        "which",
+        lambda name: {"python3": "C:/stubs/python3.exe", "python": "C:/real/python.exe"}.get(name),
+    )
+    monkeypatch.setattr(installer, "_interpreter_works", lambda path: "stubs" not in path)
+    assert installer.python_command() == "C:/real/python.exe"
+
+
+def test_python_command_returns_none_when_nothing_works(monkeypatch):
+    monkeypatch.setattr(installer.shutil, "which", lambda name: None)
+    assert installer.python_command() is None
+
+
+def test_install_without_python_warns_and_writes_the_fallback(monkeypatch, target):
+    monkeypatch.setattr(installer, "python_command", lambda: None)
+    plan = plan_install(TOOLS["commit"], target)
+    assert "python" in plan.missing_requirements
+    apply_install(plan)
+    entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
+    assert entry["command"] == installer.FALLBACK_PYTHON
+
+
+def test_skill_only_tool_does_not_care_about_missing_python(monkeypatch, target):
+    monkeypatch.setattr(installer, "python_command", lambda: None)
+    assert plan_install(TOOLS["caveman"], target).missing_requirements == []
+
+
+def test_uninstall_round_trips_after_python_resolution_drift(monkeypatch, target):
+    monkeypatch.setattr(installer, "python_command", lambda: "/usr/bin/python3.12")
+    install("commit", target)
+    monkeypatch.setattr(installer, "python_command", lambda: "/usr/bin/python3.13")
+    uninstall(TOOLS["commit"], target)
+    assert claude_files(target) == []
 
 
 def test_reinstall_is_idempotent(target):

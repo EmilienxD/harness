@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness"
-version = "0.1.0"
+version = "0.1.1"
 description = "Installer for the harness collection of Claude Code tools (skills, hooks, agents)"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -75,8 +75,11 @@ file list and settings diff. See the [repo README](../../README.md) for
 }
 ```
 
-`python3` must exist on `PATH` on the machine running Claude Code — on Windows
-that is usually `python` instead. (The installer picks the right one for you.)
+`command` must resolve on the PATH of the machine running Claude Code
+(`python` on Windows, usually `python3` elsewhere). The `harness` installer
+sidesteps this: it checks each candidate (`python3`, `python`, `py`) actually
+runs and writes its absolute path into `settings.json`, so the hook no longer
+depends on PATH at all.
 
 </details>
 
@@ -84,5 +87,6 @@ Restart or reload Claude Code so it picks up the new hook config, then test
 it: ask the agent to `cat README.md`. The tool result should come back with
 the reminder attached as context.
 
-Requires `python3` (or `python`) on PATH inside the environment Claude Code
-runs in.
+Requires a working Python 3 where the installer runs — its absolute path is
+baked into the hook config, so the interpreter does not need to stay on PATH
+afterwards.
