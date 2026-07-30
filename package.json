@@ -16,6 +16,7 @@
       { "command": "aboard.startManager", "title": "Aboard: Start Manager" },
       { "command": "aboard.resumeManager", "title": "Aboard: Resume Manager" },
       { "command": "aboard.newManager", "title": "Aboard: New Manager" },
+      { "command": "aboard.scaffoldProject", "title": "Aboard: Install or Upgrade Project Assets" },
       { "command": "aboard.reviewPr", "title": "Aboard: Review Pull Request" }
     ],
     "configuration": {
@@ -57,6 +58,7 @@
   },
   "activationEvents": [],
   "main": "./dist/extension.js",
+  "files": ["dist/extension.js", "dist/extension.js.map", "assets/scaffold/", "README.md"],
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outfile=dist/extension.js --sourcemap",
     "check": "tsc --noEmit",

@@ -16,6 +16,9 @@ import type { TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
+import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
+import { scaffoldProject } from "./scaffold/project.js";
+import { join } from "node:path";
 
 let bridge: BridgeRuntime | undefined;
 
@@ -53,6 +56,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
   const managerStore = new FileManagerStore(workspaceRoot);
+  const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const manager = new ManagerLifecycle({
     store: managerStore, terminals, workspaceRoot,
     shell: process.platform === "win32" ? "powershell" : "git-bash",
@@ -73,6 +77,27 @@ export async function activate(context: ExtensionContext): Promise<void> {
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
   };
   context.subscriptions.push(
+    commands.registerCommand("aboard.scaffoldProject", async () => {
+      try {
+        const autoCompactEnabled = workspace.getConfiguration("claudeCode").get<boolean>("autoCompact");
+        const report = await scaffoldProject({
+          projectRoot: workspaceRoot,
+          assetRoot: join(context.extensionPath, "assets", "scaffold"),
+          ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
+          todo: {
+            ensure: async () => {
+              try { await github.getTodo(); return "existing"; }
+              catch (error) {
+                if (!(error instanceof GitHubBoundaryError) || error.code !== "missing-todo") throw error;
+                await github.updateTodo("# Project TODO\n\n- Add the next project priorities here."); return "created";
+              }
+            },
+          },
+        });
+        for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
+        void window.showInformationMessage(`aboard project assets installed (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
+      } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
+    }),
     commands.registerCommand("aboard.startManager", () => launch("start")),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),

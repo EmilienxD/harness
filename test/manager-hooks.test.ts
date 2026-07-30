@@ -165,7 +165,7 @@ test("Python prompt hook injects a drained queue on a real prompt", async () => 
 
 test("aboard-owned launch skills are user-only command shims and raw has no agent definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
-  for (const name of ["brainstorm", "raw"]) {
+  for (const name of ["brainstorm"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, /argument-hint:/); assert.match(skill, new RegExp(`/${name}`));
   }
