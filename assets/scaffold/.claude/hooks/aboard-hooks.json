@@ -15,11 +15,6 @@
       { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/reground", "timeout": 120 }
     ] }
   ],
-  "InstructionsLoaded": [
-    { "matcher": "compact", "hooks": [
-      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/reground", "timeout": 120 }
-    ] }
-  ],
   "SubagentStart": [
     { "hooks": [ { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/subagent-start" } ] }
   ],
@@ -34,7 +29,13 @@
   ],
   "Stop": [
     { "hooks": [
-      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/stop", "timeout": 3600 }
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/stop", "timeout": 3600 },
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/stop" }
+    ] }
+  ],
+  "StopFailure": [
+    { "hooks": [
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/stop-failure" }
     ] }
   ]
 }

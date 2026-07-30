@@ -8,6 +8,10 @@ import { WorkerHookService, createWorkerHookRoutes } from "../src/bridge/worker-
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
+import { WriteLease } from "../src/domain/lease.js";
+import { combineHandlers } from "../src/bridge/router.js";
+import { ManagerBriefings, ManagerPromptService, ManagerStopService, createManagerHookRoutes } from "../src/bridge/manager-hooks.js";
+import { createWorkerLifecycleRoutes } from "../src/bridge/lifecycle.js";
 
 const at = (value: string) => value as IsoTimestamp;
 const timestamp = at("2026-07-30T12:00:00.000Z");
@@ -65,9 +69,48 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
   }
 });
 
-test("scaffold registers lifecycle, Agent telemetry, and both compact re-grounding events", async () => {
+test("scaffold registers lifecycle, Agent telemetry, and compact re-grounding", async () => {
   const hooks = JSON.parse(await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8")) as Record<string, unknown>;
-  for (const event of ["SubagentStart", "SubagentStop", "PostToolUse", "PostCompact", "InstructionsLoaded"]) assert.ok(event in hooks);
+  for (const event of ["SubagentStart", "SubagentStop", "PostToolUse", "PostCompact", "Stop", "StopFailure"]) assert.ok(event in hooks);
   assert.equal((hooks.PostToolUse as { matcher: string }[])[0]?.matcher, "Agent");
   assert.equal((hooks.SessionStart as unknown[]).length, 2);
+  // InstructionsLoaded has no decision control, so additionalContext returned
+  // from it is discarded. Re-grounding must ride SessionStart(compact) alone.
+  assert.ok(!("InstructionsLoaded" in hooks));
+  const regrounding = (hooks.SessionStart as { matcher: string; hooks: { command: string }[] }[]).find((entry) => entry.matcher === "compact");
+  assert.ok(regrounding?.hooks.some((hook) => hook.command.includes("/hooks/worker/reground")));
+});
+
+test("every scaffolded hook endpoint is served by a bridge route", async () => {
+  const raw = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8");
+  const registered = new Set([...raw.matchAll(/aboard_hook\.py (\/[^"\s]+)/g)].map((match) => match[1]!));
+  assert.ok(registered.size > 0);
+
+  // The composed handler chain from the extension composition root. A route the
+  // scaffold POSTs to but nothing serves is a 404 at runtime, which is exactly
+  // how the Manager briefings and worker results were silently lost before.
+  const fleet = new FleetRegistry();
+  const lease = new WriteLease();
+  const stubGit = { branch: "main", head: "abc1234", dirty: false };
+  const briefings = new ManagerBriefings(
+    { git: async () => stubGit, github: async () => ({ readyIssues: [], openPullRequests: [], hitlIssues: [], unreviewedMergeCount: 0 }), todoIssue: async () => 12 },
+    fleet, lease,
+  );
+  const handler = combineHandlers(
+    createManagerHookRoutes(briefings, new ManagerStopService({ fleet }), new ManagerPromptService(fleet, { spawnInteractive: async () => ({ agentId: "a" }) })),
+    createWorkerLifecycleRoutes({ stop: async () => true, stopFailure: async () => true, timeout: async () => true, terminalClosed: async () => true } as never),
+    createWorkerHookRoutes(new WorkerHookService(fleet)),
+  );
+
+  for (const endpoint of registered) {
+    const response = await handler({
+      method: "POST",
+      url: new URL(`http://127.0.0.1${endpoint}`),
+      headers: {},
+      body: {},
+      signal: AbortSignal.abort(),
+    });
+    // A served route may reject an empty body (400) but must never 404.
+    assert.notEqual(response.status, 404, `${endpoint} is registered in the scaffold but no bridge route serves it`);
+  }
 });

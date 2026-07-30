@@ -28,12 +28,22 @@ import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { createMcpHandler } from "./bridge/mcp.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
+import {
+  ManagerBriefings,
+  ManagerPromptService,
+  ManagerStopService,
+  createManagerHookRoutes,
+  type BriefingSlice,
+  type BriefingSources,
+} from "./bridge/manager-hooks.js";
 import { GitWorkingTreeInspector, WorkerLifecycleReconciler, createWorkerLifecycleRoutes } from "./bridge/lifecycle.js";
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
 import { parseAgentDefinition } from "./scaffold/agent-definition.js";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId } from "./domain/contracts.js";
 import { ReviewCoordinator } from "./github/review.js";
 import { registerReviewCommand } from "./vscode/review.js";
@@ -43,6 +53,40 @@ let persistence: PersistOnChange | undefined;
 
 function configuration() {
   return readAboardConfiguration({ get: (section) => workspace.getConfiguration().get(section) });
+}
+
+/**
+ * Briefing sources for the Manager's split SessionStart hooks. Each slice is
+ * independently fallible by design: `ManagerBriefings` converts a rejection into
+ * a one-line "unavailable" note, so one broken `gh` call degrades a single slice
+ * instead of losing the whole briefing.
+ */
+function briefingSources(workspaceRoot: string, github: GitHubClient, previousSessionAt: () => string | undefined): BriefingSources {
+  const git = async (args: readonly string[]): Promise<string> =>
+    (await promisify(execFile)("git", [...args], { cwd: workspaceRoot, encoding: "utf8", windowsHide: true })).stdout.trim();
+  return {
+    git: async () => ({
+      branch: await git(["branch", "--show-current"]) || "detached",
+      head: await git(["rev-parse", "--short", "HEAD"]),
+      dirty: (await git(["status", "--porcelain"])).length > 0,
+    }),
+    github: async () => {
+      const roadmap = await github.listRoadmapIssues();
+      const since = previousSessionAt();
+      const merges = since === undefined ? [] : await github.listUnreviewedMerges(since);
+      const open = roadmap.filter((issue) => issue.disposition === "hitl");
+      return {
+        readyIssues: roadmap.filter((issue) => issue.ready).map((issue) => issue.number),
+        openPullRequests: [],
+        hitlIssues: open.map((issue) => issue.number),
+        unreviewedMergeCount: merges.length,
+      };
+    },
+    todoIssue: async () => {
+      try { return (await github.getTodo()).number; }
+      catch (error) { if (error instanceof GitHubBoundaryError && error.code === "missing-todo") return undefined; throw error; }
+    },
+  };
 }
 
 function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
@@ -93,15 +137,42 @@ export async function activate(context: ExtensionContext): Promise<void> {
   const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: workerConfigurations(workspaceRoot), prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   const reviews = new ReviewCoordinator(github, coordinator, fleet);
+  const briefings = new ManagerBriefings(
+    briefingSources(workspaceRoot, github, () => recordedManager?.updatedAt),
+    fleet,
+    lease,
+    {
+      write: async (slice: BriefingSlice, content: string) => {
+        const path = join(workspaceRoot, ".aboard", "runtime", "events", `brief-${slice}.txt`);
+        await mkdir(join(workspaceRoot, ".aboard", "runtime", "events"), { recursive: true });
+        await writeFile(path, content, "utf8");
+        return path;
+      },
+    },
+  );
+  // The Stop hook long-polls: it must keep waiting while background workers are
+  // live, and wake the moment one of them files a result.
+  const managerStop = new ManagerStopService({
+    fleet,
+    waitForChange: (signal) => new Promise<void>((resolve) => {
+      const registration = fleet.onDidChange(() => { registration.dispose(); signal.removeEventListener("abort", onAbort); resolve(); });
+      const onAbort = (): void => { registration.dispose(); resolve(); };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }),
+  });
+  const managerPrompts = new ManagerPromptService(fleet, coordinator);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { github, reviews }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createTerminalRoutes(terminals)),
+    handler: combineHandlers(createMcpHandler(coordinator, { github, reviews }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createTerminalRoutes(terminals)),
     persistence: new FileBridgeDiscoveryPersistence(workspaceRoot),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
   registerNativeFleetUi(context, bridge.port, fleet, lease, terminals);
   persistence = new PersistOnChange((listener) => fleet.onDidChange(listener), () => fleetStore.save(fleet.toPersistenceDto()), (error) => output.appendLine(`Fleet persistence failed: ${error instanceof Error ? error.message : "unknown error"}`));
+  // Disposed through subscriptions like every other resource; `deactivate` also
+  // awaits it so queued writes are flushed on a normal shutdown.
+  context.subscriptions.push({ dispose: () => void persistence?.dispose() });
   const manager = new ManagerLifecycle({
     store: managerStore, terminals, workspaceRoot,
     shell: process.platform === "win32" ? "powershell" : "git-bash",

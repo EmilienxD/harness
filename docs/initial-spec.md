@@ -908,7 +908,9 @@ No bridge-mediated permission policy engine is built. (A `PreToolUse` http hook 
 
 **Compaction is lossy, and the residual risk is specific:** an implementation agent that compacts mid-task can lose its launch prompt — which, per §5.8, is where its entire contract was handed to it. This is survivable for a structural reason: **the contract also lives in GitHub.** A compacted worker re-reads `gh issue view N` and recovers everything. This is the second dividend of the GitHub-as-backbone choice, and it is why §5.8 removes the *routine* fetch without removing the *capability*.
 
-**Compaction becomes a re-grounding event.** Per `hooks.md`, two hooks fire on compaction: `SessionStart` with `source: "compact"`, and `InstructionsLoaded` with `load_reason: "compact"`. The scaffolder installs a re-orientation hook so that after any compaction the worker is re-injected with:
+**Compaction becomes a re-grounding event.** Per `hooks.md`, two hooks fire on compaction: `SessionStart` with `source: "compact"`, and `InstructionsLoaded` with `load_reason: "compact"`. **Only the first can re-inject context.** `InstructionsLoaded` is documented as having no decision control — it cannot block or modify instruction loading, and its exit code is ignored — so `additionalContext` returned from it is silently discarded. The re-grounding hook therefore registers on `SessionStart` with `matcher: "compact"` alone. `InstructionsLoaded` remains available for observability, but must never be relied on to deliver context.
+
+The scaffolder installs a re-orientation hook so that after any compaction the worker is re-injected with:
 
 > You are aboard worker `$ABOARD_AGENT_ID`, implementing issue #N on branch X. Re-read the issue and spec before continuing.
 
