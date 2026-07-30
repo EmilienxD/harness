@@ -3,6 +3,7 @@ import type {
   AgentLifecycle,
   AgentSession,
   AgentTelemetry,
+  ChildAgentNode,
   IsoTimestamp,
   SessionId,
   WorkerResult,
@@ -85,6 +86,13 @@ export type FleetEvent =
       readonly occurredAt: IsoTimestamp;
       readonly type: "telemetry-updated";
       readonly agentId: AgentId;
+    }
+  | {
+      readonly sequence: number;
+      readonly occurredAt: IsoTimestamp;
+      readonly type: "child-agent-started" | "child-agent-finished" | "child-agent-telemetry-updated";
+      readonly agentId: AgentId;
+      readonly childAgentId: string;
     };
 
 type NewFleetEvent = FleetEvent extends infer Event
@@ -101,6 +109,7 @@ export interface MailboxEntry {
 export interface FleetPersistenceDto {
   readonly version: 1;
   readonly sessions: readonly AgentSession[];
+  readonly childAgents?: readonly ChildAgentNode[];
   readonly blockingResults: readonly MailboxEntry[];
   readonly mailboxes: readonly {
     readonly managerAgentId: AgentId;
@@ -125,6 +134,7 @@ const TRANSITIONS: Readonly<Record<AgentLifecycle["status"], ReadonlySet<AgentLi
 
 export class FleetRegistry {
   private readonly sessionsByAgent = new Map<AgentId, AgentSession>();
+  private readonly childAgentsById = new Map<string, ChildAgentNode>();
   private readonly agentBySession = new Map<SessionId, AgentId>();
   private readonly blockingResults = new Map<AgentId, WorkerResult>();
   private readonly mailboxes = new Map<AgentId, MailboxEntry[]>();
@@ -139,6 +149,7 @@ export class FleetRegistry {
       registry.sessionsByAgent.set(session.identity.agentId, session);
       registry.agentBySession.set(session.sessionId, session.identity.agentId);
     }
+    for (const child of dto.childAgents ?? []) registry.childAgentsById.set(child.agentId, child);
     for (const entry of dto.blockingResults) {
       registry.blockingResults.set(entry.agentId, entry.result);
     }
@@ -196,6 +207,41 @@ export class FleetRegistry {
 
   public list(): readonly AgentSession[] {
     return [...this.sessionsByAgent.values()];
+  }
+
+  public listChildren(parentAgentId?: AgentId): readonly ChildAgentNode[] {
+    const children = [...this.childAgentsById.values()];
+    return parentAgentId === undefined ? children : children.filter((child) => child.parentAgentId === parentAgentId);
+  }
+
+  public startChild(child: ChildAgentNode, occurredAt: IsoTimestamp): void {
+    this.requireSession(child.parentAgentId);
+    if (this.childAgentsById.has(child.agentId)) throw new FleetStateError("duplicate-agent", `Child agent ${child.agentId} is already registered`);
+    if (child.status !== "running") throw new FleetStateError("invalid-transition", "New child agents must start in running state");
+    this.childAgentsById.set(child.agentId, child);
+    this.record({ type: "child-agent-started", agentId: child.parentAgentId, childAgentId: child.agentId }, occurredAt);
+  }
+
+  public finishChild(parentAgentId: AgentId, childAgentId: string, result: string | undefined, occurredAt: IsoTimestamp): void {
+    const child = this.childAgentsById.get(childAgentId);
+    if (child === undefined || child.parentAgentId !== parentAgentId) throw new FleetStateError("unknown-agent", `Child agent ${childAgentId} is not registered for ${parentAgentId}`);
+    if (child.status === "completed") return;
+    this.childAgentsById.set(childAgentId, { ...child, status: "completed", finishedAt: occurredAt, ...(result === undefined ? {} : { result }) });
+    this.record({ type: "child-agent-finished", agentId: parentAgentId, childAgentId }, occurredAt);
+  }
+
+  public updateChildTelemetry(parentAgentId: AgentId, childAgentId: string, telemetry: AgentTelemetry, result: string | undefined, occurredAt: IsoTimestamp): void {
+    const child = this.childAgentsById.get(childAgentId);
+    if (child === undefined || child.parentAgentId !== parentAgentId) throw new FleetStateError("unknown-agent", `Child agent ${childAgentId} is not registered for ${parentAgentId}`);
+    this.childAgentsById.set(childAgentId, { ...child, telemetry, ...(result === undefined ? {} : { result }) });
+    this.record({ type: "child-agent-telemetry-updated", agentId: parentAgentId, childAgentId }, occurredAt);
+  }
+
+  public recordCompaction(agentId: AgentId, summary: string, occurredAt: IsoTimestamp): void {
+    const session = this.requireSession(agentId);
+    const telemetry = { ...session.telemetry, compactionCount: session.telemetry.compactionCount + 1 };
+    this.sessionsByAgent.set(agentId, { ...session, telemetry, compactSummaries: [...(session.compactSummaries ?? []), summary] });
+    this.record({ type: "telemetry-updated", agentId }, occurredAt);
   }
 
   public transition(agentId: AgentId, lifecycle: AgentLifecycle, occurredAt: IsoTimestamp): void {
@@ -338,6 +384,7 @@ export class FleetRegistry {
     return {
       version: 1,
       sessions: this.list(),
+      childAgents: this.listChildren(),
       blockingResults: [...this.blockingResults].map(([agentId, result]) => ({ agentId, result })),
       mailboxes: [...this.mailboxes].map(([managerAgentId, entries]) => ({ managerAgentId, entries: [...entries] })),
       deferredNotifications: [...this.notifications].map(([managerAgentId, entries]) => ({ managerAgentId, entries: [...entries] })),

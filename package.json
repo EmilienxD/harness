@@ -15,7 +15,8 @@
     "commands": [
       { "command": "aboard.startManager", "title": "Aboard: Start Manager" },
       { "command": "aboard.resumeManager", "title": "Aboard: Resume Manager" },
-      { "command": "aboard.newManager", "title": "Aboard: New Manager" }
+      { "command": "aboard.newManager", "title": "Aboard: New Manager" },
+      { "command": "aboard.reviewPr", "title": "Aboard: Review Pull Request" }
     ],
     "configuration": {
       "title": "aboard",
@@ -50,6 +51,7 @@
         }
         ,"aboard.manager.toolPreset": { "type": "string", "enum": ["read-only", "delegation-only"], "default": "read-only" }
         ,"aboard.manager.disallowedTools": { "type": "array", "items": { "type": "string" }, "default": [] }
+        ,"aboard.review.autoReview": { "type": "string", "enum": ["never", "hitl", "all"], "default": "never", "description": "Controls the sole automatic review path. Explicit review actions are always available." }
       }
     }
   },

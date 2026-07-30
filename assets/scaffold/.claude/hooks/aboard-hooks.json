@@ -10,7 +10,27 @@
       { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-github", "timeout": 120 },
       { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-fleet", "timeout": 120 },
       { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-todo", "timeout": 120 }
+    ] },
+    { "matcher": "compact", "hooks": [
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/reground", "timeout": 120 }
     ] }
+  ],
+  "InstructionsLoaded": [
+    { "matcher": "compact", "hooks": [
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/reground", "timeout": 120 }
+    ] }
+  ],
+  "SubagentStart": [
+    { "hooks": [ { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/subagent-start" } ] }
+  ],
+  "SubagentStop": [
+    { "hooks": [ { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/subagent-stop" } ] }
+  ],
+  "PostToolUse": [
+    { "matcher": "Agent", "hooks": [ { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/agent-tool" } ] }
+  ],
+  "PostCompact": [
+    { "matcher": "manual|auto", "hooks": [ { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/worker/post-compact" } ] }
   ],
   "Stop": [
     { "hooks": [

@@ -118,10 +118,10 @@ function resultBody(response: Awaited<ReturnType<ReturnType<typeof createMcpHand
   return response.body as Record<string, unknown>;
 }
 
-test("publishes seven distinct core tools and the one-hour timeout expectation", async () => {
+test("publishes ten distinct core tools and the one-hour timeout expectation", async () => {
   const { handler } = setup();
-  assert.equal(CORE_MCP_TOOLS.length, 7);
-  assert.equal(new Set(CORE_MCP_TOOLS.map((tool) => tool.name)).size, 7);
+  assert.equal(CORE_MCP_TOOLS.length, 10);
+  assert.equal(new Set(CORE_MCP_TOOLS.map((tool) => tool.name)).size, 10);
   const initialized = await handler({
     method: "POST", url: new URL("/mcp", "http://127.0.0.1"), headers: {},
     body: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, signal: new AbortController().signal,
@@ -138,6 +138,9 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["aboard__list_agents", { surprise: true }],
     ["aboard__send_to_agent", { agentId: "", message: "hello" }],
     ["aboard__focus_agent", { agentId: "x", extra: true }],
+    ["aboard__get_todo", { issue: 12 }],
+    ["aboard__update_todo", { body: "x", reason: "" }],
+    ["aboard__review_pr", { pr: 0 }],
     ["aboard__release_lease", { reason: "" }],
   ] as const) {
     assert.equal("error" in resultBody(await call(name, args)), true, name);

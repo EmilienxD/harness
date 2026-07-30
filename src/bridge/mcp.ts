@@ -1,6 +1,8 @@
 import { AGENT_TYPES, type AgentId, type AgentType } from "../domain/contracts.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
+import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
+import type { ReviewCoordinator } from "../github/review.js";
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 export const ABOARD_MCP_TIMEOUT_SECONDS = 3600;
@@ -55,11 +57,31 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     inputSchema: { type: "object", properties: { agentId: { type: "string", minLength: 1 } }, required: ["agentId"], additionalProperties: false },
   },
   {
+    name: "aboard__get_todo",
+    description: "Return the body of the singleton open GitHub issue labelled todo. The bridge resolves and caches its number; callers never pass an issue identifier.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "aboard__update_todo",
+    description: "Replace the singleton project TODO issue body. Creates the issue on first write when missing; the reason is for audit context and is not stored in the issue.",
+    inputSchema: { type: "object", properties: { body: { type: "string" }, reason: { type: "string", minLength: 1 } }, required: ["body", "reason"], additionalProperties: false },
+  },
+  {
+    name: "aboard__review_pr",
+    description: "Explicitly launch a read-only reviewer for a pull request after resolving its diff and governing issue contract. Findings are persisted as line-specific GitHub review comments.",
+    inputSchema: { type: "object", properties: { pr: { type: "integer", minimum: 1 }, focus: { type: "string", minLength: 1 } }, required: ["pr"], additionalProperties: false },
+  },
+  {
     name: "aboard__release_lease",
     description: "Force-release the workspace write lease as an explicit escape hatch. Always provide a meaningful audit reason; concurrent editing may become possible immediately.",
     inputSchema: { type: "object", properties: { reason: { type: "string", minLength: 1 } }, required: ["reason"], additionalProperties: false },
   },
 ];
+
+export interface McpServices {
+  readonly github?: GitHubClient;
+  readonly reviews?: ReviewCoordinator;
+}
 
 type JsonRpcId = string | number | null;
 
@@ -119,6 +141,7 @@ function parsePair(value: unknown, second: "message" | "reason" | undefined): Re
 
 async function callTool(
   coordinator: DelegationCoordinator,
+  services: McpServices,
   name: string,
   args: unknown,
   signal: AbortSignal,
@@ -152,6 +175,24 @@ async function callTool(
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.focus(parsed.agentId as AgentId);
     }
+    case "aboard__get_todo":
+      if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("arguments must be an empty object");
+      if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
+      return services.github.getTodo();
+    case "aboard__update_todo": {
+      if (!isRecord(args) || !exactKeys(args, ["body", "reason"])) throw new TypeError("arguments contain an unknown property");
+      if (typeof args.body !== "string") throw new TypeError("body must be a string");
+      if (!nonEmptyString(args.reason)) throw new TypeError("reason must be a non-empty string");
+      if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
+      return services.github.updateTodo(args.body);
+    }
+    case "aboard__review_pr": {
+      if (!isRecord(args) || !exactKeys(args, ["pr", "focus"])) throw new TypeError("arguments contain an unknown property");
+      if (!Number.isInteger(args.pr) || (args.pr as number) <= 0) throw new TypeError("pr must be a positive integer");
+      if (args.focus !== undefined && !nonEmptyString(args.focus)) throw new TypeError("focus must be a non-empty string when provided");
+      if (services.reviews === undefined) throw new GitHubBoundaryError("command-failed", "Review service is unavailable");
+      return services.reviews.review({ pr: args.pr as number, ...(args.focus === undefined ? {} : { focus: (args.focus as string).trim() }) });
+    }
     case "aboard__release_lease": {
       const parsed = parsePair(args, "reason");
       if (typeof parsed === "string") throw new TypeError(parsed);
@@ -162,7 +203,7 @@ async function callTool(
   }
 }
 
-export function createMcpHandler(coordinator: DelegationCoordinator): BridgeRequestHandler {
+export function createMcpHandler(coordinator: DelegationCoordinator, services: McpServices = {}): BridgeRequestHandler {
   return async (request) => {
     if (request.url.pathname !== "/mcp") return protocolError(404, "not-found", "Route not found");
     if (request.method === "GET") return protocolError(405, "invalid-request", "This stateless MCP endpoint accepts POST requests");
@@ -191,10 +232,13 @@ export function createMcpHandler(coordinator: DelegationCoordinator): BridgeRequ
       case "tools/call": {
         if (!isRecord(params) || !nonEmptyString(params.name)) return jsonRpcError(id, -32602, "Invalid params");
         try {
-          return jsonRpc(id, toolResult(await callTool(coordinator, params.name, params.arguments ?? {}, request.signal)));
+          return jsonRpc(id, toolResult(await callTool(coordinator, services, params.name, params.arguments ?? {}, request.signal)));
         } catch (error) {
           if (error instanceof TypeError) return jsonRpcError(id, -32602, error.message);
           if (error instanceof DelegationError) {
+            return jsonRpc(id, toolResult({ code: error.code, message: error.message, details: error.details }, true));
+          }
+          if (error instanceof GitHubBoundaryError) {
             return jsonRpc(id, toolResult({ code: error.code, message: error.message, details: error.details }, true));
           }
           throw error;

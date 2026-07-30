@@ -6,6 +6,7 @@ import {
   type AgentLifecycle,
   type AgentSession,
   type AgentTelemetry,
+  type ChildAgentNode,
   type AgentType,
   type IsoTimestamp,
   type ManagerPersistenceDto,
@@ -202,6 +203,12 @@ function parseTelemetry(
     record.resolvedModel === undefined
       ? undefined
       : readNonEmptyString(record.resolvedModel, `${path}.resolvedModel`, issues);
+  const usageRecord = record.usage === undefined ? undefined : readRecord(record.usage, `${path}.usage`, issues);
+  const inputTokens = usageRecord?.inputTokens === undefined ? undefined : readNonNegativeInteger(usageRecord.inputTokens, `${path}.usage.inputTokens`, issues);
+  const outputTokens = usageRecord?.outputTokens === undefined ? undefined : readNonNegativeInteger(usageRecord.outputTokens, `${path}.usage.outputTokens`, issues);
+  const cacheCreationInputTokens = usageRecord?.cacheCreationInputTokens === undefined ? undefined : readNonNegativeInteger(usageRecord.cacheCreationInputTokens, `${path}.usage.cacheCreationInputTokens`, issues);
+  const cacheReadInputTokens = usageRecord?.cacheReadInputTokens === undefined ? undefined : readNonNegativeInteger(usageRecord.cacheReadInputTokens, `${path}.usage.cacheReadInputTokens`, issues);
+  const usage = usageRecord === undefined ? undefined : { ...(inputTokens === undefined ? {} : { inputTokens }), ...(outputTokens === undefined ? {} : { outputTokens }), ...(cacheCreationInputTokens === undefined ? {} : { cacheCreationInputTokens }), ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }) };
 
   if (
     totalTokens === undefined ||
@@ -213,15 +220,15 @@ function parseTelemetry(
     return undefined;
   }
 
-  return resolvedModel === undefined
-    ? { totalTokens, totalDurationMs, totalToolUseCount, compactionCount }
-    : {
+  const base = {
         totalTokens,
         totalDurationMs,
         totalToolUseCount,
         compactionCount,
-        resolvedModel,
+        ...(resolvedModel === undefined ? {} : { resolvedModel }),
+        ...(usage === undefined ? {} : { usage }),
       };
+  return base;
 }
 
 function parseFailure(
@@ -395,6 +402,9 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     record.lastResult === undefined
       ? undefined
       : parseWorkerResult(record.lastResult, "session.lastResult", issues);
+  const compactSummaries = record.compactSummaries === undefined ? undefined : Array.isArray(record.compactSummaries)
+    ? record.compactSummaries.map((value, index) => readNonEmptyString(value, `session.compactSummaries[${index}]`, issues))
+    : (issues.push("session.compactSummaries must be an array"), undefined);
 
   if (identity !== undefined && resultDelivery !== undefined) {
     if (
@@ -435,6 +445,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     telemetry === undefined ||
     (record.issueNumber !== undefined && issueNumber === undefined)
     || (record.lastResult !== undefined && lastResult === undefined)
+    || compactSummaries?.some((value) => value === undefined)
   ) {
     return { ok: false, issues };
   }
@@ -448,6 +459,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     telemetry,
     ...(lastResult === undefined ? {} : { lastResult }),
     ...(issueNumber === undefined ? {} : { issueNumber }),
+    ...(compactSummaries === undefined ? {} : { compactSummaries: compactSummaries as string[] }),
   };
   return { ok: true, value: base };
 }
@@ -480,6 +492,20 @@ export function parseFleetPersistenceDto(
       return undefined;
     }
     return parsed.value;
+  });
+  const childAgents = record.childAgents === undefined ? [] : parseArray(record.childAgents, "fleet.childAgents", (item, path, innerIssues): ChildAgentNode | undefined => {
+    const child = readRecord(item, path, innerIssues); if (child === undefined) return undefined;
+    const agentId = readNonEmptyString(child.agentId, `${path}.agentId`, innerIssues);
+    const parentAgentId = readNonEmptyString(child.parentAgentId, `${path}.parentAgentId`, innerIssues);
+    const type = readNonEmptyString(child.type, `${path}.type`, innerIssues);
+    const status = child.status === "running" || child.status === "completed" ? child.status : undefined;
+    if (status === undefined) innerIssues.push(`${path}.status must be running or completed`);
+    const startedAt = readTimestamp(child.startedAt, `${path}.startedAt`, innerIssues);
+    const finishedAt = child.finishedAt === undefined ? undefined : readTimestamp(child.finishedAt, `${path}.finishedAt`, innerIssues);
+    const result = child.result === undefined ? undefined : readNonEmptyString(child.result, `${path}.result`, innerIssues);
+    const telemetry = parseTelemetry(child.telemetry, `${path}.telemetry`, innerIssues);
+    if (agentId === undefined || parentAgentId === undefined || type === undefined || status === undefined || startedAt === undefined || telemetry === undefined) return undefined;
+    return { agentId, parentAgentId: parentAgentId as AgentId, type, status, startedAt, telemetry, ...(finishedAt === undefined ? {} : { finishedAt }), ...(result === undefined ? {} : { result }) };
   });
 
   const parseMailboxEntry = (
@@ -607,6 +633,13 @@ export function parseFleetPersistenceDto(
           ? undefined
           : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId };
       }
+      case "child-agent-started":
+      case "child-agent-finished":
+      case "child-agent-telemetry-updated": {
+        const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
+        const childAgentId = readNonEmptyString(event.childAgentId, `${path}.childAgentId`, innerIssues);
+        return agentId === undefined || childAgentId === undefined ? undefined : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId, childAgentId };
+      }
       default:
         innerIssues.push(`${path}.type is not a recognized fleet event`);
         return undefined;
@@ -626,6 +659,7 @@ export function parseFleetPersistenceDto(
   if (
     issues.length > 0 ||
     sessions === undefined ||
+    childAgents === undefined ||
     blockingResults === undefined ||
     mailboxes === undefined ||
     deferredNotifications === undefined ||
@@ -653,6 +687,7 @@ export function parseFleetPersistenceDto(
     value: {
       version: 1,
       sessions,
+      childAgents,
       blockingResults,
       mailboxes,
       deferredNotifications,

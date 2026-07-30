@@ -18,13 +18,17 @@ def intercepted_prompt(prompt):
 
 def main():
     agent_id = os.environ.get("ABOARD_AGENT_ID")
-    if not agent_id or os.environ.get("ABOARD_AGENT_TYPE") != "manager":
+    if not agent_id or len(sys.argv) < 2:
+        return 0
+    endpoint = sys.argv[1]
+    agent_type = os.environ.get("ABOARD_AGENT_TYPE")
+    expected_manager = endpoint.startswith("/hooks/manager/")
+    if (expected_manager and agent_type != "manager") or (not expected_manager and agent_type not in ("implementer", "reviewer", "fixer")):
         return 0
     try:
         payload = json.load(sys.stdin)
     except (ValueError, OSError):
         return 0
-    endpoint = sys.argv[1]
     prompt = payload.get("prompt", "") if isinstance(payload, dict) else ""
     is_intercepted = endpoint.endswith("/prompt") and isinstance(prompt, str) and intercepted_prompt(prompt)
     try:
@@ -33,6 +37,24 @@ def main():
     except (KeyError, ValueError):
         return finish("Aboard could not handle that command because bridge discovery is unavailable.") if is_intercepted else 0
     body = {"agentId": agent_id}
+    if endpoint.startswith("/hooks/worker/"):
+        body = {"parentAgentId": agent_id}
+        event = payload.get("hook_event_name")
+        if endpoint.endswith("/subagent-start") or endpoint.endswith("/subagent-stop"):
+            body.update({"childAgentId": payload.get("agent_id"), "agentType": payload.get("agent_type")})
+        if endpoint.endswith("/subagent-stop"):
+            body["result"] = payload.get("last_assistant_message")
+        if endpoint.endswith("/agent-tool"):
+            if payload.get("tool_name") != "Agent":
+                return 0
+            body["toolResponse"] = payload.get("tool_response")
+        if endpoint.endswith("/post-compact"):
+            body["compactSummary"] = payload.get("compact_summary")
+        if endpoint.endswith("/reground"):
+            compact_source = (event == "SessionStart" and payload.get("source") == "compact") or (event == "InstructionsLoaded" and payload.get("load_reason") == "compact")
+            if not compact_source:
+                return 0
+            body["cwd"] = payload.get("cwd")
     if endpoint.endswith("/prompt"):
         body["prompt"] = prompt
     if endpoint.endswith("/stop"):

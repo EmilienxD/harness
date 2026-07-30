@@ -22,6 +22,8 @@ export interface DelegationLaunchInput {
   readonly prompt?: string;
   readonly description: string;
   readonly issue?: number;
+  readonly pullRequest?: number;
+  readonly focus?: string;
 }
 
 export interface DelegationConfigurationSource {

@@ -41,6 +41,25 @@ export interface AgentTelemetry {
   readonly totalToolUseCount: number;
   readonly compactionCount: number;
   readonly resolvedModel?: string;
+  readonly usage?: AgentTokenUsage;
+}
+
+export interface AgentTokenUsage {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cacheCreationInputTokens?: number;
+  readonly cacheReadInputTokens?: number;
+}
+
+export interface ChildAgentNode {
+  readonly agentId: string;
+  readonly parentAgentId: AgentId;
+  readonly type: string;
+  readonly status: "running" | "completed";
+  readonly startedAt: IsoTimestamp;
+  readonly finishedAt?: IsoTimestamp;
+  readonly result?: string;
+  readonly telemetry: AgentTelemetry;
 }
 
 export const WORKER_FAILURE_TYPES = [
@@ -111,6 +130,7 @@ export interface AgentSession {
   readonly resultDelivery: ResultDelivery;
   readonly telemetry: AgentTelemetry;
   readonly issueNumber?: number;
+  readonly compactSummaries?: readonly string[];
   readonly lastResult?: WorkerResult;
 }
 
