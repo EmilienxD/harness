@@ -157,8 +157,9 @@ export class DelegationCoordinator {
   }
 
   /** Called by the worker result boundary after lifecycle classification. */
-  public complete(agentId: AgentId, result: WorkerResult): void {
+  public complete(agentId: AgentId, result: WorkerResult): boolean {
     const session = this.#requireAgent(agentId);
+    if (session.lifecycle.status === "completed" || session.lifecycle.status === "failed") return false;
     const finishedAt = this.#timestamp();
     if (result.outcome === "succeeded") {
       this.options.fleet.transition(agentId, {
@@ -180,6 +181,7 @@ export class DelegationCoordinator {
     this.options.lease.releaseForTerminalOutcome(agentId, finishedAt, "agent finished");
     this.#waiters.get(agentId)?.(result);
     this.#waiters.delete(agentId);
+    return true;
   }
 
   async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"]): Promise<{

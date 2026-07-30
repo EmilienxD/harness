@@ -25,3 +25,4 @@ Thumbs.db
 # Scaffold templates contain a project .claude directory intentionally.
 !assets/scaffold/.claude/
 !assets/scaffold/.claude/**
+.aboard/
