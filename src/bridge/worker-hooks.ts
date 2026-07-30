@@ -62,7 +62,9 @@ export class WorkerHookService {
 
 export function createWorkerHookRoutes(service: WorkerHookService): BridgeRequestHandler {
   return async (request) => {
-    if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
+    if (request.method !== "POST" || !request.url.pathname.startsWith("/hooks/worker/")) {
+      return protocolError(404, "not-found", "Route not found");
+    }
     try {
       const body = object(request.body); const parent = requiredString(body.parentAgentId, "parentAgentId") as AgentId;
       switch (request.url.pathname) {

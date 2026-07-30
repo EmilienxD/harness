@@ -1,9 +1,14 @@
 {
   "name": "aboard",
   "displayName": "aboard",
+  "publisher": "aboard",
   "description": "Visible, human-in-the-loop orchestration for Claude Code agents in VS Code.",
   "version": "0.0.0",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EmilienxD/aboard.git"
+  },
   "engines": {
     "node": ">=22",
     "vscode": "^1.125.0"
@@ -13,27 +18,91 @@
   ],
   "contributes": {
     "commands": [
-      { "command": "aboard.startManager", "title": "Aboard: Start Manager" },
-      { "command": "aboard.resumeManager", "title": "Aboard: Resume Manager" },
-      { "command": "aboard.newManager", "title": "Aboard: New Manager" },
-      { "command": "aboard.scaffoldProject", "title": "Aboard: Install or Upgrade Project Assets" },
-      { "command": "aboard.reviewPr", "title": "Aboard: Review Pull Request" }
-      ,{ "command": "aboard.focusAgent", "title": "Aboard: Focus Agent" }
-      ,{ "command": "aboard.sendAgent", "title": "Aboard: Send Message" }
-      ,{ "command": "aboard.killAgent", "title": "Aboard: Kill Agent" }
-      ,{ "command": "aboard.resumeAgent", "title": "Aboard: Resume Agent" }
-      ,{ "command": "aboard.forceReleaseLease", "title": "Aboard: Force Release Write Lease" }
-      ,{ "command": "aboard.focusFleet", "title": "Aboard: Focus Fleet" }
+      {
+        "command": "aboard.startManager",
+        "title": "Aboard: Start Manager"
+      },
+      {
+        "command": "aboard.resumeManager",
+        "title": "Aboard: Resume Manager"
+      },
+      {
+        "command": "aboard.newManager",
+        "title": "Aboard: New Manager"
+      },
+      {
+        "command": "aboard.scaffoldProject",
+        "title": "Aboard: Install or Upgrade Project Assets"
+      },
+      {
+        "command": "aboard.reviewPr",
+        "title": "Aboard: Review Pull Request"
+      },
+      {
+        "command": "aboard.focusAgent",
+        "title": "Aboard: Focus Agent"
+      },
+      {
+        "command": "aboard.sendAgent",
+        "title": "Aboard: Send Message"
+      },
+      {
+        "command": "aboard.killAgent",
+        "title": "Aboard: Kill Agent"
+      },
+      {
+        "command": "aboard.resumeAgent",
+        "title": "Aboard: Resume Agent"
+      },
+      {
+        "command": "aboard.forceReleaseLease",
+        "title": "Aboard: Force Release Write Lease"
+      },
+      {
+        "command": "aboard.focusFleet",
+        "title": "Aboard: Focus Fleet"
+      }
     ],
-    "viewsContainers": { "activitybar": [{ "id": "aboard", "title": "aboard", "icon": "assets/aboard.svg" }] },
-    "views": { "aboard": [{ "id": "aboard.fleet", "name": "Fleet" }] },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aboard",
+          "title": "aboard",
+          "icon": "assets/aboard.svg"
+        }
+      ]
+    },
+    "views": {
+      "aboard": [
+        {
+          "id": "aboard.fleet",
+          "name": "Fleet"
+        }
+      ]
+    },
     "menus": {
       "view/item/context": [
-        { "command": "aboard.focusAgent", "when": "view == aboard.fleet && viewItem =~ /aboard.agent/", "group": "inline" },
-        { "command": "aboard.sendAgent", "when": "view == aboard.fleet && viewItem == aboard.agent.active" },
-        { "command": "aboard.killAgent", "when": "view == aboard.fleet && viewItem == aboard.agent.active" },
-        { "command": "aboard.resumeAgent", "when": "view == aboard.fleet && viewItem == aboard.agent.finished" },
-        { "command": "aboard.forceReleaseLease", "when": "view == aboard.fleet" }
+        {
+          "command": "aboard.focusAgent",
+          "when": "view == aboard.fleet && viewItem =~ /aboard.agent/",
+          "group": "inline"
+        },
+        {
+          "command": "aboard.sendAgent",
+          "when": "view == aboard.fleet && viewItem == aboard.agent.active"
+        },
+        {
+          "command": "aboard.killAgent",
+          "when": "view == aboard.fleet && viewItem == aboard.agent.active"
+        },
+        {
+          "command": "aboard.resumeAgent",
+          "when": "view == aboard.fleet && viewItem == aboard.agent.finished"
+        },
+        {
+          "command": "aboard.forceReleaseLease",
+          "when": "view == aboard.fleet"
+        }
       ]
     },
     "configuration": {
@@ -66,29 +135,83 @@
           ],
           "default": "default",
           "description": "Permission mode for worker launches. Applied per process; aboard never writes a permissions block into .claude/settings.json."
+        },
+        "aboard.manager.toolPreset": {
+          "type": "string",
+          "enum": [
+            "read-only",
+            "delegation-only"
+          ],
+          "default": "read-only"
+        },
+        "aboard.manager.disallowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "aboard.review.autoReview": {
+          "type": "string",
+          "enum": [
+            "never",
+            "hitl",
+            "all"
+          ],
+          "default": "never",
+          "description": "Controls the sole automatic review path. Explicit review actions are always available."
+        },
+        "aboard.timeouts.managerStop": {
+          "type": "integer",
+          "default": 3600,
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "Manager Stop hook and foreground MCP timeout in seconds."
+        },
+        "aboard.timeouts.managerPrompt": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 600,
+          "description": "Manager UserPromptSubmit hook timeout in seconds."
+        },
+        "aboard.timeouts.managerSessionStart": {
+          "type": "integer",
+          "default": 120,
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Manager SessionStart briefing timeout in seconds."
         }
-        ,"aboard.manager.toolPreset": { "type": "string", "enum": ["read-only", "delegation-only"], "default": "read-only" }
-        ,"aboard.manager.disallowedTools": { "type": "array", "items": { "type": "string" }, "default": [] }
-        ,"aboard.review.autoReview": { "type": "string", "enum": ["never", "hitl", "all"], "default": "never", "description": "Controls the sole automatic review path. Explicit review actions are always available." }
-        ,"aboard.timeouts.managerStop": { "type": "integer", "default": 3600, "minimum": 1, "maximum": 86400, "description": "Manager Stop hook and foreground MCP timeout in seconds." }
-        ,"aboard.timeouts.managerPrompt": { "type": "integer", "default": 60, "minimum": 1, "maximum": 600, "description": "Manager UserPromptSubmit hook timeout in seconds." }
-        ,"aboard.timeouts.managerSessionStart": { "type": "integer", "default": 120, "minimum": 1, "maximum": 3600, "description": "Manager SessionStart briefing timeout in seconds." }
       }
     }
   },
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
-  "files": ["dist/extension.js", "dist/extension.js.map", "assets/aboard.svg", "assets/scaffold/", "README.md"],
+  "files": [
+    "dist/extension.js",
+    "dist/extension.js.map",
+    "assets/aboard.svg",
+    "assets/scaffold/",
+    "README.md"
+  ],
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outfile=dist/extension.js --sourcemap",
     "check": "tsc --noEmit",
     "test:build": "esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test",
     "test": "npm run test:build && node --test dist/test/*.test.js",
-    "package": "npm run check && npm run build -- --minify"
+    "test:integration": "npm run test && npm run test:vscode",
+    "test:vscode:build": "esbuild test/vscode/run.ts test/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/vscode-test",
+    "test:vscode": "npm run build && npm run test:vscode:build && node dist/vscode-test/run.js",
+    "package:build": "esbuild scripts/package.ts --bundle --packages=external --platform=node --format=cjs --target=node22 --outfile=dist/package.js",
+    "package": "npm run check && npm run build -- --minify && npm run package:build && node dist/package.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
     "@types/vscode": "1.125.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "0.28.1",
     "typescript": "7.0.2"
   },

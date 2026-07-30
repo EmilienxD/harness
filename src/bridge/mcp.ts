@@ -83,6 +83,9 @@ export interface McpServices {
   readonly reviews?: ReviewCoordinator;
 }
 
+export type McpCoordinator = Pick<DelegationCoordinator,
+  "run" | "spawn" | "spawnInteractive" | "list" | "send" | "focus" | "releaseLease">;
+
 type JsonRpcId = string | number | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -140,7 +143,7 @@ function parsePair(value: unknown, second: "message" | "reason" | undefined): Re
 }
 
 async function callTool(
-  coordinator: DelegationCoordinator,
+  coordinator: McpCoordinator,
   services: McpServices,
   name: string,
   args: unknown,
@@ -203,7 +206,7 @@ async function callTool(
   }
 }
 
-export function createMcpHandler(coordinator: DelegationCoordinator, services: McpServices = {}): BridgeRequestHandler {
+export function createMcpHandler(coordinator: McpCoordinator, services: McpServices = {}): BridgeRequestHandler {
   return async (request) => {
     if (request.url.pathname !== "/mcp") return protocolError(404, "not-found", "Route not found");
     if (request.method === "GET") return protocolError(405, "invalid-request", "This stateless MCP endpoint accepts POST requests");

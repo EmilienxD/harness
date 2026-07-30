@@ -91,7 +91,7 @@ test("long poll observes abort and route validates stop input", async () => {
 test("Python Manager hook silently self-guards non-addressed sessions", () => {
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
   for (const env of [{}, { ABOARD_AGENT_ID: "worker", ABOARD_AGENT_TYPE: "implementer" }]) {
-    const result = spawnSync("python", [script, "/hooks/manager/brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
+    const result = spawnSync("uv", ["run", "--no-project", "python", script, "/hooks/manager/brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
   }
 });
@@ -135,7 +135,7 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
   const address = server.address();
   assert.ok(address !== null && typeof address !== "string");
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
-  const child = spawn("python", [script, "/hooks/manager/prompt"], {
+  const child = spawn("uv", ["run", "--no-project", "python", script, "/hooks/manager/prompt"], {
     env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: "manager", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token },
     stdio: ["pipe", "pipe", "pipe"],
   });

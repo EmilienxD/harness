@@ -42,6 +42,11 @@ test("tracks child lifecycle and merges optional Agent telemetry", async () => {
   assert.equal(fleet.listChildren(parentId)[0]?.result, "complete");
 });
 
+test("leaves non-worker POST routes for the next bridge adapter", async () => {
+  const route = createWorkerHookRoutes(new WorkerHookService(fleetWithWorker()));
+  assert.equal((await route(request("/terminals", {}))).status, 404);
+});
+
 test("records compact summaries, repeat count, and precise re-grounding", async () => {
   const fleet = fleetWithWorker(); const service = new WorkerHookService(fleet, { current: async (cwd) => { assert.equal(cwd, "C:\\repo"); return "feat/issue-15"; } }, () => new Date(timestamp));
   service.compact(parentId, "first summary"); service.compact(parentId, "second summary");
@@ -55,7 +60,7 @@ test("records compact summaries, repeat count, and precise re-grounding", async 
 test("worker Python hook is silent for non-aboard and wrong-role sessions", () => {
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
   for (const env of [{}, { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" }]) {
-    const result = spawnSync("python", [script, "/hooks/worker/post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
+    const result = spawnSync("uv", ["run", "--no-project", "python", script, "/hooks/worker/post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
   }
 });
