@@ -228,6 +228,8 @@ export interface ResumePlanRequest extends CommonPlanRequest {
   readonly sequence: number;
 }
 
+export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType" | "permissionMode">;
+
 /**
  * aboard never writes a `permissions` block into project settings (4.3.1);
  * permission mode is a per-process launch flag and nothing else.
@@ -490,6 +492,29 @@ export function planResume(request: ResumePlanRequest): LaunchPlan {
     requiresWriteLease: requiresWriteLease(request.agentType, request.writeCapability),
     promptDelivery: promptPlan.delivery,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
+  };
+}
+
+/** The long-lived Manager resumes without an automated message (spec 4.4). */
+export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
+  const { executable } = commonPreconditions({
+    ...request,
+    agentType: "manager",
+    permissionMode: "default",
+  });
+  const args = ["--resume", request.sessionId];
+  return {
+    kind: "resume",
+    agentId: request.agentId,
+    sessionId: request.sessionId,
+    agentType: "manager",
+    shell: request.shell,
+    executable,
+    args,
+    commandLine: buildCommandLine(request.shell, executable, args),
+    writeCapability: "read-only",
+    requiresWriteLease: false,
+    promptDelivery: "none",
   };
 }
 

@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { window, workspace } from "vscode";
+import { commands, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -14,6 +14,8 @@ import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { TerminalController } from "./claude/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
+import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
+import type { WorkerPermissionMode } from "./claude/launch.js";
 
 let bridge: BridgeRuntime | undefined;
 
@@ -50,6 +52,31 @@ export async function activate(context: ExtensionContext): Promise<void> {
     },
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
+  const managerStore = new FileManagerStore(workspaceRoot);
+  const manager = new ManagerLifecycle({
+    store: managerStore, terminals, workspaceRoot,
+    shell: process.platform === "win32" ? "powershell" : "git-bash",
+    preset: workspace.getConfiguration("aboard.manager").get("toolPreset", "read-only"),
+    disallowedTools: workspace.getConfiguration("aboard.manager").get("disallowedTools", []),
+  });
+  const warnKey = "aboard.manager.permissionWarning";
+  const launch = async (mode: "start" | "resume" | "new") => {
+    const workerMode = workspace.getConfiguration("aboard.workers").get<WorkerPermissionMode>("permissionMode", "default");
+    if (workerMode !== "bypass" && !context.globalState.get(warnKey)) { await window.showWarningMessage("Unattended workers may stall on permission prompts. For afk work, use the bypass permission mode."); await context.globalState.update(warnKey, true); }
+    try {
+      if (mode === "start" && await managerStore.load() !== undefined) {
+        const choice = await window.showInformationMessage("A Manager session is already recorded. Resume it?", "Resume Manager", "New Manager");
+        if (choice === undefined) return;
+        mode = choice === "Resume Manager" ? "resume" : "new";
+      }
+      await manager.start(mode);
+    } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
+  };
+  context.subscriptions.push(
+    commands.registerCommand("aboard.startManager", () => launch("start")),
+    commands.registerCommand("aboard.resumeManager", () => launch("resume")),
+    commands.registerCommand("aboard.newManager", () => launch("new")),
+  );
   context.subscriptions.push({ dispose: () => void bridge?.stop() });
 }
 

@@ -1,0 +1,15 @@
+{
+  "SessionStart": [
+    { "matcher": "startup|resume|clear|compact|fork", "hooks": [
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-git", "timeout": 120 },
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-github", "timeout": 120 },
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-fleet", "timeout": 120 },
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/brief-todo", "timeout": 120 }
+    ] }
+  ],
+  "Stop": [
+    { "hooks": [
+      { "type": "command", "command": "uv run .claude/hooks/aboard_hook.py /hooks/manager/stop", "timeout": 3600 }
+    ] }
+  ]
+}

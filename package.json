@@ -12,6 +12,11 @@
     "Other"
   ],
   "contributes": {
+    "commands": [
+      { "command": "aboard.startManager", "title": "Aboard: Start Manager" },
+      { "command": "aboard.resumeManager", "title": "Aboard: Resume Manager" },
+      { "command": "aboard.newManager", "title": "Aboard: New Manager" }
+    ],
     "configuration": {
       "title": "aboard",
       "properties": {
@@ -43,6 +48,8 @@
           "default": "default",
           "description": "Permission mode for worker launches. Applied per process; aboard never writes a permissions block into .claude/settings.json."
         }
+        ,"aboard.manager.toolPreset": { "type": "string", "enum": ["read-only", "delegation-only"], "default": "read-only" }
+        ,"aboard.manager.disallowedTools": { "type": "array", "items": { "type": "string" }, "default": [] }
       }
     }
   },
