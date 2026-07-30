@@ -19,6 +19,9 @@ import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { scaffoldProject } from "./scaffold/project.js";
 import { join } from "node:path";
+import { FleetRegistry } from "./domain/fleet.js";
+import { WriteLease } from "./domain/lease.js";
+import { registerNativeFleetUi } from "./vscode/native-ui.js";
 
 let bridge: BridgeRuntime | undefined;
 
@@ -55,6 +58,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     },
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
+  const fleet = new FleetRegistry();
+  const lease = new WriteLease();
+  registerNativeFleetUi(context, bridge.port, fleet, lease, terminals);
   const managerStore = new FileManagerStore(workspaceRoot);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const manager = new ManagerLifecycle({

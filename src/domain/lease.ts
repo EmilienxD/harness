@@ -31,6 +31,12 @@ export function isStaleLease(observation: LeaseHolderObservation): boolean {
 export class WriteLease {
   #holder: WriteLeaseHolder | undefined;
   readonly #audit: LeaseAuditEvent[] = [];
+  readonly #listeners = new Set<(event: LeaseAuditEvent) => void>();
+
+  public onDidChange(listener: (event: LeaseAuditEvent) => void): { dispose(): void } {
+    this.#listeners.add(listener);
+    return { dispose: () => this.#listeners.delete(listener) };
+  }
 
   public current(): WriteLeaseHolder | undefined {
     return this.#holder;
@@ -58,7 +64,7 @@ export class WriteLease {
     const auditReason = requireReason(reason);
     const holder = { ...identity, acquiredAt: occurredAt };
     this.#holder = holder;
-    this.#audit.push({ type: "acquired", occurredAt, holder, reason: auditReason });
+    this.#record({ type: "acquired", occurredAt, holder, reason: auditReason });
     return { acquired: true, required: true, holder };
   }
 
@@ -93,7 +99,12 @@ export class WriteLease {
     const auditReason = requireReason(reason);
     const holder = this.#holder!;
     this.#holder = undefined;
-    this.#audit.push({ type, occurredAt, holder, reason: auditReason });
+    this.#record({ type, occurredAt, holder, reason: auditReason });
+  }
+
+  #record(event: LeaseAuditEvent): void {
+    this.#audit.push(event);
+    for (const listener of this.#listeners) listener(event);
   }
 }
 

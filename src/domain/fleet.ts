@@ -142,6 +142,12 @@ export class FleetRegistry {
   private readonly eventHistory: FleetEvent[] = [];
   private nextNotificationId = 1;
   private nextEventSequence = 1;
+  private readonly listeners = new Set<(event: FleetEvent) => void>();
+
+  public onDidChange(listener: (event: FleetEvent) => void): { dispose(): void } {
+    this.listeners.add(listener);
+    return { dispose: () => this.listeners.delete(listener) };
+  }
 
   public static restore(dto: FleetPersistenceDto): FleetRegistry {
     const registry = new FleetRegistry();
@@ -406,6 +412,8 @@ export class FleetRegistry {
     event: NewFleetEvent,
     occurredAt: IsoTimestamp,
   ): void {
-    this.eventHistory.push({ ...event, sequence: this.nextEventSequence++, occurredAt } as FleetEvent);
+    const recorded = { ...event, sequence: this.nextEventSequence++, occurredAt } as FleetEvent;
+    this.eventHistory.push(recorded);
+    for (const listener of this.listeners) listener(recorded);
   }
 }
