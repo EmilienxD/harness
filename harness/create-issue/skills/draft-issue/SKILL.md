@@ -1,39 +1,31 @@
----
+﻿---
 name: draft-issue
 description: Draft a single GitHub issue to a markdown file in .issue-gateway/ for the user to review and edit before publishing. Use when the user wants to create one issue, with no multi-issue breakdown needed.
 disable-model-invocation: true
 ---
 
-# Draft Issue
+!`{ mkdir -p "./.issue-gateway"; [ -e ./.issue-gateway/.gitignore ] || printf '*\n' > ./.issue-gateway/.gitignore; } >/dev/null 2>&1; true`
 
-> This skill is step 1/2 of a single-issue publishing system: drafting, then publishing. There is no mapping step — it drafts exactly one issue. For breaking a plan into multiple dependency-linked issues, use `/map-issues` from the `create-issues` tool instead.
+This skill is step 1/2 of a single-issue publishing system: drafting, then publishing. There is no mapping step — you will draft exactly one issue.
 
-Turn what the user wants — from the conversation, or from the argument passed to this skill — into ONE markdown file at `.issue-gateway/${CLAUDE_SESSION_ID}.md`. Do not run `gh` or publish anything — that only happens in `/publish-issue`.
+It turns what the user wants — from the conversation, or from the argument passed to this skill — into ONE markdown file. Do not run `gh` or publish anything — that only happens in the next step (publishing).
 
 ## Process
 
-### 1. Pin down the issue
+1. Pin down the issue
 
 Work from whatever is already in the conversation. If the user passes a description as an argument, use it. If the argument is an issue number or URL, fetch it with `gh issue view` and treat that issue as the parent. If the title, scope, or acceptance criteria are still unclear, ask one short round of questions before writing anything.
 
 Optionally explore the codebase so "What to build" describes the real end-to-end behavior, not a guess.
 
-Scope constraint: exactly **one agent, working alone, in one pass**. If what the user describes is bigger than that, say so and propose `/map-issues` instead of drafting an oversized issue.
+Scope constraint: exactly **one agent, working alone, in one pass**. If what the user describes is bigger than that, say so and ask them to narrow the scope instead of drafting an oversized issue.
 
-Decide, and be ready to justify:
+Decide the labels:
 
 - **Difficulty**: `low`, `medium`, or `high` — your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Routine, well-understood work is `low`; multi-step work with real design decisions is `medium`; anything needing careful judgment, wide context, or unusual reasoning is `high`.
 - **Mode**: `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
 
-### 2. Session id
-
-The draft is named after this session's id: `${CLAUDE_SESSION_ID}` (already substituted above with the real value — use that literal value, don't print the variable name and don't run any command to look it up).
-
-Its directory has already been created for you (this line produces no output — ignore it, and do not run any command yourself):
-
-!`{ mkdir -p "./.issue-gateway"; [ -e ./.issue-gateway/.gitignore ] || printf '*\n' > ./.issue-gateway/.gitignore; } >/dev/null 2>&1; true`
-
-### 3. Write the one file
+2. Write the one file
 
 Create `.issue-gateway/${CLAUDE_SESSION_ID}.md`. Do not spend time checking whether the folder exists or what it already contains — the directory was just created in step 2 — just write the file.
 
@@ -68,9 +60,9 @@ Or "None - can start immediately" if no blockers.
 
 </issue-template>
 
-`{difficulty-label}` is `difficulty:low`, `difficulty:medium`, or `difficulty:high`. `{mode-label}` is `mode:afk` or `mode:hitl`. Example second line: `> difficulty:medium, mode:hitl`. `/publish-issue` parses this line and maps it to the actual GitHub labels (`low-difficulty`, `medium-difficulty`, `high-difficulty`, `afk`, `hitl`) — write the `difficulty:`/`mode:` form here, not the label names. It tolerates extra surrounding whitespace, but don't add anything else to it, and don't skip it.
+`{difficulty-label}` is `difficulty:low`, `difficulty:medium`, or `difficulty:high`. `{mode-label}` is `mode:afk` or `mode:hitl`. Example second line: `> difficulty:medium, mode:hitl`.
 
-### 4. Hand off to the user
+3. Hand off to the user
 
 Tell the user the relative file path you created (`.issue-gateway/${CLAUDE_SESSION_ID}.md`) and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing. Mention they can run `/publish-issue --dry-run` first to preview what would be created without touching the tracker, or `/publish-issue` to publish for real. Ask if they want changes.
 

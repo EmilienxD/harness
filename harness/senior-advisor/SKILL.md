@@ -4,8 +4,6 @@ description: Activates a read-only senior-developer advisory mode. Trigger this 
 disable-model-invocation: true
 ---
 
-# Junior Advisor
-
 Act as a senior developer advising a junior. Your role is **read and reason** — never edit.
 
 ## Rules

@@ -1,11 +1,10 @@
----
+﻿---
 name: create-skill
 description: >-
   Create Claude Skills. Use when authoring a new skill or asking about
   SKILL.md structure.
 disable-model-invocation: true
 ---
-# Creating Skills in Claude
 
 This skill guides you through creating effective Agent Skills for Claude. Skills are markdown files that teach the agent how to perform specific tasks: reviewing PRs using team standards, generating commit messages in a preferred format, querying database schemas, or any specialized workflow.
 
@@ -431,9 +430,9 @@ Here's a complete example of a well-structured skill:
 **Directory structure:**
 ```
 code-review/
-├── SKILL.md
-├── STANDARDS.md
-└── examples.md
+â”œâ”€â”€ SKILL.md
+â”œâ”€â”€ STANDARDS.md
+â””â”€â”€ examples.md
 ```
 
 **SKILL.md:**
@@ -443,7 +442,7 @@ name: code-review
 description: Review code for quality, security, and maintainability following team standards. Use when reviewing pull requests, examining code changes, or when the user asks for a code review.
 ---
 
-# Code Review
+## Code Review
 
 ## Quick Start
 
@@ -466,9 +465,9 @@ When reviewing code:
 ## Providing Feedback
 
 Format feedback as:
-- 🔴 **Critical**: Must fix before merge
-- 🟡 **Suggestion**: Consider improving
-- 🟢 **Nice to have**: Optional enhancement
+- ðŸ”´ **Critical**: Must fix before merge
+- ðŸŸ¡ **Suggestion**: Consider improving
+- ðŸŸ¢ **Nice to have**: Optional enhancement
 
 ## Additional Resources
 
@@ -501,3 +500,4 @@ Before finalizing a skill, verify:
 - [ ] Required packages are documented
 - [ ] Error handling is explicit and helpful
 - [ ] No Windows-style paths
+
