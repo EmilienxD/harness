@@ -4,7 +4,8 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FleetRegistry } from "../src/domain/fleet.js";
-import { FileFleetStore, PersistOnChange } from "../src/runtime/persistence.js";
+import { FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore } from "../src/runtime/persistence.js";
+import type { AutoRunRecord } from "../src/domain/auto-run.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 
@@ -28,6 +29,53 @@ test("persistence drains queued writes and performs a final save on disposal", a
   await persistence.dispose();
   assert.equal(saves, 3);
   assert.equal(listener, undefined);
+});
+
+test("the auto-run record round-trips, carries no prompt text, and clears on discard", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-autorun-"));
+  const store = new FileAutoRunStore(root);
+  assert.equal(await store.load(), undefined);
+  const record: AutoRunRecord = {
+    version: 1,
+    runId: "run_01H",
+    specNumber: 12,
+    issueNumbers: [34, 35],
+    currentIssue: 35,
+    phase: "await-approval",
+    branch: "aboard/35-migrate-the-queue",
+    prNumber: 57,
+    reviewMode: false,
+    scope: "spec",
+    reviewedIssues: [],
+    startedAt: "2026-07-31T09:12:04.221Z",
+  };
+  await store.save(record);
+  assert.deepEqual(await store.load(), record);
+  const raw = await readFile(join(root, ".aboard", "runtime", "auto-run.json"), "utf8");
+  assert.doesNotMatch(raw, /prompt/i);
+  await store.clear();
+  assert.equal(await store.load(), undefined);
+});
+
+// The record is only a resume hint, so anything unusable degrades to "no run to
+// resume" rather than an error: the engine re-derives every fact anyway.
+test("an unusable auto-run record degrades to nothing to resume", () => {
+  const valid = { version: 1, runId: "r", specNumber: 12, issueNumbers: [34], currentIssue: 34, phase: "commit", branch: "b", prNumber: 1, reviewMode: true, scope: "all", startedAt: "2026-07-31T09:12:04.221Z" };
+  assert.ok(parseAutoRunRecord(valid));
+  for (const broken of [
+    undefined, null, [], "run",
+    { ...valid, version: 2 },
+    { ...valid, phase: "publish" },
+    { ...valid, scope: "everything" },
+    { ...valid, specNumber: 0 },
+    { ...valid, reviewMode: "yes" },
+    { ...valid, issueNumbers: [34, "x"] },
+    { ...valid, startedAt: "yesterday" },
+  ]) {
+    assert.equal(parseAutoRunRecord(broken), undefined, JSON.stringify(broken));
+  }
+  // Optional fields legitimately absent, not malformed.
+  assert.equal(parseAutoRunRecord({ ...valid, currentIssue: undefined, branch: undefined, prNumber: undefined })?.currentIssue, undefined);
 });
 
 test("combined bridge handlers stop at the first owned route", async () => {

@@ -19,11 +19,22 @@ import { sessionTranscriptExists } from "./claude/sessions.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
+import { createVendoredSkillInstaller } from "./scaffold/vendored.js";
 import { join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
 import { registerNativeFleetUi } from "./vscode/native-ui.js";
-import { readAboardConfiguration, MANAGER_RESTART_SETTINGS } from "./configuration.js";
+import {
+  ABOARD_SETTINGS,
+  EMPTY_PROJECT_SETTINGS,
+  MANAGER_RESTART_SETTINGS,
+  PROJECT_SETTINGS_PATH,
+  createLayeredReader,
+  managerLaunchChanged,
+  parseProjectSettings,
+  readAboardConfiguration,
+  type ProjectSettings,
+} from "./configuration.js";
 import { FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
@@ -43,17 +54,39 @@ import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
 import { parseAgentDefinition } from "./scaffold/agent-definition.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import type { AgentId, AgentSession, IsoTimestamp, SessionId } from "./domain/contracts.js";
-import { ReviewCoordinator } from "./github/review.js";
+import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
+import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
 import { registerReviewCommand } from "./vscode/review.js";
+import { ProcessGitClient, type GitClient } from "./git/client.js";
+import { AutoRunEngine, type PullRequestOwner } from "./auto/engine.js";
+import { FileAutoRunStore } from "./runtime/persistence.js";
+import { planSessionResume } from "./claude/launch.js";
+import { deriveWriteCapability } from "./domain/capability.js";
 
 let bridge: BridgeRuntime | undefined;
 let persistence: PersistOnChange | undefined;
+let activeAutoRun: AutoRunEngine | undefined;
 
-function configuration() {
-  return readAboardConfiguration({ get: (section) => workspace.getConfiguration().get(section) });
+/**
+ * Reads the effective configuration. `inspect` rather than `get` is deliberate:
+ * `get` collapses every scope into one value, which would leave the project file
+ * unable to override a global while a contributed default is present.
+ */
+function configuration(project: ReadonlyMap<string, unknown>) {
+  const scope = workspace.getConfiguration();
+  return readAboardConfiguration(createLayeredReader({
+    workspace: { get: (section) => { const found = scope.inspect(section); return found?.workspaceFolderValue ?? found?.workspaceValue; } },
+    project,
+    user: { get: (section) => { const found = scope.inspect(section); return found?.globalValue ?? found?.defaultValue; } },
+  }));
+}
+
+async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettings> {
+  try { return parseProjectSettings(await readFile(join(workspaceRoot, ".aboard", "settings.json"), "utf8")); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return EMPTY_PROJECT_SETTINGS;
+    return { values: new Map(), diagnostics: [{ setting: PROJECT_SETTINGS_PATH, severity: "error", message: `Unable to read ${PROJECT_SETTINGS_PATH}: ${error instanceof Error ? error.message : "unknown error"}. Project overrides are ignored.` }] };
+  }
 }
 
 /**
@@ -62,15 +95,16 @@ function configuration() {
  * a one-line "unavailable" note, so one broken `gh` call degrades a single slice
  * instead of losing the whole briefing.
  */
-function briefingSources(workspaceRoot: string, github: GitHubClient, previousSessionAt: () => string | undefined): BriefingSources {
-  const git = async (args: readonly string[]): Promise<string> =>
-    (await promisify(execFile)("git", [...args], { cwd: workspaceRoot, encoding: "utf8", windowsHide: true })).stdout.trim();
+function briefingSources(git: GitClient, github: GitHubClient, previousSessionAt: () => string | undefined): BriefingSources {
   return {
-    git: async () => ({
-      branch: await git(["branch", "--show-current"]) || "detached",
-      head: await git(["rev-parse", "--short", "HEAD"]),
-      dirty: (await git(["status", "--porcelain"])).length > 0,
-    }),
+    git: async () => {
+      const status = await git.status();
+      return {
+        branch: status.branch ?? "detached",
+        head: await git.headSha(),
+        dirty: status.entries.length > 0,
+      };
+    },
     github: async () => {
       const roadmap = await github.listRoadmapIssues();
       const since = previousSessionAt();
@@ -113,9 +147,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
 
   const output = window.createOutputChannel("aboard");
   context.subscriptions.push(output);
-  const initialConfiguration = configuration();
-  for (const diagnostic of initialConfiguration.diagnostics) output.appendLine(`Configuration: ${diagnostic.message}`);
-  if (initialConfiguration.diagnostics.length > 0) void window.showWarningMessage(initialConfiguration.diagnostics.map((item) => item.message).join(" "));
+  let projectSettings = await readProjectSettings(workspaceRoot);
+  const initialConfiguration = configuration(projectSettings.values);
+  const initialDiagnostics = [...projectSettings.diagnostics, ...initialConfiguration.diagnostics];
+  for (const diagnostic of initialDiagnostics) output.appendLine(`Configuration: ${diagnostic.message}`);
+  if (initialDiagnostics.length > 0) void window.showWarningMessage(initialDiagnostics.map((item) => item.message).join(" "));
   let currentConfiguration = initialConfiguration.value;
   let bridgeEnvironment: { port: number; token: string } | undefined;
   let lifecycle: WorkerLifecycleReconciler | undefined;
@@ -152,11 +188,63 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const recordedManager = await managerStore.load();
   const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
-  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: workerConfigurations(workspaceRoot), prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, transcriptExists: (sessionId) => sessionTranscriptExists(sessionId, workspaceRoot) });
+  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: workerConfigurations(workspaceRoot), prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
-  const reviews = new ReviewCoordinator(github, coordinator, fleet);
+  const git: GitClient = new ProcessGitClient(workspaceRoot);
+  const autoRun = new AutoRunEngine({
+    git,
+    github,
+    launcher: coordinator,
+    terminals: { close: (terminalId) => terminals.kill(terminalId) },
+    store: new FileAutoRunStore(workspaceRoot),
+    notifier: { notify: (message) => enqueueManagerNotification(message) },
+    settings: () => currentConfiguration.autoRun,
+    log: (message) => output.appendLine(message),
+    onStateChange: (state) => void publishAutoRunState(state),
+  });
+  activeAutoRun = autoRun;
+  const ownership: PullRequestOwnership = { owner: (prNumber) => autoRun.owner(prNumber) };
+  // `review_pr` focuses a live terminal or resumes a closed session. Resume is
+  // safe because the agent has already run, so a transcript exists.
+  const reviewTerminals: ReviewTerminals = {
+    focus: (terminalId) => { try { terminals.show(terminalId); return true; } catch { return false; } },
+    resume: async (owner: PullRequestOwner) => {
+      // An unread tool set resolves to the restrictive answer, so a resumed
+      // worker is treated as write-capable and takes the lease like any other.
+      const capability = deriveWriteCapability(undefined);
+      const plan = planSessionResume({
+        agentId: owner.agentId,
+        sessionId: owner.sessionId,
+        agentType: owner.type,
+        shell: process.platform === "win32" ? "powershell" : "git-bash",
+        permissionMode: currentConfiguration.workerPermissionMode,
+        command: currentConfiguration.claudeCommand,
+        writeCapability: capability,
+      });
+      const at = new Date().toISOString() as IsoTimestamp;
+      const acquisition = lease.acquire(capability, { agentId: owner.agentId, sessionId: owner.sessionId }, at, "resume pull request session");
+      if (!acquisition.acquired) throw new Error(`Write lease is held by ${acquisition.holder.agentId}; release it before resuming this session.`);
+      const terminal = terminals.create({
+        agentId: owner.agentId,
+        sessionId: owner.sessionId,
+        agentType: owner.type,
+        issueNumber: owner.issueNumber,
+        name: `aboard: resume pull request ${owner.prNumber}`,
+        initialCommand: plan.commandLine,
+      });
+      // The agent finished, so its fleet row is spent history; `restart` reuses
+      // the identity rather than leaving a live terminal untracked.
+      const recorded = fleet.get(owner.agentId);
+      if (recorded !== undefined && (recorded.lifecycle.status === "completed" || recorded.lifecycle.status === "failed")) {
+        fleet.restart(owner.agentId, { terminalId: terminal.terminalId, name: terminal.name }, at);
+        fleet.transition(owner.agentId, { status: "running", startedAt: at }, at);
+      }
+      terminals.show(terminal.terminalId);
+    },
+  };
+  const reviews = new ReviewCoordinator(github, coordinator, ownership, reviewTerminals);
   const briefings = new ManagerBriefings(
-    briefingSources(workspaceRoot, github, () => recordedManager?.updatedAt),
+    briefingSources(git, github, () => recordedManager?.updatedAt),
     fleet,
     lease,
     {
@@ -178,16 +266,47 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       signal.addEventListener("abort", onAbort, { once: true });
     }),
   });
-  const managerPrompts = new ManagerPromptService(fleet, coordinator);
+  const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
+    startAutoRun: () => autoRun.start(),
+    reviewPullRequest: () => reviews.review(),
+  });
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { github, reviews }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createTerminalRoutes(terminals)),
+    handler: combineHandlers(createMcpHandler(coordinator, { github, reviews, autoRun }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createTerminalRoutes(terminals)),
     persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
   registerNativeFleetUi(context, bridge.port, fleet, lease, terminals);
+  // Progress is pull, not push: one bounded line per transition, drained by the
+  // Manager's UserPromptSubmit hook on the user's next message. If the user is
+  // away for a whole afk spec, they learn the outcome when they return — which
+  // is what "afk" means. With no Manager alive there is nobody to tell, so the
+  // line goes to the output channel instead of being lost silently.
+  const enqueueManagerNotification = (message: string): void => {
+    output.appendLine(message);
+    if (fleet.get(managerAgentId)?.identity.type !== "manager") return;
+    try { fleet.enqueueNotification(managerAgentId, message, new Date().toISOString() as IsoTimestamp); }
+    catch (error) { output.appendLine(`Unable to queue auto-run notification: ${error instanceof Error ? error.message : "unknown error"}`); }
+  };
+  const autoRunStatus = window.createStatusBarItem(undefined, 99);
+  autoRunStatus.command = "aboard.stopAutoRun";
+  context.subscriptions.push(autoRunStatus);
+  const publishAutoRunState = async (state: ReturnType<AutoRunEngine["state"]> | undefined): Promise<void> => {
+    if (state === undefined) {
+      autoRunStatus.hide();
+    } else {
+      autoRunStatus.text = `$(sync~spin) Auto-run: spec #${state.specNumber} (${state.completedCount + 1}/${state.totalCount})`;
+      autoRunStatus.tooltip = state.waiting
+        ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Click to stop the run.`
+        : `${state.phase} — issue #${state.currentIssue ?? "?"}. Click to stop the run.`;
+      autoRunStatus.show();
+    }
+    await commands.executeCommand("setContext", "aboard.autoRunActive", state !== undefined);
+    await commands.executeCommand("setContext", "aboard.autoRunWaiting", state?.waiting === true);
+  };
+  await publishAutoRunState(undefined);
   // Persisting into an uninitialized project would recreate `.aboard/` behind the
   // user's back — including right after they deleted it.
   persistence = new PersistOnChange((listener) => fleet.onDidChange(listener), async () => { if (initialized) await fleetStore.save(fleet.toPersistenceDto()); }, (error) => output.appendLine(`Fleet persistence failed: ${error instanceof Error ? error.message : "unknown error"}`));
@@ -199,6 +318,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     shell: process.platform === "win32" ? "powershell" : "git-bash",
     preset: currentConfiguration.managerToolPreset,
     disallowedTools: currentConfiguration.managerDisallowedTools,
+    command: () => currentConfiguration.claudeCommand,
+    permissionMode: () => currentConfiguration.workerPermissionMode,
     agentIdFactory: () => managerAgentId,
     transcriptExists: sessionTranscriptExists,
   });
@@ -271,6 +392,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const report = await scaffoldProject({
         projectRoot: workspaceRoot,
         assetRoot: join(context.extensionPath, "assets", "scaffold"),
+        installer: createVendoredSkillInstaller(),
         ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
         todo: {
           ensure: async () => {
@@ -283,7 +405,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         },
       });
       for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
-      void window.showInformationMessage(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
+      void window.showInformationMessage(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.removed.length} removed, ${report.preserved.length} preserved, ${report.installed.length} skills installed).`);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
     finally { await publishScaffoldState(); }
   };
@@ -292,19 +414,72 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     commands.registerCommand("aboard.updateProject", scaffold),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
-    registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, callback), input: async (options) => await window.showInputBox(options), error: (message) => { void window.showErrorMessage(message); } }, reviews),
+    registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, callback), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
+    commands.registerCommand("aboard.startAutoRun", async () => {
+      try {
+        const result = await autoRun.start();
+        if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
+        else void window.showInformationMessage(`Auto-run started on spec #${result.spec.number} — ${result.issues.length} issue(s), review ${result.reviewMode ? "on" : "off"}.`);
+      } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
+    }),
+    commands.registerCommand("aboard.stopAutoRun", () => autoRun.stop()),
+    commands.registerCommand("aboard.continueAutoRun", () => autoRun.continueNow()),
+    // A wait outstanding when the window regains focus is polled immediately,
+    // so returning to VS Code after merging does not cost a poll interval.
+    window.onDidChangeWindowState((state) => { if (state.focused && autoRun.state()?.waiting === true) autoRun.continueNow(); }),
   );
+  // Resume is explicit, never automatic (§11). Auto-resuming would launch a
+  // write-capable agent into a workspace nobody has looked at since the crash,
+  // with no human present — exactly what the visibility invariants prevent.
+  const offerAutoRunResume = async (): Promise<void> => {
+    const record = await new FileAutoRunStore(workspaceRoot).load().catch(() => undefined);
+    if (record === undefined) return;
+    const choice = await window.showWarningMessage(
+      `An aboard auto-run for spec #${record.specNumber} was interrupted at the ${record.phase} phase of issue #${record.currentIssue ?? "?"}. Resume it?`,
+      { modal: false },
+      "Resume", "Discard",
+    );
+    if (choice === "Resume") {
+      const result = await autoRun.resume(record).catch((error: unknown) => ({ started: false, reason: error instanceof Error ? error.message : "resume failed" }) as const);
+      if (!result.started) void window.showErrorMessage(`aboard could not resume the run: ${result.reason}.`);
+    } else if (choice === "Discard") {
+      await new FileAutoRunStore(workspaceRoot).clear();
+    }
+  };
+  void offerAutoRunResume();
+  const reloadConfiguration = (restartHint: (before: typeof currentConfiguration, after: typeof currentConfiguration) => boolean) => {
+    const next = configuration(projectSettings.values);
+    const previous = currentConfiguration;
+    currentConfiguration = next.value;
+    for (const diagnostic of [...projectSettings.diagnostics, ...next.diagnostics]) output.appendLine(`Configuration: ${diagnostic.message}`);
+    if (restartHint(previous, next.value)) void window.showInformationMessage("Manager launch settings changed. Restart the Manager to apply them.");
+  };
   context.subscriptions.push(workspace.onDidChangeConfiguration((event) => {
-    if (!["aboard.bridge.port", "aboard.launch.maxInlinePromptChars", "aboard.manager.toolPreset", "aboard.manager.disallowedTools", "aboard.workers.permissionMode", "aboard.review.autoReview", "aboard.timeouts.managerStop", "aboard.timeouts.managerPrompt", "aboard.timeouts.managerSessionStart"].some((setting) => event.affectsConfiguration(setting))) return;
-    const next = configuration(); currentConfiguration = next.value;
-    for (const diagnostic of next.diagnostics) output.appendLine(`Configuration: ${diagnostic.message}`);
-    if ([...MANAGER_RESTART_SETTINGS].some((setting) => event.affectsConfiguration(setting))) void window.showInformationMessage("Manager launch settings changed. Restart the Manager to apply them.");
+    if (!ABOARD_SETTINGS.some((setting) => event.affectsConfiguration(setting))) return;
+    reloadConfiguration(() => [...MANAGER_RESTART_SETTINGS].some((setting) => event.affectsConfiguration(setting)));
   }));
+  // `.aboard/settings.json` is outside VS Code's settings model, so it needs its
+  // own watcher; the broader `.aboard/**` scaffold watcher is not reused because
+  // runtime writes would reload the file constantly.
+  const settingsWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, PROJECT_SETTINGS_PATH));
+  const reloadProjectSettings = async () => {
+    projectSettings = await readProjectSettings(workspaceRoot);
+    reloadConfiguration(managerLaunchChanged);
+  };
+  for (const event of [settingsWatcher.onDidCreate, settingsWatcher.onDidChange, settingsWatcher.onDidDelete]) {
+    context.subscriptions.push(event(() => void reloadProjectSettings()));
+  }
+  context.subscriptions.push(settingsWatcher);
   context.subscriptions.push({ dispose: () => void bridge?.stop() });
   return { bridgeDiscoveryPath: discovery.path };
 }
 
 export async function deactivate(): Promise<void> {
+  // Stopping is a pause with no resume promise: nothing is rolled back, and the
+  // persisted record is what an explicit resume re-enters from.
+  activeAutoRun?.stop("the extension is shutting down");
+  await activeAutoRun?.settle();
+  activeAutoRun = undefined;
   await persistence?.dispose();
   persistence = undefined;
   await bridge?.stop();

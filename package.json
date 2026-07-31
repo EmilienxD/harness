@@ -37,7 +37,19 @@
       },
       {
         "command": "aboard.reviewPr",
-        "title": "Aboard: Review Pull Request"
+        "title": "Aboard: Reopen Session For Open Pull Request"
+      },
+      {
+        "command": "aboard.startAutoRun",
+        "title": "Aboard: Start Auto Run"
+      },
+      {
+        "command": "aboard.stopAutoRun",
+        "title": "Aboard: Stop Auto Run"
+      },
+      {
+        "command": "aboard.continueAutoRun",
+        "title": "Aboard: Auto Run — Continue Now"
       },
       {
         "command": "aboard.focusAgent",
@@ -129,6 +141,18 @@
           "when": "!aboard.managerLive"
         },
         {
+          "command": "aboard.startAutoRun",
+          "when": "aboard.initialized && !aboard.autoRunActive"
+        },
+        {
+          "command": "aboard.stopAutoRun",
+          "when": "aboard.autoRunActive"
+        },
+        {
+          "command": "aboard.continueAutoRun",
+          "when": "aboard.autoRunWaiting"
+        },
+        {
           "command": "aboard.focusAgent",
           "when": "false"
         },
@@ -158,6 +182,21 @@
           "maximum": 65535,
           "description": "Preferred loopback port. If occupied, aboard selects an ephemeral port."
         },
+        "aboard.launch.claudeCommand": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "default": "claude",
+          "markdownDescription": "Command that starts Claude Code. Defaults to `claude`; use it to point aboard at another binary or a wrapper, for example `openclaude` or `clauder run kiro --`. aboard appends its own flags to this command unchanged.\n\nWritten as a string it is split on spaces, with `\"...\"` or `'...'` around a token that contains spaces (`\"C:\\tools\\my claude.exe\" run --`); an array of strings is used verbatim. It is a program and its arguments, not a shell expression: every token is quoted, so `&&` or `|` would be passed as literal text. Applies to the next launch; a running Manager keeps its command."
+        },
         "aboard.launch.maxInlinePromptChars": {
           "type": "integer",
           "default": 4000,
@@ -172,12 +211,12 @@
             "default"
           ],
           "enumDescriptions": [
-            "Launch workers with --dangerously-skip-permissions. Required for unattended afk work.",
-            "Launch workers with --permission-mode acceptEdits.",
-            "Launch workers with Claude Code's default permission behaviour."
+            "Launch with --dangerously-skip-permissions. Required for unattended afk work.",
+            "Launch with --permission-mode acceptEdits.",
+            "Launch with Claude Code's default permission behaviour."
           ],
           "default": "default",
-          "description": "Permission mode for worker launches. Applied per process; aboard never writes a permissions block into .claude/settings.json."
+          "description": "Permission mode for every agent aboard launches or resumes, including the Manager. Applied per process; aboard never writes a permissions block into .claude/settings.json."
         },
         "aboard.manager.toolPreset": {
           "type": "string",
@@ -194,15 +233,45 @@
           },
           "default": []
         },
-        "aboard.review.autoReview": {
+        "aboard.autoRun.review": {
+          "type": "boolean",
+          "default": false,
+          "description": "Launch a pr-doctor after each implementation during an auto-run. Automated review stays opt-in; the explicit review action is always available."
+        },
+        "aboard.autoRun.scope": {
           "type": "string",
           "enum": [
-            "never",
-            "hitl",
+            "spec",
             "all"
           ],
-          "default": "never",
-          "description": "Controls the sole automatic review path. Explicit review actions are always available."
+          "enumDescriptions": [
+            "Stop after one spec issue's children are processed.",
+            "Continue into the next open spec without stopping."
+          ],
+          "default": "spec",
+          "description": "How much one auto-run invocation covers. A spec is the natural human review unit, and stopping there bounds the blast radius of the run's irreversible acts."
+        },
+        "aboard.autoRun.pauseAfterHitl": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stop the run after a hitl issue is merged instead of continuing automatically. The merge is already an explicit user gesture, so this is the harder brake rather than the default."
+        },
+        "aboard.autoRun.mergeStrategy": {
+          "type": "string",
+          "enum": [
+            "squash",
+            "merge",
+            "rebase"
+          ],
+          "default": "squash",
+          "description": "How auto-run merges a pull request. Squash by default because one issue is one logical change even when the engine made two commits."
+        },
+        "aboard.autoRun.pollSeconds": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "How often auto-run checks a hitl pull request for resolution while waiting. Window focus and the Continue action poll immediately regardless."
         },
         "aboard.timeouts.managerStop": {
           "type": "integer",
