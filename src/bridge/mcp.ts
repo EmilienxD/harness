@@ -1,4 +1,4 @@
-import { AGENT_TYPES, AUTOMATED_AGENT_TYPES, INTERACTIVE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentId, type AgentType } from "../domain/contracts.js";
+import { MCP_LAUNCHABLE_AGENT_TYPES, isInteractiveAgentType, type AgentType } from "../domain/contracts.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
@@ -13,17 +13,69 @@ interface McpTool {
   readonly inputSchema: Readonly<Record<string, unknown>>;
 }
 
+// One launch tool with two orthogonal flags, not one tool per combination. Both
+// flags carry information no other argument supplies: `interactive` decides
+// whether a result exists at all, `run_in_background` decides when it arrives.
+// The shape and wording track Claude Code's own `Agent` tool so the Manager
+// brings the same priors to it (spec section 6.1).
 const LAUNCH_PROPERTIES = {
-  prompt: { type: "string", minLength: 1, description: "The task for the agent; becomes its first user turn." },
+  type: { type: "string", enum: MCP_LAUNCHABLE_AGENT_TYPES },
+  prompt: {
+    type: "string",
+    minLength: 1,
+    description: "The task for the agent; becomes its first user turn. Required unless interactive is true, where it is an optional opening topic that should usually be omitted.",
+  },
   description: { type: "string", minLength: 1, description: "A concise 3-6 word description shown in the fleet tree." },
   issue: { type: "integer", minimum: 1, description: "Optional GitHub issue whose resolved contract is merged into the launch prompt." },
+  interactive: {
+    type: "boolean",
+    description: "Set to true to hand the terminal to the user to drive. No result is ever delivered for an interactive agent. Defaults to false.",
+  },
+  run_in_background: {
+    type: "boolean",
+    description: "Set to true to run this agent in the background. You will be notified when it completes. Defaults to false, which blocks this call until the agent's final message is available. Ignored when interactive is true, which has no result to wait for.",
+  },
 } as const;
 
-// The type/tool pairing is a contract, not a preference: an interactive agent
-// never reports a result, so launching one through a result-delivering tool
-// strands the caller and leaves the fleet waiting on a result that cannot come.
-const AUTOMATED_PROPERTIES = { type: { type: "string", enum: AUTOMATED_AGENT_TYPES }, ...LAUNCH_PROPERTIES } as const;
-const INTERACTIVE_PROPERTIES = { type: { type: "string", enum: INTERACTIVE_AGENT_TYPES }, ...LAUNCH_PROPERTIES } as const;
+const RUN_AGENT_DESCRIPTION = `Launch a visible, independent Claude Code agent in its own terminal. This is aboard's replacement for Claude Code's Agent tool: the agent is a real session the user can watch and take over, not an in-process subagent.
+
+Available agent types:
+- brainstormer: Develop a product or architecture idea with the user and finish with a durable spec issue. Interactive only.
+- raw: An unconstrained Claude Code session with no agent definition, for a user who wants to work directly. Interactive only.
+
+Each type's effective tools come from the project's own agent definition in .claude/agents/.
+
+Implementation agents are deliberately absent. \`implementer\`, \`pr-doctor-afk\`, and \`pr-doctor-hitl\` are reachable only through mcp__aboard__start_auto_run and mcp__aboard__review_pr, because the extension — not you — owns the implementation loop and performs every git and GitHub side effect in it. To get an issue implemented, start an auto-run; do not try to reproduce the loop by hand.
+
+## Two modes
+
+**Interactive** (\`interactive: true\`) is the mode every currently available type uses. The terminal is focused and handed to the user, who drives it from there. **No result is ever delivered** — never wait for one, never poll for one, and never tell the user you will report back. Hand off and continue the conversation. \`prompt\` is optional here and should be omitted unless the user named a specific topic to open on; they type the first message themselves. Never invent or paraphrase a topic to fill it in, because an invented opening turn spends the agent's first turn on a question the user did not ask.
+
+**Automated** (the default) has the agent work alone and report back, with \`run_in_background: true\` returning immediately instead of blocking this call. Both \`brainstormer\` and \`raw\` exist only to be handed to the user, so requesting either without \`interactive: true\` launches interactively anyway and says so in the result. Automated implementation work goes through mcp__aboard__start_auto_run, not through this tool.
+
+## When not to use
+
+If you only need project state, read it directly: mcp__aboard__get_todo and \`gh\` calls are far cheaper than an agent. Hand over a coherent unit of work — one conversation the user wants to have — not a single file edit or a lookup.
+
+## Usage notes
+
+- Always include a short description; it names the agent's terminal in the fleet tree.
+- Neither flag bypasses the single-writer lease. At most one write-capable agent runs at a time; a second launch fails immediately with the current holder rather than queuing, and you should surface that to the user instead of retrying. Read-only agents stay concurrent.
+- Every call starts a fresh agent with no memory of prior runs, so any prompt must be self-contained.
+
+<example>
+user: "I want to think through the caching layer."
+assistant: <thinking>This is the user's own thinking to do, not a task to delegate — hand them a brainstormer. They named the topic, so I can open on it, but the first real message is theirs.</thinking>
+mcp__aboard__run_agent({
+  type: "brainstormer",
+  interactive: true,
+  description: "Brainstorm the caching layer",
+  prompt: "The caching layer"
+})
+<commentary>
+No result will come back. Tell the user the terminal is open and waiting for them, then continue; do not offer to summarize an outcome.
+</commentary>
+</example>`;
 
 // Tools are served under bare names; Claude Code namespaces them for the model
 // as mcp__aboard__<name>, which the Manager's --tools preset matches with
@@ -31,38 +83,8 @@ const INTERACTIVE_PROPERTIES = { type: { type: "string", enum: INTERACTIVE_AGENT
 export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "run_agent",
-    description: "Launch a visible independent Claude Code agent in the foreground for a focused task. Like Claude Code's Agent tool with run_in_background false: this call waits for the agent's final result. Use mcp__aboard__spawn_agent when you should stay conversational while work runs, and mcp__aboard__spawn_interactive_agent for a session the user drives.",
-    inputSchema: { type: "object", properties: AUTOMATED_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
-  },
-  {
-    name: "spawn_agent",
-    description: "Launch a visible independent Claude Code agent in the background for a focused task. Like Claude Code's Agent tool with run_in_background true: returns immediately and the Manager Stop hook delivers the eventual result. Backgrounding does not bypass the single-writer lease.",
-    inputSchema: { type: "object", properties: AUTOMATED_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
-  },
-  {
-    name: "spawn_interactive_agent",
-    description: "Create and focus a visible Claude Code terminal for the user to drive. The opening prompt is optional, and no result is expected or delivered, so never wait on one. Use type raw for an unconstrained session with no agent definition, or brainstormer for the brainstorming agent.",
-    inputSchema: { type: "object", properties: INTERACTIVE_PROPERTIES, required: ["type", "description"], additionalProperties: false },
-  },
-  {
-    name: "list_agents",
-    description: "List live and recent aboard agents with their types, lifecycle states, issues, terminals, telemetry, and the current write-lease holder.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-  },
-  {
-    name: "send_to_agent",
-    description: "Resume a finished aboard agent with a new message in a new visible terminal using claude --resume. This is reliable CLI-argument delivery, never keystroke injection into a live TUI.",
-    inputSchema: {
-      type: "object",
-      properties: { agentId: { type: "string", minLength: 1 }, message: { type: "string", minLength: 1 } },
-      required: ["agentId", "message"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "focus_agent",
-    description: "Reveal and focus an aboard agent's VS Code terminal for user handoff or inspection.",
-    inputSchema: { type: "object", properties: { agentId: { type: "string", minLength: 1 } }, required: ["agentId"], additionalProperties: false },
+    description: RUN_AGENT_DESCRIPTION,
+    inputSchema: { type: "object", properties: LAUNCH_PROPERTIES, required: ["type", "description"], additionalProperties: false },
   },
   {
     name: "get_todo",
@@ -75,9 +97,24 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     inputSchema: { type: "object", properties: { body: { type: "string" }, reason: { type: "string", minLength: 1 } }, required: ["body", "reason"], additionalProperties: false },
   },
   {
+    name: "start_auto_run",
+    description: `Start the automatic implementation run for the oldest open spec issue. The extension walks that spec's children one at a time and performs every git and GitHub side effect itself — branch, commit, push, pull request, merge — while agents only produce content.
+
+Returns immediately with the resolved plan: the spec, the issues it will process with their afk/hitl disposition and branch name, and the issues it is skipping and why. **Do not wait for the run and do not poll it.** A run routinely outlives this conversation, and its progress reaches you one line at a time on the user's next message. Report the plan to the user and continue.
+
+Only one run exists at a time; calling this while a run is active returns the active run's state instead of starting a second one. If the run cannot start — a dirty working tree, no open spec, no processable child — it returns \`started: false\` with the reason and launches nothing. Relay that reason verbatim; the dirty-tree case in particular is the user's own uncommitted work and only they can decide what to do with it.
+
+An \`hitl\` issue pauses the run at its pull request and waits for the user to merge it. That is the design, not a stall: tell the user which pull request is waiting.`,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "review_pr",
-    description: "Explicitly launch a read-only reviewer for a pull request after resolving its diff and governing issue contract. Findings are persisted as line-specific GitHub review comments.",
-    inputSchema: { type: "object", properties: { pr: { type: "integer", minimum: 1 }, focus: { type: "string", minLength: 1 } }, required: ["pr"], additionalProperties: false },
+    description: `Reopen the aboard session that owns the pull request currently in flight, and hand it to the user. This does not launch a reviewer and posts no review comments: it focuses the terminal of the agent that built the change — the implementer, or the pr-doctor when review mode is on — or resumes that session if its terminal was closed.
+
+This is a handoff, so **no result is delivered**. The user reads what the agent did and continues from there themselves. If no pull request is open, nothing is launched and the tool says so.
+
+Pass \`pr\` only to target a specific pull request; omitted, it picks the latest open one.`,
+    inputSchema: { type: "object", properties: { pr: { type: "integer", minimum: 1 }, focus: { type: "string", minLength: 1 } }, additionalProperties: false },
   },
   {
     name: "release_lease",
@@ -86,13 +123,18 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   },
 ];
 
+export interface AutoRunTrigger {
+  start(): Promise<unknown>;
+}
+
 export interface McpServices {
   readonly github?: GitHubClient;
   readonly reviews?: ReviewCoordinator;
+  readonly autoRun?: AutoRunTrigger;
 }
 
 export type McpCoordinator = Pick<DelegationCoordinator,
-  "run" | "spawn" | "spawnInteractive" | "list" | "send" | "focus" | "releaseLease">;
+  "run" | "spawn" | "spawnInteractive" | "releaseLease">;
 
 type JsonRpcId = string | number | null;
 
@@ -124,37 +166,77 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function parseLaunch(value: unknown, kind: "automated" | "interactive"): DelegationLaunchInput | string {
-  const interactive = kind === "interactive";
-  // An automated agent's prompt is its whole brief and cannot be typed in later;
-  // an interactive one is handed to the user, who may open the conversation.
-  const promptRequired = !interactive;
+interface ParsedLaunch {
+  readonly input: DelegationLaunchInput;
+  readonly interactive: boolean;
+  /** Only meaningful for automated launches; an interactive session has no result. */
+  readonly background: boolean;
+  /**
+   * Corrections applied to a launch that was still unambiguous. They are
+   * returned with the result so the Manager learns what actually happened.
+   */
+  readonly notices: readonly string[];
+}
+
+function parseLaunch(value: unknown): ParsedLaunch | string {
   if (!isRecord(value)) return "arguments must be an object";
-  if (!exactKeys(value, ["type", "prompt", "description", "issue"])) return "arguments contain an unknown property";
-  if (!nonEmptyString(value.type) || value.type === "manager" || !AGENT_TYPES.includes(value.type as AgentType)) return "type must be a supported worker agent type";
+  if (!exactKeys(value, ["type", "prompt", "description", "issue", "interactive", "run_in_background"])) {
+    return "arguments contain an unknown property";
+  }
+  // The enum in the schema is advisory; the parser is what actually keeps the
+  // implementation types out of the Manager's reach.
+  if (!nonEmptyString(value.type) || !MCP_LAUNCHABLE_AGENT_TYPES.includes(value.type as AgentType)) {
+    return `type must be one of: ${MCP_LAUNCHABLE_AGENT_TYPES.join(", ")}`;
+  }
   const type = value.type as AgentType;
-  if (interactive && !isInteractiveAgentType(type)) return `type must be one of ${INTERACTIVE_AGENT_TYPES.join(", ")}; ${type} reports a result and belongs on run_agent or spawn_agent`;
-  if (!interactive && !isAutomatedAgentType(type)) return `type must be one of ${AUTOMATED_AGENT_TYPES.join(", ")}; ${type} never reports a result and belongs on spawn_interactive_agent`;
+  if (value.interactive !== undefined && typeof value.interactive !== "boolean") return "interactive must be a boolean";
+  if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
   if (!nonEmptyString(value.description)) return "description must be a non-empty string";
   const words = value.description.trim().split(/\s+/).length;
   if (words < 3 || words > 6) return "description must contain 3-6 words";
-  if (promptRequired && !nonEmptyString(value.prompt)) return "prompt must be a non-empty string";
   if (value.prompt !== undefined && !nonEmptyString(value.prompt)) return "prompt must be a non-empty string when provided";
   if (value.issue !== undefined && (!Number.isInteger(value.issue) || (value.issue as number) <= 0)) return "issue must be a positive integer";
+
+  const notices: string[] = [];
+  // An interactive-only type has exactly one valid reading, and its Stop hook is
+  // guarded off, so honouring the request beats rejecting it: refusing would cost
+  // a round trip and the retry can only be this same launch.
+  let interactive = value.interactive === true;
+  if (!interactive && isInteractiveAgentType(type)) {
+    interactive = true;
+    notices.push(`${type} is an interactive type and was launched interactively; no result will be delivered, so continue with the user instead of waiting.`);
+  }
+  // A missing prompt has no such reading: an automated agent would sit at an
+  // empty TUI forever and nothing may be typed into it (spec section 5.3).
+  if (!interactive && !nonEmptyString(value.prompt)) return "prompt must be a non-empty string unless interactive is true";
+  const background = !interactive && value.run_in_background === true;
+  if (interactive && value.run_in_background === true) {
+    notices.push("run_in_background was ignored: an interactive session returns no result to wait for.");
+  }
   return {
-    type: value.type as DelegationLaunchInput["type"],
-    description: value.description.trim(),
-    ...(value.prompt === undefined ? {} : { prompt: (value.prompt as string).trim() }),
-    ...(value.issue === undefined ? {} : { issue: value.issue as number }),
+    input: {
+      type: type as DelegationLaunchInput["type"],
+      description: value.description.trim(),
+      ...(value.prompt === undefined ? {} : { prompt: (value.prompt as string).trim() }),
+      ...(value.issue === undefined ? {} : { issue: value.issue as number }),
+    },
+    interactive,
+    background,
+    notices,
   };
 }
 
-function parsePair(value: unknown, second: "message" | "reason" | undefined): Record<string, string> | string {
+/** Notices ride back with the launch result; a coerced call must not look clean. */
+function withNotices(result: unknown, notices: readonly string[]): unknown {
+  if (notices.length === 0 || !isRecord(result)) return result;
+  return { ...result, notice: notices.join(" ") };
+}
+
+function parseReason(value: unknown): { readonly reason: string } | string {
   if (!isRecord(value)) return "arguments must be an object";
-  const keys = second === undefined ? ["agentId"] : second === "message" ? ["agentId", "message"] : ["reason"];
-  if (!exactKeys(value, keys)) return "arguments contain an unknown property";
-  for (const key of keys) if (!nonEmptyString(value[key])) return `${key} must be a non-empty string`;
-  return Object.fromEntries(keys.map((key) => [key, (value[key] as string).trim()]));
+  if (!exactKeys(value, ["reason"])) return "arguments contain an unknown property";
+  if (!nonEmptyString(value.reason)) return "reason must be a non-empty string";
+  return { reason: value.reason.trim() };
 }
 
 async function callTool(
@@ -166,32 +248,14 @@ async function callTool(
 ): Promise<unknown> {
   switch (name) {
     case "run_agent": {
-      const parsed = parseLaunch(args, "automated");
+      const parsed = parseLaunch(args);
       if (typeof parsed === "string") throw new TypeError(parsed);
-      return coordinator.run(parsed, signal);
-    }
-    case "spawn_agent": {
-      const parsed = parseLaunch(args, "automated");
-      if (typeof parsed === "string") throw new TypeError(parsed);
-      return coordinator.spawn(parsed);
-    }
-    case "spawn_interactive_agent": {
-      const parsed = parseLaunch(args, "interactive");
-      if (typeof parsed === "string") throw new TypeError(parsed);
-      return coordinator.spawnInteractive(parsed);
-    }
-    case "list_agents":
-      if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("arguments must be an empty object");
-      return coordinator.list();
-    case "send_to_agent": {
-      const parsed = parsePair(args, "message");
-      if (typeof parsed === "string") throw new TypeError(parsed);
-      return coordinator.send(parsed.agentId as AgentId, parsed.message!);
-    }
-    case "focus_agent": {
-      const parsed = parsePair(args, undefined);
-      if (typeof parsed === "string") throw new TypeError(parsed);
-      return coordinator.focus(parsed.agentId as AgentId);
+      const launched = parsed.interactive
+        ? coordinator.spawnInteractive(parsed.input)
+        : parsed.background
+          ? coordinator.spawn(parsed.input)
+          : coordinator.run(parsed.input, signal);
+      return withNotices(await launched, parsed.notices);
     }
     case "get_todo":
       if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("arguments must be an empty object");
@@ -204,17 +268,27 @@ async function callTool(
       if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
       return services.github.updateTodo(args.body);
     }
+    case "start_auto_run": {
+      if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("arguments must be an empty object");
+      if (services.autoRun === undefined) throw new GitHubBoundaryError("command-failed", "The auto-run engine is unavailable");
+      // Non-blocking: a multi-issue run exceeds the foreground MCP timeout, and
+      // blocking would pin the Manager's turn for the whole run.
+      return services.autoRun.start();
+    }
     case "review_pr": {
       if (!isRecord(args) || !exactKeys(args, ["pr", "focus"])) throw new TypeError("arguments contain an unknown property");
-      if (!Number.isInteger(args.pr) || (args.pr as number) <= 0) throw new TypeError("pr must be a positive integer");
+      if (args.pr !== undefined && (!Number.isInteger(args.pr) || (args.pr as number) <= 0)) throw new TypeError("pr must be a positive integer when provided");
       if (args.focus !== undefined && !nonEmptyString(args.focus)) throw new TypeError("focus must be a non-empty string when provided");
       if (services.reviews === undefined) throw new GitHubBoundaryError("command-failed", "Review service is unavailable");
-      return services.reviews.review({ pr: args.pr as number, ...(args.focus === undefined ? {} : { focus: (args.focus as string).trim() }) });
+      return services.reviews.review({
+        ...(args.pr === undefined ? {} : { pr: args.pr as number }),
+        ...(args.focus === undefined ? {} : { focus: (args.focus as string).trim() }),
+      });
     }
     case "release_lease": {
-      const parsed = parsePair(args, "reason");
+      const parsed = parseReason(args);
       if (typeof parsed === "string") throw new TypeError(parsed);
-      return coordinator.releaseLease(parsed.reason!);
+      return coordinator.releaseLease(parsed.reason);
     }
     default:
       throw new DelegationError("unknown-agent", `Unknown MCP tool ${name}`);

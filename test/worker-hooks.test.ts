@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -64,7 +65,7 @@ test("records compact summaries, repeat count, and precise re-grounding", async 
 test("worker Python hook is silent for non-aboard and wrong-role sessions", () => {
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
   for (const env of [{}, { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" }]) {
-    const result = spawnSync("uv", ["run", "--no-project", "python", script, "/hooks/worker/post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
+    const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
   }
 });
@@ -77,14 +78,44 @@ test("scaffold registers lifecycle, Agent telemetry, and compact re-grounding", 
   // InstructionsLoaded has no decision control, so additionalContext returned
   // from it is discarded. Re-grounding must ride SessionStart(compact) alone.
   assert.ok(!("InstructionsLoaded" in hooks));
-  const regrounding = (hooks.SessionStart as { matcher: string; hooks: { command: string }[] }[]).find((entry) => entry.matcher === "compact");
-  assert.ok(regrounding?.hooks.some((hook) => hook.command.includes("/hooks/worker/reground")));
+  const regrounding = (hooks.SessionStart as { matcher: string; hooks: { args: string[] }[] }[]).find((entry) => entry.matcher === "compact");
+  assert.ok(regrounding?.hooks.some((hook) => hook.args.includes("worker-reground")));
 });
 
-test("every scaffolded hook endpoint is served by a bridge route", async () => {
-  const raw = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8");
-  const registered = new Set([...raw.matchAll(/aboard_hook\.py (\/[^"\s]+)/g)].map((match) => match[1]!));
-  assert.ok(registered.size > 0);
+/**
+ * Registered hooks address the script by opaque route name, never by URL path,
+ * so Git Bash on Windows cannot rewrite the argument into a filesystem path.
+ * The script owns the name-to-endpoint table and exposes it with `--routes`;
+ * reading it back keeps this test on the same source of truth.
+ */
+function scaffoldedRoutes(): { readonly names: readonly string[]; readonly table: Readonly<Record<string, string>> } {
+  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const printed = spawnSync("uv", ["run", "--no-project", "python", script, "--routes"], { encoding: "utf8" });
+  assert.equal(printed.status, 0);
+  const table = JSON.parse(printed.stdout) as Record<string, string>;
+  const registration = readFileSync(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8");
+  const entries = JSON.parse(registration) as Record<string, { hooks: { command: string; args: string[] }[] }[]>;
+  const names: string[] = [];
+  for (const groups of Object.values(entries)) {
+    for (const group of groups) {
+      for (const hook of group.hooks) {
+        // Exec form only: `args` means no shell tokenizes or rewrites anything.
+        assert.equal(hook.command, "uv");
+        assert.ok(Array.isArray(hook.args));
+        const name = hook.args[hook.args.length - 1]!;
+        assert.ok(name in table, `unregistered hook route ${name}`);
+        names.push(name);
+      }
+    }
+  }
+  return { names, table };
+}
+
+test("every scaffolded hook route is path-free and served by a bridge route", async () => {
+  const { names, table } = scaffoldedRoutes();
+  assert.ok(names.length > 0);
+  for (const name of names) assert.doesNotMatch(name, /[/\\]/u, "hook route names must not look like paths");
+  const registered = new Set(names.map((name) => table[name]!));
 
   // The composed handler chain from the extension composition root. A route the
   // scaffold POSTs to but nothing serves is a 404 at runtime, which is exactly

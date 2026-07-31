@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "aboard": {
+      "type": "http",
+      "url": "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ABOARD_BRIDGE_TOKEN}"
+      }
+    }
+  }
+}

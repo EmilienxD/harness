@@ -170,6 +170,12 @@ export interface InteractiveManagerLauncher {
   spawnInteractive(input: DelegationLaunchInput): Promise<unknown>;
 }
 
+/** The extension-owned actions `/auto` and `/review-pr` trigger. */
+export interface ManagerCommandActions {
+  startAutoRun(): Promise<unknown>;
+  reviewPullRequest(): Promise<unknown>;
+}
+
 export class ManagerPromptService {
   readonly #now: () => Date;
 
@@ -177,11 +183,14 @@ export class ManagerPromptService {
     private readonly fleet: FleetRegistry,
     private readonly launcher: InteractiveManagerLauncher,
     now?: () => Date,
+    private readonly actions?: ManagerCommandActions,
   ) {
     this.#now = now ?? (() => new Date());
   }
 
   public async handle(agentId: AgentId, prompt: string): Promise<Record<string, unknown>> {
+    const action = parseActionCommand(prompt);
+    if (action !== undefined) return this.#runAction(agentId, action);
     const command = parseInteractiveCommand(prompt);
     if (command === undefined) {
       const deliveredAt = this.#now().toISOString() as IsoTimestamp;
@@ -204,28 +213,103 @@ export class ManagerPromptService {
     const launchedAgentId = typeof launched.agentId === "string" ? launched.agentId : "unknown";
     const event = command.type === "raw"
       ? `you started a raw session (agent ${launchedAgentId}).`
-      : `you started a brainstormer${command.topic === undefined ? "" : ` on ${JSON.stringify(command.topic)}`} (agent ${launchedAgentId}).`;
+      : `you started a brainstormer (agent ${launchedAgentId}).`;
     this.fleet.enqueueNotification(agentId, event, occurredAt);
-    return { intercepted: true, message: command.type === "raw" ? "Raw session launched and focused." : "Brainstorm session launched and focused." };
+    const opened = command.type === "raw" ? "Raw session launched and focused." : "Brainstorm session launched and focused.";
+    return {
+      intercepted: true,
+      message: command.ignoredArguments
+        ? `${opened} It takes no arguments, so the text you typed after /${command.command} was not sent; type it in the new terminal.`
+        : opened,
+    };
+  }
+
+  /**
+   * `/auto` and `/review-pr` are thin triggers for extension behavior, so the
+   * bridge performs them and tells the user directly. Waking the Manager to
+   * narrate a mechanical action costs a turn and risks it acting on the command
+   * a second time; it is told what happened in the next prompt's drain instead.
+   */
+  async #runAction(agentId: AgentId, action: ParsedActionCommand): Promise<Record<string, unknown>> {
+    if (this.actions === undefined) {
+      return { intercepted: true, message: `aboard cannot handle /${action.command} right now: the extension action is unavailable.` };
+    }
+    let outcome: unknown;
+    try {
+      outcome = action.type === "auto" ? await this.actions.startAutoRun() : await this.actions.reviewPullRequest();
+    } catch (error) {
+      return { intercepted: true, message: `aboard could not run /${action.command}: ${error instanceof Error ? error.message : "the action failed"}.` };
+    }
+    const summary = describeActionOutcome(action.type, outcome);
+    const occurredAt = this.#now().toISOString() as IsoTimestamp;
+    this.fleet.enqueueNotification(agentId, `you ran /${action.command}: ${summary}`, occurredAt);
+    return {
+      intercepted: true,
+      message: action.ignoredArguments
+        ? `${summary} /${action.command} takes no arguments, so the text you typed after it was not sent.`
+        : summary,
+    };
   }
 }
 
+function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unknown): string {
+  if (typeof outcome !== "object" || outcome === null) {
+    return type === "auto" ? "auto-run triggered." : "reopened the session for the open pull request.";
+  }
+  const value = outcome as Record<string, unknown>;
+  if (type === "auto") {
+    if (value.started === false) return `auto-run did not start: ${typeof value.reason === "string" ? value.reason : "no reason given"}.`;
+    const spec = value.spec as { number?: unknown; title?: unknown } | undefined;
+    const issues = Array.isArray(value.issues) ? value.issues.length : 0;
+    return `auto-run started on spec #${String(spec?.number ?? "?")} with ${issues} issue${issues === 1 ? "" : "s"}.`;
+  }
+  switch (value.action) {
+    case "none": return "No pull request is open, so nothing was launched.";
+    case "focused": return `Focused the ${String(value.type)} terminal for PR #${String(value.prNumber)}.`;
+    case "resumed": return `Resumed the ${String(value.type)} session for PR #${String(value.prNumber)}.`;
+    case "launched": return String(value.notice ?? `Launched a reviewer for PR #${String(value.prNumber)}.`);
+    default: return "Reopened the session for the open pull request.";
+  }
+}
+
+interface ParsedActionCommand {
+  readonly type: "auto" | "review-pr";
+  readonly command: string;
+  readonly ignoredArguments: boolean;
+}
+
+/**
+ * Like `/brainstorm` and `/raw`, these take no arguments. Trailing text is
+ * matched and dropped rather than forwarded: leaking `/auto now please` into the
+ * Manager's context is worse than declining to pass it on.
+ */
+function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
+  const match = /^\s*\/(auto|review-pr)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
+  if (match === null) return undefined;
+  const command = match[1] as "auto" | "review-pr";
+  return { type: command, command, ignoredArguments: (match[2]?.trim() ?? "").length > 0 };
+}
+
+/**
+ * `/brainstorm` and `/raw` take no arguments: they open a terminal the user then
+ * drives directly, so an opening message would only spend a turn before the
+ * conversation starts. Trailing text is still matched rather than passed
+ * through, because leaking `/brainstorm foo` into the Manager's context is worse
+ * than declining to forward it.
+ */
 function parseInteractiveCommand(prompt: string): {
   readonly type: "brainstormer" | "raw";
-  readonly topic?: string;
+  readonly command: string;
+  readonly ignoredArguments: boolean;
   readonly input: DelegationLaunchInput;
 } | undefined {
   const match = /^\s*\/(brainstorm|raw)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
-  const topic = match[2]?.trim();
-  if (match[1] === "raw") {
-    return { type: "raw", input: { type: "raw", description: "raw interactive session", ...(topic ? { prompt: topic } : {}) } };
-  }
-  return {
-    type: "brainstormer",
-    ...(topic ? { topic } : {}),
-    input: { type: "brainstormer", description: "interactive brainstorm session", ...(topic ? { prompt: topic } : {}) },
-  };
+  const command = match[1] as "brainstorm" | "raw";
+  const ignoredArguments = (match[2]?.trim() ?? "").length > 0;
+  return command === "raw"
+    ? { type: "raw", command, ignoredArguments, input: { type: "raw", description: "raw interactive session" } }
+    : { type: "brainstormer", command, ignoredArguments, input: { type: "brainstormer", description: "interactive brainstorm session" } };
 }
 
 export function createManagerHookRoutes(briefings: ManagerBriefings, stop: ManagerStopService, prompts?: ManagerPromptService): BridgeRequestHandler {

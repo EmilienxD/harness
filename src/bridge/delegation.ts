@@ -1,5 +1,5 @@
 import type { LaunchConfiguration, WorkerPermissionMode } from "../claude/launch.js";
-import { planLaunch, planResume } from "../claude/launch.js";
+import { planLaunch } from "../claude/launch.js";
 import type { ResolvedPrompt } from "../claude/prompts.js";
 import type { PromptSpillStore } from "../claude/spill.js";
 import type { ShellKind } from "../claude/shell.js";
@@ -24,6 +24,27 @@ export interface DelegationLaunchInput {
   readonly issue?: number;
   readonly pullRequest?: number;
   readonly focus?: string;
+  /**
+   * Set only by the auto-run engine. It records that this agent's contract ends
+   * at "the working tree contains the change", so a dirty tree at Stop is
+   * success rather than a `no-commit` failure — the engine commits
+   * (`docs/auto-implementation.md` §13).
+   */
+  readonly expectsUncommittedTree?: boolean;
+}
+
+/** What the engine needs back from a launch: the handles plus the result. */
+export interface AutomatedLaunchOutcome {
+  readonly agentId: AgentId;
+  readonly sessionId: SessionId;
+  readonly terminalId: AgentSession["terminal"]["terminalId"];
+  readonly result: WorkerResult;
+}
+
+export interface InteractiveLaunchHandles {
+  readonly agentId: AgentId;
+  readonly sessionId: SessionId;
+  readonly terminalId: AgentSession["terminal"]["terminalId"];
 }
 
 export interface DelegationConfigurationSource {
@@ -44,12 +65,15 @@ export interface DelegationCoordinatorOptions {
   readonly managerAgentId: AgentId;
   readonly shell: ShellKind;
   readonly permissionMode: WorkerPermissionMode;
+  /**
+   * `aboard.launch.claudeCommand` tokens. Read at launch time so a settings
+   * change applies to the next agent without reloading the window.
+   */
+  readonly command?: () => readonly string[] | undefined;
   readonly agentIdFactory: () => AgentId;
   readonly sessionIdFactory: () => SessionId;
   readonly now?: () => Date;
   readonly maxInlinePromptChars?: number;
-  /** Session-transcript probe (claude/sessions.ts); absent transcripts make --resume impossible. */
-  readonly transcriptExists?: (sessionId: SessionId) => Promise<boolean>;
 }
 
 export class DelegationError extends Error {
@@ -71,8 +95,6 @@ const EMPTY_TELEMETRY: AgentTelemetry = {
 
 export class DelegationCoordinator {
   readonly #waiters = new Map<AgentId, (result: WorkerResult) => void>();
-  readonly #capabilities = new Map<AgentId, WriteCapability>();
-  readonly #resumeSequences = new Map<AgentId, number>();
   readonly #now: () => Date;
 
   public constructor(private readonly options: DelegationCoordinatorOptions) {
@@ -83,6 +105,23 @@ export class DelegationCoordinator {
     const launched = await this.#launch(input, { mode: "tool-result" });
     const result = await this.#waitForResult(launched.agentId, signal);
     return this.#foregroundResult(launched.agentId, result);
+  }
+
+  /**
+   * The auto-run engine's launch path. It is `run` plus the terminal id, which
+   * the engine needs to close the terminal at cleanup; `tool-result` delivery is
+   * correct because the engine is in-process async code and genuinely is the
+   * blocked caller that mode describes (`docs/auto-implementation.md` §2).
+   */
+  public async runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome> {
+    const launched = await this.#launch(input, { mode: "tool-result" });
+    const result = await this.#waitForResult(launched.agentId, signal);
+    return { ...launched, result };
+  }
+
+  /** Interactive launch for the engine, typed to the handles it actually uses. */
+  public async launchInteractive(input: DelegationLaunchInput): Promise<InteractiveLaunchHandles> {
+    return this.#launch(input, { mode: "none" });
   }
 
   public async spawn(input: DelegationLaunchInput): Promise<unknown> {
@@ -99,74 +138,6 @@ export class DelegationCoordinator {
       ...launched,
       handoff: `Terminal focused for ${input.description}. Continue directly with the user; no agent result will be returned.`,
     };
-  }
-
-  public list(): unknown {
-    return {
-      agents: this.options.fleet.list(),
-      leaseHolder: this.options.lease.current() ?? null,
-    };
-  }
-
-  public focus(agentId: AgentId): unknown {
-    const session = this.#requireAgent(agentId);
-    this.options.terminals.show(session.terminal.terminalId);
-    return { agentId, terminalId: session.terminal.terminalId, focused: true };
-  }
-
-  public async send(agentId: AgentId, message: string): Promise<unknown> {
-    const session = this.#requireAgent(agentId);
-    if (session.lifecycle.status === "starting" || session.lifecycle.status === "running" || session.lifecycle.status === "awaiting-user") {
-      throw new DelegationError("agent-active", `Agent ${agentId} is still active; wait for it to finish before resuming`);
-    }
-    const type = session.identity.type;
-    const sequence = (this.#resumeSequences.get(agentId) ?? 0) + 1;
-    // --resume fails on a session closed before its first message (no
-    // transcript on disk). Relaunch the conversation under the same imposed
-    // session id instead; the agent definition re-supplies the launch shape,
-    // and no conversation exists that could reference prior spill files.
-    const plan = type !== "manager" && this.options.transcriptExists !== undefined && !await this.options.transcriptExists(session.sessionId)
-      ? planLaunch({
-        agentId,
-        sessionId: session.sessionId,
-        agentType: type,
-        shell: this.options.shell,
-        permissionMode: this.options.permissionMode,
-        configuration: await this.options.configurations.get(type),
-        prompt: message,
-        maxInlinePromptChars: this.options.maxInlinePromptChars,
-      })
-      : planResume({
-        agentId,
-        sessionId: session.sessionId,
-        agentType: type,
-        shell: this.options.shell,
-        permissionMode: this.options.permissionMode,
-        message,
-        writeCapability: this.#capabilities.get(agentId) ?? "write-capable",
-        sequence,
-        maxInlinePromptChars: this.options.maxInlinePromptChars,
-      });
-    const occurredAt = this.#timestamp();
-    this.#acquire(plan.writeCapability, agentId, session.sessionId, occurredAt, "resume agent");
-    try {
-      if (plan.spill !== undefined) await this.options.spills.write(plan.spill);
-      const terminal = this.options.terminals.create({
-        agentId,
-        sessionId: session.sessionId,
-        agentType: session.identity.type,
-        ...(session.issueNumber === undefined ? {} : { issueNumber: session.issueNumber }),
-        name: session.terminal.name,
-        initialCommand: plan.commandLine,
-      });
-      this.options.fleet.restart(agentId, { terminalId: terminal.terminalId, name: terminal.name }, occurredAt);
-      this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
-      if (plan.kind === "resume") this.#resumeSequences.set(agentId, sequence);
-      return { agentId, sessionId: session.sessionId, terminalId: terminal.terminalId, status: "running" };
-    } catch (error) {
-      this.options.lease.release(agentId, occurredAt, "resume launch failed");
-      throw error;
-    }
   }
 
   public releaseLease(reason: string): unknown {
@@ -222,6 +193,7 @@ export class DelegationCoordinator {
       permissionMode: this.options.permissionMode,
       configuration,
       prompt,
+      ...this.#command(),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
     });
     const occurredAt = this.#timestamp();
@@ -244,9 +216,9 @@ export class DelegationCoordinator {
         resultDelivery,
         telemetry: EMPTY_TELEMETRY,
         ...(input.issue === undefined ? {} : { issueNumber: input.issue }),
+        ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
       }, occurredAt);
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
-      this.#capabilities.set(agentId, plan.writeCapability);
       return { agentId, sessionId, terminalId: terminal.terminalId };
     } catch (error) {
       this.options.lease.release(agentId, occurredAt, "launch failed");
@@ -298,6 +270,12 @@ export class DelegationCoordinator {
     const session = this.options.fleet.get(agentId);
     if (session === undefined) throw new DelegationError("unknown-agent", `Unknown agent ${agentId}`);
     return session;
+  }
+
+  /** Spread so an unset command leaves the field absent under exactOptionalPropertyTypes. */
+  #command(): { readonly command?: readonly string[] } {
+    const command = this.options.command?.();
+    return command === undefined ? {} : { command };
   }
 
   #timestamp(): IsoTimestamp {

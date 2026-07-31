@@ -91,7 +91,7 @@ test("long poll observes abort and route validates stop input", async () => {
 test("Python Manager hook silently self-guards non-addressed sessions", () => {
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
   for (const env of [{}, { ABOARD_AGENT_ID: "worker", ABOARD_AGENT_TYPE: "implementer" }]) {
-    const result = spawnSync("uv", ["run", "--no-project", "python", script, "/hooks/manager/brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
+    const result = spawnSync("uv", ["run", "--no-project", "python", script, "manager-brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
   }
 });
@@ -112,17 +112,84 @@ test("Manager prompt route launches both interactive command types and drains or
   const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input) => {
     launches.push(input); return { agentId: `interactive-${next++}` };
   } }, () => new Date("2026-07-30T14:31:00.000Z"));
-  assert.deepEqual(await prompts.handle(managerId, "/brainstorm caching layer"), { intercepted: true, message: "Brainstorm session launched and focused." });
+  assert.deepEqual(await prompts.handle(managerId, "/brainstorm"), { intercepted: true, message: "Brainstorm session launched and focused." });
   assert.deepEqual(await prompts.handle(managerId, "/raw"), { intercepted: true, message: "Raw session launched and focused." });
+  // Neither launch carries a prompt: an interactive terminal has a user in
+  // front of it, and filler would burn a turn before the conversation starts.
   assert.deepEqual(launches, [
-    { type: "brainstormer", description: "interactive brainstorm session", prompt: "caching layer" },
+    { type: "brainstormer", description: "interactive brainstorm session" },
     { type: "raw", description: "raw interactive session" },
   ]);
   const drained = await prompts.handle(managerId, "what is the status?");
-  assert.match(String(drained.additionalContext), /At 2026-07-30T14:31:00.000Z: you started a brainstormer on "caching layer" \(agent interactive-1\)/);
+  assert.match(String(drained.additionalContext), /At 2026-07-30T14:31:00.000Z: you started a brainstormer \(agent interactive-1\)/);
   assert.match(String(drained.additionalContext), /raw session \(agent interactive-2\)/);
   assert.ok(String(drained.additionalContext).indexOf("interactive-1") < String(drained.additionalContext).indexOf("interactive-2"));
   assert.deepEqual(await prompts.handle(managerId, "and now?"), {});
+});
+
+test("interactive commands take no arguments and say so rather than silently dropping text", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const launches: unknown[] = [];
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input) => {
+    launches.push(input); return { agentId: "interactive-1" };
+  } });
+  const result = await prompts.handle(managerId, "/brainstorm caching layer");
+  assert.equal(result.intercepted, true);
+  assert.match(String(result.message), /takes no arguments/);
+  assert.match(String(result.message), /type it in the new terminal/);
+  // Still intercepted: leaking "/brainstorm caching layer" into the Manager's
+  // context is worse than declining to forward the topic.
+  assert.deepEqual(launches, [{ type: "brainstormer", description: "interactive brainstorm session" }]);
+});
+
+test("/auto and /review-pr are performed by the extension, reported to the user, and queued for the Manager", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const started: string[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("an extension action must not launch an agent") },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    {
+      startAutoRun: async () => { started.push("auto"); return { started: true, spec: { number: 12, title: "Offline sync" }, issues: [{ number: 34 }, { number: 35 }] }; },
+      reviewPullRequest: async () => { started.push("review"); return { action: "focused", prNumber: 56, type: "implementer" }; },
+    },
+  );
+  const auto = await prompts.handle(managerId, "/auto");
+  assert.equal(auto.intercepted, true);
+  assert.equal(auto.message, "auto-run started on spec #12 with 2 issues.");
+  const review = await prompts.handle(managerId, "/review-pr");
+  assert.equal(review.message, "Focused the implementer terminal for PR #56.");
+  assert.deepEqual(started, ["auto", "review"]);
+
+  // The Manager is told later, batched into the next real prompt, rather than
+  // being woken to narrate a mechanical action.
+  const drained = await prompts.handle(managerId, "what changed?");
+  assert.match(String(drained.additionalContext), /you ran \/auto: auto-run started on spec #12/);
+  assert.match(String(drained.additionalContext), /you ran \/review-pr: Focused the implementer terminal/);
+});
+
+test("an extension action reports a refusal verbatim and drops trailing arguments", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    {
+      startAutoRun: async () => ({ started: false, reason: "the working tree is not clean: src/a.ts" }),
+      reviewPullRequest: async () => ({ action: "none" }),
+    },
+  );
+  const refused = await prompts.handle(managerId, "/auto now please");
+  assert.match(String(refused.message), /auto-run did not start: the working tree is not clean: src\/a\.ts/);
+  assert.match(String(refused.message), /takes no arguments/);
+});
+
+test("an unavailable extension action is reported instead of falling through to the Manager", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => assert.fail("no agent") });
+  const result = await prompts.handle(managerId, "/auto");
+  assert.equal(result.intercepted, true);
+  assert.match(String(result.message), /cannot handle \/auto right now/);
 });
 
 async function runPromptHook(responseStatus: number, responseBody: unknown, prompt: string, token = "secret"): Promise<{ status: number | null; stdout: string; stderr: string }> {
@@ -135,7 +202,7 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
   const address = server.address();
   assert.ok(address !== null && typeof address !== "string");
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
-  const child = spawn("uv", ["run", "--no-project", "python", script, "/hooks/manager/prompt"], {
+  const child = spawn("uv", ["run", "--no-project", "python", script, "manager-prompt"], {
     env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: "manager", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -165,9 +232,34 @@ test("Python prompt hook injects a drained queue on a real prompt", async () => 
 
 test("aboard-owned launch skills are user-only command shims and raw has no agent definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
-  for (const name of ["brainstorm"]) {
+  for (const name of ["brainstorm", "raw", "auto", "review-pr"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
-    assert.match(skill, /disable-model-invocation: true/); assert.match(skill, /argument-hint:/); assert.match(skill, new RegExp(`/${name}`));
+    assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
+    // No argument-hint: these commands are argumentless, and hinting otherwise
+    // invites a topic the launch deliberately does not forward.
+    assert.doesNotMatch(skill, /argument-hint:/);
+    // The body must stay inert. The UserPromptSubmit hook exits 2 before this
+    // file is ever loaded, so any instruction here is unreachable at best and,
+    // if the hook fails, becomes a prompt the Manager acts on.
+    const body = skill.replace(/^---\n[\s\S]*?\n---\n/u, "").replace(/<!--[\s\S]*?-->/gu, "").trim();
+    assert.equal(body, "", `${name} SKILL.md must have no model-visible body`);
   }
   await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".claude", "agents", "raw.md")));
+});
+
+test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
+  for (const prompt of ["/raw", "/raw fix the parser", "/brainstorm", "/brainstorm caching layer", "/auto", "/review-pr", "/auto the next spec"]) {
+    const result = await runPromptHook(500, { error: "boom" }, prompt);
+    assert.equal(result.status, 2, `${prompt} must erase the prompt even when the bridge fails`);
+    assert.equal(result.stdout, "");
+  }
+  // A bridge that wrongly reports interception on a Stop poll must not exit 2:
+  // that would refuse to let the Manager stop, looping the session forever.
+  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const stop = spawnSync("uv", ["run", "--no-project", "python", script, "manager-stop"], {
+    input: JSON.stringify({ hook_event_name: "Stop", stop_hook_active: false }),
+    encoding: "utf8",
+    env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: "manager" },
+  });
+  assert.equal(stop.status, 0); assert.equal(stop.stderr, "");
 });

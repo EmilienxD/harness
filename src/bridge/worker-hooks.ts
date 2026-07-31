@@ -1,20 +1,18 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import type { AgentId, AgentTelemetry, AgentTokenUsage, IsoTimestamp } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
+import { ProcessGitClient, type GitClient } from "../git/client.js";
 import type { BridgeRequestHandler } from "./protocol.js";
 import { protocolError } from "./protocol.js";
 
-const execFileAsync = promisify(execFile);
 const EMPTY_TELEMETRY: AgentTelemetry = { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 };
 
 export interface WorkerBranchResolver { current(cwd: string): Promise<string>; }
 export class GitWorkerBranchResolver implements WorkerBranchResolver {
+  public constructor(private readonly client: (cwd: string) => GitClient = (cwd) => new ProcessGitClient(cwd)) {}
+
   public async current(cwd: string): Promise<string> {
-    const { stdout } = await execFileAsync("git", ["branch", "--show-current"], { cwd, encoding: "utf8", windowsHide: true });
-    const branch = stdout.trim();
-    if (branch.length === 0) throw new Error("Worker is not on a named branch");
+    const branch = await this.client(cwd).currentBranch();
+    if (branch === undefined) throw new Error("Worker is not on a named branch");
     return branch;
   }
 }

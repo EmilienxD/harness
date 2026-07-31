@@ -13,7 +13,7 @@ const session = (value: string) => value as SessionId;
 const terminal = (value: string) => value as TerminalId;
 const startedAt = at("2026-07-30T10:00:00.000Z");
 
-function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }): AgentSession {
+function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }, expectsUncommittedTree = false): AgentSession {
   return {
     identity: { agentId: agent("worker-10"), type: "implementer" },
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
@@ -21,10 +21,11 @@ function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result"
     lifecycle: { status: "starting", startedAt },
     resultDelivery: delivery,
     telemetry: { totalTokens: 12, totalDurationMs: 34, totalToolUseCount: 2, compactionCount: 1 },
+    ...(expectsUncommittedTree ? { expectsUncommittedTree: true } : {}),
   };
 }
 
-function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }) {
+function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }, expectsUncommittedTree = false) {
   const fleet = new FleetRegistry();
   if (delivery.mode === "mailbox") {
     fleet.register({
@@ -35,7 +36,7 @@ function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: 
       telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
     }, startedAt);
   }
-  fleet.register(worker(delivery), startedAt);
+  fleet.register(worker(delivery, expectsUncommittedTree), startedAt);
   fleet.transition(agent("worker-10"), { status: "running", startedAt }, startedAt);
   const lease = new WriteLease();
   lease.acquire("write-capable", { agentId: agent("worker-10"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee") }, startedAt, "test launch");
@@ -76,6 +77,21 @@ test("dirty write-capable Stop becomes no-commit and enters the Manager mailbox"
   const entries = fleet.drainMailbox(manager, at("2026-07-30T10:06:00.000Z"));
   assert.equal(entries[0]?.result.outcome === "failed" && entries[0].result.failure.type, "no-commit");
   assert.equal(lease.current(), undefined);
+});
+
+// For an auto-run implementer a dirty tree is the expected success state: the
+// engine commits, and an empty diff is the failure it detects. The flag is a
+// property of the agent's contract, not of where its result goes.
+test("no-commit is not raised when the launch expected an uncommitted tree", async () => {
+  const expected = setup(false, { mode: "tool-result" }, true);
+  await expected.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "left the change in the tree" });
+  assert.equal(expected.delivered[0]?.outcome, "succeeded");
+  assert.equal(expected.lease.current(), undefined);
+
+  // A manually delegated write-capable agent still owes a commit.
+  const manual = setup(false);
+  await manual.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "done" });
+  assert.equal(manual.delivered[0]?.outcome === "failed" && manual.delivered[0].failure.type, "no-commit");
 });
 
 test("non-zero, kill, timeout, and StopFailure paths are typed and release", async () => {

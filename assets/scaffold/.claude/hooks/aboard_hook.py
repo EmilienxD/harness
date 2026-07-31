@@ -1,44 +1,77 @@
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
 
-# Endpoints served by the Manager hook routes. Everything else is a worker
-# route. Membership is explicit because several endpoints share a suffix
-# (`/hooks/manager/stop` and `/hooks/stop` both end in "/stop").
-MANAGER_ENDPOINTS = frozenset({
-    "/hooks/manager/prompt",
-    "/hooks/manager/stop",
-    "/hooks/manager/brief-git",
-    "/hooks/manager/brief-github",
-    "/hooks/manager/brief-fleet",
-    "/hooks/manager/brief-todo",
-})
+# Hooks are addressed by an opaque route name, never by a URL path. Claude Code
+# runs shell-form hooks through Git Bash on Windows, and MSYS rewrites any bare
+# argument that looks like a POSIX path: `/hooks/manager/prompt` arrives as
+# `C:/Program Files/Git/hooks/manager/prompt`, no route matches, and every hook
+# silently exits 0. The scaffold registers these hooks in exec form so no shell
+# is involved, and these names stay path-free so a hand-edited shell-form
+# registration cannot resurrect the same failure.
+ROUTES = {
+    "manager-prompt": "/hooks/manager/prompt",
+    "manager-stop": "/hooks/manager/stop",
+    "manager-brief-git": "/hooks/manager/brief-git",
+    "manager-brief-github": "/hooks/manager/brief-github",
+    "manager-brief-fleet": "/hooks/manager/brief-fleet",
+    "manager-brief-todo": "/hooks/manager/brief-todo",
+    "worker-subagent-start": "/hooks/worker/subagent-start",
+    "worker-subagent-stop": "/hooks/worker/subagent-stop",
+    "worker-agent-tool": "/hooks/worker/agent-tool",
+    "worker-post-compact": "/hooks/worker/post-compact",
+    "worker-reground": "/hooks/worker/reground",
+    "worker-stop": "/hooks/stop",
+    "worker-stop-failure": "/hooks/stop-failure",
+}
+
+# The only route whose event (`UserPromptSubmit`) can be blocked. Exit 2 on any
+# other route would be read as "refuse to stop" or "refuse to compact".
+BLOCKING_ROUTE = "manager-prompt"
 
 # Roles that run as automated, result-reporting workers. Interactive roles
-# (brainstormer, raw) never report a result, so worker hooks skip them.
-WORKER_AGENT_TYPES = frozenset({"implementer", "reviewer", "fixer"})
+# (brainstormer, raw, pr-doctor-hitl) never report a result, so worker hooks skip
+# them: pr-doctor-hitl waits on the user, and the run's continue signal for a
+# hitl issue is the pull request's resolution, not that agent's completion.
+WORKER_AGENT_TYPES = frozenset({"implementer", "pr-doctor-afk"})
+
+# Commands the bridge handles itself. Matches the bridge-side parsers.
+INTERCEPTED_COMMAND = re.compile(r"^\s*/(brainstorm|raw|auto|review-pr)(?:\s[\s\S]*)?$")
 
 
 def finish(message):
+    """Erase the prompt and show `message` to the user in place of a response.
+
+    This is the success path as much as the failure path. `/brainstorm` and
+    `/raw` are mechanical: the bridge spawns the terminal, and waking the
+    Manager to narrate that costs a turn and risks it acting on the command a
+    second time. Exit 2 on `UserPromptSubmit` blocks prompt processing and
+    erases the prompt, and stderr becomes what the user sees. The Manager is
+    told what happened later, batched into the next real prompt.
+    """
     sys.stderr.write("\n" + message.strip() + "\n")
     return 2
 
 
 def intercepted_prompt(prompt):
-    stripped = prompt.strip()
-    return stripped == "/raw" or stripped.startswith("/raw ") or stripped == "/brainstorm" or stripped.startswith("/brainstorm ")
+    return isinstance(prompt, str) and INTERCEPTED_COMMAND.match(prompt) is not None
 
 
 def main():
-    agent_id = os.environ.get("ABOARD_AGENT_ID")
-    if not agent_id or len(sys.argv) < 2:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--routes":
+        json.dump(ROUTES, sys.stdout)
         return 0
-    endpoint = sys.argv[1]
+    agent_id = os.environ.get("ABOARD_AGENT_ID")
+    route = sys.argv[1] if len(sys.argv) >= 2 else None
+    endpoint = ROUTES.get(route)
+    if not agent_id or endpoint is None:
+        return 0
     agent_type = os.environ.get("ABOARD_AGENT_TYPE")
-    expected_manager = endpoint in MANAGER_ENDPOINTS
+    expected_manager = route.startswith("manager-")
     if (expected_manager and agent_type != "manager") or (not expected_manager and agent_type not in WORKER_AGENT_TYPES):
         return 0
     try:
@@ -48,7 +81,8 @@ def main():
     if not isinstance(payload, dict):
         payload = {}
     prompt = payload.get("prompt", "")
-    is_intercepted = endpoint == "/hooks/manager/prompt" and isinstance(prompt, str) and intercepted_prompt(prompt)
+    blocking = route == BLOCKING_ROUTE
+    is_intercepted = blocking and intercepted_prompt(prompt)
     try:
         port = int(os.environ["ABOARD_BRIDGE_PORT"])
         token = os.environ["ABOARD_BRIDGE_TOKEN"]
@@ -118,7 +152,7 @@ def main():
         time.sleep(1)
     if not isinstance(result, dict):
         return 0
-    if result.get("intercepted"):
+    if blocking and result.get("intercepted"):
         return finish(str(result.get("message", "Aboard handled the command.")))
     # Only events that support context injection may print. Stop and
     # UserPromptSubmit do; the worker result routes deliberately do not.

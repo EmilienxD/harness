@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
+import { ProcessGitClient, isWorkingTreeClean, type GitClient } from "../git/client.js";
 import type { TerminalLifecycleEvent } from "../claude/terminals.js";
 import {
   isAutomatedAgentType,
@@ -17,20 +15,16 @@ import type { WriteLease } from "../domain/lease.js";
 import type { BridgeRequestHandler } from "./protocol.js";
 import { protocolError } from "./protocol.js";
 
-const execFileAsync = promisify(execFile);
-
 export interface WorkingTreeInspector {
   isClean(cwd: string): Promise<boolean>;
 }
 
+/** Thin adapter over the git boundary; the cwd is the worker's, not the host's. */
 export class GitWorkingTreeInspector implements WorkingTreeInspector {
+  public constructor(private readonly client: (cwd: string) => GitClient = (cwd) => new ProcessGitClient(cwd)) {}
+
   public async isClean(cwd: string): Promise<boolean> {
-    const { stdout } = await execFileAsync("git", ["status", "--porcelain"], {
-      cwd,
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    return stdout.trim().length === 0;
+    return isWorkingTreeClean(await this.client(cwd).status());
   }
 }
 
@@ -92,7 +86,11 @@ export class WorkerLifecycleReconciler {
       if (exitCode !== 0) {
         return this.#finish(observation.agentId, failure("crashed", exitCode, observation.lastAssistantMessage));
       }
-      if (this.options.lease.current()?.agentId === observation.agentId) {
+      // An auto-run implementer's contract ends at "the working tree contains
+      // the change": the engine commits, so a dirty tree here is the expected
+      // success state and an empty diff is the failure the engine detects.
+      const expectsUncommittedTree = this.options.fleet.get(observation.agentId)?.expectsUncommittedTree === true;
+      if (!expectsUncommittedTree && this.options.lease.current()?.agentId === observation.agentId) {
         let clean = false;
         try {
           clean = await this.options.workingTree.isClean(observation.cwd);
