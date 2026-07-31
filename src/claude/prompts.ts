@@ -168,14 +168,20 @@ function requireInstruction(instruction: string): string {
   return trimmed;
 }
 
+/**
+ * The disposition tells the worker what will happen to its change, not what to
+ * do about it: the extension owns every git and GitHub side effect, so no
+ * disposition ever asks an agent to commit, open, or merge anything
+ * (`docs/auto-implementation.md` §1).
+ */
 function dispositionGuidance(disposition: IssueDisposition): string {
   switch (disposition) {
     case "afk":
-      return "This issue is labelled `afk`: open a pull request that closes it and merge your own pull request once checks pass.";
+      return "This issue is labelled `afk`: aboard will commit your change, open a pull request, and merge it without further human review. Leave the work in the working tree and make sure the checks you can run pass first.";
     case "hitl":
-      return "This issue is labelled `hitl`: open the pull request and stop. Only a human may merge or close it.";
+      return "This issue is labelled `hitl`: aboard will commit your change and open a pull request, then wait for the user to review and merge it. Leave the work in the working tree, and make your final message a clear account of what you changed and why.";
     case "unclassified":
-      return "This issue carries neither `afk` nor `hitl`. Treat it as human-in-the-loop: open the pull request and stop, and say in your final message that the issue is unclassified.";
+      return "This issue carries neither `afk` nor `hitl`, which is a legitimate but unresolved state. Leave the work in the working tree and say in your final message that the issue is unclassified.";
   }
 }
 
@@ -332,7 +338,7 @@ export class PromptResolver {
 
     builder.section(
       undefined,
-      `You are reviewing pull request #${pullRequest.number} (\`${pullRequest.headBranch}\` into \`${pullRequest.baseBranch}\`). Post findings as review comments on specific lines.`,
+      `You are reviewing pull request #${pullRequest.number} (\`${pullRequest.headBranch}\` into \`${pullRequest.baseBranch}\`), and that branch is already checked out.`,
     );
     builder.section(undefined, instruction);
     if (request.focus !== undefined && request.focus.trim().length > 0) {

@@ -12,10 +12,18 @@ const sessionId = "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId;
 const agentId = "manager-1" as AgentId;
 
 test("plans a promptless Manager resume with only the recorded UUID", () => {
-  const plan = planManagerResume({ agentId, sessionId, shell: "powershell" });
+  const plan = planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default" });
   assert.deepEqual(plan.args, ["--resume", sessionId]);
   assert.equal(plan.promptDelivery, "none");
   assert.equal(plan.requiresWriteLease, false);
+});
+
+// The permission mode setting is a launch property, not a worker property: the
+// Manager gets it too, on start and on resume alike. bypassPermissions is never
+// carried over by --resume, so it has to be re-passed there.
+test("the Manager resume carries the configured permission mode", () => {
+  const plan = planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "bypass" });
+  assert.deepEqual(plan.args, ["--resume", sessionId, "--dangerously-skip-permissions"]);
 });
 
 test("manager metadata persists and corrupt metadata recovers as missing", async () => {
@@ -39,14 +47,38 @@ test("resume keeps the recorded identity and new replaces the session", async ()
     create: (request: unknown) => { records.push({ kind: "create", request }); return terminal("new-terminal"); },
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return terminal("resumed-terminal"); },
   } as unknown as TerminalController;
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "delegation-only", disallowedTools: ["Bash(git push*)"], now: () => new Date("2026-07-30T10:00:00.000Z"), transcriptExists: async () => true });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "delegation-only", disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), transcriptExists: async () => true });
   await lifecycle.start("resume");
   assert.match((records[0] as any).request.initialCommand, /--resume 4db0ed4c/);
+  // A wrapper starts the Manager too, resume included, and its arguments stay
+  // ahead of every aboard flag.
+  assert.match((records[0] as any).request.initialCommand, /^& clauder run kiro -- --resume /);
   assert.equal(saved[0].sessionId, sessionId);
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
   assert.match((records[1] as any).request.initialCommand, /--tools 'mcp__aboard__\*,Skill,AskUserQuestion'/);
   assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
+});
+
+test("the lifecycle applies the configured permission mode to start and resume", async () => {
+  const records: any[] = [];
+  const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
+  const snapshot = (id: string): TerminalSnapshot => ({ terminalId: id as TerminalId, agentId, sessionId, agentType: "manager", name: "aboard: Manager", cwd: "C:\\work", status: "open", createdAt: "2026-07-30T10:00:00.000Z", closedAt: null, exitCode: null });
+  const terminals = {
+    create: (request: unknown) => { records.push(request); return snapshot("terminal"); },
+    resume: (request: unknown) => { records.push(request); return snapshot("terminal"); },
+  } as unknown as TerminalController;
+  // Read through a callback, so toggling the setting takes effect on the next
+  // launch rather than at the next window reload.
+  let mode: "bypass" | "default" = "bypass";
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "read-only", permissionMode: () => mode, transcriptExists: async () => true });
+  await lifecycle.start("new");
+  assert.match(records[0].initialCommand, /--dangerously-skip-permissions/);
+  await lifecycle.start("resume");
+  assert.match(records[1].initialCommand, /--resume .* --dangerously-skip-permissions/);
+  mode = "default";
+  await lifecycle.start("new");
+  assert.doesNotMatch(records[2].initialCommand, /--dangerously-skip-permissions/);
 });
 
 test("resume without a transcript starts afresh under the same session id", async () => {

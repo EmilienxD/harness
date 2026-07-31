@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestamp } from "../domain/contracts.js";
 import { parseManagerPersistenceDto } from "../domain/validation.js";
-import { MANAGER_TOOL_PRESET_TOOLS, type ManagerToolPreset, planLaunch, planManagerResume } from "./launch.js";
+import { managerLaunchConfiguration, type ManagerToolPreset, type WorkerPermissionMode, planLaunch, planManagerResume } from "./launch.js";
 import { sessionTranscriptExists } from "./sessions.js";
 import type { ShellKind } from "./shell.js";
 import type { TerminalController, TerminalSnapshot } from "./terminals.js";
@@ -22,7 +22,8 @@ export class FileManagerStore implements ManagerStore {
   public async save(value: ManagerPersistenceDto): Promise<void> { const temporary = `${this.#path}.${process.pid}.tmp`; await mkdir(dirname(this.#path), { recursive: true }); await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { encoding: "utf8", mode: 0o600 }); await rm(this.#path, { force: true }); await rename(temporary, this.#path); }
 }
 
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly executable?: string; readonly preset: ManagerToolPreset; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly transcriptExists?: (sessionId: SessionId, cwd: string) => Promise<boolean>; }
+/** `command` and `permissionMode` are callbacks so a settings change applies to the next launch without reloading the window. */
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly preset: ManagerToolPreset; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly transcriptExists?: (sessionId: SessionId, cwd: string) => Promise<boolean>; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
   public constructor(private readonly options: ManagerLifecycleOptions) { this.#now = options.now ?? (() => new Date()); }
@@ -37,10 +38,12 @@ export class ManagerLifecycle {
     // afresh under the same imposed id (--session-id); identity and history
     // continuity are preserved because the id never changes.
     const resumable = mode === "resume" && await (this.options.transcriptExists ?? sessionTranscriptExists)(sessionId, this.options.workspaceRoot);
-    const executable = this.options.executable === undefined ? {} : { executable: this.options.executable };
+    const launched = this.options.command?.();
+    const command = launched === undefined ? {} : { command: launched };
+    const permissionMode = this.options.permissionMode?.() ?? "default";
     const plan = resumable
-      ? planManagerResume({ agentId, sessionId, shell: this.options.shell, ...executable })
-      : planLaunch({ agentId, sessionId, agentType: "manager", shell: this.options.shell, permissionMode: "default", configuration: { shape: "inline", tools: MANAGER_TOOL_PRESET_TOOLS[this.options.preset] }, disallowedTools: this.options.disallowedTools, ...executable });
+      ? planManagerResume({ agentId, sessionId, shell: this.options.shell, permissionMode, ...command })
+      : planLaunch({ agentId, sessionId, agentType: "manager", shell: this.options.shell, permissionMode, configuration: managerLaunchConfiguration(this.options.preset), disallowedTools: this.options.disallowedTools, ...command });
     const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine });
     const updatedAt = this.#now().toISOString() as IsoTimestamp;
     await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt });

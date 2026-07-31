@@ -4,6 +4,26 @@ aboard is a VS Code extension that runs delegated Claude Code work in visible, i
 
 The product contract is [docs/initial-spec.md](./docs/initial-spec.md), and the accepted implementation shape is [docs/architecture.md](./docs/architecture.md).
 
+## Settings
+
+aboard settings (`aboard.*`) are edited in VS Code Settings. They resolve through three layers, highest precedence first:
+
+1. `.vscode/settings.json` — an explicit VS Code workspace or folder value.
+2. `.aboard/settings.json` — the project override file, checked in and shared with the team.
+3. The user, profile, or default value.
+
+`.aboard/settings.json` is optional and never scaffolded; create it when a project needs its own configuration. Keys may be written flat or nested, with or without the redundant `aboard.` prefix, so all three of these set the same thing:
+
+```json
+{
+  "aboard.workers.permissionMode": "bypass",
+  "launch": { "maxInlinePromptChars": 4000 },
+  "aboard": { "timeouts": { "managerPrompt": 45 } }
+}
+```
+
+Changes apply live. An unknown key or an invalid value is reported in Output → aboard and falls back to the value from the next layer.
+
 ## Development baseline
 
 - Node.js 24 for local tooling; extension output targets Node.js 22.

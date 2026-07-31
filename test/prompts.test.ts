@@ -88,7 +88,7 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
   assert.match(prompt.text, /## Issue #47 — Add token refresh/);
   assert.match(prompt.text, /Refresh the access token before it expires\./);
   assert.match(prompt.text, /## Parent spec #31 — Auth rework/);
-  assert.match(prompt.text, /merge your own pull request/);
+  assert.match(prompt.text, /aboard will commit your change, open a pull request, and merge it/);
   assert.deepEqual(
     prompt.sources.map((source) => `${source.kind}#${source.number}`),
     ["issue#47", "parent-spec#31"],
@@ -99,10 +99,10 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
 
 test("carries the disposition each label implies", async () => {
   const cases: ReadonlyArray<readonly [readonly string[], RegExp]> = [
-    [["afk"], /merge your own pull request/],
-    [["hitl"], /Only a human may merge or close it/],
-    [[], /Treat it as human-in-the-loop/],
-    [["afk", "hitl"], /Only a human may merge or close it/],
+    [["afk"], /aboard will commit your change, open a pull request, and merge it/],
+    [["hitl"], /wait for the user to review and merge it/],
+    [[], /neither `afk` nor `hitl`, which is a legitimate but unresolved state/],
+    [["afk", "hitl"], /wait for the user to review and merge it/],
   ];
 
   for (const [labels, expected] of cases) {
@@ -263,4 +263,20 @@ test("summarizes a prompt without repeating its content", async () => {
   assert.equal(description.includes("hunter2"), false);
   assert.match(description, /^prompt=\d+ chars sources=issue#47\(\d+\)$/);
   assert.equal(describeResolvedPrompt(undefined), "prompt=none");
+});
+
+test("interactive launches resolve to no prompt so the terminal opens empty", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
+  for (const type of ["brainstormer", "raw"] as const) {
+    assert.equal(await adapter.resolve({ type, description: "d" }), undefined);
+    assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }), undefined);
+    // A Manager delegating with a real topic still gets it; only filler is gone.
+    const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" });
+    assert.equal(withTopic?.text.includes("caching layer"), true);
+  }
+  // Automated types keep their fallback: a worker with no first message would
+  // sit at an empty TUI forever.
+  const doctor = await adapter.resolve({ type: "pr-doctor-afk", description: "d" });
+  assert.match(String(doctor?.text), /Review the supplied change against its contract\./);
 });

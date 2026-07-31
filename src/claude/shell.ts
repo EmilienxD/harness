@@ -67,12 +67,18 @@ export function quoteArgument(shell: ShellKind, value: string): string {
   }
 }
 
+/**
+ * `command` is the launch command as tokens: the program followed by any fixed
+ * arguments it takes before Claude Code's own (`clauder run kiro --`). Every
+ * token is quoted individually, so a wrapper's arguments cannot turn into shell
+ * operators and a program path may contain spaces.
+ */
 export function buildCommandLine(
   shell: ShellKind,
-  executable: string,
+  command: readonly string[],
   args: readonly string[],
 ): string {
-  const quoted = [executable, ...args].map((value) => quoteArgument(shell, value));
+  const quoted = [...command, ...args].map((value) => quoteArgument(shell, value));
   // PowerShell needs the call operator to run a quoted path.
   const parts = shell === "powershell" ? ["&", ...quoted] : quoted;
   return parts.join(" ");

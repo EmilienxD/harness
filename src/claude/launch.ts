@@ -7,8 +7,13 @@
  *
  * Two invariants shape the whole module:
  *
- * - `--agent` and `--tools`/`--system-prompt` are mutually exclusive (5.1.1).
- *   A plan that mixes them is rejected, never silently reconciled.
+ * - For an agent whose definition declares `tools:`, `--agent` and
+ *   `--tools` are mutually exclusive (5.1.1). A plan that
+ *   mixes them is rejected, never silently reconciled. The Manager is the sole
+ *   exception, and only because its definition declares no `tools:` at all: an
+ *   agent that omits the field inherits the full pool, so `--tools <preset>`
+ *   narrows it rather than competing with it. That keeps the tool set a runtime
+ *   setting (4.3) while the persona lives in `.claude/agents/manager.md`.
  * - The first message and every later message travel as CLI arguments (5.1.2,
  *   5.1.3). aboard never types into a running TUI, so a message that cannot be
  *   represented on a command line spills to a file and is `@`-referenced.
@@ -28,10 +33,40 @@ import {
 } from "./prompts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
 
-export const DEFAULT_CLAUDE_EXECUTABLE = "claude";
+/**
+ * `aboard.launch.claudeCommand`. The launch command is a token list rather than
+ * a single executable so a wrapper can carry its own fixed arguments — a
+ * profile switcher launches as `clauder run kiro --`, where everything after
+ * `--` is Claude Code's. aboard appends its flags to these tokens and changes
+ * nothing else about how they are passed.
+ */
+export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 export const DEFAULT_RUNTIME_DIRECTORY = ".aboard/runtime";
 /** `aboard.launch.maxInlinePromptChars` — conservative, below every known ceiling. */
 export const DEFAULT_MAX_INLINE_PROMPT_CHARS = 4000;
+
+/**
+ * The longest command line each shell will carry, as a whole line rather than
+ * per argument.
+ *
+ * - `cmd.exe` hard-fails past 8191 characters, and there is no escape from it.
+ * - PowerShell and Git Bash are bounded instead by `CreateProcess`, whose
+ *   `lpCommandLine` caps at 32767 for the process the shell ultimately spawns.
+ *
+ * Both figures are taken well below the documented ceiling because the line is
+ * delivered as terminal input, where a console's own line-editing buffer can
+ * truncate before the shell ever parses it — and a truncated launch command is
+ * far worse than a spilled prompt, because it fails silently or launches
+ * something subtly different from what was planned.
+ */
+export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
+  cmd: 8_000,
+  powershell: 24_000,
+  "git-bash": 24_000,
+};
+
+/** The scaffolded definition the Manager session runs as (`--agent manager`). */
+export const MANAGER_AGENT_NAME = "manager";
 
 export const MANAGER_TOOL_PRESETS = ["read-only", "delegation-only"] as const;
 
@@ -53,7 +88,72 @@ export const MANAGER_TOOL_PRESET_TOOLS: Readonly<
   "delegation-only": ["mcp__aboard__*", "Skill", "AskUserQuestion"],
 };
 
-/** `aboard.workers.permissionMode` (spec section 8.3). */
+export type ClaudeCommandResult =
+  | { readonly ok: true; readonly value: readonly string[] }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Reads the launch command setting, accepting either a token array or a command
+ * string. The string form is split on whitespace with `'...'` and `"..."`
+ * grouping a token that contains spaces, which is what lets a quoted program
+ * path coexist with a wrapper's arguments (`"C:\\tools\\my claude.exe" run --`).
+ *
+ * This is deliberately not a shell parser: the result is a program plus its
+ * arguments, each quoted individually at build time, so `&&`, `|`, and `>` are
+ * literal argument text rather than operators.
+ */
+export function parseClaudeCommand(value: unknown): ClaudeCommandResult {
+  if (Array.isArray(value)) {
+    if (!value.every((token): token is string => typeof token === "string")) {
+      return { ok: false, reason: "Launch command array must contain only strings" };
+    }
+    const tokens = value.map((token) => token.trim()).filter((token) => token.length > 0);
+    return tokens.length === 0
+      ? { ok: false, reason: "Launch command is empty" }
+      : { ok: true, value: tokens };
+  }
+  if (typeof value !== "string") return { ok: false, reason: "Launch command must be a string or an array of strings" };
+
+  const tokens: string[] = [];
+  let current = "";
+  let started = false;
+  let quote: '"' | "'" | undefined;
+  for (const character of value) {
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      else current += character;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (started) tokens.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += character;
+    started = true;
+  }
+  if (quote !== undefined) return { ok: false, reason: "Launch command has an unterminated quote" };
+  if (started) tokens.push(current);
+  return tokens.length === 0
+    ? { ok: false, reason: "Launch command is empty" }
+    : { ok: true, value: tokens };
+}
+
+/**
+ * `aboard.workers.permissionMode` (spec section 8.3). The setting is named for
+ * the case it exists to serve — an unattended `afk` worker deadlocks on a
+ * permission prompt — but it is a property of how aboard launches Claude Code,
+ * not of one agent type. It applies to every session aboard starts or resumes,
+ * the Manager included: a Manager that stops on a prompt the user chose to
+ * bypass everywhere else is the same surprise, in the one terminal that is
+ * supposed to keep the fleet moving.
+ */
 export const WORKER_PERMISSION_MODES = ["bypass", "acceptEdits", "default"] as const;
 
 export type WorkerPermissionMode = (typeof WORKER_PERMISSION_MODES)[number];
@@ -66,9 +166,25 @@ export type LaunchConfiguration =
       readonly declaredTools?: readonly string[];
     }
   | {
+      /**
+       * Manager only: `--agent manager --tools <preset>`. Valid because the
+       * Manager definition declares no `tools:`, so nothing is overridden.
+       */
+      readonly shape: "agent-preset";
+      readonly agentName: string;
+      readonly tools: readonly string[];
+    }
+  /**
+   * The raw agent of spec section 5.7, which is the *absence* of an agent
+   * definition. It carries no `--system-prompt`: raw is defined as unconstrained
+   * (section 9.7), so there is no prompt to pass, and nothing in the extension
+   * has ever produced one. The spec's shape table listed the flag as optional;
+   * supporting an option no caller can reach only added an unbounded argument to
+   * every command line the planner has to fit inside a shell's limit.
+   */
+  | {
       readonly shape: "inline";
       readonly tools?: readonly string[];
-      readonly systemPrompt?: string;
     };
 
 /** The flat shape a caller supplies, so the exclusive pair can be rejected. */
@@ -76,7 +192,6 @@ export interface LaunchConfigurationInput {
   readonly agentName?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
   readonly tools?: readonly string[] | undefined;
-  readonly systemPrompt?: string | undefined;
 }
 
 export type LaunchPlanErrorCode =
@@ -88,11 +203,10 @@ export type LaunchPlanErrorCode =
   | "invalid-session-id"
   | "unsafe-agent-id"
   | "unsafe-spill-path"
-  | "unrepresentable-system-prompt"
   | "invalid-threshold"
-  | "invalid-sequence"
+  | "invalid-command"
+  | "command-line-too-long"
   | "missing-prompt"
-  | "missing-message"
   | "shape-not-allowed";
 
 export class LaunchPlanError extends Error {
@@ -110,17 +224,17 @@ const SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
- * Rejects the `--agent` plus `--tools`/`--system-prompt` combination that looks
- * like composition but is not (spec section 5.1.1).
+ * Rejects the `--agent` plus `--tools` combination that looks like composition
+ * but is not (spec section 5.1.1).
  */
 export function resolveLaunchConfiguration(
   input: LaunchConfigurationInput,
 ): LaunchConfiguration {
   if (input.agentName !== undefined) {
-    if (input.tools !== undefined || input.systemPrompt !== undefined) {
+    if (input.tools !== undefined) {
       throw new LaunchPlanError(
         "conflicting-launch-shape",
-        "--agent cannot be combined with --tools or --system-prompt",
+        "--agent cannot be combined with --tools",
       );
     }
     if (!AGENT_NAME_PATTERN.test(input.agentName)) {
@@ -145,7 +259,19 @@ export function resolveLaunchConfiguration(
   return {
     shape: "inline",
     ...(input.tools === undefined ? {} : { tools: input.tools }),
-    ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt }),
+  };
+}
+
+/**
+ * The one configuration that pairs `--agent` with `--tools`. It is built here
+ * rather than through `resolveLaunchConfiguration` so the exclusive pair stays
+ * rejected everywhere a caller could reach it with an arbitrary agent name.
+ */
+export function managerLaunchConfiguration(preset: ManagerToolPreset): LaunchConfiguration {
+  return {
+    shape: "agent-preset",
+    agentName: MANAGER_AGENT_NAME,
+    tools: MANAGER_TOOL_PRESET_TOOLS[preset],
   };
 }
 
@@ -160,6 +286,7 @@ export function launchWriteCapability(
   configuration: LaunchConfiguration,
 ): WriteCapability {
   if (agentType === "raw") return "write-capable";
+  // `agent-preset` and `inline` both carry the effective list in `tools`.
   return deriveWriteCapability(
     configuration.shape === "agent-defined" ? configuration.declaredTools : configuration.tools,
   );
@@ -193,7 +320,8 @@ export interface LaunchPlan {
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
   readonly shell: ShellKind;
-  readonly executable: string;
+  /** The launch command tokens (`aboard.launch.claudeCommand`), program first. */
+  readonly command: readonly string[];
   readonly args: readonly string[];
   readonly commandLine: string;
   readonly writeCapability: WriteCapability;
@@ -209,7 +337,7 @@ interface CommonPlanRequest {
   readonly shell: ShellKind;
   readonly permissionMode: WorkerPermissionMode;
   readonly model?: string | undefined;
-  readonly executable?: string | undefined;
+  readonly command?: readonly string[] | undefined;
   readonly maxInlinePromptChars?: number | undefined;
   readonly runtimeDirectory?: string | undefined;
 }
@@ -221,18 +349,11 @@ export interface LaunchPlanRequest extends CommonPlanRequest {
   readonly disallowedTools?: readonly string[] | undefined;
 }
 
-export interface ResumePlanRequest extends CommonPlanRequest {
-  readonly message: ResolvedPrompt | string;
-  /**
-   * Capability of the session being resumed. It was derived when the session
-   * was created; resume carries no shape flags that could change it.
-   */
-  readonly writeCapability: WriteCapability;
-  /** 1-based ordinal of this resume, so a spill never overwrites an earlier one. */
-  readonly sequence: number;
-}
+export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType">;
 
-export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType" | "permissionMode">;
+export interface SessionResumePlanRequest extends CommonPlanRequest {
+  readonly writeCapability: WriteCapability;
+}
 
 /**
  * aboard never writes a `permissions` block into project settings (4.3.1);
@@ -336,7 +457,7 @@ function planPrompt(
 }
 
 function commonPreconditions(request: CommonPlanRequest): {
-  readonly executable: string;
+  readonly command: readonly string[];
   readonly threshold: number;
   readonly runtimeDirectory: string;
 } {
@@ -361,21 +482,43 @@ function commonPreconditions(request: CommonPlanRequest): {
       "maxInlinePromptChars must be a non-negative integer",
     );
   }
+  const command = request.command === undefined || request.command.length === 0
+    ? [...DEFAULT_CLAUDE_COMMAND]
+    : request.command;
+  // A wrapper's own arguments reach argv, so they are checked here rather than
+  // trusted from a setting: an empty token would launch the wrong program, and
+  // an unquotable one would be silently mangled into the command line.
+  for (const token of command) {
+    if (token.trim().length === 0 || !canQuoteArgument(request.shell, token)) {
+      throw new LaunchPlanError(
+        "invalid-command",
+        `Launch command token cannot be passed on a ${request.shell} command line: ${JSON.stringify(token)}`,
+      );
+    }
+  }
   return {
-    executable: request.executable ?? DEFAULT_CLAUDE_EXECUTABLE,
+    command,
     threshold,
     runtimeDirectory: request.runtimeDirectory ?? DEFAULT_RUNTIME_DIRECTORY,
   };
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { executable, threshold, runtimeDirectory } = commonPreconditions(request);
+  const { command, threshold, runtimeDirectory } = commonPreconditions(request);
   const { agentType, configuration } = request;
 
-  if (agentType === "manager" && configuration.shape !== "inline") {
+  if (agentType === "manager" && configuration.shape !== "agent-preset") {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      "The Manager is the top-level session and never launches with --agent",
+      "The Manager launches as --agent manager with a tool preset",
+    );
+  }
+  if (agentType !== "manager" && configuration.shape === "agent-preset") {
+    // Only the Manager has a definition without `tools:`; for every other agent
+    // this shape would widen or contradict the frontmatter the lease trusts.
+    throw new LaunchPlanError(
+      "shape-not-allowed",
+      "Only the Manager combines --agent with a --tools preset",
     );
   }
   if (agentType === "raw" && configuration.shape !== "inline") {
@@ -398,29 +541,14 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   const shapeArguments: string[] = [];
   if (configuration.shape === "agent-defined") {
     shapeArguments.push("--agent", configuration.agentName);
+  } else if (configuration.shape === "agent-preset") {
+    shapeArguments.push("--agent", configuration.agentName);
+    shapeArguments.push(...toolListArguments("--tools", configuration.tools));
   } else {
     shapeArguments.push(...toolListArguments("--tools", configuration.tools));
-    if (configuration.systemPrompt !== undefined) {
-      const systemPrompt = configuration.systemPrompt.trim();
-      if (!canQuoteArgument(request.shell, systemPrompt)) {
-        throw new LaunchPlanError(
-          "unrepresentable-system-prompt",
-          `System prompt cannot be passed on a ${request.shell} command line`,
-        );
-      }
-      shapeArguments.push("--system-prompt", systemPrompt);
-    }
   }
 
-  const promptPlan = planPrompt(prompt, {
-    agentId: request.agentId,
-    shell: request.shell,
-    threshold,
-    runtimeDirectory,
-    stem: request.agentId,
-  });
-
-  const args = [
+  const fixedArguments = [
     "--session-id",
     request.sessionId,
     ...shapeArguments,
@@ -429,8 +557,38 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       ? []
       : ["--model", assertFlagValue(request.model, "invalid-model", "model")]),
     ...permissionArguments(request.permissionMode),
-    ...promptPlan.args,
   ];
+
+  const planFor = (promptThreshold: number): { readonly plan: PromptPlan; readonly args: string[]; readonly commandLine: string } => {
+    const plan = planPrompt(prompt, {
+      agentId: request.agentId,
+      shell: request.shell,
+      threshold: promptThreshold,
+      runtimeDirectory,
+      stem: request.agentId,
+    });
+    const args = [...fixedArguments, ...plan.args];
+    return { plan, args, commandLine: buildCommandLine(request.shell, command, args) };
+  };
+
+  // The prompt threshold alone cannot decide this. It measures the prompt text,
+  // while the shell's limit applies to the whole assembled line — which also
+  // carries the wrapper command, the tool lists, a system prompt, and quoting
+  // that expands rather than preserves length (PowerShell doubles every `'`,
+  // Git Bash turns one into four characters). A prompt comfortably under the
+  // threshold can still produce a command line that the shell truncates or
+  // refuses, so the line itself is measured and the prompt spilled if it is too
+  // long. Spilling is always safe, so an unsure implementation spills.
+  const limit = MAX_COMMAND_LINE_CHARS[request.shell];
+  let built = planFor(threshold);
+  if (built.commandLine.length > limit && built.plan.delivery === "inline") built = planFor(0);
+  if (built.commandLine.length > limit) {
+    throw new LaunchPlanError(
+      "command-line-too-long",
+      `Launch command line is ${built.commandLine.length} characters, over the ${limit} the ${request.shell} shell accepts, even with the prompt spilled to a file. Shorten the agent's tool list.`,
+    );
+  }
+  const { plan: promptPlan, args } = built;
 
   const capability = launchWriteCapability(agentType, configuration);
   return {
@@ -439,9 +597,9 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     sessionId: request.sessionId,
     agentType,
     shell: request.shell,
-    executable,
+    command,
     args,
-    commandLine: buildCommandLine(request.shell, executable, args),
+    commandLine: built.commandLine,
     writeCapability: capability,
     requiresWriteLease: requiresWriteLease(agentType, capability),
     promptDelivery: promptPlan.delivery,
@@ -450,80 +608,54 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 }
 
 /**
- * `send_to_agent` and Manager resume (6.2, 4.4): relaunch with
- * `--resume <session-id> <message>`. Never keystrokes into a live TUI.
+ * Manager resume (spec 4.4): relaunch with `--resume <session-id>`. Never
+ * keystrokes into a live TUI. The long-lived Manager resumes without an
+ * automated message.
  *
  * Resume carries no `--agent`/`--tools`, matching the spec's resume command and
  * keeping the mutually exclusive pair out of a second code path. Permission
  * mode is re-passed because `bypassPermissions` is documented as never carried
  * over by `--resume` (`docs/CLAUDE-REFERENCES/hooks.md`).
  */
-export function planResume(request: ResumePlanRequest): LaunchPlan {
-  const { executable, threshold, runtimeDirectory } = commonPreconditions(request);
-
-  const message = normalizePrompt(request.message);
-  if (message === undefined) {
-    throw new LaunchPlanError("missing-message", "A resume must carry a non-empty message");
-  }
-  if (!Number.isInteger(request.sequence) || request.sequence < 1) {
-    throw new LaunchPlanError("invalid-sequence", "Resume sequence must be a positive integer");
-  }
-
-  const promptPlan = planPrompt(message, {
+export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
+  const { command } = commonPreconditions({ ...request, agentType: "manager" });
+  const args = ["--resume", request.sessionId, ...permissionArguments(request.permissionMode)];
+  return {
+    kind: "resume",
     agentId: request.agentId,
+    sessionId: request.sessionId,
+    agentType: "manager",
     shell: request.shell,
-    threshold,
-    runtimeDirectory,
-    // Earlier spill files are retained for the session lifetime so `--resume`
-    // can still resolve their references, so each message gets its own file.
-    stem: `${request.agentId}-resume-${request.sequence}`,
-  });
+    command,
+    args,
+    commandLine: buildCommandLine(request.shell, command, args),
+    writeCapability: "read-only",
+    requiresWriteLease: false,
+    promptDelivery: "none",
+  };
+}
 
-  const args = [
-    "--resume",
-    request.sessionId,
-    ...(request.model === undefined
-      ? []
-      : ["--model", assertFlagValue(request.model, "invalid-model", "model")]),
-    ...permissionArguments(request.permissionMode),
-    ...promptPlan.args,
-  ];
-
+/**
+ * Reopens a worker's recorded session (`docs/auto-implementation.md` §9). Like
+ * the Manager's resume it carries no `--agent`/`--tools`: the session already
+ * has its configuration, and re-passing it would put the mutually exclusive pair
+ * into a second code path. Permission mode is re-passed because
+ * `bypassPermissions` is documented as never carried over by `--resume`.
+ */
+export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
+  const { command } = commonPreconditions(request);
+  const args = ["--resume", request.sessionId, ...permissionArguments(request.permissionMode)];
   return {
     kind: "resume",
     agentId: request.agentId,
     sessionId: request.sessionId,
     agentType: request.agentType,
     shell: request.shell,
-    executable,
+    command,
     args,
-    commandLine: buildCommandLine(request.shell, executable, args),
+    commandLine: buildCommandLine(request.shell, command, args),
     writeCapability: request.writeCapability,
     requiresWriteLease: requiresWriteLease(request.agentType, request.writeCapability),
-    promptDelivery: promptPlan.delivery,
-    ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
-  };
-}
-
-/** The long-lived Manager resumes without an automated message (spec 4.4). */
-export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { executable } = commonPreconditions({
-    ...request,
-    agentType: "manager",
-    permissionMode: "default",
-  });
-  const args = ["--resume", request.sessionId];
-  return {
-    kind: "resume",
-    agentId: request.agentId,
-    sessionId: request.sessionId,
-    agentType: "manager",
-    shell: request.shell,
-    executable,
-    args,
-    commandLine: buildCommandLine(request.shell, executable, args),
-    writeCapability: "read-only",
-    requiresWriteLease: false,
     promptDelivery: "none",
   };
 }

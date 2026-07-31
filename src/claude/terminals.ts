@@ -169,8 +169,7 @@ export class TerminalController {
    * Opens a terminal for an agent. The invariants are that an agent and a
    * session each have at most one *live* terminal, and that a session id never
    * migrates to a different agent. A closed terminal is spent history: the same
-   * agent may be launched again, which is what a Manager restart and every
-   * `send_to_agent` resume rely on.
+    * agent may be launched again, which is what a Manager restart relies on.
    */
   public create(request: CreateAboardTerminalRequest): TerminalSnapshot {
     return this.#create(request);

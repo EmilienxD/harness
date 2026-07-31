@@ -101,7 +101,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
   assert.throws(() => controller.create({
     agentId: agent("agent-6"),
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    agentType: "reviewer",
+    agentType: "pr-doctor-afk",
   }), /already has a live aboard terminal/);
 });
 
@@ -221,7 +221,7 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
   const duplicate = await handler(request("POST", "/terminals", {
     agentId: "worker",
     sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560",
-    agentType: "reviewer",
+    agentType: "pr-doctor-afk",
   }));
   assert.equal(duplicate.status, 409);
 });
