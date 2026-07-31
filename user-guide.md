@@ -36,16 +36,19 @@ Phase 4 — Manager smoke $ (5–10 min)
  9. Click "+ New Manager" in the Manager section above the fleet. On a fresh project it is the only launch button; no dialog should appear. Expect the one-time warning about permission prompts (workers aren't in bypass mode yet) — that's correct, acknowledge it. A Manager terminal opens and the launch buttons are replaced by a single Manager row in that section. The Fleet section below stays empty — it lists workers only, never the Manager.
 10. If Claude Code asks to approve the aboard MCP server from .mcp.json → approve. (First launch may pause on trust/MCP notices.)
 11. Verify: SessionStart briefing is injected (git branch, GitHub state, fleet, TODO pointer); the fleet tree shows the Manager.
-12. Ask the Manager: "What's the project status?" → expect a briefing-based answer, possibly using aboard__list_agents / aboard__get_todo visibly as tool calls.
+12. Ask the Manager: "What's the project status?" → expect a briefing-based answer, possibly using aboard__get_todo visibly as a tool call.
 13. Close the Manager terminal (bin icon or terminal kill). Expect: the Manager row disappears entirely — no "completed" row — and the Manager section falls back to "Resume Previous Manager" above "+ New Manager". Click Resume → no dialog, the same session continues (check .aboard\runtime\manager.json session id is unchanged). Close it again and click "+ New Manager" → a fresh session id is recorded. Later, with workers still listed in the fleet, kill the Manager again and confirm the launch buttons still appear — they are tied to no Manager running, not to an empty fleet.
 Phase 5 — Interception & interactive agents $ (10 min)
-14. Now set the worker permission mode for unattended work: Settings (Ctrl+,) → search aboard → Workers: Permission Mode = bypass. (Before this, ask the Manager to implement something and watch it refuse or note the config; optional.)
+14. Now set the permission mode for unattended work: Settings (Ctrl+,) → search aboard → Workers: Permission Mode = bypass. It applies to every agent aboard launches, the Manager included, but only from the next launch: a Manager already running keeps the mode it started with, so kill it and Resume to see `--dangerously-skip-permissions` on its command line. (Before this, ask the Manager to implement something and watch it refuse or note the config; optional.)
+14b. Project-scoped settings (30s, optional): create .aboard\settings.json with {"workers": {"permissionMode": "default"}} and save. Expect the global you just set to be overridden for this project only — Output → aboard logs nothing new, and a worker launched now uses default permissions. Then set "aboard.workers.permissionMode": "bypass" in .vscode\settings.json: the .vscode value wins over the project file. Delete both files again before continuing. A typo'd key ("permissionMod") should produce a warning naming the unknown setting, not a failure.
 15. In the Manager terminal, type: /brainstorm caching strategy → expected: the prompt never reaches the model; you see a short confirmation line; a brainstormer terminal opens and is focused; a tree node appears. Kill it after a moment (right-click node → Kill Agent) — don't run a full brainstorm, that burns money.
 16. Back in the Manager, ask a real question ("what's running right now?"). Expected: the answer is preceded by deferred-notification context like "Since your last message: at HH:MM you started a brainstormer…".
 17. Type /raw in the Manager terminal → raw terminal opens at an empty prompt; tree shows raw; status bar shows it as lease holder.
 18. Lease refusal: with raw idle, ask the Manager: "Implement issue #1" → expect an immediate refusal naming the raw agent as lease holder (not a queue, not a wait). Kill the raw agent → lease clears in the status bar.
 Phase 6 — The money test: afk issue end-to-end $ (10–20 min)
 19. gh issue create --title "Add multiply function" --body "Add a \multiply(a, b)\` function to \`calc.py\` that returns a * b." --label afk`
+> Phases 6-8 below exercise the **superseded** implementation flow, in which the implementer commits and merges its own PR and a reviewer hands findings to a fixer. They are accurate for the current build. Once `docs/auto-implementation.md` is implemented they are replaced by: start a run with `/auto`, the extension commits and opens the PR, `afk` merges without a reviewer, `hitl` stops at the open PR, and review mode launches one pr-doctor that both reviews and fixes.
+
 20. Tell the Manager: "Implement issue #1." Watch:
 - A worker terminal appears running claude --agent implementer --session-id … with the task as a CLI argument (issue body inline — nobody typed into a TUI)
 - Tree: implementer running · lease holder; status bar shows lease holder
@@ -59,14 +62,14 @@ Phase 7 — Typed failure & hitl path $ (10–15 min)
 24. Ask the Manager to implement issue #2 again. Let it finish → PR opens, worker stops without merging (hitl).
 Phase 8 — Review (opt-in, recommended) $
 25. Command Palette → "Aboard: Review Pull Request" → enter the PR number → reviewer agent runs read-only → findings appear as PR review comments on GitHub lines.
-26. In the Manager: "Send the review feedback back to the implementer." → it uses aboard__send_to_agent, resuming the same session; fixes land as a new commit on the PR.
+26. In the Manager: "Send the review feedback back to the implementer." → it launches a fixer agent against the unresolved threads; fixes land as a new commit on the PR.
 27. Merge PR #2 by hand → issue #2 closes (that merge is the approval).
 Phase 9 — Guards & restart (5 min, no tokens)
-28. In the sandbox window: Terminal → New Terminal → run claude by hand. Expect: no briefing injection, no new fleet node, hooks silent. (It will adopt the sandbox's Manager-style CLAUDE.md — that's project-scoping, expected.) Exit it.
+28. In the sandbox window: Terminal → New Terminal → run claude by hand. Expect: no briefing injection, no new fleet node, hooks silent, and no Manager persona (it is an agent definition now, not project memory). Exit it.
 29. Developer: Reload Window → bridge rebinds → "Aboard: Resume Manager" resumes the same session; fleet state restored from .aboard\runtime\.
 Phase 10 — Preset evaluation (spec open question #4)
 30. Set aboard.manager.toolPreset = delegation-only, run "Aboard: New Manager", ask it to read calc.py. Expected: it has no Read tool and must delegate/decline. Form an opinion vs read-only — your preference closes open question #4.
-What to report back to me
+31. Set aboard.launch.claudeCommand = clauder run kiro -- (or leave it at claude if you have no wrapper), run "Aboard: New Manager", and read the terminal's first line. Expected: & clauder run kiro -- --session-id ... --agent manager ..., i.e. your wrapper's arguments first and aboard's flags appended unchanged. A path with spaces goes in quotes: "C:\tools\my claude.exe" run --. Reset it to claude afterwards.What to report back to me
 For each phase, one line: PASS or FAIL + step number. For any FAIL:
 1. Exact step number and what you saw instead (exact text/screenshot of the terminal)
 2. Output → aboard channel, last ~50 lines
@@ -78,4 +81,4 @@ Plus four qualitative answers:
 - (c) Any unexpected permission prompts, TUI stalls, or garbled terminals?
 - (d) Rough wall-clock time and feel of the afk run.
 Cleanup when done: kill all agents from the tree, and optionally gh repo delete aboard-e2e --yes.
-Known non-bugs (don't report): the permission warning firing once; MCP-server approval prompt in the Manager terminal; the aboard-repo window running its own bridge on a different port; a hand-started session adopting the sandbox CLAUDE.md persona.
+Known non-bugs (don't report): the permission warning firing once; MCP-server approval prompt in the Manager terminal; the aboard-repo window running its own bridge on a different port.

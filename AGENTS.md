@@ -8,13 +8,16 @@ Build **aboard**: a VS Code extension that replaces opaque in-process delegation
 
 1. [`docs\initial-spec.md`](./docs\initial-spec.md) is the authoritative product and behavior contract.
 2. [`docs/architecture.md`](./docs/architecture.md) is the accepted repository architecture.
-3. [`docs/CLAUDE-REFERENCES/`](./docs/CLAUDE-REFERENCES/) contains the Claude Code documentation snapshots used by the spec. Verify hook, settings, tool, agent, and CLI behavior there before relying on memory.
+3. [`docs/auto-implementation.md`](./docs/auto-implementation.md) is the authoritative contract for the automatic implementation workflow. Where it and the spec disagree, it wins — it explicitly supersedes spec §7.5, §9.3 steps 3–5, §9.5, and §9.6.
+4. [`docs/CLAUDE-REFERENCES/`](./docs/CLAUDE-REFERENCES/) contains the Claude Code documentation snapshots used by the spec. Verify hook, settings, tool, agent, and CLI behavior there before relying on memory.
 
 If implementation convenience conflicts with a load-bearing decision in the spec, follow the spec. Do not silently reinterpret an open question; document it and ask the user when it blocks the requested work.
 
 ## Current stage
 
-The repository is pre-implementation. Configuration and architecture documents exist, but there is intentionally no runtime source. Do not add placeholder classes or speculative abstractions merely to fill the planned directory tree.
+Runtime source exists and the baseline checks under [Verification](#verification) apply. The automatic implementation workflow described in `docs/auto-implementation.md` is implemented: `src/domain/auto-run.ts` (pure reducer), `src/auto/engine.ts` (driver), and `src/git/client.ts` (git boundary). The `reviewer` and `fixer` agents are gone, replaced by `pr-doctor-afk` and `pr-doctor-hitl`.
+
+Do not add placeholder classes or speculative abstractions merely to fill the planned directory tree. Create a directory when its first real file arrives.
 
 ## Architecture
 
@@ -38,17 +41,22 @@ Follow the intended module layout in `docs/architecture.md`, but create a direct
 - Every project-scoped hook must first self-guard on `ABOARD_AGENT_ID`; hooks for specific roles must also check `ABOARD_AGENT_TYPE`. A non-addressed hook exits `0` silently.
 - aboard may add hook registrations to `.claude/settings.json`, but must preserve user settings and must never write `permissions` or `autoCompact`.
 - Resolve worker prompts before launch. Pass the first prompt as a CLI argument; never type an automated worker's prompt into a live TUI.
-- Treat `--agent` as mutually exclusive with Manager-style `--tools`/system-prompt launch configuration.
+- Treat `--agent` as mutually exclusive with `--tools`/system-prompt launch configuration for every agent whose definition declares `tools:`. The Manager is the one exception: it launches as `--agent manager --tools <preset>`, valid only because `.claude/agents/manager.md` declares no `tools:`. Never add one.
+- aboard scaffolds no `CLAUDE.md`. That file belongs to the user's project and applies to every session in the workspace; the Manager persona lives in its agent definition.
 - GitHub is the durable work-state source. Do not introduce `TODO.md` or duplicate issue/PR state locally.
 - Preserve the four-label model from the spec: `spec`, `todo`, `afk`, and `hitl`. Derive other state.
 - Automated review remains opt-in.
+- The extension owns the auto-implementation loop; agents only produce content. Every git and GitHub side effect — branch, commit, push, PR, merge — is performed by the extension, never by an agent. The `implementer` and pr-doctor definitions must forbid `git commit`, `git push`, and `gh`.
+- The Manager cannot launch `implementer`, `pr-doctor-afk`, or `pr-doctor-hitl`. They are reachable only through the auto-run engine and `review_pr`.
+- Every auto-run phase is idempotent and checks its own postcondition before acting. Resume correctness depends on it, and resume re-derives state from git and GitHub rather than trusting the persisted record.
+- The extension never approves a pull request. GitHub refuses self-approval, so an `afk` PR is merged directly and a `hitl` PR waits for the user's merge, which spec §7.3 defines as the approval.
 - `raw` is the absence of an agent definition. Do not create a raw-agent prompt file.
 
 ## Skills and scaffold assets
 
-aboard owns only the `update-todo` and `brainstorm` skills. The user-owned `map-issues`, `draft-issues`, `publish-issues`, `grill-me`, `lavish`, and `commit` skills must not be implemented or rewritten here.
+aboard owns only the `update-todo`, `brainstorm`, `raw`, `auto`, and `review-pr` skills. Each is a thin trigger for extension behavior and is meaningless outside aboard. The user-owned `map-issues`, `draft-issues`, `publish-issues`, `grill-me`, `lavish`, and `commit` skills must not be implemented or rewritten here.
 
-When those user-owned skills are packaged, vendor them as build assets from their upstream repository. Never use git submodules and never edit a vendored copy in place. Report a missing upstream asset instead of inventing a replacement.
+Those skills are never shipped with the extension — no copy under `assets/`, no git submodule. Each is installed into a scaffolded project by running its upstream install command from the `VENDORED_SKILLS` table in `src/scaffold/project.ts`. Do not add a copy of one, and do not author a replacement for a skill whose command is missing or fails: report it.
 
 The extension owns scaffolded files, versions them, upgrades unchanged files, and warns instead of clobbering locally edited files.
 
@@ -65,7 +73,7 @@ The extension owns scaffolded files, versions them, upgrades unchanged files, an
 
 ## Verification
 
-After runtime source exists, the baseline commands are:
+The baseline commands are:
 
 ```powershell
 npm run check
@@ -80,7 +88,8 @@ Add focused tests with each behavior change. At minimum, cover:
 - authentication and loopback binding;
 - prompt resolution and command argument construction;
 - settings/scaffold merge behavior that preserves user configuration;
-- session resume and typed failure transitions.
+- session resume and typed failure transitions;
+- auto-run phase transitions, postcondition short circuits, and resume from an interrupted run.
 
 For Python hooks, test both stdin payloads and inherited `ABOARD_*` environment variables. A guard-path test must assert exit `0` with no stdout or stderr.
 
