@@ -26,9 +26,9 @@ export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonl
 export class ManagerLifecycle {
   readonly #now: () => Date;
   public constructor(private readonly options: ManagerLifecycleOptions) { this.#now = options.now ?? (() => new Date()); }
-  public async start(mode: "start" | "resume" | "new" = "start"): Promise<TerminalSnapshot> {
+  /** The caller chooses resume or new explicitly; there is no ambiguous "start" that has to ask. */
+  public async start(mode: "resume" | "new"): Promise<TerminalSnapshot> {
     const prior = await this.options.store.load();
-    if (mode === "start" && prior) throw new Error("A Manager session is recorded; use Resume Manager or New Manager");
     if (mode === "resume" && !prior) throw new Error("No recorded Manager session exists");
     const agentId = mode === "resume" && prior ? prior.agentId : (this.options.agentIdFactory ?? (() => randomUUID() as AgentId))();
     const sessionId = mode === "resume" && prior ? prior.sessionId : (this.options.sessionIdFactory ?? (() => randomUUID() as SessionId))();

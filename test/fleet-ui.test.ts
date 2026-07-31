@@ -13,24 +13,66 @@ const terminal = (value: string) => value as TerminalId;
 const startedAt = at("2026-07-30T10:00:00.000Z");
 const worker: AgentSession = { identity: { agentId: agent("worker-1"), type: "implementer" }, sessionId: session("session-1"), terminal: { terminalId: terminal("terminal-1"), name: "worker" }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "tool-result" }, telemetry: { totalTokens: 1200, totalDurationMs: 3000, totalToolUseCount: 4, compactionCount: 1 }, issueNumber: 19 };
 
-test("tree mapping is hierarchical and includes lifecycle, telemetry, elapsed time, and lease", () => {
+test("tree mapping is hierarchical and shows status, elapsed time, and lease but no telemetry", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease(); let refreshes = 0;
   const model = new FleetTreeModel(fleet, lease, { refresh: () => refreshes++ }, () => new Date("2026-07-30T10:02:05.000Z"));
   fleet.register(worker, startedAt); fleet.transition(worker.identity.agentId, { status: "running", startedAt }, startedAt);
   fleet.startChild({ agentId: "child-1", parentAgentId: worker.identity.agentId, type: "Explore", status: "running", startedAt, telemetry: { totalTokens: 400, totalDurationMs: 1, totalToolUseCount: 2, compactionCount: 0 } }, startedAt);
   lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, startedAt, "test");
   const root = model.roots()[0]!; const item = model.item(root);
-  assert.equal(item.label, "implementer #19"); assert.match(item.description, /running · lease holder · 2:05 · compacted ×1/);
-  assert.equal(model.children(root).length, 1); assert.ok(refreshes >= 4); model.dispose();
+  assert.equal(item.label, "implementer #19"); assert.equal(item.description, "running · lease holder · 2:05");
+  assert.equal(item.tooltip, "Session: session-1\nStatus: running\nHolds the write lease");
+  const [child] = model.children(root);
+  assert.equal(child !== undefined && model.item(child).description, "running");
+  assert.equal(child !== undefined && model.item(child).tooltip, "Type: Explore\nStatus: running");
+  assert.ok(refreshes >= 4); model.dispose();
 });
 
-test("commands route focus, send, kill, resume, and force release", async () => {
+test("the Manager occupies its own section and never appears among the workers", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease();
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:02:05.000Z"));
+  assert.deepEqual(model.managerRoots(), []);
+  assert.deepEqual(model.roots(), []);
+  fleet.register(worker, startedAt);
+  // Workers with no Manager are a valid state: the fleet lists them while the
+  // Manager section stays empty and keeps offering its launch actions.
+  assert.deepEqual(model.managerRoots(), []);
+  assert.equal(model.roots().length, 1);
+  fleet.register({ ...worker, identity: { agentId: agent("manager-1"), type: "manager" }, sessionId: session("session-2"), resultDelivery: { mode: "none" } }, startedAt);
+  assert.equal(model.managerRoots().length, 1);
+  assert.equal(model.roots().length, 1);
+  const [onlyWorker] = model.roots();
+  assert.equal(onlyWorker?.kind === "agent" ? onlyWorker.session.identity.type : undefined, "implementer");
+  model.dispose();
+});
+
+test("icons separate the Manager, interactive agents, and automated workers, never the lease", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease();
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:02:05.000Z"));
+  const icon = (type: AgentSession["identity"]["type"], id: string, sessionId: string) => {
+    fleet.register({ ...worker, identity: { agentId: agent(id), type }, sessionId: session(sessionId) }, startedAt);
+    return model.item({ kind: "agent", session: fleet.get(agent(id))!, leaseHolder: true }).icon;
+  };
+  assert.equal(icon("manager", "m", "s-m"), "organization");
+  // A raw or brainstormer agent is write-capable and holds the lease, but it is
+  // still something the user talks to.
+  assert.equal(icon("brainstormer", "b", "s-b"), "comment-discussion");
+  assert.equal(icon("raw", "r", "s-r"), "comment-discussion");
+  assert.equal(icon("implementer", "i", "s-i"), "lock");
+  assert.equal(icon("reviewer", "v", "s-v"), "lock");
+  assert.equal(icon("fixer", "f", "s-f"), "lock");
+  model.dispose();
+});
+
+test("commands route focus and kill, and force release stays available as a recovery hatch", async () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease(); fleet.register(worker, startedAt); lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, startedAt, "test");
   const callbacks = new Map<string, (...args: readonly unknown[]) => unknown>(); const calls: string[] = [];
-  const registration = registerFleetCommands({ register: (name, callback) => { callbacks.set(name, callback); return { dispose: () => callbacks.delete(name) }; }, input: async () => "hello", confirm: async () => true, info: () => {}, error: () => {} }, { show: () => calls.push("show"), kill: () => calls.push("kill"), sendUserTakeoverText: (_id, text) => calls.push(`send:${text}`) }, fleet, lease, () => new Date("2026-07-30T10:03:00.000Z"));
+  const registration = registerFleetCommands({ register: (name, callback) => { callbacks.set(name, callback); return { dispose: () => callbacks.delete(name) }; }, confirm: async () => true, info: () => {}, error: () => {} }, { show: () => calls.push("show"), kill: () => calls.push("kill") }, fleet, lease, () => new Date("2026-07-30T10:03:00.000Z"));
   const node = { kind: "agent" as const, session: worker, leaseHolder: true };
-  await callbacks.get("aboard.focusAgent")?.(node); await callbacks.get("aboard.sendAgent")?.(node); await callbacks.get("aboard.killAgent")?.(node); await callbacks.get("aboard.resumeAgent")?.(node); await callbacks.get("aboard.forceReleaseLease")?.();
-  assert.deepEqual(calls, ["show", "send:hello", "kill", "show"]); assert.equal(lease.current(), undefined); registration.dispose(); assert.equal(callbacks.size, 0);
+  await callbacks.get("aboard.focusAgent")?.(node); await callbacks.get("aboard.killAgent")?.(node); await callbacks.get("aboard.forceReleaseLease")?.();
+  assert.deepEqual(calls, ["show", "kill"]); assert.equal(lease.current(), undefined);
+  assert.deepEqual([...callbacks.keys()], ["aboard.focusAgent", "aboard.killAgent", "aboard.forceReleaseLease"]);
+  registration.dispose(); assert.equal(callbacks.size, 0);
 });
 
 test("status and typed notifications render domain state without sensitive content", () => {

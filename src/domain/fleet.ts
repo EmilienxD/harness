@@ -62,6 +62,13 @@ export type FleetEvent =
   | {
       readonly sequence: number;
       readonly occurredAt: IsoTimestamp;
+      readonly type: "agent-removed";
+      readonly agentId: AgentId;
+      readonly sessionId: SessionId;
+    }
+  | {
+      readonly sequence: number;
+      readonly occurredAt: IsoTimestamp;
       readonly type: "lifecycle-transitioned";
       readonly agentId: AgentId;
       readonly from: AgentLifecycle["status"];
@@ -200,6 +207,40 @@ export class FleetRegistry {
     this.sessionsByAgent.set(agentId, session);
     this.agentBySession.set(session.sessionId, agentId);
     this.record({ type: "agent-registered", agentId, sessionId: session.sessionId }, occurredAt);
+  }
+
+  /**
+   * Forgets an agent completely. A dead terminal is not a fleet member: the
+   * session, its children, and any undelivered results go with it, so nothing
+   * in the tree or the persisted snapshot outlives the process it described.
+   */
+  public remove(agentId: AgentId, occurredAt: IsoTimestamp): void {
+    const session = this.sessionsByAgent.get(agentId);
+    if (session === undefined) return;
+    this.sessionsByAgent.delete(agentId);
+    this.agentBySession.delete(session.sessionId);
+    this.blockingResults.delete(agentId);
+    this.mailboxes.delete(agentId);
+    this.notifications.delete(agentId);
+    for (const [managerAgentId, entries] of this.mailboxes) {
+      const kept = entries.filter((entry) => entry.agentId !== agentId);
+      if (kept.length === entries.length) continue;
+      if (kept.length === 0) this.mailboxes.delete(managerAgentId);
+      else this.mailboxes.set(managerAgentId, kept);
+    }
+    for (const [childId, child] of this.childAgentsById) {
+      if (child.parentAgentId === agentId) this.childAgentsById.delete(childId);
+    }
+    this.record({ type: "agent-removed", agentId, sessionId: session.sessionId }, occurredAt);
+  }
+
+  /** Discards all live state, used when the project's `.aboard/` directory disappears. */
+  public clear(occurredAt: IsoTimestamp): void {
+    for (const agentId of [...this.sessionsByAgent.keys()]) this.remove(agentId, occurredAt);
+    this.childAgentsById.clear();
+    this.blockingResults.clear();
+    this.mailboxes.clear();
+    this.notifications.clear();
   }
 
   public get(agentId: AgentId): AgentSession | undefined {

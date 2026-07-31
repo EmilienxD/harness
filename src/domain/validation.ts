@@ -579,7 +579,8 @@ export function parseFleetPersistenceDto(
     const occurredAt = readTimestamp(event.occurredAt, `${path}.occurredAt`, innerIssues);
     if (sequence === undefined || occurredAt === undefined) return undefined;
     switch (event.type) {
-      case "agent-registered": {
+      case "agent-registered":
+      case "agent-removed": {
         const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
         const sessionId = parseSessionId(event.sessionId, `${path}.sessionId`, innerIssues);
         return agentId === undefined || sessionId === undefined

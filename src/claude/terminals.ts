@@ -1,8 +1,9 @@
-import type {
-  AgentId,
-  AgentType,
-  SessionId,
-  TerminalId,
+import {
+  isInteractiveAgentType,
+  type AgentId,
+  type AgentType,
+  type SessionId,
+  type TerminalId,
 } from "../domain/contracts.js";
 
 export const TERMINAL_KEYS = [
@@ -146,11 +147,10 @@ export interface TerminalControllerOptions {
   readonly processIdTimeoutMs?: number;
 }
 
-const INTERACTIVE_AGENT_TYPES: ReadonlySet<AgentType> = new Set([
-  "manager",
-  "brainstormer",
-  "raw",
-]);
+/** The Manager and every interactive agent are shown on creation; automated workers are not stolen focus for. */
+function isUserFacing(type: AgentType): boolean {
+  return type === "manager" || isInteractiveAgentType(type);
+}
 
 export class TerminalController {
   readonly #records = new Map<TerminalId, TerminalRecord>();
@@ -237,7 +237,7 @@ export class TerminalController {
       occurredAt: createdAt,
     });
 
-    if (INTERACTIVE_AGENT_TYPES.has(request.agentType)) handle.show(false);
+    if (isUserFacing(request.agentType)) handle.show(false);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
     return this.#snapshot(record);
   }

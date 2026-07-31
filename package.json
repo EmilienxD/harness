@@ -19,12 +19,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "aboard.startManager",
-        "title": "Aboard: Start Manager"
-      },
-      {
         "command": "aboard.resumeManager",
-        "title": "Aboard: Resume Manager"
+        "title": "Aboard: Resume Previous Manager"
       },
       {
         "command": "aboard.newManager",
@@ -36,7 +32,8 @@
       },
       {
         "command": "aboard.updateProject",
-        "title": "Aboard: Update Project Assets"
+        "title": "Aboard: Update Project Assets",
+        "icon": "$(sync)"
       },
       {
         "command": "aboard.reviewPr",
@@ -47,16 +44,8 @@
         "title": "Aboard: Focus Agent"
       },
       {
-        "command": "aboard.sendAgent",
-        "title": "Aboard: Send Message"
-      },
-      {
         "command": "aboard.killAgent",
         "title": "Aboard: Kill Agent"
-      },
-      {
-        "command": "aboard.resumeAgent",
-        "title": "Aboard: Resume Agent"
       },
       {
         "command": "aboard.forceReleaseLease",
@@ -79,29 +68,49 @@
     "views": {
       "aboard": [
         {
+          "id": "aboard.welcome",
+          "name": "Get Started",
+          "when": "!aboard.initialized"
+        },
+        {
+          "id": "aboard.manager",
+          "name": "Manager",
+          "when": "aboard.initialized"
+        },
+        {
           "id": "aboard.fleet",
-          "name": "Fleet"
+          "name": "Fleet",
+          "when": "aboard.initialized"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "aboard.fleet",
-        "when": "!aboard.initialized",
+        "view": "aboard.welcome",
         "contents": "aboard runs delegated Claude Code work in visible, independent terminals, coordinated by a long-lived Manager.\n\nGitHub keeps the durable work state, and you stay in control of the decisions that matter.\n\nInitializing installs the aboard agents, skills, and hooks into this workspace and registers the local MCP bridge.\n[Initialize](command:aboard.initializeProject)"
       },
       {
         "view": "aboard.fleet",
-        "when": "aboard.initialized",
-        "contents": "This workspace is ready. Agents the bridge launches appear here.\n[Start Manager](command:aboard.startManager)"
+        "contents": "No agents yet. Agents the Manager launches appear here."
       },
       {
-        "view": "aboard.fleet",
-        "when": "aboard.initialized",
-        "contents": "Re-run the installer to pick up new agent, skill, and hook versions.\n[Update Project Assets](command:aboard.updateProject)"
+        "view": "aboard.manager",
+        "when": "aboard.managerResumable",
+        "contents": "[Resume Previous Manager](command:aboard.resumeManager)"
+      },
+      {
+        "view": "aboard.manager",
+        "contents": "[+ New Manager](command:aboard.newManager)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "aboard.updateProject",
+          "when": "view == aboard.manager",
+          "group": "navigation@1"
+        }
+      ],
       "commandPalette": [
         {
           "command": "aboard.initializeProject",
@@ -112,43 +121,30 @@
           "when": "aboard.initialized"
         },
         {
+          "command": "aboard.resumeManager",
+          "when": "aboard.managerResumable && !aboard.managerLive"
+        },
+        {
+          "command": "aboard.newManager",
+          "when": "!aboard.managerLive"
+        },
+        {
           "command": "aboard.focusAgent",
           "when": "false"
         },
         {
-          "command": "aboard.sendAgent",
-          "when": "false"
-        },
-        {
           "command": "aboard.killAgent",
-          "when": "false"
-        },
-        {
-          "command": "aboard.resumeAgent",
           "when": "false"
         }
       ],
       "view/item/context": [
         {
           "command": "aboard.focusAgent",
-          "when": "view == aboard.fleet && viewItem =~ /aboard.agent/",
-          "group": "inline"
-        },
-        {
-          "command": "aboard.sendAgent",
-          "when": "view == aboard.fleet && viewItem == aboard.agent.active"
+          "when": "viewItem =~ /aboard.agent/"
         },
         {
           "command": "aboard.killAgent",
-          "when": "view == aboard.fleet && viewItem == aboard.agent.active"
-        },
-        {
-          "command": "aboard.resumeAgent",
-          "when": "view == aboard.fleet && viewItem == aboard.agent.finished"
-        },
-        {
-          "command": "aboard.forceReleaseLease",
-          "when": "view == aboard.fleet"
+          "when": "viewItem == aboard.agent.active"
         }
       ]
     },

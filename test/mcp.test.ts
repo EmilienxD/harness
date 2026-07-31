@@ -135,6 +135,11 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["run_agent", { type: "implementer", prompt: "", description: "do the work" }],
     ["spawn_agent", { type: "bogus", prompt: "work", description: "do the work" }],
     ["spawn_interactive_agent", { type: "raw", description: "too short" }],
+    // An interactive agent never reports a result, so a result-delivering tool
+    // must refuse it rather than strand the caller. And the reverse.
+    ["run_agent", { type: "brainstormer", prompt: "work", description: "brainstorm the caching design" }],
+    ["spawn_agent", { type: "raw", prompt: "work", description: "open a raw session" }],
+    ["spawn_interactive_agent", { type: "implementer", description: "implement the caching layer" }],
     ["list_agents", { surprise: true }],
     ["send_to_agent", { agentId: "", message: "hello" }],
     ["focus_agent", { agentId: "x", extra: true }],

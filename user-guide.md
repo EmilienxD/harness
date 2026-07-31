@@ -24,8 +24,8 @@ Phase 2 — Scaffold (5 min, no tokens)
 - .gitignore gained .aboard/runtime/ and .claude/settings.local.json; git status --porcelain does not list .aboard/ or the local settings file
 - .aboard/ now exists and holds scaffold.json plus runtime/ — and no bridge token file
 - On GitHub: a "Project TODO" issue exists with the (auto-created) todo label
-6. Non-destructive merge test: add a marker line (e.g. <!-- my edit -->) to .claude\agents\implementer.md, then click "Update Project Assets". Expect: a warning, the file reported as preserved, and your marker still there.
-6b. State test: delete .aboard\ from the explorer. The view returns to the presentation page with the "Initialize" button. Re-initialize before continuing.
+6. Non-destructive merge test: add a marker line (e.g. <!-- my edit -->) to .claude\agents\implementer.md, then click the sync icon ("Update Project Assets") in the Fleet view's title bar. Expect: a warning, the file reported as preserved, and your marker still there. The sync icon stays available once agents are listed.
+6b. State test: delete .aboard\ from the explorer. Expect: any live agent terminals close, the fleet empties, and the view returns to the presentation page with the "Initialize" button. Re-initialize before continuing.
 7. Commit the scaffold: git add -A; git commit -m "aboard scaffold"; git push
 Phase 3 — Bridge security probes (2 min, no tokens)
 8. Get the port from Output → aboard or the status bar (the token lives in bridge.json under the extension's per-workspace storage, outside the project — do not paste it anywhere, including to me). Then:
@@ -33,11 +33,11 @@ curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:<port>/mcp      # expect 4
 curl.exe -s -o NUL -w "%{http_code}" -H "Authorization: Bearer wrong" http://127.0.0.1:<port>/mcp   # expect 401
 Test-NetConnection <your-LAN-IP-from-ipconfig> -Port <port>          # expect TcpTestSucceeded: False
 Phase 4 — Manager smoke $ (5–10 min)
- 9. "Aboard: Start Manager". Expect the one-time warning about permission prompts (workers aren't in bypass mode yet) — that's correct, acknowledge it. A Manager terminal opens.
+ 9. Click "+ New Manager" in the Manager section above the fleet. On a fresh project it is the only launch button; no dialog should appear. Expect the one-time warning about permission prompts (workers aren't in bypass mode yet) — that's correct, acknowledge it. A Manager terminal opens and the launch buttons are replaced by a single Manager row in that section. The Fleet section below stays empty — it lists workers only, never the Manager.
 10. If Claude Code asks to approve the aboard MCP server from .mcp.json → approve. (First launch may pause on trust/MCP notices.)
 11. Verify: SessionStart briefing is injected (git branch, GitHub state, fleet, TODO pointer); the fleet tree shows the Manager.
 12. Ask the Manager: "What's the project status?" → expect a briefing-based answer, possibly using aboard__list_agents / aboard__get_todo visibly as tool calls.
-13. Run "Aboard: Start Manager" again → dialog offers Resume/New → choose Resume → same session continues (check .aboard\runtime\manager.json session id is unchanged).
+13. Close the Manager terminal (bin icon or terminal kill). Expect: the Manager row disappears entirely — no "completed" row — and the Manager section falls back to "Resume Previous Manager" above "+ New Manager". Click Resume → no dialog, the same session continues (check .aboard\runtime\manager.json session id is unchanged). Close it again and click "+ New Manager" → a fresh session id is recorded. Later, with workers still listed in the fleet, kill the Manager again and confirm the launch buttons still appear — they are tied to no Manager running, not to an empty fleet.
 Phase 5 — Interception & interactive agents $ (10 min)
 14. Now set the worker permission mode for unattended work: Settings (Ctrl+,) → search aboard → Workers: Permission Mode = bypass. (Before this, ask the Manager to implement something and watch it refuse or note the config; optional.)
 15. In the Manager terminal, type: /brainstorm caching strategy → expected: the prompt never reaches the model; you see a short confirmation line; a brainstormer terminal opens and is focused; a tree node appears. Kill it after a moment (right-click node → Kill Agent) — don't run a full brainstorm, that burns money.

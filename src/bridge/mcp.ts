@@ -1,4 +1,4 @@
-import { AGENT_TYPES, type AgentId, type AgentType } from "../domain/contracts.js";
+import { AGENT_TYPES, AUTOMATED_AGENT_TYPES, INTERACTIVE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentId, type AgentType } from "../domain/contracts.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
@@ -13,12 +13,17 @@ interface McpTool {
   readonly inputSchema: Readonly<Record<string, unknown>>;
 }
 
-const SPAWN_PROPERTIES = {
-  type: { type: "string", enum: AGENT_TYPES.filter((type) => type !== "manager") },
+const LAUNCH_PROPERTIES = {
   prompt: { type: "string", minLength: 1, description: "The task for the agent; becomes its first user turn." },
   description: { type: "string", minLength: 1, description: "A concise 3-6 word description shown in the fleet tree." },
   issue: { type: "integer", minimum: 1, description: "Optional GitHub issue whose resolved contract is merged into the launch prompt." },
 } as const;
+
+// The type/tool pairing is a contract, not a preference: an interactive agent
+// never reports a result, so launching one through a result-delivering tool
+// strands the caller and leaves the fleet waiting on a result that cannot come.
+const AUTOMATED_PROPERTIES = { type: { type: "string", enum: AUTOMATED_AGENT_TYPES }, ...LAUNCH_PROPERTIES } as const;
+const INTERACTIVE_PROPERTIES = { type: { type: "string", enum: INTERACTIVE_AGENT_TYPES }, ...LAUNCH_PROPERTIES } as const;
 
 // Tools are served under bare names; Claude Code namespaces them for the model
 // as mcp__aboard__<name>, which the Manager's --tools preset matches with
@@ -26,18 +31,18 @@ const SPAWN_PROPERTIES = {
 export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "run_agent",
-    description: "Launch a visible independent Claude Code agent in the foreground for a focused task. Like Claude Code's Agent tool with run_in_background false: this call waits for the agent's final result. Use mcp__aboard__spawn_agent when you should stay conversational while work runs.",
-    inputSchema: { type: "object", properties: SPAWN_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
+    description: "Launch a visible independent Claude Code agent in the foreground for a focused task. Like Claude Code's Agent tool with run_in_background false: this call waits for the agent's final result. Use mcp__aboard__spawn_agent when you should stay conversational while work runs, and mcp__aboard__spawn_interactive_agent for a session the user drives.",
+    inputSchema: { type: "object", properties: AUTOMATED_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
   },
   {
     name: "spawn_agent",
     description: "Launch a visible independent Claude Code agent in the background for a focused task. Like Claude Code's Agent tool with run_in_background true: returns immediately and the Manager Stop hook delivers the eventual result. Backgrounding does not bypass the single-writer lease.",
-    inputSchema: { type: "object", properties: SPAWN_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
+    inputSchema: { type: "object", properties: AUTOMATED_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
   },
   {
     name: "spawn_interactive_agent",
-    description: "Create and focus a visible Claude Code terminal for the user. The opening prompt is optional, and no result is expected or delivered. Use type raw for an unconstrained session with no agent definition.",
-    inputSchema: { type: "object", properties: SPAWN_PROPERTIES, required: ["type", "description"], additionalProperties: false },
+    description: "Create and focus a visible Claude Code terminal for the user to drive. The opening prompt is optional, and no result is expected or delivered, so never wait on one. Use type raw for an unconstrained session with no agent definition, or brainstormer for the brainstorming agent.",
+    inputSchema: { type: "object", properties: INTERACTIVE_PROPERTIES, required: ["type", "description"], additionalProperties: false },
   },
   {
     name: "list_agents",
@@ -119,10 +124,17 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function parseLaunch(value: unknown, promptRequired: boolean): DelegationLaunchInput | string {
+function parseLaunch(value: unknown, kind: "automated" | "interactive"): DelegationLaunchInput | string {
+  const interactive = kind === "interactive";
+  // An automated agent's prompt is its whole brief and cannot be typed in later;
+  // an interactive one is handed to the user, who may open the conversation.
+  const promptRequired = !interactive;
   if (!isRecord(value)) return "arguments must be an object";
   if (!exactKeys(value, ["type", "prompt", "description", "issue"])) return "arguments contain an unknown property";
   if (!nonEmptyString(value.type) || value.type === "manager" || !AGENT_TYPES.includes(value.type as AgentType)) return "type must be a supported worker agent type";
+  const type = value.type as AgentType;
+  if (interactive && !isInteractiveAgentType(type)) return `type must be one of ${INTERACTIVE_AGENT_TYPES.join(", ")}; ${type} reports a result and belongs on run_agent or spawn_agent`;
+  if (!interactive && !isAutomatedAgentType(type)) return `type must be one of ${AUTOMATED_AGENT_TYPES.join(", ")}; ${type} never reports a result and belongs on spawn_interactive_agent`;
   if (!nonEmptyString(value.description)) return "description must be a non-empty string";
   const words = value.description.trim().split(/\s+/).length;
   if (words < 3 || words > 6) return "description must contain 3-6 words";
@@ -154,17 +166,17 @@ async function callTool(
 ): Promise<unknown> {
   switch (name) {
     case "run_agent": {
-      const parsed = parseLaunch(args, true);
+      const parsed = parseLaunch(args, "automated");
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.run(parsed, signal);
     }
     case "spawn_agent": {
-      const parsed = parseLaunch(args, true);
+      const parsed = parseLaunch(args, "automated");
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.spawn(parsed);
     }
     case "spawn_interactive_agent": {
-      const parsed = parseLaunch(args, false);
+      const parsed = parseLaunch(args, "interactive");
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.spawnInteractive(parsed);
     }

@@ -30,7 +30,7 @@ test("manager metadata persists and corrupt metadata recovers as missing", async
   assert.equal(await store.load(), undefined);
 });
 
-test("start refuses replacement, resume keeps identity, and new replaces it", async () => {
+test("resume keeps the recorded identity and new replaces the session", async () => {
   const records: unknown[] = [];
   const saved: any[] = [];
   let recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
@@ -40,7 +40,6 @@ test("start refuses replacement, resume keeps identity, and new replaces it", as
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return terminal("resumed-terminal"); },
   } as unknown as TerminalController;
   const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "delegation-only", disallowedTools: ["Bash(git push*)"], now: () => new Date("2026-07-30T10:00:00.000Z"), transcriptExists: async () => true });
-  await assert.rejects(() => lifecycle.start("start"), /Resume Manager or New Manager/);
   await lifecycle.start("resume");
   assert.match((records[0] as any).request.initialCommand, /--resume 4db0ed4c/);
   assert.equal(saved[0].sessionId, sessionId);

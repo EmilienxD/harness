@@ -37,7 +37,7 @@ import {
   type BriefingSlice,
   type BriefingSources,
 } from "./bridge/manager-hooks.js";
-import { GitWorkingTreeInspector, WorkerLifecycleReconciler, createWorkerLifecycleRoutes } from "./bridge/lifecycle.js";
+import { GitWorkingTreeInspector, WorkerLifecycleReconciler, createWorkerLifecycleRoutes, reportsResult } from "./bridge/lifecycle.js";
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
@@ -119,6 +119,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let currentConfiguration = initialConfiguration.value;
   let bridgeEnvironment: { port: number; token: string } | undefined;
   let lifecycle: WorkerLifecycleReconciler | undefined;
+  let initialized = false;
   const terminals = new TerminalController({
     host: createVsCodeTerminalHost(),
     environment: () => {
@@ -131,12 +132,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         output.appendLine(`Terminal ${event.terminalId} closed (${event.reason}, exit ${event.exitCode ?? "unknown"})`);
       }
       if (event.type !== "terminal-closed") return;
-      // The Manager is not a worker: it delivers no result, holds no lease, and
-      // must not go through the worker reconciler. It still has to leave the
-      // active states, or the fleet keeps showing a dead terminal and the next
-      // launch cannot restart it.
-      if (fleet?.get(event.agentId)?.identity.type === "manager") closeManagerSession(event.agentId, event.exitCode, event.occurredAt as IsoTimestamp);
-      else void lifecycle?.terminalClosed(event).catch((error: unknown) => output.appendLine(`Lifecycle reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
+      const closed = fleet?.get(event.agentId);
+      if (closed === undefined) return;
+      if (!reportsResult(closed)) {
+        const occurredAt = event.occurredAt as IsoTimestamp;
+        // The reconciler would have released the lease; do it here for the paths
+        // that skip it, or an interactive agent's lease outlives its terminal.
+        lease.releaseForTerminalOutcome(event.agentId, occurredAt, "agent terminal closed");
+        fleet.remove(event.agentId, occurredAt);
+      } else void lifecycle?.terminalClosed(event).catch((error: unknown) => output.appendLine(`Lifecycle reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
     },
   });
   context.subscriptions.push({ dispose: () => terminals.dispose() });
@@ -184,7 +188,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
   registerNativeFleetUi(context, bridge.port, fleet, lease, terminals);
-  persistence = new PersistOnChange((listener) => fleet.onDidChange(listener), () => fleetStore.save(fleet.toPersistenceDto()), (error) => output.appendLine(`Fleet persistence failed: ${error instanceof Error ? error.message : "unknown error"}`));
+  // Persisting into an uninitialized project would recreate `.aboard/` behind the
+  // user's back — including right after they deleted it.
+  persistence = new PersistOnChange((listener) => fleet.onDidChange(listener), async () => { if (initialized) await fleetStore.save(fleet.toPersistenceDto()); }, (error) => output.appendLine(`Fleet persistence failed: ${error instanceof Error ? error.message : "unknown error"}`));
   // Disposed through subscriptions like every other resource; `deactivate` also
   // awaits it so queued writes are flushed on a normal shutdown.
   context.subscriptions.push({ dispose: () => void persistence?.dispose() });
@@ -196,26 +202,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     agentIdFactory: () => managerAgentId,
     transcriptExists: sessionTranscriptExists,
   });
-  // Closing the Manager terminal ends that session. `completed` is the honest
-  // state whatever the exit code: the user closed their own console, and a
-  // `failed` transition would only raise an alarming notification.
-  function closeManagerSession(agentId: AgentId, exitCode: number | null, occurredAt: IsoTimestamp): void {
-    const session = fleet.get(agentId);
-    if (session === undefined || !["starting", "running", "awaiting-user"].includes(session.lifecycle.status)) return;
-    try {
-      fleet.transition(agentId, { status: "completed", startedAt: session.lifecycle.startedAt, finishedAt: occurredAt, exitCode: exitCode ?? 0, lastAssistantMessage: null }, occurredAt);
-    } catch (error) { output.appendLine(`Manager close reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`); }
-  }
   const warnKey = "aboard.manager.permissionWarning";
-  const launch = async (mode: "start" | "resume" | "new") => {
+  // The UI offers resume and new as separate actions, so the launch path never
+  // has to interrupt with a "which did you mean?" prompt.
+  const launch = async (mode: "resume" | "new") => {
     const workerMode = currentConfiguration.workerPermissionMode;
     if (workerMode !== "bypass" && !context.globalState.get(warnKey)) { await window.showWarningMessage("Unattended workers may stall on permission prompts. For afk work, use the bypass permission mode."); await context.globalState.update(warnKey, true); }
     try {
-      if (mode === "start" && await managerStore.load() !== undefined) {
-        const choice = await window.showInformationMessage("A Manager session is already recorded. Resume it?", "Resume Manager", "New Manager");
-        if (choice === undefined) return;
-        mode = choice === "Resume Manager" ? "resume" : "new";
-      }
       const terminal = await manager.start(mode);
       // Registration is only ever valid in `starting`; a relaunch of the same
       // Manager identity goes through `restart`, carrying the new session id so
@@ -228,12 +221,35 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       }
       fleet.transition(terminal.agentId, { status: "running", startedAt }, startedAt);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
+    finally { await publishManagerState(); }
   };
-  // `aboard.initialized` drives the welcome view and command palette so the user
-  // is offered "Initialize" exactly once and "Update" afterwards.
+  // `aboard.initialized` drives the welcome view and the Initialize/Update pair.
+  // `aboard.managerLive` hides the launch actions while a Manager is running, and
+  // `aboard.managerResumable` shows Resume only when a session exists to resume.
+  const publishManagerState = async () => {
+    const recorded = await managerStore.load().catch(() => undefined);
+    await commands.executeCommand("setContext", "aboard.managerLive", fleet.list().some((entry) => entry.identity.type === "manager"));
+    await commands.executeCommand("setContext", "aboard.managerResumable", recorded !== undefined);
+  };
   const publishScaffoldState = async () => {
     const state = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const);
-    await commands.executeCommand("setContext", "aboard.initialized", state === "initialized");
+    const next = state === "initialized";
+    // `.aboard/` is the project's state root. When it disappears the aboard
+    // session it described is gone: live terminals are closed and the fleet is
+    // discarded, rather than leaving the tree showing agents whose backing state
+    // no longer exists.
+    if (initialized && !next) {
+      for (const terminal of terminals.list()) {
+        if (terminal.status === "open") try { terminals.kill(terminal.terminalId); } catch { /* already closing */ }
+      }
+      const at = new Date().toISOString() as IsoTimestamp;
+      if (lease.current() !== undefined) lease.forceRelease(at, "project state was removed");
+      fleet.clear(at);
+      output.appendLine("Project state directory .aboard/ was removed; the aboard session was discarded.");
+    }
+    initialized = next;
+    await commands.executeCommand("setContext", "aboard.initialized", next);
+    await publishManagerState();
   };
   await publishScaffoldState();
   // Watch the whole directory, not just the manifest: deleting `.aboard/` in the
@@ -243,7 +259,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   for (const event of [scaffoldWatcher.onDidCreate, scaffoldWatcher.onDidChange, scaffoldWatcher.onDidDelete]) {
     context.subscriptions.push(event(() => void publishScaffoldState()));
   }
-  context.subscriptions.push(scaffoldWatcher, window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState(); }));
+  context.subscriptions.push(
+    scaffoldWatcher,
+    window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState(); }),
+    fleet.onDidChange(() => void publishManagerState()),
+  );
   const scaffold = async () => {
     try {
       const autoCompactEnabled = workspace.getConfiguration("claudeCode").get<boolean>("autoCompact");
@@ -270,7 +290,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push(
     commands.registerCommand("aboard.initializeProject", scaffold),
     commands.registerCommand("aboard.updateProject", scaffold),
-    commands.registerCommand("aboard.startManager", () => launch("start")),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
     registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, callback), input: async (options) => await window.showInputBox(options), error: (message) => { void window.showErrorMessage(message); } }, reviews),

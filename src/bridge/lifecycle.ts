@@ -2,13 +2,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { TerminalLifecycleEvent } from "../claude/terminals.js";
-import type {
-  AgentId,
-  AgentTelemetry,
-  IsoTimestamp,
-  SessionId,
-  WorkerFailureType,
-  WorkerResult,
+import {
+  isAutomatedAgentType,
+  type AgentId,
+  type AgentSession,
+  type AgentTelemetry,
+  type IsoTimestamp,
+  type SessionId,
+  type WorkerFailureType,
+  type WorkerResult,
 } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
@@ -34,6 +36,17 @@ export class GitWorkingTreeInspector implements WorkingTreeInspector {
 
 export interface WorkerCompletionSink {
   complete(agentId: AgentId, result: WorkerResult): boolean;
+}
+
+/**
+ * Whether a closed terminal owes anyone a result. The Manager and interactive
+ * agents do not: their Stop hook is guarded off, so no result can ever arrive
+ * and there is nothing to reconcile — they are simply forgotten. Both halves of
+ * the test matter, so a mis-routed launch (an interactive type handed to a
+ * result-delivering tool) still cannot leave a dead agent stuck in the fleet.
+ */
+export function reportsResult(session: AgentSession): boolean {
+  return session.resultDelivery.mode !== "none" && isAutomatedAgentType(session.identity.type);
 }
 
 export interface WorkerLifecycleReconcilerOptions {

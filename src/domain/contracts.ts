@@ -20,6 +20,17 @@ export function isAutomatedAgentType(type: AgentType): boolean {
   return (AUTOMATED_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
+/**
+ * Agent types handed to the user instead of reporting back. They never deliver a
+ * result — their Stop hook is guarded off — so a caller that waits for one waits
+ * forever. Launch them only through the interactive path.
+ */
+export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "raw"] as const;
+
+export function isInteractiveAgentType(type: AgentType): boolean {
+  return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
+}
+
 export type AgentId = string & { readonly __brand: "AgentId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
 export type TerminalId = string & { readonly __brand: "TerminalId" };

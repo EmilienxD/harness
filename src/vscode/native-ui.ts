@@ -9,25 +9,35 @@ export function registerNativeFleetUi(context: ExtensionContext, port: number, f
   const disposables: Disposable[] = [];
   const changes = new EventEmitter<FleetTreeNode | undefined>();
   const model = new FleetTreeModel(fleet, lease, { refresh: () => changes.fire(undefined) });
-  const provider: TreeDataProvider<FleetTreeNode> = {
+  const provider = (roots: () => readonly FleetTreeNode[]): TreeDataProvider<FleetTreeNode> => ({
     onDidChangeTreeData: changes.event,
-    getChildren: (node) => [...(node === undefined ? model.roots() : model.children(node))],
+    getChildren: (node) => [...(node === undefined ? roots() : model.children(node))],
     getTreeItem: (node) => {
       const mapped = model.item(node);
       const item = new TreeItem(mapped.label, mapped.collapsible ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None);
       item.description = mapped.description;
       item.tooltip = mapped.tooltip;
       item.contextValue = mapped.contextValue;
-      item.iconPath = new ThemeIcon(node.kind === "child" ? "symbol-method" : node.leaseHolder ? "lock" : "terminal");
+      item.iconPath = new ThemeIcon(mapped.icon);
       if (mapped.command) item.command = { ...mapped.command, arguments: [...mapped.command.arguments] };
       return item;
     },
-  };
-  disposables.push(window.registerTreeDataProvider("aboard.fleet", provider), changes, model);
+  });
+  // Two sections over one model. The Manager section holds at most one row and
+  // shows its launch actions while empty — a welcome view renders only on an
+  // empty tree, which is exactly "no Manager is running". Workers therefore
+  // cannot share that tree; they would suppress the actions just by existing.
+  disposables.push(
+    window.registerTreeDataProvider("aboard.manager", provider(() => model.managerRoots())),
+    window.registerTreeDataProvider("aboard.fleet", provider(() => model.roots())),
+    changes,
+    model,
+    // Hosts the pre-initialization presentation; never has rows of its own.
+    window.registerTreeDataProvider("aboard.welcome", { getChildren: () => [], getTreeItem: (node: never) => node }),
+  );
 
   const commandRegistration = registerFleetCommands({
     register: (command, callback) => commands.registerCommand(command, callback),
-    input: async (prompt) => window.showInputBox({ prompt, ignoreFocusOut: true }),
     confirm: async (message, action) => await window.showWarningMessage(message, { modal: true }, action) === action,
     info: (message) => { void window.showInformationMessage(message); },
     error: (message) => { void window.showErrorMessage(message); },

@@ -195,3 +195,30 @@ test("restart relaunches a finished agent and rebinds session routing when the c
   assert.equal(fleet.getBySession(session("af817a6c-cd41-41e2-a4db-44d3f43cd560"))?.identity.agentId, "manager-1");
   assert.equal(fleet.getBySession(session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee")), undefined);
 });
+
+test("removing an agent forgets its session, children, and undelivered results", () => {
+  const fleet = new FleetRegistry();
+  const managerId = agent("manager-1");
+  const workerId = agent("worker-1");
+  fleet.register(createSession("manager-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "none" }, "manager"), startedAt);
+  fleet.register(createSession("worker-1", "af817a6c-cd41-41e2-a4db-44d3f43cd560", { mode: "mailbox", managerAgentId: managerId }), startedAt);
+  fleet.startChild({ agentId: "child-1", parentAgentId: workerId, type: "Explore", status: "running", startedAt, telemetry }, startedAt);
+  fleet.transition(workerId, { status: "completed", startedAt, finishedAt, exitCode: 0, lastAssistantMessage: "done" }, finishedAt);
+  fleet.recordResult(workerId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "done", telemetry }, finishedAt);
+
+  const events: string[] = [];
+  fleet.onDidChange((event) => events.push(event.type));
+  fleet.remove(workerId, finishedAt);
+  assert.equal(fleet.get(workerId), undefined);
+  assert.equal(fleet.getBySession(session("af817a6c-cd41-41e2-a4db-44d3f43cd560")), undefined);
+  assert.deepEqual(fleet.listChildren(workerId), []);
+  assert.deepEqual(fleet.drainMailbox(managerId, finishedAt), []);
+  assert.deepEqual(events, ["agent-removed"]);
+  fleet.remove(workerId, finishedAt);
+  assert.deepEqual(events, ["agent-removed"], "removing an absent agent is a no-op");
+
+  fleet.clear(finishedAt);
+  assert.deepEqual(fleet.list(), []);
+  assert.deepEqual(fleet.listChildren(), []);
+  assert.deepEqual(parseFleetPersistenceDto(JSON.parse(JSON.stringify(fleet.toPersistenceDto())) as unknown).ok, true);
+});
