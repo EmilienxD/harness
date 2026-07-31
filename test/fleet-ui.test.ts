@@ -59,8 +59,8 @@ test("icons separate the Manager, interactive agents, and automated workers, nev
   assert.equal(icon("brainstormer", "b", "s-b"), "comment-discussion");
   assert.equal(icon("raw", "r", "s-r"), "comment-discussion");
   assert.equal(icon("implementer", "i", "s-i"), "lock");
-  assert.equal(icon("reviewer", "v", "s-v"), "lock");
-  assert.equal(icon("fixer", "f", "s-f"), "lock");
+  assert.equal(icon("pr-doctor-afk", "v", "s-v"), "lock");
+  assert.equal(icon("pr-doctor-hitl", "f", "s-f"), "comment-discussion");
   model.dispose();
 });
 

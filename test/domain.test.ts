@@ -161,8 +161,8 @@ test("the legal agent catalogue excludes a custom explorer definition", () => {
     "manager",
     "brainstormer",
     "implementer",
-    "reviewer",
-    "fixer",
+    "pr-doctor-afk",
+    "pr-doctor-hitl",
     "raw",
   ]);
 });

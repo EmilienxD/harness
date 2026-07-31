@@ -5,8 +5,10 @@ import test from "node:test";
 
 import {
   SCAFFOLDED_AGENT_NAMES,
+  WORKER_AGENT_NAMES,
   parseAgentDefinition,
-  type ScaffoldedAgentName,
+  parseManagerAgentDefinition,
+  type WorkerAgentName,
 } from "../src/scaffold/agent-definition.js";
 
 const scaffoldRoot = join(process.cwd(), "assets", "scaffold");
@@ -21,32 +23,32 @@ const expected = {
     capability: "write-capable",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill"],
   },
-  reviewer: {
-    capability: "read-only",
-    tools: ["Read", "Grep", "Glob", "Bash(gh *)", "Bash(git diff*)", "LSP"],
-  },
-  fixer: {
+  "pr-doctor-afk": {
     capability: "write-capable",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill"],
   },
+  "pr-doctor-hitl": {
+    capability: "write-capable",
+    tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", "AskUserQuestion"],
+  },
 } as const;
 
-async function definition(name: ScaffoldedAgentName) {
+async function definition(name: WorkerAgentName) {
   const parsed = parseAgentDefinition(await readFile(join(agentsRoot, `${name}.md`), "utf8"));
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   return parsed.value;
 }
 
-test("ships exactly the four aboard agent definitions", async () => {
+test("ships the Manager definition and exactly the four worker definitions", async () => {
   const files = (await readdir(agentsRoot)).sort();
   assert.deepEqual(files, SCAFFOLDED_AGENT_NAMES.map((name) => `${name}.md`).sort());
-  assert.equal(files.includes("manager.md"), false);
+  assert.equal(files.includes("manager.md"), true);
   assert.equal(files.includes("raw.md"), false);
   assert.equal(files.includes("explorer.md"), false);
 });
 
-test("parses every definition and derives its capability from the exact tool catalogue", async () => {
-  for (const name of SCAFFOLDED_AGENT_NAMES) {
+test("parses every worker definition and derives its capability from the exact tool catalogue", async () => {
+  for (const name of WORKER_AGENT_NAMES) {
     const agent = await definition(name);
     assert.equal(agent.name, name);
     assert.equal(agent.model, "opus");
@@ -63,27 +65,67 @@ test("worker prompts encode their product contracts", async () => {
   assert.match(brainstormer.prompt, /do not create or modify workspace files/i);
 
   const implementer = await definition("implementer");
-  assert.match(implementer.prompt, /dedicated issue branch/i);
-  assert.match(implementer.prompt, /commit and a clean working tree/i);
-  assert.match(implementer.prompt, /For an `afk` issue, merge/i);
-  assert.match(implementer.prompt, /For a `hitl` issue.*only a human may merge/is);
+  assert.match(implementer.prompt, /already created and checked out/i);
+  assert.match(implementer.prompt, /contract ends at "the working tree contains the change\."/i);
   assert.match(implementer.prompt, /After compaction.*`gh issue view`/is);
 
-  const reviewer = await definition("reviewer");
-  assert.match(reviewer.prompt, /automated review is opt-in/i);
-  assert.match(reviewer.prompt, /specific changed lines/i);
-  assert.match(reviewer.prompt, /Do not edit code/i);
-  assert.match(reviewer.prompt, /GitHub is the durable review record/i);
+  const afk = await definition("pr-doctor-afk");
+  assert.match(afk.prompt, /Apply the fixes you find directly/i);
+  assert.match(afk.prompt, /becomes the fix commit's body/i);
 
-  const fixer = await definition("fixer");
-  assert.match(fixer.prompt, /Reply to every thread/i);
-  assert.match(fixer.prompt, /commit and a clean working tree/i);
-  assert.match(fixer.prompt, /For `afk`, merge/i);
-  assert.match(fixer.prompt, /For `hitl`.*only a human may merge/is);
+  const hitl = await definition("pr-doctor-hitl");
+  assert.match(hitl.prompt, /Present your findings to the user and stop/i);
+  assert.match(hitl.prompt, /only the changes they agreed to/i);
+  assert.match(hitl.prompt, /their merge is the approval/i);
+});
+
+// The two doctors are the same reviewer with different permission to act, so a
+// contract that appears in only one of them is a bug, not a specialization.
+test("the pr-doctors forbid git and gh identically and differ only in when they may act", async () => {
+  const afk = await definition("pr-doctor-afk");
+  const hitl = await definition("pr-doctor-hitl");
+  for (const prompt of [afk.prompt, hitl.prompt]) {
+    assert.match(prompt, /Do not run `git commit`, `git push`, `git checkout`, or any `gh` command/);
+    assert.match(prompt, /do not post review comments or merge anything/i);
+    assert.match(prompt, /review and you fix, in the same context/i);
+  }
+  assert.doesNotMatch(afk.prompt, /AskUserQuestion/);
+});
+
+test("the implementer is forbidden every git and GitHub side effect the engine owns", async () => {
+  const implementer = await definition("implementer");
+  for (const forbidden of ["git commit", "git push", "git checkout", "git branch"]) {
+    assert.match(implementer.prompt, new RegExp(`\`${forbidden}\``));
+  }
+  assert.match(implementer.prompt, /any `gh` command/);
+});
+
+test("the Manager definition leaves its tool set to the launch preset", async () => {
+  const source = await readFile(join(agentsRoot, "manager.md"), "utf8");
+  const parsed = parseManagerAgentDefinition(source);
+  assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
+  assert.equal(parsed.value.model, "opus");
+  // Omitting `tools:` is what makes `--agent manager --tools <preset>` a
+  // narrowing rather than a contradiction: an agent without the field inherits
+  // the full pool. A `tools:` line here would silently compete with the setting.
+  assert.doesNotMatch(source, /^tools\s*:/m);
+
+  assert.equal(
+    parseManagerAgentDefinition("---\nname: manager\ndescription: d\nmodel: opus\ntools: Read\n---\nOrchestrate.").ok,
+    false,
+  );
+  assert.equal(
+    parseManagerAgentDefinition("---\nname: implementer\ndescription: d\nmodel: opus\n---\nOrchestrate.").ok,
+    false,
+  );
+  // The Manager is not a worker: it must not resolve through the worker parser.
+  assert.equal(parseAgentDefinition(source).ok, false);
 });
 
 test("Manager guidance stays shallow and handles failed slash-command interception", async () => {
-  const manager = await readFile(join(scaffoldRoot, "CLAUDE.md"), "utf8");
+  const parsed = parseManagerAgentDefinition(await readFile(join(agentsRoot, "manager.md"), "utf8"));
+  assert.equal(parsed.ok, true);
+  const manager = parsed.ok ? parsed.value.prompt : "";
   for (const required of [
     /orchestrate/i,
     /not an autonomous software factory/i,

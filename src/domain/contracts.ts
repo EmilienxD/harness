@@ -2,19 +2,36 @@ export const AGENT_TYPES = [
   "manager",
   "brainstormer",
   "implementer",
-  "reviewer",
-  "fixer",
+  "pr-doctor-afk",
+  "pr-doctor-hitl",
   "raw",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 /**
+ * Every type the extension may launch. The Manager is excluded: it is created by
+ * the extension's own lifecycle, never by a delegation call.
+ */
+export const LAUNCHABLE_AGENT_TYPES = AGENT_TYPES.filter((type) => type !== "manager");
+
+/**
+ * The subset the Manager's `run_agent` tool may launch. `implementer` and both
+ * pr-doctors are absent on purpose: they are reachable only through the auto-run
+ * engine and `review_pr`, so the loop stays the extension's
+ * (`docs/auto-implementation.md` §2, §13). A type the Manager cannot see is a
+ * type it cannot bypass the engine with.
+ */
+export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT_TYPES.filter(
+  (type) => type !== "implementer" && type !== "pr-doctor-afk" && type !== "pr-doctor-hitl",
+);
+
+/**
  * Agent types that perform a task and return a result rather than being handed
  * to the user. They are never typed into, so their first prompt is mandatory
  * (spec section 5.3).
  */
-export const AUTOMATED_AGENT_TYPES = ["implementer", "reviewer", "fixer"] as const;
+export const AUTOMATED_AGENT_TYPES = ["implementer", "pr-doctor-afk"] as const;
 
 export function isAutomatedAgentType(type: AgentType): boolean {
   return (AUTOMATED_AGENT_TYPES as readonly AgentType[]).includes(type);
@@ -24,8 +41,13 @@ export function isAutomatedAgentType(type: AgentType): boolean {
  * Agent types handed to the user instead of reporting back. They never deliver a
  * result — their Stop hook is guarded off — so a caller that waits for one waits
  * forever. Launch them only through the interactive path.
+ *
+ * `pr-doctor-hitl` belongs here rather than with its `afk` twin: the two share a
+ * contract and a tool set, and differ only in that the HITL one stops to ask.
+ * The run's continue signal for a HITL issue is the pull request's resolution,
+ * never that agent's completion (`docs/auto-implementation.md` §2).
  */
-export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "raw"] as const;
+export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "raw", "pr-doctor-hitl"] as const;
 
 export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
@@ -141,6 +163,14 @@ export interface AgentSession {
   readonly resultDelivery: ResultDelivery;
   readonly telemetry: AgentTelemetry;
   readonly issueNumber?: number;
+  /**
+   * Set only by the auto-run engine. For an agent whose contract ends at "the
+   * working tree contains the change", a dirty tree at Stop is the expected
+   * success state rather than a `no-commit` failure — the engine commits. It is
+   * a property of the agent's contract, not of where its result goes, so it does
+   * not live on `ResultDelivery` (`docs/auto-implementation.md` §13).
+   */
+  readonly expectsUncommittedTree?: boolean;
   readonly compactSummaries?: readonly string[];
   readonly lastResult?: WorkerResult;
 }

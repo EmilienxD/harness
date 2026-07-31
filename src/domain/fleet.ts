@@ -1,3 +1,4 @@
+import { isInteractiveAgentType } from "./contracts.js";
 import type {
   AgentId,
   AgentLifecycle,
@@ -300,7 +301,7 @@ export class FleetRegistry {
         `Cannot transition agent ${agentId} from ${from} to ${lifecycle.status}`,
       );
     }
-    if (lifecycle.status === "awaiting-user" && !["brainstormer", "raw"].includes(session.identity.type)) {
+    if (lifecycle.status === "awaiting-user" && !isInteractiveAgentType(session.identity.type)) {
       throw new FleetStateError(
         "invalid-transition",
         `Agent type ${session.identity.type} cannot await user input`,

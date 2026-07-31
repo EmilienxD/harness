@@ -1,5 +1,6 @@
 import {
   AGENT_TYPES,
+  INTERACTIVE_AGENT_TYPES,
   WORKER_FAILURE_TYPES,
   type AgentId,
   type AgentIdentity,
@@ -31,10 +32,7 @@ export type ValidationResult<T> =
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const INTERACTIVE_AGENT_TYPES: ReadonlySet<AgentType> = new Set([
-  "brainstormer",
-  "raw",
-]);
+const INTERACTIVE_TYPES: ReadonlySet<AgentType> = new Set(INTERACTIVE_AGENT_TYPES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -402,6 +400,11 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     record.lastResult === undefined
       ? undefined
       : parseWorkerResult(record.lastResult, "session.lastResult", issues);
+  let expectsUncommittedTree: boolean | undefined;
+  if (record.expectsUncommittedTree !== undefined) {
+    if (typeof record.expectsUncommittedTree === "boolean") expectsUncommittedTree = record.expectsUncommittedTree;
+    else issues.push("session.expectsUncommittedTree must be a boolean");
+  }
   const compactSummaries = record.compactSummaries === undefined ? undefined : Array.isArray(record.compactSummaries)
     ? record.compactSummaries.map((value, index) => readNonEmptyString(value, `session.compactSummaries[${index}]`, issues))
     : (issues.push("session.compactSummaries must be an array"), undefined);
@@ -409,7 +412,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
   if (identity !== undefined && resultDelivery !== undefined) {
     if (
       (identity.type === "manager" ||
-        INTERACTIVE_AGENT_TYPES.has(identity.type)) &&
+        INTERACTIVE_TYPES.has(identity.type)) &&
       resultDelivery.mode !== "none"
     ) {
       issues.push(
@@ -418,7 +421,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     }
     if (
       identity.type !== "manager" &&
-      !INTERACTIVE_AGENT_TYPES.has(identity.type) &&
+      !INTERACTIVE_TYPES.has(identity.type) &&
       resultDelivery.mode === "none"
     ) {
       issues.push(
@@ -427,7 +430,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     }
     if (
       lifecycle?.status === "awaiting-user" &&
-      !INTERACTIVE_AGENT_TYPES.has(identity.type)
+      !INTERACTIVE_TYPES.has(identity.type)
     ) {
       issues.push(
         `session.lifecycle.status awaiting-user is only legal for interactive agents`,
@@ -459,6 +462,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     telemetry,
     ...(lastResult === undefined ? {} : { lastResult }),
     ...(issueNumber === undefined ? {} : { issueNumber }),
+    ...(expectsUncommittedTree === undefined ? {} : { expectsUncommittedTree }),
     ...(compactSummaries === undefined ? {} : { compactSummaries: compactSummaries as string[] }),
   };
   return { ok: true, value: base };
