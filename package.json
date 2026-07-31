@@ -219,14 +219,6 @@
           "default": "default",
           "description": "Permission mode for every agent aboard launches or resumes, including the Manager. Applied per process; aboard never writes a permissions block into .claude/settings.json."
         },
-        "aboard.manager.toolPreset": {
-          "type": "string",
-          "enum": [
-            "read-only",
-            "delegation-only"
-          ],
-          "default": "read-only"
-        },
         "aboard.manager.disallowedTools": {
           "type": "array",
           "items": {

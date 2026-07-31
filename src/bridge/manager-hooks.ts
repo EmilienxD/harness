@@ -170,6 +170,10 @@ export interface InteractiveManagerLauncher {
   spawnInteractive(input: DelegationLaunchInput): Promise<unknown>;
 }
 
+export interface InvokingTerminalKiller {
+  kill(terminalId: AgentSession["terminal"]["terminalId"]): void;
+}
+
 /** The extension-owned actions `/auto` and `/review-pr` trigger. */
 export interface ManagerCommandActions {
   startAutoRun(): Promise<unknown>;
@@ -184,11 +188,14 @@ export class ManagerPromptService {
     private readonly launcher: InteractiveManagerLauncher,
     now?: () => Date,
     private readonly actions?: ManagerCommandActions,
+    private readonly terminals?: InvokingTerminalKiller,
   ) {
     this.#now = now ?? (() => new Date());
   }
 
   public async handle(agentId: AgentId, prompt: string): Promise<Record<string, unknown>> {
+    const done = parseDoneCommand(prompt);
+    if (done !== undefined) return this.#done(agentId, done);
     const action = parseActionCommand(prompt);
     if (action !== undefined) return this.#runAction(agentId, action);
     const command = parseInteractiveCommand(prompt);
@@ -222,6 +229,24 @@ export class ManagerPromptService {
         ? `${opened} It takes no arguments, so the text you typed after /${command.command} was not sent; type it in the new terminal.`
         : opened,
     };
+  }
+
+  #done(agentId: AgentId, command: ParsedDoneCommand): Record<string, unknown> {
+    const session = this.fleet.get(agentId);
+    if (session === undefined || this.terminals === undefined) {
+      return { intercepted: true, message: "aboard could not close this terminal right now." };
+    }
+    try {
+      this.terminals.kill(session.terminal.terminalId);
+      return {
+        intercepted: true,
+        message: command.ignoredArguments
+          ? "/done closes this terminal; the text you typed after it was not sent."
+          : "Closing this terminal.",
+      };
+    } catch (error) {
+      return { intercepted: true, message: `aboard could not close this terminal: ${error instanceof Error ? error.message : "the terminal action failed"}.` };
+    }
   }
 
   /**
@@ -276,6 +301,16 @@ interface ParsedActionCommand {
   readonly type: "auto" | "review-pr";
   readonly command: string;
   readonly ignoredArguments: boolean;
+}
+
+interface ParsedDoneCommand {
+  readonly ignoredArguments: boolean;
+}
+
+function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
+  const match = /^\s*\/done(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
+  if (match === null) return undefined;
+  return { ignoredArguments: (match[1]?.trim() ?? "").length > 0 };
 }
 
 /**

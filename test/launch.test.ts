@@ -8,8 +8,6 @@ import {
   DEFAULT_MAX_INLINE_PROMPT_CHARS,
   MAX_COMMAND_LINE_CHARS,
   LaunchPlanError,
-  MANAGER_TOOL_PRESET_TOOLS,
-  managerLaunchConfiguration,
   describeLaunchPlan,
   launchWriteCapability,
   parseClaudeCommand,
@@ -57,11 +55,11 @@ function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest 
   };
 }
 
-test("plans the Manager as --agent manager narrowed by a tool preset, with no Agent tool", () => {
+test("plans the Manager as --agent manager with no tool flags and no Agent tool", () => {
   const plan = planLaunch(
     request({
       agentType: "manager",
-      configuration: managerLaunchConfiguration("read-only"),
+      configuration: resolveLaunchConfiguration({ agentName: "manager" }),
       disallowedTools: ["Bash(git push*)"],
       permissionMode: "default",
       prompt: undefined,
@@ -69,18 +67,15 @@ test("plans the Manager as --agent manager narrowed by a tool preset, with no Ag
     }),
   );
 
-  // The persona lives in .claude/agents/manager.md, which declares no `tools:`,
-  // so the preset narrows an inherited pool instead of contradicting the file.
-  // Tool lists are one comma-separated argument: the flags are variadic, so
-  // separate values would swallow the positional prompt (claude --help:
-  // "Bash,Edit,Read"). MCP tools surface as mcp__<server>__<tool>.
+  // Persona, model, and the read-only tool set all live in
+  // .claude/agents/manager.md, so the command line carries no tool allowlist
+  // at all. The allowlist's contents (no Agent, no session-task tools, the
+  // mcp__aboard__* delegation surface) are pinned in agent-definitions.test.ts.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
     "--agent",
     "manager",
-    "--tools",
-    "mcp__aboard__*,Read,Grep,Glob,Bash,Skill,AskUserQuestion",
     "--disallowedTools",
     "Bash(git push*)",
     "--model",
@@ -88,21 +83,13 @@ test("plans the Manager as --agent manager narrowed by a tool preset, with no Ag
   ]);
   assert.equal(
     plan.commandLine,
-    `& claude --session-id ${sessionId} --agent manager --tools 'mcp__aboard__*,Read,Grep,Glob,Bash,Skill,AskUserQuestion' --disallowedTools 'Bash(git push*)' --model opus`,
+    `& claude --session-id ${sessionId} --agent manager --disallowedTools 'Bash(git push*)' --model opus`,
   );
   assert.equal(plan.promptDelivery, "none");
-  // The Manager orchestrates and is never a lease holder, even though the
-  // read-only preset leaves unrestricted Bash in place.
+  // The Manager orchestrates and is never a lease holder, even though its
+  // tool list leaves unrestricted Bash in place (spec section 4.3.1).
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, false);
-});
-
-test("neither Manager preset exposes the Agent or session-task tools", () => {
-  for (const tools of Object.values(MANAGER_TOOL_PRESET_TOOLS)) {
-    for (const forbidden of ["Agent", "Task", "TaskCreate", "TaskUpdate", "TodoWrite"]) {
-      assert.equal(tools.includes(forbidden), false, `${forbidden} must be absent`);
-    }
-  }
 });
 
 test("plans an agent-defined implementer and spills a multi-line prompt", () => {
@@ -199,9 +186,12 @@ test("the builtin types carry Claude Code's own capabilities, not a derived gues
 });
 
 test("rejects plans that mix --agent with inline configuration", () => {
+  // An agent's tool set is its definition's `tools:` field; a `--tools` flag
+  // alongside `--agent` would compete with the file the write lease trusts,
+  // so the pair is refused rather than reconciled (spec section 5.1.1).
   for (const input of [
     { agentName: "implementer", tools: ["Read"] },
-    { agentName: "manager", tools: MANAGER_TOOL_PRESET_TOOLS["read-only"] },
+    { agentName: "manager", tools: ["Read", "Grep"] },
   ]) {
     assert.throws(
       () => resolveLaunchConfiguration(input),
@@ -226,20 +216,31 @@ test("pins each launch shape to the agent types allowed to use it", () => {
     );
   };
 
-  // raw has no definition to launch from, and the Manager must not fall back to
-  // a bare --tools launch that would leave it without its persona.
+  // raw has no definition to launch from; inline is its shape and it never
+  // carries --agent.
   rejects({ agentType: "raw", configuration: resolveLaunchConfiguration({ agentName: "manager" }) });
-  rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({ agentName: "manager" }) });
-  rejects({
-    agentType: "manager",
-    configuration: resolveLaunchConfiguration({ tools: [...MANAGER_TOOL_PRESET_TOOLS["read-only"]] }),
-  });
 
-  // Every worker definition declares its own `tools:`, which the write lease
-  // trusts; a preset alongside --agent would widen it behind the bridge's back.
-  for (const agentType of ["implementer", "pr-doctor-afk", "pr-doctor-hitl", "brainstormer"] as const) {
-    rejects({ agentType, configuration: managerLaunchConfiguration("read-only") });
+  // The Manager launches from its own definition and nothing else: no bare
+  // inline launch (it would lose the persona), and no other agent name.
+  rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({}) });
+  rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({ agentName: "implementer" }) });
+
+  // Every other type has a definition — scaffolded or builtin — and a bare
+  // inline launch would leave it without persona and frontmatter alike.
+  for (const agentType of ["implementer", "pr-doctor-afk", "pr-doctor-hitl", "brainstormer", "Explore"] as const) {
+    rejects({ agentType, configuration: resolveLaunchConfiguration({ tools: ["Read"] }) });
   }
+
+  // The one allowed pairing per side: raw inline, and the Manager as manager.
+  const raw = planLaunch(request({ agentType: "raw", configuration: resolveLaunchConfiguration({ tools: ["Read"] }) }));
+  assert.deepEqual(raw.args.slice(2), ["--tools", "Read", "--dangerously-skip-permissions", "Implement issue #47."]);
+  const manager = planLaunch(request({
+    agentType: "manager",
+    configuration: resolveLaunchConfiguration({ agentName: "manager" }),
+    prompt: undefined,
+    permissionMode: "default",
+  }));
+  assert.deepEqual(manager.args, ["--session-id", sessionId, "--agent", "manager"]);
 });
 
 test("automated workers require a prompt and interactive workers do not", () => {

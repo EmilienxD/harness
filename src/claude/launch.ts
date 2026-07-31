@@ -7,13 +7,13 @@
  *
  * Two invariants shape the whole module:
  *
- * - For an agent whose definition declares `tools:`, `--agent` and
- *   `--tools` are mutually exclusive (5.1.1). A plan that
- *   mixes them is rejected, never silently reconciled. The Manager is the sole
- *   exception, and only because its definition declares no `tools:` at all: an
- *   agent that omits the field inherits the full pool, so `--tools <preset>`
- *   narrows it rather than competing with it. That keeps the tool set a runtime
- *   setting (4.3) while the persona lives in `.claude/agents/manager.md`.
+ * - An agent's tool set lives in the `tools:` field of its
+ *   `.claude/agents/<name>.md` definition, never on the command line (5.1.1):
+ *   a launch flag that widened an agent past its file would silently defeat the
+ *   write-lease derivation, which reads exactly that field. The planner
+ *   therefore rejects `--agent` combined with `--tools`; the only `--tools`
+ *   flag left is the optional restriction on a raw launch, which is the
+ *   *absence* of a definition and has no file to contradict.
  * - The first message and every later message travel as CLI arguments (5.1.2,
  *   5.1.3). aboard never types into a running TUI, so a message that cannot be
  *   represented on a command line spills to a file and is `@`-referenced.
@@ -67,26 +67,6 @@ export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
 
 /** The scaffolded definition the Manager session runs as (`--agent manager`). */
 export const MANAGER_AGENT_NAME = "manager";
-
-export const MANAGER_TOOL_PRESETS = ["read-only", "delegation-only"] as const;
-
-export type ManagerToolPreset = (typeof MANAGER_TOOL_PRESETS)[number];
-
-/**
- * Spec section 4.3. `Agent` and the session-task tools are absent from both
- * presets rather than denied: the Manager cannot reach for a tool it cannot
- * see, and we do not pay context for a schema it must never use.
- *
- * MCP tools are named `mcp__<server>__<tool>` inside Claude Code, so the
- * bridge's tool surface (`mcp__aboard__run_agent`, …) is matched by the
- * server-wide pattern `mcp__aboard__*`.
- */
-export const MANAGER_TOOL_PRESET_TOOLS: Readonly<
-  Record<ManagerToolPreset, readonly string[]>
-> = {
-  "read-only": ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"],
-  "delegation-only": ["mcp__aboard__*", "Skill", "AskUserQuestion"],
-};
 
 export type ClaudeCommandResult =
   | { readonly ok: true; readonly value: readonly string[] }
@@ -165,15 +145,6 @@ export type LaunchConfiguration =
       /** `tools:` read from `.claude/agents/<name>.md`; absent when unreadable. */
       readonly declaredTools?: readonly string[];
     }
-  | {
-      /**
-       * Manager only: `--agent manager --tools <preset>`. Valid because the
-       * Manager definition declares no `tools:`, so nothing is overridden.
-       */
-      readonly shape: "agent-preset";
-      readonly agentName: string;
-      readonly tools: readonly string[];
-    }
   /**
    * The raw agent of spec section 5.7, which is the *absence* of an agent
    * definition. It carries no `--system-prompt`: raw is defined as unconstrained
@@ -181,6 +152,9 @@ export type LaunchConfiguration =
    * has ever produced one. The spec's shape table listed the flag as optional;
    * supporting an option no caller can reach only added an unbounded argument to
    * every command line the planner has to fit inside a shell's limit.
+   *
+   * `tools` is the one surviving `--tools` flag: with no definition to read,
+   * a restriction the user wants on a raw session has nowhere else to live.
    */
   | {
       readonly shape: "inline";
@@ -225,7 +199,9 @@ const SESSION_ID_PATTERN =
 
 /**
  * Rejects the `--agent` plus `--tools` combination that looks like composition
- * but is not (spec section 5.1.1).
+ * but is not (spec section 5.1.1): an agent's tool set is its definition's
+ * `tools:` field, and a launch flag alongside it would compete with the file
+ * the write lease trusts.
  */
 export function resolveLaunchConfiguration(
   input: LaunchConfigurationInput,
@@ -263,19 +239,6 @@ export function resolveLaunchConfiguration(
 }
 
 /**
- * The one configuration that pairs `--agent` with `--tools`. It is built here
- * rather than through `resolveLaunchConfiguration` so the exclusive pair stays
- * rejected everywhere a caller could reach it with an arbitrary agent name.
- */
-export function managerLaunchConfiguration(preset: ManagerToolPreset): LaunchConfiguration {
-  return {
-    shape: "agent-preset",
-    agentName: MANAGER_AGENT_NAME,
-    tools: MANAGER_TOOL_PRESET_TOOLS[preset],
-  };
-}
-
-/**
  * Capability is derived from the effective tool set, never declared. Two types
  * are fixed rather than derived. `raw` is fixed by the spec: it has no
  * definition to read and is exactly where ad-hoc edits happen, so it is
@@ -290,7 +253,6 @@ export function launchWriteCapability(
 ): WriteCapability {
   if (agentType === "raw") return "write-capable";
   if (agentType === "Explore") return "read-only";
-  // `agent-preset` and `inline` both carry the effective list in `tools`.
   return deriveWriteCapability(
     configuration.shape === "agent-defined" ? configuration.declaredTools : configuration.tools,
   );
@@ -298,9 +260,8 @@ export function launchWriteCapability(
 
 /**
  * The Manager is launched, not delegated, and it is long-lived: a permanent
- * lease holder would deadlock every worker. Its residual `Bash` write vector in
- * the `read-only` preset is addressed by `--disallowedTools` (section 4.3.1),
- * not by the lease.
+ * lease holder would deadlock every worker. Its residual `Bash` write vector is
+ * addressed by `--disallowedTools` (section 4.3.1), not by the lease.
  */
 export function requiresWriteLease(
   agentType: AgentType,
@@ -511,24 +472,32 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   const { command, threshold, runtimeDirectory } = commonPreconditions(request);
   const { agentType, configuration } = request;
 
-  if (agentType === "manager" && configuration.shape !== "agent-preset") {
-    throw new LaunchPlanError(
-      "shape-not-allowed",
-      "The Manager launches as --agent manager with a tool preset",
-    );
-  }
-  if (agentType !== "manager" && configuration.shape === "agent-preset") {
-    // Only the Manager has a definition without `tools:`; for every other agent
-    // this shape would widen or contradict the frontmatter the lease trusts.
-    throw new LaunchPlanError(
-      "shape-not-allowed",
-      "Only the Manager combines --agent with a --tools preset",
-    );
+  if (agentType === "manager") {
+    // The Manager's persona and tool list both live in
+    // .claude/agents/manager.md; it never launches from a bare tool list.
+    if (
+      configuration.shape !== "agent-defined" ||
+      configuration.agentName !== MANAGER_AGENT_NAME
+    ) {
+      throw new LaunchPlanError(
+        "shape-not-allowed",
+        "The Manager launches as --agent manager from .claude/agents/manager.md",
+      );
+    }
   }
   if (agentType === "raw" && configuration.shape !== "inline") {
     throw new LaunchPlanError(
       "shape-not-allowed",
       "raw is the absence of an agent definition and never launches with --agent",
+    );
+  }
+  if (agentType !== "raw" && agentType !== "manager" && configuration.shape === "inline") {
+    // Every other type has a definition — scaffolded or builtin. A bare `--tools`
+    // launch would drop its persona and put an allowlist on the command line
+    // that competes with the `tools:` field the write lease trusts.
+    throw new LaunchPlanError(
+      "shape-not-allowed",
+      `Automated and builtin agent types launch from their definition, not an inline tool list: ${agentType}`,
     );
   }
 
@@ -545,9 +514,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   const shapeArguments: string[] = [];
   if (configuration.shape === "agent-defined") {
     shapeArguments.push("--agent", configuration.agentName);
-  } else if (configuration.shape === "agent-preset") {
-    shapeArguments.push("--agent", configuration.agentName);
-    shapeArguments.push(...toolListArguments("--tools", configuration.tools));
   } else {
     shapeArguments.push(...toolListArguments("--tools", configuration.tools));
   }
@@ -577,12 +543,12 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 
   // The prompt threshold alone cannot decide this. It measures the prompt text,
   // while the shell's limit applies to the whole assembled line — which also
-  // carries the wrapper command, the tool lists, a system prompt, and quoting
-  // that expands rather than preserves length (PowerShell doubles every `'`,
-  // Git Bash turns one into four characters). A prompt comfortably under the
-  // threshold can still produce a command line that the shell truncates or
-  // refuses, so the line itself is measured and the prompt spilled if it is too
-  // long. Spilling is always safe, so an unsure implementation spills.
+  // carries the wrapper command, any tool-list flags, and quoting that expands
+  // rather than preserves length (PowerShell doubles every `'`, Git Bash turns
+  // one into four characters). A prompt comfortably under the threshold can
+  // still produce a command line that the shell truncates or refuses, so the
+  // line itself is measured and the prompt spilled if it is too long. Spilling
+  // is always safe, so an unsure implementation spills.
   const limit = MAX_COMMAND_LINE_CHARS[request.shell];
   let built = planFor(threshold);
   if (built.commandLine.length > limit && built.plan.delivery === "inline") built = planFor(0);

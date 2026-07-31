@@ -47,7 +47,7 @@ test("resume keeps the recorded identity and new replaces the session", async ()
     create: (request: unknown) => { records.push({ kind: "create", request }); return terminal("new-terminal"); },
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return terminal("resumed-terminal"); },
   } as unknown as TerminalController;
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "delegation-only", disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), transcriptExists: async () => true });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), transcriptExists: async () => true });
   await lifecycle.start("resume");
   assert.match((records[0] as any).request.initialCommand, /--resume 4db0ed4c/);
   // A wrapper starts the Manager too, resume included, and its arguments stay
@@ -56,7 +56,10 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   assert.equal(saved[0].sessionId, sessionId);
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
-  assert.match((records[1] as any).request.initialCommand, /--tools 'mcp__aboard__\*,Skill,AskUserQuestion'/);
+  // The Manager's tool set lives in manager.md; the command line names the
+  // definition and carries no --tools.
+  assert.match((records[1] as any).request.initialCommand, /--agent manager/);
+  assert.doesNotMatch((records[1] as any).request.initialCommand, /--tools/);
   assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
 });
 
@@ -71,7 +74,7 @@ test("the lifecycle applies the configured permission mode to start and resume",
   // Read through a callback, so toggling the setting takes effect on the next
   // launch rather than at the next window reload.
   let mode: "bypass" | "default" = "bypass";
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "read-only", permissionMode: () => mode, transcriptExists: async () => true });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", permissionMode: () => mode, transcriptExists: async () => true });
   await lifecycle.start("new");
   assert.match(records[0].initialCommand, /--dangerously-skip-permissions/);
   await lifecycle.start("resume");
@@ -91,10 +94,10 @@ test("resume without a transcript starts afresh under the same session id", asyn
   } as unknown as TerminalController;
   // The recorded session was closed before its first message: no transcript
   // exists, so --resume would fail. aboard must relaunch with --session-id.
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "read-only", transcriptExists: async () => false });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", transcriptExists: async () => false });
   await lifecycle.start("resume");
   assert.equal(records[0].kind, "create");
   assert.match(records[0].request.initialCommand, new RegExp(`--session-id ${sessionId}`));
   assert.doesNotMatch(records[0].request.initialCommand, /--resume/);
-  assert.match(records[0].request.initialCommand, /--tools/);
+  assert.match(records[0].request.initialCommand, /--agent manager/);
 });

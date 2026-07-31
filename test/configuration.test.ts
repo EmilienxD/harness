@@ -8,7 +8,6 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   const values = new Map<string, unknown>([
     ["aboard.bridge.port", 70_000],
     ["aboard.launch.maxInlinePromptChars", -1],
-    ["aboard.manager.toolPreset", "writer"],
     ["aboard.manager.disallowedTools", ["Read", ""]],
     ["aboard.workers.permissionMode", "unsafe"],
     ["aboard.autoRun.scope", "everything"],
@@ -18,12 +17,11 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   const result = readAboardConfiguration({ get: (key) => values.get(key) });
   assert.equal(result.value.bridgePort, 4823);
   assert.equal(result.value.maxInlinePromptChars, 4000);
-  assert.equal(result.value.managerToolPreset, "read-only");
   assert.deepEqual(result.value.managerDisallowedTools, []);
   assert.equal(result.value.workerPermissionMode, "default");
   assert.deepEqual(result.value.autoRun, { review: false, scope: "spec", pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 30 });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
-  assert.equal(result.diagnostics.length, 8);
+  assert.equal(result.diagnostics.length, 7);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
 });
 
@@ -31,7 +29,6 @@ test("configuration accepts every supported launch and review setting", () => {
   const values: Record<string, unknown> = {
     "aboard.bridge.port": 0,
     "aboard.launch.maxInlinePromptChars": 12_000,
-    "aboard.manager.toolPreset": "delegation-only",
     "aboard.manager.disallowedTools": ["Bash", "Read(./src/**)"],
     "aboard.workers.permissionMode": "bypass",
     "aboard.autoRun.review": true,
@@ -46,7 +43,6 @@ test("configuration accepts every supported launch and review setting", () => {
   const result = readAboardConfiguration({ get: (key) => values[key] });
   assert.equal(result.diagnostics.length, 0);
   assert.equal(result.value.bridgePort, 0);
-  assert.equal(result.value.managerToolPreset, "delegation-only");
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash", "Read(./src/**)"]);
   assert.deepEqual(result.value.autoRun, { review: true, scope: "all", pauseAfterHitl: true, mergeStrategy: "rebase", pollSeconds: 15 });
 });
@@ -87,7 +83,7 @@ test("a bad project value falls back exactly like a bad vs code value", () => {
 });
 
 test("project settings override globals, and an explicit vs code workspace value overrides both", () => {
-  const user = new Map<string, unknown>([["aboard.bridge.port", 6000], ["aboard.autoRun.scope", "all"], ["aboard.manager.toolPreset", "delegation-only"]]);
+  const user = new Map<string, unknown>([["aboard.bridge.port", 6000], ["aboard.autoRun.scope", "all"], ["aboard.manager.disallowedTools", ["Bash"]]]);
   const workspaceScope = new Map<string, unknown>([["aboard.bridge.port", 7000]]);
   const project = parseProjectSettings(JSON.stringify({ "aboard.bridge.port": 8000, "aboard.autoRun.scope": "spec" }));
   const reader = createLayeredReader({
@@ -99,7 +95,7 @@ test("project settings override globals, and an explicit vs code workspace value
   assert.equal(result.diagnostics.length, 0);
   assert.equal(result.value.bridgePort, 7000, "an explicit .vscode value wins");
   assert.equal(result.value.autoRun.scope, "spec", "the project file wins over a global");
-  assert.equal(result.value.managerToolPreset, "delegation-only", "an unoverridden global still applies");
+  assert.deepEqual(result.value.managerDisallowedTools, ["Bash"], "an unoverridden global still applies");
   assert.equal(result.value.workerPermissionMode, "default", "an unset setting keeps its default");
 });
 
@@ -107,7 +103,6 @@ test("manager launch changes are detected by value for the project settings relo
   const read = (values: Record<string, unknown>) => readAboardConfiguration({ get: (key) => values[key] }).value;
   const base = read({});
   assert.equal(managerLaunchChanged(base, read({})), false);
-  assert.equal(managerLaunchChanged(base, read({ "aboard.manager.toolPreset": "delegation-only" })), true);
   assert.equal(managerLaunchChanged(base, read({ "aboard.launch.claudeCommand": "openclaude" })), true);
   assert.equal(managerLaunchChanged(base, read({ "aboard.manager.disallowedTools": ["Bash"] })), true);
   assert.equal(managerLaunchChanged(base, read({ "aboard.autoRun.scope": "all" })), false);

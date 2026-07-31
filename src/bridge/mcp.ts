@@ -80,7 +80,7 @@ No result will come back. Tell the user the terminal is open and waiting for the
 </example>`;
 
 // Tools are served under bare names; Claude Code namespaces them for the model
-// as mcp__aboard__<name>, which the Manager's --tools preset matches with
+// as mcp__aboard__<name>, which the Manager's `tools:` frontmatter matches with
 // mcp__aboard__*.
 export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {

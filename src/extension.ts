@@ -275,7 +275,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
     startAutoRun: () => autoRun.start(),
     reviewPullRequest: () => reviews.review(),
-  });
+  }, terminals);
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
@@ -322,7 +322,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const manager = new ManagerLifecycle({
     store: managerStore, terminals, workspaceRoot,
     shell: process.platform === "win32" ? "powershell" : "git-bash",
-    preset: currentConfiguration.managerToolPreset,
     disallowedTools: currentConfiguration.managerDisallowedTools,
     command: () => currentConfiguration.claudeCommand,
     permissionMode: () => currentConfiguration.workerPermissionMode,

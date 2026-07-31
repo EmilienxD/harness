@@ -42,8 +42,11 @@ BLOCKING_ROUTE = "manager-prompt"
 # for result-delivering sessions, so an interactive one stays silent here.
 WORKER_AGENT_TYPES = frozenset({"implementer", "pr-doctor-afk"})
 
-# Commands the bridge handles itself. Matches the bridge-side parsers.
-INTERCEPTED_COMMAND = re.compile(r"^\s*/(brainstorm|raw|auto|review-pr)(?:\s[\s\S]*)?$")
+# Commands the bridge handles itself. `/done` is available in every aboard
+# terminal; the remaining commands belong only to the Manager. These expressions
+# match the bridge-side parsers.
+MANAGER_INTERCEPTED_COMMAND = re.compile(r"^\s*/(brainstorm|raw|done|auto|review-pr)(?:\s[\s\S]*)?$")
+DONE_COMMAND = re.compile(r"^\s*/done(?:\s[\s\S]*)?$")
 
 
 def finish(message):
@@ -60,8 +63,11 @@ def finish(message):
     return 2
 
 
-def intercepted_prompt(prompt):
-    return isinstance(prompt, str) and INTERCEPTED_COMMAND.match(prompt) is not None
+def intercepted_prompt(prompt, agent_type):
+    if not isinstance(prompt, str):
+        return False
+    command = MANAGER_INTERCEPTED_COMMAND if agent_type == "manager" else DONE_COMMAND
+    return command.match(prompt) is not None
 
 
 def main():
@@ -76,10 +82,6 @@ def main():
     agent_type = os.environ.get("ABOARD_AGENT_TYPE")
     delivers_result = os.environ.get("ABOARD_DELIVERS_RESULT") == "1"
     expected_manager = route.startswith("manager-")
-    if (expected_manager and agent_type != "manager") or (
-        not expected_manager and agent_type not in WORKER_AGENT_TYPES and not delivers_result
-    ):
-        return 0
     try:
         payload = json.load(sys.stdin)
     except (ValueError, OSError):
@@ -87,8 +89,17 @@ def main():
     if not isinstance(payload, dict):
         payload = {}
     prompt = payload.get("prompt", "")
+    # The shared UserPromptSubmit registration reaches every aboard terminal.
+    # Only `/done` is meaningful outside the Manager; skip the bridge entirely
+    # for all other prompts so worker input remains untouched.
+    if route == BLOCKING_ROUTE and agent_type != "manager" and not intercepted_prompt(prompt, agent_type):
+        return 0
+    if (expected_manager and route != BLOCKING_ROUTE and agent_type != "manager") or (
+        not expected_manager and agent_type not in WORKER_AGENT_TYPES and not delivers_result
+    ):
+        return 0
     blocking = route == BLOCKING_ROUTE
-    is_intercepted = blocking and intercepted_prompt(prompt)
+    is_intercepted = blocking and intercepted_prompt(prompt, agent_type)
     try:
         port = int(os.environ["ABOARD_BRIDGE_PORT"])
         token = os.environ["ABOARD_BRIDGE_TOKEN"]

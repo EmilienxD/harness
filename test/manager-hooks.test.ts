@@ -127,6 +127,29 @@ test("Manager prompt route launches both interactive command types and drains or
   assert.deepEqual(await prompts.handle(managerId, "and now?"), {});
 });
 
+test("/done closes the invoking Manager terminal without waking the model", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const rawId = agent("raw-1");
+  fleet.register({
+    identity: { agentId: rawId, type: "raw" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("raw-terminal"), name: "raw" }, lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(rawId, { status: "running", startedAt: timestamp }, timestamp);
+  const killed: TerminalId[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("/done must not launch an agent") },
+    undefined,
+    undefined,
+    { kill: (terminalId) => killed.push(terminalId) },
+  );
+  assert.deepEqual(await prompts.handle(managerId, "/done"), { intercepted: true, message: "Closing this terminal." });
+  assert.deepEqual(await prompts.handle(rawId, "/done"), { intercepted: true, message: "Closing this terminal." });
+  assert.deepEqual(killed, [terminal("manager-terminal"), terminal("raw-terminal")]);
+  assert.match(String((await prompts.handle(managerId, "/done trailing text")).message), /text you typed after it was not sent/);
+});
+
 test("interactive commands take no arguments and say so rather than silently dropping text", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const launches: unknown[] = [];
@@ -192,7 +215,7 @@ test("an unavailable extension action is reported instead of falling through to 
   assert.match(String(result.message), /cannot handle \/auto right now/);
 });
 
-async function runPromptHook(responseStatus: number, responseBody: unknown, prompt: string, token = "secret"): Promise<{ status: number | null; stdout: string; stderr: string }> {
+async function runPromptHook(responseStatus: number, responseBody: unknown, prompt: string, token = "secret", agentType = "manager"): Promise<{ status: number | null; stdout: string; stderr: string }> {
   const server = createServer((request, response) => {
     assert.equal(request.headers.authorization, `Bearer ${token}`);
     response.writeHead(responseStatus, { "content-type": "application/json" });
@@ -203,7 +226,7 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
   assert.ok(address !== null && typeof address !== "string");
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
   const child = spawn("uv", ["run", "--no-project", "python", script, "manager-prompt"], {
-    env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: "manager", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token },
+    env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: agentType, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = ""; let stderr = "";
@@ -219,6 +242,8 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
 test("Python prompt hook erases successful and failed commands with exact output channels", async () => {
   const success = await runPromptHook(200, { intercepted: true, message: "Brainstorm session launched and focused." }, "/brainstorm caching layer");
   assert.deepEqual(success, { status: 2, stdout: "", stderr: `${EOL}Brainstorm session launched and focused.${EOL}` });
+  const rawDone = await runPromptHook(200, { intercepted: true, message: "Closing this terminal." }, "/done", "secret", "raw");
+  assert.deepEqual(rawDone, { status: 2, stdout: "", stderr: `${EOL}Closing this terminal.${EOL}` });
   const authFailure = await runPromptHook(401, { ok: false }, "/raw", "wrong-token");
   assert.equal(authFailure.status, 2); assert.equal(authFailure.stdout, ""); assert.ok(authFailure.stderr.startsWith(`${EOL}Aboard did not launch the requested session:`));
 });
@@ -230,9 +255,9 @@ test("Python prompt hook injects a drained queue on a real prompt", async () => 
   assert.deepEqual(JSON.parse(result.stdout), { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } });
 });
 
-test("aboard-owned launch skills are user-only command shims and raw has no agent definition", async () => {
+test("aboard-owned command skills are user-only shims and raw has no agent definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
-  for (const name of ["brainstorm", "raw", "auto", "review-pr"]) {
+  for (const name of ["brainstorm", "raw", "done", "auto", "review-pr"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
     // No argument-hint: these commands are argumentless, and hinting otherwise
@@ -248,7 +273,7 @@ test("aboard-owned launch skills are user-only command shims and raw has no agen
 });
 
 test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
-  for (const prompt of ["/raw", "/raw fix the parser", "/brainstorm", "/brainstorm caching layer", "/auto", "/review-pr", "/auto the next spec"]) {
+  for (const prompt of ["/raw", "/raw fix the parser", "/brainstorm", "/brainstorm caching layer", "/done", "/done close now", "/auto", "/review-pr", "/auto the next spec"]) {
     const result = await runPromptHook(500, { error: "boom" }, prompt);
     assert.equal(result.status, 2, `${prompt} must erase the prompt even when the bridge fails`);
     assert.equal(result.stdout, "");

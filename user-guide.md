@@ -67,8 +67,8 @@ Phase 8 — Review (opt-in, recommended) $
 Phase 9 — Guards & restart (5 min, no tokens)
 28. In the sandbox window: Terminal → New Terminal → run claude by hand. Expect: no briefing injection, no new fleet node, hooks silent, and no Manager persona (it is an agent definition now, not project memory). Exit it.
 29. Developer: Reload Window → bridge rebinds → "Aboard: Resume Manager" resumes the same session; fleet state restored from .aboard\runtime\.
-Phase 10 — Preset evaluation (spec open question #4)
-30. Set aboard.manager.toolPreset = delegation-only, run "Aboard: New Manager", ask it to read calc.py. Expected: it has no Read tool and must delegate/decline. Form an opinion vs read-only — your preference closes open question #4.
+Phase 10 — Manager tool list & launch command (5 min)
+30. In the sandbox project's .claude/agents/manager.md, delete Read, Grep, Glob, and Bash from the tools: line, run "Aboard: New Manager", ask it to read calc.py. Expected: it has no Read tool and must delegate/decline — the frontmatter list is the Manager's only tool authority; the launch command carries no --tools. Restore the line afterwards (or re-run "Aboard: Initialize/Update" to get the shipped asset back).
 31. Set aboard.launch.claudeCommand = clauder run kiro -- (or leave it at claude if you have no wrapper), run "Aboard: New Manager", and read the terminal's first line. Expected: & clauder run kiro -- --session-id ... --agent manager ..., i.e. your wrapper's arguments first and aboard's flags appended unchanged. A path with spaces goes in quotes: "C:\tools\my claude.exe" run --. Reset it to claude afterwards.What to report back to me
 For each phase, one line: PASS or FAIL + step number. For any FAIL:
 1. Exact step number and what you saw instead (exact text/screenshot of the terminal)
@@ -76,7 +76,7 @@ For each phase, one line: PASS or FAIL + step number. For any FAIL:
 3. .aboard\runtime\fleet.json contents — but never paste bridge.json or any token
 4. GitHub state if relevant (gh issue list, PR state)
 Plus four qualitative answers:
-- (a) read-only vs delegation-only — which Manager preset felt right?
+- (a) Did tuning the Manager's tools by editing manager.md feel right, or do you want the read-only default narrowed?
 - (b) Any moment you felt you lost visibility or couldn't intervene?
 - (c) Any unexpected permission prompts, TUI stalls, or garbled terminals?
 - (d) Rough wall-clock time and feel of the afk run.

@@ -1,4 +1,4 @@
-import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, MANAGER_TOOL_PRESETS, WORKER_PERMISSION_MODES, parseClaudeCommand, type ManagerToolPreset, type WorkerPermissionMode } from "./claude/launch.js";
+import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, WORKER_PERMISSION_MODES, parseClaudeCommand, type WorkerPermissionMode } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 import { AUTO_RUN_SCOPES, MERGE_STRATEGIES, type AutoRunScope, type AutoRunSettings, type MergeStrategy } from "./domain/auto-run.js";
 
@@ -8,7 +8,6 @@ export interface AboardConfiguration {
   readonly maxInlinePromptChars: number;
   /** `aboard.launch.claudeCommand` as tokens: the program, then its own fixed arguments. */
   readonly claudeCommand: readonly string[];
-  readonly managerToolPreset: ManagerToolPreset;
   readonly managerDisallowedTools: readonly string[];
   readonly workerPermissionMode: WorkerPermissionMode;
   readonly autoRun: AutoRunSettings;
@@ -25,7 +24,6 @@ export const ABOARD_SETTINGS = [
   "aboard.launch.claudeCommand",
   "aboard.launch.maxInlinePromptChars",
   "aboard.workers.permissionMode",
-  "aboard.manager.toolPreset",
   "aboard.manager.disallowedTools",
   "aboard.autoRun.review",
   "aboard.autoRun.scope",
@@ -153,7 +151,6 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     bridgePort: integer(reader, "aboard.bridge.port", DEFAULT_BRIDGE_PORT, 0, 65_535, diagnostics),
     maxInlinePromptChars: integer(reader, "aboard.launch.maxInlinePromptChars", DEFAULT_MAX_INLINE_PROMPT_CHARS, 0, 32_767, diagnostics),
     claudeCommand: claudeCommand(reader, diagnostics),
-    managerToolPreset: choice(reader, "aboard.manager.toolPreset", MANAGER_TOOL_PRESETS, "read-only", diagnostics),
     managerDisallowedTools,
     workerPermissionMode: choice(reader, "aboard.workers.permissionMode", WORKER_PERMISSION_MODES, "default", diagnostics),
     autoRun: {
@@ -171,15 +168,14 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
   }, diagnostics };
 }
 
-export const MANAGER_RESTART_SETTINGS = new Set(["aboard.manager.toolPreset", "aboard.manager.disallowedTools", "aboard.launch.claudeCommand"]);
+export const MANAGER_RESTART_SETTINGS = new Set(["aboard.manager.disallowedTools", "aboard.launch.claudeCommand"]);
 
 /**
  * Value-level equivalent of `MANAGER_RESTART_SETTINGS`, for reload paths such as
  * the project settings file where VS Code raises no configuration event.
  */
 export function managerLaunchChanged(before: AboardConfiguration, after: AboardConfiguration): boolean {
-  const list = (values: readonly string[]) => values.join(" ");
-  return before.managerToolPreset !== after.managerToolPreset
-    || list(before.claudeCommand) !== list(after.claudeCommand)
+  const list = (values: readonly string[]) => values.join(" ");
+  return list(before.claudeCommand) !== list(after.claudeCommand)
     || list(before.managerDisallowedTools) !== list(after.managerDisallowedTools);
 }

@@ -30,17 +30,17 @@ export interface AgentDefinition {
 }
 
 /**
- * The Manager definition deliberately declares no `tools:`. An agent that omits
- * the field inherits the full tool pool, which is what lets the launch preset
- * (`--tools`, spec section 4.3) remain the Manager's single tool authority
- * without contradicting the file. A `tools:` line here would silently compete
- * with the setting, so it is rejected rather than merged.
+ * The Manager definition declares its read-only allowlist like every other
+ * aboard agent: the frontmatter `tools:` field is the single tool authority,
+ * and nothing on the command line may compete with it (spec section 5.1.1).
  */
 export interface ManagerAgentDefinition {
   readonly name: typeof MANAGER_AGENT_NAME;
   readonly description: string;
   readonly model: AgentModel;
+  readonly tools: readonly string[];
   readonly prompt: string;
+  readonly writeCapability: WriteCapability;
 }
 
 export type AgentDefinitionResult =
@@ -132,7 +132,7 @@ export function parseAgentDefinition(definition: unknown): AgentDefinitionResult
   };
 }
 
-/** The Manager definition, which must leave its tool set to the launch preset. */
+/** The Manager definition, which declares its read-only tool set like any worker. */
 export function parseManagerAgentDefinition(
   definition: unknown,
 ): ManagerAgentDefinitionResult {
@@ -143,14 +143,10 @@ export function parseManagerAgentDefinition(
   if (scalarField(frontmatter, "name") !== MANAGER_AGENT_NAME) {
     return { ok: false, reason: "The Manager definition must be named manager" };
   }
-  if (frontmatter.some((line) => /^tools\s*:/.test(line))) {
-    return {
-      ok: false,
-      reason: "The Manager definition must declare no tools; the launch preset owns its tool set",
-    };
-  }
   const common = commonFields(frontmatter);
   if (!common.ok) return common;
+  const parsedTools = parseAgentDefinitionTools(definition);
+  if (!parsedTools.ok) return parsedTools;
 
   return {
     ok: true,
@@ -158,7 +154,9 @@ export function parseManagerAgentDefinition(
       name: MANAGER_AGENT_NAME,
       description: common.value.description,
       model: common.value.model,
+      tools: parsedTools.tools,
       prompt,
+      writeCapability: deriveWriteCapability(parsedTools.tools),
     },
   };
 }

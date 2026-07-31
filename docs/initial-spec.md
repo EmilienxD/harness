@@ -2,6 +2,8 @@
 
 **Status:** Design complete, pre-implementation. This document is the authoritative starting point for scaffolding, agent-definition authoring, and all subsequent implementation work.
 
+**Version:** 1.2 — the Manager's tool list moved from a runtime `toolPreset` setting passed as `--tools` on the command line into the `tools:` field of `.claude/agents/manager.md`, retiring the setting and the Manager's both-flags exception (§4.3, §5.1.1).
+
 **Version:** 1.1 — incorporates the first full review pass. Changes from 1.0: the TODO moved from a committed file to a GitHub issue (§7.1); session-task tools removed from every Manager preset (§4.3); aboard no longer writes user permission settings (§4.3.1); the `SessionStart` injection cap and its split-hook mitigation (§4.5); `--agent` XOR `--tools` and the CLI-argument first prompt (§5.1); the raw agent as a first-class launch type (§5.7); prompt resolution before launch (§5.8); intercepted commands deny with exit 2 and batch notifications (§6.3); the `explorer` agent dropped in favour of the built-in `Explore` (§9.4); skill ownership clarified — most skills already exist and must not be reimplemented (§10.0); and hooks must self-guard because they are project-scoped, not agent-scoped (§3.4).
 
 ---
@@ -100,7 +102,7 @@ Several design decisions in this document look conservative in isolation and are
 ┌───────────────────────┐  ┌───────────────────────┐  ┌──────────────┐
 │ Terminal: MANAGER     │  │ Terminal: worker #1   │  │ Terminal: …  │
 │ claude --agent manager│  │ claude --agent impl … │  │              │
-│ --tools <preset>      │  │   └─ sub-sub-agents   │  │              │
+│                       │  │   └─ sub-sub-agents   │  │              │
 └───────────────────────┘  └───────────────────────┘  └──────────────┘
             │                          │
             └──────────┬───────────────┘
@@ -228,33 +230,21 @@ The Manager must never write code and must never spend time deeply reasoning abo
 
 Rationale: a Manager that reads a 2,000-line file has spent its context on detail it will lose at the next compaction, and a Manager that reasons deeply about one feature has stopped being able to reason about the project. Its value is breadth and continuity, and both are destroyed by depth.
 
-This is enforced **structurally** (tool presets, §4.3) and **by prompt** (§9.1), because the read-only preset cannot fully prevent deep reasoning — only deep *writing*.
+This is enforced **structurally** (the tool list, §4.3) and **by prompt** (§9.1), because the read-only tool list cannot fully prevent deep reasoning — only deep *writing*.
 
-### 4.3 Tool presets
+### 4.3 The Manager's tool list
 
-The Manager's **persona** is a scaffolded agent definition, `.claude/agents/manager.md`, launched with `--agent manager` (§9.1). That definition deliberately declares **no `tools:` field**, which is what keeps the tool list a **setting** rather than a hardcoded launch string, changeable and evaluable without rebuilding the extension:
-
-```
-aboard.manager.toolPreset: "read-only" | "delegation-only"
-```
-
-**Default: `read-only`.** The user will evaluate both in end-to-end testing and the default may change; the spec deliberately documents both rather than pretending the answer is known.
-
-**`read-only` preset** — Manager can inspect but not modify:
+The Manager's **persona** is a scaffolded agent definition, `.claude/agents/manager.md`, launched with `--agent manager` (§9.1). Like every other aboard agent, its **tool set is that file's `tools:` field**, and the launch command carries no `--tools` (§5.1.1). The shipped list is the read-only set:
 
 ```
-aboard__*, Read, Grep, Glob, Bash, Skill, AskUserQuestion
+mcp__aboard__*, Read, Grep, Glob, Bash, Skill, AskUserQuestion
 ```
 
-**`delegation-only` preset** — Manager can only delegate:
+The user tightens or loosens it by editing the file; the scaffolder preserves locally edited assets, so the change survives upgrades (a Manager restart is still required — the tool set is resolved at launch). An earlier draft kept the list in a `toolPreset` setting with two presets; that was retired in favour of one tool authority per agent, the definition file.
 
-```
-aboard__*, Skill, AskUserQuestion
-```
+**Critical:** `Agent` is **absent from the tool list**, not merely denied. A `tools:` allowlist controls what enters Claude's context, rather than `--disallowedTools` (which only auto-denies). The distinction matters twice: the Manager cannot reach for a tool it cannot see, and we do not pay context for the `Agent` tool's schema.
 
-**Critical:** in both presets, `Agent` is **absent from the tool list**, not merely denied. We use `--tools` (an allowlist controlling what enters Claude's context) rather than `--disallowedTools` (which only auto-denies). The distinction matters twice: the Manager cannot reach for a tool it cannot see, and we do not pay context for the `Agent` tool's schema.
-
-**No task tools.** `TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate` (and the deprecated `TodoWrite`) are **deliberately excluded from every preset.** Those tools exist to keep an agent on track through a long *coding* task, which is exactly the work the Manager never does. They would also invite a category error: an agent reaching for `TaskUpdate` to edit the project's global TODO. That TODO is a different artifact with a different lifetime, it lives in GitHub (§7.1), and it is edited through dedicated MCP tools (§6.2). The two must never be confused, and the cheapest way to guarantee that is for the session-task tools not to exist in the Manager's context at all.
+**No task tools.** `TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate` (and the deprecated `TodoWrite`) are **deliberately excluded from the list.** Those tools exist to keep an agent on track through a long *coding* task, which is exactly the work the Manager never does. They would also invite a category error: an agent reaching for `TaskUpdate` to edit the project's global TODO. That TODO is a different artifact with a different lifetime, it lives in GitHub (§7.1), and it is edited through dedicated MCP tools (§6.2). The two must never be confused, and the cheapest way to guarantee that is for the session-task tools not to exist in the Manager's context at all.
 
 ### 4.3.1 aboard never writes user permission settings
 
@@ -270,20 +260,20 @@ Two reasons, both about user experience:
 **Per-agent restriction uses `--disallowedTools` at launch instead**, which takes the same `ToolName(specifier)` rule format documented in `tools-reference.md` and applies to exactly one process:
 
 ```
-claude --agent manager --tools <preset> \
+claude --agent manager \
        --disallowedTools "Bash(git push*)" "Bash(git commit*)" "Bash(git merge*)" ...
 ```
 
 **Two consequences to keep in view:**
 
-1. **`Bash` remains a write vector in the `read-only` preset.** A Manager with unscoped `Bash` can write files regardless of lacking `Edit`/`Write`. The read-only property is only as real as the `--disallowedTools` list at launch. That list is a setting (`aboard.manager.disallowedTools`), starts empty, and the user tightens it after observing actual behaviour.
+1. **`Bash` remains a write vector in the read-only list.** A Manager with unscoped `Bash` can write files regardless of lacking `Edit`/`Write`. The read-only property is only as real as the `--disallowedTools` list at launch. That list is a setting (`aboard.manager.disallowedTools`), starts empty, and the user tightens it after observing actual behaviour.
 2. **`Read` is path-scopable if wanted.** Per `tools-reference.md`, the `Read(path/**)` rule format applies to `Read`, `Grep`, `Glob`, and `LSP`, so `--disallowedTools "Read(./src/**)"` is expressible. Not used by default.
 
 ### 4.4 Lifecycle: one Manager, kept alive
 
 **The Manager is long-lived.** Resume is the default path; a fresh Manager is an explicit choice.
 
-- **`Aboard: Start Manager`** — mints a session ID, records it in `.aboard/runtime/manager.json`, creates the terminal, launches `claude --session-id <uuid> --agent manager --tools <preset>`.
+- **`Aboard: Start Manager`** — mints a session ID, records it in `.aboard/runtime/manager.json`, creates the terminal, launches `claude --session-id <uuid> --agent manager`.
 - **`Aboard: Resume Manager`** — relaunches with `--resume <recorded-uuid>`. This is what the extension offers by default when a recorded Manager session exists.
 - **`Aboard: New Manager`** — explicit fresh start, replaces the recorded session ID.
 
@@ -344,27 +334,26 @@ Every worker is an independent process, launched via `sendText()` into a freshly
 
 **Terminals are created with `window.createTerminal()`** — a real PTY (conpty on Windows). This is a deliberate rejection of `vscode.Pseudoterminal`, which cannot emulate ANSI alternate screen buffers, cursor addressing, mouse reporting, or SIGWINCH; a real TUI renders garbled inside it. Claude Code is a real TUI.
 
-#### 5.1.1 `--agent` and `--system-prompt`/`--tools` are mutually exclusive — except for the Manager
+#### 5.1.1 An agent's tools come from its definition — `--agent` and `--tools` never mix
 
 **This is a CLI constraint and it shapes the whole launch layer.**
 
-When `--agent <name>` is passed, Claude Code reads `.claude/agents/<name>.md` and takes the system prompt, the `tools:` allowlist, and the model **from that file's frontmatter.** For an agent that declares `tools:`, passing `--tools` alongside it is not the composition it looks like.
+When `--agent <name>` is passed, Claude Code reads `.claude/agents/<name>.md` and takes the system prompt, the `tools:` allowlist, and the model **from that file's frontmatter.** Passing `--tools` alongside it is not the composition it looks like: the flag competes with the file the write lease (§8.1) reads to derive capability. aboard therefore never combines them — every aboard agent declares its tool set in its definition, including the Manager, and no launch command carries both flags.
 
-**The exception, and it is a narrow one.** `subagents.md:279` documents that an agent whose frontmatter **omits** `tools:` inherits the full tool pool. For such an agent there is no declared list to contradict, so `--tools` narrows the inherited pool and the pair composes cleanly. The Manager is the only agent aboard ships without a `tools:` field, and it is the only agent launched with both flags.
+> **Amended (v1.2).** The Manager used to be the one exception: its definition declared no `tools:`, so a runtime `toolPreset` setting could narrow the inherited pool via `--tools <preset>`. That made the Manager's tool authority unlike every other agent's and split the answer to "what can this agent run?" across a file and a setting. The setting and the exception are gone; `.claude/agents/manager.md` declares the read-only list like any other definition.
 
-So there are exactly three launch shapes, and each agent uses exactly one:
+So there are exactly two launch shapes, and each agent uses exactly one:
 
 | Shape | Command | Configuration source |
 | :-- | :-- | :-- |
-| **Agent-defined** (every worker type) | `claude --agent implementer --session-id <uuid>` | `.claude/agents/implementer.md` frontmatter |
-| **Agent-plus-preset** (Manager only) | `claude --session-id <uuid> --agent manager --tools <preset>` | `.claude/agents/manager.md` for the prompt and model; the preset setting for the tools |
+| **Agent-defined** (Manager and every worker type) | `claude --agent implementer --session-id <uuid>` | `.claude/agents/implementer.md` frontmatter |
 | **Inline** (the raw agent of §5.7) | `claude --session-id <uuid> [--tools <list>]` | Launch flags |
 
-> **Amended.** The inline shape carried an optional `--system-prompt <text>` and nothing ever set it: §9.7 defines raw as unconstrained, so there is no prompt to pass, and `raw` is the shape's only user. Supporting an option no caller could reach put an unbounded argument on every command line the planner has to fit inside a shell's length limit, so it is gone. `--tools` stays because it is what the `--agent` exclusion in this section has to keep rejecting.
+> **Amended.** The inline shape carried an optional `--system-prompt <text>` and nothing ever set it: §9.7 defines raw as unconstrained, so there is no prompt to pass, and `raw` is the shape's only user. Supporting an option no caller could reach put an unbounded argument on every command line the planner has to fit inside a shell's length limit, so it is gone. `--tools` stays on this shape — with no definition to read, a restriction on a raw session has nowhere else to live.
 
-**Consequence for the write lease.** §8.1 derives write-capability by reading the agent definition's `tools:` frontmatter. That derivation is only sound because agent-defined workers take their tools from exactly that file — there is no launch flag that can widen them behind the bridge's back. The mutual exclusion is what makes the derivation trustworthy rather than a guess. The agent-plus-preset shape is therefore **refused for every type but the Manager**, and the Manager never holds the lease (§8.1).
+**Consequence for the write lease.** §8.1 derives write-capability by reading the agent definition's `tools:` frontmatter. That derivation is only sound because agent-defined workers take their tools from exactly that file — there is no launch flag that can widen them behind the bridge's back. The mutual exclusion is what makes the derivation trustworthy rather than a guess. The inline shape is therefore **refused for every type but raw**, and the Manager never holds the lease (§8.1).
 
-**Consequence for the Manager.** The Manager's prompt and model live in `.claude/agents/manager.md`, so its persona is a versioned scaffold asset rather than an instruction in the user's `CLAUDE.md` — which would otherwise apply to every session in the workspace, including workers and hand-started sessions. Its tool list stays a runtime setting (§4.3) that the user flips without editing the agent file, which is exactly why that file must never grow a `tools:` line.
+**Consequence for the Manager.** The Manager's prompt, model, and tool list all live in `.claude/agents/manager.md`, so the whole Manager definition is a versioned scaffold asset rather than an instruction in the user's `CLAUDE.md` — which would otherwise apply to every session in the workspace, including workers and hand-started sessions.
 
 #### 5.1.2 The first prompt is a CLI argument
 
@@ -651,7 +640,7 @@ Escape hatch. Force-releases a stuck lease with a reason. Logged conspicuously; 
 
 Some actions need no judgement from the Manager. Launching an interactive brainstorm agent is one: the user knows what they want, and routing it through the Manager costs a reasoning turn, a tool call, and tokens to accomplish something mechanical.
 
-Instead, a **`UserPromptSubmit` hook intercepts the command directly.** When the user types `/brainstorm <topic>` in the Manager's terminal, the hook recognises the pattern, POSTs to the bridge, and the bridge creates and focuses the terminal.
+Instead, a **`UserPromptSubmit` hook intercepts the command directly.** When the user types `/brainstorm <topic>` in the Manager's terminal, the hook recognises the pattern, POSTs to the bridge, and the bridge creates and focuses the terminal. `/done` uses the same path to close the invoking aboard terminal.
 
 **This generalises into a rule:** any user-initiated action that requires no judgement should be a hook, not a tool call. It is the cheapest sufficient mechanism (§1.4.6).
 
@@ -871,7 +860,7 @@ This is enforced **structurally**, not by prompting. The bridge is the only path
 - The Manager surfaces that to the user rather than queuing. With "quality over speed", a task that waits 20 minutes for a lease is a task whose premise may have gone stale by the time it runs.
 - **Read-only types are exempt** and stay concurrent. Three reviewers at once cost nothing and touch nothing.
 
-**Capability class is derived, not declared.** The bridge reads the agent's `.claude/agents/<type>.md` frontmatter: a `tools:` list with no `Edit`, `Write`, or `NotebookEdit`, and no unrestricted `Bash`/`PowerShell`, **cannot** write, so the bridge classifies it read-only. There is no flag to forget and no flag to lie about. This derivation is sound because `--agent` and `--tools` are mutually exclusive for any agent that declares `tools:` (§5.1.1) — no launch flag can widen such an agent past what its file declares. The Manager, the one agent launched with both flags, declares no tools and never holds the lease.
+**Capability class is derived, not declared.** The bridge reads the agent's `.claude/agents/<type>.md` frontmatter: a `tools:` list with no `Edit`, `Write`, or `NotebookEdit`, and no unrestricted `Bash`/`PowerShell`, **cannot** write, so the bridge classifies it read-only. There is no flag to forget and no flag to lie about. This derivation is sound because every aboard agent declares its tool set in its definition and no launch combines `--agent` with `--tools` (§5.1.1) — no launch flag can widen an agent past what its file declares. The Manager declares the read-only list like any other agent and never holds the lease.
 
 **An agent with no definition is write-capable.** The raw agent (§5.7) has no frontmatter to read and Claude Code's default tool set can write, so it takes the lease. Unknown capability resolves to the restrictive answer, always.
 
@@ -956,7 +945,7 @@ A foreground `aboard__run_agent` blocks for as long as a worker runs, so the MCP
 
 Per `settings.md`, Claude Code watches settings files and reloads them on change — including `permissions` and `hooks` — and fires a `ConfigChange` hook per detected change. Two consequences:
 
-1. Flipping `toolPreset` or permission scoping needs no extension rebuild (a Manager restart is still required for `--tools`, which is a launch flag).
+1. Changing `aboard.manager.disallowedTools` or other aboard settings needs no extension rebuild (a Manager restart is still required, because its tool set and deny list are resolved at launch).
 2. The bridge can subscribe to `ConfigChange` and react to configuration edits live.
 
 ---
@@ -973,12 +962,12 @@ Agent definitions live in `.claude/agents/*.md` and are scaffolded and owned by 
 
 ### 9.1 `manager`
 
-Launched as the main session agent: `claude --agent manager --tools <preset>` (§5.1.1). Its contract is enforced structurally by the preset and by prompt through `.claude/agents/manager.md`.
+Launched as the main session agent: `claude --agent manager` (§5.1.1). Its contract is enforced structurally by the `tools:` allowlist and by prompt through `.claude/agents/manager.md`.
 
 **aboard scaffolds no `CLAUDE.md`.** That file is the user's, it applies to every Claude Code session in the workspace — workers and hand-started sessions included — and a Manager persona written there would leak into all of them.
 
 - **Model:** opus
-- **Tools:** per preset (§4.3). The definition declares no `tools:` field; see §5.1.1.
+- **Tools:** the read-only list in the definition's `tools:` field (§4.3).
 - **Must:** orchestrate, brief, recommend, delegate, track state.
 - **Must never:** write code; reason deeply about an individual feature; read large files.
 - **Backstop:** because "never reason deeply" is prompt-enforced rather than structural, the prompt must state it forcefully, and the Manager should be given an explicit turn/token budget per delegation decision.
@@ -1064,12 +1053,14 @@ Most of the skills in this workflow **already exist and are owned by the user.**
 
 aboard **integrates** these — invokes them, registers them, ships them alongside its own assets — but their content is not this project's work. An agent that finds one of them missing from a scaffold should report that, not author a replacement.
 
-**aboard owns exactly four skills**, each a thin trigger for extension behavior:
+**aboard owns exactly six skills**, each a thin trigger for extension behavior:
 
 | Skill | Why aboard owns it |
 | :-- | :-- |
 | `update-todo` | Operates on the TODO issue via `aboard__update_todo`. Meaningless outside aboard. |
 | `brainstorm` | Hook-backed launch of an aboard interactive worker. Meaningless outside aboard. |
+| `raw` | Hook-backed launch of an unconstrained aboard interactive worker. Meaningless outside aboard. |
+| `done` | Hook-backed closure of the invoking aboard terminal. Meaningless outside aboard. |
 | `auto` | Starts the auto-implementation run ([`auto-implementation.md`](./auto-implementation.md) §3). |
 | `review-pr` | Reopens the session owning the latest open PR (§9 of the same document). |
 
@@ -1103,6 +1094,8 @@ The scaffolder therefore **never writes under `.claude/skills/<user-owned-skill>
 | `commit` | **user** | user | Commit-message quality; already uses the exit-2 pattern of §6.3.1 |
 | `update-todo` | **aboard** | user, in Manager | Evolve the TODO issue via `aboard__update_todo` |
 | `brainstorm` | **aboard** | user, in Manager | Hook-backed interactive-agent launch (§6.3) |
+| `raw` | **aboard** | user, in Manager | Hook-backed unconstrained interactive-agent launch (§5.7) |
+| `done` | **aboard** | user, in any aboard terminal | Hook-backed terminal closure (§6.3) |
 
 Skills use `disable-model-invocation: true` where they are meant to be user-triggered only, and `argument-hint` for discoverability (both confirmed in `skills.md`).
 
@@ -1120,8 +1113,8 @@ An extension command scaffolds project assets:
                    pr-doctor-afk.md, pr-doctor-hitl.md
                    (no explorer — built-in Explore is used, §9.4)
   hooks/           Python hook scripts
-  skills/          update-todo, brainstorm, auto,
-                   review-pr                        (aboard-owned)
+  skills/          update-todo, brainstorm, raw, done,
+                   auto, review-pr                  (aboard-owned)
                    map-issues, draft-issues, publish-issues,
                    grill-me, lavish, commit         (user-owned: installed by
                                                      command, never shipped, §10.1)
@@ -1214,7 +1207,7 @@ Deliberately unresolved; each needs the user's input or dedicated iteration.
 1. **System prompts for every agent type (§9).** The highest-value remaining work. Quality lives here.
 2. **`update-todo` skill** — exact evolution semantics. One of only two skills aboard owns (§10.0).
 3. **Name for the raw-launch skill** (§5.7) — `/raw`, `/claude`, `/plain`, something else.
-4. **`manager.toolPreset` default** — `read-only` ships; the user will evaluate `delegation-only` in end-to-end testing.
+4. **~~`manager.toolPreset` default~~** — retired: the Manager's tool list now lives in `manager.md` like every other agent (§4.3); the user tunes it by editing the file.
 5. **The real Windows command-length ceiling** (§5.1.4) — measure per shell (PowerShell vs Git Bash). `aboard.launch.maxInlinePromptChars` defaults to a conservative 4,000 until it is known.
 7. **How `map-issues`/`draft-issues`/`publish-issues` express dependencies** — issue-body task lists, GitHub's native blocked-by, or a convention. Determines how the readiness query (§7.3) is written. **This is a question about the user's existing skills, not a design decision for this project** (§10.0).
 8. **Multi-root workspaces** — out of scope for v1; assume one workspace root per bridge.
@@ -1230,7 +1223,7 @@ For quick reference, and to prevent silent re-litigation:
 
 | # | Decision | Consequence if reversed |
 | :-- | :-- | :-- |
-| 1 | `--tools` allowlist omits `Agent`; MCP replaces it | Manager reaches for in-process sub-agents; all visibility lost |
+| 1 | `tools:` allowlist omits `Agent`; MCP replaces it | Manager reaches for in-process sub-agents; all visibility lost |
 | 2 | Bridge mints `--session-id` | No Manager resume; no durable fleet history |
 | 3 | Bridge is the only creator of agents | Fleet state becomes unreliable; lease unenforceable |
 | 4 | Env injection carries port + token + identity | Multi-window breaks; hooks need heuristic correlation |
@@ -1244,11 +1237,11 @@ For quick reference, and to prevent silent re-litigation:
 | 12 | Goal is experience, not automation | The project becomes a different, worse product |
 | 13 | aboard never writes user `permissions` settings | Clobbers user config; scopes every session, not one agent |
 | 14 | First prompt is a CLI argument; never typed into a live TUI | Update notices and callouts silently swallow prompts |
-| 15 | `--agent` XOR `--system-prompt`/`--tools` for every agent that declares `tools:`; the Manager is the sole both-flags launch, and only because its definition declares none | Launch silently ignores half its configuration; lease derivation becomes a guess |
+| 15 | `--agent` never combines with `--tools`; every agent's tool set is its definition's `tools:` field, the Manager's included | Launch silently ignores half its configuration; lease derivation becomes a guess |
 | 16 | Bridge resolves prompts before launch (§5.8) | Every worker pays `gh` output in context to learn its own job |
 | 17 | Intercepted commands exit 2, never inject context | Model wakes for mechanical actions and may act on them twice |
 | 18 | TODO is a GitHub issue, not a file | Editing the roadmap requires write tools → the Manager competes for its own lease |
-| 19 | No session-task tools in any Manager preset | Agents conflate session scratch state with the project roadmap |
+| 19 | No session-task tools in the Manager's tool list | Agents conflate session scratch state with the project roadmap |
 | 20 | Raw agent is first-class (§5.7) | Users are pushed out of the tool they came for; workflow becomes a wall |
 | 21 | Most skills are user-owned; aboard owns two | Reimplementation, divergence, and maintenance of tools that already work |
 | 22 | Every hook self-guards on `ABOARD_AGENT_ID` (§3.4) | Hooks fire in every session in the workspace — Manager logic runs inside workers, and the user's own sessions get hijacked |

@@ -100,22 +100,29 @@ test("the implementer is forbidden every git and GitHub side effect the engine o
   assert.match(implementer.prompt, /any `gh` command/);
 });
 
-test("the Manager definition leaves its tool set to the launch preset", async () => {
+test("the Manager definition declares the read-only tool list, with no Agent or session-task tools", async () => {
   const source = await readFile(join(agentsRoot, "manager.md"), "utf8");
   const parsed = parseManagerAgentDefinition(source);
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   assert.equal(parsed.value.model, "opus");
-  // Omitting `tools:` is what makes `--agent manager --tools <preset>` a
-  // narrowing rather than a contradiction: an agent without the field inherits
-  // the full pool. A `tools:` line here would silently compete with the setting.
-  assert.doesNotMatch(source, /^tools\s*:/m);
+  // The frontmatter allowlist is the Manager's only tool authority: the
+  // command line carries no --tools (spec section 5.1.1). `Agent` and the
+  // session-task tools are absent from it, not merely denied (spec section 4.3).
+  assert.deepEqual(parsed.value.tools, ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"]);
+  for (const forbidden of ["Agent", "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TodoWrite"]) {
+    assert.equal(parsed.value.tools.includes(forbidden), false, `${forbidden} must be absent`);
+  }
+  // Unrestricted Bash keeps the Manager write-capable on paper (spec section
+  // 4.3.1); it never holds the lease because requiresWriteLease exempts the type.
+  assert.equal(parsed.value.writeCapability, "write-capable");
 
+  // Without `tools:` the Manager would inherit the full pool, Agent included.
   assert.equal(
-    parseManagerAgentDefinition("---\nname: manager\ndescription: d\nmodel: opus\ntools: Read\n---\nOrchestrate.").ok,
+    parseManagerAgentDefinition("---\nname: manager\ndescription: d\nmodel: opus\n---\nOrchestrate.").ok,
     false,
   );
   assert.equal(
-    parseManagerAgentDefinition("---\nname: implementer\ndescription: d\nmodel: opus\n---\nOrchestrate.").ok,
+    parseManagerAgentDefinition("---\nname: implementer\ndescription: d\nmodel: opus\ntools: Read\n---\nOrchestrate.").ok,
     false,
   );
   // The Manager is not a worker: it must not resolve through the worker parser.

@@ -41,7 +41,7 @@ Follow the intended module layout in `docs/architecture.md`, but create a direct
 - Every project-scoped hook must first self-guard on `ABOARD_AGENT_ID`; hooks for specific roles must also check `ABOARD_AGENT_TYPE`. A non-addressed hook exits `0` silently.
 - aboard may add hook registrations to `.claude/settings.json`, but must preserve user settings and must never write `permissions` or `autoCompact`.
 - Resolve worker prompts before launch. Pass the first prompt as a CLI argument; never type an automated worker's prompt into a live TUI.
-- Treat `--agent` as mutually exclusive with `--tools`/system-prompt launch configuration for every agent whose definition declares `tools:`. The Manager is the one exception: it launches as `--agent manager --tools <preset>`, valid only because `.claude/agents/manager.md` declares no `tools:`. Never add one.
+- Every aboard agent takes its tool set from the `tools:` field of its `.claude/agents/<name>.md` definition. Launches never combine `--agent` with `--tools` — the planner rejects the pair, because the flag would compete with the frontmatter the write lease trusts. The Manager's read-only list lives in `.claude/agents/manager.md` like any other agent. The only surviving `--tools` flag is the optional restriction on a raw launch, which is the absence of a definition.
 - aboard scaffolds no `CLAUDE.md`. That file belongs to the user's project and applies to every session in the workspace; the Manager persona lives in its agent definition.
 - GitHub is the durable work-state source. Do not introduce `TODO.md` or duplicate issue/PR state locally.
 - Preserve the four-label model from the spec: `spec`, `todo`, `afk`, and `hitl`. Derive other state.
