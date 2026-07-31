@@ -269,14 +269,31 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
   for (const type of ["brainstormer", "raw"] as const) {
-    assert.equal(await adapter.resolve({ type, description: "d" }), undefined);
-    assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }), undefined);
+    assert.equal(await adapter.resolve({ type, description: "d" }, { interactive: true }), undefined);
+    assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }, { interactive: true }), undefined);
     // A Manager delegating with a real topic still gets it; only filler is gone.
-    const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" });
+    const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { interactive: true });
     assert.equal(withTopic?.text.includes("caching layer"), true);
   }
   // Automated types keep their fallback: a worker with no first message would
   // sit at an empty TUI forever.
-  const doctor = await adapter.resolve({ type: "pr-doctor-afk", description: "d" });
+  const doctor = await adapter.resolve({ type: "pr-doctor-afk", description: "d" }, { interactive: false });
   assert.match(String(doctor?.text), /Review the supplied change against its contract\./);
+});
+
+test("a builtin type's prompt follows its launch mode, not its type", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
+  // Interactive: the terminal opens empty even though the type can also run
+  // unattended — the user types the first message.
+  assert.equal(await adapter.resolve({ type: "general-purpose", description: "d" }, { interactive: true }), undefined);
+  assert.equal(await adapter.resolve({ type: "Explore", description: "d" }, { interactive: true }), undefined);
+  const topic = await adapter.resolve({ type: "Explore", description: "d", prompt: "auth flow" }, { interactive: true });
+  assert.equal(topic?.text.includes("auth flow"), true);
+  // Automated: the prompt is the first user turn, and a missing one still falls
+  // back rather than leave an agent at an empty terminal.
+  const task = await adapter.resolve({ type: "general-purpose", description: "d", prompt: "find the retry bug" }, { interactive: false });
+  assert.equal(task?.text.includes("find the retry bug"), true);
+  const fallback = await adapter.resolve({ type: "Explore", description: "d" }, { interactive: false });
+  assert.match(String(fallback?.text), /Continue with the requested task\./);
 });

@@ -5,6 +5,8 @@ export const AGENT_TYPES = [
   "pr-doctor-afk",
   "pr-doctor-hitl",
   "raw",
+  "general-purpose",
+  "Explore",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -51,6 +53,24 @@ export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "raw", "pr-doctor-hitl"]
 
 export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
+}
+
+/**
+ * Claude Code's builtin agents. aboard scaffolds no `.claude/agents/` file for
+ * them — `--agent <name>` resolves to the definition Claude Code ships — and
+ * the names deliberately match the builtin exactly, since a project definition
+ * of the same name would override it upstream.
+ *
+ * They are the dual-mode types the `interactive` flag exists for (spec section
+ * 6.1): unlike INTERACTIVE_AGENT_TYPES they can work unattended and report a
+ * result, and unlike AUTOMATED_AGENT_TYPES they can also be handed to the user,
+ * so a first prompt stays optional and result reporting is decided per launch,
+ * never per type.
+ */
+export const BUILTIN_AGENT_TYPES = ["general-purpose", "Explore"] as const;
+
+export function isBuiltinAgentType(type: AgentType): boolean {
+  return (BUILTIN_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
 export type AgentId = string & { readonly __brand: "AgentId" };

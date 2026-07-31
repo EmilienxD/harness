@@ -12,8 +12,8 @@ test("authenticated HTTP crosses the MCP boundary and validates requests", async
   const mcp = createMcpHandler({
     run: async (input) => { calls.push({ type: input.type, description: input.description }); return { agentId: "worker-1", result: { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "reviewed", telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } }; },
     spawn: () => { throw new Error("not used"); },
-    // Both remaining run_agent types are interactive-only, so a launch that
-    // omits the flag is coerced onto this path rather than refused.
+    // `raw` and `brainstormer` are interactive-only, so a launch that omits the
+    // flag is coerced onto this path rather than refused.
     spawnInteractive: async (input) => { calls.push({ type: input.type, description: input.description }); return { agentId: "worker-1", handoff: "Terminal focused." }; },
     releaseLease: () => ({ released: false }),
   });

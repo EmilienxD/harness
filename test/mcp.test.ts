@@ -7,7 +7,7 @@ import { resolveLaunchConfiguration } from "../src/claude/launch.js";
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
-import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId, WorkerResult } from "../src/domain/contracts.js";
+import { isBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
 
@@ -95,11 +95,15 @@ function setup() {
     agentIdFactory: () => agent(`worker-${++agentId}`),
     sessionIdFactory: () => session(ids[sessionId++]!),
     configurations: {
+      // Mirrors the production source: builtin types launch as `--agent <name>`
+      // against Claude Code's own definition, so there is no file to read.
       get: async (type) => type === "brainstormer"
         ? resolveLaunchConfiguration({ agentName: type, declaredTools: ["Read", "Grep"] })
         : type === "raw"
           ? resolveLaunchConfiguration({})
-          : resolveLaunchConfiguration({ agentName: type, declaredTools: ["Read", "Edit"] }),
+          : isBuiltinAgentType(type)
+            ? resolveLaunchConfiguration({ agentName: type })
+            : resolveLaunchConfiguration({ agentName: type, declaredTools: ["Read", "Edit"] }),
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
     spills: { write: async (spill) => spill.relativePath },
@@ -154,6 +158,9 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["run_agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
     ["run_agent", { type: "raw", description: "too short", interactive: true }],
     ["run_agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
+    // A dual-mode type without the interactive flag is automated, and an
+    // automated launch without a prompt is the one combination with no reading.
+    ["run_agent", { type: "Explore", description: "map the auth flow" }],
     ["get_todo", { issue: 12 }],
     ["update_todo", { body: "x", reason: "" }],
     ["review_pr", { pr: 0 }],
@@ -171,7 +178,7 @@ test("run_agent cannot launch an implementation agent by any route", async () =>
   const { call, fleet } = setup();
   const tool = CORE_MCP_TOOLS.find((entry) => entry.name === "run_agent")!;
   const schema = tool.inputSchema as { properties: { type: { enum: readonly string[] } } };
-  assert.deepEqual([...schema.properties.type.enum].sort(), ["brainstormer", "raw"]);
+  assert.deepEqual([...schema.properties.type.enum].sort(), ["Explore", "brainstormer", "general-purpose", "raw"]);
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
     assert.equal("error" in resultBody(await call("run_agent", { type, prompt: "work", description: "do the work now" })), true, type);
   }
@@ -258,6 +265,63 @@ test("interactive mode makes prompt optional at both the schema and runtime boun
   const withTopic = resultBody(await call("run_agent", { type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true }));
   assert.equal("error" in withTopic, false, JSON.stringify(withTopic));
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /caching layer/);
+});
+
+test("builtin types run unattended: foreground blocks, and read-only Explore runs beside the lease holder", async () => {
+  const { call, fleet, lease, host, coordinator } = setup();
+  let foregroundSettled = false;
+  const foreground = Promise.resolve(call("run_agent", {
+    type: "general-purpose", prompt: "hunt the retry bug", description: "hunt the retry bug",
+  })).then((response) => { foregroundSettled = true; return response; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(foregroundSettled, false);
+  const worker = fleet.list().find((entry) => entry.identity.type === "general-purpose")!;
+  // A full-tool agent is write-capable: it holds the lease and its session is
+  // marked result-delivering for the hooks.
+  assert.equal(lease.current()?.agentId, worker.identity.agentId);
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  assert.equal(worker.resultDelivery.mode, "tool-result");
+
+  // Explore is read-only, so it launches concurrently instead of conflicting.
+  const background = resultBody(await call("run_agent", {
+    type: "Explore", prompt: "map the auth flow", description: "map the auth flow", run_in_background: true,
+  }));
+  assert.equal("error" in background, false, JSON.stringify(background));
+  assert.match(JSON.stringify(background), /running/);
+  const explorer = fleet.list().find((entry) => entry.identity.type === "Explore")!;
+  assert.equal(explorer.resultDelivery.mode, "mailbox");
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  const explorerCommand = host.created.at(-1)!.terminal.sent.at(-1)!;
+  assert.match(explorerCommand, /--agent Explore/);
+  assert.match(explorerCommand, /map the auth flow/);
+  assert.deepEqual(host.created.at(-1)!.terminal.shown, []);
+
+  coordinator.complete(worker.identity.agentId, success);
+  assert.match(JSON.stringify((await foreground).body), /finished/);
+  assert.equal(lease.current(), undefined);
+});
+
+test("builtin types run interactively: focused, hook-silent, prompt optional", async () => {
+  const { call, host } = setup();
+  const launched = resultBody(await call("run_agent", {
+    type: "Explore", description: "browse the auth flow", interactive: true,
+  }));
+  assert.equal("error" in launched, false, JSON.stringify(launched));
+  assert.match(JSON.stringify(launched), /no agent result/);
+  // Focused like any handed-off session, with no result to report and no
+  // positional prompt: the user types the first message.
+  assert.deepEqual(host.created.at(-1)!.terminal.shown, [false]);
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent Explore\s*$/);
+
+  const withTopic = resultBody(await call("run_agent", {
+    type: "general-purpose", prompt: "start from src/auth.ts", description: "drive the auth cleanup", interactive: true,
+  }));
+  assert.equal("error" in withTopic, false, JSON.stringify(withTopic));
+  const command = host.created.at(-1)!.terminal.sent.at(-1)!;
+  assert.match(command, /--agent general-purpose/);
+  assert.match(command, /start from src\/auth\.ts/);
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
 });
 
 test("an interactive-only type is launched interactively and the correction is reported", async () => {

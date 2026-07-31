@@ -80,6 +80,14 @@ export interface CreateAboardTerminalRequest {
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
   readonly initialCommand?: string;
+  /**
+   * Whether this session reports its result over the bridge. It is a property
+   * of the launch, not of the type: the dual-mode builtin types
+   * (`general-purpose`, `Explore`) report exactly when their launch is
+   * result-delivering. The hooks read it as `ABOARD_DELIVERS_RESULT`, and its
+   * absence means the session is handed to the user and stays hook-silent.
+   */
+  readonly deliversResult?: boolean;
 }
 
 export type TerminalLifecycleEvent =
@@ -147,9 +155,14 @@ export interface TerminalControllerOptions {
   readonly processIdTimeoutMs?: number;
 }
 
-/** The Manager and every interactive agent are shown on creation; automated workers are not stolen focus for. */
-function isUserFacing(type: AgentType): boolean {
-  return type === "manager" || isInteractiveAgentType(type);
+/**
+ * The Manager and every session handed to the user are shown on creation;
+ * automated workers are not stolen focus for. Handed-to-the-user is per launch
+ * (`deliversResult: false`), not only per type: a builtin type launched
+ * interactively is shown exactly like an interactive-only one.
+ */
+function isUserFacing(request: CreateAboardTerminalRequest): boolean {
+  return request.agentType === "manager" || isInteractiveAgentType(request.agentType) || request.deliversResult === false;
 }
 
 export class TerminalController {
@@ -200,6 +213,7 @@ export class TerminalController {
       ABOARD_WORKSPACE_ROOT: environment.workspaceRoot,
     };
     if (request.issueNumber !== undefined) env.ABOARD_ISSUE_NUMBER = String(request.issueNumber);
+    if (request.deliversResult === true) env.ABOARD_DELIVERS_RESULT = "1";
 
     const creationOptions: TerminalCreationOptions = {
       name,
@@ -236,7 +250,7 @@ export class TerminalController {
       occurredAt: createdAt,
     });
 
-    if (isUserFacing(request.agentType)) handle.show(false);
+    if (isUserFacing(request)) handle.show(false);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
     return this.#snapshot(record);
   }

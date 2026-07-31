@@ -12,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { TerminalController } from "./claude/terminals.js";
-import type { TerminalId } from "./domain/contracts.js";
+import { isBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
 import { sessionTranscriptExists } from "./claude/sessions.js";
@@ -127,6 +127,12 @@ function briefingSources(git: GitClient, github: GitHubClient, previousSessionAt
 function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
   return { get: async (type) => {
     if (type === "raw") return { shape: "inline" };
+    // The builtin types resolve to Claude Code's own definitions: aboard
+    // scaffolds no file for them and there is no frontmatter to read for the
+    // tool set — capability for both is fixed in `launchWriteCapability`, and
+    // deriving from an unreadable file would conservatively mark even Explore
+    // write-capable.
+    if (isBuiltinAgentType(type)) return { shape: "agent-defined", agentName: type };
     const result = parseAgentDefinition(await readFile(join(workspaceRoot, ".claude", "agents", `${type}.md`), "utf8"));
     if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
     return { shape: "agent-defined", agentName: type, declaredTools: result.value.tools };
@@ -411,7 +417,17 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   context.subscriptions.push(
     commands.registerCommand("aboard.initializeProject", scaffold),
-    commands.registerCommand("aboard.updateProject", scaffold),
+    commands.registerCommand("aboard.updateProject", async () => {
+      const confirmed = await window.showWarningMessage(
+        "Reset aboard's project assets?",
+        {
+          modal: true,
+          detail: "aboard reinstalls the agents, hooks, and skills it owns under .aboard/ and .claude/: files you have not touched are replaced with this version's copies, and files aboard no longer ships are deleted. Assets you edited yourself are kept and listed afterwards rather than overwritten, and your own project files are never touched. Running agents keep going.",
+        },
+        "Reset",
+      );
+      if (confirmed === "Reset") await scaffold();
+    }),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
     registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, callback), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),

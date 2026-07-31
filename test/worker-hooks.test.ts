@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { WorkerHookService, createWorkerHookRoutes } from "../src/bridge/worker-hooks.js";
@@ -67,6 +68,52 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
   for (const env of [{}, { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" }]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
+  }
+});
+
+test("worker Python hook guards the dual-mode builtin types on ABOARD_DELIVERS_RESULT", async () => {
+  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "done" });
+  // An interactive Explore session reports nothing: without the delivery flag
+  // the guard exits 0 with no output, exactly like a brainstormer.
+  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" } });
+  assert.equal(silent.status, 0); assert.equal(silent.stdout, ""); assert.equal(silent.stderr, "");
+
+  // The same type launched to deliver a result reports its stop: the flag, not
+  // the type, opens the worker route. Spawned asynchronously — a synchronous
+  // spawn would block the event loop that has to answer the hook's POST.
+  const received: { url?: string; body?: string } = {};
+  const server = createServer((incoming, outgoing) => {
+    const chunks: Buffer[] = [];
+    incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+    incoming.on("end", () => {
+      if (incoming.url !== undefined) received.url = incoming.url;
+      received.body = Buffer.concat(chunks).toString("utf8");
+      outgoing.writeHead(200, { "content-type": "application/json" });
+      outgoing.end("{}");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+    const child = spawn("uv", ["run", "--no-project", "python", script, "worker-stop"], {
+      env: { ...process.env, ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore", ABOARD_DELIVERS_RESULT: "1", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = ""; let stderr = "";
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.stdin.end(stopPayload);
+    const status = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    assert.equal(status, 0);
+    assert.equal(stderr, "");
+    assert.equal(stdout, "");
+    assert.equal(received.url, "/hooks/stop");
+    assert.match(received.body ?? "", /explore-1/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
   }
 });
 

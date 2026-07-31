@@ -52,7 +52,12 @@ export interface DelegationConfigurationSource {
 }
 
 export interface DelegationPromptResolver {
-  resolve(input: DelegationLaunchInput): Promise<ResolvedPrompt | undefined>;
+  /**
+   * `interactive` is the launch's mode, not the type's: a dual-mode builtin
+   * type launched interactively needs no opening message any more than a
+   * brainstormer does, and an automated launch always needs one.
+   */
+  resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined>;
 }
 
 export interface DelegationCoordinatorOptions {
@@ -181,9 +186,12 @@ export class DelegationCoordinator {
   }> {
     const agentId = this.options.agentIdFactory();
     const sessionId = this.options.sessionIdFactory();
+    // Interactive is the launch's delivery mode, derivable from nothing else:
+    // `general-purpose` and `Explore` run in either mode.
+    const interactive = resultDelivery.mode === "none";
     const [configuration, prompt] = await Promise.all([
       this.options.configurations.get(input.type),
-      this.options.prompts.resolve(input),
+      this.options.prompts.resolve(input, { interactive }),
     ]);
     const plan = planLaunch({
       agentId,
@@ -207,6 +215,9 @@ export class DelegationCoordinator {
         ...(input.issue === undefined ? {} : { issueNumber: input.issue }),
         name: `aboard: ${input.description}`,
         initialCommand: plan.commandLine,
+        // Hooks and focus both key on this: a result-delivering session reports
+        // over the bridge and runs unfocused; a handed-off one stays silent.
+        deliversResult: !interactive,
       });
       this.options.fleet.register({
         identity: { agentId, type: input.type },

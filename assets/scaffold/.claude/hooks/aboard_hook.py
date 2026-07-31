@@ -33,10 +33,13 @@ ROUTES = {
 # other route would be read as "refuse to stop" or "refuse to compact".
 BLOCKING_ROUTE = "manager-prompt"
 
-# Roles that run as automated, result-reporting workers. Interactive roles
-# (brainstormer, raw, pr-doctor-hitl) never report a result, so worker hooks skip
-# them: pr-doctor-hitl waits on the user, and the run's continue signal for a
-# hitl issue is the pull request's resolution, not that agent's completion.
+# Roles that always run as automated, result-reporting workers. Interactive
+# roles (brainstormer, raw, pr-doctor-hitl) never report a result, so worker
+# hooks skip them: pr-doctor-hitl waits on the user, and the run's continue
+# signal for a hitl issue is the pull request's resolution, not that agent's
+# completion. The dual-mode builtin types (general-purpose, Explore) report per
+# launch rather than per role: the extension sets ABOARD_DELIVERS_RESULT=1 only
+# for result-delivering sessions, so an interactive one stays silent here.
 WORKER_AGENT_TYPES = frozenset({"implementer", "pr-doctor-afk"})
 
 # Commands the bridge handles itself. Matches the bridge-side parsers.
@@ -71,8 +74,11 @@ def main():
     if not agent_id or endpoint is None:
         return 0
     agent_type = os.environ.get("ABOARD_AGENT_TYPE")
+    delivers_result = os.environ.get("ABOARD_DELIVERS_RESULT") == "1"
     expected_manager = route.startswith("manager-")
-    if (expected_manager and agent_type != "manager") or (not expected_manager and agent_type not in WORKER_AGENT_TYPES):
+    if (expected_manager and agent_type != "manager") or (
+        not expected_manager and agent_type not in WORKER_AGENT_TYPES and not delivers_result
+    ):
         return 0
     try:
         payload = json.load(sys.stdin)

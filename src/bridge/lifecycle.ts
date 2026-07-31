@@ -1,7 +1,7 @@
 import { ProcessGitClient, isWorkingTreeClean, type GitClient } from "../git/client.js";
 import type { TerminalLifecycleEvent } from "../claude/terminals.js";
 import {
-  isAutomatedAgentType,
+  isInteractiveAgentType,
   type AgentId,
   type AgentSession,
   type AgentTelemetry,
@@ -33,14 +33,19 @@ export interface WorkerCompletionSink {
 }
 
 /**
- * Whether a closed terminal owes anyone a result. The Manager and interactive
- * agents do not: their Stop hook is guarded off, so no result can ever arrive
- * and there is nothing to reconcile — they are simply forgotten. Both halves of
- * the test matter, so a mis-routed launch (an interactive type handed to a
- * result-delivering tool) still cannot leave a dead agent stuck in the fleet.
+ * Whether a closed terminal owes anyone a result. The Manager and sessions
+ * handed to the user do not: their Stop hook is guarded off (by type for the
+ * interactive-only types, by `ABOARD_DELIVERS_RESULT` for a builtin launched
+ * interactively), so no result can ever arrive and there is nothing to
+ * reconcile — they are simply forgotten. The type half of the test still
+ * matters, so a mis-routed launch (an interactive type handed to a
+ * result-delivering tool) still cannot leave a dead agent stuck in the fleet;
+ * the dual-mode builtin types report exactly when their launch asked for one.
  */
 export function reportsResult(session: AgentSession): boolean {
-  return session.resultDelivery.mode !== "none" && isAutomatedAgentType(session.identity.type);
+  return session.resultDelivery.mode !== "none"
+    && session.identity.type !== "manager"
+    && !isInteractiveAgentType(session.identity.type);
 }
 
 export interface WorkerLifecycleReconcilerOptions {

@@ -40,22 +40,24 @@ const LAUNCH_PROPERTIES = {
 const RUN_AGENT_DESCRIPTION = `Launch a visible, independent Claude Code agent in its own terminal. This is aboard's replacement for Claude Code's Agent tool: the agent is a real session the user can watch and take over, not an in-process subagent.
 
 Available agent types:
+- general-purpose: Claude Code's built-in full-tool agent for multi-step work that mixes exploring and editing. Runs in either mode.
+- Explore: Claude Code's built-in read-only search agent: it reads excerpts rather than whole files and returns findings rather than dumps, and being read-only it never holds the write lease. Runs in either mode.
 - brainstormer: Develop a product or architecture idea with the user and finish with a durable spec issue. Interactive only.
 - raw: An unconstrained Claude Code session with no agent definition, for a user who wants to work directly. Interactive only.
 
-Each type's effective tools come from the project's own agent definition in .claude/agents/.
+The built-in types resolve to the agent definitions Claude Code ships; the other types' effective tools come from the project's own agent definition in .claude/agents/.
 
 Implementation agents are deliberately absent. \`implementer\`, \`pr-doctor-afk\`, and \`pr-doctor-hitl\` are reachable only through mcp__aboard__start_auto_run and mcp__aboard__review_pr, because the extension — not you — owns the implementation loop and performs every git and GitHub side effect in it. To get an issue implemented, start an auto-run; do not try to reproduce the loop by hand.
 
 ## Two modes
 
-**Interactive** (\`interactive: true\`) is the mode every currently available type uses. The terminal is focused and handed to the user, who drives it from there. **No result is ever delivered** — never wait for one, never poll for one, and never tell the user you will report back. Hand off and continue the conversation. \`prompt\` is optional here and should be omitted unless the user named a specific topic to open on; they type the first message themselves. Never invent or paraphrase a topic to fill it in, because an invented opening turn spends the agent's first turn on a question the user did not ask.
+**Interactive** (\`interactive: true\`) focuses the terminal and hands it to the user, who drives it from there. **No result is ever delivered** — never wait for one, never poll for one, and never tell the user you will report back. Hand off and continue the conversation. \`prompt\` is optional here and should be omitted unless the user named a specific topic to open on; they type the first message themselves. Never invent or paraphrase a topic to fill it in, because an invented opening turn spends the agent's first turn on a question the user did not ask.
 
-**Automated** (the default) has the agent work alone and report back, with \`run_in_background: true\` returning immediately instead of blocking this call. Both \`brainstormer\` and \`raw\` exist only to be handed to the user, so requesting either without \`interactive: true\` launches interactively anyway and says so in the result. Automated implementation work goes through mcp__aboard__start_auto_run, not through this tool.
+**Automated** (the default) has the agent work alone and report back, with \`run_in_background: true\` returning immediately instead of blocking this call, and requires a \`prompt\` — without one the agent would sit at an empty terminal forever, and nothing may type into it. Only \`general-purpose\` and \`Explore\` run in both modes; \`brainstormer\` and \`raw\` exist only to be handed to the user, so requesting either without \`interactive: true\` launches interactively anyway and says so in the result. Automated implementation work goes through mcp__aboard__start_auto_run, not through this tool.
 
 ## When not to use
 
-If you only need project state, read it directly: mcp__aboard__get_todo and \`gh\` calls are far cheaper than an agent. Hand over a coherent unit of work — one conversation the user wants to have — not a single file edit or a lookup.
+If you only need project state, read it directly: mcp__aboard__get_todo and \`gh\` calls are far cheaper than an agent, and a file you can already name is a Read call, not an Explore launch. Hand over a coherent unit of work — a question that needs searching to answer, a task with real steps, one conversation the user wants to have — not a single lookup.
 
 ## Usage notes
 

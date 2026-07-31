@@ -8,7 +8,7 @@ const PR_DOCTOR_INSTRUCTION =
 export class GitHubDelegationPromptResolver implements DelegationPromptResolver {
   public constructor(private readonly prompts: PromptResolver) {}
 
-  public async resolve(input: DelegationLaunchInput): Promise<ResolvedPrompt | undefined> {
+  public async resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined> {
     // Both pr-doctors take the same launch prompt: the diff, the issue, the
     // parent spec excerpt, the PR number, and the branch. Divergence between
     // them is a bug — they are the same reviewer with different permission to
@@ -25,10 +25,12 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         ...(input.focus === undefined ? {} : { focus: input.focus }),
       });
     }
-    // Any other interactive agent has a user in front of it, so it needs no
-    // opening message. Substituting filler here would spend a whole turn on
-    // "Continue with the requested task." before the user has said anything.
-    if (isInteractiveAgentType(input.type)) {
+    // Any agent handed to the user has one in front of it, so it needs no
+    // opening message — whether it is an interactive-only type or a dual-mode
+    // builtin launched with `interactive: true`. Substituting filler here would
+    // spend a whole turn on "Continue with the requested task." before the user
+    // has said anything.
+    if (options.interactive || isInteractiveAgentType(input.type)) {
       const instruction = input.prompt?.trim();
       return instruction === undefined || instruction.length === 0
         ? undefined

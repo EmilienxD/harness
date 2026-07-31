@@ -276,16 +276,20 @@ export function managerLaunchConfiguration(preset: ManagerToolPreset): LaunchCon
 }
 
 /**
- * Capability is derived from the effective tool set, never declared. `raw` is
- * the one type fixed by the spec rather than by derivation: it has no
+ * Capability is derived from the effective tool set, never declared. Two types
+ * are fixed rather than derived. `raw` is fixed by the spec: it has no
  * definition to read and is exactly where ad-hoc edits happen, so it is
  * write-capable whatever tools the user configured (sections 5.7 and 9.7).
+ * `Explore` is fixed by Claude Code itself: its builtin definition is a
+ * read-only search agent, and aboard scaffolds no file that could be read to
+ * derive that (`docs/CLAUDE-REFERENCES/subagents.md`).
  */
 export function launchWriteCapability(
   agentType: AgentType,
   configuration: LaunchConfiguration,
 ): WriteCapability {
   if (agentType === "raw") return "write-capable";
+  if (agentType === "Explore") return "read-only";
   // `agent-preset` and `inline` both carry the effective list in `tools`.
   return deriveWriteCapability(
     configuration.shape === "agent-defined" ? configuration.declaredTools : configuration.tools,

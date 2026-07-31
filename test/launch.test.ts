@@ -178,6 +178,26 @@ test("a configured raw tool set does not downgrade raw out of the lease", () => 
   assert.equal(launchWriteCapability("raw", configuration), "write-capable");
 });
 
+test("the builtin types carry Claude Code's own capabilities, not a derived guess", () => {
+  // No scaffolded definition exists to derive from: general-purpose is Claude
+  // Code's full-tool agent, and Explore is its read-only search agent — the
+  // conservative fallback for an unreadable definition would wrongly put
+  // Explore on the write lease.
+  const builtin = (name: string) => resolveLaunchConfiguration({ agentName: name });
+  assert.equal(launchWriteCapability("Explore", builtin("Explore")), "read-only");
+  assert.equal(launchWriteCapability("general-purpose", builtin("general-purpose")), "write-capable");
+
+  const explore = planLaunch(request({
+    agentType: "Explore",
+    configuration: builtin("Explore"),
+    prompt: "Map the auth flow.",
+    permissionMode: "default",
+  }));
+  assert.equal(explore.requiresWriteLease, false);
+  // Both resolve to --agent <builtin name> with no tool flags.
+  assert.deepEqual(explore.args, ["--session-id", sessionId, "--agent", "Explore", "Map the auth flow."]);
+});
+
 test("rejects plans that mix --agent with inline configuration", () => {
   for (const input of [
     { agentName: "implementer", tools: ["Read"] },

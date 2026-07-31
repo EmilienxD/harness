@@ -125,6 +125,30 @@ test("a closed terminal frees the agent for relaunch but keeps session identity 
   assert.throws(() => controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "manager" }), /already has a live aboard terminal/);
 });
 
+test("result-delivering sessions carry ABOARD_DELIVERS_RESULT; handed-off ones are focused and silent", () => {
+  const { controller, host } = setup();
+  // The dual-mode builtin types make this a per-launch property: same type,
+  // opposite environment and focus.
+  controller.create({
+    agentId: agent("explore-auto"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "Explore",
+    initialCommand: "claude --agent Explore map the auth flow",
+    deliversResult: true,
+  });
+  assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  assert.deepEqual(host.created[0]!.terminal.shows, []);
+
+  controller.create({
+    agentId: agent("explore-interactive"),
+    sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
+    agentType: "Explore",
+    deliversResult: false,
+  });
+  assert.equal(host.created[1]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.deepEqual(host.created[1]!.terminal.shows, [false]);
+});
+
 test("focuses interactive terminals and exposes only takeover-named input controls", async () => {
   const { controller, host } = setup();
   const created = controller.create({
