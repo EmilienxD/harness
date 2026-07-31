@@ -1,8 +1,31 @@
 import { createHash } from "node:crypto";
-import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-export const VENDORED_SKILLS = ["map-issues", "draft-issues", "publish-issues", "grill-me", "lavish", "commit"] as const;
+/**
+ * User-owned skills live upstream in the `harness` repository. aboard ships no
+ * copy of them: shipped copies drift from upstream silently and turn a user file
+ * into an extension asset. Each is installed instead by running its upstream
+ * install command in the project. The commands are not defined yet; an
+ * unconfigured skill is reported, never authored here (spec §10.0, §10.1).
+ */
+export interface VendoredSkill {
+  readonly name: string;
+  readonly command: string | null;
+}
+
+export const VENDORED_SKILLS: readonly VendoredSkill[] = [
+  { name: "map-issues", command: null },
+  { name: "draft-issues", command: null },
+  { name: "publish-issues", command: null },    // TODO: Add the commands
+  { name: "grill-me", command: null },
+  { name: "lavish", command: null },
+  { name: "commit", command: null },
+];
+
+export interface VendoredSkillInstaller {
+  run(command: string, cwd: string): Promise<void>;
+}
 
 export interface ScaffoldTodo {
   ensure(): Promise<"created" | "existing">;
@@ -13,19 +36,22 @@ export interface ScaffoldOptions {
   readonly assetRoot: string;
   readonly todo: ScaffoldTodo;
   readonly autoCompactEnabled?: boolean;
+  readonly vendoredSkills?: readonly VendoredSkill[];
+  readonly installer?: VendoredSkillInstaller;
 }
 
 export interface ScaffoldReport {
   readonly created: readonly string[];
   readonly updated: readonly string[];
+  readonly removed: readonly string[];
   readonly preserved: readonly string[];
+  readonly installed: readonly string[];
   readonly warnings: readonly string[];
   readonly todo: "created" | "existing";
 }
 
 interface InstalledAsset {
   readonly sourceHash: string;
-  readonly vendored: boolean;
 }
 
 interface Manifest {
@@ -79,9 +105,30 @@ async function files(root: string): Promise<readonly string[]> {
 
 function portable(path: string): string { return path.split(sep).join("/"); }
 
-function isVendored(path: string): boolean {
+function isVendored(path: string, skills: readonly VendoredSkill[]): boolean {
   const match = /^\.claude\/skills\/([^/]+)\//.exec(path);
-  return match !== null && (VENDORED_SKILLS as readonly string[]).includes(match[1] ?? "");
+  return match !== null && skills.some((skill) => skill.name === match[1]);
+}
+
+/**
+ * Vendored skills are installed by command, so aboard neither writes nor owns
+ * their files. Any that a shipped-copy build left behind is handed back to the
+ * user: dropped from the manifest, left on disk for the install command to
+ * replace.
+ */
+async function installVendoredSkills(
+  skills: readonly VendoredSkill[],
+  installer: VendoredSkillInstaller | undefined,
+  projectRoot: string,
+  installed: string[],
+  warnings: string[],
+): Promise<void> {
+  for (const skill of skills) {
+    if (skill.command === null) { warnings.push(`No install command configured for vendored skill: ${skill.name}`); continue; }
+    if (installer === undefined) { warnings.push(`Cannot install vendored skill ${skill.name}: no installer available`); continue; }
+    try { await installer.run(skill.command, projectRoot); installed.push(skill.name); }
+    catch (error) { warnings.push(`Failed to install vendored skill ${skill.name}: ${error instanceof Error ? error.message : "install command failed"}`); }
+  }
 }
 
 function isAboardHook(value: unknown): boolean {
@@ -149,16 +196,14 @@ export async function readScaffoldState(projectRoot: string): Promise<ScaffoldSt
 export async function scaffoldProject(options: ScaffoldOptions): Promise<ScaffoldReport> {
   const projectRoot = resolve(options.projectRoot);
   const assetRoot = resolve(options.assetRoot);
-  const created: string[] = [], updated: string[] = [], preserved: string[] = [], warnings: string[] = [];
+  const created: string[] = [], updated: string[] = [], removed: string[] = [], preserved: string[] = [], installed: string[] = [], warnings: string[] = [];
   const manifestPath = join(projectRoot, MANIFEST_PATH);
   const previous = await loadManifest(manifestPath);
   const next: Record<string, InstalledAsset> = { ...previous.assets };
+  const vendoredSkills = options.vendoredSkills ?? VENDORED_SKILLS;
 
   const sourceFiles = await files(assetRoot);
   const sourcePaths = new Set(sourceFiles.map((path) => portable(relative(assetRoot, path))));
-  for (const skill of VENDORED_SKILLS) {
-    if (![...sourcePaths].some((path) => path.startsWith(`.claude/skills/${skill}/`))) warnings.push(`Missing upstream vendored skill: ${skill}`);
-  }
 
   for (const source of sourceFiles) {
     const path = portable(relative(assetRoot, source));
@@ -167,21 +212,37 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
     const content = await readFile(source, "utf8");
     const sourceHash = hash(content);
     const destination = join(projectRoot, ...path.split("/"));
-    const vendored = isVendored(path);
     if (!await exists(destination)) {
       await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, content, "utf8"); created.push(path);
     } else {
       const current = await readFile(destination, "utf8");
-      const installed = previous.assets[path];
+      const previousAsset = previous.assets[path];
       if (current === content) {
         // Already current.
-      } else if (vendored || (installed !== undefined && hash(current) === installed.sourceHash)) {
+      } else if (previousAsset !== undefined && hash(current) === previousAsset.sourceHash) {
         await writeFile(destination, content, "utf8"); updated.push(path);
       } else {
         preserved.push(path); warnings.push(`Preserved locally edited aboard asset: ${path}`);
       }
     }
-    next[path] = { sourceHash, vendored };
+    next[path] = { sourceHash };
+  }
+
+  // An asset aboard used to ship but no longer does (the Manager persona moved
+  // from CLAUDE.md into .claude/agents/manager.md) would otherwise linger and
+  // keep applying to every session in the project. Retire it only when it still
+  // matches what we installed; a locally edited copy is the user's file now.
+  for (const [path, asset] of Object.entries(previous.assets)) {
+    if (sourcePaths.has(path)) continue;
+    delete next[path];
+    if (isVendored(path, vendoredSkills)) continue;
+    const destination = join(projectRoot, ...path.split("/"));
+    if (!await exists(destination)) continue;
+    if (hash(await readFile(destination, "utf8")) === asset.sourceHash) {
+      await rm(destination, { force: true }); removed.push(path);
+    } else {
+      preserved.push(path); warnings.push(`Preserved locally edited asset aboard no longer ships: ${path}`);
+    }
   }
 
   const registration = parseObject(await readFile(join(assetRoot, ".claude", "hooks", "aboard-hooks.json"), "utf8"), "aboard-hooks.json");
@@ -209,7 +270,8 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   }
   await Promise.all(["prompts", "events"].map((directory) => mkdir(join(projectRoot, ".aboard", "runtime", directory), { recursive: true })));
   await writeJson(manifestPath, { version: 1, assets: next });
+  await installVendoredSkills(vendoredSkills, options.installer, projectRoot, installed, warnings);
   if (options.autoCompactEnabled === false || settings.autoCompact === false) warnings.push("Claude Code autoCompact is disabled; aboard workers may exhaust their context window.");
   const todo = await options.todo.ensure();
-  return { created, updated, preserved, warnings, todo };
+  return { created, updated, removed, preserved, installed, warnings, todo };
 }

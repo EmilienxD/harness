@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { createVSIX, listFiles, PackageManager } from "@vscode/vsce";
 
+import { VENDORED_SKILLS } from "../src/scaffold/project.js";
+
 const root = process.cwd();
 const output = join(root, "dist", "aboard-0.0.0.vsix");
 
@@ -11,12 +13,17 @@ const required = [
   "assets/aboard.svg",
   "assets/scaffold/.claude/hooks/aboard_hook.py",
   "assets/scaffold/.claude/hooks/aboard-hooks.json",
+  "assets/scaffold/.claude/agents/manager.md",
   "assets/scaffold/.claude/agents/implementer.md",
   "assets/scaffold/.claude/skills/update-todo/SKILL.md",
   "assets/scaffold/.claude/skills/brainstorm/SKILL.md",
+  "assets/scaffold/.claude/skills/raw/SKILL.md",
 ];
 
 const forbidden = [
+  // User-owned skills are installed from upstream by command; a copy in the VSIX
+  // would resurrect the drift that removing them was meant to end.
+  ...VENDORED_SKILLS.map((skill) => new RegExp(`(^|/)\\.claude/skills/${skill.name}(/|$)`)),
   /(^|\/)\.aboard(\/|$)/,
   /(^|\/)\.env(?:\.|$)/,
   /(^|\/)bridge\.json$/,
