@@ -88,6 +88,28 @@ export interface UnreviewedMerge {
   readonly mergedAt: string;
 }
 
+export interface SpecIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly createdAt: string;
+}
+
+/** A `spec` issue's child, with just what selection needs (`auto-implementation.md` §5.2). */
+export interface SubIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly labels: readonly string[];
+  readonly state: "open" | "closed";
+  readonly openBlockedByNumbers: readonly number[];
+}
+
+export interface CreatePullRequestInput {
+  readonly title: string;
+  readonly body: string;
+  readonly head: string;
+  readonly base: string;
+}
+
 function record(value: unknown, context: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new GitHubBoundaryError("malformed-output", `${context} must be an object`);
@@ -175,12 +197,15 @@ function repositoryFromGraphql(value: unknown): Record<string, unknown> {
 }
 
 const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:20){nodes{name}} parent{number} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
+const SPEC_QUERY = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){issues(first:100,states:OPEN,labels:["spec"],orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title createdAt}}}}`;
+const SUB_ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100){nodes{number title state labels(first:20){nodes{name}} blockedBy(first:100){nodes{number state}}}}}}}`;
 const ROADMAP_QUERY = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){issues(first:100,states:OPEN){nodes{number title labels(first:20){nodes{name}} blockedBy(first:100){nodes{number state}}}}}}`;
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
 export class GitHubClient implements GitHubPromptSource {
   #todoNumber: number | undefined;
+  #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
 
   public constructor(private readonly gh: GhExecutor) {}
 
@@ -234,6 +259,85 @@ export class GitHubClient implements GitHubPromptSource {
         dependencyNumbers: dependencies.map((dependency, dependencyIndex) => integer(record(dependency, `dependency[${dependencyIndex}]`).number, `dependency[${dependencyIndex}].number`)),
       }];
     });
+  }
+
+  /**
+   * Open `spec` issues, oldest first by creation. "Oldest" is by `createdAt` and
+   * not by `updatedAt`: a spec being edited is not a spec being deprioritized.
+   * Ties break on the lower number.
+   */
+  public async listSpecIssues(): Promise<readonly SpecIssue[]> {
+    const data = await this.#graphql(SPEC_QUERY);
+    const nodes = array(record(repositoryFromGraphql(data).issues, "data.repository.issues").nodes, "data.repository.issues.nodes");
+    return nodes
+      .map((value, index) => {
+        const item = record(value, `spec[${index}]`);
+        return {
+          number: integer(item.number, `spec[${index}].number`),
+          title: string(item.title, `spec[${index}].title`),
+          createdAt: string(item.createdAt, `spec[${index}].createdAt`),
+        };
+      })
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.number - right.number);
+  }
+
+  /** A spec's children through the GraphQL sub-issue edge, ascending by number. */
+  public async listSubIssues(parentNumber: number): Promise<readonly SubIssue[]> {
+    const data = await this.#graphql(SUB_ISSUE_QUERY, { number: parentNumber });
+    const issue = repositoryFromGraphql(data).issue;
+    if (issue === null || issue === undefined) return [];
+    const nodes = array(record(record(issue, "issue").subIssues, "issue.subIssues").nodes, "issue.subIssues.nodes");
+    return nodes
+      .map((value, index) => {
+        const item = record(value, `subIssue[${index}]`);
+        const dependencies = item.blockedBy === undefined || item.blockedBy === null
+          ? []
+          : array(record(item.blockedBy, `subIssue[${index}].blockedBy`).nodes, `subIssue[${index}].blockedBy.nodes`);
+        return {
+          number: integer(item.number, `subIssue[${index}].number`),
+          title: string(item.title, `subIssue[${index}].title`),
+          labels: labels(record(item.labels, `subIssue[${index}].labels`).nodes, `subIssue[${index}].labels.nodes`),
+          state: state(item.state, `subIssue[${index}].state`),
+          openBlockedByNumbers: dependencies.flatMap((dependency, dependencyIndex) => {
+            const entry = record(dependency, `subIssue[${index}].blockedBy[${dependencyIndex}]`);
+            return state(entry.state, `subIssue[${index}].blockedBy[${dependencyIndex}].state`) === "open"
+              ? [integer(entry.number, `subIssue[${index}].blockedBy[${dependencyIndex}].number`)]
+              : [];
+          }),
+        };
+      })
+      .sort((left, right) => left.number - right.number);
+  }
+
+  public async createPullRequest(input: CreatePullRequestInput): Promise<number> {
+    const output = (await this.gh.run([
+      "pr", "create", "--title", input.title, "--body", input.body, "--head", input.head, "--base", input.base,
+    ])).trim();
+    const match = /\/pull\/(\d+)\/?$/.exec(output);
+    if (match === null) throw new GitHubBoundaryError("malformed-output", "gh pr create did not return a pull request URL");
+    return integer(Number(match[1]), "created pull request number");
+  }
+
+  /**
+   * The open pull request whose head is this branch, if any. This is the `pr`
+   * phase's postcondition, so it must answer from the repository rather than
+   * from the run record.
+   */
+  public async findOpenPullRequestForBranch(branch: string): Promise<number | undefined> {
+    const output = await this.gh.run(["pr", "list", "--state", "open", "--head", branch, "--limit", "1", "--json", "number"]);
+    const items = array(json(output, "branch pull request lookup"), "branch pull request lookup");
+    return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
+  }
+
+  /** The most recently opened pull request still open, for `review_pr` (§9). */
+  public async findLatestOpenPullRequest(): Promise<number | undefined> {
+    const output = await this.gh.run(["pr", "list", "--state", "open", "--limit", "1", "--json", "number"]);
+    const items = array(json(output, "open pull request lookup"), "open pull request lookup");
+    return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
+  }
+
+  public async mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase"): Promise<void> {
+    await this.gh.run(["pr", "merge", String(number), `--${strategy}`, "--delete-branch"]);
   }
 
   public async getPullRequest(number: number): Promise<PullRequestSnapshot | undefined> {
@@ -313,10 +417,29 @@ export class GitHubClient implements GitHubPromptSource {
     return this.#todoNumber;
   }
 
+  /**
+   * The repository's identity does not change for the lifetime of a workspace,
+   * and every GraphQL call needs it. Resolving it per call meant an extra `gh`
+   * subprocess on every query, which the auto-run loop makes several of per
+   * phase and once per poll tick while a hitl pull request waits.
+   */
+  async #ownerRepo(): Promise<{ readonly owner: string; readonly repo: string }> {
+    this.#identity ??= (async () => {
+      const ownerRepo = record(json(await this.gh.run(["repo", "view", "--json", "owner,name"]), "repository identity"), "repository identity");
+      const owner = record(ownerRepo.owner, "repository owner");
+      return { owner: string(owner.login, "repository owner.login"), repo: string(ownerRepo.name, "repository name") };
+    })().catch((error: unknown) => {
+      // A failed lookup must not be cached, or a transient `gh` outage would
+      // poison every later query for the life of the extension host.
+      this.#identity = undefined;
+      throw error;
+    });
+    return this.#identity;
+  }
+
   async #graphql(query: string, variables: Readonly<Record<string, number>> = {}): Promise<unknown> {
-    const ownerRepo = record(json(await this.gh.run(["repo", "view", "--json", "owner,name"]), "repository identity"), "repository identity");
-    const owner = record(ownerRepo.owner, "repository owner");
-    const args = ["api", "graphql", "-f", `query=${query}`, "-f", `owner=${string(owner.login, "repository owner.login")}`, "-f", `repo=${string(ownerRepo.name, "repository name")}`];
+    const { owner, repo } = await this.#ownerRepo();
+    const args = ["api", "graphql", "-f", `query=${query}`, "-f", `owner=${owner}`, "-f", `repo=${repo}`];
     for (const [key, value] of Object.entries(variables)) args.push("-F", `${key}=${value}`);
     return json(await this.gh.run(args), "GitHub GraphQL");
   }

@@ -1,76 +1,78 @@
 import type { DelegationCoordinator } from "../bridge/delegation.js";
-import type { AgentId, AgentSession } from "../domain/contracts.js";
-import type { FleetRegistry } from "../domain/fleet.js";
+import type { PullRequestOwner } from "../auto/engine.js";
+import type { TerminalId } from "../domain/contracts.js";
 import type { GitHubClient } from "./client.js";
 
-export type AutoReviewSetting = "never" | "hitl" | "all";
-
 export interface ReviewRequest {
-  readonly pr: number;
+  /** Optional: the default is "whatever pull request is currently in flight". */
+  readonly pr?: number;
   readonly focus?: string;
 }
 
-export type FixRoute =
-  | { readonly route: "original-implementer"; readonly agentId: AgentId; readonly result: unknown }
-  | { readonly route: "fixer"; readonly result: unknown }
-  | { readonly route: "none"; readonly reason: "no-unresolved-threads" };
+export type ReviewOutcome =
+  | { readonly action: "none"; readonly reason: "no-open-pull-request" }
+  | { readonly action: "focused"; readonly prNumber: number; readonly agentId: string; readonly type: string }
+  | { readonly action: "resumed"; readonly prNumber: number; readonly agentId: string; readonly type: string }
+  | { readonly action: "launched"; readonly prNumber: number; readonly agentId: string; readonly notice: string };
 
+/** Looks up who owns a pull request; the auto-run engine is the only source. */
+export interface PullRequestOwnership {
+  owner(prNumber: number): PullRequestOwner | undefined;
+}
+
+export interface ReviewTerminals {
+  /** Focuses a live terminal, or reports that it is gone. */
+  focus(terminalId: TerminalId): boolean;
+  /** Relaunches `claude --resume <sessionId>` into a new terminal. */
+  resume(owner: PullRequestOwner): Promise<void>;
+}
+
+/**
+ * `review_pr` is the way back into work already in flight
+ * (`docs/auto-implementation.md` §9). It no longer launches a reviewer: it finds
+ * the agent that owns the open pull request — the implementer when review mode
+ * is off, the pr-doctor when it is on — and hands that session to the user, who
+ * continues from there. This is a handoff, so it returns no result; the Manager
+ * learns what happened from the `UserPromptSubmit` drain on the next message.
+ */
 export class ReviewCoordinator {
   public constructor(
     private readonly github: GitHubClient,
-    private readonly delegation: DelegationCoordinator,
-    private readonly fleet: FleetRegistry,
+    private readonly delegation: Pick<DelegationCoordinator, "launchInteractive">,
+    private readonly ownership: PullRequestOwnership,
+    private readonly terminals: ReviewTerminals,
   ) {}
 
-  /** Explicit user/Manager action. The setting is intentionally irrelevant here. */
-  public async review(request: ReviewRequest): Promise<unknown> {
-    return this.delegation.spawn({
-      type: "reviewer",
-      prompt: "Review this pull request against its resolved contract and persist every finding as a line-specific GitHub review comment.",
-      description: `review pull request ${request.pr}`,
-      pullRequest: request.pr,
+  public async review(request: ReviewRequest = {}): Promise<ReviewOutcome> {
+    const prNumber = request.pr ?? await this.github.findLatestOpenPullRequest();
+    if (prNumber === undefined) return { action: "none", reason: "no-open-pull-request" };
+
+    const owner = this.ownership.owner(prNumber);
+    if (owner !== undefined) {
+      if (this.terminals.focus(owner.terminalId)) {
+        return { action: "focused", prNumber, agentId: owner.agentId, type: owner.type };
+      }
+      // Resume is safe here: the agent has already run, so a transcript exists.
+      // The closed-before-first-message case that breaks `--resume` cannot apply
+      // to a worker that produced a commit.
+      await this.terminals.resume(owner);
+      return { action: "resumed", prNumber, agentId: owner.agentId, type: owner.type };
+    }
+
+    // No record of the owning session — the extension restarted, or the pull
+    // request was opened outside a run. A fresh doctor against the diff is the
+    // nearest useful thing, and saying so keeps the substitution visible.
+    const launched = await this.delegation.launchInteractive({
+      type: "pr-doctor-hitl",
+      pullRequest: prNumber,
+      description: `review pull request ${prNumber}`,
       ...(request.focus === undefined ? {} : { focus: request.focus }),
     });
-  }
-
-  /** The sole automatic path; the configured choice is used verbatim. */
-  public async maybeAutoReview(request: ReviewRequest, setting: AutoReviewSetting): Promise<unknown | undefined> {
-    if (setting === "never") return undefined;
-    const pullRequest = await this.github.getPullRequest(request.pr);
-    if (pullRequest === undefined) return undefined;
-    if (setting === "hitl") {
-      const issue = pullRequest.issueNumber === undefined ? undefined : await this.github.getIssue(pullRequest.issueNumber);
-      if (!issue?.labels.some((label) => label.toLowerCase() === "hitl")) return undefined;
-    }
-    return this.review(request);
-  }
-
-  public async routeFixes(pr: number): Promise<FixRoute> {
-    const threads = (await this.github.listReviewThreads(pr)).filter((thread) => !thread.isResolved);
-    if (threads.length === 0) return { route: "none", reason: "no-unresolved-threads" };
-    const pullRequest = await this.github.getPullRequest(pr);
-    const original = pullRequest?.issueNumber === undefined
-      ? undefined
-      : this.#originalImplementer(pullRequest.issueNumber);
-    const message = `Address the ${threads.length} unresolved review thread${threads.length === 1 ? "" : "s"} on pull request #${pr}. The bridge will resolve the current threads before launch.`;
-    if (original !== undefined && original.lifecycle.status !== "running" && original.lifecycle.status !== "starting") {
-      return { route: "original-implementer", agentId: original.identity.agentId, result: await this.delegation.send(original.identity.agentId, message) };
-    }
     return {
-      route: "fixer",
-      result: await this.delegation.spawn({
-        type: "fixer",
-        prompt: message,
-        description: `fix pull request ${pr}`,
-        pullRequest: pr,
-        ...(pullRequest?.issueNumber === undefined ? {} : { issue: pullRequest.issueNumber }),
-      }),
+      action: "launched",
+      prNumber,
+      agentId: launched.agentId,
+      notice: `No aboard session is recorded for PR #${prNumber}, so a fresh pr-doctor-hitl was launched against its diff instead of resuming one.`,
     };
-  }
-
-  #originalImplementer(issueNumber: number): AgentSession | undefined {
-    return [...this.fleet.list()]
-      .reverse()
-      .find((session) => session.identity.type === "implementer" && session.issueNumber === issueNumber);
   }
 }

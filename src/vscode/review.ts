@@ -1,27 +1,35 @@
 import type { Disposable } from "vscode";
 
-import type { ReviewCoordinator } from "../github/review.js";
+import type { ReviewCoordinator, ReviewOutcome } from "../github/review.js";
 
 export interface ReviewCommandHost {
   registerCommand(command: string, callback: (...args: readonly unknown[]) => unknown): Disposable;
-  input(options: { readonly prompt: string; readonly placeHolder: string; readonly validateInput: (value: string) => string | undefined }): Promise<string | undefined>;
+  info(message: string): void;
   error(message: string): void;
 }
 
-/** Registers the PR action without coupling review orchestration to VS Code APIs. */
+/**
+ * The panel entry point for `review_pr` (`docs/auto-implementation.md` §9). It
+ * asks for nothing: the action is "reopen the session for the pull request
+ * currently in flight", and the extension already knows which that is. A number
+ * may still be passed positionally from a tree item.
+ */
 export function registerReviewCommand(host: ReviewCommandHost, reviews: ReviewCoordinator): Disposable {
   return host.registerCommand("aboard.reviewPr", async (...args) => {
-    const provided = typeof args[0] === "number" ? String(args[0]) : undefined;
-    const value = provided ?? await host.input({
-      prompt: "Pull request to review",
-      placeHolder: "42",
-      validateInput: (candidate) => /^\d+$/.test(candidate) && Number(candidate) > 0 ? undefined : "Enter a positive pull request number",
-    });
-    if (value === undefined) return;
+    const pr = typeof args[0] === "number" && Number.isInteger(args[0]) && args[0] > 0 ? args[0] : undefined;
     try {
-      await reviews.review({ pr: Number(value) });
+      host.info(describe(await reviews.review(pr === undefined ? {} : { pr })));
     } catch (error) {
-      host.error(error instanceof Error ? error.message : "Unable to launch pull request review");
+      host.error(error instanceof Error ? error.message : "Unable to reopen the pull request session");
     }
   });
+}
+
+function describe(outcome: ReviewOutcome): string {
+  switch (outcome.action) {
+    case "none": return "No pull request is open, so there is no session to reopen.";
+    case "focused": return `Focused the ${outcome.type} terminal for PR #${outcome.prNumber}.`;
+    case "resumed": return `Resumed the ${outcome.type} session for PR #${outcome.prNumber}.`;
+    case "launched": return outcome.notice;
+  }
 }

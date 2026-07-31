@@ -1,24 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ReviewCoordinator } from "../src/github/review.js";
+import type { ReviewCoordinator, ReviewOutcome, ReviewRequest } from "../src/github/review.js";
 import { registerReviewCommand, type ReviewCommandHost } from "../src/vscode/review.js";
 
-test("VS Code review action validates or accepts a PR and launches the same review path", async () => {
+function setup(outcome: ReviewOutcome) {
   let callback: ((...args: readonly unknown[]) => unknown) | undefined;
-  const reviewed: number[] = [];
+  const requests: ReviewRequest[] = [];
+  const messages: string[] = [];
   const host: ReviewCommandHost = {
     registerCommand: (_command, registered) => { callback = registered; return { dispose() {} }; },
-    input: async (options) => {
-      assert.equal(options.validateInput("0"), "Enter a positive pull request number");
-      assert.equal(options.validateInput("42"), undefined);
-      return "42";
-    },
-    error: () => assert.fail("review should not fail"),
+    info: (message) => messages.push(message),
+    error: () => assert.fail("reopening should not fail"),
   };
-  const reviews = { review: async ({ pr }: { pr: number }) => { reviewed.push(pr); } } as ReviewCoordinator;
+  const reviews = { review: async (request: ReviewRequest = {}) => { requests.push(request); return outcome; } } as ReviewCoordinator;
   registerReviewCommand(host, reviews);
-  await callback?.();
-  await callback?.(17);
-  assert.deepEqual(reviewed, [42, 17]);
+  return { invoke: async (...args: readonly unknown[]) => { await callback?.(...args); }, requests, messages };
+}
+
+test("the panel action asks for nothing and targets the pull request in flight", async () => {
+  const { invoke, requests, messages } = setup({ action: "focused", prNumber: 42, agentId: "a", type: "implementer" });
+  await invoke();
+  assert.deepEqual(requests, [{}]);
+  assert.equal(messages[0], "Focused the implementer terminal for PR #42.");
+});
+
+test("a positional pull request number narrows the action, and junk is ignored", async () => {
+  const { invoke, requests } = setup({ action: "resumed", prNumber: 17, agentId: "a", type: "pr-doctor-afk" });
+  await invoke(17);
+  await invoke("not a number");
+  await invoke(0);
+  assert.deepEqual(requests, [{ pr: 17 }, {}, {}]);
+});
+
+test("no open pull request reports that nothing was reopened", async () => {
+  const { invoke, messages } = setup({ action: "none", reason: "no-open-pull-request" });
+  await invoke();
+  assert.match(messages[0]!, /No pull request is open/);
 });
