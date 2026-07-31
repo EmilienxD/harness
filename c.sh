@@ -1,0 +1,1 @@
+exec claude --tools Bash,Read,Grep,Glob,Agent,Write,Edit,AskUserQuestion,ListMcp,ReadMcp,Skill,TaskCreate,TaskGet,TaskList,TaskStop,TaskUpdate,TodoWrite,EnterPlan,ExitPlan,WaitMcp

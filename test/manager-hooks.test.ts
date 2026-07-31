@@ -65,7 +65,7 @@ test("oversized slices use a bounded preview and file reference", async () => {
 
 test("Manager Stop returns pending results, waits for running work, and permits idle stop", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet); const workerId = worker(fleet, managerId);
-  const running = new ManagerStopService({ fleet });
+  const running = new ManagerStopService({ fleet, now: () => new Date(timestamp) });
   assert.deepEqual(await running.poll({ agentId: managerId, stopHookActive: false }, new AbortController().signal), { state: "running" });
   fleet.transition(workerId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "implemented" }, timestamp);
   const result: WorkerResult = { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "implemented", telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 } };

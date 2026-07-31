@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { commands, window, workspace } from "vscode";
+import { RelativePattern, commands, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -18,7 +18,7 @@ import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
 import { sessionTranscriptExists } from "./claude/sessions.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
-import { scaffoldProject } from "./scaffold/project.js";
+import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
 import { join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
@@ -99,10 +99,17 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
   } };
 }
 
-export async function activate(context: ExtensionContext): Promise<void> {
-  if ((workspace.workspaceFolders?.length ?? 0) > 1) { void window.showErrorMessage("aboard v1 supports exactly one workspace folder. Open the project in a single-root window."); return; }
+/** Exposed so the VS Code integration suite can locate the out-of-workspace discovery file. */
+export interface AboardExtensionApi {
+  readonly bridgeDiscoveryPath: string;
+}
+
+export async function activate(context: ExtensionContext): Promise<AboardExtensionApi | undefined> {
+  if ((workspace.workspaceFolders?.length ?? 0) > 1) { void window.showErrorMessage("aboard v1 supports exactly one workspace folder. Open the project in a single-root window."); return undefined; }
   const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (workspaceRoot === undefined) return;
+  if (workspaceRoot === undefined) return undefined;
+  const storageRoot = (context.storageUri ?? context.globalStorageUri).fsPath;
+  await mkdir(storageRoot, { recursive: true });
 
   const output = window.createOutputChannel("aboard");
   context.subscriptions.push(output);
@@ -123,7 +130,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
       if (event.type === "terminal-closed") {
         output.appendLine(`Terminal ${event.terminalId} closed (${event.reason}, exit ${event.exitCode ?? "unknown"})`);
       }
-      if (event.type === "terminal-closed" && fleet?.get(event.agentId)?.identity.type !== "manager") void lifecycle?.terminalClosed(event).catch((error: unknown) => output.appendLine(`Lifecycle reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
+      if (event.type !== "terminal-closed") return;
+      // The Manager is not a worker: it delivers no result, holds no lease, and
+      // must not go through the worker reconciler. It still has to leave the
+      // active states, or the fleet keeps showing a dead terminal and the next
+      // launch cannot restart it.
+      if (fleet?.get(event.agentId)?.identity.type === "manager") closeManagerSession(event.agentId, event.exitCode, event.occurredAt as IsoTimestamp);
+      else void lifecycle?.terminalClosed(event).catch((error: unknown) => output.appendLine(`Lifecycle reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
     },
   });
   context.subscriptions.push({ dispose: () => terminals.dispose() });
@@ -162,10 +175,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
     }),
   });
   const managerPrompts = new ManagerPromptService(fleet, coordinator);
+  const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
     handler: combineHandlers(createMcpHandler(coordinator, { github, reviews }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createTerminalRoutes(terminals)),
-    persistence: new FileBridgeDiscoveryPersistence(workspaceRoot),
+    persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
@@ -182,6 +196,16 @@ export async function activate(context: ExtensionContext): Promise<void> {
     agentIdFactory: () => managerAgentId,
     transcriptExists: sessionTranscriptExists,
   });
+  // Closing the Manager terminal ends that session. `completed` is the honest
+  // state whatever the exit code: the user closed their own console, and a
+  // `failed` transition would only raise an alarming notification.
+  function closeManagerSession(agentId: AgentId, exitCode: number | null, occurredAt: IsoTimestamp): void {
+    const session = fleet.get(agentId);
+    if (session === undefined || !["starting", "running", "awaiting-user"].includes(session.lifecycle.status)) return;
+    try {
+      fleet.transition(agentId, { status: "completed", startedAt: session.lifecycle.startedAt, finishedAt: occurredAt, exitCode: exitCode ?? 0, lastAssistantMessage: null }, occurredAt);
+    } catch (error) { output.appendLine(`Manager close reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`); }
+  }
   const warnKey = "aboard.manager.permissionWarning";
   const launch = async (mode: "start" | "resume" | "new") => {
     const workerMode = currentConfiguration.workerPermissionMode;
@@ -193,31 +217,59 @@ export async function activate(context: ExtensionContext): Promise<void> {
         mode = choice === "Resume Manager" ? "resume" : "new";
       }
       const terminal = await manager.start(mode);
-      if (fleet.get(terminal.agentId) === undefined) fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "running", startedAt: new Date().toISOString() as IsoTimestamp }, resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, new Date().toISOString() as IsoTimestamp);
+      // Registration is only ever valid in `starting`; a relaunch of the same
+      // Manager identity goes through `restart`, carrying the new session id so
+      // hook routing by session keeps resolving.
+      const startedAt = new Date().toISOString() as IsoTimestamp;
+      if (fleet.get(terminal.agentId) === undefined) {
+        fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
+      } else {
+        fleet.restart(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
+      }
+      fleet.transition(terminal.agentId, { status: "running", startedAt }, startedAt);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
   };
-  context.subscriptions.push(
-    commands.registerCommand("aboard.scaffoldProject", async () => {
-      try {
-        const autoCompactEnabled = workspace.getConfiguration("claudeCode").get<boolean>("autoCompact");
-        const report = await scaffoldProject({
-          projectRoot: workspaceRoot,
-          assetRoot: join(context.extensionPath, "assets", "scaffold"),
-          ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
-          todo: {
-            ensure: async () => {
-              try { await github.getTodo(); return "existing"; }
-              catch (error) {
-                if (!(error instanceof GitHubBoundaryError) || error.code !== "missing-todo") throw error;
-                await github.updateTodo("# Project TODO\n\n- Add the next project priorities here."); return "created";
-              }
-            },
+  // `aboard.initialized` drives the welcome view and command palette so the user
+  // is offered "Initialize" exactly once and "Update" afterwards.
+  const publishScaffoldState = async () => {
+    const state = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const);
+    await commands.executeCommand("setContext", "aboard.initialized", state === "initialized");
+  };
+  await publishScaffoldState();
+  // Watch the whole directory, not just the manifest: deleting `.aboard/` in the
+  // explorer does not reliably raise a per-file delete for its contents. The
+  // window-focus re-check covers a deletion made entirely outside VS Code.
+  const scaffoldWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, ".aboard/**"));
+  for (const event of [scaffoldWatcher.onDidCreate, scaffoldWatcher.onDidChange, scaffoldWatcher.onDidDelete]) {
+    context.subscriptions.push(event(() => void publishScaffoldState()));
+  }
+  context.subscriptions.push(scaffoldWatcher, window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState(); }));
+  const scaffold = async () => {
+    try {
+      const autoCompactEnabled = workspace.getConfiguration("claudeCode").get<boolean>("autoCompact");
+      const first = await readScaffoldState(workspaceRoot) === "uninitialized";
+      const report = await scaffoldProject({
+        projectRoot: workspaceRoot,
+        assetRoot: join(context.extensionPath, "assets", "scaffold"),
+        ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
+        todo: {
+          ensure: async () => {
+            try { await github.getTodo(); return "existing"; }
+            catch (error) {
+              if (!(error instanceof GitHubBoundaryError) || error.code !== "missing-todo") throw error;
+              await github.updateTodo("# Project TODO\n\n- Add the next project priorities here."); return "created";
+            }
           },
-        });
-        for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
-        void window.showInformationMessage(`aboard project assets installed (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
-      } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
-    }),
+        },
+      });
+      for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
+      void window.showInformationMessage(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
+    } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
+    finally { await publishScaffoldState(); }
+  };
+  context.subscriptions.push(
+    commands.registerCommand("aboard.initializeProject", scaffold),
+    commands.registerCommand("aboard.updateProject", scaffold),
     commands.registerCommand("aboard.startManager", () => launch("start")),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
@@ -230,6 +282,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     if ([...MANAGER_RESTART_SETTINGS].some((setting) => event.affectsConfiguration(setting))) void window.showInformationMessage("Manager launch settings changed. Restart the Manager to apply them.");
   }));
   context.subscriptions.push({ dispose: () => void bridge?.stop() });
+  return { bridgeDiscoveryPath: discovery.path };
 }
 
 export async function deactivate(): Promise<void> {

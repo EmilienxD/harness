@@ -48,13 +48,16 @@ Folders should be created when their first real file is added; empty architectur
 - Boundary modules may depend on domain contracts; domain code must not depend on boundary modules.
 - Cross-boundary message shapes get explicit TypeScript types and runtime validation at untrusted inputs.
 - Scaffold templates are assets, not runtime source. Vendored user-owned skills are copied from upstream and never edited in place.
-- Persistent project state belongs in GitHub or committed files. Ephemeral secrets and live state belong only under `.aboard/runtime/`.
+- Persistent project state belongs in GitHub or committed files. Ephemeral live state belongs under `.aboard/runtime/`; the bridge token file lives outside the workspace entirely (see resolved decisions).
 
 ## Resolved decisions from end-to-end testing (2026-07-30)
 
 - **MCP tool naming:** the bridge serves bare tool names (`run_agent`, `list_agents`, …). Claude Code namespaces them for the model as `mcp__aboard__<name>`, so the spec's `aboard__*` delegation surface is realized as `mcp__aboard__*`, which is also what the Manager `--tools` presets allow.
 - **Tool-list flags:** `--tools`/`--disallowedTools` take one comma-separated argument (`claude --help`: `"Bash,Edit,Read"`). The flags are variadic; spreading values across arguments lets the last one swallow the positional launch prompt.
 - **Session resume:** `claude --resume <id>` fails on a session that was closed before its first message because no transcript exists yet. Resume paths (Manager, `send_to_agent`) probe for the transcript first and, when absent, start the conversation afresh under the same imposed `--session-id`.
+- **Bridge discovery file location:** `bridge.json` moves out of the workspace into the extension's per-workspace storage (`ExtensionContext.storageUri`). Spec §5.2 places it in `.aboard/runtime/` "for hook scripts to read", but no hook reads it: hooks and the MCP client receive the port and token through the inherited `ABOARD_BRIDGE_PORT`/`ABOARD_BRIDGE_TOKEN` environment variables. Keeping it in the project only put a bearer-token file in the user's tree and made `.aboard/` exist before initialization, which broke the initialize-versus-update signal. `.vscode/` was rejected because it is routinely committed.
+- **MCP approval:** `enabledMcpjsonServers: ["aboard"]` is written to `.claude/settings.local.json`, not `.claude/settings.json`. Claude Code honors the key in an untrusted folder only from a settings file that is not checked into the repository, so the scaffolder also adds that file to `.gitignore`.
+- **Initialization state:** the presence of the `.aboard/scaffold.json` manifest is the single signal for "this project is initialized". It drives the `aboard.initialized` context key, which selects the welcome view and the Initialize/Update command pair.
 
 ## Testing strategy
 

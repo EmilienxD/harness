@@ -114,6 +114,9 @@ export class FleetNotifications {
 function notify(event: FleetEvent, fleet: FleetRegistry, host: FleetNotificationHost): void {
   if (event.type !== "lifecycle-transitioned" || (event.to !== "completed" && event.to !== "failed")) return;
   const session = fleet.get(event.agentId);
+  // The Manager is the user's own console: its ending is something they did, not
+  // a background result worth a toast.
+  if (session?.identity.type === "manager") return;
   if (session?.lifecycle.status === "completed") host.information(`${session.identity.type} completed${session.issueNumber === undefined ? "" : ` issue #${session.issueNumber}`}.`);
   else if (session?.lifecycle.status === "failed") host.error(`${session.identity.type} failed: ${failureLabel(session.lifecycle.failure.type)}.`);
 }

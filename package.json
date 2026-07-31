@@ -31,8 +31,12 @@
         "title": "Aboard: New Manager"
       },
       {
-        "command": "aboard.scaffoldProject",
-        "title": "Aboard: Install or Upgrade Project Assets"
+        "command": "aboard.initializeProject",
+        "title": "Aboard: Initialize Project"
+      },
+      {
+        "command": "aboard.updateProject",
+        "title": "Aboard: Update Project Assets"
       },
       {
         "command": "aboard.reviewPr",
@@ -83,10 +87,47 @@
     "viewsWelcome": [
       {
         "view": "aboard.fleet",
-        "contents": "No agents yet. Agents the bridge launches appear here.\n[Aboard: Install or Upgrade Project Assets](command:aboard.scaffoldProject)\n[Aboard: Start Manager](command:aboard.startManager)"
+        "when": "!aboard.initialized",
+        "contents": "aboard runs delegated Claude Code work in visible, independent terminals, coordinated by a long-lived Manager.\n\nGitHub keeps the durable work state, and you stay in control of the decisions that matter.\n\nInitializing installs the aboard agents, skills, and hooks into this workspace and registers the local MCP bridge.\n[Initialize](command:aboard.initializeProject)"
+      },
+      {
+        "view": "aboard.fleet",
+        "when": "aboard.initialized",
+        "contents": "This workspace is ready. Agents the bridge launches appear here.\n[Start Manager](command:aboard.startManager)"
+      },
+      {
+        "view": "aboard.fleet",
+        "when": "aboard.initialized",
+        "contents": "Re-run the installer to pick up new agent, skill, and hook versions.\n[Update Project Assets](command:aboard.updateProject)"
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "aboard.initializeProject",
+          "when": "!aboard.initialized"
+        },
+        {
+          "command": "aboard.updateProject",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.focusAgent",
+          "when": "false"
+        },
+        {
+          "command": "aboard.sendAgent",
+          "when": "false"
+        },
+        {
+          "command": "aboard.killAgent",
+          "when": "false"
+        },
+        {
+          "command": "aboard.resumeAgent",
+          "when": "false"
+        }
+      ],
       "view/item/context": [
         {
           "command": "aboard.focusAgent",

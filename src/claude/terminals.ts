@@ -155,8 +155,6 @@ const INTERACTIVE_AGENT_TYPES: ReadonlySet<AgentType> = new Set([
 export class TerminalController {
   readonly #records = new Map<TerminalId, TerminalRecord>();
   readonly #terminalIdsByHandle = new WeakMap<TerminalHandle, TerminalId>();
-  readonly #agentIds = new Set<AgentId>();
-  readonly #sessionIds = new Set<SessionId>();
   readonly #closeRegistration: { dispose(): void };
   readonly #now: () => Date;
   readonly #sleep: (milliseconds: number) => Promise<void>;
@@ -167,26 +165,28 @@ export class TerminalController {
     this.#closeRegistration = options.host.onDidCloseTerminal((terminal) => this.#onClosed(terminal));
   }
 
+  /**
+   * Opens a terminal for an agent. The invariants are that an agent and a
+   * session each have at most one *live* terminal, and that a session id never
+   * migrates to a different agent. A closed terminal is spent history: the same
+   * agent may be launched again, which is what a Manager restart and every
+   * `send_to_agent` resume rely on.
+   */
   public create(request: CreateAboardTerminalRequest): TerminalSnapshot {
-    return this.#create(request, false);
+    return this.#create(request);
   }
 
-  public resume(request: CreateAboardTerminalRequest): TerminalSnapshot {
-    return this.#create(request, true);
-  }
-
-  #create(request: CreateAboardTerminalRequest, resume: boolean): TerminalSnapshot {
-    if (this.#agentIds.has(request.agentId)) {
-      const prior = [...this.#records.values()].reverse().find((record) => record.agentId === request.agentId);
-      if (!resume || prior?.status !== "closed" || prior.sessionId !== request.sessionId) {
-        throw new TerminalControlError("duplicate-agent", `Agent ${request.agentId} already has an aboard terminal`);
-      }
+  #create(request: CreateAboardTerminalRequest): TerminalSnapshot {
+    const latestForAgent = this.#latest((record) => record.agentId === request.agentId);
+    if (latestForAgent?.status === "open") {
+      throw new TerminalControlError("duplicate-agent", `Agent ${request.agentId} already has a live aboard terminal`);
     }
-    if (this.#sessionIds.has(request.sessionId)) {
-      const prior = [...this.#records.values()].reverse().find((record) => record.sessionId === request.sessionId);
-      if (!resume || prior?.status !== "closed" || prior.agentId !== request.agentId) {
-        throw new TerminalControlError("duplicate-session", `Session ${request.sessionId} already has an aboard terminal`);
-      }
+    const latestForSession = this.#latest((record) => record.sessionId === request.sessionId);
+    if (latestForSession?.status === "open") {
+      throw new TerminalControlError("duplicate-session", `Session ${request.sessionId} already has a live aboard terminal`);
+    }
+    if (latestForSession !== undefined && latestForSession.agentId !== request.agentId) {
+      throw new TerminalControlError("duplicate-session", `Session ${request.sessionId} belongs to agent ${latestForSession.agentId}`);
     }
 
     const environment = this.options.environment();
@@ -228,8 +228,6 @@ export class TerminalController {
     };
     this.#records.set(terminalId, record);
     this.#terminalIdsByHandle.set(handle, terminalId);
-    this.#agentIds.add(request.agentId);
-    this.#sessionIds.add(request.sessionId);
 
     this.options.onLifecycleEvent?.({
       type: "terminal-created",
@@ -323,6 +321,10 @@ export class TerminalController {
       reason: record.killRequested ? "killed" : "exited",
       occurredAt: closedAt,
     });
+  }
+
+  #latest(predicate: (record: TerminalRecord) => boolean): TerminalRecord | undefined {
+    return [...this.#records.values()].reverse().find(predicate);
   }
 
   #requireRecord(terminalId: TerminalId): TerminalRecord {

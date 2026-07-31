@@ -173,3 +173,25 @@ test("validates the separately persisted long-lived Manager identity", () => {
     false,
   );
 });
+
+test("restart relaunches a finished agent and rebinds session routing when the conversation is new", () => {
+  const fleet = new FleetRegistry();
+  const managerId = agent("manager-1");
+  fleet.register(createSession("manager-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "none" }, "manager"), startedAt);
+  fleet.transition(managerId, { status: "running", startedAt }, startedAt);
+  assert.throws(
+    () => fleet.restart(managerId, { terminalId: "t2" as AgentSession["terminal"]["terminalId"], name: "aboard: Manager" }, finishedAt),
+    (error) => error instanceof FleetStateError && error.code === "invalid-transition",
+  );
+
+  fleet.transition(managerId, { status: "completed", startedAt, finishedAt, exitCode: 0, lastAssistantMessage: null }, finishedAt);
+  // Resume keeps the recorded session; a new conversation replaces it and the
+  // old session id must stop resolving.
+  fleet.restart(managerId, { terminalId: "t2" as AgentSession["terminal"]["terminalId"], name: "aboard: Manager" }, finishedAt);
+  assert.equal(fleet.get(managerId)?.sessionId, "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee");
+  fleet.transition(managerId, { status: "completed", startedAt: finishedAt, finishedAt, exitCode: 0, lastAssistantMessage: null }, finishedAt);
+  fleet.restart(managerId, { terminalId: "t3" as AgentSession["terminal"]["terminalId"], name: "aboard: Manager" }, finishedAt, session("af817a6c-cd41-41e2-a4db-44d3f43cd560"));
+  assert.equal(fleet.get(managerId)?.sessionId, "af817a6c-cd41-41e2-a4db-44d3f43cd560");
+  assert.equal(fleet.getBySession(session("af817a6c-cd41-41e2-a4db-44d3f43cd560"))?.identity.agentId, "manager-1");
+  assert.equal(fleet.getBySession(session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee")), undefined);
+});

@@ -41,9 +41,7 @@ export class ManagerLifecycle {
     const plan = resumable
       ? planManagerResume({ agentId, sessionId, shell: this.options.shell, ...executable })
       : planLaunch({ agentId, sessionId, agentType: "manager", shell: this.options.shell, permissionMode: "default", configuration: { shape: "inline", tools: MANAGER_TOOL_PRESET_TOOLS[this.options.preset] }, disallowedTools: this.options.disallowedTools, ...executable });
-    const terminal = resumable && prior
-      ? this.options.terminals.resume({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine })
-      : this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine });
+    const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine });
     const updatedAt = this.#now().toISOString() as IsoTimestamp;
     await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt });
     return terminal;

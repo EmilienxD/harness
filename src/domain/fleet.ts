@@ -269,19 +269,35 @@ export class FleetRegistry {
     this.record({ type: "lifecycle-transitioned", agentId, from, to: lifecycle.status }, occurredAt);
   }
 
+  /**
+   * Relaunches a finished agent under its existing identity. `sessionId` is
+   * passed only when the relaunch starts a fresh conversation rather than
+   * resuming the recorded one — "New Manager" keeps the agent id but replaces
+   * the session, and hook routing resolves by session id.
+   */
   public restart(
     agentId: AgentId,
     terminal: AgentSession["terminal"],
     startedAt: IsoTimestamp,
+    sessionId?: SessionId,
   ): void {
     const session = this.requireSession(agentId);
     if (session.lifecycle.status !== "completed" && session.lifecycle.status !== "failed") {
       throw new FleetStateError("invalid-transition", `Agent ${agentId} is still active`);
     }
+    if (sessionId !== undefined && sessionId !== session.sessionId) {
+      const owner = this.agentBySession.get(sessionId);
+      if (owner !== undefined && owner !== agentId) {
+        throw new FleetStateError("duplicate-session", `Session ${sessionId} is already registered`);
+      }
+      this.agentBySession.delete(session.sessionId);
+      this.agentBySession.set(sessionId, agentId);
+    }
     const from = session.lifecycle.status;
     const { lastResult: _lastResult, ...withoutResult } = session;
     this.sessionsByAgent.set(agentId, {
       ...withoutResult,
+      ...(sessionId === undefined ? {} : { sessionId }),
       terminal,
       lifecycle: { status: "starting", startedAt },
     });

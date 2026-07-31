@@ -151,7 +151,7 @@ export class DelegationCoordinator {
     this.#acquire(plan.writeCapability, agentId, session.sessionId, occurredAt, "resume agent");
     try {
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill);
-      const terminal = this.options.terminals.resume({
+      const terminal = this.options.terminals.create({
         agentId,
         sessionId: session.sessionId,
         agentType: session.identity.type,

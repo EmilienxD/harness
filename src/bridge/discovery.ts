@@ -14,13 +14,28 @@ export interface BridgeDiscoveryPersistence {
   clear(): Promise<void>;
 }
 
+export const DISCOVERY_FILE_NAME = "bridge.json";
+
+/**
+ * The discovery file lives outside the workspace, in the extension's
+ * per-workspace storage. Nothing in the project reads it — hooks and MCP
+ * clients receive the port and token through inherited `ABOARD_BRIDGE_*`
+ * environment variables — so writing it into the project only leaked a
+ * bearer-token file into the user's tree and made `.aboard/` exist before the
+ * project was ever initialized. `.vscode/` would be worse: it is routinely
+ * committed.
+ */
 export class FileBridgeDiscoveryPersistence
   implements BridgeDiscoveryPersistence
 {
   readonly #path: string;
 
-  public constructor(workspaceRoot: string) {
-    this.#path = join(workspaceRoot, ".aboard", "runtime", "bridge.json");
+  public constructor(storageDirectory: string) {
+    this.#path = join(storageDirectory, DISCOVERY_FILE_NAME);
+  }
+
+  public get path(): string {
+    return this.#path;
   }
 
   public async write(metadata: BridgeDiscoveryMetadata): Promise<void> {

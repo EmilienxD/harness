@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { scaffoldProject } from "../src/scaffold/project.js";
+import { readScaffoldState, scaffoldProject } from "../src/scaffold/project.js";
 
 const assets = join(process.cwd(), "assets", "scaffold");
 const todo = { ensure: async () => "existing" as const };
@@ -22,6 +22,31 @@ test("fresh scaffold installs real assets, runtime ignore rules, MCP, hooks, and
   await assert.rejects(readFile(join(root, "TODO.md")));
   for (const name of ["raw", "manager", "explorer"]) await assert.rejects(readFile(join(root, ".claude", "agents", `${name}.md`)));
   assert.deepEqual(report.warnings, ["Missing upstream vendored skill: lavish"]);
+  // The MCP approval only takes effect from the uncommitted local settings file.
+  assert.deepEqual((await json(join(root, ".claude", "settings.local.json"))).enabledMcpjsonServers, ["aboard"]);
+  assert.equal((await json(join(root, ".claude", "settings.json"))).enabledMcpjsonServers, undefined);
+  assert.match(await readFile(join(root, ".gitignore"), "utf8"), /^\.claude\/settings\.local\.json$/m);
+});
+
+test("scaffold state distinguishes a first initialize from a later update", async () => {
+  const root = await project();
+  assert.equal(await readScaffoldState(root), "uninitialized");
+  await mkdir(join(root, ".aboard"), { recursive: true });
+  await writeFile(join(root, ".aboard", "scaffold.json"), "not json at all");
+  assert.equal(await readScaffoldState(root), "uninitialized");
+  await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
+  assert.equal(await readScaffoldState(root), "initialized");
+});
+
+test("MCP approval merges into existing local settings without duplicating or dropping keys", async () => {
+  const root = await project();
+  await mkdir(join(root, ".claude"), { recursive: true });
+  await writeFile(join(root, ".claude", "settings.local.json"), JSON.stringify({ enabledMcpjsonServers: ["memory"], permissions: { allow: ["Read"] } }));
+  await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
+  await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
+  const local = await json(join(root, ".claude", "settings.local.json"));
+  assert.deepEqual(local.enabledMcpjsonServers, ["memory", "aboard"]);
+  assert.deepEqual(local.permissions, { allow: ["Read"] });
 });
 
 test("rerun is idempotent and settings and MCP merges preserve unrelated configuration", async () => {

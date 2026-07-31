@@ -13,19 +13,22 @@ gh label create spec --color BFD4F2 --description "Implementation contract" --fo
 gh label create afk --color 0E8A16 --description "Agent may merge and close" --force
 gh label create hitl --color D93F0B --description "Only a human may close" --force
 code -n C:\Users\emb\dev\aboard-e2e
-3. In the new window: trust the folder. Verify: the aboard icon is in the activity bar; Output panel → "aboard" channel shows the bridge bound to 127.0.0.1 on some port; a status-bar item shows bridge info.
+3. In the new window: trust the folder. Verify: the aboard icon is in the activity bar; Output panel → "aboard" channel shows the bridge bound to 127.0.0.1 on some port; a status-bar item shows bridge info. Verify the project tree is still clean — no .aboard/ directory exists before initialization.
 Phase 2 — Scaffold (5 min, no tokens)
-4. Command Palette → "Aboard: Install or Upgrade Project Assets". Expect an info message with created counts.
+4. Open the aboard view. Expect a short description of the project and a single "Initialize" button (Command Palette equivalent: "Aboard: Initialize Project"). Expect an info message with created counts, and the view to switch to the ready state offering "Start Manager" and "Update Project Assets".
 5. Verify in the sandbox:
 - .claude\agents\ has brainstormer.md, implementer.md, reviewer.md, fixer.md (no explorer.md)
 - .claude\hooks\, .claude\skills\ (7 skills), .mcp.json with ${ABOARD_BRIDGE_PORT} placeholders and no secrets
 - .claude\settings.json contains hooks only — no permissions, no autoCompact keys (open it and look)
-- .gitignore gained .aboard/runtime/; git status --porcelain does not list .aboard/
+- .claude\settings.local.json contains "enabledMcpjsonServers": ["aboard"], so Claude never asks to approve the bridge MCP server
+- .gitignore gained .aboard/runtime/ and .claude/settings.local.json; git status --porcelain does not list .aboard/ or the local settings file
+- .aboard/ now exists and holds scaffold.json plus runtime/ — and no bridge token file
 - On GitHub: a "Project TODO" issue exists with the (auto-created) todo label
-6. Non-destructive merge test: add a marker line (e.g. <!-- my edit -->) to .claude\agents\implementer.md, re-run the scaffold command. Expect: a warning, the file reported as preserved, and your marker still there.
+6. Non-destructive merge test: add a marker line (e.g. <!-- my edit -->) to .claude\agents\implementer.md, then click "Update Project Assets". Expect: a warning, the file reported as preserved, and your marker still there.
+6b. State test: delete .aboard\ from the explorer. The view returns to the presentation page with the "Initialize" button. Re-initialize before continuing.
 7. Commit the scaffold: git add -A; git commit -m "aboard scaffold"; git push
 Phase 3 — Bridge security probes (2 min, no tokens)
-8. Get the port from Output → aboard or .aboard\runtime\bridge.json (do not paste bridge.json's token anywhere, including to me). Then:
+8. Get the port from Output → aboard or the status bar (the token lives in bridge.json under the extension's per-workspace storage, outside the project — do not paste it anywhere, including to me). Then:
 curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:<port>/mcp      # expect 401
 curl.exe -s -o NUL -w "%{http_code}" -H "Authorization: Bearer wrong" http://127.0.0.1:<port>/mcp   # expect 401
 Test-NetConnection <your-LAN-IP-from-ipconfig> -Port <port>          # expect TcpTestSucceeded: False
