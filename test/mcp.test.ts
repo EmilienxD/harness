@@ -132,16 +132,16 @@ test("publishes ten distinct core tools and the one-hour timeout expectation", a
 test("runtime-validates every tool boundary and rejects unknown fields", async () => {
   const { call } = setup();
   for (const [name, args] of [
-    ["aboard__run_agent", { type: "implementer", prompt: "", description: "do the work" }],
-    ["aboard__spawn_agent", { type: "bogus", prompt: "work", description: "do the work" }],
-    ["aboard__spawn_interactive_agent", { type: "raw", description: "too short" }],
-    ["aboard__list_agents", { surprise: true }],
-    ["aboard__send_to_agent", { agentId: "", message: "hello" }],
-    ["aboard__focus_agent", { agentId: "x", extra: true }],
-    ["aboard__get_todo", { issue: 12 }],
-    ["aboard__update_todo", { body: "x", reason: "" }],
-    ["aboard__review_pr", { pr: 0 }],
-    ["aboard__release_lease", { reason: "" }],
+    ["run_agent", { type: "implementer", prompt: "", description: "do the work" }],
+    ["spawn_agent", { type: "bogus", prompt: "work", description: "do the work" }],
+    ["spawn_interactive_agent", { type: "raw", description: "too short" }],
+    ["list_agents", { surprise: true }],
+    ["send_to_agent", { agentId: "", message: "hello" }],
+    ["focus_agent", { agentId: "x", extra: true }],
+    ["get_todo", { issue: 12 }],
+    ["update_todo", { body: "x", reason: "" }],
+    ["review_pr", { pr: 0 }],
+    ["release_lease", { reason: "" }],
   ] as const) {
     assert.equal("error" in resultBody(await call(name, args)), true, name);
   }
@@ -150,7 +150,7 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
 test("foreground waits for its matching result while background returns immediately", async () => {
   const { call, fleet, coordinator } = setup();
   let foregroundSettled = false;
-  const foreground = Promise.resolve(call("aboard__run_agent", {
+  const foreground = Promise.resolve(call("run_agent", {
     type: "reviewer", prompt: "Review issue nine", description: "review issue nine",
   })).then((value) => { foregroundSettled = true; return value; });
   await new Promise((resolve) => setImmediate(resolve));
@@ -159,7 +159,7 @@ test("foreground waits for its matching result while background returns immediat
   coordinator.complete(foregroundAgent.identity.agentId, success);
   assert.match(JSON.stringify((await foreground).body), /finished/);
 
-  const background = await call("aboard__spawn_agent", {
+  const background = await call("spawn_agent", {
     type: "implementer", prompt: "Implement issue nine", description: "implement issue nine", issue: 9,
   });
   assert.match(JSON.stringify(background.body), /running/);
@@ -167,38 +167,38 @@ test("foreground waits for its matching result while background returns immediat
 
 test("lease conflicts fail immediately with holder details and release is audited", async () => {
   const { call } = setup();
-  await call("aboard__spawn_agent", {
+  await call("spawn_agent", {
     type: "implementer", prompt: "Implement first task", description: "implement first task",
   });
-  const conflict = await call("aboard__spawn_agent", {
+  const conflict = await call("spawn_agent", {
     type: "fixer", prompt: "Fix second task", description: "fix second task now",
   });
   assert.match(JSON.stringify(conflict.body), /lease-conflict/);
   assert.match(JSON.stringify(conflict.body), /worker-1/);
-  assert.match(JSON.stringify((await call("aboard__release_lease", { reason: "user intervention" })).body), /released/);
+  assert.match(JSON.stringify((await call("release_lease", { reason: "user intervention" })).body), /released/);
 });
 
 test("interactive launch focuses the terminal, expects no result, and fleet/focus tools inspect it", async () => {
   const { call, host } = setup();
-  const launched = await call("aboard__spawn_interactive_agent", {
+  const launched = await call("spawn_interactive_agent", {
     type: "brainstormer", description: "brainstorm the caching design",
   });
   assert.match(JSON.stringify(launched.body), /no agent result/);
   assert.deepEqual(host.created[0]!.terminal.shown, [false]);
-  assert.match(JSON.stringify((await call("aboard__list_agents")).body), /brainstormer/);
-  await call("aboard__focus_agent", { agentId: "worker-1" });
+  assert.match(JSON.stringify((await call("list_agents")).body), /brainstormer/);
+  await call("focus_agent", { agentId: "worker-1" });
   assert.equal(host.created[0]!.terminal.shown.length, 2);
 });
 
 test("send resumes a finished session in a new terminal through CLI arguments", async () => {
   const { call, host, fleet, coordinator } = setup();
-  await call("aboard__spawn_agent", {
+  await call("spawn_agent", {
     type: "reviewer", prompt: "Review the change", description: "review the current change",
   });
   const worker = fleet.get(agent("worker-1"))!;
   host.close(0);
   coordinator.complete(worker.identity.agentId, success);
-  const resumed = await call("aboard__send_to_agent", { agentId: "worker-1", message: "Check the updated diff" });
+  const resumed = await call("send_to_agent", { agentId: "worker-1", message: "Check the updated diff" });
   assert.match(JSON.stringify(resumed.body), /running/);
   assert.match(host.created[1]!.terminal.sent[0]!, /--resume/);
   assert.match(host.created[1]!.terminal.sent[0]!, /Check the updated diff/);

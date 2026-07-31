@@ -20,29 +20,32 @@ const SPAWN_PROPERTIES = {
   issue: { type: "integer", minimum: 1, description: "Optional GitHub issue whose resolved contract is merged into the launch prompt." },
 } as const;
 
+// Tools are served under bare names; Claude Code namespaces them for the model
+// as mcp__aboard__<name>, which the Manager's --tools preset matches with
+// mcp__aboard__*.
 export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
-    name: "aboard__run_agent",
-    description: "Launch a visible independent Claude Code agent in the foreground for a focused task. Like Claude Code's Agent tool with run_in_background false: this call waits for the agent's final result. Use aboard__spawn_agent when you should stay conversational while work runs.",
+    name: "run_agent",
+    description: "Launch a visible independent Claude Code agent in the foreground for a focused task. Like Claude Code's Agent tool with run_in_background false: this call waits for the agent's final result. Use mcp__aboard__spawn_agent when you should stay conversational while work runs.",
     inputSchema: { type: "object", properties: SPAWN_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
   },
   {
-    name: "aboard__spawn_agent",
+    name: "spawn_agent",
     description: "Launch a visible independent Claude Code agent in the background for a focused task. Like Claude Code's Agent tool with run_in_background true: returns immediately and the Manager Stop hook delivers the eventual result. Backgrounding does not bypass the single-writer lease.",
     inputSchema: { type: "object", properties: SPAWN_PROPERTIES, required: ["type", "prompt", "description"], additionalProperties: false },
   },
   {
-    name: "aboard__spawn_interactive_agent",
+    name: "spawn_interactive_agent",
     description: "Create and focus a visible Claude Code terminal for the user. The opening prompt is optional, and no result is expected or delivered. Use type raw for an unconstrained session with no agent definition.",
     inputSchema: { type: "object", properties: SPAWN_PROPERTIES, required: ["type", "description"], additionalProperties: false },
   },
   {
-    name: "aboard__list_agents",
+    name: "list_agents",
     description: "List live and recent aboard agents with their types, lifecycle states, issues, terminals, telemetry, and the current write-lease holder.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
-    name: "aboard__send_to_agent",
+    name: "send_to_agent",
     description: "Resume a finished aboard agent with a new message in a new visible terminal using claude --resume. This is reliable CLI-argument delivery, never keystroke injection into a live TUI.",
     inputSchema: {
       type: "object",
@@ -52,27 +55,27 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     },
   },
   {
-    name: "aboard__focus_agent",
+    name: "focus_agent",
     description: "Reveal and focus an aboard agent's VS Code terminal for user handoff or inspection.",
     inputSchema: { type: "object", properties: { agentId: { type: "string", minLength: 1 } }, required: ["agentId"], additionalProperties: false },
   },
   {
-    name: "aboard__get_todo",
+    name: "get_todo",
     description: "Return the body of the singleton open GitHub issue labelled todo. The bridge resolves and caches its number; callers never pass an issue identifier.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
-    name: "aboard__update_todo",
+    name: "update_todo",
     description: "Replace the singleton project TODO issue body. Creates the issue on first write when missing; the reason is for audit context and is not stored in the issue.",
     inputSchema: { type: "object", properties: { body: { type: "string" }, reason: { type: "string", minLength: 1 } }, required: ["body", "reason"], additionalProperties: false },
   },
   {
-    name: "aboard__review_pr",
+    name: "review_pr",
     description: "Explicitly launch a read-only reviewer for a pull request after resolving its diff and governing issue contract. Findings are persisted as line-specific GitHub review comments.",
     inputSchema: { type: "object", properties: { pr: { type: "integer", minimum: 1 }, focus: { type: "string", minLength: 1 } }, required: ["pr"], additionalProperties: false },
   },
   {
-    name: "aboard__release_lease",
+    name: "release_lease",
     description: "Force-release the workspace write lease as an explicit escape hatch. Always provide a meaningful audit reason; concurrent editing may become possible immediately.",
     inputSchema: { type: "object", properties: { reason: { type: "string", minLength: 1 } }, required: ["reason"], additionalProperties: false },
   },
@@ -150,53 +153,53 @@ async function callTool(
   signal: AbortSignal,
 ): Promise<unknown> {
   switch (name) {
-    case "aboard__run_agent": {
+    case "run_agent": {
       const parsed = parseLaunch(args, true);
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.run(parsed, signal);
     }
-    case "aboard__spawn_agent": {
+    case "spawn_agent": {
       const parsed = parseLaunch(args, true);
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.spawn(parsed);
     }
-    case "aboard__spawn_interactive_agent": {
+    case "spawn_interactive_agent": {
       const parsed = parseLaunch(args, false);
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.spawnInteractive(parsed);
     }
-    case "aboard__list_agents":
+    case "list_agents":
       if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("arguments must be an empty object");
       return coordinator.list();
-    case "aboard__send_to_agent": {
+    case "send_to_agent": {
       const parsed = parsePair(args, "message");
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.send(parsed.agentId as AgentId, parsed.message!);
     }
-    case "aboard__focus_agent": {
+    case "focus_agent": {
       const parsed = parsePair(args, undefined);
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.focus(parsed.agentId as AgentId);
     }
-    case "aboard__get_todo":
+    case "get_todo":
       if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("arguments must be an empty object");
       if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
       return services.github.getTodo();
-    case "aboard__update_todo": {
+    case "update_todo": {
       if (!isRecord(args) || !exactKeys(args, ["body", "reason"])) throw new TypeError("arguments contain an unknown property");
       if (typeof args.body !== "string") throw new TypeError("body must be a string");
       if (!nonEmptyString(args.reason)) throw new TypeError("reason must be a non-empty string");
       if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
       return services.github.updateTodo(args.body);
     }
-    case "aboard__review_pr": {
+    case "review_pr": {
       if (!isRecord(args) || !exactKeys(args, ["pr", "focus"])) throw new TypeError("arguments contain an unknown property");
       if (!Number.isInteger(args.pr) || (args.pr as number) <= 0) throw new TypeError("pr must be a positive integer");
       if (args.focus !== undefined && !nonEmptyString(args.focus)) throw new TypeError("focus must be a non-empty string when provided");
       if (services.reviews === undefined) throw new GitHubBoundaryError("command-failed", "Review service is unavailable");
       return services.reviews.review({ pr: args.pr as number, ...(args.focus === undefined ? {} : { focus: (args.focus as string).trim() }) });
     }
-    case "aboard__release_lease": {
+    case "release_lease": {
       const parsed = parsePair(args, "reason");
       if (typeof parsed === "string") throw new TypeError(parsed);
       return coordinator.releaseLease(parsed.reason!);

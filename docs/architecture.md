@@ -50,6 +50,12 @@ Folders should be created when their first real file is added; empty architectur
 - Scaffold templates are assets, not runtime source. Vendored user-owned skills are copied from upstream and never edited in place.
 - Persistent project state belongs in GitHub or committed files. Ephemeral secrets and live state belong only under `.aboard/runtime/`.
 
+## Resolved decisions from end-to-end testing (2026-07-30)
+
+- **MCP tool naming:** the bridge serves bare tool names (`run_agent`, `list_agents`, …). Claude Code namespaces them for the model as `mcp__aboard__<name>`, so the spec's `aboard__*` delegation surface is realized as `mcp__aboard__*`, which is also what the Manager `--tools` presets allow.
+- **Tool-list flags:** `--tools`/`--disallowedTools` take one comma-separated argument (`claude --help`: `"Bash,Edit,Read"`). The flags are variadic; spreading values across arguments lets the last one swallow the positional launch prompt.
+- **Session resume:** `claude --resume <id>` fails on a session that was closed before its first message because no transcript exists yet. Resume paths (Manager, `send_to_agent`) probe for the transcript first and, when absent, start the conversation afresh under the same imposed `--session-id`.
+
 ## Testing strategy
 
 - Unit-test lease, fleet, session, prompt, and failure state transitions as pure TypeScript.

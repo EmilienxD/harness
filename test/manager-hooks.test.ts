@@ -50,7 +50,7 @@ test("briefing slices are concise, body-free, and fail independently", async () 
   const signal = new AbortController().signal;
   assert.match(await briefings.render("git", signal), /main.*abc123.*clean/);
   assert.match(await briefings.render("github", signal), /unavailable.*gh unavailable/);
-  assert.equal(await briefings.render("todo", signal), "Project TODO is issue #77. Read it with aboard__get_todo when you need it.");
+  assert.equal(await briefings.render("todo", signal), "Project TODO is issue #77. Read it with mcp__aboard__get_todo when you need it.");
   assert.doesNotMatch(await briefings.render("todo", signal), /body|description|thread/i);
 });
 

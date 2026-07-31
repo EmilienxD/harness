@@ -80,6 +80,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "aboard.fleet",
+        "contents": "No agents yet. Agents the bridge launches appear here.\n[Aboard: Install or Upgrade Project Assets](command:aboard.scaffoldProject)\n[Aboard: Start Manager](command:aboard.startManager)"
+      }
+    ],
     "menus": {
       "view/item/context": [
         {

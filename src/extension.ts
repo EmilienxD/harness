@@ -15,6 +15,7 @@ import { TerminalController } from "./claude/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
+import { sessionTranscriptExists } from "./claude/sessions.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { scaffoldProject } from "./scaffold/project.js";
@@ -134,7 +135,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const recordedManager = await managerStore.load();
   const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
-  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: workerConfigurations(workspaceRoot), prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId });
+  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: workerConfigurations(workspaceRoot), prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, transcriptExists: (sessionId) => sessionTranscriptExists(sessionId, workspaceRoot) });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   const reviews = new ReviewCoordinator(github, coordinator, fleet);
   const briefings = new ManagerBriefings(
@@ -179,6 +180,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     preset: currentConfiguration.managerToolPreset,
     disallowedTools: currentConfiguration.managerDisallowedTools,
     agentIdFactory: () => managerAgentId,
+    transcriptExists: sessionTranscriptExists,
   });
   const warnKey = "aboard.manager.permissionWarning";
   const launch = async (mode: "start" | "resume" | "new") => {

@@ -48,6 +48,8 @@ export interface DelegationCoordinatorOptions {
   readonly sessionIdFactory: () => SessionId;
   readonly now?: () => Date;
   readonly maxInlinePromptChars?: number;
+  /** Session-transcript probe (claude/sessions.ts); absent transcripts make --resume impossible. */
+  readonly transcriptExists?: (sessionId: SessionId) => Promise<boolean>;
 }
 
 export class DelegationError extends Error {
@@ -117,19 +119,34 @@ export class DelegationCoordinator {
     if (session.lifecycle.status === "starting" || session.lifecycle.status === "running" || session.lifecycle.status === "awaiting-user") {
       throw new DelegationError("agent-active", `Agent ${agentId} is still active; wait for it to finish before resuming`);
     }
-    const capability = this.#capabilities.get(agentId) ?? "write-capable";
+    const type = session.identity.type;
     const sequence = (this.#resumeSequences.get(agentId) ?? 0) + 1;
-    const plan = planResume({
-      agentId,
-      sessionId: session.sessionId,
-      agentType: session.identity.type,
-      shell: this.options.shell,
-      permissionMode: this.options.permissionMode,
-      message,
-      writeCapability: capability,
-      sequence,
-      maxInlinePromptChars: this.options.maxInlinePromptChars,
-    });
+    // --resume fails on a session closed before its first message (no
+    // transcript on disk). Relaunch the conversation under the same imposed
+    // session id instead; the agent definition re-supplies the launch shape,
+    // and no conversation exists that could reference prior spill files.
+    const plan = type !== "manager" && this.options.transcriptExists !== undefined && !await this.options.transcriptExists(session.sessionId)
+      ? planLaunch({
+        agentId,
+        sessionId: session.sessionId,
+        agentType: type,
+        shell: this.options.shell,
+        permissionMode: this.options.permissionMode,
+        configuration: await this.options.configurations.get(type),
+        prompt: message,
+        maxInlinePromptChars: this.options.maxInlinePromptChars,
+      })
+      : planResume({
+        agentId,
+        sessionId: session.sessionId,
+        agentType: type,
+        shell: this.options.shell,
+        permissionMode: this.options.permissionMode,
+        message,
+        writeCapability: this.#capabilities.get(agentId) ?? "write-capable",
+        sequence,
+        maxInlinePromptChars: this.options.maxInlinePromptChars,
+      });
     const occurredAt = this.#timestamp();
     this.#acquire(plan.writeCapability, agentId, session.sessionId, occurredAt, "resume agent");
     try {
@@ -144,7 +161,7 @@ export class DelegationCoordinator {
       });
       this.options.fleet.restart(agentId, { terminalId: terminal.terminalId, name: terminal.name }, occurredAt);
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
-      this.#resumeSequences.set(agentId, sequence);
+      if (plan.kind === "resume") this.#resumeSequences.set(agentId, sequence);
       return { agentId, sessionId: session.sessionId, terminalId: terminal.terminalId, status: "running" };
     } catch (error) {
       this.options.lease.release(agentId, occurredAt, "resume launch failed");

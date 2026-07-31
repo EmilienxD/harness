@@ -69,17 +69,14 @@ test("plans the Manager as an inline launch with a tool preset and no Agent tool
     }),
   );
 
+  // Tool lists are one comma-separated argument: the flags are variadic, so
+  // separate values would swallow the positional prompt (claude --help:
+  // "Bash,Edit,Read"). MCP tools surface as mcp__<server>__<tool>.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
     "--tools",
-    "aboard__*",
-    "Read",
-    "Grep",
-    "Glob",
-    "Bash",
-    "Skill",
-    "AskUserQuestion",
+    "mcp__aboard__*,Read,Grep,Glob,Bash,Skill,AskUserQuestion",
     "--disallowedTools",
     "Bash(git push*)",
     "--model",
@@ -87,7 +84,7 @@ test("plans the Manager as an inline launch with a tool preset and no Agent tool
   ]);
   assert.equal(
     plan.commandLine,
-    `& claude --session-id ${sessionId} --tools 'aboard__*' Read Grep Glob Bash Skill AskUserQuestion --disallowedTools 'Bash(git push*)' --model opus`,
+    `& claude --session-id ${sessionId} --tools 'mcp__aboard__*,Read,Grep,Glob,Bash,Skill,AskUserQuestion' --disallowedTools 'Bash(git push*)' --model opus`,
   );
   assert.equal(plan.promptDelivery, "none");
   // The Manager orchestrates and is never a lease holder, even though the

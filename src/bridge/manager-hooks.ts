@@ -84,7 +84,7 @@ export class ManagerBriefings {
           const issue = await this.sources.todoIssue(signal);
           content = issue === undefined
             ? "Project TODO issue was not found."
-            : `Project TODO is issue #${issue}. Read it with aboard__get_todo when you need it.`;
+            : `Project TODO is issue #${issue}. Read it with mcp__aboard__get_todo when you need it.`;
           break;
         }
       }

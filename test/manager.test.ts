@@ -39,13 +39,31 @@ test("start refuses replacement, resume keeps identity, and new replaces it", as
     create: (request: unknown) => { records.push({ kind: "create", request }); return terminal("new-terminal"); },
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return terminal("resumed-terminal"); },
   } as unknown as TerminalController;
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "delegation-only", disallowedTools: ["Bash(git push*)"], now: () => new Date("2026-07-30T10:00:00.000Z") });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "delegation-only", disallowedTools: ["Bash(git push*)"], now: () => new Date("2026-07-30T10:00:00.000Z"), transcriptExists: async () => true });
   await assert.rejects(() => lifecycle.start("start"), /Resume Manager or New Manager/);
   await lifecycle.start("resume");
   assert.match((records[0] as any).request.initialCommand, /--resume 4db0ed4c/);
   assert.equal(saved[0].sessionId, sessionId);
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
-  assert.match((records[1] as any).request.initialCommand, /--tools 'aboard__\*' Skill AskUserQuestion/);
+  assert.match((records[1] as any).request.initialCommand, /--tools 'mcp__aboard__\*,Skill,AskUserQuestion'/);
   assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
+});
+
+test("resume without a transcript starts afresh under the same session id", async () => {
+  const records: any[] = [];
+  const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
+  const snapshot = (id: string): TerminalSnapshot => ({ terminalId: id as TerminalId, agentId, sessionId, agentType: "manager", name: "aboard: Manager", cwd: "C:\\work", status: "open", createdAt: "2026-07-30T10:00:00.000Z", closedAt: null, exitCode: null });
+  const terminals = {
+    create: (request: unknown) => { records.push({ kind: "create", request }); return snapshot("fresh-terminal"); },
+    resume: (request: unknown) => { records.push({ kind: "resume", request }); return snapshot("resumed-terminal"); },
+  } as unknown as TerminalController;
+  // The recorded session was closed before its first message: no transcript
+  // exists, so --resume would fail. aboard must relaunch with --session-id.
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", preset: "read-only", transcriptExists: async () => false });
+  await lifecycle.start("resume");
+  assert.equal(records[0].kind, "create");
+  assert.match(records[0].request.initialCommand, new RegExp(`--session-id ${sessionId}`));
+  assert.doesNotMatch(records[0].request.initialCommand, /--resume/);
+  assert.match(records[0].request.initialCommand, /--tools/);
 });

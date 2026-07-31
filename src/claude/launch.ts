@@ -41,12 +41,16 @@ export type ManagerToolPreset = (typeof MANAGER_TOOL_PRESETS)[number];
  * Spec section 4.3. `Agent` and the session-task tools are absent from both
  * presets rather than denied: the Manager cannot reach for a tool it cannot
  * see, and we do not pay context for a schema it must never use.
+ *
+ * MCP tools are named `mcp__<server>__<tool>` inside Claude Code, so the
+ * bridge's tool surface (`mcp__aboard__run_agent`, …) is matched by the
+ * server-wide pattern `mcp__aboard__*`.
  */
 export const MANAGER_TOOL_PRESET_TOOLS: Readonly<
   Record<ManagerToolPreset, readonly string[]>
 > = {
-  "read-only": ["aboard__*", "Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"],
-  "delegation-only": ["aboard__*", "Skill", "AskUserQuestion"],
+  "read-only": ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"],
+  "delegation-only": ["mcp__aboard__*", "Skill", "AskUserQuestion"],
 };
 
 /** `aboard.workers.permissionMode` (spec section 8.3). */
@@ -257,12 +261,18 @@ function assertFlagValue(
   return trimmed;
 }
 
+/**
+ * `claude --help` documents tool lists as comma-separated values in a single
+ * argument ("Bash,Edit,Read"). They must not be spread as separate arguments:
+ * the flags are variadic, so trailing values would swallow the positional
+ * launch prompt.
+ */
 function toolListArguments(
   flag: string,
   rules: readonly string[] | undefined,
 ): readonly string[] {
   if (rules === undefined || rules.length === 0) return [];
-  return [flag, ...rules.map((rule) => assertFlagValue(rule, "invalid-tool-rule", "tool rule"))];
+  return [flag, rules.map((rule) => assertFlagValue(rule, "invalid-tool-rule", "tool rule")).join(",")];
 }
 
 function normalizePrompt(
@@ -440,7 +450,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 }
 
 /**
- * `aboard__send_to_agent` and Manager resume (6.2, 4.4): relaunch with
+ * `send_to_agent` and Manager resume (6.2, 4.4): relaunch with
  * `--resume <session-id> <message>`. Never keystrokes into a live TUI.
  *
  * Resume carries no `--agent`/`--tools`, matching the spec's resume command and

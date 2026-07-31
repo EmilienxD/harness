@@ -25,10 +25,10 @@ test("authenticated HTTP crosses the MCP boundary and validates requests", async
     method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
   });
   assert.equal((await invoke("wrong", { jsonrpc: "2.0", id: 1, method: "tools/list" })).status, 401);
-  const invalid = await invoke(bridge.token, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "aboard__run_agent", arguments: { type: "implementer", description: "implement the current issue", prompt: "" } } });
+  const invalid = await invoke(bridge.token, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "run_agent", arguments: { type: "implementer", description: "implement the current issue", prompt: "" } } });
   assert.equal(invalid.status, 200);
   assert.match(await invalid.text(), /prompt must be a non-empty string/);
-  const valid = await invoke(bridge.token, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "aboard__run_agent", arguments: { type: "reviewer", description: "review the current changes", prompt: "Review the current changes" } } });
+  const valid = await invoke(bridge.token, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "run_agent", arguments: { type: "reviewer", description: "review the current changes", prompt: "Review the current changes" } } });
   assert.equal(valid.status, 200);
   assert.match(await valid.text(), /worker-1/);
   assert.deepEqual(calls, [{ type: "reviewer", description: "review the current changes" }]);
