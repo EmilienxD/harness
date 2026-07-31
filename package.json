@@ -20,7 +20,7 @@
     "commands": [
       {
         "command": "aboard.resumeManager",
-        "title": "Aboard: Resume Previous Manager"
+        "title": "Aboard: Resume Manager"
       },
       {
         "command": "aboard.newManager",
@@ -32,7 +32,7 @@
       },
       {
         "command": "aboard.updateProject",
-        "title": "Aboard: Update Project Assets",
+        "title": "Reset .aboard/",
         "icon": "$(sync)"
       },
       {
@@ -85,13 +85,8 @@
           "when": "!aboard.initialized"
         },
         {
-          "id": "aboard.manager",
-          "name": "Manager",
-          "when": "aboard.initialized"
-        },
-        {
           "id": "aboard.fleet",
-          "name": "Fleet",
+          "name": "Agents",
           "when": "aboard.initialized"
         }
       ]
@@ -103,24 +98,30 @@
       },
       {
         "view": "aboard.fleet",
-        "contents": "No agents yet. Agents the Manager launches appear here."
+        "contents": "No agents yet. Start a Manager, and the agents it launches appear here.\n[+ New Manager](command:aboard.newManager)"
       },
       {
-        "view": "aboard.manager",
+        "view": "aboard.fleet",
         "when": "aboard.managerResumable",
-        "contents": "[Resume Previous Manager](command:aboard.resumeManager)"
-      },
-      {
-        "view": "aboard.manager",
-        "contents": "[+ New Manager](command:aboard.newManager)"
+        "contents": "[↻ Resume Manager](command:aboard.resumeManager)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "aboard.updateProject",
-          "when": "view == aboard.manager",
+          "when": "view == aboard.fleet",
           "group": "navigation@1"
+        },
+        {
+          "command": "aboard.newManager",
+          "when": "view == aboard.fleet && !aboard.managerLive",
+          "group": "1_manager@1"
+        },
+        {
+          "command": "aboard.resumeManager",
+          "when": "view == aboard.fleet && aboard.managerResumable && !aboard.managerLive",
+          "group": "1_manager@2"
         }
       ],
       "commandPalette": [

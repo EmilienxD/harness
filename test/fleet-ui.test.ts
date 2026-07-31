@@ -28,21 +28,17 @@ test("tree mapping is hierarchical and shows status, elapsed time, and lease but
   assert.ok(refreshes >= 4); model.dispose();
 });
 
-test("the Manager occupies its own section and never appears among the workers", () => {
+test("one section lists the Manager and its workers, with the Manager pinned first", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:02:05.000Z"));
-  assert.deepEqual(model.managerRoots(), []);
   assert.deepEqual(model.roots(), []);
+  // Workers with no Manager are a valid state, so the section is not empty then
+  // and its welcome actions are unavailable — the view title menu carries them.
   fleet.register(worker, startedAt);
-  // Workers with no Manager are a valid state: the fleet lists them while the
-  // Manager section stays empty and keeps offering its launch actions.
-  assert.deepEqual(model.managerRoots(), []);
   assert.equal(model.roots().length, 1);
   fleet.register({ ...worker, identity: { agentId: agent("manager-1"), type: "manager" }, sessionId: session("session-2"), resultDelivery: { mode: "none" } }, startedAt);
-  assert.equal(model.managerRoots().length, 1);
-  assert.equal(model.roots().length, 1);
-  const [onlyWorker] = model.roots();
-  assert.equal(onlyWorker?.kind === "agent" ? onlyWorker.session.identity.type : undefined, "implementer");
+  const types = model.roots().map((node) => node.kind === "agent" ? node.session.identity.type : "child");
+  assert.deepEqual(types, ["manager", "implementer"]);
   model.dispose();
 });
 
@@ -61,6 +57,13 @@ test("icons separate the Manager, interactive agents, and automated workers, nev
   assert.equal(icon("implementer", "i", "s-i"), "lock");
   assert.equal(icon("pr-doctor-afk", "v", "s-v"), "lock");
   assert.equal(icon("pr-doctor-hitl", "f", "s-f"), "comment-discussion");
+  // The dual-mode builtin types follow the launch: an automated one is closed
+  // to input, an interactive one (delivery mode "none") is something the user
+  // talks to.
+  assert.equal(icon("general-purpose", "g", "s-g"), "lock");
+  assert.equal(icon("Explore", "e", "s-e"), "lock");
+  fleet.register({ ...worker, identity: { agentId: agent("e2"), type: "Explore" }, sessionId: session("s-e2"), resultDelivery: { mode: "none" } }, startedAt);
+  assert.equal(model.item({ kind: "agent", session: fleet.get(agent("e2"))!, leaseHolder: false }).icon, "comment-discussion");
   model.dispose();
 });
 

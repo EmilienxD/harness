@@ -27,3 +27,5 @@ Thumbs.db
 !assets/scaffold/.claude/**
 .aboard/
 .claude/settings.local.json
+
+private-notes/

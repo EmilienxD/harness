@@ -23,12 +23,10 @@ export function registerNativeFleetUi(context: ExtensionContext, port: number, f
       return item;
     },
   });
-  // Two sections over one model. The Manager section holds at most one row and
-  // shows its launch actions while empty — a welcome view renders only on an
-  // empty tree, which is exactly "no Manager is running". Workers therefore
-  // cannot share that tree; they would suppress the actions just by existing.
+  // One section over the whole model: the Manager sorts first, workers follow.
+  // Its welcome view renders only while the tree is empty, so the launch actions
+  // also live in the view title menu, where a leftover worker row cannot hide them.
   disposables.push(
-    window.registerTreeDataProvider("aboard.manager", provider(() => model.managerRoots())),
     window.registerTreeDataProvider("aboard.fleet", provider(() => model.roots())),
     changes,
     model,

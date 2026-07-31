@@ -1,4 +1,4 @@
-import { isAutomatedAgentType, type AgentId, type AgentSession, type AgentType, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
+import { isInteractiveAgentType, type AgentId, type AgentSession, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 
@@ -35,20 +35,13 @@ export class FleetTreeModel {
   }
 
   /**
-   * The Manager and the fleet are separate sections of the panel: the Manager
-   * section holds at most one row and falls back to its launch actions when
-   * empty, so it must not be mixed into the worker list.
+   * A single section holds the Manager and its fleet. The Manager is pinned to
+   * the top so the row the user talks to never drifts down the worker list.
    */
-  public managerRoots(): readonly FleetTreeNode[] {
-    return this.#nodes((session) => session.identity.type === "manager");
-  }
-
   public roots(): readonly FleetTreeNode[] {
-    return this.#nodes((session) => session.identity.type !== "manager");
-  }
-
-  #nodes(predicate: (session: AgentSession) => boolean): readonly FleetTreeNode[] {
-    return this.fleet.list().filter(predicate).map((session) => ({ kind: "agent", session, leaseHolder: this.lease.current()?.agentId === session.identity.agentId }));
+    return this.fleet.list()
+      .map((session): FleetTreeNode => ({ kind: "agent", session, leaseHolder: this.lease.current()?.agentId === session.identity.agentId }))
+      .sort((left, right) => managerRank(left) - managerRank(right));
   }
 
   public children(node: FleetTreeNode): readonly FleetTreeNode[] {
@@ -69,7 +62,7 @@ export class FleetTreeModel {
       label: `${session.identity.type === "manager" ? "Manager" : session.identity.type}${goal}`,
       description: markers.join(" · "),
       tooltip: agentTooltip(session, node.leaseHolder),
-      icon: agentIcon(session.identity.type),
+      icon: agentIcon(session),
       contextValue: active ? "aboard.agent.active" : "aboard.agent.finished",
       collapsible: this.fleet.listChildren(session.identity.agentId).length > 0,
       command: { command: "aboard.focusAgent", title: "Focus Agent", arguments: [node] },
@@ -107,15 +100,19 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
 /**
  * The icon separates agents you may talk to from agents that run to completion
  * on their own: the Manager coordinates, interactive agents are handed to the
- * user, and automated workers are closed to input. It deliberately does not
- * encode the write lease — that is orthogonal and already shown in the row
- * description.
+ * user, and automated workers are closed to input. Handed-to-the-user is per
+ * launch (`resultDelivery.mode === "none"`), not only per type, since the
+ * builtin types run either way. It deliberately does not encode the write
+ * lease — that is orthogonal and already shown in the row description.
  */
-function agentIcon(type: AgentType): string {
-  if (type === "manager") return "organization";
-  return isAutomatedAgentType(type) ? "lock" : "comment-discussion";
+function agentIcon(session: AgentSession): string {
+  if (session.identity.type === "manager") return "organization";
+  return isInteractiveAgentType(session.identity.type) || session.resultDelivery.mode === "none"
+    ? "comment-discussion"
+    : "lock";
 }
 
+function managerRank(node: FleetTreeNode): number { return node.kind === "agent" && node.session.identity.type === "manager" ? 0 : 1; }
 function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "agent" }> { return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "agent"; }
 function formatElapsed(startedAt: IsoTimestamp, now: Date): string { const seconds = Math.max(0, Math.floor((now.getTime() - Date.parse(startedAt)) / 1000)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
