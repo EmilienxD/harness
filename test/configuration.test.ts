@@ -108,6 +108,30 @@ test("manager launch changes are detected by value for the project settings relo
   assert.equal(managerLaunchChanged(base, read({ "aboard.autoRun.scope": "all" })), false);
 });
 
+test("the launch effort setting accepts every level, and inherit means no flag", () => {
+  const read = (value: unknown) => readAboardConfiguration({ get: (key) => key === "aboard.launch.effort" ? value : undefined });
+  for (const level of ["low", "medium", "high", "xhigh", "max"] as const) {
+    const result = read(level);
+    assert.deepEqual(result.diagnostics, []);
+    assert.equal(result.value.launchEffort, level);
+  }
+  // Unset and the explicit default both mean "inherit the session level", which
+  // is an absent value rather than a level aboard passes on the command line.
+  assert.equal(read(undefined).value.launchEffort, undefined);
+  assert.deepEqual(read("inherit").diagnostics, []);
+  assert.equal(read("inherit").value.launchEffort, undefined);
+
+  const broken = read("ultracode");
+  assert.equal(broken.value.launchEffort, undefined);
+  assert.deepEqual(broken.diagnostics.map((item) => item.setting), ["aboard.launch.effort"]);
+
+  // Changing it changes the Manager's command line, so the reload path has to
+  // offer the restart that applies it.
+  const level = (value: unknown) => readAboardConfiguration({ get: (key) => key === "aboard.launch.effort" ? value : undefined }).value;
+  assert.equal(managerLaunchChanged(level(undefined), level("high")), true);
+  assert.equal(managerLaunchChanged(level("high"), level("high")), false);
+});
+
 test("every contributed setting is listed in ABOARD_SETTINGS", async () => {
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as { contributes: { configuration: { properties: Record<string, unknown> } } };
   assert.deepEqual([...ABOARD_SETTINGS].sort(), Object.keys(manifest.contributes.configuration.properties).sort());

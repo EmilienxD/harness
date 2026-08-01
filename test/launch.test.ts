@@ -6,13 +6,18 @@ import test from "node:test";
 
 import {
   DEFAULT_MAX_INLINE_PROMPT_CHARS,
+  EFFORT_LEVELS,
   MAX_COMMAND_LINE_CHARS,
   LaunchPlanError,
   describeLaunchPlan,
+  isEffortLevel,
   launchWriteCapability,
   parseClaudeCommand,
   planLaunch,
+  planManagerResume,
+  planSessionResume,
   resolveLaunchConfiguration,
+  type EffortLevel,
   type LaunchPlanRequest,
 } from "../src/claude/launch.js";
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
@@ -90,6 +95,35 @@ test("plans the Manager as --agent manager with no tool flags and no Agent tool"
   // tool list leaves unrestricted Bash in place (spec section 4.3.1).
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, false);
+});
+
+test("wrapper layout prefixes the launch and resume lines without reshaping the args", () => {
+  const wrapper = {
+    script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py",
+    lockPathFor: (id: typeof agentId) => `C:\\repo\\.aboard\\runtime\\locks\\${id}.lock`,
+  };
+  const plan = planLaunch(request({ wrapper }));
+  // plan.args keeps the claude-side view; only the command line changes.
+  assert.equal(plan.args[2], "--agent");
+  assert.match(plan.commandLine, /^& uv run --no-project 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
+  assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' -- claude --session-id ${sessionId}`));
+
+  const resumed = planSessionResume({
+    agentId, sessionId, agentType: "implementer", shell: "powershell",
+    permissionMode: "bypass", writeCapability: "write-capable", wrapper,
+  });
+  assert.match(resumed.commandLine, /aboard_wrapper\.py' .* -- claude --resume/);
+});
+
+test("wrapper tokens are validated like the launch command", () => {
+  const wrapper = {
+    script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py",
+    lockPathFor: () => 'has "quote".lock',
+  };
+  assert.throws(() => planSessionResume({
+    agentId, sessionId, agentType: "implementer", shell: "powershell",
+    permissionMode: "bypass", writeCapability: "write-capable", wrapper,
+  }), /Wrapper token/);
 });
 
 test("plans an agent-defined implementer and spills a multi-line prompt", () => {
@@ -183,6 +217,152 @@ test("the builtin types carry Claude Code's own capabilities, not a derived gues
   assert.equal(explore.requiresWriteLease, false);
   // Both resolve to --agent <builtin name> with no tool flags.
   assert.deepEqual(explore.args, ["--session-id", sessionId, "--agent", "Explore", "Map the auth flow."]);
+});
+
+test("passes the session effort level on every launch shape and refuses an unknown one", () => {
+  const plan = planLaunch(request({ effort: "xhigh", permissionMode: "default" }));
+  // --effort sits with the other session flags, before the positional prompt.
+  assert.deepEqual(plan.args, [
+    "--session-id",
+    sessionId,
+    "--agent",
+    "implementer",
+    "--effort",
+    "xhigh",
+    "Implement issue #47.",
+  ]);
+
+  // A resume carries no --agent, so the definition is not read at all and the
+  // caller passes whatever level it resolved as a flag.
+  assert.deepEqual(
+    planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default", effort: "low" }).args,
+    ["--resume", sessionId, "--effort", "low"],
+  );
+  assert.deepEqual(
+    planSessionResume({
+      agentId,
+      sessionId,
+      agentType: "implementer",
+      shell: "powershell",
+      permissionMode: "bypass",
+      writeCapability: "write-capable",
+      effort: "max",
+    }).args,
+    ["--resume", sessionId, "--effort", "max", "--dangerously-skip-permissions"],
+  );
+
+  // Unset is the documented "inherit": no flag at all, so Claude Code's own
+  // effortLevel setting keeps deciding.
+
+  assert.equal(planLaunch(request()).args.includes("--effort"), false);
+  assert.equal(
+    planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default" }).args.includes("--effort"),
+    false,
+  );
+
+  for (const level of EFFORT_LEVELS) {
+    assert.equal(isEffortLevel(level), true);
+    assert.deepEqual(planLaunch(request({ effort: level })).args.slice(4, 6), ["--effort", level]);
+  }
+  // The value reaches the planner from a settings file, where a typo is a user
+  // mistake rather than a compile error, and Claude Code refuses the launch on
+  // an unknown level.
+  for (const invalid of ["ultracode", "highest", "", "--max"]) {
+    assert.equal(isEffortLevel(invalid), false);
+    assert.throws(
+      () => planLaunch(request({ effort: invalid as EffortLevel })),
+      (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-effort",
+      `${invalid} must be refused as an effort level`,
+    );
+  }
+});
+
+test("puts the definition's model and effort on the command line, overriding the session settings", () => {
+  // Claude Code honors the full frontmatter only for a subagent spawn. A
+  // main-thread `--agent` launch — every launch aboard makes — ignores `model:`
+  // and `effort:`, so the planner reads them from the definition and passes the
+  // flags itself, or the session silently runs at the user's global defaults.
+  const configuration = resolveLaunchConfiguration({
+    agentName: "implementer",
+    declaredTools: IMPLEMENTER_TOOLS,
+    declaredModel: "opus",
+    declaredEffort: "high",
+  });
+  const plan = planLaunch(
+    request({ configuration, permissionMode: "default", model: "haiku", effort: "low" }),
+  );
+  assert.deepEqual(plan.args, [
+    "--session-id",
+    sessionId,
+    "--agent",
+    "implementer",
+    "--model",
+    "opus",
+    "--effort",
+    "high",
+    "Implement issue #47.",
+  ]);
+
+  // Each field falls back independently: a definition that declares only one
+  // leaves the setting deciding the other.
+  assert.deepEqual(
+    planLaunch(request({
+      configuration: resolveLaunchConfiguration({ agentName: "brainstormer", declaredModel: "opus" }),
+      agentType: "brainstormer",
+      permissionMode: "default",
+      effort: "low",
+    })).args.slice(4),
+    ["--model", "opus", "--effort", "low", "Implement issue #47."],
+  );
+
+  // `model: inherit` is the definition declining to choose, which is no flag —
+  // not a model literally named "inherit", which would fail the launch.
+  const inherited = resolveLaunchConfiguration({ agentName: "implementer", declaredModel: "inherit" });
+  assert.equal("declaredModel" in inherited, false);
+  assert.equal(
+    planLaunch(request({ configuration: inherited, permissionMode: "default" })).args.includes("--model"),
+    false,
+  );
+
+  // A resume drops --agent, so the caller re-passes both; `--model` used to be
+  // accepted there and silently discarded.
+  assert.deepEqual(
+    planSessionResume({
+      agentId,
+      sessionId,
+      agentType: "implementer",
+      shell: "powershell",
+      permissionMode: "default",
+      writeCapability: "write-capable",
+      model: "opus",
+      effort: "high",
+    }).args,
+    ["--resume", sessionId, "--model", "opus", "--effort", "high"],
+  );
+  assert.deepEqual(
+    planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default", model: "opus" }).args,
+    ["--resume", sessionId, "--model", "opus"],
+  );
+
+  for (const invalid of ["", "  ", "--sonnet"]) {
+    assert.throws(
+      () => resolveLaunchConfiguration({ agentName: "implementer", declaredModel: invalid }),
+      (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-model",
+      `${invalid} must be refused as a definition model`,
+    );
+  }
+  assert.throws(
+    () => resolveLaunchConfiguration({ agentName: "implementer", declaredEffort: "ultra" as EffortLevel }),
+    (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-effort",
+  );
+  // The declared fields describe a definition and are meaningless without one.
+  for (const input of [{ declaredModel: "opus" }, { declaredEffort: "high" as EffortLevel }]) {
+    assert.throws(
+      () => resolveLaunchConfiguration(input),
+      (error: unknown) =>
+        error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
+    );
+  }
 });
 
 test("rejects plans that mix --agent with inline configuration", () => {

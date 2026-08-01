@@ -17,18 +17,24 @@ const agentsRoot = join(scaffoldRoot, ".claude", "agents");
 const expected = {
   brainstormer: {
     capability: "read-only",
+    // Absent: the brainstormer is the interactive type, so the user's own
+    // session level is the right one to keep.
+    effort: undefined,
     tools: ["Read", "Grep", "Glob", "Bash(gh *)", "Agent", "Skill", "AskUserQuestion"],
   },
   implementer: {
     capability: "write-capable",
+    effort: "high",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill"],
   },
   "pr-doctor-afk": {
     capability: "write-capable",
+    effort: "high",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill"],
   },
   "pr-doctor-hitl": {
     capability: "write-capable",
+    effort: "high",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", "AskUserQuestion"],
   },
 } as const;
@@ -52,8 +58,66 @@ test("parses every worker definition and derives its capability from the exact t
     const agent = await definition(name);
     assert.equal(agent.name, name);
     assert.equal(agent.model, "opus");
+    assert.equal(agent.effort, expected[name].effort);
     assert.deepEqual(agent.tools, expected[name].tools);
     assert.equal(agent.writeCapability, expected[name].capability);
+  }
+});
+
+/**
+ * `--agent` replaces Claude Code's default system prompt entirely
+ * (`docs/CLAUDE-REFERENCES/subagents.md`), so each definition body is the whole
+ * system prompt and has to carry its own grounding. The shared blocks live in
+ * one file each and are embedded verbatim; this is what catches the copies
+ * drifting apart.
+ */
+async function sharedBlock(name: "baseline" | "engineering"): Promise<string> {
+  const source = await readFile(join(process.cwd(), "docs", "agent-prompts", `${name}.md`), "utf8");
+  // Drop the leading HTML comment: it explains the file to a maintainer and is
+  // deliberately not part of what the agents are given.
+  return source.slice(source.indexOf("-->") + 3).trim();
+}
+
+test("every scaffolded agent embeds the shared baseline verbatim", async () => {
+  const baseline = await sharedBlock("baseline");
+  const sections = baseline.split("\n\n## ");
+  for (const name of SCAFFOLDED_AGENT_NAMES) {
+    const body = await readFile(join(agentsRoot, `${name}.md`), "utf8");
+    for (const section of sections) {
+      const heading = section.split("\n")[0]!.replace(/^## /, "");
+      // The brainstormer writes the spec issue with `gh`, so its care section is
+      // deliberately its own; every other section must match byte for byte.
+      if (name === "brainstormer" && (heading === "Executing actions with care" || heading === "Using your tools")) continue;
+      assert.ok(
+        body.includes(section.startsWith("## ") ? section : `## ${section}`) || body.includes(section),
+        `${name}.md has drifted from the shared baseline section "${heading}"`,
+      );
+    }
+  }
+});
+
+test("only the code-writing agents carry the engineering block, and identically", async () => {
+  const engineering = await sharedBlock("engineering");
+  const body = engineering.slice(engineering.indexOf("## Writing code"));
+  for (const name of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"] as const) {
+    const definition = await readFile(join(agentsRoot, `${name}.md`), "utf8");
+    assert.ok(definition.includes(body), `${name}.md has drifted from the shared engineering block`);
+  }
+  // The Manager and the brainstormer write no code; a page of comment policy
+  // would only crowd out the guidance they do need.
+  for (const name of ["manager", "brainstormer"] as const) {
+    const definition = await readFile(join(agentsRoot, `${name}.md`), "utf8");
+    assert.equal(definition.includes("## Writing code"), false, `${name}.md should not carry the engineering block`);
+  }
+});
+
+// The whole point of the rewrite: a definition body is the entire system prompt,
+// so a definition that fits in a paragraph is an agent running on nothing.
+test("every definition body is substantial enough to stand in for a system prompt", async () => {
+  for (const name of SCAFFOLDED_AGENT_NAMES) {
+    const body = await readFile(join(agentsRoot, `${name}.md`), "utf8");
+    const prompt = body.slice(body.indexOf("---", 3) + 3).trim();
+    assert.ok(prompt.length > 3_000, `${name}.md body is only ${prompt.length} chars`);
   }
 });
 
@@ -62,7 +126,7 @@ test("worker prompts encode their product contracts", async () => {
   assert.match(brainstormer.prompt, /one decision at a time/i);
   assert.match(brainstormer.prompt, /recommended answer/i);
   assert.match(brainstormer.prompt, /`spec` label/);
-  assert.match(brainstormer.prompt, /do not create or modify workspace files/i);
+  assert.match(brainstormer.prompt, /do not .*modify any workspace file/i);
 
   const implementer = await definition("implementer");
   assert.match(implementer.prompt, /already created and checked out/i);
@@ -105,6 +169,9 @@ test("the Manager definition declares the read-only tool list, with no Agent or 
   const parsed = parseManagerAgentDefinition(source);
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   assert.equal(parsed.value.model, "opus");
+  // The Manager is told to stay shallow and spend at most one short turn
+  // deciding how to delegate, so it runs below the workers it dispatches.
+  assert.equal(parsed.value.effort, "medium");
   // The frontmatter allowlist is the Manager's only tool authority: the
   // command line carries no --tools (spec section 5.1.1). `Agent` and the
   // session-task tools are absent from it, not merely denied (spec section 4.3).
@@ -141,11 +208,48 @@ test("Manager guidance stays shallow and handles failed slash-command intercepti
     /one short turn deciding how to delegate/i,
     /Never use Claude Code's `Agent` tool/i,
     /session task\/TodoWrite tools/i,
-    /bare slash-command text.*command interception failed/is,
-    /Do not treat that text as work/i,
+    // Interception failure is compressed to one line rather than a paragraph:
+    // it is an aboard bug the hook already reports, and a paragraph about it
+    // taxed every turn to defend against a case the user sees anyway.
+    /bare slash command.*interception failed/is,
+    /rather than improvising the action yourself/i,
+    // The state block is the Manager's orientation; it must be told to use it
+    // instead of re-fetching what it already holds.
+    /<aboard-state>/,
   ]) {
     assert.match(manager, required);
   }
+});
+
+test("an agent definition may declare an effort level, and an unknown one is refused", () => {
+  const worker = (frontmatter: string) =>
+    parseAgentDefinition(`---\nname: implementer\ndescription: d\ntools: Read\nmodel: opus\n${frontmatter}---\nImplement.`);
+
+  // Absent is the documented "inherit the session level", so it parses and
+  // leaves the field unset rather than inventing a default.
+  const inherited = worker("");
+  assert.equal(inherited.ok, true, inherited.ok ? undefined : inherited.reason);
+  assert.equal(inherited.ok && inherited.value.effort, undefined);
+
+  for (const level of ["low", "medium", "high", "xhigh", "max"] as const) {
+    const parsed = worker(`effort: ${level}\n`);
+    assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
+    assert.equal(parsed.ok && parsed.value.effort, level);
+  }
+  // Claude Code refuses the launch outright on an unknown level, so a typo is
+  // caught here rather than as a terminal that dies on start.
+  for (const invalid of ["ultracode", "highest", "opus"]) {
+    assert.equal(worker(`effort: ${invalid}\n`).ok, false, `${invalid} must be refused`);
+  }
+
+  const manager = parseManagerAgentDefinition(
+    "---\nname: manager\ndescription: d\ntools: Read\nmodel: opus\neffort: medium\n---\nOrchestrate.",
+  );
+  assert.equal(manager.ok && manager.value.effort, "medium");
+  assert.equal(
+    parseManagerAgentDefinition("---\nname: manager\ndescription: d\ntools: Read\nmodel: opus\neffort: highest\n---\nOrchestrate.").ok,
+    false,
+  );
 });
 
 test("rejects definitions outside the aboard catalogue or without required frontmatter", () => {

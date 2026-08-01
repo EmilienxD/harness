@@ -1,4 +1,4 @@
-import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, WORKER_PERMISSION_MODES, parseClaudeCommand, type WorkerPermissionMode } from "./claude/launch.js";
+import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, WORKER_PERMISSION_MODES, parseClaudeCommand, type EffortLevel, type WorkerPermissionMode } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 import { AUTO_RUN_SCOPES, MERGE_STRATEGIES, type AutoRunScope, type AutoRunSettings, type MergeStrategy } from "./domain/auto-run.js";
 
@@ -8,6 +8,8 @@ export interface AboardConfiguration {
   readonly maxInlinePromptChars: number;
   /** `aboard.launch.claudeCommand` as tokens: the program, then its own fixed arguments. */
   readonly claudeCommand: readonly string[];
+  /** `aboard.launch.effort`; absent means aboard passes no `--effort` and Claude Code's own setting stands. */
+  readonly launchEffort?: EffortLevel;
   readonly managerDisallowedTools: readonly string[];
   readonly workerPermissionMode: WorkerPermissionMode;
   readonly autoRun: AutoRunSettings;
@@ -23,6 +25,7 @@ export const ABOARD_SETTINGS = [
   "aboard.bridge.port",
   "aboard.launch.claudeCommand",
   "aboard.launch.maxInlinePromptChars",
+  "aboard.launch.effort",
   "aboard.workers.permissionMode",
   "aboard.manager.disallowedTools",
   "aboard.autoRun.review",
@@ -129,6 +132,21 @@ function choice<T extends string>(reader: ConfigurationReader, setting: string, 
   return fallback;
 }
 
+/**
+ * `aboard.launch.effort`. `"inherit"` is spelled out rather than left as an
+ * empty value, matching the `model: inherit` an agent definition already
+ * accepts, and resolves to no `--effort` flag at all so Claude Code's own
+ * `effortLevel` setting keeps deciding.
+ */
+function launchEffort(reader: ConfigurationReader, diagnostics: ConfigurationDiagnostic[]): EffortLevel | undefined {
+  const setting = "aboard.launch.effort";
+  const value = reader.get(setting);
+  if (value === undefined || value === "inherit") return undefined;
+  if (typeof value === "string" && (EFFORT_LEVELS as readonly string[]).includes(value)) return value as EffortLevel;
+  diagnostics.push({ setting, severity: "warning", message: `${setting} must be one of inherit, ${EFFORT_LEVELS.join(", ")}; inheriting the session effort level.` });
+  return undefined;
+}
+
 function claudeCommand(reader: ConfigurationReader, diagnostics: ConfigurationDiagnostic[]): readonly string[] {
   const setting = "aboard.launch.claudeCommand";
   const value = reader.get(setting);
@@ -141,6 +159,7 @@ function claudeCommand(reader: ConfigurationReader, diagnostics: ConfigurationDi
 
 export function readAboardConfiguration(reader: ConfigurationReader): ConfigurationResult {
   const diagnostics: ConfigurationDiagnostic[] = [];
+  const effort = launchEffort(reader, diagnostics);
   const rawTools = reader.get("aboard.manager.disallowedTools");
   let managerDisallowedTools: readonly string[] = [];
   if (rawTools !== undefined) {
@@ -151,6 +170,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     bridgePort: integer(reader, "aboard.bridge.port", DEFAULT_BRIDGE_PORT, 0, 65_535, diagnostics),
     maxInlinePromptChars: integer(reader, "aboard.launch.maxInlinePromptChars", DEFAULT_MAX_INLINE_PROMPT_CHARS, 0, 32_767, diagnostics),
     claudeCommand: claudeCommand(reader, diagnostics),
+    ...(effort === undefined ? {} : { launchEffort: effort }),
     managerDisallowedTools,
     workerPermissionMode: choice(reader, "aboard.workers.permissionMode", WORKER_PERMISSION_MODES, "default", diagnostics),
     autoRun: {
@@ -168,7 +188,13 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
   }, diagnostics };
 }
 
-export const MANAGER_RESTART_SETTINGS = new Set(["aboard.manager.disallowedTools", "aboard.launch.claudeCommand"]);
+export const MANAGER_RESTART_SETTINGS = new Set([
+  "aboard.manager.disallowedTools",
+  "aboard.launch.claudeCommand",
+  // Effort is a launch flag on a process that may already be hours old, so a
+  // change reaches a running Manager only through a restart.
+  "aboard.launch.effort",
+]);
 
 /**
  * Value-level equivalent of `MANAGER_RESTART_SETTINGS`, for reload paths such as
@@ -177,5 +203,6 @@ export const MANAGER_RESTART_SETTINGS = new Set(["aboard.manager.disallowedTools
 export function managerLaunchChanged(before: AboardConfiguration, after: AboardConfiguration): boolean {
   const list = (values: readonly string[]) => values.join(" ");
   return list(before.claudeCommand) !== list(after.claudeCommand)
-    || list(before.managerDisallowedTools) !== list(after.managerDisallowedTools);
+    || list(before.managerDisallowedTools) !== list(after.managerDisallowedTools)
+    || before.launchEffort !== after.launchEffort;
 }

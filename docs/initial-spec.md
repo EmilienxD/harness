@@ -296,24 +296,26 @@ On `SessionStart`, hooks inject the current project state so the Manager opens w
 
 **Hook output strings are capped at 10,000 characters** (`hooks.md:758`), including `additionalContext`, `systemMessage`, and plain stdout. Output beyond the cap is written to a file and replaced with a preview and the file path — the same handling large tool results get.
 
-That cap is generous, but it is not a target. A briefing that approaches it has already failed on cost: **every character of it is paid on every session start and every resume**, and most of it will be irrelevant to whatever the user actually wants to do. Two mechanisms keep it small:
+That cap is generous, but it is not a target. Every character is paid on every session start and every resume. The governing question is not "is this small?" but **"would the Manager otherwise spend a turn fetching it?"** — because a round trip costs a tool call, a latency stall, and the unbounded output of whatever command it ran, all of which dwarf the tokens saved by omitting the fact.
 
-**1. Split across multiple `SessionStart` hooks.** Per `hooks.md:838`, when several hooks return context for the same event, Claude receives **all** of the values. The budget is therefore per-hook, not per-event. aboard registers the briefing as separate, independently-truncatable hooks:
+> **Superseded.** This section originally specified four independently-truncatable `SessionStart` hooks (`brief-git`, `brief-github`, `brief-fleet`, `brief-todo`) and a *reference, never inline* rule under which the briefing carried "identifiers and counts, never content". Both are replaced by what follows. Fault isolation was the right goal; per-hook splitting was the wrong mechanism for it.
 
-| Hook | Contents |
+**One `SessionStart` hook, one `<aboard-state>` block.** Four hooks cost four `uv` process spawns and four bridge round trips per session start, and delivered four unlabeled `additionalContext` fragments the Manager then had to reassemble. Fault isolation is preserved *inside* the renderer: each source is fetched independently and a rejection degrades its own section to a one-line "Unavailable" note. Fetching them together also lets the slow boundaries overlap rather than run in series.
+
+**Inline what would otherwise be fetched.** The block carries:
+
+| Section | Contents |
 | :-- | :-- |
-| `brief-git` | Branch, HEAD, dirty/clean |
-| `brief-github` | Ready issues, open PRs, `hitl` waiting, unreviewed-merge count |
-| `brief-fleet` | Live agents, lease holder |
-| `brief-todo` | TODO **pointer** only |
+| Repository | Name, default branch, the project's baseline check commands, current branch/HEAD/dirty |
+| Auto-run | Active spec, phase, current issue, and the PR a `hitl` issue is parked on |
+| Ready to implement / Blocked | Open issues **with titles and dispositions**, and what each blocked one waits on |
+| Pull requests | Open PRs with titles and review state; unreviewed-merge count |
+| Fleet | Live agents by their **descriptions**, lifecycle, bound issue, lease holder |
+| Roadmap | The `todo` issue **body**, bounded at 2,000 characters |
 
-The reason to split is **fault isolation, not headroom**: a `gh` call that hangs, errors, or returns something unexpected degrades one slice of the briefing instead of losing all of it. Each hook is independently timeoutable and independently debuggable.
+Bare issue numbers were the clearest instance of the old rule's cost: they forced a `gh issue view` per issue before the Manager could say anything useful, and a title is ten tokens. The roadmap was the second: it is short by construction, needed almost every session, and cost a tool round trip to read. Content that is genuinely large and conditionally relevant — spec bodies, PR descriptions, review threads — is still referenced rather than inlined, and the roadmap body is truncated with a pointer past its bound.
 
-**2. Reference, never inline.** No hook embeds a body of text it could instead point at. The TODO briefing hook emits a line like:
-
-> Project TODO is issue #12. Read it with `aboard__get_todo` when you need it.
-
-The Manager fetches on demand, which means a long TODO costs nothing at session start and costs exactly once when it is actually relevant. The same rule applies to spec issue bodies, PR descriptions, and review threads: **the briefing carries identifiers and counts, never content.**
+The `--agent` launch replaces Claude Code's own system prompt entirely (`subagents.md:735`), which removes the environment and git-status blocks every other session receives. The Repository section restores that orientation; it is not decoration.
 
 #### The `--resume` replay hazard
 
@@ -418,6 +420,24 @@ aboard.launch.claudeCommand   // default "claude"
 - An empty, unquotable, or unparseable value warns and falls back to `claude` rather than reaching argv.
 
 The tokens lead **every** command line — start and `--resume` alike — because a wrapper that is bypassed on resume would silently drop the profile it selected.
+
+#### 5.1.6 Effort is a setting and a frontmatter field, and the two compose
+
+Reasoning effort is configurable in the same two places as the model, and for the same reason: it belongs to an agent when one agent should think harder than the rest, and to the session when there is no agent definition to read.
+
+```
+aboard.launch.effort   // "inherit" (default) | "low" | "medium" | "high" | "xhigh" | "max"
+```
+
+The setting is passed as `--effort` on **every** command line aboard builds — start and `--resume` alike, the Manager included — and, like the permission mode, it is read at launch time so a change takes effect on the next start or resume rather than on a running session. `inherit` passes no flag at all, leaving Claude Code's own `effortLevel` in charge; that is the default, so aboard imposes nothing until asked.
+
+An agent definition's `effort:` frontmatter **overrides the session level**, exactly as its `model:` does — but aboard, not Claude Code, is what applies it. Claude Code honors the full frontmatter only when an agent is spawned as a *subagent*; a **main-thread** launch, which is every launch aboard makes, honors a smaller subset (`mcpServers`, `permissionMode`, `tools`/`disallowedTools`) and silently ignores `model:` and `effort:`, leaving the session at the user's global config. aboard therefore parses both fields from `.claude/agents/<name>.md` and passes `--model`/`--effort` itself, using the definition's values where it declares them and the setting where it does not.
+
+This does not weaken §5.1.1. The prohibition there is on `--tools` alongside `--agent`, because a tool flag would *compete* with the field the write lease derives capability from; `--model` and `--effort` carry the definition's own values and contradict nothing.
+
+A `--resume` reads no definition at all, so the same flags are re-passed there from the definition the resumed agent was launched with. `raw` (§5.7) and the builtin types have no definition to read, and the setting alone decides.
+
+A level aboard does not recognise — in the setting or in a scaffolded definition — is **reported and dropped**, never forwarded. Claude Code refuses the whole launch on an unknown level, and a terminal that dies on start is a worse failure than a session that runs at the inherited level.
 
 ### 5.2 Session identity and resumability
 
@@ -612,9 +632,9 @@ a tool result. Also reachable as `/auto` and as a panel command.
 
 The project TODO is a GitHub issue (§7.1), and these are how it is read and written. They exist so no agent is ever tempted to reach for session-task tools (§4.3) or to hand-roll `gh` calls against it.
 
-**`aboard__get_todo`** — returns the current TODO body. Called on demand, not at session start; the briefing carries only a pointer (§4.5).
+> **Superseded.** `aboard__get_todo` no longer exists. The TODO body is delivered inline in the `SessionStart` briefing (§4.5), so the read tool only ever bought a round trip for context the Manager already held. Writing still needs a tool.
 
-**`aboard__update_todo`** — replaces the TODO body.
+**`aboard__update_todo`** — replaces the TODO body. The caller writes the full replacement, reading the current roadmap from the session-start briefing rather than fetching it.
 
 ```jsonc
 { "body": "string", "reason": "string" }  // reason is logged, not stored in the issue
@@ -753,7 +773,7 @@ The lease row is the decisive one. A Manager that edits `.aboard/TODO.md` needs 
 
 It also puts the roadmap in the same place as every other durable fact in this system (§1.4.4), which is the point of having chosen GitHub at all.
 
-**Access is via `aboard__get_todo` / `aboard__update_todo`** (§6.2), never raw `gh`. The bridge resolves the issue by label and caches its number in `.aboard/runtime/`, so no agent handles an identifier.
+**Reads arrive in the session-start briefing and writes go through `aboard__update_todo`** (§6.2), never raw `gh`. The bridge resolves the issue by label and caches its number in `.aboard/runtime/`, so no agent handles an identifier.
 
 **Updating is not ticking boxes.** The list evolves as the project evolves: tasks appear, priorities change, obsolete tasks are deleted. It is intentionally **not** an exhaustive specification — that is what `spec` issues are for. Driven by the `update-todo` skill (§10.2).
 
@@ -886,9 +906,9 @@ A worker that dies, hangs, or exits dirty must produce a **typed** result, so th
 | `timeout` | Exceeded its wall-clock budget | Escalate with partial state |
 | `killed` | Terminal closed by the user | Treat as deliberate cancellation |
 
-Each carries the terminal exit code and the last assistant message. **The lease always releases**, on every path. `onDidCloseTerminal` provides lifecycle and exit-code capture.
+Each carries the terminal exit code and the last assistant message. **The lease always releases**, on every path. `onDidCloseTerminal` provides lifecycle and exit-code capture — and, since a user can end the TUI from inside without closing the terminal (`exit`, double Ctrl+C), the bridge also polls a lock-marker file that aboard's launch wrapper owns for exactly the Claude child's lifetime; a removed marker settles exactly like a terminal close. A `/clear` fires `SessionEnd` while the process (and marker) stay alive and settles the record gracefully instead.
 
-The bridge also runs a `StopFailure` hook per agent, and treats an unexpected `onDidCloseTerminal` as `crashed` or `killed` depending on exit code.
+The bridge also runs a `StopFailure` hook per agent, and treats an unexpected `onDidCloseTerminal` — or an unexpected marker removal — as `crashed` or `killed` depending on exit code and origin.
 
 ### 8.3 Permissions
 
@@ -952,7 +972,7 @@ Per `settings.md`, Claude Code watches settings files and reloads them on change
 
 ## 9. Agent Catalogue
 
-Agent definitions live in `.claude/agents/*.md` and are scaffolded and owned by the extension (§10.3). Each declares a system prompt, a `tools:` allowlist, a model, and optional frontmatter hooks.
+Agent definitions live in `.claude/agents/*.md` and are scaffolded and owned by the extension (§10.3). Each declares a system prompt, a `tools:` allowlist, a model, and optional frontmatter hooks. An optional `effort:` field overrides the session effort level for that agent (§5.1.6): the Manager declares `medium` because it is told to stay shallow, `implementer` and both pr-doctors declare `high` because they carry the actual work, and `brainstormer` declares none — it is the interactive type, so the user's own session level is the one to keep.
 
 **The `tools:` list is load-bearing twice:** it constrains the agent, and it is what the bridge reads to derive write-capability for the lease (§8.1). It must never be edited casually. Per §5.1.1, an agent launched with `--agent` takes its tools from this file and nothing at launch can widen them — which is what makes the derivation sound.
 
@@ -966,7 +986,7 @@ Launched as the main session agent: `claude --agent manager` (§5.1.1). Its cont
 
 **aboard scaffolds no `CLAUDE.md`.** That file is the user's, it applies to every Claude Code session in the workspace — workers and hand-started sessions included — and a Manager persona written there would leak into all of them.
 
-- **Model:** opus
+- **Model:** opus. **Effort:** medium — it stays shallow by contract, so it runs below the workers it dispatches (§5.1.6).
 - **Tools:** the read-only list in the definition's `tools:` field (§4.3).
 - **Must:** orchestrate, brief, recommend, delegate, track state.
 - **Must never:** write code; reason deeply about an individual feature; read large files.
@@ -974,7 +994,7 @@ Launched as the main session agent: `claude --agent manager` (§5.1.1). Its cont
 
 ### 9.2 `brainstormer` (interactive)
 
-- **Model:** opus
+- **Model:** opus. **Effort:** inherited — the interactive type keeps the user's own session level (§5.1.6).
 - **Write-capable:** no (produces a GitHub issue via `gh`, not code)
 - **Tools:** `Read`, `Grep`, `Glob`, `Bash(gh *)`, `Agent`, `Skill`, `AskUserQuestion`
 - **Contract:** ends with a GitHub issue labelled `spec`.
@@ -985,7 +1005,7 @@ Launched as the main session agent: `claude --agent manager` (§5.1.1). Its cont
 
 ### 9.3 `implementer` (automated, write-capable)
 
-- **Model:** opus
+- **Model:** opus. **Effort:** high.
 - **Write-capable:** yes → **takes the write lease**
 - **Tools:** `Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`, `LSP`, `Agent`, `Skill`
 - **Launch prompt:** the issue body, the relevant parent-spec excerpt, the branch name, and the `afk`/`hitl` disposition — **all resolved by the bridge before launch** (§5.8). The implementer does not fetch its own instructions.

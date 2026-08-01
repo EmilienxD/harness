@@ -3,6 +3,7 @@ import {
   parseAgentDefinitionTools,
   type WriteCapability,
 } from "../domain/capability.js";
+import { EFFORT_LEVELS, isEffortLevel, type EffortLevel } from "../claude/launch.js";
 
 /** The Manager runs as the main session agent (`--agent manager`). */
 export const MANAGER_AGENT_NAME = "manager";
@@ -19,11 +20,18 @@ export const SCAFFOLDED_AGENT_NAMES = [MANAGER_AGENT_NAME, ...WORKER_AGENT_NAMES
 export type WorkerAgentName = (typeof WORKER_AGENT_NAMES)[number];
 export type ScaffoldedAgentName = (typeof SCAFFOLDED_AGENT_NAMES)[number];
 export type AgentModel = "opus" | "sonnet" | "haiku" | "fable" | "inherit";
+/**
+ * The definition's `effort:` field. Unlike `model:` it is optional, because an
+ * absent field is a meaningful value rather than an omission: the agent inherits
+ * the session's effort level, which is what `aboard.launch.effort` sets.
+ */
+export type AgentEffort = EffortLevel;
 
 export interface AgentDefinition {
   readonly name: WorkerAgentName;
   readonly description: string;
   readonly model: AgentModel;
+  readonly effort?: AgentEffort;
   readonly tools: readonly string[];
   readonly prompt: string;
   readonly writeCapability: WriteCapability;
@@ -38,6 +46,7 @@ export interface ManagerAgentDefinition {
   readonly name: typeof MANAGER_AGENT_NAME;
   readonly description: string;
   readonly model: AgentModel;
+  readonly effort?: AgentEffort;
   readonly tools: readonly string[];
   readonly prompt: string;
   readonly writeCapability: WriteCapability;
@@ -88,6 +97,7 @@ function splitDefinition(definition: unknown): DocumentResult {
 interface CommonFields {
   readonly description: string;
   readonly model: AgentModel;
+  readonly effort?: AgentEffort;
 }
 
 type CommonFieldsResult =
@@ -101,7 +111,20 @@ function commonFields(frontmatter: readonly string[]): CommonFieldsResult {
   if (model === undefined || !MODELS.has(model)) {
     return { ok: false, reason: `Unsupported agent model: ${model ?? "missing"}` };
   }
-  return { ok: true, value: { description, model: model as AgentModel } };
+  // An absent `effort:` inherits the session level, so only a present-but-wrong
+  // value is an error: Claude Code refuses the launch outright on one.
+  const effort = scalarField(frontmatter, "effort");
+  if (effort !== undefined && !isEffortLevel(effort)) {
+    return { ok: false, reason: `Unsupported agent effort: ${effort}. Expected one of ${EFFORT_LEVELS.join(", ")}` };
+  }
+  return {
+    ok: true,
+    value: {
+      description,
+      model: model as AgentModel,
+      ...(effort === undefined ? {} : { effort }),
+    },
+  };
 }
 
 /** Parses the small, security-relevant subset of Claude agent frontmatter aboard ships. */
@@ -125,6 +148,7 @@ export function parseAgentDefinition(definition: unknown): AgentDefinitionResult
       name: name as WorkerAgentName,
       description: common.value.description,
       model: common.value.model,
+      ...(common.value.effort === undefined ? {} : { effort: common.value.effort }),
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),
@@ -154,6 +178,7 @@ export function parseManagerAgentDefinition(
       name: MANAGER_AGENT_NAME,
       description: common.value.description,
       model: common.value.model,
+      ...(common.value.effort === undefined ? {} : { effort: common.value.effort }),
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),

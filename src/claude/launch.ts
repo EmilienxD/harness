@@ -138,12 +138,54 @@ export const WORKER_PERMISSION_MODES = ["bypass", "acceptEdits", "default"] as c
 
 export type WorkerPermissionMode = (typeof WORKER_PERMISSION_MODES)[number];
 
+/**
+ * `aboard.launch.effort` — the session-wide reasoning effort, the `--effort`
+ * levels `claude --help` documents. It is the session floor rather than the last
+ * word: an agent definition's `effort:` frontmatter overrides it, and the
+ * planner puts that value on the command line itself, because a main-thread
+ * `--agent` launch does not honor the field (see `LaunchConfiguration`). The
+ * setting is what reaches the launches with no definition to read — `raw` and
+ * the builtin types.
+ *
+ * Unset means "inherit", exactly as an absent `effort:` field does; aboard
+ * passes no flag and Claude Code keeps whatever the user's own `effortLevel`
+ * setting says.
+ */
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
+const EFFORT_LEVEL_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
+
+export function isEffortLevel(value: unknown): value is EffortLevel {
+  return typeof value === "string" && EFFORT_LEVEL_SET.has(value);
+}
+
 export type LaunchConfiguration =
   | {
       readonly shape: "agent-defined";
       readonly agentName: string;
       /** `tools:` read from `.claude/agents/<name>.md`; absent when unreadable. */
       readonly declaredTools?: readonly string[];
+      /**
+       * `model:` and `effort:` read from the same definition, carried onto the
+       * command line because `--agent` does not honor them.
+       *
+       * Claude Code applies the *full* frontmatter only when an agent is spawned
+       * as a subagent. A main-thread launch — which is every launch aboard makes
+       * — honors a smaller subset (`mcpServers`, `permissionMode`,
+       * `tools`/`disallowedTools`), so `model:` and `effort:` in the file are
+       * silently ignored and the session falls back to the user's global config.
+       * aboard therefore reads both fields itself and passes `--model`/`--effort`
+       * explicitly. Unlike `tools:`, this contradicts nothing: the flags carry
+       * the definition's own values rather than competing with them, which is why
+       * the `--agent`/`--tools` prohibition does not extend here.
+       *
+       * `inherit` is normalized away at resolve time, because "inherit" is the
+       * frontmatter spelling of "pass no flag".
+       */
+      readonly declaredModel?: string;
+      readonly declaredEffort?: EffortLevel;
     }
   /**
    * The raw agent of spec section 5.7, which is the *absence* of an agent
@@ -165,6 +207,8 @@ export type LaunchConfiguration =
 export interface LaunchConfigurationInput {
   readonly agentName?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
+  readonly declaredModel?: string | undefined;
+  readonly declaredEffort?: EffortLevel | undefined;
   readonly tools?: readonly string[] | undefined;
 }
 
@@ -174,6 +218,7 @@ export type LaunchPlanErrorCode =
   | "invalid-agent-name"
   | "invalid-tool-rule"
   | "invalid-model"
+  | "invalid-effort"
   | "invalid-session-id"
   | "unsafe-agent-id"
   | "unsafe-spill-path"
@@ -219,17 +264,35 @@ export function resolveLaunchConfiguration(
         `Invalid agent definition name: ${input.agentName}`,
       );
     }
+    // `inherit` means the definition declines to choose, which on a command
+    // line is the absence of the flag rather than a model named "inherit".
+    const declaredModel =
+      input.declaredModel === undefined || input.declaredModel === "inherit"
+        ? undefined
+        : assertFlagValue(input.declaredModel, "invalid-model", "agent definition model");
+    if (input.declaredEffort !== undefined && !isEffortLevel(input.declaredEffort)) {
+      throw new LaunchPlanError(
+        "invalid-effort",
+        `Agent definition effort must be one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(input.declaredEffort)}`,
+      );
+    }
     return {
       shape: "agent-defined",
       agentName: input.agentName,
       ...(input.declaredTools === undefined ? {} : { declaredTools: input.declaredTools }),
+      ...(declaredModel === undefined ? {} : { declaredModel }),
+      ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
     };
   }
 
-  if (input.declaredTools !== undefined) {
+  if (
+    input.declaredTools !== undefined ||
+    input.declaredModel !== undefined ||
+    input.declaredEffort !== undefined
+  ) {
     throw new LaunchPlanError(
       "declared-tools-without-agent",
-      "declaredTools describe an agent definition and require agentName",
+      "declared fields describe an agent definition and require agentName",
     );
   }
   return {
@@ -302,9 +365,23 @@ interface CommonPlanRequest {
   readonly shell: ShellKind;
   readonly permissionMode: WorkerPermissionMode;
   readonly model?: string | undefined;
+  readonly effort?: EffortLevel | undefined;
   readonly command?: readonly string[] | undefined;
   readonly maxInlinePromptChars?: number | undefined;
   readonly runtimeDirectory?: string | undefined;
+  /**
+   * When set, the command line launches `uv run --no-project <script> <lockFile> -- <original line>`:
+   * aboard's wrapper owns a marker file for exactly the child's lifetime, and
+   * the bridge polls that file for liveness instead of scraping process ids.
+   */
+  readonly wrapper?: SessionWrapperLayout | undefined;
+}
+
+export interface SessionWrapperLayout {
+  /** Absolute path of the scaffolded wrapper script. */
+  readonly script: string;
+  /** Per-agent marker path the wrapper owns (`lockFile` in the request). */
+  lockPathFor(agentId: AgentId): string;
 }
 
 export interface LaunchPlanRequest extends CommonPlanRequest {
@@ -359,6 +436,29 @@ function toolListArguments(
 ): readonly string[] {
   if (rules === undefined || rules.length === 0) return [];
   return [flag, rules.map((rule) => assertFlagValue(rule, "invalid-tool-rule", "tool rule")).join(",")];
+}
+
+/**
+ * Effort is a closed set rather than free text like `--model`, whose value may
+ * be a full model id. The check is kept even though the type says the same
+ * thing: the value arrives from a settings file, where a typo is a user's
+ * mistake rather than a compile error, and an unknown level would make Claude
+ * Code refuse the whole launch.
+ */
+function modelArguments(model: string | undefined): readonly string[] {
+  if (model === undefined) return [];
+  return ["--model", assertFlagValue(model, "invalid-model", "model")];
+}
+
+function effortArguments(effort: EffortLevel | undefined): readonly string[] {
+  if (effort === undefined) return [];
+  if (!isEffortLevel(effort)) {
+    throw new LaunchPlanError(
+      "invalid-effort",
+      `Effort must be one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(effort)}`,
+    );
+  }
+  return ["--effort", effort];
 }
 
 function normalizePrompt(
@@ -425,6 +525,7 @@ function commonPreconditions(request: CommonPlanRequest): {
   readonly command: readonly string[];
   readonly threshold: number;
   readonly runtimeDirectory: string;
+  readonly wrapper: SessionWrapperLayout | undefined;
 } {
   if (!AGENT_ID_PATTERN.test(request.agentId)) {
     throw new LaunchPlanError(
@@ -461,15 +562,41 @@ function commonPreconditions(request: CommonPlanRequest): {
       );
     }
   }
+  const wrapper = request.wrapper;
+  if (wrapper !== undefined) {
+    for (const token of [wrapper.script, wrapper.lockPathFor(request.agentId)]) {
+      if (token.trim().length === 0 || !canQuoteArgument(request.shell, token)) {
+        throw new LaunchPlanError(
+          "invalid-command",
+          `Wrapper token cannot be passed on a ${request.shell} command line: ${JSON.stringify(token)}`,
+        );
+      }
+    }
+  }
   return {
     command,
     threshold,
     runtimeDirectory: request.runtimeDirectory ?? DEFAULT_RUNTIME_DIRECTORY,
+    wrapper,
+  };
+}
+
+/** The wrapper executable, then the marker path and the original line after `--`. */
+function wrapCommand(
+  command: readonly string[],
+  args: readonly string[],
+  wrapper: SessionWrapperLayout | undefined,
+  agentId: AgentId,
+): { readonly command: readonly string[]; readonly args: readonly string[] } {
+  if (wrapper === undefined) return { command, args };
+  return {
+    command: ["uv", "run", "--no-project", wrapper.script],
+    args: [wrapper.lockPathFor(agentId), "--", ...command, ...args],
   };
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { command, threshold, runtimeDirectory } = commonPreconditions(request);
+  const { command, threshold, runtimeDirectory, wrapper } = commonPreconditions(request);
   const { agentType, configuration } = request;
 
   if (agentType === "manager") {
@@ -518,14 +645,22 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     shapeArguments.push(...toolListArguments("--tools", configuration.tools));
   }
 
+  // The definition wins over the session settings for both fields: it is the
+  // agent's own declaration, and `--agent` would have applied it were this a
+  // subagent spawn. The settings remain the floor for the launches with no
+  // definition to read — `raw` and every resume.
+  const declared =
+    configuration.shape === "agent-defined"
+      ? configuration
+      : { declaredModel: undefined, declaredEffort: undefined };
+
   const fixedArguments = [
     "--session-id",
     request.sessionId,
     ...shapeArguments,
     ...toolListArguments("--disallowedTools", request.disallowedTools),
-    ...(request.model === undefined
-      ? []
-      : ["--model", assertFlagValue(request.model, "invalid-model", "model")]),
+    ...modelArguments(declared.declaredModel ?? request.model),
+    ...effortArguments(declared.declaredEffort ?? request.effort),
     ...permissionArguments(request.permissionMode),
   ];
 
@@ -538,7 +673,8 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       stem: request.agentId,
     });
     const args = [...fixedArguments, ...plan.args];
-    return { plan, args, commandLine: buildCommandLine(request.shell, command, args) };
+    const wrapped = wrapCommand(command, args, wrapper, request.agentId);
+    return { plan, args, commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args) };
   };
 
   // The prompt threshold alone cannot decide this. It measures the prompt text,
@@ -585,11 +721,20 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
  * Resume carries no `--agent`/`--tools`, matching the spec's resume command and
  * keeping the mutually exclusive pair out of a second code path. Permission
  * mode is re-passed because `bypassPermissions` is documented as never carried
- * over by `--resume` (`docs/CLAUDE-REFERENCES/hooks.md`).
+ * over by `--resume` (`docs/CLAUDE-REFERENCES/hooks.md`); `--model`/`--effort`
+ * are re-passed for the stronger reason that there is no definition left to read
+ * them from, so the caller supplies the values it parsed from the file.
  */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command } = commonPreconditions({ ...request, agentType: "manager" });
-  const args = ["--resume", request.sessionId, ...permissionArguments(request.permissionMode)];
+  const { command, wrapper } = commonPreconditions({ ...request, agentType: "manager" });
+  const args = [
+    "--resume",
+    request.sessionId,
+    ...modelArguments(request.model),
+    ...effortArguments(request.effort),
+    ...permissionArguments(request.permissionMode),
+  ];
+  const wrapped = wrapCommand(command, args, wrapper, request.agentId);
   return {
     kind: "resume",
     agentId: request.agentId,
@@ -598,7 +743,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     shell: request.shell,
     command,
     args,
-    commandLine: buildCommandLine(request.shell, command, args),
+    commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args),
     writeCapability: "read-only",
     requiresWriteLease: false,
     promptDelivery: "none",
@@ -610,11 +755,20 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
  * the Manager's resume it carries no `--agent`/`--tools`: the session already
  * has its configuration, and re-passing it would put the mutually exclusive pair
  * into a second code path. Permission mode is re-passed because
- * `bypassPermissions` is documented as never carried over by `--resume`.
+ * `bypassPermissions` is documented as never carried over by `--resume`, and
+ * `--model`/`--effort` because the definition that declared them is not read on
+ * a resume any more than it is on a `--agent` launch.
  */
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command } = commonPreconditions(request);
-  const args = ["--resume", request.sessionId, ...permissionArguments(request.permissionMode)];
+  const { command, wrapper } = commonPreconditions(request);
+  const args = [
+    "--resume",
+    request.sessionId,
+    ...modelArguments(request.model),
+    ...effortArguments(request.effort),
+    ...permissionArguments(request.permissionMode),
+  ];
+  const wrapped = wrapCommand(command, args, wrapper, request.agentId);
   return {
     kind: "resume",
     agentId: request.agentId,
@@ -623,7 +777,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     shell: request.shell,
     command,
     args,
-    commandLine: buildCommandLine(request.shell, command, args),
+    commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args),
     writeCapability: request.writeCapability,
     requiresWriteLease: requiresWriteLease(request.agentType, request.writeCapability),
     promptDelivery: "none",

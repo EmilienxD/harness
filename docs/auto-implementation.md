@@ -303,7 +303,7 @@ differs.
 
 ### 7.1 `pr-doctor-afk` (automated, write-capable)
 
-- Model: opus. Tools: as `implementer`.
+- Model: opus. Effort: high. Tools: as `implementer`.
 - Launch prompt, resolved by the bridge: the PR diff, the issue body, the parent spec excerpt, the PR
   number, and the branch name.
 - Contract: review the diff against the issue contract, apply fixes directly, stop. Do **not** commit,
@@ -313,7 +313,7 @@ differs.
 
 ### 7.2 `pr-doctor-hitl` (interactive, write-capable)
 
-- Model: opus. Tools: as `implementer`, plus `AskUserQuestion`.
+- Model: opus. Effort: high. Tools: as `implementer`, plus `AskUserQuestion`.
 - Same launch prompt as `pr-doctor-afk`.
 - Contract: review the diff, **present the findings to the user and stop**. Apply changes only on the
   user's word, and then only the ones they agreed to. The user may accept the summary, adjust it, or
