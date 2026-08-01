@@ -5,7 +5,7 @@ import { EOL } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ManagerBriefings, ManagerPromptService, ManagerStopService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT } from "../src/bridge/manager-hooks.js";
+import { ManagerBriefings, ManagerPromptService, ManagerStopService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT, ROADMAP_BODY_LIMIT, type BriefingSources } from "../src/bridge/manager-hooks.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId, WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
@@ -40,27 +40,117 @@ function worker(fleet: FleetRegistry, managerAgentId: AgentId, status: AgentSess
   return id;
 }
 
-test("briefing slices are concise, body-free, and fail independently", async () => {
-  const fleet = new FleetRegistry(); manager(fleet);
-  const briefings = new ManagerBriefings({
+const EMPTY_GITHUB = { issues: [], openPullRequests: [], unreviewedMergeCount: 0 } as const;
+
+function sources(overrides: Partial<BriefingSources> = {}): BriefingSources {
+  return {
+    repository: async () => ({ name: "aboard", defaultBranch: "main", checks: ["npm run check"] }),
     git: async () => ({ branch: "main", head: "abc123", dirty: false }),
-    github: async () => { throw new Error("gh unavailable"); },
-    todoIssue: async () => 77,
-  }, fleet, new WriteLease());
-  const signal = new AbortController().signal;
-  assert.match(await briefings.render("git", signal), /main.*abc123.*clean/);
-  assert.match(await briefings.render("github", signal), /unavailable.*gh unavailable/);
-  assert.equal(await briefings.render("todo", signal), "Project TODO is issue #77. Read it with mcp__aboard__get_todo when you need it.");
-  assert.doesNotMatch(await briefings.render("todo", signal), /body|description|thread/i);
+    github: async () => EMPTY_GITHUB,
+    roadmap: async () => undefined,
+    autoRun: () => undefined,
+    ...overrides,
+  };
+}
+
+test("the state block carries the facts a Manager would otherwise fetch", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    github: async () => ({
+      issues: [
+        { number: 12, title: "Rework the fleet tree", disposition: "afk", blockedBy: [] },
+        { number: 14, title: "Rotate bridge tokens", disposition: "hitl", blockedBy: [12] },
+      ],
+      openPullRequests: [{ number: 21, title: "Fix lease recovery", reviewState: "no review yet" }],
+      unreviewedMergeCount: 2,
+    }),
+    roadmap: async () => ({ number: 9, body: "# Roadmap\n\n- Ship the bridge" }),
+    autoRun: () => ({ specNumber: 4, specTitle: "Bridge hardening", phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+
+  assert.match(rendered, /^<aboard-state>/);
+  assert.match(rendered, /<\/aboard-state>$/);
+  // Titles, not bare numbers: a number alone costs a `gh` round trip per issue.
+  assert.match(rendered, /#12 Rework the fleet tree \(afk\)/);
+  assert.match(rendered, /#14 Rotate bridge tokens \(hitl\) — waits on #12/);
+  assert.match(rendered, /#21 Fix lease recovery \(no review yet\)/);
+  assert.match(rendered, /2 pull request\(s\) merged without review/);
+  // The roadmap body itself, so no tool call is needed to read it.
+  assert.match(rendered, /## Roadmap\nIssue #9[\s\S]*- Ship the bridge/);
+  assert.match(rendered, /PR #21 is hitl and waiting/);
+  assert.match(rendered, /default branch main · verify with npm run check/);
 });
 
-test("oversized slices use a bounded preview and file reference", async () => {
+test("an idle project renders every section without a failure note", async () => {
+  const briefings = new ManagerBriefings(sources(), new FleetRegistry(), new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.match(rendered, /No run is active/);
+  assert.match(rendered, /Nothing is ready\./);
+  assert.match(rendered, /## Pull requests\nNone open\./);
+  assert.match(rendered, /No live agents/);
+  assert.match(rendered, /No issue is labelled `todo`/);
+  assert.doesNotMatch(rendered, /Unavailable/);
+});
+
+test("one failing boundary costs its own section, not the block", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    github: async () => { throw new Error("gh unavailable"); },
+    roadmap: async () => ({ number: 9, body: "still readable" }),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.match(rendered, /## Work\nUnavailable: gh unavailable/);
+  assert.match(rendered, /still readable/);
+  assert.match(rendered, /## Repository/);
+});
+
+test("a cancelled briefing names the cancellation rather than a boundary error", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const briefings = new ManagerBriefings(sources({
+    github: async () => { throw new Error("aborted"); },
+  }), new FleetRegistry(), new WriteLease());
+  assert.match(await briefings.render(controller.signal), /Unavailable: the request was cancelled or timed out/);
+});
+
+test("the roadmap body is bounded and points at the rest", async () => {
+  const briefings = new ManagerBriefings(sources({
+    roadmap: async () => ({ number: 9, body: "x".repeat(ROADMAP_BODY_LIMIT + 500) }),
+  }), new FleetRegistry(), new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.match(rendered, /…truncated\. Read the rest with `gh issue view 9`/);
+  assert.ok(rendered.length < ROADMAP_BODY_LIMIT + 2_000);
+});
+
+test("an oversized block uses a bounded preview and file reference", async () => {
   let written = "";
-  const briefings = new ManagerBriefings({ git: async () => ({ branch: "x".repeat(HOOK_OUTPUT_LIMIT), head: "h", dirty: true }), github: async () => ({ readyIssues: [], openPullRequests: [], hitlIssues: [], unreviewedMergeCount: 0 }), todoIssue: async () => undefined }, new FleetRegistry(), new WriteLease(), { write: async (_slice, content) => { written = content; return "C:\\runtime\\brief-git.txt"; } });
-  const output = await briefings.render("git", new AbortController().signal);
+  const briefings = new ManagerBriefings(
+    sources({ git: async () => ({ branch: "x".repeat(HOOK_OUTPUT_LIMIT), head: "h", dirty: true }) }),
+    new FleetRegistry(),
+    new WriteLease(),
+    { write: async (_slice, content) => { written = content; return "C:\\runtime\\brief-state.txt"; } },
+  );
+  const output = await briefings.render(new AbortController().signal);
   assert.ok(written.length > HOOK_OUTPUT_LIMIT);
   assert.ok(output.length <= HOOK_OUTPUT_LIMIT);
-  assert.match(output, /Full git briefing: C:\\runtime\\brief-git.txt/);
+  assert.match(output, /Full briefing: C:\\runtime\\brief-state.txt/);
+  // The block still closes, so the model never sees a dangling open tag.
+  assert.match(output, /<\/aboard-state>$/);
+});
+
+test("the briefing is served on one route", async () => {
+  const briefings = new ManagerBriefings(sources(), new FleetRegistry(), new WriteLease());
+  const stop = new ManagerStopService({ fleet: new FleetRegistry() });
+  const route = createManagerHookRoutes(briefings, stop);
+  const call = (path: string) => route({ method: "POST", url: new URL(`http://127.0.0.1${path}`), headers: {}, body: {}, signal: new AbortController().signal });
+  const served = await call("/hooks/manager/brief");
+  assert.equal(served.status, 200);
+  assert.match(String((served.body as { additionalContext: string }).additionalContext), /<aboard-state>/);
+  // The four per-slice routes are gone; nothing may quietly keep calling them.
+  for (const slice of ["git", "github", "fleet", "todo"]) {
+    assert.equal((await call(`/hooks/manager/brief-${slice}`)).status, 404);
+  }
 });
 
 test("Manager Stop returns pending results, waits for running work, and permits idle stop", async () => {
@@ -82,7 +172,7 @@ test("long poll observes abort and route validates stop input", async () => {
   const stop = new ManagerStopService({ fleet, waitForChange: (signal) => new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })) });
   const controller = new AbortController(); const pending = stop.poll({ agentId: managerId, stopHookActive: false }, controller.signal); controller.abort();
   assert.deepEqual(await pending, { state: "idle" });
-  const briefings = new ManagerBriefings({ git: async () => ({ branch: "main", head: "h", dirty: false }), github: async () => ({ readyIssues: [], openPullRequests: [], hitlIssues: [], unreviewedMergeCount: 0 }), todoIssue: async () => undefined }, fleet, new WriteLease());
+  const briefings = new ManagerBriefings(sources(), fleet, new WriteLease());
   const route = createManagerHookRoutes(briefings, stop);
   const request = (body: unknown): AuthenticatedBridgeRequest => ({ method: "POST", url: new URL("http://127.0.0.1/hooks/manager/stop"), headers: {}, body, signal: new AbortController().signal });
   assert.equal((await route(request({ agentId: managerId }))).status, 400);
@@ -96,11 +186,20 @@ test("Python Manager hook silently self-guards non-addressed sessions", () => {
   }
 });
 
-test("hook registration covers cold start, resume, explicit timeouts, and split slices", async () => {
+test("hook registration covers cold start, resume, and explicit timeouts in one briefing call", async () => {
   const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8"));
   const parsed = JSON.parse(hooks) as any;
-  assert.match(parsed.SessionStart[0].matcher, /startup/); assert.match(parsed.SessionStart[0].matcher, /resume/);
-  assert.deepEqual(parsed.SessionStart[0].hooks.map((hook: any) => hook.timeout), [120, 120, 120, 120]);
+  // Index 0 is the proof-of-life session-start hook (pid report); index 1 is
+  // the manager briefing call.
+  const proofOfLife = parsed.SessionStart[0];
+  assert.match(proofOfLife.matcher, /startup/); assert.match(proofOfLife.matcher, /resume/);
+  assert.deepEqual(proofOfLife.hooks.map((hook: any) => hook.args.at(-1)), ["session-start"]);
+  const brief = parsed.SessionStart[1];
+  assert.match(brief.matcher, /startup/); assert.match(brief.matcher, /resume/);
+  // One hook, so one `uv` spawn and one bridge round trip per session start.
+  assert.deepEqual(brief.hooks.map((hook: any) => hook.timeout), [120]);
+  assert.deepEqual(brief.hooks.map((hook: any) => hook.args.at(-1)), ["manager-brief"]);
+  assert.deepEqual(parsed.SessionEnd[0].hooks.map((hook: any) => hook.args.at(-1)), ["session-end"]);
   assert.equal(parsed.Stop[0].hooks[0].timeout, 3600);
   assert.equal(parsed.UserPromptSubmit[0].hooks[0].timeout, 60);
 });

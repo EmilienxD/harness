@@ -1,4 +1,4 @@
-import type { LaunchConfiguration, WorkerPermissionMode } from "../claude/launch.js";
+import type { EffortLevel, LaunchConfiguration, WorkerPermissionMode } from "../claude/launch.js";
 import { planLaunch } from "../claude/launch.js";
 import type { ResolvedPrompt } from "../claude/prompts.js";
 import type { PromptSpillStore } from "../claude/spill.js";
@@ -16,6 +16,7 @@ import {
 } from "../domain/contracts.js";
 import { FleetRegistry } from "../domain/fleet.js";
 import { WriteLease, type WriteLeaseHolder } from "../domain/lease.js";
+import type { SessionWrapperLayout } from "../claude/launch.js";
 
 export interface DelegationLaunchInput {
   readonly type: Exclude<AgentType, "manager">;
@@ -75,10 +76,28 @@ export interface DelegationCoordinatorOptions {
    * change applies to the next agent without reloading the window.
    */
   readonly command?: () => readonly string[] | undefined;
+  /**
+   * `aboard.launch.effort`, read at launch time for the same reason as
+   * `command`. It is the session level; a worker whose definition declares
+   * `effort:` overrides it from its own frontmatter.
+   */
+  readonly effort?: () => EffortLevel | undefined;
   readonly agentIdFactory: () => AgentId;
   readonly sessionIdFactory: () => SessionId;
   readonly now?: () => Date;
   readonly maxInlinePromptChars?: number;
+  /**
+   * Proof-of-life window for every delegated launch. If no SessionStart hook
+   * fires inside this window the terminal is killed as a failed start; the
+   * write lease is released by the launch-failure path on timeout.
+   */
+  readonly startupTimeoutMs?: number;
+  /**
+   * Launch-through-wrapper layout: the wrapper owns a lock-marker file per
+   * agent for the child's exact lifetime, which the bridge polls for liveness
+   * instead of scraping process ids. Absent = launch unwrapped.
+   */
+  readonly wrapper?: SessionWrapperLayout;
 }
 
 export class DelegationError extends Error {
@@ -202,7 +221,9 @@ export class DelegationCoordinator {
       configuration,
       prompt,
       ...this.#command(),
+      ...this.#effort(),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
+      ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
     const occurredAt = this.#timestamp();
     this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, "launch agent");
@@ -218,6 +239,9 @@ export class DelegationCoordinator {
         // Hooks and focus both key on this: a result-delivering session reports
         // over the bridge and runs unfocused; a handed-off one stays silent.
         deliversResult: !interactive,
+        // A failed launch prints to the terminal and exits before any hook; the
+        // SessionStart pid report is the only trustworthy proof the TUI is up.
+        ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
       });
       this.options.fleet.register({
         identity: { agentId, type: input.type },
@@ -287,6 +311,12 @@ export class DelegationCoordinator {
   #command(): { readonly command?: readonly string[] } {
     const command = this.options.command?.();
     return command === undefined ? {} : { command };
+  }
+
+  /** Spread like `#command`, so an unset level stays absent rather than explicitly undefined. */
+  #effort(): { readonly effort?: EffortLevel } {
+    const effort = this.options.effort?.();
+    return effort === undefined ? {} : { effort };
   }
 
   #timestamp(): IsoTimestamp {

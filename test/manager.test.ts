@@ -84,6 +84,31 @@ test("the lifecycle applies the configured permission mode to start and resume",
   assert.doesNotMatch(records[2].initialCommand, /--dangerously-skip-permissions/);
 });
 
+test("the Manager's own model and effort reach the command line on start and on resume", async () => {
+  const records: any[] = [];
+  const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
+  const snapshot = (id: string): TerminalSnapshot => ({ terminalId: id as TerminalId, agentId, sessionId, agentType: "manager", name: "aboard: Manager", cwd: "C:\\work", status: "open", createdAt: "2026-07-30T10:00:00.000Z", closedAt: null, exitCode: null });
+  const terminals = {
+    create: (request: unknown) => { records.push(request); return snapshot("terminal"); },
+    resume: (request: unknown) => { records.push(request); return snapshot("terminal"); },
+  } as unknown as TerminalController;
+  // `--agent manager` honors neither field in manager.md and `--resume` reads no
+  // definition at all, so both have to travel as flags or the Manager silently
+  // runs at the user's global model and effort.
+  const options = { store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell" as const, transcriptExists: async () => true, effort: () => "low" as const };
+  const lifecycle = new ManagerLifecycle({ ...options, definition: async () => ({ model: "opus", effort: "medium" as const }) });
+  await lifecycle.start("new");
+  assert.match(records[0].initialCommand, /--agent manager --model opus --effort medium/);
+  await lifecycle.start("resume");
+  assert.match(records[1].initialCommand, /--resume .* --model opus --effort medium/);
+
+  // An unreadable or `inherit` definition leaves aboard.launch.effort deciding.
+  const bare = new ManagerLifecycle({ ...options, definition: async () => undefined });
+  await bare.start("new");
+  assert.doesNotMatch(records[2].initialCommand, /--model/);
+  assert.match(records[2].initialCommand, /--effort low/);
+});
+
 test("resume without a transcript starts afresh under the same session id", async () => {
   const records: any[] = [];
   const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };

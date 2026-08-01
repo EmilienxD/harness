@@ -20,7 +20,7 @@ import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
 import { createVendoredSkillInstaller } from "./scaffold/vendored.js";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
 import { registerNativeFleetUi } from "./vscode/native-ui.js";
@@ -45,10 +45,16 @@ import {
   ManagerPromptService,
   ManagerStopService,
   createManagerHookRoutes,
-  type BriefingSlice,
   type BriefingSources,
 } from "./bridge/manager-hooks.js";
 import { GitWorkingTreeInspector, WorkerLifecycleReconciler, createWorkerLifecycleRoutes, reportsResult } from "./bridge/lifecycle.js";
+import {
+  SessionLifecycleService,
+  SessionProcessMonitor,
+  SessionStartupProofs,
+  createSessionLifecycleRoutes,
+} from "./bridge/session-lifecycle.js";
+import { lockMarkerPresent, sessionWrapperLayout } from "./runtime/lock-markers.js";
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
@@ -56,11 +62,14 @@ import { parseAgentDefinition } from "./scaffold/agent-definition.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
+
+/** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the claude CLI boot. */
+const STARTUP_PROOF_TIMEOUT_MS = 60_000;
 import { registerReviewCommand } from "./vscode/review.js";
 import { ProcessGitClient, type GitClient } from "./git/client.js";
-import { AutoRunEngine, type PullRequestOwner } from "./auto/engine.js";
+import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
-import { planSessionResume } from "./claude/launch.js";
+import { planSessionResume, resolveLaunchConfiguration, type LaunchConfiguration } from "./claude/launch.js";
 import { deriveWriteCapability } from "./domain/capability.js";
 
 let bridge: BridgeRuntime | undefined;
@@ -90,13 +99,42 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 }
 
 /**
- * Briefing sources for the Manager's split SessionStart hooks. Each slice is
- * independently fallible by design: `ManagerBriefings` converts a rejection into
- * a one-line "unavailable" note, so one broken `gh` call degrades a single slice
- * instead of losing the whole briefing.
+ * The project's own baseline commands, so a Manager can name the check a worker
+ * should run instead of guessing at one. Read from `package.json` because that
+ * is where this project keeps them; an unreadable or scriptless project simply
+ * contributes nothing, which the briefing renders as "no baseline checks".
  */
-function briefingSources(git: GitClient, github: GitHubClient, previousSessionAt: () => string | undefined): BriefingSources {
+async function repositoryChecks(workspaceRoot: string): Promise<readonly string[]> {
+  const preferred = ["check", "lint", "test", "build"];
+  try {
+    const parsed: unknown = JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"));
+    if (typeof parsed !== "object" || parsed === null) return [];
+    const scripts = (parsed as { scripts?: unknown }).scripts;
+    if (typeof scripts !== "object" || scripts === null) return [];
+    const available = new Set(Object.keys(scripts as Record<string, unknown>));
+    return preferred.filter((name) => available.has(name)).map((name) => `npm run ${name}`);
+  } catch { return []; }
+}
+
+/**
+ * Sources for the Manager's single SessionStart briefing. Each is independently
+ * fallible by design: `ManagerBriefings` converts a rejection into a one-line
+ * "unavailable" note, so one broken `gh` call degrades one section instead of
+ * losing the whole block.
+ */
+function briefingSources(
+  git: GitClient,
+  github: GitHubClient,
+  workspaceRoot: string,
+  previousSessionAt: () => string | undefined,
+  autoRunState: () => AutoRunState | undefined,
+): BriefingSources {
   return {
+    repository: async () => ({
+      name: basename(workspaceRoot),
+      defaultBranch: await git.defaultBranch(),
+      checks: await repositoryChecks(workspaceRoot),
+    }),
     git: async () => {
       const status = await git.status();
       return {
@@ -106,20 +144,40 @@ function briefingSources(git: GitClient, github: GitHubClient, previousSessionAt
       };
     },
     github: async () => {
-      const roadmap = await github.listRoadmapIssues();
       const since = previousSessionAt();
-      const merges = since === undefined ? [] : await github.listUnreviewedMerges(since);
-      const open = roadmap.filter((issue) => issue.disposition === "hitl");
+      const [roadmap, pullRequests, merges] = await Promise.all([
+        github.listRoadmapIssues(),
+        github.listOpenPullRequests(),
+        since === undefined ? Promise.resolve([]) : github.listUnreviewedMerges(since),
+      ]);
       return {
-        readyIssues: roadmap.filter((issue) => issue.ready).map((issue) => issue.number),
-        openPullRequests: [],
-        hitlIssues: open.map((issue) => issue.number),
+        issues: roadmap.map((issue) => ({
+          number: issue.number,
+          title: issue.title,
+          disposition: issue.disposition,
+          blockedBy: issue.ready ? [] : issue.dependencyNumbers,
+        })),
+        openPullRequests: pullRequests,
         unreviewedMergeCount: merges.length,
       };
     },
-    todoIssue: async () => {
-      try { return (await github.getTodo()).number; }
+    roadmap: async () => {
+      try { return await github.getTodo(); }
       catch (error) { if (error instanceof GitHubBoundaryError && error.code === "missing-todo") return undefined; throw error; }
+    },
+    autoRun: () => {
+      const state = autoRunState();
+      if (state === undefined) return undefined;
+      return {
+        specNumber: state.specNumber,
+        specTitle: state.specTitle,
+        phase: state.phase,
+        currentIssue: state.currentIssue,
+        completedCount: state.completedCount,
+        ...(state.waiting && state.currentPullRequest !== undefined
+          ? { waitingOnPullRequest: state.currentPullRequest }
+          : {}),
+      };
     },
   };
 }
@@ -135,7 +193,15 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
     if (isBuiltinAgentType(type)) return { shape: "agent-defined", agentName: type };
     const result = parseAgentDefinition(await readFile(join(workspaceRoot, ".claude", "agents", `${type}.md`), "utf8"));
     if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
-    return { shape: "agent-defined", agentName: type, declaredTools: result.value.tools };
+    // `model:` and `effort:` are read here and passed as flags because a
+    // main-thread `--agent` launch ignores them in the file (see
+    // `LaunchConfiguration`); `tools:` stays where it is, on no command line.
+    return resolveLaunchConfiguration({
+      agentName: type,
+      declaredTools: result.value.tools,
+      declaredModel: result.value.model,
+      declaredEffort: result.value.effort,
+    });
   } };
 }
 
@@ -161,6 +227,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let currentConfiguration = initialConfiguration.value;
   let bridgeEnvironment: { port: number; token: string } | undefined;
   let lifecycle: WorkerLifecycleReconciler | undefined;
+  let sessionLifecycle: SessionLifecycleService | undefined;
+  const sessionProofs = new SessionStartupProofs();
   let initialized = false;
   const terminals = new TerminalController({
     host: createVsCodeTerminalHost(),
@@ -169,9 +237,17 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       return { ...bridgeEnvironment, workspaceRoot };
     },
     terminalIdFactory: () => randomUUID() as TerminalId,
+    startupProofs: sessionProofs,
+    onStartupTimeout: (agentId, sessionId) => {
+      output.appendLine(`Agent ${agentId} (session ${sessionId}) did not produce a SessionStart hook in time; closing the terminal as a failed launch.`);
+    },
     onLifecycleEvent: (event) => {
       if (event.type === "terminal-closed") {
         output.appendLine(`Terminal ${event.terminalId} closed (${event.reason}, exit ${event.exitCode ?? "unknown"})`);
+        // The terminal close is authoritative: stop tracking the process so a
+        // later poll does not report it as dead when the shell dumped it.
+        sessionMonitor.untrack(event.agentId);
+        sessionProofs.cancel(event.agentId);
       }
       if (event.type !== "terminal-closed") return;
       const closed = fleet?.get(event.agentId);
@@ -194,8 +270,78 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const recordedManager = await managerStore.load();
   const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
-  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: workerConfigurations(workspaceRoot), prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId });
+  const launchConfigurations = workerConfigurations(workspaceRoot);
+  const wrapperLayout = sessionWrapperLayout(workspaceRoot);
+  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
+  // A settled session leaves its terminal to be collected: the record the
+  // fleet dropped still names an open terminal, and the next launch for the
+  // same agent fails the one-live-terminal invariant until it is closed —
+  // "agent already has a live aboard terminal" on relaunch was exactly that
+  // leak. Kill on the way out; the close event lands on an already-settled
+  // agent and untracks it harmlessly.
+  const closeAbandonedTerminal = (agentId: AgentId): void => {
+    const terminalId = fleet.get(agentId)?.terminal.terminalId;
+    if (terminalId === undefined) return;
+    try { terminals.kill(terminalId); } catch { /* already closed */ }
+  };
+  // The wrapper's marker file is the strongest liveness source aboard owns:
+  // the user can kill the TUI from inside while keeping the shell (`exit`,
+  // double Ctrl+C), and only the marker poll spots them — the wrapper removes
+  // the marker the moment its Claude child exits for any reason. Terminal
+  // close still wins when it happens first; untracking there lets the monitor
+  // skip agents the shell already reclaimed.
+  const sessionMonitor = new SessionProcessMonitor({
+    probe: lockMarkerPresent,
+    // TEMP E2E instrumentation for ctrl+c detection.
+    debug: (message) => output.appendLine(`[liveness] ${message}`),
+    onProcessEnded: (observation) => {
+      output.appendLine(`[liveness] process-ended agent=${observation.agentId} lock=${observation.lockFile}`);
+      const session = fleet.get(observation.agentId);
+      if (session === undefined) return;
+      const at = new Date().toISOString() as IsoTimestamp;
+      if (!reportsResult(session)) {
+        lease.releaseForTerminalOutcome(observation.agentId, at, "agent session process ended");
+        fleet.remove(observation.agentId, at);
+        closeAbandonedTerminal(observation.agentId);
+        output.appendLine(`Session process for agent ${observation.agentId} ended`);
+        return;
+      }
+      void lifecycle?.processEnded(observation)
+        .then(() => closeAbandonedTerminal(observation.agentId))
+        .catch((error: unknown) => output.appendLine(`Process-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
+    },
+  });
+  const settleCleared = (agentId: AgentId): void => {
+    const session = fleet.get(agentId);
+    if (session === undefined) return;
+    const at = new Date().toISOString() as IsoTimestamp;
+    // `/clear` ends the conversation while the TUI and terminal keep running.
+    // The agent record is spent history; the user deliberately kept the TUI.
+      if (!reportsResult(session)) {
+        lease.releaseForTerminalOutcome(agentId, at, "agent session cleared");
+        fleet.remove(agentId, at);
+        closeAbandonedTerminal(agentId);
+        return;
+      }
+      // Result-delivering sessions settle with a graceful completed outcome: the
+      // conversation ended on the user's terms, and any pending run completes
+      // rather than hangs waiting for a Stop hook that a cleared TUI cannot fire.
+      void lifecycle?.processEnded({ agentId, sessionId: session.sessionId })
+        .then(() => closeAbandonedTerminal(agentId))
+        .catch((error: unknown) => output.appendLine(`Session-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
+  };
+  sessionLifecycle = new SessionLifecycleService({
+    fleet,
+    monitor: sessionMonitor,
+    settlement: { settleCleared },
+    lockPathFor: wrapperLayout.lockPathFor,
+    onSessionStarted: (observation) => {
+      output.appendLine(`Session ${observation.sessionId} for agent ${observation.agentId} started`);
+    },
+  });
+  sessionMonitor.start(10_000);
+  activeSessionMonitor = sessionMonitor;
   const git: GitClient = new ProcessGitClient(workspaceRoot);
   const autoRun = new AutoRunEngine({
     git,
@@ -218,6 +364,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       // An unread tool set resolves to the restrictive answer, so a resumed
       // worker is treated as write-capable and takes the lease like any other.
       const capability = deriveWriteCapability(undefined);
+      // A resume carries no --agent, so the definition's model and effort have
+      // to be re-passed as flags. An unreadable definition is not fatal here:
+      // the session setting still applies, and refusing to reopen a finished
+      // agent's terminal over it would be worse than resuming at the default.
+      let declared: LaunchConfiguration | undefined;
+      try { declared = await launchConfigurations.get(owner.type); }
+      catch (error) { output.appendLine(`Could not read the ${owner.type} agent definition for resume; using the configured model and effort. ${error instanceof Error ? error.message : "unknown error"}`); }
+      const definition = declared?.shape === "agent-defined" ? declared : undefined;
+      const effort = definition?.declaredEffort ?? currentConfiguration.launchEffort;
       const plan = planSessionResume({
         agentId: owner.agentId,
         sessionId: owner.sessionId,
@@ -226,6 +381,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         permissionMode: currentConfiguration.workerPermissionMode,
         command: currentConfiguration.claudeCommand,
         writeCapability: capability,
+        wrapper: wrapperLayout,
       });
       const at = new Date().toISOString() as IsoTimestamp;
       const acquisition = lease.acquire(capability, { agentId: owner.agentId, sessionId: owner.sessionId }, at, "resume pull request session");
@@ -237,6 +393,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         issueNumber: owner.issueNumber,
         name: `aboard: resume pull request ${owner.prNumber}`,
         initialCommand: plan.commandLine,
+        startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS,
       });
       // The agent finished, so its fleet row is spent history; `restart` reuses
       // the identity rather than leaving a live terminal untracked.
@@ -250,11 +407,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   const reviews = new ReviewCoordinator(github, coordinator, ownership, reviewTerminals);
   const briefings = new ManagerBriefings(
-    briefingSources(git, github, () => recordedManager?.updatedAt),
+    briefingSources(git, github, workspaceRoot, () => recordedManager?.updatedAt, () => autoRun.state()),
     fleet,
     lease,
     {
-      write: async (slice: BriefingSlice, content: string) => {
+      write: async (slice: "state", content: string) => {
         const path = join(workspaceRoot, ".aboard", "runtime", "events", `brief-${slice}.txt`);
         await mkdir(join(workspaceRoot, ".aboard", "runtime", "events"), { recursive: true });
         await writeFile(path, content, "utf8");
@@ -279,7 +436,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { github, reviews, autoRun }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createTerminalRoutes(terminals)),
+    handler: combineHandlers(createMcpHandler(coordinator, { github, reviews, autoRun }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
     persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
@@ -325,8 +482,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     disallowedTools: currentConfiguration.managerDisallowedTools,
     command: () => currentConfiguration.claudeCommand,
     permissionMode: () => currentConfiguration.workerPermissionMode,
+    effort: () => currentConfiguration.launchEffort,
     agentIdFactory: () => managerAgentId,
     transcriptExists: sessionTranscriptExists,
+    wrapper: wrapperLayout,
   });
   const warnKey = "aboard.manager.permissionWarning";
   // The UI offers resume and new as separate actions, so the launch path never
@@ -489,9 +648,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   return { bridgeDiscoveryPath: discovery.path };
 }
 
+let activeSessionMonitor: SessionProcessMonitor | undefined;
+
 export async function deactivate(): Promise<void> {
   // Stopping is a pause with no resume promise: nothing is rolled back, and the
   // persisted record is what an explicit resume re-enters from.
+  activeSessionMonitor?.stop();
+  activeSessionMonitor = undefined;
   activeAutoRun?.stop("the extension is shutting down");
   await activeAutoRun?.settle();
   activeAutoRun = undefined;

@@ -98,6 +98,12 @@ export interface AutoRunState {
   readonly completedCount: number;
   readonly totalCount: number;
   readonly waiting: boolean;
+  /**
+   * The pull request the current issue is parked on. Published so a Manager
+   * that joins mid-run can name what the user has to merge without asking
+   * GitHub which pull request the run means.
+   */
+  readonly currentPullRequest: number | undefined;
 }
 
 export type AutoRunStartResult =
@@ -254,6 +260,7 @@ export class AutoRunEngine {
       completedCount: 0,
       totalCount: record.issueNumbers.length,
       waiting: false,
+      currentPullRequest: record.prNumber,
     });
     this.#loop = this.#run(record, specTitle, controller.signal).catch((error: unknown) => {
       this.options.log?.(`auto-run failed: ${message(error)}`);
@@ -381,6 +388,7 @@ export class AutoRunEngine {
         completedCount,
         totalCount: Math.max(record.issueNumbers.length, completedCount + 1),
         waiting: step.action === "await-approval",
+        currentPullRequest: prNumber,
       });
       await this.options.store.save({ ...record, currentIssue: issue.number, phase, branch: issue.branch, prNumber, reviewedIssues: [...reviewed] });
 

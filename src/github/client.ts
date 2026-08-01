@@ -88,6 +88,13 @@ export interface UnreviewedMerge {
   readonly mergedAt: string;
 }
 
+/** An open pull request as the Manager's briefing needs it: enough to name it. */
+export interface OpenPullRequest {
+  readonly number: number;
+  readonly title: string;
+  readonly reviewState: string;
+}
+
 export interface SpecIssue {
   readonly number: number;
   readonly title: string;
@@ -384,6 +391,23 @@ export class GitHubClient implements GitHubPromptSource {
         return { author: string(record(comment.author, `comment[${commentIndex}].author`).login, `comment[${commentIndex}].author.login`), body: string(comment.body, `comment[${commentIndex}].body`) };
       });
       return { id: string(thread.id, `thread[${index}].id`), path: string(thread.path, `thread[${index}].path`), line: nullableInteger(thread.line, `thread[${index}].line`), isResolved: boolean(thread.isResolved, `thread[${index}].isResolved`), comments };
+    });
+  }
+
+  public async listOpenPullRequests(): Promise<readonly OpenPullRequest[]> {
+    const output = await this.gh.run(["pr", "list", "--state", "open", "--limit", "50", "--json", "number,title,reviewDecision"]);
+    return array(json(output, "open pull requests"), "open pull requests").map((value, index) => {
+      const item = record(value, `open pull request[${index}]`);
+      // `reviewDecision` is null until a review is requested or submitted, which
+      // is the ordinary state of a freshly opened aboard pull request.
+      const decision = item.reviewDecision === null || item.reviewDecision === undefined || item.reviewDecision === ""
+        ? "no review yet"
+        : string(item.reviewDecision, `open pull request[${index}].reviewDecision`).toLowerCase().replaceAll("_", " ");
+      return {
+        number: integer(item.number, `open pull request[${index}].number`),
+        title: string(item.title, `open pull request[${index}].title`),
+        reviewState: decision,
+      };
     });
   }
 

@@ -9,7 +9,41 @@ export const MANAGER_SESSION_START_TIMEOUT_SECONDS = 120;
 export const MANAGER_STOP_TIMEOUT_SECONDS = 3_600;
 export const MANAGER_PROMPT_TIMEOUT_SECONDS = 60;
 
-export type BriefingSlice = "git" | "github" | "fleet" | "todo";
+/**
+ * The Manager's session-start orientation.
+ *
+ * One hook, one block. Four separate slices cost four `uv` process spawns and
+ * four bridge round trips to deliver four unlabeled `additionalContext`
+ * fragments; the Manager then had to reassemble them into a picture of the
+ * project. Fetching them together also lets the slow boundaries — git and
+ * GitHub — overlap instead of running in series.
+ *
+ * The content rule is that a fact the Manager would otherwise spend a turn
+ * fetching belongs here. Issue titles, not bare numbers; the roadmap body, not
+ * a pointer to a tool that returns it. `--agent` replaces Claude Code's own
+ * system prompt (`docs/CLAUDE-REFERENCES/subagents.md`), which takes the
+ * environment and git-status blocks with it, so the repository card restores
+ * the orientation every other Claude Code session starts with.
+ */
+export const ROADMAP_BODY_LIMIT = 2_000;
+const ISSUE_LIST_LIMIT = 15;
+
+export type BriefingDisposition = "afk" | "hitl" | "unclassified";
+
+export interface BriefingIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly disposition: BriefingDisposition;
+  /** Open issues this one waits on. Empty means ready to start. */
+  readonly blockedBy: readonly number[];
+}
+
+export interface RepositoryBriefing {
+  readonly name: string;
+  readonly defaultBranch: string;
+  /** The project's own baseline commands, in the order a worker should run them. */
+  readonly checks: readonly string[];
+}
 
 export interface GitBriefingState {
   readonly branch: string;
@@ -18,29 +52,81 @@ export interface GitBriefingState {
 }
 
 export interface GitHubBriefingState {
-  readonly readyIssues: readonly number[];
-  readonly openPullRequests: readonly { readonly number: number; readonly reviewState: string }[];
-  readonly hitlIssues: readonly number[];
+  readonly issues: readonly BriefingIssue[];
+  readonly openPullRequests: readonly {
+    readonly number: number;
+    readonly title: string;
+    readonly reviewState: string;
+  }[];
   readonly unreviewedMergeCount: number;
 }
 
+export interface RoadmapBriefing {
+  readonly number: number;
+  readonly body: string;
+}
+
+/** What the auto-run engine is doing, flattened to the facts that change advice. */
+export interface AutoRunBriefing {
+  readonly specNumber: number;
+  readonly specTitle: string;
+  readonly phase: string;
+  readonly currentIssue: number | undefined;
+  readonly completedCount: number;
+  /** The pull request a `hitl` issue is parked on, when the run is waiting. */
+  readonly waitingOnPullRequest?: number | undefined;
+}
+
 export interface BriefingSources {
+  repository(signal: AbortSignal): Promise<RepositoryBriefing>;
   git(signal: AbortSignal): Promise<GitBriefingState>;
   github(signal: AbortSignal): Promise<GitHubBriefingState>;
-  todoIssue(signal: AbortSignal): Promise<number | undefined>;
+  roadmap(signal: AbortSignal): Promise<RoadmapBriefing | undefined>;
+  autoRun(): AutoRunBriefing | undefined;
 }
 
 export interface BriefingFileStore {
-  write(slice: BriefingSlice, content: string): Promise<string>;
+  write(slice: "state", content: string): Promise<string>;
 }
 
 function active(session: AgentSession): boolean {
   return session.lifecycle.status === "starting" || session.lifecycle.status === "running" || session.lifecycle.status === "awaiting-user";
 }
 
-function boundedPreview(slice: BriefingSlice, content: string, path: string): string {
-  const suffix = `\nFull ${slice} briefing: ${path}`;
+function boundedPreview(content: string, path: string): string {
+  const suffix = `\nFull briefing: ${path}\n</aboard-state>`;
   return `${content.slice(0, Math.max(0, HOOK_OUTPUT_LIMIT - suffix.length - 1))}…${suffix}`;
+}
+
+/** One failing boundary costs its own section, never the whole block. */
+async function section(
+  heading: string,
+  signal: AbortSignal,
+  render: () => Promise<string> | string,
+): Promise<string> {
+  try {
+    const body = (await render()).trim();
+    return body.length === 0 ? "" : `## ${heading}\n${body}`;
+  } catch (error) {
+    const reason = signal.aborted
+      ? "the request was cancelled or timed out"
+      : error instanceof Error ? error.message : "boundary failure";
+    return `## ${heading}\nUnavailable: ${reason}. Re-derive it yourself before acting on it.`;
+  }
+}
+
+function issueLine(issue: BriefingIssue): string {
+  const waits = issue.blockedBy.length === 0
+    ? ""
+    : ` — waits on ${issue.blockedBy.map((number) => `#${number}`).join(", ")}`;
+  return `#${issue.number} ${issue.title} (${issue.disposition})${waits}`;
+}
+
+function list(issues: readonly BriefingIssue[]): string {
+  const shown = issues.slice(0, ISSUE_LIST_LIMIT).map(issueLine);
+  const omitted = issues.length - shown.length;
+  if (omitted > 0) shown.push(`…and ${omitted} more; list them with \`gh issue list\` if you need them.`);
+  return shown.join("\n");
 }
 
 export class ManagerBriefings {
@@ -51,55 +137,110 @@ export class ManagerBriefings {
     private readonly files?: BriefingFileStore,
   ) {}
 
-  public async render(slice: BriefingSlice, signal: AbortSignal): Promise<string> {
-    let content: string;
-    try {
-      switch (slice) {
-        case "git": {
-          const state = await this.sources.git(signal);
-          content = `Git: branch ${state.branch}; HEAD ${state.head}; working tree ${state.dirty ? "dirty" : "clean"}.`;
-          break;
-        }
-        case "github": {
-          const state = await this.sources.github(signal);
-          const prs = state.openPullRequests.map((pr) => `#${pr.number} (${pr.reviewState})`).join(", ") || "none";
-          content = [
-            `GitHub: ready issues ${numbers(state.readyIssues)}.`,
-            `Open PRs: ${prs}.`,
-            `HITL waits: ${numbers(state.hitlIssues)}.`,
-            `Merged without review since the previous session: ${state.unreviewedMergeCount}.`,
-          ].join("\n");
-          break;
-        }
-        case "fleet": {
-          const agents = this.fleet.list().filter(active).map((entry) => {
-            const issue = entry.issueNumber === undefined ? "" : ` issue #${entry.issueNumber}`;
-            return `${entry.identity.agentId} (${entry.identity.type}, ${entry.lifecycle.status}${issue})`;
-          });
-          const holder = this.lease.current();
-          content = `Fleet: ${agents.join(", ") || "no live agents"}.\nWrite lease: ${holder?.agentId ?? "unheld"}.`;
-          break;
-        }
-        case "todo": {
-          const issue = await this.sources.todoIssue(signal);
-          content = issue === undefined
-            ? "Project TODO issue was not found."
-            : `Project TODO is issue #${issue}. Read it with mcp__aboard__get_todo when you need it.`;
-          break;
-        }
-      }
-    } catch (error) {
-      if (signal.aborted) return `${slice} briefing unavailable: request was cancelled or timed out.`;
-      return `${slice} briefing unavailable: ${error instanceof Error ? error.message : "boundary failure"}.`;
-    }
-    if (content.length <= HOOK_OUTPUT_LIMIT) return content;
-    if (this.files === undefined) return `${content.slice(0, HOOK_OUTPUT_LIMIT - 1)}…`;
-    return boundedPreview(slice, content, await this.files.write(slice, content));
-  }
-}
+  public async render(signal: AbortSignal): Promise<string> {
+    // Independent boundaries, so they overlap. A slow `gh` call no longer adds
+    // its latency to a slow `git` call.
+    const [repository, work, fleet, roadmap] = await Promise.all([
+      this.#repository(signal),
+      this.#work(signal),
+      section("Fleet", signal, () => this.#fleet()),
+      section("Roadmap", signal, () => this.#roadmap(signal)),
+    ]);
 
-function numbers(values: readonly number[]): string {
-  return values.length === 0 ? "none" : values.map((value) => `#${value}`).join(", ");
+    const content = [
+      "<aboard-state>",
+      "A snapshot taken at session start, not a live view. Re-check anything you are about to act on.",
+      repository,
+      section("Auto-run", signal, () => this.#autoRun()),
+      work,
+      fleet,
+      roadmap,
+      "</aboard-state>",
+    ];
+    const rendered = (await Promise.all(content)).filter((part) => part.length > 0).join("\n\n");
+    if (rendered.length <= HOOK_OUTPUT_LIMIT) return rendered;
+    if (this.files === undefined) return `${rendered.slice(0, HOOK_OUTPUT_LIMIT - 1)}…`;
+    return boundedPreview(rendered, await this.files.write("state", rendered));
+  }
+
+  async #repository(signal: AbortSignal): Promise<string> {
+    return section("Repository", signal, async () => {
+      const [repository, git] = await Promise.all([
+        this.sources.repository(signal),
+        this.sources.git(signal),
+      ]);
+      const checks = repository.checks.length === 0
+        ? "no baseline checks are configured"
+        : `verify with ${repository.checks.join(", ")}`;
+      return [
+        `${repository.name} · default branch ${repository.defaultBranch} · ${checks}`,
+        `Checked out: ${git.branch} @ ${git.head}, working tree ${git.dirty ? "dirty" : "clean"}`,
+      ].join("\n");
+    });
+  }
+
+  /** Issues and pull requests read together: they are one question about work. */
+  async #work(signal: AbortSignal): Promise<string> {
+    let state: GitHubBriefingState;
+    try {
+      state = await this.sources.github(signal);
+    } catch (error) {
+      return await section("Work", signal, () => { throw error; });
+    }
+    const ready = state.issues.filter((issue) => issue.blockedBy.length === 0);
+    const blocked = state.issues.filter((issue) => issue.blockedBy.length > 0);
+    const parts = [
+      `## Ready to implement\n${ready.length === 0 ? "Nothing is ready." : list(ready)}`,
+    ];
+    if (blocked.length > 0) parts.push(`## Blocked\n${list(blocked)}`);
+    const pullRequests = state.openPullRequests
+      .map((pr) => `#${pr.number} ${pr.title} (${pr.reviewState})`)
+      .join("\n");
+    const merges = state.unreviewedMergeCount === 0
+      ? ""
+      : `\n${state.unreviewedMergeCount} pull request(s) merged without review since your previous session.`;
+    parts.push(`## Pull requests\n${pullRequests.length === 0 ? "None open." : pullRequests}${merges}`);
+    return parts.join("\n\n");
+  }
+
+  #autoRun(): string {
+    const run = this.sources.autoRun();
+    if (run === undefined) return "No run is active. `/auto` starts one on the oldest open spec.";
+    const lines = [
+      `Running spec #${run.specNumber} "${run.specTitle}" — phase ${run.phase}, ${run.completedCount} issue(s) done.`,
+    ];
+    if (run.currentIssue !== undefined) lines.push(`Current issue: #${run.currentIssue}.`);
+    if (run.waitingOnPullRequest !== undefined) {
+      lines.push(`Paused: PR #${run.waitingOnPullRequest} is hitl and waiting for the user to merge it. Their merge resumes the run.`);
+    }
+    return lines.join("\n");
+  }
+
+  #fleet(): string {
+    const holder = this.lease.current();
+    const agents = this.fleet.list().filter(active).map((entry) => {
+      const issue = entry.issueNumber === undefined ? "" : `, issue #${entry.issueNumber}`;
+      const lease = holder?.agentId === entry.identity.agentId ? ", holds the write lease" : "";
+      // The description is what the user sees in the fleet tree, so it is what
+      // makes this list legible when the Manager relays it back to them.
+      return `"${entry.terminal.name}" — ${entry.identity.type}, ${entry.lifecycle.status}${issue}${lease}`;
+    });
+    return agents.length === 0
+      ? "No live agents. The write lease is unheld."
+      : `${agents.join("\n")}\nWrite lease: ${holder === undefined ? "unheld" : holder.agentId}`;
+  }
+
+  async #roadmap(signal: AbortSignal): Promise<string> {
+    const roadmap = await this.sources.roadmap(signal);
+    if (roadmap === undefined) {
+      return "No issue is labelled `todo`. Write one with mcp__aboard__update_todo when the project has a direction worth recording.";
+    }
+    const body = roadmap.body.trim();
+    const bounded = body.length <= ROADMAP_BODY_LIMIT
+      ? body
+      : `${body.slice(0, ROADMAP_BODY_LIMIT).trimEnd()}\n\n…truncated. Read the rest with \`gh issue view ${roadmap.number}\`.`;
+    return `Issue #${roadmap.number} — the full body follows, so do not fetch it again.\n\n${bounded}`;
+  }
 }
 
 export interface ManagerStopRequest {
@@ -350,8 +491,9 @@ function parseInteractiveCommand(prompt: string): {
 export function createManagerHookRoutes(briefings: ManagerBriefings, stop: ManagerStopService, prompts?: ManagerPromptService): BridgeRequestHandler {
   return async (request): Promise<BridgeResponse> => {
     if (request.method !== "POST") return protocolError(405, "invalid-request", "Method not allowed");
-    const brief = /^\/hooks\/manager\/brief-(git|github|fleet|todo)$/.exec(request.url.pathname);
-    if (brief !== null) return { status: 200, body: { additionalContext: await briefings.render(brief[1] as BriefingSlice, request.signal) } };
+    if (request.url.pathname === "/hooks/manager/brief") {
+      return { status: 200, body: { additionalContext: await briefings.render(request.signal) } };
+    }
     if (request.url.pathname === "/hooks/manager/stop") {
       const body = record(request.body);
       if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "" || typeof (body.stopHookActive ?? body.stop_hook_active) !== "boolean") {
