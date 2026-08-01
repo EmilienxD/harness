@@ -1,54 +1,97 @@
 # aboard
 
-aboard is a VS Code extension that runs delegated Claude Code work in visible, independent terminals while a long-lived Manager coordinates the fleet. GitHub is the durable work-state backbone, and the user remains in control of decisions that matter.
+**Stop trusting summaries. Watch your agents work.**
 
-The product contract is [docs/initial-spec.md](./docs/initial-spec.md), and the accepted implementation shape is [docs/architecture.md](./docs/architecture.md).
+aboard is a VS Code extension for Claude Code that turns invisible sub-agents into **real terminals you can read, interrupt, and take over** — coordinated by one long-lived Manager, with GitHub holding the work state.
 
-## Settings
+---
 
-aboard settings (`aboard.*`) are edited in VS Code Settings. They resolve through three layers, highest precedence first:
+## The problem
 
-1. `.vscode/settings.json` — an explicit VS Code workspace or folder value.
-2. `.aboard/settings.json` — the project override file, checked in and shared with the team.
-3. The user, profile, or default value.
+When Claude Code delegates with the `Agent` tool, the sub-agent runs inside the parent process, in a context window you cannot see. You learn what happened from a summary it chose to write.
 
-`.aboard/settings.json` is optional and never scaffolded; create it when a project needs its own configuration. Keys may be written flat or nested, with or without the redundant `aboard.` prefix, so all three of these set the same thing:
+You can't watch it. You can't stop it mid-mistake. You can't take the keyboard. You can't resume it tomorrow.
 
-```json
-{
-  "aboard.workers.permissionMode": "bypass",
-  "launch": { "maxInlinePromptChars": 4000 },
-  "aboard": { "timeouts": { "managerPrompt": 45 } }
-}
+|  | Built-in sub-agents | aboard |
+| :-- | :-- | :-- |
+| Where it runs | Inside the parent process | Its own VS Code terminal |
+| What you see | A summary, afterwards | Every token, live |
+| When it goes wrong | You find out at the end | You type into it and fix it |
+| Next morning | Gone | `--resume`, same session |
+| Work state | The context window | GitHub issues and PRs |
+
+## What it looks like
+
+```
+aboard ─ Agents                                       claude --agent implementer
+├─ manager               running                      ┌───────────────────────────┐
+│  ├─ implementer #19    running · lease holder · 2:05│ > Reading calc.py…        │
+│  │  └─ Explore         running                      │ ● Edit calc.py            │
+│  └─ brainstormer       running                      │ …                         │
+└─ raw                   running                      └───────────────────────────┘
 ```
 
-Changes apply live. An unknown key or an invalid value is reported in Output → aboard and falls back to the value from the next layer.
+You talk to the **Manager**. It plans, delegates, and reports — and it cannot edit your code. Each delegated task opens as its own terminal. Click a node and you're inside it. One agent at a time is the *lease holder*: at most one agent can touch your working tree, ever, and the status bar always names it.
 
-## Development baseline
+## Quick start
 
-- Node.js 24 for local tooling; extension output targets Node.js 22.
-- npm 11.
-- TypeScript bundled with esbuild.
-- Python hooks executed with `uv`.
-- VS Code 1.125 or newer.
-- Claude Code, Git, and the GitHub CLI.
+**You need:** VS Code 1.125+, Claude Code, Git, the GitHub CLI (`gh`), and [`uv`](https://docs.astral.sh/uv/).
 
-Install the pinned development dependencies with:
+1. Install the extension (`code --install-extension aboard-*.vsix`).
+2. Open your project, click the aboard icon, hit **Initialize**. It installs agent definitions, skills, and hooks into `.claude/`, registers a loopback-only MCP bridge, and leaves the rest of your config exactly as it found it.
+3. Click **+ New Manager** and ask it something: *"What's the state of this project?"*
 
-```powershell
-npm install
-```
+Then try one of these in the Manager terminal:
 
-## Verification
+| You type | What happens |
+| :-- | :-- |
+| `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
+| `/raw` | Plain Claude Code, no workflow, tracked by the fleet. You are never worse off for having installed aboard |
+| `/auto` | The extension walks a `spec` issue's children: branch, implement, commit, PR, merge — one issue at a time |
+| *"Implement issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
 
-The local prerequisites are Node.js 24, npm 11, `uv`, and VS Code 1.125 or newer. The VS Code integration suite downloads VS Code 1.130 into `.vscode-test/` on first use.
+## The auto-run, honestly
 
-```powershell
-npm test                 # TypeScript unit and boundary integration tests, including Python hooks through uv
-npm run test:vscode      # Activation, native command wiring, and terminal create/focus/close integration
-npm run check
-npm run build
-npm run package          # Produces and inspects dist/aboard-0.0.0.vsix
-```
+`/auto` is the closest aboard gets to hands-off, and it's deliberately fenced in:
 
-`npm run package` fails if runtime code or required scaffold assets are absent, or if local `.aboard` state, environment files, tokens, session data, temporary prompts, tests, or source files would be included in the VSIX.
+- **The extension does every git and GitHub side effect** — branch, commit, push, PR, merge. Agents only produce content. A branch name and a `Closes #N` trailer derived from the issue are correct by construction; an agent writing them is a sampling operation that drifts silently.
+- **One issue at a time.** No parallel fan-out, no worktrees. Merge conflicts and self-contradicting agents destroy more value than concurrency creates.
+- **Labels decide how far it goes.** `afk` means an issue may be merged unattended. `hitl` means the run opens the PR and stops — your merge *is* the approval. Four labels, no hidden state: `spec`, `todo`, `afk`, `hitl`.
+- **Every phase is idempotent.** Close your laptop mid-run. Resume re-derives state from git and GitHub rather than trusting a file.
+- **Review is opt-in.** LLM tokens are your money, not ours.
+
+## Why you can leave it running
+
+- **One writer, enforced.** The write lease is derived from each agent's actual tool set, not a flag someone remembered to set. Two agents cannot edit your tree at once.
+- **Loopback only.** The bridge binds `127.0.0.1` and requires a per-activation bearer token on every request. Tokens live outside your project and are never committed.
+- **Your config stays yours.** aboard adds hook registrations to `.claude/settings.json` and nothing else. It never writes `permissions`. It never scaffolds a `CLAUDE.md` — that file is yours.
+- **Nothing hidden runs.** The bridge is the only creator of agents. A Claude session you start by hand is outside the system, and aboard's hooks stay silent in it.
+- **Scaffolded files are versioned.** Edit one, and the next update warns instead of clobbering it.
+
+## Things aboard will never do
+
+This list is a feature, and it's [written into the spec](./docs/initial-spec.md#13-the-goal-is-experience-not-automation) so it survives future contributors:
+
+- Approve its own pull requests.
+- Let the Manager quietly implement something itself.
+- Fan out N agents at your repo to look fast.
+- Review everything by default and hand you the bill.
+- Type into a live TUI on your behalf.
+
+> aboard is not an autonomous software factory. It's an attempt to make building a real project *with* agents feel good. Automation is applied where it removes tedium, never where it removes judgement.
+
+## Documentation
+
+| | |
+| :-- | :-- |
+| [docs/initial-spec.md](./docs/initial-spec.md) | The product and behavior contract — the reasoning behind every decision above |
+| [docs/auto-implementation.md](./docs/auto-implementation.md) | How the auto-run works, phase by phase |
+| [docs/architecture.md](./docs/architecture.md) | Module layout and boundaries |
+| [docs/configuration.md](./docs/configuration.md) | Every `aboard.*` setting and how the three config layers resolve |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Build, test, package |
+
+## Status
+
+Pre-1.0 and moving. The runtime works end to end; the API, scaffold assets, and settings may still change between versions. Issues and discussion are welcome — the [spec](./docs/initial-spec.md) is the best place to argue with a decision, and it names its open questions.
+
+Licensed under [MIT](./LICENSE).

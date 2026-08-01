@@ -1,8 +1,8 @@
 {
   "name": "aboard",
-  "displayName": "aboard",
+  "displayName": "aboard — visible agents for Claude Code",
   "publisher": "aboard",
-  "description": "Visible, human-in-the-loop orchestration for Claude Code agents in VS Code.",
+  "description": "Turn Claude Code's invisible sub-agents into terminals you can watch, interrupt, and take over — coordinated by one Manager, with GitHub as the work state.",
   "version": "0.0.0",
   "private": true,
   "repository": {
@@ -14,7 +14,16 @@
     "vscode": "^1.125.0"
   },
   "categories": [
+    "AI",
+    "Machine Learning",
     "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "agents",
+    "orchestration",
+    "ai"
   ],
   "contributes": {
     "commands": [
@@ -37,7 +46,7 @@
       },
       {
         "command": "aboard.reviewPr",
-        "title": "Aboard: Reopen Session For Open Pull Request"
+        "title": "Aboard: Review a Pull Request"
       },
       {
         "command": "aboard.startAutoRun",
@@ -94,11 +103,11 @@
     "viewsWelcome": [
       {
         "view": "aboard.welcome",
-        "contents": "aboard runs delegated Claude Code work in visible, independent terminals, coordinated by a long-lived Manager.\n\nGitHub keeps the durable work state, and you stay in control of the decisions that matter.\n\nInitializing installs the aboard agents, skills, and hooks into this workspace and registers the local MCP bridge.\n[Initialize](command:aboard.initializeProject)"
+        "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over — coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)"
       },
       {
         "view": "aboard.fleet",
-        "contents": "No agents yet. Start a Manager, and the agents it launches appear here.\n[+ New Manager](command:aboard.newManager)"
+        "contents": "Talk to the Manager, and every task it delegates shows up here as a terminal you can open, interrupt, or take over.\n[+ New Manager](command:aboard.newManager)"
       },
       {
         "view": "aboard.fleet",
@@ -203,6 +212,27 @@
           "default": 4000,
           "minimum": 0,
           "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to .aboard/runtime/prompts and are referenced with @path."
+        },
+        "aboard.launch.effort": {
+          "type": "string",
+          "enum": [
+            "inherit",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "enumDescriptions": [
+            "Pass no --effort flag; Claude Code's own effort level applies.",
+            "Launch with --effort low.",
+            "Launch with --effort medium.",
+            "Launch with --effort high.",
+            "Launch with --effort xhigh.",
+            "Launch with --effort max."
+          ],
+          "default": "inherit",
+          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, including the Manager, passed as `--effort`. Available levels depend on the model.\n\nThis is the session level: an agent definition that sets `effort:` in its `.claude/agents/<name>.md` frontmatter overrides it while that agent is active, so use the setting for the launches that have no definition to read — raw sessions, the builtin agent types, and resumed sessions. Applies to the next launch; a running agent keeps its level."
         },
         "aboard.workers.permissionMode": {
           "type": "string",
