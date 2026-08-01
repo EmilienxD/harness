@@ -5,6 +5,12 @@ import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
 import type { ReviewCoordinator } from "../github/review.js";
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
+/**
+ * The bound a foreground delegation runs under, matching the Manager Stop hook
+ * timeout (`docs/auto-implementation.md` §111). It is operator configuration —
+ * `ABOARD_MCP_TIMEOUT` — so it is documented here rather than served to the
+ * model as MCP `instructions`, which no agent can act on.
+ */
 export const ABOARD_MCP_TIMEOUT_SECONDS = 3600;
 
 interface McpTool {
@@ -37,33 +43,51 @@ const LAUNCH_PROPERTIES = {
   },
 } as const;
 
-const RUN_AGENT_DESCRIPTION = `Launch a visible, independent Claude Code agent in its own terminal. This is aboard's replacement for Claude Code's Agent tool: the agent is a real session the user can watch and take over, not an in-process subagent.
+const RUN_AGENT_DESCRIPTION = `Launch a visible, independent Claude Code agent in its own terminal. This is aboard's replacement for Claude Code's Agent tool: the agent is a real session the user can watch, interrupt, and take over, not an in-process subagent.
 
 Available agent types:
 - general-purpose: Claude Code's built-in full-tool agent for multi-step work that mixes exploring and editing. Runs in either mode.
-- Explore: Claude Code's built-in read-only search agent: it reads excerpts rather than whole files and returns findings rather than dumps, and being read-only it never holds the write lease. Runs in either mode.
+- Explore: Claude Code's built-in read-only search agent. Use it to find files by pattern (eg. "src/**/*.test.ts"), grep for symbols or keywords, or answer "where is X defined / which files reference Y". Do NOT use it for code review, design auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. State the breadth you want in the prompt: "quick" for a single targeted lookup, "medium" for moderate exploration, "very thorough" to search across multiple locations and naming conventions. Read-only, so it never holds the write lease. Runs in either mode.
 - brainstormer: Develop a product or architecture idea with the user and finish with a durable spec issue. Interactive only.
 - raw: An unconstrained Claude Code session with no agent definition, for a user who wants to work directly. Interactive only.
 
-The built-in types resolve to the agent definitions Claude Code ships; the other types' effective tools come from the project's own agent definition in .claude/agents/.
-
-Implementation agents are deliberately absent. \`implementer\`, \`pr-doctor-afk\`, and \`pr-doctor-hitl\` are reachable only through mcp__aboard__start_auto_run and mcp__aboard__review_pr, because the extension — not you — owns the implementation loop and performs every git and GitHub side effect in it. To get an issue implemented, start an auto-run; do not try to reproduce the loop by hand.
+To get an issue implemented, call mcp__aboard__start_auto_run. Implementation agents are not launchable here.
 
 ## Two modes
 
-**Interactive** (\`interactive: true\`) focuses the terminal and hands it to the user, who drives it from there. **No result is ever delivered** — never wait for one, never poll for one, and never tell the user you will report back. Hand off and continue the conversation. \`prompt\` is optional here and should be omitted unless the user named a specific topic to open on; they type the first message themselves. Never invent or paraphrase a topic to fill it in, because an invented opening turn spends the agent's first turn on a question the user did not ask.
+**Interactive** (\`interactive: true\`) focuses the terminal and hands it to the user, who drives it from there. **No result is ever delivered** — never wait for one, never poll for one, and never tell the user you will report back. Hand off and continue the conversation. \`prompt\` is optional here and should be omitted unless the user named a specific topic to open on; they type the first message themselves. Never invent or paraphrase a topic to fill it in: an invented opening turn spends the agent's first turn on a question the user did not ask.
 
-**Automated** (the default) has the agent work alone and report back, with \`run_in_background: true\` returning immediately instead of blocking this call, and requires a \`prompt\` — without one the agent would sit at an empty terminal forever, and nothing may type into it. Only \`general-purpose\` and \`Explore\` run in both modes; \`brainstormer\` and \`raw\` exist only to be handed to the user, so requesting either without \`interactive: true\` launches interactively anyway and says so in the result. Automated implementation work goes through mcp__aboard__start_auto_run, not through this tool.
+**Automated** (the default) has the agent work alone and report back, and requires a \`prompt\`. \`brainstormer\` and \`raw\` exist only to be handed to the user, so requesting either without \`interactive: true\` launches interactively anyway and says so in the result.
+
+**Foreground vs background**: foreground (the default) blocks this call until the agent's final message is available — use it when you need the result before you can say anything useful, such as research that decides what you recommend next. \`run_in_background: true\` returns immediately and notifies you on completion — use it for genuinely independent work, or when the user is mid-conversation and should not be left waiting on a tool call.
 
 ## When not to use
 
-If you only need project state, read it directly: mcp__aboard__get_todo and \`gh\` calls are far cheaper than an agent, and a file you can already name is a Read call, not an Explore launch. Hand over a coherent unit of work — a question that needs searching to answer, a task with real steps, one conversation the user wants to have — not a single lookup.
+If the target is already known, use the direct tool: Read for a known path, Grep for a specific symbol. The project roadmap, git state, open issues, and fleet are already in your context at session start — never launch an agent to fetch them, and never launch one to read a file you can name. Hand over a coherent unit of work: a question that needs searching to answer, a task with real steps, one conversation the user wants to have. Not a single lookup.
 
 ## Usage notes
 
-- Always include a short description; it names the agent's terminal in the fleet tree.
+- Always include a short description. It names the agent's terminal in the fleet tree and is what the user reads to know what is running, so "Audit retry centralization" beats "Investigate code".
+- When you launch several independent agents, send them in a single message so they run concurrently.
+- The user can watch the terminal, but the agent's returned result is not shown to them. Relay what matters in your own words.
+- Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an agent writes or edits code, check the actual change before reporting the work as done.
 - Neither flag bypasses the single-writer lease. At most one write-capable agent runs at a time; a second launch fails immediately with the current holder rather than queuing, and you should surface that to the user instead of retrying. Read-only agents stay concurrent.
-- Every call starts a fresh agent with no memory of prior runs, so any prompt must be self-contained.
+- Every call starts a fresh agent with no memory of prior runs and no view of this conversation.
+
+## Writing the prompt
+
+Brief the agent like a smart colleague who just walked into the room — it has not seen this conversation, does not know what the user asked, and does not know why the task matters.
+
+- Say what you are trying to accomplish, and why.
+- Name what you already know: the files you suspect, what you have ruled out, the constraint that makes the obvious answer wrong.
+- Give enough surrounding context that the agent can make judgement calls rather than following a narrow instruction off a cliff.
+- Lookups: hand over the exact path or command. Investigations: hand over the question — prescribed steps become dead weight when the premise is wrong.
+- Say what "done" looks like, and name the command that proves it.
+- If you need a short answer, say so ("report in under 200 words").
+
+Terse command-style prompts produce shallow, generic work.
+
+**Never delegate understanding.** Do not write "based on your findings, fix it" or "investigate and do the right thing" — those push synthesis onto the agent instead of doing it yourself. A prompt that proves you understood names files, symbols, and the specific change you expect.
 
 <example>
 user: "I want to think through the caching layer."
@@ -77,6 +101,19 @@ mcp__aboard__run_agent({
 <commentary>
 No result will come back. Tell the user the terminal is open and waiting for them, then continue; do not offer to summarize an outcome.
 </commentary>
+</example>
+
+<example>
+user: "Before we start #41, is the retry logic really all in one place like the issue claims?"
+assistant: <thinking>A factual question about the codebase that needs real searching, and the answer changes what I recommend next — so foreground, and I hold my recommendation until it lands.</thinking>
+mcp__aboard__run_agent({
+  type: "Explore",
+  description: "Audit retry logic centralization",
+  prompt: "Issue #41 assumes every HTTP retry in this repo goes through src/net/retry.ts, and plans a change in that one file. Verify that assumption. Find every retry, backoff, or re-attempt implementation, including ad-hoc loops that re-issue a request on failure without the shared helper. Medium breadth. Report file:line locations and say plainly whether the assumption holds; under 200 words."
+})
+<commentary>
+The prompt states the goal, the belief under test, what counts as a hit, the breadth, and the shape of the answer. Relay the finding to the user before recommending the auto-run.
+</commentary>
 </example>`;
 
 // Tools are served under bare names; Claude Code namespaces them for the model
@@ -89,24 +126,19 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     inputSchema: { type: "object", properties: LAUNCH_PROPERTIES, required: ["type", "description"], additionalProperties: false },
   },
   {
-    name: "get_todo",
-    description: "Return the body of the singleton open GitHub issue labelled todo. The bridge resolves and caches its number; callers never pass an issue identifier.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-  },
-  {
     name: "update_todo",
-    description: "Replace the singleton project TODO issue body. Creates the issue on first write when missing; the reason is for audit context and is not stored in the issue.",
+    description: "Replace the body of the project roadmap issue. The current roadmap is already in your context from session start, so read it there and write the full replacement body — there is no fetch step. Creates the issue on first write when missing. The reason is audit context for the user and is not stored in the issue.",
     inputSchema: { type: "object", properties: { body: { type: "string" }, reason: { type: "string", minLength: 1 } }, required: ["body", "reason"], additionalProperties: false },
   },
   {
     name: "start_auto_run",
-    description: `Start the automatic implementation run for the oldest open spec issue. The extension walks that spec's children one at a time and performs every git and GitHub side effect itself — branch, commit, push, pull request, merge — while agents only produce content.
+    description: `Start the automatic implementation run for the oldest open spec issue. The extension walks that spec's children one at a time and performs every git and GitHub side effect itself — branch, commit, push, pull request, merge.
 
 Returns immediately with the resolved plan: the spec, the issues it will process with their afk/hitl disposition and branch name, and the issues it is skipping and why. **Do not wait for the run and do not poll it.** A run routinely outlives this conversation, and its progress reaches you one line at a time on the user's next message. Report the plan to the user and continue.
 
 Only one run exists at a time; calling this while a run is active returns the active run's state instead of starting a second one. If the run cannot start — a dirty working tree, no open spec, no processable child — it returns \`started: false\` with the reason and launches nothing. Relay that reason verbatim; the dirty-tree case in particular is the user's own uncommitted work and only they can decide what to do with it.
 
-An \`hitl\` issue pauses the run at its pull request and waits for the user to merge it. That is the design, not a stall: tell the user which pull request is waiting.`,
+An \`hitl\` issue pauses the run at its pull request and waits for the user to merge it. That is the design, not a stall: tell the user which pull request is waiting, and that merging it resumes the run.`,
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -259,10 +291,6 @@ async function callTool(
           : coordinator.run(parsed.input, signal);
       return withNotices(await launched, parsed.notices);
     }
-    case "get_todo":
-      if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("arguments must be an empty object");
-      if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
-      return services.github.getTodo();
     case "update_todo": {
       if (!isRecord(args) || !exactKeys(args, ["body", "reason"])) throw new TypeError("arguments contain an unknown property");
       if (typeof args.body !== "string") throw new TypeError("body must be a string");
@@ -315,7 +343,6 @@ export function createMcpHandler(coordinator: McpCoordinator, services: McpServi
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "aboard", version: "0.0.0" },
-          instructions: `Foreground delegation may run for up to ${ABOARD_MCP_TIMEOUT_SECONDS} seconds. Configure ABOARD_MCP_TIMEOUT to match the Manager Stop hook timeout.`,
         });
       case "notifications/initialized":
         return { status: 202 };

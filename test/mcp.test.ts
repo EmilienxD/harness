@@ -124,10 +124,15 @@ function resultBody(response: Awaited<ReturnType<ReturnType<typeof createMcpHand
   return response.body as Record<string, unknown>;
 }
 
-test("publishes six distinct core tools and the one-hour timeout expectation", async () => {
+test("publishes five distinct core tools and no fetch tool for state it is already given", async () => {
   const { handler, call } = setup();
-  assert.equal(CORE_MCP_TOOLS.length, 6);
-  assert.equal(new Set(CORE_MCP_TOOLS.map((tool) => tool.name)).size, 6);
+  assert.equal(CORE_MCP_TOOLS.length, 5);
+  assert.equal(new Set(CORE_MCP_TOOLS.map((tool) => tool.name)).size, 5);
+  // The roadmap arrives inline in the session-start briefing, so there is no
+  // tool to fetch it: a round trip for context the Manager already holds is a
+  // turn spent on nothing.
+  assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === "get_todo"), false);
+  assert.match(JSON.stringify((await call("get_todo")).body), /Unknown MCP tool get_todo/);
   // Delivery timing and delivery existence are flags on one launch tool. Near
   // identical descriptions are what the Manager kept selecting between wrongly.
   for (const removed of ["spawn_agent", "spawn_interactive_agent"]) {
@@ -143,11 +148,14 @@ test("publishes six distinct core tools and the one-hour timeout expectation", a
   // list tool to turn into a decision.
   assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === "list_agents"), false);
   assert.match(JSON.stringify((await call("list_agents")).body), /Unknown MCP tool list_agents/);
+  // `initialize` carries no `instructions`: the only text it ever held was
+  // operator timeout configuration, which no agent can act on.
   const initialized = await handler({
     method: "POST", url: new URL("/mcp", "http://127.0.0.1"), headers: {},
     body: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, signal: new AbortController().signal,
   });
-  assert.match(JSON.stringify(initialized.body), /3600/);
+  const result = (initialized.body as { result: Record<string, unknown> }).result;
+  assert.equal("instructions" in result, false);
 });
 
 test("runtime-validates every tool boundary and rejects unknown fields", async () => {
@@ -161,7 +169,6 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     // A dual-mode type without the interactive flag is automated, and an
     // automated launch without a prompt is the one combination with no reading.
     ["run_agent", { type: "Explore", description: "map the auth flow" }],
-    ["get_todo", { issue: 12 }],
     ["update_todo", { body: "x", reason: "" }],
     ["review_pr", { pr: 0 }],
     ["start_auto_run", { spec: 12 }],
