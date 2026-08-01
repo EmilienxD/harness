@@ -13,6 +13,7 @@ const required = [
   "assets/aboard.svg",
   "assets/scaffold/.claude/hooks/aboard_hook.py",
   "assets/scaffold/.claude/hooks/aboard-hooks.json",
+  "assets/scaffold/.aboard/scripts/aboard_wrapper.py",
   "assets/scaffold/.claude/agents/manager.md",
   "assets/scaffold/.claude/agents/implementer.md",
   "assets/scaffold/.claude/skills/update-todo/SKILL.md",
@@ -24,7 +25,10 @@ const forbidden = [
   // User-owned skills are installed from upstream by command; a copy in the VSIX
   // would resurrect the drift that removing them was meant to end.
   ...VENDORED_SKILLS.map((skill) => new RegExp(`(^|/)\\.claude/skills/${skill.name}(/|$)`)),
-  /(^|\/)\.aboard(\/|$)/,
+  // Runtime state belongs to a live project and must never ship, but
+  // `assets/scaffold/.aboard/scripts/` is extension-owned and legitimately
+  // packaged (it is installed by the scaffolder like every other asset).
+  /(^|\/)\.aboard\/runtime(\/|$)/,
   /(^|\/)\.env(?:\.|$)/,
   /(^|\/)bridge\.json$/,
   /(^|\/)manager\.json$/,

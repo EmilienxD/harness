@@ -88,6 +88,13 @@ export interface CreateAboardTerminalRequest {
    * absence means the session is handed to the user and stays hook-silent.
    */
   readonly deliversResult?: boolean;
+  /**
+   * Proof-of-life timeout: if the SessionStart hook has not reported the TUI's
+   * process id within this many milliseconds, the launch failed (bad command,
+   * CLI error printed and exited) and the terminal is killed so the normal
+   * terminal-close settlement fires. Absent = no proof required (raw passthrough).
+   */
+  readonly startupTimeoutMs?: number;
 }
 
 export type TerminalLifecycleEvent =
@@ -145,6 +152,18 @@ export class TerminalControlError extends Error {
   }
 }
 
+/**
+ * Proof-of-life port implemented by the bridge's session-start tracker. The
+ * controller owns the arming point — terminal creation is the one moment every
+ * launch path (delegated workers, the Manager, PR resumes) passes through — so
+ * a failed `claude` invocation (bad flag, missing binary) is detected even in
+ * the window before the fleet registers the session.
+ */
+export interface StartupProofTracker {
+  awaitStarted(agentId: AgentId, sessionId: SessionId, timeoutMs: number): Promise<unknown>;
+  cancel(agentId: AgentId): void;
+}
+
 export interface TerminalControllerOptions {
   readonly host: TerminalHost;
   readonly environment: () => BridgeTerminalEnvironment;
@@ -153,6 +172,9 @@ export interface TerminalControllerOptions {
   readonly onLifecycleEvent?: (event: TerminalLifecycleEvent) => void;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly processIdTimeoutMs?: number;
+  /** When set with `startupTimeoutMs` on a launch, arms the proof-of-life watch. */
+  readonly startupProofs?: StartupProofTracker;
+  readonly onStartupTimeout?: (agentId: AgentId, sessionId: SessionId) => void;
 }
 
 /**
@@ -252,6 +274,21 @@ export class TerminalController {
 
     if (isUserFacing(request)) handle.show(false);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
+
+    // Startup security pass: a failed launch (bad flag, missing binary) exits
+    // before the TUI writes a transcript and produces no SessionStart hook, so
+    // the absence of proof within the timeout is the failure signal itself.
+    // The terminal is killed, which routes every settlement through the same
+    // terminal-close path a user kill would take.
+    if (request.startupTimeoutMs !== undefined && this.options.startupProofs !== undefined) {
+      void this.options.startupProofs.awaitStarted(request.agentId, request.sessionId, request.startupTimeoutMs)
+        .then(undefined, () => {
+          const current = this.#records.get(terminalId);
+          if (current === undefined || current.status !== "open") return;
+          this.options.onStartupTimeout?.(request.agentId, request.sessionId);
+          this.kill(terminalId);
+        });
+    }
     return this.#snapshot(record);
   }
 

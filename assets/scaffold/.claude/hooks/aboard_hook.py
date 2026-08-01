@@ -16,10 +16,7 @@ import urllib.request
 ROUTES = {
     "manager-prompt": "/hooks/manager/prompt",
     "manager-stop": "/hooks/manager/stop",
-    "manager-brief-git": "/hooks/manager/brief-git",
-    "manager-brief-github": "/hooks/manager/brief-github",
-    "manager-brief-fleet": "/hooks/manager/brief-fleet",
-    "manager-brief-todo": "/hooks/manager/brief-todo",
+    "manager-brief": "/hooks/manager/brief",
     "worker-subagent-start": "/hooks/worker/subagent-start",
     "worker-subagent-stop": "/hooks/worker/subagent-stop",
     "worker-agent-tool": "/hooks/worker/agent-tool",
@@ -27,6 +24,8 @@ ROUTES = {
     "worker-reground": "/hooks/worker/reground",
     "worker-stop": "/hooks/stop",
     "worker-stop-failure": "/hooks/stop-failure",
+    "session-start": "/hooks/session-start",
+    "session-end": "/hooks/session-end",
 }
 
 # The only route whose event (`UserPromptSubmit`) can be blocked. Exit 2 on any
@@ -94,8 +93,14 @@ def main():
     # for all other prompts so worker input remains untouched.
     if route == BLOCKING_ROUTE and agent_type != "manager" and not intercepted_prompt(prompt, agent_type):
         return 0
-    if (expected_manager and route != BLOCKING_ROUTE and agent_type != "manager") or (
-        not expected_manager and agent_type not in WORKER_AGENT_TYPES and not delivers_result
+    # Lifecycle routes are role-agnostic: every aboard session reports its TUI
+    # pid and its end, so the write-lease recovery and startup proof-of-life
+    # cover Managers, interactive types, and workers alike. Only `ABOARD_AGENT_ID`
+    # gates them (checked above), never the agent type.
+    if route not in ("session-start", "session-end") and (
+        (expected_manager and route != BLOCKING_ROUTE and agent_type != "manager") or (
+            not expected_manager and agent_type not in WORKER_AGENT_TYPES and not delivers_result
+        )
     ):
         return 0
     blocking = route == BLOCKING_ROUTE
@@ -107,7 +112,19 @@ def main():
         return finish("Aboard could not handle that command because bridge discovery is unavailable.") if is_intercepted else 0
     event = payload.get("hook_event_name")
     session_id = os.environ.get("ABOARD_SESSION_ID") or payload.get("session_id")
-    if endpoint.startswith("/hooks/worker/"):
+    if endpoint == "/hooks/session-start":
+        # Proof-of-life only: the liveness signal itself is the wrapper's lock
+        # file (`.aboard/runtime/locks/<agentId>.lock`), owned by
+        # `.aboard/scripts/aboard_wrapper.py` for the child's exact lifetime.
+        # No pid, no process-table scraping.
+        if event != "SessionStart":
+            return 0
+        body = {"agentId": agent_id, "sessionId": session_id, "source": payload.get("source")}
+    elif endpoint == "/hooks/session-end":
+        if event != "SessionEnd":
+            return 0
+        body = {"agentId": agent_id, "sessionId": session_id, "reason": payload.get("reason") or "other"}
+    elif endpoint.startswith("/hooks/worker/"):
         body = {"parentAgentId": agent_id}
         if endpoint.endswith("/subagent-start") or endpoint.endswith("/subagent-stop"):
             body.update({"childAgentId": payload.get("agent_id"), "agentType": payload.get("agent_type")})

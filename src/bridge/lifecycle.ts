@@ -143,6 +143,19 @@ export class WorkerLifecycleReconciler {
     });
   }
 
+  /**
+   * The TUI process died while its terminal stayed open (user typed `exit` or
+   * double Ctrl+C at the shell). It settles exactly like a terminal close:
+   * from the fleet's perspective the worker is gone either way. `#once` makes
+   * the race with a real terminal close and with a Stop hook benign.
+   */
+  public processEnded(observation: { readonly agentId: AgentId; readonly sessionId: SessionId }): Promise<boolean> {
+    return this.#once(observation.agentId, async () => {
+      this.#requireIdentity(observation.agentId, observation.sessionId);
+      return this.#finish(observation.agentId, failure("crashed", null, null, this.#telemetry(observation.agentId)));
+    });
+  }
+
   #once(agentId: AgentId, operation: () => Promise<boolean>): Promise<boolean> {
     const existing = this.#settling.get(agentId);
     if (existing !== undefined) return existing.then(() => false);

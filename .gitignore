@@ -25,7 +25,11 @@ Thumbs.db
 # Scaffold templates contain a project .claude directory intentionally.
 !assets/scaffold/.claude/
 !assets/scaffold/.claude/**
+# .aboard/ holds live runtime state in user projects; the scaffold's
+# extension-owned scripts must still be committable.
 .aboard/
+!assets/scaffold/.aboard/
+!assets/scaffold/.aboard/**
 .claude/settings.local.json
 
 private-notes/

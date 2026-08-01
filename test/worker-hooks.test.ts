@@ -14,6 +14,7 @@ import { WriteLease } from "../src/domain/lease.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import { ManagerBriefings, ManagerPromptService, ManagerStopService, createManagerHookRoutes } from "../src/bridge/manager-hooks.js";
 import { createWorkerLifecycleRoutes } from "../src/bridge/lifecycle.js";
+import { SessionLifecycleService, SessionProcessMonitor, createSessionLifecycleRoutes } from "../src/bridge/session-lifecycle.js";
 
 const at = (value: string) => value as IsoTimestamp;
 const timestamp = at("2026-07-30T12:00:00.000Z");
@@ -117,11 +118,71 @@ test("worker Python hook guards the dual-mode builtin types on ABOARD_DELIVERS_R
   }
 });
 
+test("session Python hooks post proof-of-life and reason, and stay silent without boarding env", async () => {
+  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  // Guard path: no ABOARD_AGENT_ID means a hand-started session, which must
+  // exit 0 with neither stdout nor stderr even for the new routes.
+  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "session-start"], { input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup" }), encoding: "utf8" });
+  assert.equal(silent.status, 0); assert.equal(silent.stdout, ""); assert.equal(silent.stderr, "");
+  // A SessionEnd payload on the session-start route is dropped before any POST.
+  const silentEvent = spawnSync("uv", ["run", "--no-project", "python", script, "session-start"], { input: JSON.stringify({ hook_event_name: "SessionEnd", reason: "clear" }), encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "w1" } });
+  assert.equal(silentEvent.status, 0); assert.equal(silentEvent.stdout, ""); assert.equal(silentEvent.stderr, "");
+
+  const received: { url?: string; body?: Record<string, unknown> }[] = [];
+  const server = createServer((incoming, outgoing) => {
+    const chunks: Buffer[] = [];
+    incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+    incoming.on("end", () => {
+      received.push({ ...(incoming.url === undefined ? {} : { url: incoming.url }), body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown> });
+      outgoing.writeHead(200, { "content-type": "application/json" });
+      outgoing.end("{}");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+    // A Manager-type env with no delivery flag: the session-lifecycle routes
+    // must fire for every aboard session, not only result-delivering workers.
+    const envFor = { ...process.env, ABOARD_AGENT_ID: "boarded", ABOARD_AGENT_TYPE: "manager", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" };
+    // Async spawn, like the other live-POST hook tests: a synchronous spawn
+    // would block the event loop that must answer the hook's request.
+    const run = (route: string, payload: object) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn("uv", ["run", "--no-project", "python", script, route], { env: envFor, stdio: ["pipe", "pipe", "pipe"] });
+      let stdout = ""; let stderr = "";
+      child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+      child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+      child.stdin.end(JSON.stringify(payload));
+      child.once("error", reject);
+      child.once("close", (status) => resolve({ status, stdout, stderr }));
+    });
+
+    const started = await run("session-start", { hook_event_name: "SessionStart", source: "startup", session_id: "s-1" });
+    assert.equal(started.status, 0); assert.equal(started.stdout, ""); assert.equal(started.stderr, "");
+    const startPost = received.find((entry) => entry.url === "/hooks/session-start");
+    assert.ok(startPost !== undefined);
+    assert.deepEqual(startPost.body, { agentId: "boarded", sessionId: "s-1", source: "startup" });
+
+    const ended = await run("session-end", { hook_event_name: "SessionEnd", reason: "clear", session_id: "s-1" });
+    assert.equal(ended.status, 0); assert.equal(ended.stdout, ""); assert.equal(ended.stderr, "");
+    const endPost = received.find((entry) => entry.url === "/hooks/session-end");
+    assert.ok(endPost !== undefined);
+    assert.equal(endPost.body?.reason, "clear");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+  }
+});
+
 test("scaffold registers lifecycle, Agent telemetry, and compact re-grounding", async () => {
+
   const hooks = JSON.parse(await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8")) as Record<string, unknown>;
   for (const event of ["SubagentStart", "SubagentStop", "PostToolUse", "PostCompact", "Stop", "StopFailure"]) assert.ok(event in hooks);
   assert.equal((hooks.PostToolUse as { matcher: string }[])[0]?.matcher, "Agent");
-  assert.equal((hooks.SessionStart as unknown[]).length, 2);
+  // SessionStart carries the proof-of-life registration plus the manager
+  // briefings and the compact re-grounding entry.
+  assert.equal((hooks.SessionStart as unknown[]).length, 3);
+  assert.ok("SessionEnd" in hooks);
   // InstructionsLoaded has no decision control, so additionalContext returned
   // from it is discarded. Re-grounding must ride SessionStart(compact) alone.
   assert.ok(!("InstructionsLoaded" in hooks));
@@ -169,15 +230,28 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
   // how the Manager briefings and worker results were silently lost before.
   const fleet = new FleetRegistry();
   const lease = new WriteLease();
-  const stubGit = { branch: "main", head: "abc1234", dirty: false };
   const briefings = new ManagerBriefings(
-    { git: async () => stubGit, github: async () => ({ readyIssues: [], openPullRequests: [], hitlIssues: [], unreviewedMergeCount: 0 }), todoIssue: async () => 12 },
+    {
+      repository: async () => ({ name: "aboard", defaultBranch: "main", checks: [] }),
+      git: async () => ({ branch: "main", head: "abc1234", dirty: false }),
+      github: async () => ({ issues: [], openPullRequests: [], unreviewedMergeCount: 0 }),
+      roadmap: async () => ({ number: 12, body: "roadmap" }),
+      autoRun: () => undefined,
+    },
     fleet, lease,
   );
   const handler = combineHandlers(
     createManagerHookRoutes(briefings, new ManagerStopService({ fleet }), new ManagerPromptService(fleet, { spawnInteractive: async () => ({ agentId: "a" }) })),
     createWorkerLifecycleRoutes({ stop: async () => true, stopFailure: async () => true, timeout: async () => true, terminalClosed: async () => true } as never),
     createWorkerHookRoutes(new WorkerHookService(fleet)),
+    createSessionLifecycleRoutes({
+      service: new SessionLifecycleService({
+        fleet,
+        monitor: new SessionProcessMonitor({ probe: () => true }),
+        settlement: { settleCleared: () => undefined },
+        lockPathFor: () => "x.lock",
+      }),
+    }),
   );
 
   for (const endpoint of registered) {
