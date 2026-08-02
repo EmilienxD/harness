@@ -41,9 +41,7 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 ## Blocked by
 
-- `{${CLAUDE_SESSION_ID}/{i}}` of the blocking issue, one per line
-
-Or "None - can start immediately" if no blockers.
+`{${CLAUDE_SESSION_ID}/{i}}` of each blocking issue, one per line or "None - can start immediately" if no blockers.
 
 </issue-template>
 

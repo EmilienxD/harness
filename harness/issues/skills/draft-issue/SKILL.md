@@ -4,7 +4,7 @@ description: Draft a single GitHub issue to a markdown file in .issues-gateway/ 
 disable-model-invocation: true
 ---
 
-This skill is step 1/2 of a single-issue publishing system: drafting, then publishing. It turns what the user wants — from the conversation, or from the argument passed to this skill — into ONE markdown file. Do not run `gh` or publish anything — that only happens in the next step (publishing).
+This skill is step 1/2 of a single-issue publishing system: drafting, then publishing. It turns what the user wants — from the conversation, or from the argument passed to this skill — into a markdown file. Do not run `gh` or publish anything — that only happens in the next step (publishing).
 
 ## Process
 
@@ -53,9 +53,7 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 ## Blocked by
 
-Real tracker issue numbers only (`#42`), one per line — this flow drafts a single issue, so there are no sibling drafts to reference.
-
-Or "None - can start immediately" if no blockers.
+A reference to each blocking issue, or "None — can start immediately".
 
 </issue-template>
 
