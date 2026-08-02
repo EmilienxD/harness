@@ -73,7 +73,7 @@ def test_user_and_project_installs_are_independent(tmp_path, home):
 
 
 def test_user_scope_uninstall_round_trips(home):
-    main(["install", "commit", "create-issues", "--user"])
+    main(["install", "commit", "issues", "--user"])
     main(["uninstall", "all", "--user"])
     assert list((home / ".claude").rglob("*")) == []
 

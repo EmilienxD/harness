@@ -67,12 +67,11 @@ Restart Claude Code after installing so it picks up new hooks and skills.
 |---|---|
 | [`caveman`](harness/caveman/SKILL.md) | Ultra-compressed communication mode |
 | [`commit`](harness/commit/README.md) | `/commit` that stages and commits with zero model calls |
-| [`create-issue`](harness/create-issue/README.md) | One idea → one reviewed, labeled GitHub issue |
-| [`create-issues`](harness/create-issues/README.md) | Plan → reviewed, dependency-linked GitHub issues |
 | [`create-skill`](harness/create-skill/SKILL.md) | Guide for authoring new Claude Skills |
 | [`grill-me`](harness/grill-me/SKILL.md) | Interviews you to stress-test a plan or design |
 | [`handoff`](harness/handoff/SKILL.md) | Compacts a conversation into a handoff doc |
 | [`improve-codebase-architecture`](harness/improve-codebase-architecture/SKILL.md) | Finds architectural friction, proposes refactors |
+| [`issues`](harness/issues/README.md) | Draft, spec and publish reviewed GitHub issues — one or a whole plan |
 | [`on-edit-block`](harness/on-edit-block/README.md) | Blocks edits to protected files until Claude reads the required files |
 | [`on-read-reminder`](harness/on-read-reminder/README.md) | Reminds Claude to read your key files when it reads matching paths |
 | [`prefer-read-tool`](harness/prefer-read-tool/README.md) | Nudges Claude to use Read instead of `cat`/`sed` |

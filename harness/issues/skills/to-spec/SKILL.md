@@ -1,28 +1,20 @@
 ---
 name: to-spec
-description: Turn the current conversation into a spec and write it to wherever the user asked — no interview, just synthesis of what you've already discussed.
+description: Turn the current conversation into a spec, delivered directly in chat — no interview, just synthesis of what you've already discussed.
 disable-model-invocation: true
 ---
 
-This skill takes the current conversation context and codebase understanding and produces a spec (you may know this document as a PRD). Do NOT interview the user — just synthesize what you already know.
-
-## Determining where to write the spec
-
-If the user passed arguments along with the invocation, treat them as instructions for where the spec should go:
-
-- If they name a file or path (e.g. "save it to specs/checkout.md"), write the spec there.
-- If they mention a GitHub issue (e.g. "open a GitHub issue", "put it on the tracker"), create it as a GitHub issue, follow how they want it to be created (e.g. with `gh issue create --body`, `gh issue create --body-file`, or Github MCP if available). Defaults to `gh issue create --body` using heredoc.
-- If no destination is specified, **default to writing the spec directly in the chat** — do not assume a file or issue tracker.
+This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user — just synthesize what you already know.
 
 ## Process
 
-1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.
+1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, if available.
 
 2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
 
 Check with the user that these seams match their expectations.
 
-3. Write the spec using the template below, then deliver it to the destination determined above (chat, file, or GitHub issue).
+3. Write the spec using the template below. **Default: write the spec directly in the chat.** Do not write it to a file, and do not create a GitHub issue, unless the user explicitly asked for one of those in this invocation.
 
 <spec-template>
 

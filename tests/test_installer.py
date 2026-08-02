@@ -37,7 +37,7 @@ def claude_files(target):
 
 
 def test_every_tool_has_a_valid_manifest():
-    assert set(TOOLS) >= {"caveman", "commit", "create-issue", "create-issues"}
+    assert set(TOOLS) >= {"caveman", "commit", "issues"}
     for tool in TOOLS.values():
         assert tool.expand(), f"{tool.name} resolves to no files"
 
@@ -52,15 +52,19 @@ def test_install_leaves_no_lock_or_backup(target):
     target.claude_dir.mkdir(parents=True)
     target.settings_path.write_text('{"model": "opus"}', encoding="utf-8")
     install("commit", target)
-    install("create-issues", target)
+    install("issues", target)
     assert claude_files(target) == [
         "hooks/commit_user_prompt_submit_hook.py",
         "hooks/publish_issues.py",
         "settings.json",
         "skills/commit/SKILL.md",
+        "skills/draft-issue/SKILL.md",
         "skills/draft-issues/SKILL.md",
         "skills/map-issues/SKILL.md",
+        "skills/publish-issue/SKILL.md",
         "skills/publish-issues/SKILL.md",
+        "skills/to-spec-draft-issue/SKILL.md",
+        "skills/to-spec/SKILL.md",
     ]
 
 
@@ -140,14 +144,14 @@ def test_reinstall_is_idempotent(target):
 
 def test_two_hook_tools_stack(target):
     install("commit", target)
-    install("create-issues", target)
+    install("issues", target)
     groups = settings(target)["hooks"]["UserPromptSubmit"]
     assert sum(len(g["hooks"]) for g in groups) == 2
 
 
 def test_uninstall_removes_only_its_own(target):
     install("commit", target)
-    install("create-issues", target)
+    install("issues", target)
     uninstall(TOOLS["commit"], target)
     assert not (target.claude_dir / "hooks/commit_user_prompt_submit_hook.py").exists()
     assert not (target.claude_dir / "skills/commit").exists()

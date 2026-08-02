@@ -2,9 +2,9 @@
 """UserPromptSubmit hook: publishes drafted GitHub issues from .issues-gateway/.
 
 Fires before Claude ever sees the prompt. When the prompt is "/publish-issues"
-(optionally "/publish-issues --dry-run"), this script does all the work itself
-with `gh` and exits 2, which erases the prompt and shows stderr to the user
-only - zero API calls for this step.
+or "/publish-issue" (optionally with "--dry-run"), this script does all the
+work itself with `gh` and exits 2, which erases the prompt and shows stderr to
+the user only - zero API calls for this step.
 
 Design notes:
 - Each batch lives in its own directory: ".issues-gateway/{session-id}/",
@@ -17,11 +17,12 @@ Design notes:
   /draft-issues emitted a correct topological order. This script no longer
   *assumes* that ordering is perfect - see the retry pass below.
 - The first "# " header line in a draft file is the issue title. The first
-  non-empty line after that must be "> difficulty:{low|medium|high}, mode:{afk|hitl}"
-  (see /draft-issues) - it is parsed and mapped to the flat label names
-  ("low-difficulty", "medium-difficulty", "high-difficulty", "afk", "hitl")
-  via LABEL_ALIASES, then stripped from the body that gets posted, since the
-  labels carry that information from then on.
+  non-empty line after that declares labels (see /draft-issues, /draft-issue,
+  /to-spec-draft-issue): either "> difficulty:{low|medium|high}, mode:{afk|hitl}"
+  or "> spec". It is parsed and mapped to flat label names
+  ("low-difficulty", "medium-difficulty", "high-difficulty", "afk", "hitl",
+  "spec") via LABEL_ALIASES, then stripped from the body that gets posted,
+  since the labels carry that information from then on.
 - A reference to another draft issue, written as "{session-id}/{i}" in the body, is
   rewritten to "#<real-issue-number>" once that draft has been published.
   This is how "blocked by" links get resolved without creating issues
@@ -58,6 +59,9 @@ from pathlib import Path
 
 GATEWAY_DIR = Path(".issues-gateway")
 
+# "/publish-issue", "/publish-issues", and their "--dry-run" variants match.
+PROMPT_PATTERN = re.compile(r"^/publish-issues?(?:\s|$)")
+
 # A reference to another draft issue inside a body, e.g.
 # "{6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0}"
 REF_PATTERN = re.compile(r"\{([0-9a-zA-Z_-]+)/(\d+)\}")
@@ -76,13 +80,16 @@ FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
 # "issue-{i}-#{number}.md"
 PUBLISHED_FILENAME_PATTERN = re.compile(r"^issue-(\d+)-#(\d+)\.md$")
 
-# The label declaration line produced by /draft-issues, e.g.
+# The label declaration line produced by /draft-issues or /draft-issue, e.g.
 # "> difficulty:medium, mode:hitl". Tolerant of leading whitespace before
 # the ">" and of surrounding spaces around the comma.
 LABEL_LINE_PATTERN = re.compile(
     r"^\s*>\s*(difficulty:(?:low|medium|high))\s*,\s*(mode:(?:afk|hitl))\s*$",
     re.IGNORECASE,
 )
+
+# The label declaration line produced by /to-spec-draft-issue.
+SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*spec\s*$", re.IGNORECASE)
 
 # Canonical labels this workflow depends on: (color, description). Created
 # (or updated) with --force at the start of every publish run, so they
@@ -93,6 +100,7 @@ CANONICAL_LABELS = {
     "high-difficulty": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
     "afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
     "hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
+    "spec": ("7057FF", "A product spec synthesized from conversation."),
 }
 
 # The declaration line uses "difficulty:{level}" / "mode:{mode}" tokens; the
@@ -110,8 +118,8 @@ def ensure_labels(dry_run: bool) -> list[str]:
     """Create or update the canonical labels. Returns warning lines, if any."""
     if dry_run:
         return [
-            "  DRY   would ensure 5 canonical labels exist "
-            "(low/medium/high-difficulty, afk, hitl)"
+            "  DRY   would ensure 6 canonical labels exist "
+            "(low/medium/high-difficulty, afk, hitl, spec)"
         ]
 
     warnings = []
@@ -155,10 +163,11 @@ def parse_issue_file(path: Path) -> tuple[str, str]:
 
 
 def extract_labels(rest: str) -> tuple[list[str], str]:
-    """Pull the '> difficulty:..., mode:...' line out of the body.
+    """Pull the label declaration line out of the body.
 
-    Returns (labels, remaining_body). labels is empty if the line is
-    missing or malformed.
+    Accepts either "> difficulty:..., mode:..." (two labels) or "> spec"
+    (one label). Returns (labels, remaining_body). labels is empty if the
+    line is missing or malformed.
     """
     lines = rest.splitlines()
     idx = 0
@@ -173,6 +182,9 @@ def extract_labels(rest: str) -> tuple[list[str], str]:
             ]
             remaining = "\n".join(lines[idx + 1:]).strip()
             return labels, remaining
+        if SPEC_LABEL_LINE_PATTERN.match(lines[idx]):
+            remaining = "\n".join(lines[idx + 1:]).strip()
+            return ["spec"], remaining
     return [], rest.strip()
 
 
@@ -296,10 +308,11 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
             title, rest = parse_issue_file(path)
             labels, body_with_refs = extract_labels(rest)
 
-            if len(labels) != 2:
+            if not labels or (labels != ["spec"] and len(labels) != 2):
                 failed_entries.append(
-                    f"  SKIP  {path.name} - missing or malformed "
-                    f"'> difficulty:{{low|medium|high}}, mode:{{afk|hitl}}' line"
+                    f"  SKIP  {path.name} - missing or malformed label line "
+                    f"(expected '> difficulty:{{low|medium|high}}, mode:{{afk|hitl}}' "
+                    f"or '> spec')"
                 )
                 made_progress = True  # not retryable, don't requeue
                 continue
@@ -359,7 +372,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
 
 def publish_issues(dry_run: bool) -> str:
     if not GATEWAY_DIR.is_dir():
-        return "No .issues-gateway/ folder found. Run /draft-issues first."
+        return "No .issues-gateway/ folder found. Run /draft-issue or /draft-issues first."
 
     batch_dirs = gather_batch_dirs()
     if not batch_dirs:
@@ -401,7 +414,7 @@ def main() -> None:
     payload = json.load(sys.stdin)
     prompt = payload.get("prompt", "").strip()
 
-    if prompt.startswith("/publish-issues"):
+    if PROMPT_PATTERN.match(prompt):
         dry_run = "--dry-run" in prompt.split()
         result = publish_issues(dry_run)
         sys.stderr.write(result + "\n")

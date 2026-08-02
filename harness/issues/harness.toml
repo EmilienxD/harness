@@ -1,0 +1,38 @@
+name = "issues"
+version = "1.2.0"
+description = "Draft, spec and publish reviewed GitHub issues - one at a time or a whole plan"
+requires = ["git", "gh"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/issues/README.md"
+
+[[files]]
+src = "hooks/publish_issues.py"
+dest = "hooks/publish_issues.py"
+executable = true
+
+[[files]]
+src = "skills/draft-issue"
+dest = "skills/draft-issue"
+
+[[files]]
+src = "skills/publish-issue"
+dest = "skills/publish-issue"
+
+[[files]]
+src = "skills/map-issues"
+dest = "skills/map-issues"
+
+[[files]]
+src = "skills/draft-issues"
+dest = "skills/draft-issues"
+
+[[files]]
+src = "skills/publish-issues"
+dest = "skills/publish-issues"
+
+[[files]]
+src = "skills/to-spec"
+dest = "skills/to-spec"
+
+[[files]]
+src = "skills/to-spec-draft-issue"
+dest = "skills/to-spec-draft-issue"
