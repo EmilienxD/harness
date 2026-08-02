@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
+
+import { lockMarkerDirectory, lockMarkerPresent, takeSessionExitRecord, watchLockMarkers } from "../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_wrapper.py");
 
@@ -18,24 +20,100 @@ test("wrapper owns the marker for exactly the child's lifetime", async () => {
   // moment it exits, whatever the exit reason.
   const child = spawn("uv", ["run", "--no-project", "python", WRAPPER, lock, "--", process.execPath, "-e", "setTimeout(() => {}, 10000)"], { stdio: "ignore" });
   try {
+    // The marker is written before the spawn and rewritten with the child's pid,
+    // so "the file exists" and "the child is known" are two different moments.
     const deadline = Date.now() + 10_000;
-    while (!existsSync(lock)) {
-      if (Date.now() > deadline) throw new Error("marker was not created");
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    let marker: Record<string, unknown> = {};
+    while (typeof marker.childPid !== "number") {
+      if (Date.now() > deadline) throw new Error("marker never named a child");
+      if (existsSync(lock)) {
+        try { marker = JSON.parse(readFileSync(lock, "utf8")) as Record<string, unknown>; } catch { /* mid-write */ }
+      }
+      if (typeof marker.childPid !== "number") await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    const marker = JSON.parse(readFileSync(lock, "utf8")) as Record<string, unknown>;
     assert.equal(typeof marker.wrapperPid, "number");
-    assert.equal(typeof marker.childPid, "number");
     assert.equal(marker.agentId, null);
 
     // exit code, killed child, crashed child: every ending removes the marker.
-    const killed = JSON.parse(readFileSync(lock, "utf8")) as { childPid: number };
-    process.kill(killed.childPid);
+    process.kill(marker.childPid as number);
     const closed = await new Promise<number | null>((resolve) => child.once("close", resolve));
     assert.equal(typeof closed, "number");
     assert.equal(existsSync(lock), false);
+
+    // ... and leaves the exit record behind for the extension to read.
+    const record = takeSessionExitRecord(lock);
+    assert.notEqual(record, undefined);
+    assert.equal(typeof record?.exitCode, "number");
+    assert.equal(takeSessionExitRecord(lock), undefined, "the record is consumed");
   } finally {
     child.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("marker removal wakes the watcher long before the next poll interval", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-markers-"));
+  const directory = lockMarkerDirectory(root);
+  mkdirSync(directory, { recursive: true });
+  let sweeps = 0;
+  const watching = watchLockMarkers(directory, () => { sweeps += 1; }, 10);
+  const lock = join(directory, "a1.lock");
+  try {
+    writeFileSync(lock, "{}");
+    assert.equal(lockMarkerPresent(lock), true);
+    rmSync(lock);
+    const deadline = Date.now() + 5_000;
+    while (sweeps === 0) {
+      if (Date.now() > deadline) throw new Error("marker removal did not wake the watcher");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(lockMarkerPresent(lock), false);
+  } finally {
+    watching.dispose();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the watch leaves an uninitialized workspace untouched and attaches once the directory appears", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-markers-"));
+  const directory = lockMarkerDirectory(root);
+  let sweeps = 0;
+  const watching = watchLockMarkers(directory, () => { sweeps += 1; }, 10, 20);
+  try {
+    // Activation in a project that was never initialized must not create `.aboard/`.
+    assert.equal(existsSync(join(root, ".aboard")), false);
+
+    // A launch creates it, as the wrapper does; the watch must pick it up.
+    mkdirSync(directory, { recursive: true });
+    const lock = join(directory, "a1.lock");
+    const deadline = Date.now() + 5_000;
+    while (sweeps === 0) {
+      if (Date.now() > deadline) throw new Error("watch never attached to the created directory");
+      writeFileSync(lock, "{}");
+      rmSync(lock, { force: true });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  } finally {
+    watching.dispose();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a command that cannot be spawned is reported in the exit record", () => {
+  // The shell found the wrapper but not Claude. Nothing else observes this:
+  // no TUI, no hook, no session.
+  const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-"));
+  const lock = join(root, "a.lock");
+  try {
+    const result = uv([WRAPPER, lock, "--", join(root, "definitely-not-claude")]);
+    assert.equal(result.status, 127);
+    assert.equal(existsSync(lock), false);
+    const record = takeSessionExitRecord(lock);
+    assert.equal(record?.exitCode, 127);
+    // The OS phrases this in the user's own language, so only its presence is
+    // asserted; the extension surfaces the text verbatim.
+    assert.ok((record?.error ?? "").length > 0, "the spawn error is recorded");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

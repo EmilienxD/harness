@@ -15,7 +15,8 @@ import { TerminalController } from "./claude/terminals.js";
 import { isBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
-import { sessionTranscriptExists } from "./claude/sessions.js";
+import { sessionIsResumable } from "./claude/sessions.js";
+import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
@@ -54,7 +55,7 @@ import {
   SessionStartupProofs,
   createSessionLifecycleRoutes,
 } from "./bridge/session-lifecycle.js";
-import { lockMarkerPresent, sessionWrapperLayout } from "./runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
@@ -65,6 +66,7 @@ import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } fr
 
 /** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the claude CLI boot. */
 const STARTUP_PROOF_TIMEOUT_MS = 60_000;
+const SESSION_LIVENESS_POLL_MS = 5_000;
 import { registerReviewCommand } from "./vscode/review.js";
 import { ProcessGitClient, type GitClient } from "./git/client.js";
 import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
@@ -242,6 +244,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       output.appendLine(`Agent ${agentId} (session ${sessionId}) did not produce a SessionStart hook in time; closing the terminal as a failed launch.`);
     },
     onLifecycleEvent: (event) => {
+      // Watch the marker from the launch itself, not from SessionStart: the
+      // window in between is exactly where a CLI that rejects its arguments
+      // dies, and nothing else observes it.
+      if (event.type === "terminal-created") {
+        sessionMonitor.trackLaunch({
+          agentId: event.agentId,
+          sessionId: event.sessionId,
+          lockFile: wrapperLayout.lockPathFor(event.agentId),
+        });
+      }
       if (event.type === "terminal-closed") {
         output.appendLine(`Terminal ${event.terminalId} closed (${event.reason}, exit ${event.exitCode ?? "unknown"})`);
         // The terminal close is authoritative: stop tracking the process so a
@@ -272,18 +284,54 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
   const launchConfigurations = workerConfigurations(workspaceRoot);
   const wrapperLayout = sessionWrapperLayout(workspaceRoot);
-  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
+  // aboard types its launch into a shell it does not own and never sees the
+  // command's exit status. Asking `claude --version` in a child process aboard
+  // does own turns "the terminal is full of shell errors" into a refused launch
+  // with a reason. Cached per command, so only the first launch pays.
+  const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
+  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   // A settled session leaves its terminal to be collected: the record the
   // fleet dropped still names an open terminal, and the next launch for the
   // same agent fails the one-live-terminal invariant until it is closed —
   // "agent already has a live aboard terminal" on relaunch was exactly that
-  // leak. Kill on the way out; the close event lands on an already-settled
-  // agent and untracks it harmlessly.
-  const closeAbandonedTerminal = (agentId: AgentId): void => {
-    const terminalId = fleet.get(agentId)?.terminal.terminalId;
+  // leak. Releasing the record clears the invariant without touching the
+  // terminal: ending the session and closing the shell are separate gestures,
+  // and a user who pressed Ctrl+C twice kept the shell on purpose. Closing it
+  // as well is opt-in. The terminal id comes from the terminal controller, not
+  // the fleet: every caller here settles the fleet record first, so a fleet
+  // lookup would find nothing and silently leak the terminal.
+  const releaseAbandonedTerminal = (agentId: AgentId): void => {
+    const terminalId = terminals.liveTerminalForAgent(agentId);
     if (terminalId === undefined) return;
-    try { terminals.kill(terminalId); } catch { /* already closed */ }
+    if (currentConfiguration.closeTerminalOnSessionEnd) {
+      try { terminals.kill(terminalId); } catch { /* already closed */ }
+      return;
+    }
+    terminals.release(terminalId);
+  };
+  /**
+   * A launch that died on its way up. The Claude CLI printed its reason into
+   * the terminal and exited before any session existed, so nothing downstream
+   * would ever settle this agent: the fleet record would sit at `starting`
+   * forever and the write lease with it. The terminal is left alone by default
+   * precisely because it holds the error text the user needs to read.
+   */
+  const reportFailedLaunch = (agentId: AgentId, sessionId: SessionId, exit: SessionExitRecord | undefined): void => {
+    const cause = exit?.error !== undefined
+      ? `could not be started (${exit.error})`
+      : `exited with code ${exit?.exitCode ?? "unknown"} before starting a session`;
+    output.appendLine(`Launch failed for agent ${agentId} (session ${sessionId}): claude ${cause}. The terminal holds the error.`);
+    // The launch is settled; the proof's timeout must not fire later and kill a
+    // terminal whose error message is the whole point of keeping it.
+    sessionProofs.cancel(agentId);
+    const at = new Date().toISOString() as IsoTimestamp;
+    if (fleet.get(agentId) !== undefined) {
+      lease.releaseForTerminalOutcome(agentId, at, "launch failed before the session started");
+      fleet.remove(agentId, at);
+    }
+    releaseAbandonedTerminal(agentId);
+    void window.showWarningMessage(`aboard could not start Claude: it ${cause}. Check the terminal for the error.`);
   };
   // The wrapper's marker file is the strongest liveness source aboard owns:
   // the user can kill the TUI from inside while keeping the shell (`exit`,
@@ -293,22 +341,27 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // skip agents the shell already reclaimed.
   const sessionMonitor = new SessionProcessMonitor({
     probe: lockMarkerPresent,
-    // TEMP E2E instrumentation for ctrl+c detection.
     debug: (message) => output.appendLine(`[liveness] ${message}`),
     onProcessEnded: (observation) => {
-      output.appendLine(`[liveness] process-ended agent=${observation.agentId} lock=${observation.lockFile}`);
+      // The exit record is consumed either way, so a spent one can never be
+      // read back against a later launch of the same agent.
+      const exit = takeSessionExitRecord(observation.lockFile);
+      if (observation.phase === "launching") {
+        reportFailedLaunch(observation.agentId, observation.sessionId, exit);
+        return;
+      }
       const session = fleet.get(observation.agentId);
       if (session === undefined) return;
       const at = new Date().toISOString() as IsoTimestamp;
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(observation.agentId, at, "agent session process ended");
         fleet.remove(observation.agentId, at);
-        closeAbandonedTerminal(observation.agentId);
+        releaseAbandonedTerminal(observation.agentId);
         output.appendLine(`Session process for agent ${observation.agentId} ended`);
         return;
       }
       void lifecycle?.processEnded(observation)
-        .then(() => closeAbandonedTerminal(observation.agentId))
+        .then(() => releaseAbandonedTerminal(observation.agentId))
         .catch((error: unknown) => output.appendLine(`Process-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
     },
   });
@@ -321,14 +374,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(agentId, at, "agent session cleared");
         fleet.remove(agentId, at);
-        closeAbandonedTerminal(agentId);
+        releaseAbandonedTerminal(agentId);
         return;
       }
       // Result-delivering sessions settle with a graceful completed outcome: the
       // conversation ended on the user's terms, and any pending run completes
       // rather than hangs waiting for a Stop hook that a cleared TUI cannot fire.
       void lifecycle?.processEnded({ agentId, sessionId: session.sessionId })
-        .then(() => closeAbandonedTerminal(agentId))
+        .then(() => releaseAbandonedTerminal(agentId))
         .catch((error: unknown) => output.appendLine(`Session-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
   };
   sessionLifecycle = new SessionLifecycleService({
@@ -340,7 +393,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       output.appendLine(`Session ${observation.sessionId} for agent ${observation.agentId} started`);
     },
   });
-  sessionMonitor.start(10_000);
+  // The watch is the fast path — a marker deletion settles the agent within
+  // milliseconds — and the interval only covers filesystems where watching is
+  // unreliable, so it can stay coarse.
+  sessionMonitor.start(SESSION_LIVENESS_POLL_MS);
+  try {
+    const markerWatch = watchLockMarkers(lockMarkerDirectory(workspaceRoot), () => sessionMonitor.poll());
+    context.subscriptions.push({ dispose: () => markerWatch.dispose() });
+  } catch (error) {
+    output.appendLine(`Could not watch session lock markers; falling back to polling only. ${error instanceof Error ? error.message : "unknown error"}`);
+  }
   activeSessionMonitor = sessionMonitor;
   const git: GitClient = new ProcessGitClient(workspaceRoot);
   const autoRun = new AutoRunEngine({
@@ -480,11 +542,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     store: managerStore, terminals, workspaceRoot,
     shell: process.platform === "win32" ? "powershell" : "git-bash",
     disallowedTools: currentConfiguration.managerDisallowedTools,
+    preflight: (command) => claudeProbe.require(command),
     command: () => currentConfiguration.claudeCommand,
     permissionMode: () => currentConfiguration.workerPermissionMode,
     effort: () => currentConfiguration.launchEffort,
     agentIdFactory: () => managerAgentId,
-    transcriptExists: sessionTranscriptExists,
+    isResumable: sessionIsResumable,
     wrapper: wrapperLayout,
   });
   const warnKey = "aboard.manager.permissionWarning";

@@ -249,6 +249,11 @@
           "default": "default",
           "description": "Permission mode for every agent aboard launches or resumes, including the Manager. Applied per process; aboard never writes a permissions block into .claude/settings.json."
         },
+        "aboard.terminals.closeOnSessionEnd": {
+          "type": "boolean",
+          "default": false,
+          "description": "Close an agent's terminal when its Claude session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
+        },
         "aboard.manager.disallowedTools": {
           "type": "array",
           "items": {

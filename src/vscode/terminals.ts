@@ -5,7 +5,6 @@ import type { TerminalHost } from "../claude/terminals.js";
 export function createVsCodeTerminalHost(): TerminalHost {
   return {
     createTerminal: (options) => window.createTerminal({
-      name: options.name,
       cwd: options.cwd,
       env: { ...options.env },
       ...(options.shellPath === undefined ? {} : { shellPath: options.shellPath }),

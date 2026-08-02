@@ -12,6 +12,12 @@ export interface AboardConfiguration {
   readonly launchEffort?: EffortLevel;
   readonly managerDisallowedTools: readonly string[];
   readonly workerPermissionMode: WorkerPermissionMode;
+  /**
+   * Whether a session's death also closes the terminal it ran in. Off by
+   * default: ending the Claude session and closing the shell are two different
+   * user gestures, and aboard settles the agent either way.
+   */
+  readonly closeTerminalOnSessionEnd: boolean;
   readonly autoRun: AutoRunSettings;
   readonly managerStopTimeoutSeconds: number;
   readonly managerPromptTimeoutSeconds: number;
@@ -27,6 +33,7 @@ export const ABOARD_SETTINGS = [
   "aboard.launch.maxInlinePromptChars",
   "aboard.launch.effort",
   "aboard.workers.permissionMode",
+  "aboard.terminals.closeOnSessionEnd",
   "aboard.manager.disallowedTools",
   "aboard.autoRun.review",
   "aboard.autoRun.scope",
@@ -173,6 +180,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     ...(effort === undefined ? {} : { launchEffort: effort }),
     managerDisallowedTools,
     workerPermissionMode: choice(reader, "aboard.workers.permissionMode", WORKER_PERMISSION_MODES, "default", diagnostics),
+    closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {
       // Automated review stays opt-in: spec section 7.5's invariant is
       // unchanged, only its shape is.

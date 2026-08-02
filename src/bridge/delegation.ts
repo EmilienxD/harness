@@ -76,6 +76,8 @@ export interface DelegationCoordinatorOptions {
    * change applies to the next agent without reloading the window.
    */
   readonly command?: () => readonly string[] | undefined;
+  /** Verifies the Claude command runs at all; throws to refuse the launch. */
+  readonly preflight?: (command: readonly string[] | undefined) => Promise<void>;
   /**
    * `aboard.launch.effort`, read at launch time for the same reason as
    * `command`. It is the session level; a worker whose definition declares
@@ -225,6 +227,10 @@ export class DelegationCoordinator {
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
+    // Before anything is registered or leased: a command that cannot run is a
+    // refused launch, not a terminal full of shell errors and a fleet entry
+    // waiting on a session that will never start.
+    await this.options.preflight?.(this.options.command?.());
     const occurredAt = this.#timestamp();
     this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, "launch agent");
     try {

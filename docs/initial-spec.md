@@ -1067,6 +1067,10 @@ Most of the skills in this workflow **already exist and are owned by the user.**
 | `map-issues` | **Exists. Do not implement.** |
 | `draft-issues` | **Exists. Do not implement.** |
 | `publish-issues` | **Exists. Do not implement.** |
+| `draft-issue` | **Exists. Do not implement.** |
+| `publish-issue` | **Exists. Do not implement.** |
+| `to-spec` | **Exists. Do not implement.** |
+| `to-spec-draft-issue` | **Exists. Do not implement.** |
 | `grill-me` | **Exists. Do not implement.** |
 | `lavish` | **Exists. Do not implement.** |
 | `commit` | **Exists. Do not implement.** |
@@ -1090,7 +1094,7 @@ Everything else on the list is a general-purpose tool that happens to be used he
 
 ### 10.1 Installed by command, not vendored or submoduled
 
-The user's skills live in a separate `harness` repository. aboard **ships no copy of them at all** — not as build assets, and not as git submodules. Each is installed into a scaffolded project by **running its upstream install command**, declared in a single table (`VENDORED_SKILLS` in `src/scaffold/project.ts`) with one command per skill.
+The user's skills live in a separate `harness` repository. aboard **ships no copy of them at all** — not as build assets, and not as git submodules. Each is installed into a scaffolded project by **running its upstream install command**, declared in a single table (`VENDORED_SKILLS` in `src/scaffold/project.ts`), one entry per skill. Several entries may name the same command — the seven issue skills are a single upstream tool — and a repeated command is run once, its outcome reported under each skill it installs.
 
 Reasons, specific to shipping an extension:
 
@@ -1109,6 +1113,10 @@ The scaffolder therefore **never writes under `.claude/skills/<user-owned-skill>
 | `map-issues` | **user** | user, on a spec | Decompose a spec into an issue map |
 | `draft-issues` | **user** | user | Draft full issue bodies for review before publishing |
 | `publish-issues` | **user** | user | Create the issues on GitHub with labels and dependencies |
+| `draft-issue` | **user** | user | Draft one issue, for work that needs no multi-issue breakdown |
+| `publish-issue` | **user** | user | Publish a single drafted issue; hook-backed, no model call |
+| `to-spec` | **user** | user, in brainstormer | Synthesize the current conversation into a spec, delivered in chat |
+| `to-spec-draft-issue` | **user** | user, in brainstormer | The same synthesis, drafted as a GitHub issue |
 | `grill-me` | **user** | user, in brainstormer | One-question-at-a-time interviewing, each with a recommended answer |
 | `lavish` | **user** | user, in brainstormer | (User-owned) |
 | `commit` | **user** | user | Commit-message quality; already uses the exit-2 pattern of §6.3.1 |
@@ -1136,7 +1144,9 @@ An extension command scaffolds project assets:
   skills/          update-todo, brainstorm, raw, done,
                    auto, review-pr                  (aboard-owned)
                    map-issues, draft-issues, publish-issues,
-                   grill-me, lavish, commit         (user-owned: installed by
+                   draft-issue, publish-issue, to-spec,
+                   to-spec-draft-issue, grill-me,
+                   lavish, commit                   (user-owned: installed by
                                                      command, never shipped, §10.1)
   settings.json    HOOK REGISTRATION ONLY
 .mcp.json          bridge MCP registration (no secrets)

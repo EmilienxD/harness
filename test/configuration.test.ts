@@ -132,6 +132,19 @@ test("the launch effort setting accepts every level, and inherit means no flag",
   assert.equal(managerLaunchChanged(level("high"), level("high")), false);
 });
 
+test("a dead session leaves the terminal alone unless the user opts in", () => {
+  const empty = readAboardConfiguration({ get: () => undefined });
+  assert.equal(empty.value.closeTerminalOnSessionEnd, false);
+  assert.deepEqual(empty.diagnostics, []);
+
+  const opted = readAboardConfiguration({ get: (key) => (key === "aboard.terminals.closeOnSessionEnd" ? true : undefined) });
+  assert.equal(opted.value.closeTerminalOnSessionEnd, true);
+
+  const wrong = readAboardConfiguration({ get: (key) => (key === "aboard.terminals.closeOnSessionEnd" ? "always" : undefined) });
+  assert.equal(wrong.value.closeTerminalOnSessionEnd, false);
+  assert.equal(wrong.diagnostics.length, 1);
+});
+
 test("every contributed setting is listed in ABOARD_SETTINGS", async () => {
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as { contributes: { configuration: { properties: Record<string, unknown> } } };
   assert.deepEqual([...ABOARD_SETTINGS].sort(), Object.keys(manifest.contributes.configuration.properties).sort());

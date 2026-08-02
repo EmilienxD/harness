@@ -5,7 +5,7 @@ import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestam
 import { parseManagerPersistenceDto } from "../domain/validation.js";
 import { MANAGER_AGENT_NAME, type EffortLevel, type SessionWrapperLayout, type WorkerPermissionMode, planLaunch, planManagerResume } from "./launch.js";
 import { parseManagerAgentDefinition } from "../scaffold/agent-definition.js";
-import { sessionTranscriptExists } from "./sessions.js";
+import { sessionIsResumable } from "./sessions.js";
 import type { ShellKind } from "./shell.js";
 import type { TerminalController, TerminalSnapshot } from "./terminals.js";
 
@@ -57,7 +57,7 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
 }
 
 /** `command`, `permissionMode`, and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition | undefined>; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly transcriptExists?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly wrapper?: SessionWrapperLayout; }
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition | undefined>; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
   public constructor(private readonly options: ManagerLifecycleOptions) { this.#now = options.now ?? (() => new Date()); }
@@ -66,13 +66,25 @@ export class ManagerLifecycle {
     const prior = await this.options.store.load();
     if (mode === "resume" && !prior) throw new Error("No recorded Manager session exists");
     const agentId = mode === "resume" && prior ? prior.agentId : (this.options.agentIdFactory ?? (() => randomUUID() as AgentId))();
-    const sessionId = mode === "resume" && prior ? prior.sessionId : (this.options.sessionIdFactory ?? (() => randomUUID() as SessionId))();
-    // --resume fails when the recorded session was closed before its first
-    // message: no transcript exists yet. Recover by starting the conversation
-    // afresh under the same imposed id (--session-id); identity and history
-    // continuity are preserved because the id never changes.
-    const resumable = mode === "resume" && await (this.options.transcriptExists ?? sessionTranscriptExists)(sessionId, this.options.workspaceRoot);
+    const recorded = mode === "resume" && prior ? prior.sessionId : undefined;
+    // --resume fails when the recorded session holds no conversation yet, which
+    // a transcript file's existence does not rule out.
+    const resumable = recorded !== undefined && await (this.options.isResumable ?? sessionIsResumable)(recorded, this.options.workspaceRoot);
+    // An id that cannot be resumed cannot be reused either: Claude Code refuses
+    // `--session-id` for any id that already has a transcript ("Session ID … is
+    // already in use"), and an unresumable recorded session has one by
+    // definition — that is why `--resume` rejected it. Relaunching under the
+    // same id therefore fails both ways, so the recovery is a new conversation
+    // under a new id. Nothing is lost: the id was refused precisely because it
+    // holds no conversation, and Manager identity is the agent id, which is
+    // stable across every restart.
+    const sessionId = resumable && recorded !== undefined
+      ? recorded
+      : (this.options.sessionIdFactory ?? (() => randomUUID() as SessionId))();
     const launched = this.options.command?.();
+    // Refuse a launch aboard already knows cannot run, rather than opening a
+    // terminal that will only ever show a shell error.
+    await this.options.preflight?.(launched);
     const command = launched === undefined ? {} : { command: launched };
     const permissionMode = this.options.permissionMode?.() ?? "default";
     const declared = await (this.options.definition ?? readManagerLaunchDefinition)(this.options.workspaceRoot);

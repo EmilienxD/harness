@@ -23,6 +23,7 @@ Changes apply live. An unknown key or an invalid value is reported in Output →
 | Setting | Default | What it does |
 | :-- | :-- | :-- |
 | `aboard.workers.permissionMode` | `default` | Permission mode for every agent aboard launches, the Manager included. Unattended `afk` work needs `bypass`. Applied per process — a running agent keeps the mode it started with. |
+| `aboard.terminals.closeOnSessionEnd` | `false` | Close an agent's terminal when its Claude session ends. Off by default: quitting the session (`exit`, double Ctrl+C) and closing the terminal are separate gestures, so the shell is left for you to reuse. The agent leaves the fleet either way, and the leftover terminal never blocks a relaunch. |
 | `aboard.autoRun.review` | `false` | Launch a pr-doctor after each implementation during an auto-run. Automated review stays opt-in; the explicit review action is always available. |
 | `aboard.launch.claudeCommand` | `claude` | The command aboard launches. Wrapper arguments come first and aboard's flags are appended unchanged. A path with spaces goes in quotes. |
 | `aboard.launch.maxInlinePromptChars` | `4000` | Longest prompt passed inline as a command-line argument. Longer prompts spill to `.aboard/runtime/prompts` and are referenced with `@path`. |

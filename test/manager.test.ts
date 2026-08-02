@@ -47,7 +47,7 @@ test("resume keeps the recorded identity and new replaces the session", async ()
     create: (request: unknown) => { records.push({ kind: "create", request }); return terminal("new-terminal"); },
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return terminal("resumed-terminal"); },
   } as unknown as TerminalController;
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), transcriptExists: async () => true });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), isResumable: async () => true });
   await lifecycle.start("resume");
   assert.match((records[0] as any).request.initialCommand, /--resume 4db0ed4c/);
   // A wrapper starts the Manager too, resume included, and its arguments stay
@@ -74,7 +74,7 @@ test("the lifecycle applies the configured permission mode to start and resume",
   // Read through a callback, so toggling the setting takes effect on the next
   // launch rather than at the next window reload.
   let mode: "bypass" | "default" = "bypass";
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", permissionMode: () => mode, transcriptExists: async () => true });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", permissionMode: () => mode, isResumable: async () => true });
   await lifecycle.start("new");
   assert.match(records[0].initialCommand, /--dangerously-skip-permissions/);
   await lifecycle.start("resume");
@@ -95,7 +95,7 @@ test("the Manager's own model and effort reach the command line on start and on 
   // `--agent manager` honors neither field in manager.md and `--resume` reads no
   // definition at all, so both have to travel as flags or the Manager silently
   // runs at the user's global model and effort.
-  const options = { store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell" as const, transcriptExists: async () => true, effort: () => "low" as const };
+  const options = { store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell" as const, isResumable: async () => true, effort: () => "low" as const };
   const lifecycle = new ManagerLifecycle({ ...options, definition: async () => ({ model: "opus", effort: "medium" as const }) });
   await lifecycle.start("new");
   assert.match(records[0].initialCommand, /--agent manager --model opus --effort medium/);
@@ -109,7 +109,7 @@ test("the Manager's own model and effort reach the command line on start and on 
   assert.match(records[2].initialCommand, /--effort low/);
 });
 
-test("resume without a transcript starts afresh under the same session id", async () => {
+test("an unresumable recorded session starts afresh under a new id, keeping the agent", async () => {
   const records: any[] = [];
   const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
   const snapshot = (id: string): TerminalSnapshot => ({ terminalId: id as TerminalId, agentId, sessionId, agentType: "manager", name: "aboard: Manager", cwd: "C:\\work", status: "open", createdAt: "2026-07-30T10:00:00.000Z", closedAt: null, exitCode: null });
@@ -117,12 +117,41 @@ test("resume without a transcript starts afresh under the same session id", asyn
     create: (request: unknown) => { records.push({ kind: "create", request }); return snapshot("fresh-terminal"); },
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return snapshot("resumed-terminal"); },
   } as unknown as TerminalController;
-  // The recorded session was closed before its first message: no transcript
-  // exists, so --resume would fail. aboard must relaunch with --session-id.
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", transcriptExists: async () => false });
+  // The recorded session holds no conversation, so --resume refuses it. Reusing
+  // the id would be refused too — Claude rejects --session-id for any id that
+  // already has a transcript, and this one does; that is why --resume failed.
+  const saved: any[] = [];
+  const lifecycle = new ManagerLifecycle({
+    store: { load: async () => recorded, save: async (value) => { saved.push(value); } },
+    terminals, workspaceRoot: "C:\\work", shell: "powershell",
+    isResumable: async () => false,
+    sessionIdFactory: () => "9f1d6e57-0000-4000-8000-000000000001" as SessionId,
+  });
   await lifecycle.start("resume");
   assert.equal(records[0].kind, "create");
-  assert.match(records[0].request.initialCommand, new RegExp(`--session-id ${sessionId}`));
+  assert.match(records[0].request.initialCommand, /--session-id 9f1d6e57-0000-4000-8000-000000000001/);
+  assert.doesNotMatch(records[0].request.initialCommand, new RegExp(sessionId));
   assert.doesNotMatch(records[0].request.initialCommand, /--resume/);
   assert.match(records[0].request.initialCommand, /--agent manager/);
+  // Manager identity is the agent id, which survives; the new conversation id
+  // is recorded so the next resume targets it.
+  assert.equal(records[0].request.agentId, agentId);
+  assert.equal(saved[0].agentId, agentId);
+  assert.equal(saved[0].sessionId, "9f1d6e57-0000-4000-8000-000000000001");
+});
+
+test("a resumable recorded session keeps its id and resumes", async () => {
+  const records: any[] = [];
+  const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
+  const snapshot = (id: string): TerminalSnapshot => ({ terminalId: id as TerminalId, agentId, sessionId, agentType: "manager", name: "aboard: Manager", cwd: "C:\\work", status: "open", createdAt: "2026-07-30T10:00:00.000Z", closedAt: null, exitCode: null });
+  const terminals = { create: (request: any) => { records.push(request); return snapshot("fresh-terminal"); } } as unknown as TerminalController;
+  const lifecycle = new ManagerLifecycle({
+    store: { load: async () => recorded, save: async () => undefined },
+    terminals, workspaceRoot: "C:\\work", shell: "powershell",
+    isResumable: async () => true,
+    sessionIdFactory: () => "9f1d6e57-0000-4000-8000-000000000001" as SessionId,
+  });
+  await lifecycle.start("resume");
+  assert.match(records[0].initialCommand, new RegExp(`--resume ${sessionId}`));
+  assert.doesNotMatch(records[0].initialCommand, /9f1d6e57/);
 });

@@ -52,8 +52,14 @@ export interface TerminalHandle {
   dispose(): void;
 }
 
+/**
+ * No `name`: aboard deliberately leaves the VS Code terminal with its default
+ * shell name. An "aboard: manager" tab keeps that label after the session dies,
+ * and a stale name that claims a live agent misleads worse than a generic one
+ * informs. The aboard label lives on the fleet record instead, which is where
+ * the user looks for agent state and which settles the moment the session does.
+ */
 export interface TerminalCreationOptions {
-  readonly name: string;
   readonly cwd: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
@@ -123,7 +129,12 @@ export interface TerminalSnapshot {
   readonly issueNumber?: number;
   readonly name: string;
   readonly cwd: string;
-  readonly status: "open" | "closed";
+  /**
+   * `detached` means the Claude session died but the shell survived it: the VS
+   * Code terminal may well still be open, and aboard has given it back to the
+   * user. It is never killed, never controlled, and never blocks a relaunch.
+   */
+  readonly status: "open" | "detached" | "closed";
   readonly createdAt: string;
   readonly closedAt: string | null;
   readonly exitCode: number | null;
@@ -162,6 +173,14 @@ export class TerminalControlError extends Error {
 export interface StartupProofTracker {
   awaitStarted(agentId: AgentId, sessionId: SessionId, timeoutMs: number): Promise<unknown>;
   cancel(agentId: AgentId): void;
+}
+
+/**
+ * Matched by name rather than by class: the proof tracker lives in the bridge
+ * layer, which depends on this module and must not be imported back.
+ */
+function isStartupTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === "SessionStartTimeoutError";
 }
 
 export interface TerminalControllerOptions {
@@ -238,7 +257,6 @@ export class TerminalController {
     if (request.deliversResult === true) env.ABOARD_DELIVERS_RESULT = "1";
 
     const creationOptions: TerminalCreationOptions = {
-      name,
       cwd: environment.workspaceRoot,
       env,
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
@@ -282,7 +300,12 @@ export class TerminalController {
     // terminal-close path a user kill would take.
     if (request.startupTimeoutMs !== undefined && this.options.startupProofs !== undefined) {
       void this.options.startupProofs.awaitStarted(request.agentId, request.sessionId, request.startupTimeoutMs)
-        .then(undefined, () => {
+        .then(undefined, (error: unknown) => {
+          // Only the timeout is a verdict. A cancellation means something else
+          // already settled this launch — a closed terminal, or a CLI that
+          // exited and was diagnosed from its exit record — and that path has
+          // decided the terminal's fate, including leaving an error on screen.
+          if (!isStartupTimeout(error)) return;
           const current = this.#records.get(terminalId);
           if (current === undefined || current.status !== "open") return;
           this.options.onStartupTimeout?.(request.agentId, request.sessionId);
@@ -294,6 +317,31 @@ export class TerminalController {
 
   public list(): readonly TerminalSnapshot[] {
     return [...this.#records.values()].map((record) => this.#snapshot(record));
+  }
+
+  /**
+   * The agent's open terminal, if any. Settlement paths need this *after* they
+   * have dropped the fleet record, so the terminal id cannot be read back from
+   * the fleet — and an uncollected terminal is exactly what makes the next
+   * launch fail the one-live-terminal invariant.
+   */
+  public liveTerminalForAgent(agentId: AgentId): TerminalId | undefined {
+    const record = this.#latest((candidate) => candidate.agentId === agentId);
+    return record?.status === "open" ? record.terminalId : undefined;
+  }
+
+  /**
+   * Hand the terminal back to the user without closing it. Used when a session
+   * dies inside a surviving shell: the native handle is dropped, so a later
+   * close emits no lifecycle event — by then the agent may have been relaunched
+   * into a new terminal, and a stale close would settle the wrong session.
+   */
+  public release(terminalId: TerminalId): void {
+    const record = this.#requireRecord(terminalId);
+    if (record.status !== "open") return;
+    record.status = "detached";
+    if (record.handle !== undefined) this.#terminalIdsByHandle.delete(record.handle);
+    record.handle = undefined;
   }
 
   public get(terminalId: TerminalId): TerminalSnapshot {
@@ -385,8 +433,8 @@ export class TerminalController {
 
   #requireOpenHandle(terminalId: TerminalId): TerminalHandle {
     const record = this.#requireRecord(terminalId);
-    if (record.status === "closed" || record.handle === undefined) {
-      throw new TerminalControlError("closed-terminal", `Terminal ${terminalId} is closed`);
+    if (record.status !== "open" || record.handle === undefined) {
+      throw new TerminalControlError("closed-terminal", `Terminal ${terminalId} is ${record.status === "detached" ? "detached" : "closed"}`);
     }
     return record.handle;
   }

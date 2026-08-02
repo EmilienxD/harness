@@ -15,6 +15,13 @@ On Ctrl+C: every process in the console's foreground group receives the event,
 the wrapper included. The wait loop swallows the interrupt and keeps waiting —
 only the child decides whether one press clears the prompt or two exit, so the
 marker survives a single Ctrl+C exactly as it must.
+
+Beside the marker the wrapper leaves an exit record, `<agent-id>.exit`, written
+*before* the marker is removed so whoever reacts to the removal finds it. It
+carries the child's exit code, or the spawn error when the command could not be
+run at all. A Claude CLI that dies before its TUI exists — bad flag, missing
+binary, unresumable session id — reports through this file, since it never
+reaches the point of firing a SessionStart hook.
 """
 
 import json
@@ -49,19 +56,51 @@ def main():
                 handle,
             )
 
+    exit_path = os.path.splitext(lock_path)[0] + ".exit"
+
+    def write_exit(exit_code, error=None):
+        record = {
+            "agentId": os.environ.get("ABOARD_AGENT_ID"),
+            "sessionId": os.environ.get("ABOARD_SESSION_ID"),
+            "exitCode": exit_code,
+            "endedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        if error is not None:
+            record["error"] = error
+        try:
+            with open(exit_path, "w", encoding="utf-8") as handle:
+                json.dump(record, handle)
+        except OSError:
+            # Diagnostics must never become the reason a session fails to settle.
+            pass
+
     write_marker(None)
+    exit_code = None
+    spawn_error = None
     try:
-        child = subprocess.Popen(command)
+        try:
+            child = subprocess.Popen(command)
+        except OSError as error:
+            # The command itself could not be run: the shell found the wrapper
+            # but not Claude. Nothing else will ever report this.
+            spawn_error = str(error)
+            exit_code = 127
+            return exit_code
         write_marker(child.pid)
         while True:
             try:
-                return child.wait()
+                exit_code = child.wait()
+                return exit_code
             except KeyboardInterrupt:
                 # Ctrl+C reached the wrapper too; the child decides whether to
                 # exit. Keep owning the marker until it does.
                 if child.poll() is not None:
-                    return child.returncode
+                    exit_code = child.returncode
+                    return exit_code
     finally:
+        # Order matters: the exit record has to be readable by the time the
+        # marker's removal wakes the extension.
+        write_exit(exit_code, spawn_error)
         try:
             os.remove(lock_path)
         except OSError:

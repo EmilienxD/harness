@@ -105,6 +105,62 @@ test("creates one real-terminal record with the complete aboard environment", ()
   }), /already has a live aboard terminal/);
 });
 
+test("an agent's live terminal is findable without the fleet, so settlement can collect it", () => {
+  // Session-death settlement drops the fleet record before closing the
+  // terminal; a fleet-based lookup leaked the terminal and made the next launch
+  // fail with "already has a live aboard terminal".
+  const { controller, host } = setup();
+  const agentId = agent("manager-1");
+  const created = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  assert.equal(controller.liveTerminalForAgent(agentId), created.terminalId);
+  assert.equal(controller.liveTerminalForAgent(agent("never-launched")), undefined);
+  host.close(host.created[0]!.terminal);
+  assert.equal(controller.liveTerminalForAgent(agentId), undefined);
+});
+
+test("a released terminal survives the session, stops being aboard's, and frees the relaunch", () => {
+  // Ctrl+C twice ends the session inside a shell the user kept on purpose.
+  const { controller, host, events } = setup();
+  const agentId = agent("manager-1");
+  const first = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  controller.release(first.terminalId);
+
+  assert.equal(host.created[0]?.terminal.disposed, false, "the terminal is handed back, not killed");
+  assert.equal(controller.get(first.terminalId).status, "detached");
+  assert.equal(controller.liveTerminalForAgent(agentId), undefined);
+  // aboard no longer drives it: no focus, no input, no kill.
+  assert.throws(() => controller.show(first.terminalId), /is detached/);
+  assert.throws(() => controller.kill(first.terminalId), /is detached/);
+
+  const relaunched = controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "manager" });
+  assert.equal(relaunched.status, "open");
+
+  // Closing the released terminal later must stay silent: the agent has been
+  // relaunched, and a stale close event would settle the wrong session.
+  const before = events.length;
+  host.close(host.created[0]!.terminal);
+  assert.equal(events.length, before);
+  assert.equal(controller.get(relaunched.terminalId).status, "open");
+});
+
+test("releasing is idempotent and never resurrects a closed terminal", () => {
+  const { controller, host } = setup();
+  const created = controller.create({ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  host.close(host.created[0]!.terminal);
+  controller.release(created.terminalId);
+  assert.equal(controller.get(created.terminalId).status, "closed");
+  controller.release(created.terminalId);
+  assert.equal(controller.get(created.terminalId).status, "closed");
+});
+
+test("the terminal keeps its default shell name; the aboard label stays on the record", () => {
+  // A tab named "aboard: manager" outlives the agent and then lies about it.
+  const { controller, host } = setup();
+  const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "implementer", issueNumber: 6 });
+  assert.equal("name" in (host.created[0]?.options ?? {}), false);
+  assert.equal(created.name, "aboard: implementer");
+});
+
 test("a closed terminal frees the agent for relaunch but keeps session identity fixed", async () => {
   const { controller, host } = setup();
   const agentId = agent("manager-1");

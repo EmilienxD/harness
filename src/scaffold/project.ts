@@ -6,21 +6,39 @@ import { dirname, join, relative, resolve, sep } from "node:path";
  * User-owned skills live upstream in the `harness` repository. aboard ships no
  * copy of them: shipped copies drift from upstream silently and turn a user file
  * into an extension asset. Each is installed instead by running its upstream
- * install command in the project. The commands are not defined yet; an
- * unconfigured skill is reported, never authored here (spec §10.0, §10.1).
+ * install command in the project. A skill whose command is missing or fails is
+ * reported, never authored here (spec §10.0, §10.1).
  */
 export interface VendoredSkill {
   readonly name: string;
   readonly command: string | null;
 }
 
+/**
+ * Deliberately unpinned: §10.1 wants upstream improvements picked up by
+ * re-running the install command, which a `@vX.Y.Z` suffix would defeat.
+ * `harness install` defaults to project scope, so the installer's `cwd` decides
+ * where the skill lands.
+ */
+const HARNESS_INSTALL = "uvx --from git+https://github.com/EmilienxD/harness harness install";
+
 export const VENDORED_SKILLS: readonly VendoredSkill[] = [
-  { name: "map-issues", command: null },
-  { name: "draft-issues", command: null },
-  { name: "publish-issues", command: null },    // TODO: Add the commands
-  { name: "grill-me", command: null },
-  { name: "lavish", command: null },
-  { name: "commit", command: null },
+  // Every issue skill is part of the one upstream `issues` tool, which installs
+  // all seven together, so they name one command; a repeated command runs once
+  // per scaffold. Listing each by name is what keeps its directory recognized as
+  // the user's, both here and in the packaging exclusions.
+  { name: "map-issues", command: `${HARNESS_INSTALL} issues` },
+  { name: "draft-issues", command: `${HARNESS_INSTALL} issues` },
+  { name: "publish-issues", command: `${HARNESS_INSTALL} issues` },
+  { name: "draft-issue", command: `${HARNESS_INSTALL} issues` },
+  { name: "publish-issue", command: `${HARNESS_INSTALL} issues` },
+  { name: "to-spec", command: `${HARNESS_INSTALL} issues` },
+  { name: "to-spec-draft-issue", command: `${HARNESS_INSTALL} issues` },
+  { name: "grill-me", command: `${HARNESS_INSTALL} grill-me` },
+  // `lavish` is not a harness tool: it ships from its own repository through the
+  // Agent Skills installer. `-y` keeps npx from stopping to confirm the fetch.
+  { name: "lavish", command: "npx -y skills add kunchenguid/lavish-axi --skill lavish" },
+  { name: "commit", command: `${HARNESS_INSTALL} commit` },
 ];
 
 export interface VendoredSkillInstaller {
@@ -123,11 +141,21 @@ async function installVendoredSkills(
   installed: string[],
   warnings: string[],
 ): Promise<void> {
+  // Several skills can come from one upstream tool and therefore name the same
+  // command. Run each distinct command once and replay its outcome, so a shared
+  // installer is not invoked once per skill, while every skill still reports its
+  // own result under its own name.
+  const outcomes = new Map<string, string | null>();
   for (const skill of skills) {
     if (skill.command === null) { warnings.push(`No install command configured for vendored skill: ${skill.name}`); continue; }
     if (installer === undefined) { warnings.push(`Cannot install vendored skill ${skill.name}: no installer available`); continue; }
-    try { await installer.run(skill.command, projectRoot); installed.push(skill.name); }
-    catch (error) { warnings.push(`Failed to install vendored skill ${skill.name}: ${error instanceof Error ? error.message : "install command failed"}`); }
+    if (!outcomes.has(skill.command)) {
+      try { await installer.run(skill.command, projectRoot); outcomes.set(skill.command, null); }
+      catch (error) { outcomes.set(skill.command, error instanceof Error ? error.message : "install command failed"); }
+    }
+    const failure = outcomes.get(skill.command) ?? null;
+    if (failure === null) installed.push(skill.name);
+    else warnings.push(`Failed to install vendored skill ${skill.name}: ${failure}`);
   }
 }
 

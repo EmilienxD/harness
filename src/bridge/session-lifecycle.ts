@@ -45,10 +45,20 @@ export interface SessionEndObservation {
   readonly reason: SessionEndReason;
 }
 
+/**
+ * `launching` means the wrapper's child exited before any SessionStart hook
+ * fired: the Claude CLI died on its way up — a rejected flag, an auth wall, a
+ * session id it refuses to resume — and printed its reason into the terminal.
+ * `live` is an ordinary session ending. The distinction matters because a
+ * failed launch has to be reported, while a session ending is routine.
+ */
+export type SessionEndPhase = "launching" | "live";
+
 export interface ProcessEndedObservation {
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly lockFile: string;
+  readonly phase: SessionEndPhase;
 }
 
 export interface SessionProcessMonitorOptions {
@@ -56,14 +66,31 @@ export interface SessionProcessMonitorOptions {
   /** Injected timers keep tests deterministic and deactivation explicit. */
   readonly setInterval?: (callback: () => void, intervalMs: number) => unknown;
   readonly clearInterval?: (handle: unknown) => void;
+  readonly setTimeout?: (callback: () => void, delayMs: number) => unknown;
   readonly onProcessEnded?: (observation: ProcessEndedObservation) => void;
-  /** TEMP E2E instrumentation: per-sweep trace of tracked markers and probe results. */
+  /** Trace of tracking changes and observed deaths; never per-sweep, which would flood the log. */
   readonly debug?: (message: string) => void;
+}
+
+/**
+ * Retry ladder for a reported-but-not-yet-visible exit. A SessionEnd hook runs
+ * *inside* the dying process, so its marker still exists when the hook lands;
+ * these delays cover the gap between the report and the wrapper's cleanup
+ * without waiting for the next interval sweep.
+ */
+const EXIT_CONFIRMATION_DELAYS_MS = [50, 150, 400, 1_000, 2_500] as const;
+
+interface WatchedSession {
+  readonly registration: SessionRegistration;
+  /** A SessionStart hook has proved a TUI exists. */
+  proven: boolean;
+  /** The wrapper's marker has been observed at least once. */
+  appeared: boolean;
 }
 
 export class SessionProcessMonitor {
   readonly #options: SessionProcessMonitorOptions;
-  readonly #watched = new Map<AgentId, SessionRegistration>();
+  readonly #watched = new Map<AgentId, WatchedSession>();
   #timer: unknown;
 
   public constructor(options: SessionProcessMonitorOptions) {
@@ -87,9 +114,26 @@ export class SessionProcessMonitor {
     this.#timer = undefined;
   }
 
+  /**
+   * Watch a launch that has no session yet. Until the marker first appears the
+   * agent cannot die — the wrapper is still starting — so a missing marker here
+   * means "not yet", not "gone". Once it has appeared, its removal without an
+   * intervening SessionStart is a failed launch.
+   */
+  public trackLaunch(registration: SessionRegistration): void {
+    this.#options.debug?.(`launch agent=${registration.agentId} lock=${registration.lockFile}`);
+    this.#watched.set(registration.agentId, { registration, proven: false, appeared: false });
+  }
+
+  /** Promote a launch to a proven session, or start watching one directly. */
   public track(registration: SessionRegistration): void {
     this.#options.debug?.(`track agent=${registration.agentId} lock=${registration.lockFile}`);
-    this.#watched.set(registration.agentId, registration);
+    const existing = this.#watched.get(registration.agentId);
+    this.#watched.set(registration.agentId, {
+      registration,
+      proven: true,
+      appeared: existing?.appeared ?? false,
+    });
   }
 
   /** Forget the agent without reporting a death (settlement already happened). */
@@ -98,7 +142,7 @@ export class SessionProcessMonitor {
   }
 
   public registration(agentId: AgentId): SessionRegistration | undefined {
-    return this.#watched.get(agentId);
+    return this.#watched.get(agentId)?.registration;
   }
 
   public isTracked(agentId: AgentId): boolean {
@@ -112,19 +156,43 @@ export class SessionProcessMonitor {
    * fired.
    */
   public observe(agentId: AgentId): "live" | "ended" | "missing" {
-    const registration = this.#watched.get(agentId);
-    if (registration === undefined) return "missing";
-    return this.#options.probe(registration.lockFile) ? "live" : "missing";
+    const watched = this.#watched.get(agentId);
+    if (watched === undefined || !watched.proven) return "missing";
+    return this.#options.probe(watched.registration.lockFile) ? "live" : "missing";
   }
 
-  /** One sweep; public so a terminal close can flush pending deaths eagerly. */
+  /** One sweep; public so a marker watch or terminal close can flush deaths eagerly. */
   public poll(): void {
-    for (const registration of [...this.#watched.values()]) {
-      const alive = this.#options.probe(registration.lockFile);
-      this.#options.debug?.(`poll agent=${registration.agentId} lock=${registration.lockFile} alive=${alive}`);
-      if (alive) continue;
+    for (const watched of [...this.#watched.values()]) {
+      const { registration } = watched;
+      if (this.#options.probe(registration.lockFile)) {
+        watched.appeared = true;
+        continue;
+      }
+      // Never seen, and no hook has proved otherwise: the wrapper is still
+      // starting up. Its failure to ever appear is the startup proof's
+      // business, not a death to report. A SessionStart hook settles it the
+      // other way — the marker precedes the TUI, so it existed.
+      if (!watched.proven && !watched.appeared) continue;
+      const phase: SessionEndPhase = watched.proven ? "live" : "launching";
+      this.#options.debug?.(`marker gone agent=${registration.agentId} phase=${phase} lock=${registration.lockFile}`);
       this.#watched.delete(registration.agentId);
-      this.#options.onProcessEnded?.(registration);
+      this.#options.onProcessEnded?.({ ...registration, phase });
+    }
+  }
+
+  /**
+   * Sweep repeatedly over the next few seconds. Used when something reports an
+   * exit that the filesystem has not shown yet; each sweep is a stat per tracked
+   * agent, and an agent that settles early simply drops out of the map.
+   */
+  public pollSoon(): void {
+    const schedule = this.#options.setTimeout ?? ((callback: () => void, ms: number) => setTimeout(callback, ms));
+    for (const delay of EXIT_CONFIRMATION_DELAYS_MS) {
+      const handle = schedule(() => this.poll(), delay);
+      if (typeof handle === "object" && handle !== null && "unref" in handle) {
+        (handle as { unref(): void }).unref();
+      }
     }
   }
 }
@@ -168,11 +236,16 @@ export class SessionLifecycleService {
    * must stay cheap. Only `clear` settles here: the process demonstrably lives
    * on (it fired the hook inside a kept-alive TUI), so PID polling will never
    * settle this conversation. Process-exit reasons (`prompt_input_exit`,
-   * `logout`, ...) are left to the monitor's next poll, which settles them
-   * exactly like a terminal close.
+   * `logout`, ...) still belong to the marker, which is authoritative — the
+   * hook runs inside the process it is announcing the death of — but they are
+   * an early warning, so they kick off a short confirmation ladder instead of
+   * waiting for the next interval sweep.
    */
   public sessionEnded(observation: SessionEndObservation): boolean {
-    if (observation.reason !== "clear") return false;
+    if (observation.reason !== "clear") {
+      if (this.options.monitor.isTracked(observation.agentId)) this.options.monitor.pollSoon();
+      return false;
+    }
     const session = this.options.fleet.get(observation.agentId);
     if (session === undefined || session.sessionId !== observation.sessionId) return false;
     if (session.lifecycle.status === "completed" || session.lifecycle.status === "failed") return false;

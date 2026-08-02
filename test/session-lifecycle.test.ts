@@ -37,8 +37,10 @@ function setup(probe: (lockFile: string) => boolean) {
   const lease = new WriteLease();
   const ended: string[] = [];
   const settled: AgentId[] = [];
+  const confirmations: Array<{ readonly delayMs: number; readonly run: () => void }> = [];
   const monitor = new SessionProcessMonitor({
     probe,
+    setTimeout: (callback, delayMs) => { confirmations.push({ delayMs, run: callback }); return confirmations.length; },
     onProcessEnded: (observation) => ended.push(observation.agentId),
   });
   const service = new SessionLifecycleService({
@@ -47,7 +49,7 @@ function setup(probe: (lockFile: string) => boolean) {
     settlement: { settleCleared: (agentId) => settled.push(agentId) },
     lockPathFor: () => LOCK,
   });
-  return { fleet, lease, monitor, service, ended, settled };
+  return { fleet, lease, monitor, service, ended, settled, confirmations };
 }
 
 const start: SessionStartObservation = { agentId: agent("a1"), sessionId: session("s1"), source: "startup" };
@@ -108,6 +110,50 @@ test("poll reports removed markers through onProcessEnded and stops tracking the
   assert.equal(monitor.isTracked(agent("a1")), false);
 });
 
+test("a launch whose marker never appears is left to the startup proof", () => {
+  // The wrapper takes a moment to start; a missing marker here means "not yet".
+  const { monitor, ended } = setup(() => false);
+  monitor.trackLaunch({ agentId: agent("a1"), sessionId: session("s1"), lockFile: LOCK });
+  monitor.poll();
+  monitor.poll();
+  assert.deepEqual(ended, []);
+  assert.equal(monitor.isTracked(agent("a1")), true);
+});
+
+test("a CLI that exits before its first hook is reported as a failed launch", () => {
+  // Bad flag, auth wall, a session id --resume refuses: the marker appears with
+  // the wrapper, then goes when the CLI gives up, and no SessionStart ever runs.
+  let alive = true;
+  const phases: string[] = [];
+  const monitor = new SessionProcessMonitor({
+    probe: () => alive,
+    onProcessEnded: (observation) => phases.push(observation.phase),
+  });
+  monitor.trackLaunch({ agentId: agent("a1"), sessionId: session("s1"), lockFile: LOCK });
+  monitor.poll();
+  alive = false;
+  monitor.poll();
+  assert.deepEqual(phases, ["launching"]);
+  assert.equal(monitor.isTracked(agent("a1")), false);
+});
+
+test("once a session is proven, its death is an ordinary ending", () => {
+  const { fleet, monitor, service, ended } = setup(() => false);
+  registerAgent(fleet, agent("a1"), session("s1"));
+  monitor.trackLaunch({ agentId: agent("a1"), sessionId: session("s1"), lockFile: LOCK });
+  // SessionStart proves a TUI existed, so a marker already gone means dead —
+  // waiting to have seen it ourselves would strand the agent.
+  service.sessionStarted(start);
+  monitor.poll();
+  assert.deepEqual(ended, [agent("a1")]);
+});
+
+test("an unproven launch is not live for lease recovery", () => {
+  const { monitor } = setup(() => true);
+  monitor.trackLaunch({ agentId: agent("a1"), sessionId: session("s1"), lockFile: LOCK });
+  assert.equal(monitor.observe(agent("a1")), "missing");
+});
+
 test("poll keeps present markers tracked without emitting", () => {
   const { fleet, monitor, service, ended } = setup(() => true);
   registerAgent(fleet, agent("a1"), session("s1"));
@@ -133,13 +179,39 @@ test("session-end with reason clear settles gracefully and untracks", () => {
   assert.deepEqual(ended, []);
 });
 
-test("session-end process-exit reasons are left to the marker poller", () => {
+test("session-end process-exit reasons are left to the marker, still present while the hook runs", () => {
   const { fleet, monitor, service, settled } = setup(() => true);
   registerAgent(fleet, agent("a1"), session("s1"));
   service.sessionStarted(start);
   assert.equal(service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "prompt_input_exit" }), false);
   assert.equal(monitor.isTracked(agent("a1")), true);
   assert.deepEqual(settled, []);
+});
+
+test("a reported process exit confirms within milliseconds instead of waiting for the interval", () => {
+  // The hook runs inside the dying process, so the marker outlives the report.
+  let alive = true;
+  const { fleet, service, confirmations, ended } = setup(() => alive);
+  registerAgent(fleet, agent("a1"), session("s1"));
+  service.sessionStarted(start);
+  service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "prompt_input_exit" });
+  assert.ok(confirmations.length > 1);
+  assert.ok(confirmations[0]!.delayMs < 100, "first confirmation sweep is sub-100ms");
+  confirmations[0]!.run();
+  assert.deepEqual(ended, [], "the marker was still there");
+  alive = false;
+  confirmations[1]!.run();
+  assert.deepEqual(ended, [agent("a1")]);
+  // A settled agent drops out, so the remaining ladder is a no-op.
+  for (const confirmation of confirmations.slice(2)) confirmation.run();
+  assert.deepEqual(ended, [agent("a1")]);
+});
+
+test("the confirmation ladder is not armed for agents nothing is watching", () => {
+  const { fleet, service, confirmations } = setup(() => true);
+  registerAgent(fleet, agent("a1"), session("s1"));
+  service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "logout" });
+  assert.deepEqual(confirmations, []);
 });
 
 test("session events for unknown or stale sessions are ignored", () => {
