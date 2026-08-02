@@ -84,6 +84,8 @@ function setup() {
     "d8d40e7e-c465-44de-9896-5a86165cd58f",
   ];
   const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:\\repo",
+    isResumable: async () => true,
     fleet,
     lease,
     terminals,
@@ -119,6 +121,50 @@ function setup() {
   } as AuthenticatedBridgeRequest);
   return { fleet, lease, host, terminals, coordinator, handler, call };
 }
+
+test("restores a persisted worker with --resume, no new prompt, and no focus", async () => {
+  const { fleet, host, coordinator } = setup();
+  const workerId = agent("persisted-worker");
+  const sessionId = session("c15badb6-d6c8-45a6-a59f-e931cd364332");
+  fleet.register({
+    identity: { agentId: workerId, type: "implementer" },
+    sessionId,
+    terminal: { terminalId: terminal("old-terminal"), name: "aboard: implementer #19" },
+    lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
+    resultDelivery: { mode: "tool-result" },
+    telemetry,
+    issueNumber: 19,
+  }, at("2026-07-30T10:00:00.000Z"));
+  fleet.transition(workerId, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
+  await coordinator.resumePersisted(fleet.get(workerId)!);
+  assert.match(host.created[0]!.terminal.sent[0] ?? "", /--resume c15badb6/);
+  assert.deepEqual(host.created[0]!.terminal.shown, []);
+  assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
+});
+
+test("keeps a transcript-less persisted worker paused", async () => {
+  const context = setup();
+  const workerId = agent("persisted-worker");
+  const sessionId = session("c15badb6-d6c8-45a6-a59f-e931cd364332");
+  context.fleet.register({
+    identity: { agentId: workerId, type: "implementer" }, sessionId,
+    terminal: { terminalId: terminal("old-terminal"), name: "aboard: implementer" },
+    lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
+    resultDelivery: { mode: "tool-result" }, telemetry,
+  }, at("2026-07-30T10:00:00.000Z"));
+  const refusing = new DelegationCoordinator({
+    workspaceRoot: "C:\\repo", isResumable: async () => false,
+    fleet: context.fleet, lease: context.lease, terminals: context.terminals,
+    managerAgentId: agent("manager-1"), shell: "powershell", permissionMode: "default",
+    agentIdFactory: () => agent("unused"), sessionIdFactory: () => session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    configurations: { get: async () => resolveLaunchConfiguration({ agentName: "implementer", declaredTools: ["Read", "Edit"] }) },
+    prompts: { resolve: async () => undefined }, spills: { write: async (spill) => spill.relativePath },
+  });
+  await assert.rejects(() => refusing.resumePersisted(context.fleet.get(workerId)!), /no Claude conversation/);
+  assert.equal(context.host.created.length, 0);
+  assert.equal(context.fleet.get(workerId)?.terminal.terminalId, "old-terminal");
+});
 
 function resultBody(response: Awaited<ReturnType<ReturnType<typeof createMcpHandler>>>): Record<string, unknown> {
   return response.body as Record<string, unknown>;

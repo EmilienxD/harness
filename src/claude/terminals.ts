@@ -86,6 +86,8 @@ export interface CreateAboardTerminalRequest {
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
   readonly initialCommand?: string;
+  /** Overrides the default focus behavior for bulk restoration. */
+  readonly focus?: boolean;
   /**
    * Whether this session reports its result over the bridge. It is a property
    * of the launch, not of the type: the dual-mode builtin types
@@ -203,7 +205,7 @@ export interface TerminalControllerOptions {
  * interactively is shown exactly like an interactive-only one.
  */
 function isUserFacing(request: CreateAboardTerminalRequest): boolean {
-  return request.agentType === "manager" || isInteractiveAgentType(request.agentType) || request.deliversResult === false;
+  return request.focus ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType) || request.deliversResult === false);
 }
 
 export class TerminalController {

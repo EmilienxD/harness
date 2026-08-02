@@ -23,7 +23,7 @@ export async function run(): Promise<void> {
   assert.ok(api?.bridgeDiscoveryPath, "activation exposes the bridge discovery path");
 
   const available = await commands.getCommands(true);
-  for (const command of ["aboard.focusFleet", "aboard.focusAgent", "aboard.killAgent", "aboard.initializeProject", "aboard.updateProject"]) {
+  for (const command of ["aboard.focusFleet", "aboard.focusAgent", "aboard.killAgent", "aboard.removePausedSession", "aboard.initializeProject", "aboard.updateProject", "aboard.restoreFleet"]) {
     assert.ok(available.includes(command), `${command} is registered`);
   }
 
@@ -33,16 +33,21 @@ export async function run(): Promise<void> {
   assert.equal(api.bridgeDiscoveryPath.startsWith(root), false, "discovery file is written outside the workspace");
   await assert.rejects(readFile(join(root, ".aboard", "runtime", "bridge.json")), "no bridge file is written into the project");
   const discovery = JSON.parse(await readFile(api.bridgeDiscoveryPath, "utf8")) as Discovery;
+  const existingTerminals = new Set(window.terminals);
   const response = await fetch(`http://127.0.0.1:${discovery.port}/terminals`, {
     method: "POST",
     headers: { authorization: `Bearer ${discovery.token}`, "content-type": "application/json" },
-    body: JSON.stringify({ agentId: "integration-worker", sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", agentType: "reviewer" }),
+    body: JSON.stringify({ agentId: "integration-worker", sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", agentType: "brainstormer" }),
   });
   const responseBody = await response.text();
   assert.equal(response.status, 201, responseBody);
-  await eventually(() => window.terminals.some((terminal) => terminal.name.includes("reviewer")), "terminal was not created");
+  let createdTerminal = window.terminals.find((terminal) => !existingTerminals.has(terminal));
+  await eventually(() => {
+    createdTerminal = window.terminals.find((terminal) => !existingTerminals.has(terminal));
+    return createdTerminal !== undefined;
+  }, "terminal was not created");
   await commands.executeCommand("aboard.focusAgent", "integration-worker");
-  assert.match(window.activeTerminal?.name ?? "", /reviewer/);
-  window.activeTerminal?.dispose();
-  await eventually(() => !window.terminals.some((terminal) => terminal.name.includes("reviewer")), "terminal was not closed");
+  assert.equal(window.activeTerminal, createdTerminal);
+  createdTerminal?.dispose();
+  await eventually(() => createdTerminal !== undefined && !window.terminals.includes(createdTerminal), "terminal was not closed");
 }

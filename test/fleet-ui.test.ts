@@ -74,8 +74,23 @@ test("commands route focus and kill, and force release stays available as a reco
   const node = { kind: "agent" as const, session: worker, leaseHolder: true };
   await callbacks.get("aboard.focusAgent")?.(node); await callbacks.get("aboard.killAgent")?.(node); await callbacks.get("aboard.forceReleaseLease")?.();
   assert.deepEqual(calls, ["show", "kill"]); assert.equal(lease.current(), undefined);
-  assert.deepEqual([...callbacks.keys()], ["aboard.focusAgent", "aboard.killAgent", "aboard.forceReleaseLease"]);
+  assert.deepEqual([...callbacks.keys()], ["aboard.focusAgent", "aboard.killAgent", "aboard.removePausedSession", "aboard.forceReleaseLease"]);
   registration.dispose(); assert.equal(callbacks.size, 0);
+});
+
+test("paused rows explain restoration instead of controlling a missing terminal", async () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease(); fleet.register(worker, startedAt);
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:02:05.000Z"), () => false);
+  const item = model.item(model.roots()[0]!);
+  assert.match(item.description, /^paused/);
+  assert.match(item.tooltip, /Restore Fleet/);
+  assert.equal(item.contextValue, "aboard.agent.paused");
+  const callbacks = new Map<string, (...args: readonly unknown[]) => unknown>(); const info: string[] = []; const calls: string[] = [];
+  const registration = registerFleetCommands({ register: (name, callback) => { callbacks.set(name, callback); return { dispose: () => callbacks.delete(name) }; }, confirm: async () => true, info: (message) => info.push(message), error: () => {} }, { show: () => calls.push("show"), kill: () => calls.push("kill"), isOpen: () => false }, fleet, lease);
+  const node = { kind: "agent" as const, session: worker, leaseHolder: false };
+  await callbacks.get("aboard.focusAgent")?.(node); await callbacks.get("aboard.killAgent")?.(node); await callbacks.get("aboard.removePausedSession")?.(node);
+  assert.deepEqual(calls, []); assert.equal(info.length, 3); assert.equal(fleet.get(worker.identity.agentId), undefined);
+  registration.dispose(); model.dispose();
 });
 
 test("status and typed notifications render domain state without sensitive content", () => {

@@ -196,6 +196,23 @@ test("restart relaunches a finished agent and rebinds session routing when the c
   assert.equal(fleet.getBySession(session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee")), undefined);
 });
 
+test("reattach preserves active identity, replaces the terminal, and hands restored workers to the user", () => {
+  const fleet = new FleetRegistry();
+  const workerId = agent("worker-1");
+  fleet.register(createSession("worker-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "tool-result" }), startedAt);
+  fleet.transition(workerId, { status: "running", startedAt }, startedAt);
+  fleet.reattach(
+    workerId,
+    { terminalId: "restored-terminal" as AgentSession["terminal"]["terminalId"], name: "worker-1" },
+    finishedAt,
+    undefined,
+    { mode: "none" },
+  );
+  assert.equal(fleet.get(workerId)?.terminal.terminalId, "restored-terminal");
+  assert.equal(fleet.get(workerId)?.lifecycle.status, "starting");
+  assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
+});
+
 test("removing an agent forgets its session, children, and undelivered results", () => {
   const fleet = new FleetRegistry();
   const managerId = agent("manager-1");

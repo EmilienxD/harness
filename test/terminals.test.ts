@@ -205,6 +205,17 @@ test("result-delivering sessions carry ABOARD_DELIVERS_RESULT; handed-off ones a
   assert.deepEqual(host.created[1]!.terminal.shows, [false]);
 });
 
+test("bulk restoration can suppress focus for user-facing sessions", () => {
+  const { controller, host } = setup();
+  controller.create({
+    agentId: agent("restored-brainstormer"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "brainstormer",
+    focus: false,
+  });
+  assert.deepEqual(host.created[0]!.terminal.shows, []);
+});
+
 test("focuses interactive terminals and exposes only takeover-named input controls", async () => {
   const { controller, host } = setup();
   const created = controller.create({

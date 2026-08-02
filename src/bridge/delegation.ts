@@ -1,5 +1,5 @@
 import type { EffortLevel, LaunchConfiguration, WorkerPermissionMode } from "../claude/launch.js";
-import { planLaunch } from "../claude/launch.js";
+import { launchWriteCapability, planLaunch, planSessionResume } from "../claude/launch.js";
 import type { ResolvedPrompt } from "../claude/prompts.js";
 import type { PromptSpillStore } from "../claude/spill.js";
 import type { ShellKind } from "../claude/shell.js";
@@ -17,6 +17,7 @@ import {
 import { FleetRegistry } from "../domain/fleet.js";
 import { WriteLease, type WriteLeaseHolder } from "../domain/lease.js";
 import type { SessionWrapperLayout } from "../claude/launch.js";
+import { sessionIsResumable } from "../claude/sessions.js";
 
 export interface DelegationLaunchInput {
   readonly type: Exclude<AgentType, "manager">;
@@ -62,6 +63,9 @@ export interface DelegationPromptResolver {
 }
 
 export interface DelegationCoordinatorOptions {
+  readonly workspaceRoot: string;
+  /** Tests transcript availability before deciding between resume and a fresh session. */
+  readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>;
   readonly fleet: FleetRegistry;
   readonly lease: WriteLease;
   readonly terminals: TerminalController;
@@ -104,7 +108,7 @@ export interface DelegationCoordinatorOptions {
 
 export class DelegationError extends Error {
   public constructor(
-    public readonly code: "lease-conflict" | "unknown-agent" | "agent-active" | "aborted",
+    public readonly code: "lease-conflict" | "unknown-agent" | "agent-active" | "aborted" | "unresumable-session",
     message: string,
     public readonly details?: unknown,
   ) {
@@ -148,6 +152,64 @@ export class DelegationCoordinator {
   /** Interactive launch for the engine, typed to the handles it actually uses. */
   public async launchInteractive(input: DelegationLaunchInput): Promise<InteractiveLaunchHandles> {
     return this.#launch(input, { mode: "none" });
+  }
+
+  /** Reopens a persisted active worker after the extension host restarted. */
+  public async resumePersisted(session: AgentSession): Promise<InteractiveLaunchHandles> {
+    if (session.identity.type === "manager") {
+      throw new DelegationError("unknown-agent", "The Manager has its own lifecycle");
+    }
+    const configuration = await this.options.configurations.get(session.identity.type);
+    const capability = launchWriteCapability(session.identity.type, configuration);
+    const resumable = await (this.options.isResumable ?? sessionIsResumable)(session.sessionId, this.options.workspaceRoot);
+    if (!resumable) {
+      throw new DelegationError("unresumable-session", `Session ${session.sessionId} has no Claude conversation to resume`);
+    }
+    const plan = planSessionResume({
+      agentId: session.identity.agentId,
+      sessionId: session.sessionId,
+      agentType: session.identity.type,
+      shell: this.options.shell,
+      permissionMode: this.options.permissionMode,
+      writeCapability: capability,
+      model: configuration.shape === "agent-defined" ? configuration.declaredModel : undefined,
+      effort: configuration.shape === "agent-defined"
+        ? configuration.declaredEffort ?? this.options.effort?.()
+        : this.options.effort?.(),
+      ...this.#command(),
+      ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
+    });
+    await this.options.preflight?.(this.options.command?.());
+    const occurredAt = this.#timestamp();
+    this.#acquire(plan.writeCapability, session.identity.agentId, session.sessionId, occurredAt, "restore persisted agent");
+    try {
+      const terminal = this.options.terminals.create({
+        agentId: session.identity.agentId,
+        sessionId: session.sessionId,
+        agentType: session.identity.type,
+        ...(session.issueNumber === undefined ? {} : { issueNumber: session.issueNumber }),
+        name: session.terminal.name,
+        initialCommand: plan.commandLine,
+        // The extension-host waiter that owned an automated result is gone.
+        // Restoration therefore hands every worker to the user instead of
+        // pretending the interrupted workflow can still receive its result.
+        deliversResult: false,
+        focus: false,
+        ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+      });
+      this.options.fleet.reattach(
+        session.identity.agentId,
+        { terminalId: terminal.terminalId, name: terminal.name },
+        occurredAt,
+        undefined,
+        { mode: "none" },
+      );
+      this.options.fleet.transition(session.identity.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
+      return { agentId: session.identity.agentId, sessionId: session.sessionId, terminalId: terminal.terminalId };
+    } catch (error) {
+      this.options.lease.release(session.identity.agentId, occurredAt, "persisted agent restore failed");
+      throw error;
+    }
   }
 
   public async spawn(input: DelegationLaunchInput): Promise<unknown> {

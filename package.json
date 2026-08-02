@@ -32,6 +32,11 @@
         "title": "Aboard: Resume Manager"
       },
       {
+        "command": "aboard.restoreFleet",
+        "title": "Aboard: Restore Fleet",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "aboard.newManager",
         "title": "Aboard: New Manager"
       },
@@ -67,6 +72,10 @@
       {
         "command": "aboard.killAgent",
         "title": "Aboard: Kill Agent"
+      },
+      {
+        "command": "aboard.removePausedSession",
+        "title": "Aboard: Remove Paused Session"
       },
       {
         "command": "aboard.forceReleaseLease",
@@ -111,8 +120,13 @@
       },
       {
         "view": "aboard.fleet",
-        "when": "aboard.managerResumable",
+        "when": "aboard.managerResumable && !aboard.fleetRestoreAvailable",
         "contents": "[↻ Resume Manager](command:aboard.resumeManager)"
+      },
+      {
+        "view": "aboard.fleet",
+        "when": "aboard.fleetRestoreAvailable",
+        "contents": "A previous aboard fleet is paused after VS Code restarted. [Restore Fleet](command:aboard.restoreFleet)"
       }
     ],
     "menus": {
@@ -131,6 +145,11 @@
           "command": "aboard.resumeManager",
           "when": "view == aboard.fleet && aboard.managerResumable && !aboard.managerLive",
           "group": "1_manager@2"
+        },
+        {
+          "command": "aboard.restoreFleet",
+          "when": "view == aboard.fleet && aboard.fleetRestoreAvailable && !aboard.fleetRestoreRunning",
+          "group": "1_manager@3"
         }
       ],
       "commandPalette": [
@@ -144,11 +163,27 @@
         },
         {
           "command": "aboard.resumeManager",
-          "when": "aboard.managerResumable && !aboard.managerLive"
+          "when": "aboard.initialized && aboard.managerResumable && !aboard.managerLive"
+        },
+        {
+          "command": "aboard.restoreFleet",
+          "when": "aboard.initialized && aboard.fleetRestoreAvailable && !aboard.fleetRestoreRunning"
         },
         {
           "command": "aboard.newManager",
-          "when": "!aboard.managerLive"
+          "when": "aboard.initialized && !aboard.managerLive"
+        },
+        {
+          "command": "aboard.reviewPr",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.focusFleet",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.forceReleaseLease",
+          "when": "aboard.initialized"
         },
         {
           "command": "aboard.startAutoRun",
@@ -156,11 +191,11 @@
         },
         {
           "command": "aboard.stopAutoRun",
-          "when": "aboard.autoRunActive"
+          "when": "aboard.initialized && aboard.autoRunActive"
         },
         {
           "command": "aboard.continueAutoRun",
-          "when": "aboard.autoRunWaiting"
+          "when": "aboard.initialized && aboard.autoRunWaiting"
         },
         {
           "command": "aboard.focusAgent",
@@ -168,17 +203,25 @@
         },
         {
           "command": "aboard.killAgent",
+          "when": "false"
+        },
+        {
+          "command": "aboard.removePausedSession",
           "when": "false"
         }
       ],
       "view/item/context": [
         {
           "command": "aboard.focusAgent",
-          "when": "viewItem =~ /aboard.agent/"
+          "when": "viewItem =~ /aboard.agent.(active|finished)/"
         },
         {
           "command": "aboard.killAgent",
           "when": "viewItem == aboard.agent.active"
+        },
+        {
+          "command": "aboard.removePausedSession",
+          "when": "viewItem == aboard.agent.paused"
         }
       ]
     },

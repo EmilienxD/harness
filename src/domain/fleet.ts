@@ -346,6 +346,41 @@ export class FleetRegistry {
     this.record({ type: "lifecycle-transitioned", agentId, from, to: "starting" }, startedAt);
   }
 
+  /** Reattaches an active persisted session to a new VS Code terminal. */
+  public reattach(
+    agentId: AgentId,
+    terminal: AgentSession["terminal"],
+    startedAt: IsoTimestamp,
+    sessionId?: SessionId,
+    resultDelivery?: AgentSession["resultDelivery"],
+  ): void {
+    const session = this.requireSession(agentId);
+    if (
+      session.lifecycle.status !== "starting" &&
+      session.lifecycle.status !== "running" &&
+      session.lifecycle.status !== "awaiting-user"
+    ) {
+      throw new FleetStateError("invalid-transition", `Agent ${agentId} is not active`);
+    }
+    if (sessionId !== undefined && sessionId !== session.sessionId) {
+      const owner = this.agentBySession.get(sessionId);
+      if (owner !== undefined && owner !== agentId) {
+        throw new FleetStateError("duplicate-session", `Session ${sessionId} is already registered`);
+      }
+      this.agentBySession.delete(session.sessionId);
+      this.agentBySession.set(sessionId, agentId);
+    }
+    const from = session.lifecycle.status;
+    this.sessionsByAgent.set(agentId, {
+      ...session,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(resultDelivery === undefined ? {} : { resultDelivery }),
+      terminal,
+      lifecycle: { status: "starting", startedAt },
+    });
+    this.record({ type: "lifecycle-transitioned", agentId, from, to: "starting" }, startedAt);
+  }
+
   public updateTelemetry(agentId: AgentId, telemetry: AgentTelemetry, occurredAt: IsoTimestamp): void {
     const session = this.requireSession(agentId);
     if (telemetry.compactionCount < session.telemetry.compactionCount) {

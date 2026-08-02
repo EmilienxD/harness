@@ -11,7 +11,7 @@ export interface FleetTreeItem {
   readonly description: string;
   readonly tooltip: string;
   readonly icon: string;
-  readonly contextValue: "aboard.agent.active" | "aboard.agent.finished" | "aboard.child";
+  readonly contextValue: "aboard.agent.active" | "aboard.agent.paused" | "aboard.agent.finished" | "aboard.child";
   readonly collapsible: boolean;
   readonly command?: { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
 }
@@ -29,6 +29,7 @@ export class FleetTreeModel {
     private readonly lease: WriteLease,
     host: FleetTreeHost,
     private readonly now: () => Date = () => new Date(),
+    private readonly isTerminalOpen: (terminalId: TerminalId) => boolean = () => true,
   ) {
     this.#fleetRegistration = fleet.onDidChange(() => host.refresh());
     this.#leaseRegistration = lease.onDidChange(() => host.refresh());
@@ -55,15 +56,16 @@ export class FleetTreeModel {
     }
     const { session } = node;
     const goal = session.issueNumber === undefined ? "" : ` #${session.issueNumber}`;
+    const terminalOpen = this.isTerminalOpen(session.terminal.terminalId);
     const elapsed = formatElapsed(session.lifecycle.startedAt, this.now());
-    const markers = [session.lifecycle.status, node.leaseHolder ? "lease holder" : "", elapsed].filter(Boolean);
+    const markers = [terminalOpen ? session.lifecycle.status : "paused", node.leaseHolder ? "lease holder" : "", elapsed].filter(Boolean);
     const active = ["starting", "running", "awaiting-user"].includes(session.lifecycle.status);
     return {
       label: `${session.identity.type === "manager" ? "Manager" : session.identity.type}${goal}`,
       description: markers.join(" · "),
-      tooltip: agentTooltip(session, node.leaseHolder),
+      tooltip: agentTooltip(session, node.leaseHolder, terminalOpen),
       icon: agentIcon(session),
-      contextValue: active ? "aboard.agent.active" : "aboard.agent.finished",
+      contextValue: active ? terminalOpen ? "aboard.agent.active" : "aboard.agent.paused" : "aboard.agent.finished",
       collapsible: this.fleet.listChildren(session.identity.agentId).length > 0,
       command: { command: "aboard.focusAgent", title: "Focus Agent", arguments: [node] },
     };
@@ -82,13 +84,33 @@ export interface AgentCommandHost {
 export interface AgentTerminalActions {
   show(terminalId: TerminalId): void;
   kill(terminalId: TerminalId): void;
+  isOpen?(terminalId: TerminalId): boolean;
 }
 
 export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTerminalActions, fleet: FleetRegistry, lease: WriteLease, now: () => Date = () => new Date()): { dispose(): void } {
   const sessionOf = (value: unknown): AgentSession | undefined => isAgentNode(value) ? value.session : undefined;
   const registrations = [
-    host.register("aboard.focusAgent", (value) => { const session = sessionOf(value); if (session) terminals.show(session.terminal.terminalId); }),
-    host.register("aboard.killAgent", async (value) => { const session = sessionOf(value); if (session && await host.confirm(`Kill ${session.identity.type}?`, "Kill")) terminals.kill(session.terminal.terminalId); }),
+    host.register("aboard.focusAgent", (value) => {
+      const session = sessionOf(value);
+      if (session === undefined) return;
+      if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("This session is paused. Use Restore Fleet to reopen its terminal.");
+      terminals.show(session.terminal.terminalId);
+    }),
+    host.register("aboard.killAgent", async (value) => {
+      const session = sessionOf(value);
+      if (session === undefined) return;
+      if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("This session is paused. Restore it before killing the terminal.");
+      if (await host.confirm(`Kill ${session.identity.type}?`, "Kill")) terminals.kill(session.terminal.terminalId);
+    }),
+    host.register("aboard.removePausedSession", async (value) => {
+      const session = sessionOf(value);
+      if (session === undefined || terminals.isOpen?.(session.terminal.terminalId) !== false) return;
+      if (!await host.confirm(`Remove the paused ${session.identity.type} session from the fleet? Its Claude transcript will stay on disk.`, "Remove")) return;
+      const occurredAt = now().toISOString() as IsoTimestamp;
+      lease.release(session.identity.agentId, occurredAt, "paused session removed by user");
+      fleet.remove(session.identity.agentId, occurredAt);
+      host.info("Paused session removed from the fleet. Its Claude transcript remains on disk.");
+    }),
     // Recovery hatch only, reachable from the Command Palette: a worker that dies
     // without releasing the write lease would otherwise block every later
     // write-capable launch.
@@ -117,7 +139,7 @@ function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "a
 function formatElapsed(startedAt: IsoTimestamp, now: Date): string { const seconds = Math.max(0, Math.floor((now.getTime() - Date.parse(startedAt)) / 1000)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
-function agentTooltip(session: AgentSession, leaseHolder: boolean): string { return [`Session: ${session.sessionId}`, `Status: ${session.lifecycle.status}`, leaseHolder ? "Holds the write lease" : ""].filter(Boolean).join("\n"); }
+function agentTooltip(session: AgentSession, leaseHolder: boolean, terminalOpen: boolean): string { return [`Session: ${session.sessionId}`, `Status: ${terminalOpen ? session.lifecycle.status : "paused after VS Code restart"}`, terminalOpen ? "" : "Use Restore Fleet to reopen this Claude conversation", leaseHolder ? "Holds the write lease" : ""].filter(Boolean).join("\n"); }
 function childTooltip(child: ChildAgentNode): string { return [`Type: ${child.type}`, `Status: ${child.status}`].join("\n"); }
 
 export interface FleetNotificationHost { information(message: string): void; warning(message: string): void; error(message: string): void; }

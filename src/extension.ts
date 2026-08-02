@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { RelativePattern, commands, window, workspace } from "vscode";
+import { ProgressLocation, RelativePattern, commands, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -232,6 +232,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let sessionLifecycle: SessionLifecycleService | undefined;
   const sessionProofs = new SessionStartupProofs();
   let initialized = false;
+  // A `when` clause hides a palette command; it does not disable it. An invoked
+  // side effect on an uninitialized project would launch agents into
+  // unscaffolded state or recreate `.aboard/` behind the user's back — the very
+  // thing the persistence layer refuses to do — so those handlers refuse too.
+  const requireInitialized = (): boolean => {
+    if (initialized) return true;
+    void window.showInformationMessage("aboard is not initialized in this workspace. Initialize it from the Get Started view first.");
+    return false;
+  };
   const terminals = new TerminalController({
     host: createVsCodeTerminalHost(),
     environment: () => {
@@ -289,7 +298,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // does own turns "the terminal is full of shell errors" into a refused launch
   // with a reason. Cached per command, so only the first launch pays.
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
-  const coordinator = new DelegationCoordinator({ fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   // A settled session leaves its terminal to be collected: the record the
   // fleet dropped still names an open terminal, and the next launch for the
@@ -503,7 +512,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
-  registerNativeFleetUi(context, bridge.port, fleet, lease, terminals);
+  const fleetUi = registerNativeFleetUi(context, bridge.port, fleet, lease, terminals, () => initialized);
   // Progress is pull, not push: one bounded line per transition, drained by the
   // Manager's UserPromptSubmit hook on the user's next message. If the user is
   // away for a whole afk spec, they learn the outcome when they return — which
@@ -554,6 +563,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // The UI offers resume and new as separate actions, so the launch path never
   // has to interrupt with a "which did you mean?" prompt.
   const launch = async (mode: "resume" | "new") => {
+    if (!requireInitialized()) return;
     const workerMode = currentConfiguration.workerPermissionMode;
     if (workerMode !== "bypass" && !context.globalState.get(warnKey)) { await window.showWarningMessage("Unattended workers may stall on permission prompts. For afk work, use the bypass permission mode."); await context.globalState.update(warnKey, true); }
     try {
@@ -565,12 +575,89 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (fleet.get(terminal.agentId) === undefined) {
         fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
       } else {
-        fleet.restart(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
+        const prior = fleet.get(terminal.agentId)!;
+        if (["starting", "running", "awaiting-user"].includes(prior.lifecycle.status)) {
+          fleet.reattach(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
+        } else {
+          fleet.restart(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
+        }
       }
       fleet.transition(terminal.agentId, { status: "running", startedAt }, startedAt);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
     finally { await publishManagerState(); }
   };
+  let fleetRestoreRunning = false;
+  let autoRunResumeDeferred = false;
+  const pausedPersistedSessions = (): readonly AgentSession[] => {
+    const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
+    return fleet.list().filter((session) =>
+      ["starting", "running", "awaiting-user"].includes(session.lifecycle.status) && !openTerminalIds.has(session.terminal.terminalId),
+    );
+  };
+  const publishFleetRestoreState = async (): Promise<void> => {
+    await commands.executeCommand("setContext", "aboard.fleetRestoreAvailable", !fleetRestoreRunning && pausedPersistedSessions().length > 0);
+    await commands.executeCommand("setContext", "aboard.fleetRestoreRunning", fleetRestoreRunning);
+  };
+  const restoreFleet = async (confirm = true): Promise<void> => {
+    if (fleetRestoreRunning) return;
+    if (!requireInitialized()) return;
+    const sessions = [...pausedPersistedSessions()];
+    if (sessions.length === 0) return;
+    if (confirm) {
+      const confirmation = await window.showInformationMessage(
+        `Restore ${sessions.length} aboard session${sessions.length === 1 ? "" : "s"}? New terminals will open and Claude will resume each saved conversation.`,
+        { modal: true, detail: "Restored workers are handed back to you; interrupted automatic workflows remain separate and explicit." },
+        "Restore Fleet",
+      );
+      if (confirmation !== "Restore Fleet") return;
+    }
+    fleetRestoreRunning = true;
+    await publishFleetRestoreState();
+    const failures: string[] = [];
+    try {
+      await window.withProgress({ location: ProgressLocation.Notification, title: "Restoring aboard fleet" }, async (progress) => {
+        let completed = 0;
+        const report = (session: AgentSession) => {
+          completed += 1;
+          progress.report({ message: `${session.identity.type} (${completed}/${sessions.length})` });
+        };
+        const managerSession = sessions.find((session) => session.identity.type === "manager");
+        if (managerSession !== undefined) {
+          try {
+            const terminal = await manager.start("resume");
+            const startedAt = new Date().toISOString() as IsoTimestamp;
+            fleet.reattach(managerSession.identity.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
+            fleet.transition(managerSession.identity.agentId, { status: "running", startedAt }, startedAt);
+          } catch (error) {
+            failures.push(`Manager: ${error instanceof Error ? error.message : "restore failed"}`);
+          }
+          report(managerSession);
+        }
+        for (const session of sessions) {
+          if (session.identity.type === "manager") continue;
+          try { await coordinator.resumePersisted(session); }
+          catch (error) { failures.push(`${session.identity.type}: ${error instanceof Error ? error.message : "restore failed"}`); }
+          report(session);
+        }
+      });
+    } finally {
+      fleetRestoreRunning = false;
+      await publishFleetRestoreState();
+    }
+    const restored = sessions.filter((session) => terminals.liveTerminalForAgent(session.identity.agentId) !== undefined);
+    const terminalToShow = restored.find((session) => session.identity.type === "manager") ?? restored[0];
+    if (terminalToShow !== undefined) terminals.show(fleet.get(terminalToShow.identity.agentId)!.terminal.terminalId);
+    if (failures.length > 0) void window.showWarningMessage(`aboard restored ${sessions.length - failures.length} of ${sessions.length} sessions. ${failures.join("; ")}`);
+    else void window.showInformationMessage(`aboard restored all ${sessions.length} sessions.`);
+    if (autoRunResumeDeferred) void offerAutoRunResume();
+  };
+  void publishFleetRestoreState();
+  if (pausedPersistedSessions().length > 0) {
+    void window.showInformationMessage(
+      `aboard paused ${pausedPersistedSessions().length} saved session${pausedPersistedSessions().length === 1 ? "" : "s"} when VS Code closed.`,
+      "Restore Fleet",
+    ).then((choice) => { if (choice === "Restore Fleet") void restoreFleet(false); });
+  }
   // `aboard.initialized` drives the welcome view and the Initialize/Update pair.
   // `aboard.managerLive` hides the launch actions while a Manager is running, and
   // `aboard.managerResumable` shows Resume only when a session exists to resume.
@@ -578,6 +665,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const recorded = await managerStore.load().catch(() => undefined);
     await commands.executeCommand("setContext", "aboard.managerLive", fleet.list().some((entry) => entry.identity.type === "manager"));
     await commands.executeCommand("setContext", "aboard.managerResumable", recorded !== undefined);
+    await publishFleetRestoreState();
   };
   const publishScaffoldState = async () => {
     const state = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const);
@@ -585,8 +673,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // `.aboard/` is the project's state root. When it disappears the aboard
     // session it described is gone: live terminals are closed and the fleet is
     // discarded, rather than leaving the tree showing agents whose backing state
-    // no longer exists.
+    // no longer exists. The auto-run is stopped first: its loop persists a
+    // resume record as it advances, and left running it would recreate the
+    // `.aboard/` the user just removed.
     if (initialized && !next) {
+      autoRun.stop("project state was removed");
       for (const terminal of terminals.list()) {
         if (terminal.status === "open") try { terminals.kill(terminal.terminalId); } catch { /* already closing */ }
       }
@@ -597,6 +688,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }
     initialized = next;
     await commands.executeCommand("setContext", "aboard.initialized", next);
+    fleetUi.refresh();
     await publishManagerState();
   };
   await publishScaffoldState();
@@ -639,6 +731,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push(
     commands.registerCommand("aboard.initializeProject", scaffold),
     commands.registerCommand("aboard.updateProject", async () => {
+      if (!requireInitialized()) return;
       const confirmed = await window.showWarningMessage(
         "Reset aboard's project assets?",
         {
@@ -651,8 +744,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
-    registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, callback), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
+    commands.registerCommand("aboard.restoreFleet", restoreFleet),
+    registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
     commands.registerCommand("aboard.startAutoRun", async () => {
+      if (!requireInitialized()) return;
       try {
         const result = await autoRun.start();
         if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
@@ -670,7 +765,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // with no human present — exactly what the visibility invariants prevent.
   const offerAutoRunResume = async (): Promise<void> => {
     const record = await new FileAutoRunStore(workspaceRoot).load().catch(() => undefined);
-    if (record === undefined) return;
+    if (record === undefined) { autoRunResumeDeferred = false; return; }
+    if (pausedPersistedSessions().some((session) => session.issueNumber === record.currentIssue && session.identity.type !== "manager")) {
+      autoRunResumeDeferred = true;
+      output.appendLine(`Auto-run resume for issue #${record.currentIssue ?? "?"} is deferred until its paused fleet session is restored or closed.`);
+      return;
+    }
+    autoRunResumeDeferred = false;
     const choice = await window.showWarningMessage(
       `An aboard auto-run for spec #${record.specNumber} was interrupted at the ${record.phase} phase of issue #${record.currentIssue ?? "?"}. Resume it?`,
       { modal: false },
@@ -683,6 +784,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       await new FileAutoRunStore(workspaceRoot).clear();
     }
   };
+  context.subscriptions.push(fleet.onDidChange(() => {
+    if (autoRunResumeDeferred && !fleetRestoreRunning) void offerAutoRunResume();
+  }));
   void offerAutoRunResume();
   const reloadConfiguration = (restartHint: (before: typeof currentConfiguration, after: typeof currentConfiguration) => boolean) => {
     const next = configuration(projectSettings.values);
