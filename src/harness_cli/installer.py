@@ -256,6 +256,10 @@ def plan_install(
             status = "new"
         elif sha256(path) == sha256(source):
             status = "unchanged"
+        elif dest.endswith(".rules"):
+            # Never overwrite user-edited .rules files — they're starter templates
+            # meant to be customized, not versioned config we maintain.
+            status = "unchanged"
         else:
             status = "overwrite"
         actions.append(FileAction(dest=dest, source=source, executable=executable, status=status))
