@@ -117,10 +117,7 @@ LABEL_ALIASES = {
 def ensure_labels(dry_run: bool) -> list[str]:
     """Create or update the canonical labels. Returns warning lines, if any."""
     if dry_run:
-        return [
-            "  DRY   would ensure 6 canonical labels exist "
-            "(low/medium/high-difficulty, afk, hitl, spec)"
-        ]
+        return []
 
     warnings = []
     for name, (color, description) in CANONICAL_LABELS.items():
@@ -285,8 +282,11 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
         published_dir.mkdir(exist_ok=True)
 
     resolved = load_resolved(batch_dir)
-    report.append(f"Batch {batch_dir.name}: {len(files)} draft(s), "
-                   f"{len(resolved)} already published in earlier run(s)\n")
+    batch_header = f"Batch: {len(files)} draft issue(s)"
+    if resolved:
+        batch_header += f", {len(resolved)} already published"
+    report.append(batch_header)
+    report.append("")
 
     # Worklist retry: a file with an unresolved reference goes back on the
     # queue instead of being skipped permanently, so ordering mistakes
@@ -310,9 +310,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
 
             if not labels or (labels != ["spec"] and len(labels) != 2):
                 failed_entries.append(
-                    f"  SKIP  {path.name} - missing or malformed label line "
-                    f"(expected '> difficulty:{{low|medium|high}}, mode:{{afk|hitl}}' "
-                    f"or '> spec')"
+                    f"  SKIP  {path.name} - missing label line"
                 )
                 made_progress = True  # not retryable, don't requeue
                 continue
@@ -328,8 +326,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
 
             if dry_run:
                 report.append(
-                    f"  DRY   {path.name} -> would create \"{title}\" "
-                    f"[{', '.join(labels)}], body {len(body)} chars"
+                    f"  Would create: \"{title}\" [{', '.join(labels)}]"
                 )
                 # Fabricate a placeholder so later dry-run references in
                 # this batch resolve too, for a fuller preview.
@@ -343,7 +340,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
                 number_match = re.search(r"/issues/(\d+)", info)
                 resolved_number = number_match.group(1) if number_match else "?"
                 resolved[key] = resolved_number
-                report.append(f"  OK    {path.name} [{', '.join(labels)}] -> {info}")
+                report.append(f"  Created: {info}")
                 path.rename(published_dir / f"issue-{i}-#{resolved_number}.md")
                 published += 1
             else:
@@ -361,9 +358,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
         _, body_with_refs = extract_labels(rest)
         _, unresolved = resolve_references(body_with_refs, resolved)
         failed_entries.append(
-            f"  SKIP  {path.name} - unresolved reference(s) after retries: "
-            f"{', '.join(unresolved)} (referenced draft not published, "
-            f"outside this batch, or part of a cycle)"
+            f"  SKIP  {path.name} - unresolved reference: {', '.join(unresolved)}"
         )
 
     report.extend(failed_entries)
@@ -378,10 +373,12 @@ def publish_issues(dry_run: bool) -> str:
     if not batch_dirs:
         return "No draft batches found in .issues-gateway/. Nothing to publish."
 
-    header = "Dry run - no issues will be created" if dry_run else "Publishing drafted issues"
-    report = [f"{header} from {GATEWAY_DIR}/\n"]
-    report.extend(ensure_labels(dry_run))
-    report.append("")
+    header = "Dry run — nothing will be created" if dry_run else "Publishing drafted issues"
+    report = [header, ""]
+    label_warnings = ensure_labels(dry_run)
+    if label_warnings:
+        report.extend(label_warnings)
+        report.append("")
 
     total_published = 0
     total_failed = 0
@@ -393,19 +390,17 @@ def publish_issues(dry_run: bool) -> str:
 
     if dry_run:
         report.append(
-            f"Dry run complete: {total_published} would publish, "
-            f"{total_failed} would be skipped or need attention. "
-            f"Nothing was created or moved."
+            f"Dry run complete: {total_published} issue(s) ready to publish."
         )
+        if total_failed:
+            report.append(f"{total_failed} would be skipped (see above).")
     elif total_failed:
         report.append(
-            f"{total_published} issue(s) published. {total_failed} failed or "
-            f"were skipped - those files were left in place so you can fix "
-            f"and re-run /publish-issues. Already-published issues in this "
-            f"batch will not be re-created on rerun."
+            f"Published {total_published} issue(s). {total_failed} failed or were skipped."
         )
+        report.append("Failed drafts remain in .issues-gateway/ — fix and rerun.")
     else:
-        report.append(f"All {total_published} issue(s) published successfully.")
+        report.append(f"Published {total_published} issue(s) successfully.")
 
     return "\n".join(report)
 
@@ -417,7 +412,7 @@ def main() -> None:
     if PROMPT_PATTERN.match(prompt):
         dry_run = "--dry" in prompt.split()
         result = publish_issues(dry_run)
-        sys.stderr.write(result + "\n")
+        sys.stderr.write("\n\n" + result)
         sys.exit(2)
 
     sys.exit(0)
