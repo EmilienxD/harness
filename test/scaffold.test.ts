@@ -132,17 +132,17 @@ test("vendored skills are installed by command and failures are reported, not au
   const installer = {
     run: async (command: string, cwd: string) => {
       calls.push({ command, cwd });
-      if (command === "install lavish") throw new Error("upstream unavailable");
+      if (command === "install unreliable") throw new Error("upstream unavailable");
     },
   };
   const report = await scaffoldProject({
     projectRoot: root, assetRoot: source, todo, installer,
-    vendoredSkills: [{ name: "commit", command: "install commit" }, { name: "lavish", command: "install lavish" }, { name: "grill-me", command: null }],
+    vendoredSkills: [{ name: "commit", command: "install commit" }, { name: "unreliable", command: "install unreliable" }, { name: "grill-me", command: null }],
   });
 
-  assert.deepEqual(calls, [{ command: "install commit", cwd: root }, { command: "install lavish", cwd: root }]);
+  assert.deepEqual(calls, [{ command: "install commit", cwd: root }, { command: "install unreliable", cwd: root }]);
   assert.deepEqual(report.installed, ["commit"]);
-  assert.ok(report.warnings.includes("Failed to install vendored skill lavish: upstream unavailable"));
+  assert.ok(report.warnings.includes("Failed to install vendored skill unreliable: upstream unavailable"));
   assert.ok(report.warnings.includes("No install command configured for vendored skill: grill-me"));
   // aboard writes nothing under a vendored skill: the command owns that directory.
   assert.deepEqual(report.created.filter((path) => path.startsWith(".claude/skills/")), []);

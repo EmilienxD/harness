@@ -35,9 +35,6 @@ export const VENDORED_SKILLS: readonly VendoredSkill[] = [
   { name: "to-spec", command: `${HARNESS_INSTALL} issues` },
   { name: "to-spec-draft-issue", command: `${HARNESS_INSTALL} issues` },
   { name: "grill-me", command: `${HARNESS_INSTALL} grill-me` },
-  // `lavish` is not a harness tool: it ships from its own repository through the
-  // Agent Skills installer. `-y` keeps npx from stopping to confirm the fetch.
-  { name: "lavish", command: "npx -y skills add kunchenguid/lavish-axi --skill lavish" },
   { name: "commit", command: `${HARNESS_INSTALL} commit` },
 ];
 

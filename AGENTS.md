@@ -56,7 +56,7 @@ Follow the intended module layout in `docs/architecture.md`, but create a direct
 
 ## Skills and scaffold assets
 
-aboard owns only the `update-todo`, `brainstorm`, `raw`, `auto`, and `review-pr` skills. Each is a thin trigger for extension behavior and is meaningless outside aboard. The user-owned skills — the seven from the upstream `issues` tool (`map-issues`, `draft-issues`, `publish-issues`, `draft-issue`, `publish-issue`, `to-spec`, `to-spec-draft-issue`) plus `grill-me`, `lavish`, and `commit` — must not be implemented or rewritten here.
+aboard owns only the `update-todo`, `brainstorm`, `raw`, `auto`, and `review-pr` skills. Each is a thin trigger for extension behavior and is meaningless outside aboard. The user-owned skills — the seven from the upstream `issues` tool (`map-issues`, `draft-issues`, `publish-issues`, `draft-issue`, `publish-issue`, `to-spec`, `to-spec-draft-issue`) plus `grill-me` and `commit` — must not be implemented or rewritten here.
 
 Those skills are never shipped with the extension — no copy under `assets/`, no git submodule. Each is installed into a scaffolded project by running its upstream install command from the `VENDORED_SKILLS` table in `src/scaffold/project.ts`. Do not add a copy of one, and do not author a replacement for a skill whose command is missing or fails: report it.
 

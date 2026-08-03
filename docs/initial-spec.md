@@ -827,7 +827,7 @@ This collapses two concepts into one primitive. There is no separate approval st
 
 1. **Start/resume the Manager.** It briefs the user on project state and recommends a next priority — revisit an incorrectly implemented feature, address review comments, start a new feature, update the roadmap.
 2. **User picks a direction.**
-3. **Brainstorm.** The Manager launches an interactive brainstorm agent (or the user invokes `/brainstorm` directly, §6.3) and hands off. That agent's sole responsibility is producing a complete specification as a large GitHub issue. It may launch built-in `Explore` sub-sub-agents, explore the codebase itself, and use the `grill-me` and `lavish` skills. **A brainstorming session always ends with an issue labelled `spec`** — the implementation contract.
+3. **Brainstorm.** The Manager launches an interactive brainstorm agent (or the user invokes `/brainstorm` directly, §6.3) and hands off. That agent's sole responsibility is producing a complete specification as a large GitHub issue. It may launch built-in `Explore` sub-sub-agents, explore the codebase itself, and use the `grill-me` skill. **A brainstorming session always ends with an issue labelled `spec`** — the implementation contract.
 4. **Split — three skills, in order.** The spec becomes implementation issues through a pipeline the user already owns and uses:
 
    | Skill | Does |
@@ -998,7 +998,7 @@ Launched as the main session agent: `claude --agent manager` (§5.1.1). Its cont
 - **Write-capable:** no (produces a GitHub issue via `gh`, not code)
 - **Tools:** `Read`, `Grep`, `Glob`, `Bash(gh *)`, `Agent`, `Skill`, `AskUserQuestion`
 - **Contract:** ends with a GitHub issue labelled `spec`.
-- **Skills:** `grill-me`, `lavish`.
+- **Skills:** `grill-me`.
 - **May:** launch built-in `Explore` sub-sub-agents (§9.4); explore the codebase directly.
 - **Style:** one question at a time, each with a recommended answer (per `grill-me`).
 - **Launch prompt:** the topic, plus any related issues the bridge resolved (§5.8). May launch with no prompt at all when the user invokes `/brainstorm` bare (§5.4).
@@ -1072,7 +1072,6 @@ Most of the skills in this workflow **already exist and are owned by the user.**
 | `to-spec` | **Exists. Do not implement.** |
 | `to-spec-draft-issue` | **Exists. Do not implement.** |
 | `grill-me` | **Exists. Do not implement.** |
-| `lavish` | **Exists. Do not implement.** |
 | `commit` | **Exists. Do not implement.** |
 
 aboard **integrates** these — invokes them, registers them, ships them alongside its own assets — but their content is not this project's work. An agent that finds one of them missing from a scaffold should report that, not author a replacement.
@@ -1118,7 +1117,6 @@ The scaffolder therefore **never writes under `.claude/skills/<user-owned-skill>
 | `to-spec` | **user** | user, in brainstormer | Synthesize the current conversation into a spec, delivered in chat |
 | `to-spec-draft-issue` | **user** | user, in brainstormer | The same synthesis, drafted as a GitHub issue |
 | `grill-me` | **user** | user, in brainstormer | One-question-at-a-time interviewing, each with a recommended answer |
-| `lavish` | **user** | user, in brainstormer | (User-owned) |
 | `commit` | **user** | user | Commit-message quality; already uses the exit-2 pattern of §6.3.1 |
 | `update-todo` | **aboard** | user, in Manager | Evolve the TODO issue via `aboard__update_todo` |
 | `brainstorm` | **aboard** | user, in Manager | Hook-backed interactive-agent launch (§6.3) |
@@ -1146,7 +1144,7 @@ An extension command scaffolds project assets:
                    map-issues, draft-issues, publish-issues,
                    draft-issue, publish-issue, to-spec,
                    to-spec-draft-issue, grill-me,
-                   lavish, commit                   (user-owned: installed by
+                   commit                           (user-owned: installed by
                                                      command, never shipped, §10.1)
   settings.json    HOOK REGISTRATION ONLY
 .mcp.json          bridge MCP registration (no secrets)
