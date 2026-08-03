@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/commit_user_prompt_submit_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/commit_UserPromptSubmit_hook.py"]
           }
         ]
       }

@@ -35,7 +35,7 @@ stream-editing tasks"* rather than *"never use sed"*.
 | File | Purpose |
 |---|---|
 | `.claude/settings.json` | Registers the hook on the `PostToolUse` event with a `Bash` matcher |
-| `.claude/hooks/prefer_read_tool_hook.py` | Scans the executed command and emits the reminder |
+| `.claude/hooks/prefer_read_tool_PostToolUse_hook.py` | Scans the executed command and emits the reminder |
 
 ## Installation
 
@@ -52,8 +52,8 @@ file list and settings diff. See the [repo README](../../README.md) for
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/prefer_read_tool_hook.py` into `.claude/hooks/` in your repo.
-2. Make it executable: `chmod +x .claude/hooks/prefer_read_tool_hook.py`
+1. Copy `hooks/prefer_read_tool_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
+2. Make it executable: `chmod +x .claude/hooks/prefer_read_tool_PostToolUse_hook.py`
 3. Add (or merge) the following into your repo's `.claude/settings.json`:
 
 ```json
@@ -66,7 +66,7 @@ file list and settings diff. See the [repo README](../../README.md) for
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/prefer_read_tool_hook.py"]
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/prefer_read_tool_PostToolUse_hook.py"]
           }
         ]
       }

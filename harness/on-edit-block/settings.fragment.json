@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/on_edit_block_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/on_edit_block_PreToolUse_hook.py"]
           }
         ]
       }

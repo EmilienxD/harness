@@ -1,11 +1,11 @@
 name = "on-read-reminder"
-version = "1.0.2"
+version = "1.0.3"
 description = "PostToolUse hook that reminds the agent to read key files when it reads paths matching gitignore-style patterns"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/on-read-reminder/README.md"
 
 [[files]]
-src = "hooks/on_read_reminder_hook.py"
-dest = "hooks/on_read_reminder_hook.py"
+src = "hooks/on_read_reminder_PostToolUse_hook.py"
+dest = "hooks/on_read_reminder_PostToolUse_hook.py"
 executable = true
 
 # Starter rules file: all comments, edited into real rules per project. A

@@ -72,7 +72,7 @@ have the last word).
 | File | Purpose |
 |---|---|
 | `.claude/settings.json` | Registers the hook on the `PreToolUse` event with a `Write\|Edit\|MultiEdit` matcher |
-| `.claude/hooks/on_edit_block_hook.py` | Matches edit targets, scans the transcript for prior reads, denies or allows |
+| `.claude/hooks/on_edit_block_PreToolUse_hook.py` | Matches edit targets, scans the transcript for prior reads, denies or allows |
 | `.claude/on-edit-block.rules` | Your pattern → required-files mapping (starter file is all comments) |
 
 ## Installation
@@ -90,8 +90,8 @@ executable, and merges the `PreToolUse` registration below into
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/on_edit_block_hook.py` into `.claude/hooks/` in your repo.
-2. Make it executable: `chmod +x .claude/hooks/on_edit_block_hook.py`
+1. Copy `hooks/on_edit_block_PreToolUse_hook.py` into `.claude/hooks/` in your repo.
+2. Make it executable: `chmod +x .claude/hooks/on_edit_block_PreToolUse_hook.py`
 3. Copy `on-edit-block.rules` into `.claude/` and write your rules.
 4. Add (or merge) the following into your repo's `.claude/settings.json`:
 
@@ -105,7 +105,7 @@ executable, and merges the `PreToolUse` registration below into
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/on_edit_block_hook.py"]
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/on_edit_block_PreToolUse_hook.py"]
           }
         ]
       }

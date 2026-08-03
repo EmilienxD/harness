@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/publish_issues.py"]
+            "args": ["${CLAUDE_DIR}/hooks/publish_issues_UserPromptSubmit_hook.py"]
           }
         ]
       }

@@ -95,8 +95,8 @@ requires = ["git"]
 gitignore = ["commit-ai.key"]                      # also relative to .claude/
 
 [[files]]
-src = "hooks/commit_user_prompt_submit_hook.py"
-dest = "hooks/commit_user_prompt_submit_hook.py"   # relative to .claude/
+src = "hooks/commit_UserPromptSubmit_hook.py"
+dest = "hooks/commit_UserPromptSubmit_hook.py"     # relative to .claude/
 executable = true
 
 [[files]]

@@ -1,12 +1,12 @@
 name = "issues"
-version = "1.2.0"
+version = "1.2.1"
 description = "Draft, spec and publish reviewed GitHub issues - one at a time or a whole plan"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/issues/README.md"
 
 [[files]]
-src = "hooks/publish_issues.py"
-dest = "hooks/publish_issues.py"
+src = "hooks/publish_issues_UserPromptSubmit_hook.py"
+dest = "hooks/publish_issues_UserPromptSubmit_hook.py"
 executable = true
 
 [[files]]

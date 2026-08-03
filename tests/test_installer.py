@@ -55,8 +55,8 @@ def test_install_leaves_no_lock_or_backup(target):
     install("commit", target)
     install("issues", target)
     assert claude_files(target) == [
-        "hooks/commit_user_prompt_submit_hook.py",
-        "hooks/publish_issues.py",
+        "hooks/commit_UserPromptSubmit_hook.py",
+        "hooks/publish_issues_UserPromptSubmit_hook.py",
         "settings.json",
         "skills/commit/SKILL.md",
         "skills/draft-issue/SKILL.md",
@@ -78,9 +78,9 @@ def test_install_hook_tool_writes_settings(target):
         assert entry["command"] == "uv"
         assert entry["args"][0] == "run"
         assert entry["args"][1] == "--no-project"
-        assert entry["args"][2].endswith("/hooks/commit_user_prompt_submit_hook.py")
+        assert entry["args"][2].endswith("/hooks/commit_UserPromptSubmit_hook.py")
     else:
-        assert entry["args"][0].endswith("/hooks/commit_user_prompt_submit_hook.py")
+        assert entry["args"][0].endswith("/hooks/commit_UserPromptSubmit_hook.py")
     assert "${PYTHON}" not in entry["command"]
 
 
@@ -93,7 +93,7 @@ def test_python_uses_uv_when_available(target):
     assert entry["command"] == "uv"
     assert entry["args"][0] == "run"
     assert entry["args"][1] == "--no-project"
-    assert entry["args"][2].endswith("/hooks/commit_user_prompt_submit_hook.py")
+    assert entry["args"][2].endswith("/hooks/commit_UserPromptSubmit_hook.py")
 
 
 def test_python_command_prefers_uv_when_available(monkeypatch):
@@ -138,7 +138,7 @@ def test_install_without_python_warns_and_writes_the_fallback(monkeypatch, targe
     apply_install(plan)
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     assert entry["command"] == installer.FALLBACK_PYTHON
-    assert entry["args"][0].endswith("/hooks/commit_user_prompt_submit_hook.py")
+    assert entry["args"][0].endswith("/hooks/commit_UserPromptSubmit_hook.py")
 
 
 def test_skill_only_tool_does_not_care_about_missing_python(monkeypatch, target):
@@ -174,9 +174,9 @@ def test_uninstall_removes_only_its_own(target):
     install("commit", target)
     install("issues", target)
     uninstall(TOOLS["commit"], target)
-    assert not (target.claude_dir / "hooks/commit_user_prompt_submit_hook.py").exists()
+    assert not (target.claude_dir / "hooks/commit_UserPromptSubmit_hook.py").exists()
     assert not (target.claude_dir / "skills/commit").exists()
-    assert (target.claude_dir / "hooks/publish_issues.py").is_file()
+    assert (target.claude_dir / "hooks/publish_issues_UserPromptSubmit_hook.py").is_file()
     groups = settings(target)["hooks"]["UserPromptSubmit"]
     assert sum(len(g["hooks"]) for g in groups) == 1
 

@@ -37,7 +37,7 @@ has already emitted a tool call, so it can't avoid that first API round trip.
 | File | Purpose |
 |---|---|
 | `.claude/settings.json` | Registers the hook on the `UserPromptSubmit` event |
-| `.claude/hooks/commit_user_prompt_submit_hook.py` | Parses the prompt, stages changes, commits, and reports back — all without touching the model |
+| `.claude/hooks/commit_UserPromptSubmit_hook.py` | Parses the prompt, stages changes, commits, and reports back — all without touching the model |
 
 No slash-command or skill definition is required. The hook matches on the
 raw prompt text (`^/commit ...`), so `/commit` doesn't need to be a
@@ -148,7 +148,7 @@ The hook doubles as a standalone CLI, which always runs dry and can be
 pointed at any historical transcript without touching a repo:
 
 ```bash
-python .claude/hooks/commit_user_prompt_submit_hook.py \
+python .claude/hooks/commit_UserPromptSubmit_hook.py \
     --transcript ~/.claude/projects/<project>/<session>.jsonl \
     --cwd /path/to/repo --ai
 ```
@@ -173,9 +173,9 @@ wrote yourself untouched. See the [repo README](../../README.md) for `--user`,
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/commit_user_prompt_submit_hook.py` into `.claude/hooks/` in your repo.
+1. Copy `hooks/commit_UserPromptSubmit_hook.py` into `.claude/hooks/` in your repo.
 2. Copy `skills/commit/SKILL.md` into `.claude/skills/commit/SKILL.md`.
-3. Make the hook executable: `chmod +x .claude/hooks/commit_user_prompt_submit_hook.py`
+3. Make the hook executable: `chmod +x .claude/hooks/commit_UserPromptSubmit_hook.py`
 4. Add (or merge) the following into your repo's `.claude/settings.json`:
 
 ```json
@@ -187,7 +187,7 @@ wrote yourself untouched. See the [repo README](../../README.md) for `--user`,
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_user_prompt_submit_hook.py"]
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_UserPromptSubmit_hook.py"]
           }
         ]
       }

@@ -87,7 +87,7 @@ additional API calls**.
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
 │   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
 └── hooks/
-    └── publish_issues.py               # UserPromptSubmit hook: gh calls, id resolution, labels
+    └── publish_issues_UserPromptSubmit_hook.py  # UserPromptSubmit hook: gh calls, id resolution, labels
 ```
 
 The hook is registered on `UserPromptSubmit` and matches `/publish-issues` or `/publish-issue`
@@ -157,7 +157,7 @@ see the exact file list and settings diff. See the [repo README](../../README.md
           {
             "type": "command",
             "command": "python",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues.py"]
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"]
           }
         ]
       }

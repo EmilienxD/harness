@@ -54,7 +54,7 @@ def test_user_scope_hook_path_is_absolute(home):
     script_path = entry["args"][-1]  # Last arg is always the script path
     assert "${CLAUDE_PROJECT_DIR}" not in script_path
     assert script_path.startswith(home.as_posix())
-    assert (home / ".claude/hooks/commit_user_prompt_submit_hook.py").is_file()
+    assert (home / ".claude/hooks/commit_UserPromptSubmit_hook.py").is_file()
 
 
 def test_project_scope_hook_path_uses_the_placeholder(tmp_path, home):
@@ -62,7 +62,7 @@ def test_project_scope_hook_path_uses_the_placeholder(tmp_path, home):
     entry = settings(tmp_path / ".claude/settings.json")["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     # With uv: args=["run", "${CLAUDE_PROJECT_DIR}/..."], without: args=["${CLAUDE_PROJECT_DIR}/..."]
     script_path = entry["args"][-1]  # Last arg is always the script path
-    assert script_path == "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_user_prompt_submit_hook.py"
+    assert script_path == "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_UserPromptSubmit_hook.py"
 
 
 def test_user_and_project_installs_are_independent(tmp_path, home):

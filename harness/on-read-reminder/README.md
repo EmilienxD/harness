@@ -68,7 +68,7 @@ reading site-packages shouldn't nag you about your project's glossary.
 | File | Purpose |
 |---|---|
 | `.claude/settings.json` | Registers the hook on the `PostToolUse` event with a `Read\|Bash` matcher |
-| `.claude/hooks/on_read_reminder_hook.py` | Matches read paths against the rules and emits the reminder |
+| `.claude/hooks/on_read_reminder_PostToolUse_hook.py` | Matches read paths against the rules and emits the reminder |
 | `.claude/on-read-reminder.rules` | Your pattern → files mapping (starter file is all comments) |
 
 ## Installation
@@ -86,8 +86,8 @@ executable, and merges the `PostToolUse` registration below into
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/on_read_reminder_hook.py` into `.claude/hooks/` in your repo.
-2. Make it executable: `chmod +x .claude/hooks/on_read_reminder_hook.py`
+1. Copy `hooks/on_read_reminder_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
+2. Make it executable: `chmod +x .claude/hooks/on_read_reminder_PostToolUse_hook.py`
 3. Copy `on-read-reminder.rules` into `.claude/` and write your rules.
 4. Add (or merge) the following into your repo's `.claude/settings.json`:
 
@@ -101,7 +101,7 @@ executable, and merges the `PostToolUse` registration below into
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/on_read_reminder_hook.py"]
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/on_read_reminder_PostToolUse_hook.py"]
           }
         ]
       }

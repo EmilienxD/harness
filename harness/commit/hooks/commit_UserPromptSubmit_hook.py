@@ -1125,7 +1125,7 @@ def cli_main(argv):
     """
     Debug entry point, bypassing the hook protocol entirely:
 
-        python commit_user_prompt_submit_hook.py --transcript <path> [--cwd <dir>] [--ai]
+        python commit_UserPromptSubmit_hook.py --transcript <path> [--cwd <dir>] [--ai]
 
     Always a dry run, so it can be pointed at any historical transcript
     without touching a repo. Prints to stdout and exits 0.
