@@ -124,46 +124,77 @@ def _interpreter_works(path: str) -> bool:
         return False
 
 
-def python_command() -> str | None:
-    """Absolute path of a working Python 3 on this machine, or None.
+def python_command() -> tuple[str, list[str]] | None:
+    """Command and args to run Python 3 scripts, or None.
 
-    Hooks run in exec form, which would resolve a bare `python`/`python3` on
-    whatever PATH Claude Code happens to see at hook time — not necessarily
-    the PATH the installer saw. Baking the full path sidesteps that entirely.
-    `py` covers the common Windows case of a python.org install that was never
-    added to PATH; the launcher itself lives at C:\\Windows\\py.exe.
+    When `uv` is installed (which it is if the user installed via uvx), prefer
+    `uv run --no-project` over an absolute Python path — it's more portable and
+    doesn't point into uv's cache directories.
+
+    Returns (command, args_prefix) where args_prefix goes before the script path.
+    For `uv run`: ("uv", ["run", "--no-project"]), for direct python: (path, []).
     """
+    # Prefer uv run when available (user installed with uvx → uv is present)
+    if shutil.which("uv"):
+        return ("uv", ["run", "--no-project"])
+
+    # Fallback to direct Python interpreter
     for candidate in ("python3", "python", "py"):
         found = shutil.which(candidate)
         if found and _interpreter_works(found):
-            return found
+            return (found, [])
     return None
 
 
-def substitute(value, target: "Target | None" = None, python: str | None = None):
+def substitute(value, target: "Target | None" = None, python_info=None):
     """Expand manifest placeholders throughout a settings fragment.
 
-    `${PYTHON}` becomes the absolute path of a verified interpreter — resolved
-    here unless the caller already did (plan_install needs to know whether the
-    lookup failed, so it resolves once and passes the result down).
+    `${PYTHON}` is expanded into command + args for running Python scripts.
+    When `uv` is available: `command: "uv", args: ["run", "<script>"]`.
+    Otherwise: `command: "<python-path>", args: ["<script>"]`.
+
     `${CLAUDE_DIR}` becomes the directory the tool was installed into — Claude
     Code's own `${CLAUDE_PROJECT_DIR}/.claude` for a project install, and an
     absolute path for a user-level one (where `${CLAUDE_PROJECT_DIR}` would
     point at whatever project happens to be open, not at the hook).
     """
-    if python is None and "${PYTHON}" in json.dumps(value):
-        python = python_command() or FALLBACK_PYTHON
+    if python_info is None and "${PYTHON}" in json.dumps(value):
+        result = python_command()
+        python_info = result if result else (FALLBACK_PYTHON, [])
+
     if isinstance(value, str):
         claude_dir = (
             target.claude_dir.as_posix()
             if target and target.is_user
             else "${CLAUDE_PROJECT_DIR}/.claude"
         )
-        return value.replace("${PYTHON}", python or "").replace("${CLAUDE_DIR}", claude_dir)
+        return value.replace("${CLAUDE_DIR}", claude_dir)
+
     if isinstance(value, dict):
-        return {k: substitute(v, target, python) for k, v in value.items()}
+        # Special handling for hook command/args pattern
+        if value.get("type") == "command" and "${PYTHON}" in json.dumps(value):
+            command, args_prefix = python_info
+            script_args = value.get("args", [])
+            # Expand ${CLAUDE_DIR} in script args
+            expanded_args = [
+                arg.replace(
+                    "${CLAUDE_DIR}",
+                    target.claude_dir.as_posix()
+                    if target and target.is_user
+                    else "${CLAUDE_PROJECT_DIR}/.claude",
+                )
+                for arg in script_args
+            ]
+            return {
+                **{k: v for k, v in value.items() if k not in ("command", "args")},
+                "command": command,
+                "args": args_prefix + expanded_args,
+            }
+        return {k: substitute(v, target, python_info) for k, v in value.items()}
+
     if isinstance(value, list):
-        return [substitute(v, target, python) for v in value]
+        return [substitute(v, target, python_info) for v in value]
+
     return value
 
 
@@ -230,8 +261,9 @@ def plan_install(
         actions.append(FileAction(dest=dest, source=source, executable=executable, status=status))
 
     needs_python = "${PYTHON}" in json.dumps(tool.fragment)
-    python = python_command() if needs_python else None
-    fragment = substitute(tool.fragment, target, python or FALLBACK_PYTHON)
+    python_info = python_command() if needs_python else None
+    fallback_info = (FALLBACK_PYTHON, []) if needs_python else None
+    fragment = substitute(tool.fragment, target, python_info or fallback_info)
     before = target.read_settings() if settings_override is None else settings_override
     after = settings_merge.merge(before, fragment) if fragment else before
 
@@ -244,7 +276,7 @@ def plan_install(
     )
 
     missing = [c for c in tool.requires if shutil.which(c) is None]
-    if needs_python and python is None:
+    if needs_python and python_info is None:
         # Settings are still written (with a fallback name) so there is a real
         # entry to fix forward from once Python is installed — but say so.
         missing.append("python")

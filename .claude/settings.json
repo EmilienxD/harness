@@ -2,6 +2,22 @@
   "env": {},
   "cleanupPeriodDays": 99999,
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": [
+              "run",
+              "--no-project",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/on_read_reminder_hook.py"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "permissions": {
     "defaultMode": "bypassPermissions",

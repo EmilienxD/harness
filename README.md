@@ -106,9 +106,10 @@ dest = "skills/commit"
 
 Settings live beside it in `settings.fragment.json` — real JSON, exactly what
 gets merged, so it stays diffable against what Claude Code expects. Two
-placeholders are resolved at install time: `${PYTHON}` becomes whichever of
-`python3`/`python` exists on the machine, and `${CLAUDE_DIR}` becomes
-`${CLAUDE_PROJECT_DIR}/.claude` (or an absolute path for `--user` installs).
+placeholders are resolved at install time: `${PYTHON}` becomes `uv run --no-project`
+when `uv` is installed (which it is if you used `uvx`), otherwise falls back to
+the first working interpreter among `python3`/`python`/`py`. `${CLAUDE_DIR}`
+becomes `${CLAUDE_PROJECT_DIR}/.claude` (or an absolute path for `--user` installs).
 
 A tool that stores a secret next to itself lists it under `gitignore`, and the
 installer creates or extends the repo's root `.gitignore` accordingly. The

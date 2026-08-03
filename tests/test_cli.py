@@ -50,18 +50,19 @@ def test_user_scope_hook_path_is_absolute(home):
     the hook, so a machine-wide install has to bake in a real path."""
     main(["install", "commit", "--user"])
     entry = settings(home / ".claude/settings.json")["hooks"]["UserPromptSubmit"][0]["hooks"][0]
-    arg = entry["args"][0]
-    assert "${CLAUDE_PROJECT_DIR}" not in arg
-    assert arg.startswith(home.as_posix())
+    # With uv: args=["run", "<absolute-path>"], without: args=["<absolute-path>"]
+    script_path = entry["args"][-1]  # Last arg is always the script path
+    assert "${CLAUDE_PROJECT_DIR}" not in script_path
+    assert script_path.startswith(home.as_posix())
     assert (home / ".claude/hooks/commit_user_prompt_submit_hook.py").is_file()
 
 
 def test_project_scope_hook_path_uses_the_placeholder(tmp_path, home):
     main(["install", "commit", "--dir", str(tmp_path)])
     entry = settings(tmp_path / ".claude/settings.json")["hooks"]["UserPromptSubmit"][0]["hooks"][0]
-    assert entry["args"][0] == (
-        "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_user_prompt_submit_hook.py"
-    )
+    # With uv: args=["run", "${CLAUDE_PROJECT_DIR}/..."], without: args=["${CLAUDE_PROJECT_DIR}/..."]
+    script_path = entry["args"][-1]  # Last arg is always the script path
+    assert script_path == "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_user_prompt_submit_hook.py"
 
 
 def test_user_and_project_installs_are_independent(tmp_path, home):

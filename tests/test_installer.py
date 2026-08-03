@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -71,28 +72,47 @@ def test_install_leaves_no_lock_or_backup(target):
 def test_install_hook_tool_writes_settings(target):
     install("commit", target)
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
-    assert entry["args"][0].endswith("/hooks/commit_user_prompt_submit_hook.py")
+    # With uv available: command="uv", args=["run", "--no-project", "<script>"]
+    # Without uv: command="<python>", args=["<script>"]
+    if installer.python_command() and installer.python_command()[0] == "uv":
+        assert entry["command"] == "uv"
+        assert entry["args"][0] == "run"
+        assert entry["args"][1] == "--no-project"
+        assert entry["args"][2].endswith("/hooks/commit_user_prompt_submit_hook.py")
+    else:
+        assert entry["args"][0].endswith("/hooks/commit_user_prompt_submit_hook.py")
     assert "${PYTHON}" not in entry["command"]
 
 
-def test_python_is_baked_as_an_absolute_path(target):
-    if installer.python_command() is None:
-        pytest.skip("no python on PATH")
+def test_python_uses_uv_when_available(target):
+    if not shutil.which("uv"):
+        pytest.skip("uv not on PATH")
     install("commit", target)
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
-    # Absolute, so the hook works on whatever PATH Claude Code happens to see,
-    # not just the PATH the installer was run from.
-    assert Path(entry["command"]).is_absolute()
+    # When uv is available, prefer it over absolute Python paths
+    assert entry["command"] == "uv"
+    assert entry["args"][0] == "run"
+    assert entry["args"][1] == "--no-project"
+    assert entry["args"][2].endswith("/hooks/commit_user_prompt_submit_hook.py")
 
 
-def test_python_command_prefers_the_first_working_candidate(monkeypatch):
+def test_python_command_prefers_uv_when_available(monkeypatch):
+    monkeypatch.setattr(
+        installer.shutil,
+        "which",
+        lambda name: {"uv": "/usr/bin/uv", "python3": "/usr/bin/python3"}.get(name),
+    )
+    assert installer.python_command() == ("uv", ["run", "--no-project"])
+
+
+def test_python_command_falls_back_to_python_when_uv_unavailable(monkeypatch):
     monkeypatch.setattr(
         installer.shutil,
         "which",
         lambda name: {"python3": "/usr/bin/python3", "python": "/usr/bin/python"}.get(name),
     )
     monkeypatch.setattr(installer, "_interpreter_works", lambda path: True)
-    assert installer.python_command() == "/usr/bin/python3"
+    assert installer.python_command() == ("/usr/bin/python3", [])
 
 
 def test_python_command_skips_candidates_that_only_look_installed(monkeypatch):
@@ -100,10 +120,10 @@ def test_python_command_skips_candidates_that_only_look_installed(monkeypatch):
     monkeypatch.setattr(
         installer.shutil,
         "which",
-        lambda name: {"python3": "C:/stubs/python3.exe", "python": "C:/real/python.exe"}.get(name),
+        lambda name: {"uv": None, "python3": "C:/stubs/python3.exe", "python": "C:/real/python.exe"}.get(name),
     )
     monkeypatch.setattr(installer, "_interpreter_works", lambda path: "stubs" not in path)
-    assert installer.python_command() == "C:/real/python.exe"
+    assert installer.python_command() == ("C:/real/python.exe", [])
 
 
 def test_python_command_returns_none_when_nothing_works(monkeypatch):
@@ -118,6 +138,7 @@ def test_install_without_python_warns_and_writes_the_fallback(monkeypatch, targe
     apply_install(plan)
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     assert entry["command"] == installer.FALLBACK_PYTHON
+    assert entry["args"][0].endswith("/hooks/commit_user_prompt_submit_hook.py")
 
 
 def test_skill_only_tool_does_not_care_about_missing_python(monkeypatch, target):
@@ -126,9 +147,9 @@ def test_skill_only_tool_does_not_care_about_missing_python(monkeypatch, target)
 
 
 def test_uninstall_round_trips_after_python_resolution_drift(monkeypatch, target):
-    monkeypatch.setattr(installer, "python_command", lambda: "/usr/bin/python3.12")
+    monkeypatch.setattr(installer, "python_command", lambda: ("/usr/bin/python3.12", []))
     install("commit", target)
-    monkeypatch.setattr(installer, "python_command", lambda: "/usr/bin/python3.13")
+    monkeypatch.setattr(installer, "python_command", lambda: ("/usr/bin/python3.13", []))
     uninstall(TOOLS["commit"], target)
     assert claude_files(target) == []
 
