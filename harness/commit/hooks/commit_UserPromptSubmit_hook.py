@@ -1200,7 +1200,7 @@ def main():
         return
 
     flags, message = split_flags(match.group(1) or "")
-    if not message and not flags.use_ai:
+    if not message and not flags.use_ai and not flags.dry_run:
         finish(
             "Usage: /commit [--dry-run] [--ai] <message>\n"
             "  --ai      generate the message from the staged diff "

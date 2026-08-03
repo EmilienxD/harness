@@ -6,3 +6,5 @@ build/
 *.egg-info/
 .pytest_cache/
 commit-ai.key
+.aboard/runtime/
+.claude/settings.local.json
