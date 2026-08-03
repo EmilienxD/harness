@@ -590,7 +590,7 @@ function wrapCommand(
 ): { readonly command: readonly string[]; readonly args: readonly string[] } {
   if (wrapper === undefined) return { command, args };
   return {
-    command: ["uv", "run", "--no-project", wrapper.script],
+    command: ["uv", "run", "--no-project", "--no-managed-python", wrapper.script],
     args: [wrapper.lockPathFor(agentId), "--", ...command, ...args],
   };
 }

@@ -105,7 +105,7 @@ test("wrapper layout prefixes the launch and resume lines without reshaping the 
   const plan = planLaunch(request({ wrapper }));
   // plan.args keeps the claude-side view; only the command line changes.
   assert.equal(plan.args[2], "--agent");
-  assert.match(plan.commandLine, /^& uv run --no-project 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
+  assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
   assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' -- claude --session-id ${sessionId}`));
 
   const resumed = planSessionResume({
