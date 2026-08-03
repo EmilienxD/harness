@@ -17,7 +17,6 @@ export type GitHubErrorCode =
   | "command-failed"
   | "malformed-output"
   | "missing-todo"
-  | "ambiguous-todo"
   | "invalid-finding";
 
 export class GitHubBoundaryError extends Error {
@@ -210,36 +209,79 @@ const ROADMAP_QUERY = `query($owner:String!,$repo:String!){repository(owner:$own
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
+/**
+ * Where the resolved TODO singleton number persists between sessions
+ * (`.aboard/runtime/todo.json` in the composed extension). The number is only
+ * a locator hint: every use is revalidated against GitHub and a stale record is
+ * discarded, because GitHub is the durable work-state source.
+ */
+export interface TodoNumberStore {
+  load(): Promise<number | undefined>;
+  save(number: number): Promise<void>;
+  remove(): Promise<void>;
+}
+
 export class GitHubClient implements GitHubPromptSource {
   #todoNumber: number | undefined;
   #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
 
-  public constructor(private readonly gh: GhExecutor) {}
+  public constructor(private readonly gh: GhExecutor, private readonly todoStore: TodoNumberStore) {}
 
   public async getTodo(): Promise<TodoSnapshot> {
-    const number = await this.#resolveTodo(false);
-    if (number === undefined) throw new GitHubBoundaryError("missing-todo", "No open issue has the todo label");
+    let number = await this.#rememberedTodo();
+    if (number !== undefined) {
+      const issue = await this.getIssue(number);
+      if (issue !== undefined && issue.state === "open") return { number, body: issue.body };
+      // Deleted or closed underneath us: the record is a hint, not the truth.
+      // Discard it and fall through to a fresh label scan before giving up.
+      await this.#forgetTodo();
+    }
+    const candidates = await this.#scanTodoNumbers();
+    const newest = candidates[0];
+    if (newest === undefined) throw new GitHubBoundaryError("missing-todo", "No open issue has the todo label");
+    // Ambiguity on a read adopts the newest carrier without creating issues or
+    // rewriting labels — reads stay read-only; the write path heals those.
+    number = await this.#rememberTodo(newest);
     const issue = await this.getIssue(number);
     if (issue === undefined || issue.state !== "open") {
-      this.#todoNumber = undefined;
-      throw new GitHubBoundaryError("missing-todo", "The cached TODO issue is missing or closed");
+      await this.#forgetTodo();
+      throw new GitHubBoundaryError("missing-todo", "The TODO issue changed state while being read");
     }
     return { number, body: issue.body };
   }
 
   public async updateTodo(body: string): Promise<TodoSnapshot> {
     const normalized = body.trim();
-    let number = await this.#resolveTodo(true);
-    if (number === undefined) {
-      await this.gh.run(["label", "create", "todo", "--description", "Project roadmap", "--color", "1D76DB", "--force"]);
-      const output = (await this.gh.run(["issue", "create", "--title", "Project TODO", "--body", normalized, "--label", "todo"])).trim();
-      const match = /\/issues\/(\d+)\/?$/.exec(output);
-      if (match === null) throw new GitHubBoundaryError("malformed-output", "gh issue create did not return an issue URL");
-      number = integer(Number(match[1]), "created TODO number");
-      this.#todoNumber = number;
-    } else {
-      await this.gh.run(["issue", "edit", String(number), "--body", normalized]);
+    const remembered = await this.#rememberedTodo();
+    if (remembered !== undefined) {
+      const issue = await this.getIssue(remembered);
+      if (issue !== undefined && issue.state === "open") {
+        await this.gh.run(["issue", "edit", String(remembered), "--body", normalized]);
+        return { number: remembered, body: normalized };
+      }
+      // The recorded issue was deleted or closed: discard the stale hint and
+      // let discovery below find or recreate the singleton.
+      await this.#forgetTodo();
     }
+    const candidates = await this.#scanTodoNumbers();
+    const adopted = candidates.length === 1 ? candidates[0] : undefined;
+    if (adopted !== undefined) {
+      const number = await this.#rememberTodo(adopted);
+      await this.gh.run(["issue", "edit", String(number), "--body", normalized]);
+      return { number, body: normalized };
+    }
+    // None found, or the label's singleton-locator property was violated by
+    // hand. Instead of failing on ambiguity, mint a fresh issue and strip the
+    // label from the older carriers, so later discovery converges.
+    await this.gh.run(["label", "create", "todo", "--description", "Project roadmap", "--color", "1D76DB", "--force"]);
+    const output = (await this.gh.run(["issue", "create", "--title", "Project TODO", "--body", normalized, "--label", "todo"])).trim();
+    const match = /\/issues\/(\d+)\/?$/.exec(output);
+    if (match === null) throw new GitHubBoundaryError("malformed-output", "gh issue create did not return an issue URL");
+    const number = integer(Number(match[1]), "created TODO number");
+    for (const other of candidates) {
+      await this.gh.run(["issue", "edit", String(other), "--remove-label", "todo"]);
+    }
+    await this.#rememberTodo(number);
     return { number, body: normalized };
   }
 
@@ -431,14 +473,33 @@ export class GitHubClient implements GitHubPromptSource {
     await this.gh.run(["api", `repos/{owner}/{repo}/pulls/${pr}/comments`, "--method", "POST", "-f", `body=${finding.body.trim()}`, "-f", `commit_id=${string(item.headRefOid, "pullRequest.headRefOid")}`, "-f", `path=${finding.path.trim()}`, "-F", `line=${finding.line}`, "-f", `side=${finding.side ?? "RIGHT"}`]);
   }
 
-  async #resolveTodo(allowMissing: boolean): Promise<number | undefined> {
-    if (this.#todoNumber !== undefined) return this.#todoNumber;
-    const output = await this.gh.run(["issue", "list", "--state", "open", "--label", "todo", "--limit", "2", "--json", "number"]);
+  /**
+   * Open issues carrying the `todo` label, newest first. The explicit sort
+   * keeps the ambiguity tiebreak ("adopt the newest") independent of `gh`'s
+   * default ordering.
+   */
+  async #scanTodoNumbers(): Promise<readonly number[]> {
+    const output = await this.gh.run(["issue", "list", "--state", "open", "--label", "todo", "--search", "sort:created-desc", "--limit", "50", "--json", "number"]);
     const items = array(json(output, "TODO lookup"), "TODO lookup");
-    if (items.length > 1) throw new GitHubBoundaryError("ambiguous-todo", "More than one open issue has the todo label");
-    if (items.length === 0) return allowMissing ? undefined : undefined;
-    this.#todoNumber = integer(record(items[0], "TODO issue").number, "TODO issue.number");
+    return items.map((value, index) => integer(record(value, `TODO issue[${index}]`).number, `TODO issue[${index}].number`));
+  }
+
+  async #rememberedTodo(): Promise<number | undefined> {
+    // `??=` never caches a rejected load, so a transient read failure cannot
+    // poison discovery for the rest of the session.
+    this.#todoNumber ??= await this.todoStore.load();
     return this.#todoNumber;
+  }
+
+  async #rememberTodo(number: number): Promise<number> {
+    this.#todoNumber = number;
+    await this.todoStore.save(number);
+    return number;
+  }
+
+  async #forgetTodo(): Promise<void> {
+    this.#todoNumber = undefined;
+    await this.todoStore.remove();
   }
 
   /**

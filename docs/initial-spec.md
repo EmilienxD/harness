@@ -775,11 +775,13 @@ It also puts the roadmap in the same place as every other durable fact in this s
 
 **Reads arrive in the session-start briefing and writes go through `aboard__update_todo`** (§6.2), never raw `gh`. The bridge resolves the issue by label and caches its number in `.aboard/runtime/`, so no agent handles an identifier.
 
+The cached number is a *hint, not the truth*: GitHub remains the source, and aboard revalidates the record on use. If several open issues carry the `todo` label — someone hand-labelled a second roadmap — the bridge never errors on the ambiguity: a read adopts the newest carrier, and a write mints a fresh issue, records its number, and removes the label from the older carriers so discovery converges again. If the recorded issue has been deleted or closed, the record is discarded: the next read reports "no roadmap" and the next write recreates the issue, exactly as on first write.
+
 **Updating is not ticking boxes.** The list evolves as the project evolves: tasks appear, priorities change, obsolete tasks are deleted. It is intentionally **not** an exhaustive specification — that is what `spec` issues are for. Driven by the `update-todo` skill (§10.2).
 
 **The one real loss** is that a GitHub issue has no diff. GitHub keeps an edit history on issue bodies, which covers auditing; there is no scenario in this workflow where a line-by-line roadmap diff drives a decision. Accepted knowingly.
 
-`.aboard/runtime/` is gitignored and holds `bridge.json`, `manager.json`, `fleet.json`, prompt spill files (§5.1.4), and the event log.
+`.aboard/runtime/` is gitignored and holds `bridge.json`, `manager.json`, `fleet.json`, `todo.json`, prompt spill files (§5.1.4), and the event log.
 
 ### 7.2 Labels: minimal, derive the rest
 

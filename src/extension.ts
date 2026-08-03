@@ -36,7 +36,7 @@ import {
   readAboardConfiguration,
   type ProjectSettings,
 } from "./configuration.js";
-import { FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
+import { FileFleetStore, FileTodoNumberStore, PersistOnChange } from "./runtime/persistence.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { createMcpHandler } from "./bridge/mcp.js";
@@ -288,7 +288,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
   const lease = new WriteLease();
   const managerStore = new FileManagerStore(workspaceRoot);
-  const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
+  const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot), new FileTodoNumberStore(workspaceRoot));
   const recordedManager = await managerStore.load();
   const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
   const launchConfigurations = workerConfigurations(workspaceRoot);

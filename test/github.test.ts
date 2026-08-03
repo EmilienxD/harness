@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { GitHubBoundaryError, GitHubClient, type GhExecutor } from "../src/github/client.js";
+import { GitHubBoundaryError, GitHubClient, type GhExecutor, type TodoNumberStore } from "../src/github/client.js";
 
 class FixtureGh implements GhExecutor {
   private readonly mutableCalls: string[][] = [];
@@ -13,10 +13,20 @@ class FixtureGh implements GhExecutor {
   }
 }
 
+class MemoryTodoStore implements TodoNumberStore {
+  public readonly saved: number[] = [];
+  public removed = 0;
+  public current: number | undefined;
+  public constructor(initial?: number) { this.current = initial; }
+  public async load(): Promise<number | undefined> { return this.current; }
+  public async save(number: number): Promise<void> { this.saved.push(number); this.current = number; }
+  public async remove(): Promise<void> { this.removed += 1; this.current = undefined; }
+}
+
 const repo = JSON.stringify({ owner: { login: "EmilienxD" }, name: "aboard" });
 const graph = (value: unknown) => JSON.stringify({ data: { repository: value } });
 
-test("looks up and caches only the singleton TODO number, then updates by argument", async () => {
+test("looks up, persists, and caches the singleton TODO number, then updates by argument", async () => {
   const gh = new FixtureGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return '[{"number":12}]';
     if (args[0] === "repo") return repo;
@@ -24,25 +34,76 @@ test("looks up and caches only the singleton TODO number, then updates by argume
     if (args[0] === "issue" && args[1] === "edit") return "";
     throw new Error(`unexpected ${args.join(" ")}`);
   });
-  const github = new GitHubClient(gh);
+  const store = new MemoryTodoStore();
+  const github = new GitHubClient(gh, store);
   assert.deepEqual(await github.getTodo(), { number: 12, body: "Now" });
   assert.deepEqual(await github.updateTodo("Next"), { number: 12, body: "Next" });
+  assert.deepEqual(store.saved, [12]);
   assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "list").length, 1);
   assert.deepEqual(gh.calls.at(-1), ["issue", "edit", "12", "--body", "Next"]);
 });
 
-test("creates the TODO on first write and rejects missing or ambiguous reads", async () => {
+test("creates the TODO on first write and reports a missing read", async () => {
+  const store = new MemoryTodoStore();
   const createGh = new FixtureGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return "[]";
     if (args[0] === "label") return "";
     if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
     throw new Error("unexpected");
   });
-  assert.deepEqual(await new GitHubClient(createGh).updateTodo("First roadmap"), { number: 44, body: "First roadmap" });
+  assert.deepEqual(await new GitHubClient(createGh, store).updateTodo("First roadmap"), { number: 44, body: "First roadmap" });
   assert.equal(createGh.calls.some((args) => args.includes("--force")), true);
+  assert.deepEqual(store.saved, [44]);
 
-  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "[]")).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo");
-  await assert.rejects(() => new GitHubClient(new FixtureGh(() => '[{"number":1},{"number":2}]')).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "ambiguous-todo");
+  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "[]"), new MemoryTodoStore()).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo");
+});
+
+test("ambiguity never fails: reads adopt the newest carrier, writes mint a fresh issue and strip the rest", async () => {
+  const readGh = new FixtureGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return '[{"number":50},{"number":3}]';
+    if (args[0] === "repo") return repo;
+    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: { number: 50, title: "TODO", body: "Fifty", state: "OPEN", labels: { nodes: [{ name: "todo" }] }, parent: null, closedByPullRequestsReferences: { nodes: [] } } });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const readStore = new MemoryTodoStore();
+  assert.deepEqual(await new GitHubClient(readGh, readStore).getTodo(), { number: 50, body: "Fifty" });
+  assert.deepEqual(readStore.saved, [50]);
+  // Reads stay read-only: the surviving labels are the write path's problem.
+  assert.equal(readGh.calls.some((args) => args.includes("--remove-label")), false);
+
+  const writeGh = new FixtureGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return '[{"number":50},{"number":3}]';
+    if (args[0] === "label") return "";
+    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
+    if (args[0] === "issue" && args[1] === "edit") return "";
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const writeStore = new MemoryTodoStore();
+  assert.deepEqual(await new GitHubClient(writeGh, writeStore).updateTodo("Fresh"), { number: 44, body: "Fresh" });
+  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 50 --remove-label todo"), true);
+  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 3 --remove-label todo"), true);
+  assert.deepEqual(writeStore.saved, [44]);
+});
+
+test("a deleted TODO issue is forgotten: reads report missing, writes recreate", async () => {
+  const deleted = (args: readonly string[]) => {
+    if (args[0] === "repo") return repo;
+    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: null });
+    if (args[0] === "issue" && args[1] === "list") return "[]";
+    if (args[0] === "label") return "";
+    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
+    throw new Error(`unexpected ${args.join(" ")}`);
+  };
+  const readStore = new MemoryTodoStore(99);
+  await assert.rejects(() => new GitHubClient(new FixtureGh(deleted), readStore).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo");
+  assert.equal(readStore.removed, 1);
+
+  const writeGh = new FixtureGh(deleted);
+  const writeStore = new MemoryTodoStore(99);
+  assert.deepEqual(await new GitHubClient(writeGh, writeStore).updateTodo("New roadmap"), { number: 44, body: "New roadmap" });
+  assert.equal(writeStore.removed, 1);
+  assert.deepEqual(writeStore.saved, [44]);
+  assert.equal(writeGh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), false);
 });
 
 test("derives readiness solely from dependency closedness and flags classification", async () => {
@@ -55,7 +116,7 @@ test("derives readiness solely from dependency closedness and flags classificati
       { number: 19, title: "umbrella", labels: { nodes: [{ name: "spec" }] }, blockedBy: { nodes: [] } },
     ] } });
   });
-  const issues = await new GitHubClient(gh).listRoadmapIssues();
+  const issues = await new GitHubClient(gh, new MemoryTodoStore()).listRoadmapIssues();
   assert.deepEqual(issues.map((issue) => [issue.number, issue.ready, issue.disposition]), [
     [16, true, "hitl"], [17, false, "afk"], [18, true, "unclassified"],
   ]);
@@ -71,7 +132,7 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
     if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract", state: "OPEN", labels: { nodes: [{ name: "hitl" }] }, parent: { number: 9 }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
     return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
   });
-  const github = new GitHubClient(gh);
+  const github = new GitHubClient(gh, new MemoryTodoStore());
   assert.equal((await github.getIssue(17))?.parentIssueNumber, 9);
   assert.equal((await github.getPullRequest(42))?.issueNumber, 17);
   assert.equal(await github.getPullRequestDiff(42), "diff --git a/a.ts b/a.ts");
@@ -82,7 +143,7 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
 });
 
 test("malformed gh JSON is a typed boundary failure", async () => {
-  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json")).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
+  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json"), new MemoryTodoStore()).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
 });
 
 test("briefing data surfaces only merges with no durable review", async () => {
@@ -90,7 +151,7 @@ test("briefing data surfaces only merges with no durable review", async () => {
     { number: 40, title: "Reviewed", mergedAt: "2026-07-30T08:00:00Z", reviews: [{ state: "APPROVED" }] },
     { number: 41, title: "Unreviewed", mergedAt: "2026-07-30T09:00:00Z", reviews: [] },
   ]));
-  assert.deepEqual(await new GitHubClient(gh).listUnreviewedMerges("2026-07-30T00:00:00Z"), [
+  assert.deepEqual(await new GitHubClient(gh, new MemoryTodoStore()).listUnreviewedMerges("2026-07-30T00:00:00Z"), [
     { number: 41, title: "Unreviewed", mergedAt: "2026-07-30T09:00:00Z" },
   ]);
   assert.equal(gh.calls[0]?.includes("merged:>=2026-07-30T00:00:00Z"), true);
