@@ -1,5 +1,5 @@
 name = "issues"
-version = "1.2.1"
+version = "1.3.0"
 description = "Draft, spec and publish reviewed GitHub issues - one at a time or a whole plan"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/issues/README.md"
@@ -12,10 +12,6 @@ executable = true
 [[files]]
 src = "skills/draft-issue"
 dest = "skills/draft-issue"
-
-[[files]]
-src = "skills/publish-issue"
-dest = "skills/publish-issue"
 
 [[files]]
 src = "skills/map-issues"

@@ -4,7 +4,7 @@ Everything for getting work out of a conversation and onto the GitHub tracker: o
 reviewed issue, a whole plan → a dependency-linked batch, or the current conversation → a spec
 (in chat, or as an issue). Nothing reaches the tracker before a human has looked at it.
 
-One install ships all seven skills and one publishing hook:
+One install ships all six skills and one publishing hook:
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness harness install issues
@@ -44,8 +44,8 @@ size irrelevant to the Windows command-length limit.
 **Single issue.** `/draft-issue` pins down scope, difficulty, and mode with you in chat, then writes
 one markdown file under `.issues-gateway/{session-id}/issue-{n}.md`, where `{n}` is the next free
 index (pending drafts and already-published files in that session are scanned automatically).
-`/publish-issues` (or the alias `/publish-issue`) publishes every draft in that folder and moves
-each published file aside so a rerun never re-creates it.
+`/publish-issues` publishes every draft in that folder and moves each published file aside so a
+rerun never re-creates it.
 
 **Batch.** `/map-issues` proposes a breakdown in chat — no files, no tracker calls — and iterates
 until granularity, dependencies, difficulty, and mode look right. `/draft-issues` writes one file per
@@ -80,7 +80,6 @@ additional API calls**.
 ├── settings.json                       # registers the UserPromptSubmit hook
 ├── skills/
 │   ├── draft-issue/SKILL.md            # writes .issues-gateway/{session-id}/issue-{n}.md
-│   ├── publish-issue/SKILL.md          # alias for /publish-issues (hook does the work)
 │   ├── map-issues/SKILL.md             # chat-only, proposes the breakdown
 │   ├── draft-issues/SKILL.md           # writes .issues-gateway/{session-id}/issue-{i}.md
 │   ├── publish-issues/SKILL.md         # user-invocable, empty body (hook does the work)
@@ -91,8 +90,8 @@ additional API calls**.
 ```
 
 The hook is registered on `UserPromptSubmit` and matches `/publish-issues` or `/publish-issue`
-(followed by end of string or whitespace). Every other prompt passes through untouched (exit 0), so
-it is safe alongside other `UserPromptSubmit` hooks.
+(followed by end of string or whitespace), handling both singular and batch drafts. Every other
+prompt passes through untouched (exit 0), so it is safe alongside other `UserPromptSubmit` hooks.
 
 At runtime the drafting skills create a gateway folder at the project root — `.issues-gateway/`:
 
@@ -197,7 +196,7 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 /publish-issues [--dry-run]
   → hook creates the labels, publishes every draft via gh,
     moves published files to .issues-gateway/{session-id}/.published/
-  (/publish-issue is an alias — same hook, same behavior)
+  (also accepts /publish-issue alias — same hook, same behavior)
 
 /map-issues [optional: issue number, URL, or path to a plan]
   → propose a breakdown in chat, iterate until it looks right
