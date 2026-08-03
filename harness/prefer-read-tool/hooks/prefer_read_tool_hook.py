@@ -22,9 +22,7 @@ REMINDER = (
     "This command used cat/sed to read a file. For reading file contents, "
     "prefer the built-in Read tool instead of shelling out to cat/sed — "
     "it's faster, avoids shell-quoting/escaping issues, and has built-in "
-    "support for line ranges and large files. Reserve sed for actual "
-    "stream-editing tasks (in-place substitutions, etc.), not for viewing "
-    "files."
+    "support for line ranges and large files."
 )
 
 
