@@ -45,7 +45,7 @@ uvx --from git+https://github.com/EmilienxD/harness harness install prefer-read-
 
 That copies the hook into `.claude/hooks/`, marks it executable, and merges
 the `PostToolUse` registration below into `.claude/settings.json` without
-disturbing any hooks you already had. Add `--dry-run` first to see the exact
+disturbing any hooks you already had. Add `--dry` first to see the exact
 file list and settings diff. See the [repo README](../../README.md) for
 `--user`, `--local`, and `uninstall`.
 

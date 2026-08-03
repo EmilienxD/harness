@@ -208,7 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_install = sub.add_parser("install", help="install one or more tools (or 'all')")
     p_install.add_argument("tools", nargs="+")
     _add_target_flags(p_install)
-    p_install.add_argument("--dry-run", action="store_true", help="show what would change")
+    p_install.add_argument("--dry", action="store_true", help="show what would change")
     p_install.set_defaults(func=cmd_install)
 
     p_remove = sub.add_parser("uninstall", help="remove installed tools (or 'all')")
@@ -220,7 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_up = sub.add_parser("upgrade", help="reinstall installed tools at the shipped version")
     p_up.add_argument("tools", nargs="*")
     _add_target_flags(p_up)
-    p_up.add_argument("--dry-run", action="store_true")
+    p_up.add_argument("--dry", action="store_true")
     p_up.set_defaults(func=cmd_upgrade)
 
     return parser

@@ -106,7 +106,7 @@ def test_unknown_tool_is_reported(tmp_path, capsys):
 
 
 def test_dry_run_writes_nothing(tmp_path, capsys):
-    assert main(["install", "commit", "--dir", str(tmp_path), "--dry-run"]) == 0
+    assert main(["install", "commit", "--dir", str(tmp_path), "--dry"]) == 0
     assert "dry run" in capsys.readouterr().out
     assert not (tmp_path / ".claude").exists()
 

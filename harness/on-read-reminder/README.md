@@ -80,7 +80,7 @@ uvx --from git+https://github.com/EmilienxD/harness harness install on-read-remi
 That copies the hook and starter rules file into `.claude/`, marks the hook
 executable, and merges the `PostToolUse` registration below into
 `.claude/settings.json` without disturbing any hooks you already had. Add
-`--dry-run` first to see the exact file list and settings diff. See the
+`--dry` first to see the exact file list and settings diff. See the
 [repo README](../../README.md) for `--user`, `--local`, and `uninstall`.
 
 <details>

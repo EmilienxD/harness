@@ -15,7 +15,7 @@ into `./.claude/settings.json`, without disturbing anything already there.
 ```bash
 harness list                      # available tools, and what's installed here
 harness info commit               # exactly what a tool will write
-harness install commit --dry-run  # file list + a settings.json diff, nothing written
+harness install commit --dry  # file list + a settings.json diff, nothing written
 harness install caveman zoom-out  # several at once ('all' installs everything)
 harness uninstall commit          # removes only what it added ('all' too)
 harness upgrade                   # reinstall everything at the shipped version

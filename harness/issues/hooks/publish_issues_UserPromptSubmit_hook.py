@@ -2,7 +2,7 @@
 """UserPromptSubmit hook: publishes drafted GitHub issues from .issues-gateway/.
 
 Fires before Claude ever sees the prompt. When the prompt is "/publish-issues"
-or "/publish-issue" (optionally with "--dry-run"), this script does all the
+or "/publish-issue" (optionally with "--dry"), this script does all the
 work itself with `gh` and exits 2, which erases the prompt and shows stderr to
 the user only - zero API calls for this step.
 
@@ -42,7 +42,7 @@ Design notes:
 - The body is always passed to `gh` via --body-file (a temp file), never
   inline on the command line. This is what avoids the Windows command-line
   length limit, on every platform, regardless of body size.
-- "--dry-run" runs the exact same parse/resolve logic but never calls
+- "--dry" runs the exact same parse/resolve logic but never calls
   `gh issue create` and never moves/renames files - it reports what would
   happen, so a bad label line or a genuinely unresolvable reference can be
   caught before anything touches the tracker.
@@ -59,7 +59,7 @@ from pathlib import Path
 
 GATEWAY_DIR = Path(".issues-gateway")
 
-# "/publish-issue", "/publish-issues", and their "--dry-run" variants match.
+# "/publish-issue", "/publish-issues", and their "--dry" variants match.
 PROMPT_PATTERN = re.compile(r"^/publish-issues?(?:\s|$)")
 
 # A reference to another draft issue inside a body, e.g.
@@ -415,7 +415,7 @@ def main() -> None:
     prompt = payload.get("prompt", "").strip()
 
     if PROMPT_PATTERN.match(prompt):
-        dry_run = "--dry-run" in prompt.split()
+        dry_run = "--dry" in prompt.split()
         result = publish_issues(dry_run)
         sys.stderr.write(result + "\n")
         sys.exit(2)

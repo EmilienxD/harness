@@ -135,7 +135,7 @@ uvx --from git+https://github.com/EmilienxD/harness harness install issues
 ```
 
 That copies the seven skills and the hook into `.claude/` and merges the hook registration below
-into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry-run` first to
+into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry` first to
 see the exact file list and settings diff. See the [repo README](../../README.md) for `--user`,
 `--local`, and `uninstall`.
 
@@ -193,7 +193,7 @@ see the exact file list and settings diff. See the [repo README](../../README.md
   → writes .issues-gateway/{session-id}/issue-{n}.md (next free index)
   → review/edit the file by hand if needed
 
-/publish-issues [--dry-run]
+/publish-issues [--dry]
   → hook creates the labels, publishes every draft via gh,
     moves published files to .issues-gateway/{session-id}/.published/
   (also accepts /publish-issue alias — same hook, same behavior)

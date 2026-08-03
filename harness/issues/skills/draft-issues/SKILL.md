@@ -51,6 +51,6 @@ In "Blocked by", reference other issues in this batch by their `${CLAUDE_SESSION
 
 2. Hand off to the user
 
-List the relative file paths you created and tell the user they can review them. They can edit any file directly — title, labels, body, blockers — before publishing. Mention they can run `/publish-issues --dry-run` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.
+List the relative file paths you created and tell the user they can review them. They can edit any file directly — title, labels, body, blockers — before publishing. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.
 
 Do NOT close or modify any parent issue.

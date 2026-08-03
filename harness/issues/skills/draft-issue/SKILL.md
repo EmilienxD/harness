@@ -61,6 +61,6 @@ A reference to each blocking issue, or "None — can start immediately".
 
 3. Hand off to the user
 
-Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing. Mention they can run `/publish-issues --dry-run` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.
+Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.
 
 Do NOT close or modify any parent issue.

@@ -1,6 +1,6 @@
 ---
 name: publish-issues
-description: "Publish all drafted issues from .issues-gateway/ to GitHub. Usage: /publish-issues [--dry-run]. --dry-run shows what would be published without creating issues. Creates issues via gh CLI and tracks published issues to avoid duplicates on rerun."
+description: "Publish all drafted issues from .issues-gateway/ to GitHub. Usage: /publish-issues [--dry]. --dry shows what would be published without creating issues. Creates issues via gh CLI and tracks published issues to avoid duplicates on rerun."
 disable-model-invocation: true
 ---
 

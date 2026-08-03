@@ -47,10 +47,10 @@ registered command for this to work.
 
 ```
 /commit <message>              stage this session's changes and commit
-/commit --dry-run <message>    show exactly what would happen, change nothing
+/commit --dry <message>    show exactly what would happen, change nothing
 /commit --ai                   generate the message from the staged diff
 /commit --ai <guidance>        generate, but steer the emphasis
-/commit --dry-run --ai         preview the generated message without committing
+/commit --dry --ai         preview the generated message without committing
 ```
 
 Flags must come before the message, so `/commit mention --ai in the docs`
@@ -62,12 +62,12 @@ Only the files **Claude actually wrote this session**, not every dirty file
 in the repo. The hook reads the session's JSONL transcript, collects the
 `Edit`/`Write`/`NotebookEdit` tool calls, and stages exactly those paths.
 Writes that failed, writes outside the repo (`~/.claude/settings.json`), and
-files created then deleted are all dropped — `--dry-run` lists each discard
+files created then deleted are all dropped — `--dry` lists each discard
 so a "missing" file is never a mystery.
 
 The commit is pathspec-scoped, so anything you staged by hand beforehand
 stays staged and is left out. If the transcript can't be read at all, the
-hook falls back to `git add -A`; `--dry-run` says so loudly when that happens.
+hook falls back to `git add -A`; `--dry` says so loudly when that happens.
 
 ### `--ai` — generated commit messages
 
@@ -82,7 +82,7 @@ it's a direct API call to a cheap model, so the conversation history is
 never re-sent. The call happens **after** staging and only if there is
 genuinely something to commit.
 
-`--dry-run --ai` is the useful pairing: it generates and prints the message
+`--dry --ai` is the useful pairing: it generates and prints the message
 without staging or committing anything, so you can copy it, edit it, and
 replay it as `/commit <your edited message>` — or just run it again for a
 different draft.
@@ -165,7 +165,7 @@ merges the `UserPromptSubmit` registration below into `.claude/settings.json`
 without disturbing any hooks you already had, and adds a small fenced block to
 the repo's `.gitignore` so the two places `--ai` looks for an API key
 (`.claude/commit-ai.key` and `.claude/settings.local.json`) can never be
-committed. Add `--dry-run` first to see the exact file list, settings diff, and
+committed. Add `--dry` first to see the exact file list, settings diff, and
 `.gitignore` diff. Uninstalling removes the block again, leaving any rules you
 wrote yourself untouched. See the [repo README](../../README.md) for `--user`,
 `--local`, and `uninstall`.

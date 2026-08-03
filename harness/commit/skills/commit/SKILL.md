@@ -1,6 +1,6 @@
 ---
 name: commit
-description: "Create a git commit with staged and unstaged changes. Usage: /commit [--dry-run] [--ai] [message]. --dry-run shows what would happen without committing. --ai generates the message from the diff (makes message optional; any text after becomes guidance). Without flags, message is required."
+description: "Create a git commit with staged and unstaged changes. Usage: /commit [--dry] [--ai] [message]. --dry shows what would happen without committing. --ai generates the message from the diff (makes message optional; any text after becomes guidance). Without flags, message is required."
 disable-model-invocation: true
 ---
 
