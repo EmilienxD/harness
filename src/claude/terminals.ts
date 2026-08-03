@@ -195,7 +195,13 @@ export interface TerminalControllerOptions {
   readonly processIdTimeoutMs?: number;
   /** When set with `startupTimeoutMs` on a launch, arms the proof-of-life watch. */
   readonly startupProofs?: StartupProofTracker;
-  readonly onStartupTimeout?: (agentId: AgentId, sessionId: SessionId) => void;
+  /**
+   * Fires once, just before the terminal is killed, when no SessionStart hook
+   * arrived in time. This is the last-resort launch verdict — there is no exit
+   * record to quote — so the callback is the place to tell the user why their
+   * terminal is disappearing.
+   */
+  readonly onStartupTimeout?: (agentId: AgentId, sessionId: SessionId, timeoutMs: number) => void;
 }
 
 /**
@@ -300,8 +306,9 @@ export class TerminalController {
     // the absence of proof within the timeout is the failure signal itself.
     // The terminal is killed, which routes every settlement through the same
     // terminal-close path a user kill would take.
-    if (request.startupTimeoutMs !== undefined && this.options.startupProofs !== undefined) {
-      void this.options.startupProofs.awaitStarted(request.agentId, request.sessionId, request.startupTimeoutMs)
+    const startupTimeoutMs = request.startupTimeoutMs;
+    if (startupTimeoutMs !== undefined && this.options.startupProofs !== undefined) {
+      void this.options.startupProofs.awaitStarted(request.agentId, request.sessionId, startupTimeoutMs)
         .then(undefined, (error: unknown) => {
           // Only the timeout is a verdict. A cancellation means something else
           // already settled this launch — a closed terminal, or a CLI that
@@ -310,7 +317,7 @@ export class TerminalController {
           if (!isStartupTimeout(error)) return;
           const current = this.#records.get(terminalId);
           if (current === undefined || current.status !== "open") return;
-          this.options.onStartupTimeout?.(request.agentId, request.sessionId);
+          this.options.onStartupTimeout?.(request.agentId, request.sessionId, startupTimeoutMs);
           this.kill(terminalId);
         });
     }

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   TerminalController,
+  type StartupProofTracker,
   type TerminalCreationOptions,
   type TerminalHandle,
   type TerminalHost,
@@ -11,6 +12,7 @@ import {
 import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { createTerminalRoutes } from "../src/bridge/terminal-routes.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
+import { SessionStartCancelledError, SessionStartTimeoutError } from "../src/bridge/session-lifecycle.js";
 
 class FakeTerminal implements TerminalHandle {
   public readonly sent: Array<{ text: string; addNewLine: boolean | undefined }> = [];
@@ -311,8 +313,82 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
 
   const duplicate = await handler(request("POST", "/terminals", {
     agentId: "worker",
-    sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560",
+    sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
     agentType: "pr-doctor-afk",
   }));
   assert.equal(duplicate.status, 409);
+});
+
+/** Lets each test decide what the awaited proof does; `cancel` is a no-op. */
+class FakeStartupProofs implements StartupProofTracker {
+  public readonly armed: Array<{ agentId: AgentId; sessionId: SessionId; timeoutMs: number }> = [];
+  public constructor(private readonly verdict: () => Promise<unknown>) {}
+  public awaitStarted(agentId: AgentId, sessionId: SessionId, timeoutMs: number): Promise<unknown> {
+    this.armed.push({ agentId, sessionId, timeoutMs });
+    return this.verdict();
+  }
+  public cancel(): void {}
+}
+
+function setupProofs(verdict: () => Promise<unknown>) {
+  const host = new FakeTerminalHost();
+  const events: TerminalLifecycleEvent[] = [];
+  const notified: Array<{ agentId: AgentId; sessionId: SessionId; timeoutMs: number }> = [];
+  const proofs = new FakeStartupProofs(verdict);
+  let id = 0;
+  const controller = new TerminalController({
+    host,
+    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard" }),
+    terminalIdFactory: () => terminal(`terminal-${++id}`),
+    now: () => new Date("2026-07-30T10:00:00.000Z"),
+    onLifecycleEvent: (event) => events.push(event),
+    startupProofs: proofs,
+    onStartupTimeout: (agentId, sessionId, timeoutMs) => notified.push({ agentId, sessionId, timeoutMs }),
+  });
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  return { controller, host, proofs, notified, flush };
+}
+
+test("a launch with no SessionStart inside its window is reported once, then killed as a failed launch", async () => {
+  const { controller, host, proofs, notified, flush } = setupProofs(() =>
+    Promise.reject(new SessionStartTimeoutError(agent("manager-1"), 120_000)));
+  controller.create({
+    agentId: agent("manager-1"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "manager",
+    startupTimeoutMs: 120_000,
+  });
+  assert.deepEqual(proofs.armed, [{ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
+
+  await flush();
+  // The callback is the launch verdict delivered to the user: it names the
+  // agent, the session, and the waiting window so the notification can say
+  // *why* the terminal is disappearing.
+  assert.deepEqual(notified, [{ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
+  assert.equal(host.created[0]!.terminal.disposed, true);
+});
+
+test("a cancelled or settled proof is not a verdict and never kills the terminal", async () => {
+  const { controller, host, notified, flush } = setupProofs(() =>
+    Promise.reject(new SessionStartCancelledError(agent("manager-1"))));
+  controller.create({
+    agentId: agent("manager-1"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "manager",
+    startupTimeoutMs: 120_000,
+  });
+  await flush();
+  assert.deepEqual(notified, []);
+  assert.equal(host.created[0]!.terminal.disposed, false);
+});
+
+test("a launch with no startup timeout armed asks for no proof at all", async () => {
+  const { controller, proofs } = setupProofs(() =>
+    Promise.reject(new SessionStartTimeoutError(agent("raw-1"), 60_000)));
+  controller.create({
+    agentId: agent("raw-1"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "raw",
+  });
+  assert.equal(proofs.armed.length, 0);
 });

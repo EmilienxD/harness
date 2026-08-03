@@ -89,7 +89,7 @@ export class ClaudeCommandProbe {
     try {
       const execution = await this.options.run(program, [...fixed, "--version"], this.options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
       if (execution.code === 0) return { ok: true, version: firstLine(execution.stdout) };
-      const detail = firstLine(execution.stderr) || firstLine(execution.stdout);
+      const detail = complaintLine(execution.stderr) || complaintLine(execution.stdout);
       return { ok: false, reason: `${program} exited with code ${execution.code ?? "unknown"}${detail === "" ? "" : ` (${detail})`}` };
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : "the command could not be started" };
@@ -99,6 +99,19 @@ export class ClaudeCommandProbe {
 
 function firstLine(text: string): string {
   return text.split(/\r?\n/, 1)[0]?.trim() ?? "";
+}
+
+/**
+ * The single line of a failure's output worth putting in a dialog. Normally
+ * the first; a Python traceback is the exception — its banner is the first
+ * line and the error the user needs (`ModuleNotFoundError: ...`) is the last,
+ * behind the frame dump.
+ */
+function complaintLine(text: string): string {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  const first = lines[0] ?? "";
+  if (first === "Traceback (most recent call last):") return lines.at(-1) ?? first;
+  return first;
 }
 
 /**

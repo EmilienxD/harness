@@ -109,6 +109,28 @@ test("the Manager's own model and effort reach the command line on start and on 
   assert.match(records[2].initialCommand, /--effort low/);
 });
 
+test("a failed preflight refuses the launch before a terminal exists", async () => {
+  // The launch command is typed into a shell aboard cannot read the exit
+  // status of, so a command it already knows cannot run must never open a
+  // terminal — that terminal would only ever show a shell error while the
+  // fleet believed a Manager was starting.
+  const created: unknown[] = [];
+  const saved: unknown[] = [];
+  const terminals = {
+    create: (request: unknown) => { created.push(request); throw new Error("unreachable"); },
+  } as unknown as TerminalController;
+  const lifecycle = new ManagerLifecycle({
+    store: { load: async () => undefined, save: async (value) => { saved.push(value); } },
+    terminals, workspaceRoot: "C:\\work", shell: "powershell",
+    command: () => ["clauder", "run", "kiro", "--"],
+    isResumable: async () => false,
+    preflight: async () => { throw new Error("The configured Claude command cannot be run: clauder exited with code 1 (ModuleNotFoundError: No module named 'clauder'). Check aboard.launch.claudeCommand."); },
+  });
+  await assert.rejects(() => lifecycle.start("new"), /cannot be run/);
+  assert.equal(created.length, 0);
+  assert.equal(saved.length, 0);
+});
+
 test("an unresumable recorded session starts afresh under a new id, keeping the agent", async () => {
   const records: any[] = [];
   const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };

@@ -48,6 +48,26 @@ test("a non-zero exit reports the code and the first line of the CLI's complaint
   assert.match(result.ok ? "" : result.reason, /code 9 \(unknown option '--version'\)/);
 });
 
+test("a Python traceback reports its actual error line, not the banner", async () => {
+  // A broken wrapper (here a shim whose package was uninstalled underneath it)
+  // fails the same way on every invocation; the banner line alone would leave
+  // the user to open a terminal just to learn the real reason.
+  const stderr = [
+    "Traceback (most recent call last):",
+    "  File \"<frozen runpy>\", line 198, in _run_module_as_main",
+    "  File \".../clauder.exe/__main__.py\", line 4, in <module>",
+    "    from clauder.cli import main",
+    "ModuleNotFoundError: No module named 'clauder'",
+    "",
+  ].join("\r\n");
+  const { instance } = probe([{ code: 1, stdout: "", stderr }]);
+  const result = await instance.verify(["clauder", "run", "kiro", "--"]);
+  assert.equal(result.ok, false);
+  const reason = result.ok ? "" : result.reason;
+  assert.match(reason, /code 1 \(ModuleNotFoundError: No module named 'clauder'\)/);
+  assert.doesNotMatch(reason, /Traceback/);
+});
+
 test("a good answer is cached per command, a bad one is retried", async () => {
   // Installing Claude and clicking launch again must not need a window reload;
   // an unchanged working command must not spawn a process per launch.

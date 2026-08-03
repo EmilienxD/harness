@@ -249,8 +249,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
     terminalIdFactory: () => randomUUID() as TerminalId,
     startupProofs: sessionProofs,
-    onStartupTimeout: (agentId, sessionId) => {
-      output.appendLine(`Agent ${agentId} (session ${sessionId}) did not produce a SessionStart hook in time; closing the terminal as a failed launch.`);
+    onStartupTimeout: (agentId, sessionId, timeoutMs) => {
+      const label = fleet.get(agentId)?.terminal.name ?? `agent ${agentId}`;
+      output.appendLine(`${label} (agent ${agentId}, session ${sessionId}) did not produce a SessionStart hook in time; closing the terminal as a failed launch.`);
+      // The terminal is being killed under the user and takes any shell error
+      // text with it — silence here was the original "extension believes the
+      // manager is running" experience, just deferred by the timeout.
+      void window.showWarningMessage(
+        `aboard closed "${label}": Claude Code reported no session start within ${Math.round(timeoutMs / 1000)}s. The launch failed before Claude Code could begin, or the SessionStart hook never fired. Check aboard.launch.claudeCommand and the project's hook configuration; the aboard output channel has details.`,
+      );
     },
     onLifecycleEvent: (event) => {
       // Watch the marker from the launch itself, not from SessionStart: the
