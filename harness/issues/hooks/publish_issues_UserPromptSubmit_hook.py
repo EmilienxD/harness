@@ -114,9 +114,9 @@ LABEL_ALIASES = {
 }
 
 
-def ensure_labels(dry_run: bool) -> list[str]:
+def ensure_labels(dry: bool) -> list[str]:
     """Create or update the canonical labels. Returns warning lines, if any."""
-    if dry_run:
+    if dry:
         return []
 
     warnings = []
@@ -268,7 +268,7 @@ def gh_create_issue(title: str, body: str, labels: list[str]) -> tuple[bool, str
     return True, url
 
 
-def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[int, int]:
+def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, int]:
     """Publish (or dry-run) every draft file in one batch directory.
 
     Returns (published_count, failed_count) for this batch.
@@ -278,7 +278,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
         return 0, 0
 
     published_dir = batch_dir / ".published"
-    if not dry_run:
+    if not dry:
         published_dir.mkdir(exist_ok=True)
 
     resolved = load_resolved(batch_dir)
@@ -324,7 +324,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
             i = m.group(1)
             key = f"{batch_dir.name}/{i}"
 
-            if dry_run:
+            if dry:
                 report.append(
                     f"  Would create: \"{title}\" [{', '.join(labels)}]"
                 )
@@ -365,7 +365,7 @@ def publish_batch(batch_dir: Path, dry_run: bool, report: list[str]) -> tuple[in
     return published, len(failed_entries)
 
 
-def publish_issues(dry_run: bool) -> str:
+def publish_issues(dry: bool) -> str:
     if not GATEWAY_DIR.is_dir():
         return "No .issues-gateway/ folder found. Run /draft-issue or /draft-issues first."
 
@@ -373,9 +373,9 @@ def publish_issues(dry_run: bool) -> str:
     if not batch_dirs:
         return "No draft batches found in .issues-gateway/. Nothing to publish."
 
-    header = "Dry run — nothing will be created" if dry_run else "Publishing drafted issues"
+    header = "Dry run — nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
-    label_warnings = ensure_labels(dry_run)
+    label_warnings = ensure_labels(dry)
     if label_warnings:
         report.extend(label_warnings)
         report.append("")
@@ -383,12 +383,12 @@ def publish_issues(dry_run: bool) -> str:
     total_published = 0
     total_failed = 0
     for batch_dir in batch_dirs:
-        p, f = publish_batch(batch_dir, dry_run, report)
+        p, f = publish_batch(batch_dir, dry, report)
         total_published += p
         total_failed += f
         report.append("")
 
-    if dry_run:
+    if dry:
         report.append(
             f"Dry run complete: {total_published} issue(s) ready to publish."
         )
@@ -410,8 +410,8 @@ def main() -> None:
     prompt = payload.get("prompt", "").strip()
 
     if PROMPT_PATTERN.match(prompt):
-        dry_run = "--dry" in prompt.split()
-        result = publish_issues(dry_run)
+        dry = "--dry" in prompt.split()
+        result = publish_issues(dry)
         sys.stderr.write("\n\n" + result)
         sys.exit(2)
 

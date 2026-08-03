@@ -24,10 +24,10 @@ from collections import namedtuple
 COMMIT_PATTERN = re.compile(r"^/commit(?:\s+(.*))?$", re.DOTALL)
 
 # Leading flags accepted before the commit message.
-DRY_RUN_FLAGS = {"--dry", "-n"}
+DRY_FLAGS = {"--dry", "-n"}
 AI_FLAGS = {"--ai"}
 
-Flags = namedtuple("Flags", "dry_run use_ai")
+Flags = namedtuple("Flags", "dry use_ai")
 
 # Tools whose invocation means "this file was modified on disk".
 # Read/Grep/Glob are excluded: they touch nothing.
@@ -51,21 +51,21 @@ def split_flags(rest: str):
     With --ai the message is optional; whatever text follows becomes
     steering guidance for the generator rather than the message itself.
     """
-    dry_run = use_ai = False
+    dry = use_ai = False
     while rest:
         stripped = rest.lstrip()
         if not stripped:
             break
         parts = stripped.split(None, 1)
         token = parts[0]
-        if token in DRY_RUN_FLAGS:
-            dry_run = True
+        if token in DRY_FLAGS:
+            dry = True
         elif token in AI_FLAGS:
             use_ai = True
         else:
             break
         rest = parts[1] if len(parts) > 1 else ""
-    return Flags(dry_run, use_ai), rest.strip()
+    return Flags(dry, use_ai), rest.strip()
 
 
 def _iter_transcript(transcript_path: str):
@@ -676,7 +676,7 @@ def collect_session_context(transcript_path, repo_root):
                 prior = COMMIT_PATTERN.match(text)
                 if prior:
                     flags, msg = split_flags(prior.group(1) or "")
-                    if not flags.dry_run:
+                    if not flags.dry:
                         events.append(
                             f"=== ALREADY COMMITTED UP TO HERE: {msg or '(generated)'} ==="
                         )
@@ -1109,7 +1109,7 @@ def cli_main(argv):
     for token in argv:
         if token in args:
             key = token
-        elif token in DRY_RUN_FLAGS:
+        elif token in DRY_FLAGS:
             continue
         elif token in AI_FLAGS:
             use_ai = True
@@ -1133,7 +1133,7 @@ def cli_main(argv):
     print(
         build_dry_run_report(
             message, "(cli)", args["--transcript"], repo_root, scan,
-            Flags(dry_run=True, use_ai=use_ai),
+            Flags(dry=True, use_ai=use_ai),
         )
     )
     sys.exit(0)
@@ -1173,7 +1173,7 @@ def main():
         return
 
     flags, message = split_flags(match.group(1) or "")
-    if not message and not flags.use_ai and not flags.dry_run:
+    if not message and not flags.use_ai and not flags.dry:
         finish(
             "Usage: /commit [--dry] [--ai] <message>\n"
             "  --ai      generate the message from the staged diff "
@@ -1189,7 +1189,7 @@ def main():
         return
     repo_root = os.path.normpath(toplevel.stdout.strip()) or cwd
 
-    if flags.dry_run:
+    if flags.dry:
         scan = _scan_writes(transcript_path, repo_root)
         finish(
             build_dry_run_report(

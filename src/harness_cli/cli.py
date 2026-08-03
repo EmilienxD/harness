@@ -136,14 +136,14 @@ def cmd_install(args: argparse.Namespace) -> int:
             tool, target, settings_override=pending, gitignore_override=pending_ignore
         )
         _print_plan(plan)
-        if args.dry_run:
+        if args.dry:
             pending = plan.settings_after
             pending_ignore = plan.gitignore_after
             continue
         for note in apply_install(plan):
             print(f"  note: {note}")
 
-    if args.dry_run:
+    if args.dry:
         print("\n(dry run — nothing written)")
     elif tools:
         print("\nRestart Claude Code (or run /doctor) to pick up the changes.")
