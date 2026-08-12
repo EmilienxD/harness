@@ -34,15 +34,33 @@ const sessionId = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b" as SessionId;
 
 const IMPLEMENTER_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill"];
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash(gh *)", "Bash(git diff*)", "LSP"];
-const BRAINSTORMER_TOOLS = [
-  "Read",
-  "Grep",
-  "Glob",
-  "Bash(gh *)",
-  "Agent",
-  "Skill",
-  "AskUserQuestion",
-];
+const BRAINSTORMER_TOOLS = ["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Agent", "Skill"];
+const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
+
+/**
+ * An aboard definition, which is now carried onto the command line in full: the
+ * body as `--system-prompt-file` and `tools:` as `--tools`.
+ */
+function definition(
+  agentName: string,
+  declaredTools: readonly string[],
+  extra: Omit<Parameters<typeof resolveLaunchConfiguration>[0], "agentName" | "systemPrompt" | "declaredTools"> = {},
+) {
+  return resolveLaunchConfiguration({
+    agentName,
+    systemPrompt: `You are the ${agentName}.`,
+    declaredTools,
+    ...extra,
+  });
+}
+
+/** The two flags every agent-defined launch and resume carries, in order. */
+function definitionArgs(agentName: string, declaredTools: readonly string[]): readonly string[] {
+  return [
+    `--system-prompt-file=.aboard/runtime/agents/${agentName}.md`,
+    `--tools=${declaredTools.join(",")}`,
+  ];
+}
 
 function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest {
   return {
@@ -51,20 +69,17 @@ function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest 
     agentType: "implementer",
     shell: "powershell",
     permissionMode: "bypass",
-    configuration: resolveLaunchConfiguration({
-      agentName: "implementer",
-      declaredTools: IMPLEMENTER_TOOLS,
-    }),
+    configuration: definition("implementer", IMPLEMENTER_TOOLS),
     prompt: "Implement issue #47.",
     ...overrides,
   };
 }
 
-test("plans the Manager as --agent manager with no tool flags and no Agent tool", () => {
+test("plans the Manager from its definition rather than a discoverable agent", () => {
   const plan = planLaunch(
     request({
       agentType: "manager",
-      configuration: resolveLaunchConfiguration({ agentName: "manager" }),
+      configuration: definition("manager", MANAGER_TOOLS),
       disallowedTools: ["Bash(git push*)"],
       permissionMode: "default",
       prompt: undefined,
@@ -72,24 +87,28 @@ test("plans the Manager as --agent manager with no tool flags and no Agent tool"
     }),
   );
 
-  // Persona, model, and the read-only tool set all live in
-  // .claude/agents/manager.md, so the command line carries no tool allowlist
-  // at all. The allowlist's contents (no Agent, no session-task tools, the
+  // Persona, model, and tool set all live in .aboard/agents/manager.md, and all
+  // three reach Claude Code as flags: nothing is registered under
+  // .claude/agents/, so no other session in the workspace can see or spawn the
+  // Manager. The allowlist's contents (no Agent, no session-task tools, the
   // mcp__aboard__* delegation surface) are pinned in agent-definitions.test.ts.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
-    "--agent",
-    "manager",
-    "--disallowedTools",
-    "Bash(git push*)",
+    ...definitionArgs("manager", MANAGER_TOOLS),
+    "--disallowedTools=Bash(git push*)",
     "--model",
     "opus",
   ]);
   assert.equal(
     plan.commandLine,
-    `& claude --session-id ${sessionId} --agent manager --disallowedTools 'Bash(git push*)' --model opus`,
+    `& claude --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/manager.md '--tools=mcp__aboard__*,Read,Grep,Glob,Bash,Skill' '--disallowedTools=Bash(git push*)' --model opus`,
   );
+  // The file the command line reads is part of the plan, because a launch that
+  // cannot write it is a launch that would silently start on Claude Code's own
+  // default persona.
+  assert.equal(plan.systemPrompt?.relativePath, ".aboard/runtime/agents/manager.md");
+  assert.equal(plan.systemPrompt?.contents, "You are the manager.\n");
   assert.equal(plan.promptDelivery, "none");
   // The Manager orchestrates and is never a lease holder, even though its
   // tool list leaves unrestricted Bash in place (spec section 4.3.1).
@@ -104,13 +123,13 @@ test("wrapper layout prefixes the launch and resume lines without reshaping the 
   };
   const plan = planLaunch(request({ wrapper }));
   // plan.args keeps the claude-side view; only the command line changes.
-  assert.equal(plan.args[2], "--agent");
+  assert.equal(plan.args[2], "--system-prompt-file=.aboard/runtime/agents/implementer.md");
   assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
   assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' -- claude --session-id ${sessionId}`));
 
   const resumed = planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
-    permissionMode: "bypass", writeCapability: "write-capable", wrapper,
+    permissionMode: "bypass", configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
   });
   assert.match(resumed.commandLine, /aboard_wrapper\.py' .* -- claude --resume/);
 });
@@ -122,7 +141,7 @@ test("wrapper tokens are validated like the launch command", () => {
   };
   assert.throws(() => planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
-    permissionMode: "bypass", writeCapability: "write-capable", wrapper,
+    permissionMode: "bypass", configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
   }), /Wrapper token/);
 });
 
@@ -135,14 +154,13 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
-    "--agent",
-    "implementer",
+    ...definitionArgs("implementer", IMPLEMENTER_TOOLS),
     "--dangerously-skip-permissions",
     "Implement issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.",
   ]);
   assert.equal(
     plan.commandLine,
-    `claude --session-id ${sessionId} --agent implementer --dangerously-skip-permissions 'Implement issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.'`,
+    `claude --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md '--tools=Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions 'Implement issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.'`,
   );
   assert.equal(plan.promptDelivery, "spilled");
   assert.equal(plan.spill?.relativePath, ".aboard/runtime/prompts/a1b2c3.md");
@@ -153,24 +171,24 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
 test("plans a read-only agent that stays concurrent", () => {
   const plan = planLaunch(
     request({
-      agentType: "brainstormer",
-      configuration: resolveLaunchConfiguration({
-        agentName: "brainstormer",
-        declaredTools: READ_ONLY_TOOLS,
-      }),
-      prompt: "Review pull request #42.",
+      agentType: "webresearcher",
+      configuration: definition("webresearcher", READ_ONLY_TOOLS, { disallowedTools: ["mcp__aboard__*"] }),
+      prompt: "Research current API pricing.",
       permissionMode: "acceptEdits",
     }),
   );
 
+  // `--tools` cannot keep the bridge's own tools out of a worker: MCP tools are
+  // in the session whether or not the allowlist names them, so the definition's
+  // silence about them is expressed as a denial instead.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
-    "--agent",
-    "brainstormer",
+    ...definitionArgs("webresearcher", READ_ONLY_TOOLS),
+    "--disallowedTools=mcp__aboard__*",
     "--permission-mode",
     "acceptEdits",
-    "Review pull request #42.",
+    "Research current API pricing.",
   ]);
   assert.equal(plan.writeCapability, "read-only");
   assert.equal(plan.requiresWriteLease, false);
@@ -204,7 +222,10 @@ test("the builtin types carry Claude Code's own capabilities, not a derived gues
   // Code's full-tool agent, and Explore is its read-only search agent — the
   // conservative fallback for an unreadable definition would wrongly put
   // Explore on the write lease.
+  // A builtin is the only shape that still carries `--agent`: Claude Code owns
+  // the definition, so there is nothing for aboard to read or to pass.
   const builtin = (name: string) => resolveLaunchConfiguration({ agentName: name });
+  assert.equal(builtin("Explore").shape, "builtin");
   assert.equal(launchWriteCapability("Explore", builtin("Explore")), "read-only");
   assert.equal(launchWriteCapability("general-purpose", builtin("general-purpose")), "write-capable");
 
@@ -225,18 +246,20 @@ test("passes the session effort level on every launch shape and refuses an unkno
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
-    "--agent",
-    "implementer",
+    ...definitionArgs("implementer", IMPLEMENTER_TOOLS),
     "--effort",
     "xhigh",
     "Implement issue #47.",
   ]);
 
-  // A resume carries no --agent, so the definition is not read at all and the
-  // caller passes whatever level it resolved as a flag.
+  // A resume re-passes the definition's own flags too — see the resume test
+  // below for why — so the session level only fills the gap it leaves.
   assert.deepEqual(
-    planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default", effort: "low" }).args,
-    ["--resume", sessionId, "--effort", "low"],
+    planManagerResume({
+      agentId, sessionId, shell: "powershell", permissionMode: "default", effort: "low",
+      configuration: definition("manager", MANAGER_TOOLS),
+    }).args,
+    ["--resume", sessionId, ...definitionArgs("manager", MANAGER_TOOLS), "--effort", "low"],
   );
   assert.deepEqual(
     planSessionResume({
@@ -245,10 +268,10 @@ test("passes the session effort level on every launch shape and refuses an unkno
       agentType: "implementer",
       shell: "powershell",
       permissionMode: "bypass",
-      writeCapability: "write-capable",
+      configuration: definition("implementer", IMPLEMENTER_TOOLS),
       effort: "max",
     }).args,
-    ["--resume", sessionId, "--effort", "max", "--dangerously-skip-permissions"],
+    ["--resume", sessionId, ...definitionArgs("implementer", IMPLEMENTER_TOOLS), "--effort", "max", "--dangerously-skip-permissions"],
   );
 
   // Unset is the documented "inherit": no flag at all, so Claude Code's own
@@ -256,7 +279,10 @@ test("passes the session effort level on every launch shape and refuses an unkno
 
   assert.equal(planLaunch(request()).args.includes("--effort"), false);
   assert.equal(
-    planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default" }).args.includes("--effort"),
+    planManagerResume({
+      agentId, sessionId, shell: "powershell", permissionMode: "default",
+      configuration: definition("manager", MANAGER_TOOLS),
+    }).args.includes("--effort"),
     false,
   );
 
@@ -282,9 +308,7 @@ test("puts the definition's model and effort on the command line, overriding the
   // main-thread `--agent` launch — every launch aboard makes — ignores `model:`
   // and `effort:`, so the planner reads them from the definition and passes the
   // flags itself, or the session silently runs at the user's global defaults.
-  const configuration = resolveLaunchConfiguration({
-    agentName: "implementer",
-    declaredTools: IMPLEMENTER_TOOLS,
+  const configuration = definition("implementer", IMPLEMENTER_TOOLS, {
     declaredModel: "opus",
     declaredEffort: "high",
   });
@@ -294,8 +318,7 @@ test("puts the definition's model and effort on the command line, overriding the
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
-    "--agent",
-    "implementer",
+    ...definitionArgs("implementer", IMPLEMENTER_TOOLS),
     "--model",
     "opus",
     "--effort",
@@ -307,7 +330,7 @@ test("puts the definition's model and effort on the command line, overriding the
   // leaves the setting deciding the other.
   assert.deepEqual(
     planLaunch(request({
-      configuration: resolveLaunchConfiguration({ agentName: "brainstormer", declaredModel: "opus" }),
+      configuration: definition("brainstormer", BRAINSTORMER_TOOLS, { declaredModel: "opus" }),
       agentType: "brainstormer",
       permissionMode: "default",
       effort: "low",
@@ -317,15 +340,15 @@ test("puts the definition's model and effort on the command line, overriding the
 
   // `model: inherit` is the definition declining to choose, which is no flag —
   // not a model literally named "inherit", which would fail the launch.
-  const inherited = resolveLaunchConfiguration({ agentName: "implementer", declaredModel: "inherit" });
+  const inherited = definition("implementer", IMPLEMENTER_TOOLS, { declaredModel: "inherit" });
   assert.equal("declaredModel" in inherited, false);
   assert.equal(
     planLaunch(request({ configuration: inherited, permissionMode: "default" })).args.includes("--model"),
     false,
   );
 
-  // A resume drops --agent, so the caller re-passes both; `--model` used to be
-  // accepted there and silently discarded.
+  // On a resume the definition still wins over the session settings, because
+  // the resume re-reads it and re-passes every flag the launch did.
   assert.deepEqual(
     planSessionResume({
       agentId,
@@ -333,26 +356,29 @@ test("puts the definition's model and effort on the command line, overriding the
       agentType: "implementer",
       shell: "powershell",
       permissionMode: "default",
-      writeCapability: "write-capable",
-      model: "opus",
-      effort: "high",
+      configuration,
+      model: "haiku",
+      effort: "low",
     }).args,
-    ["--resume", sessionId, "--model", "opus", "--effort", "high"],
+    ["--resume", sessionId, ...definitionArgs("implementer", IMPLEMENTER_TOOLS), "--model", "opus", "--effort", "high"],
   );
   assert.deepEqual(
-    planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default", model: "opus" }).args,
-    ["--resume", sessionId, "--model", "opus"],
+    planManagerResume({
+      agentId, sessionId, shell: "powershell", permissionMode: "default", model: "opus",
+      configuration: definition("manager", MANAGER_TOOLS),
+    }).args,
+    ["--resume", sessionId, ...definitionArgs("manager", MANAGER_TOOLS), "--model", "opus"],
   );
 
   for (const invalid of ["", "  ", "--sonnet"]) {
     assert.throws(
-      () => resolveLaunchConfiguration({ agentName: "implementer", declaredModel: invalid }),
+      () => definition("implementer", IMPLEMENTER_TOOLS, { declaredModel: invalid }),
       (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-model",
       `${invalid} must be refused as a definition model`,
     );
   }
   assert.throws(
-    () => resolveLaunchConfiguration({ agentName: "implementer", declaredEffort: "ultra" as EffortLevel }),
+    () => definition("implementer", IMPLEMENTER_TOOLS, { declaredEffort: "ultra" as EffortLevel }),
     (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-effort",
   );
   // The declared fields describe a definition and are meaningless without one.
@@ -366,12 +392,12 @@ test("puts the definition's model and effort on the command line, overriding the
 });
 
 test("rejects plans that mix --agent with inline configuration", () => {
-  // An agent's tool set is its definition's `tools:` field; a `--tools` flag
-  // alongside `--agent` would compete with the file the write lease trusts,
-  // so the pair is refused rather than reconciled (spec section 5.1.1).
+  // `--agent` names a builtin, whose tool set is Claude Code's; a `--tools`
+  // flag beside it would be a second authority over the same session, which is
+  // exactly what the write lease cannot survive (spec section 5.1.1).
   for (const input of [
-    { agentName: "implementer", tools: ["Read"] },
-    { agentName: "manager", tools: ["Read", "Grep"] },
+    { agentName: "Explore", tools: ["Read"] },
+    { agentName: "general-purpose", tools: ["Read", "Grep"] },
   ]) {
     assert.throws(
       () => resolveLaunchConfiguration(input),
@@ -380,10 +406,50 @@ test("rejects plans that mix --agent with inline configuration", () => {
     );
   }
 
+  // A builtin has no aboard definition, so it can declare none of its fields.
+  for (const input of [
+    { agentName: "Explore", declaredTools: ["Read"] },
+    { agentName: "Explore", declaredModel: "opus" },
+  ]) {
+    assert.throws(
+      () => resolveLaunchConfiguration(input),
+      (error: unknown) =>
+        error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
+    );
+  }
+
   assert.throws(
     () => resolveLaunchConfiguration({ declaredTools: ["Read"] }),
     (error: unknown) =>
       error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
+  );
+});
+
+test("refuses a definition that cannot produce a complete command line", () => {
+  // An empty system prompt is the one failure Claude Code does not report: it
+  // starts the session on its own default persona instead (verified against
+  // 2.1.229), which for an aboard agent means default behavior under a tool
+  // list it never chose.
+  for (const empty of ["", "   ", "\n\n"]) {
+    assert.throws(
+      () => resolveLaunchConfiguration({ agentName: "implementer", systemPrompt: empty, declaredTools: ["Read"] }),
+      (error: unknown) => error instanceof LaunchPlanError && error.code === "missing-system-prompt",
+      `${JSON.stringify(empty)} must be refused as a system prompt`,
+    );
+  }
+
+  // `--tools=` with nothing after it disables every tool rather than inheriting
+  // one, so an empty allowlist is a refused launch, not a permissive one.
+  assert.throws(
+    () => resolveLaunchConfiguration({ agentName: "implementer", systemPrompt: "You are it.", declaredTools: [] }),
+    (error: unknown) => error instanceof LaunchPlanError && error.code === "missing-declared-tools",
+  );
+
+  // The name becomes a file name under the runtime directory. A plugin-scoped
+  // name is a legal `--agent` value but can never name an aboard definition.
+  assert.throws(
+    () => resolveLaunchConfiguration({ agentName: "plugin:implementer", systemPrompt: "You are it.", declaredTools: ["Read"] }),
+    (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-agent-name",
   );
 });
 
@@ -396,41 +462,103 @@ test("pins each launch shape to the agent types allowed to use it", () => {
     );
   };
 
-  // raw has no definition to launch from; inline is its shape and it never
-  // carries --agent.
-  rejects({ agentType: "raw", configuration: resolveLaunchConfiguration({ agentName: "manager" }) });
+  // raw has no definition to launch from; inline is its shape.
+  rejects({ agentType: "raw", configuration: definition("manager", MANAGER_TOOLS) });
 
   // The Manager launches from its own definition and nothing else: no bare
   // inline launch (it would lose the persona), and no other agent name.
   rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({}) });
-  rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({ agentName: "implementer" }) });
+  rejects({ agentType: "manager", configuration: definition("implementer", IMPLEMENTER_TOOLS) });
 
-  // Every other type has a definition — scaffolded or builtin — and a bare
-  // inline launch would leave it without persona and frontmatter alike.
-  for (const agentType of ["implementer", "pr-doctor-afk", "pr-doctor-hitl", "brainstormer", "Explore"] as const) {
+  // Every other type has a definition — aboard's or Claude Code's — and a bare
+  // inline launch would leave it without persona and tool list alike.
+  for (const agentType of ["webresearcher", "implementer", "pr-doctor-afk", "pr-doctor-hitl", "brainstormer", "Explore"] as const) {
     rejects({ agentType, configuration: resolveLaunchConfiguration({ tools: ["Read"] }) });
   }
 
-  // The one allowed pairing per side: raw inline, and the Manager as manager.
+  // `--agent` and an aboard definition cannot borrow each other's shape: only
+  // Claude Code's builtins are named on the command line, and only aboard's own
+  // agents are carried on it.
+  rejects({ agentType: "Explore", configuration: definition("Explore", ["Read"]) });
+  rejects({ agentType: "implementer", configuration: resolveLaunchConfiguration({ agentName: "implementer" }) });
+
+  // The one allowed pairing per side: raw inline, and the Manager from its file.
   const raw = planLaunch(request({ agentType: "raw", configuration: resolveLaunchConfiguration({ tools: ["Read"] }) }));
-  assert.deepEqual(raw.args.slice(2), ["--tools", "Read", "--dangerously-skip-permissions", "Implement issue #47."]);
+  assert.deepEqual(raw.args.slice(2), ["--tools=Read", "--dangerously-skip-permissions", "Implement issue #47."]);
   const manager = planLaunch(request({
     agentType: "manager",
-    configuration: resolveLaunchConfiguration({ agentName: "manager" }),
+    configuration: definition("manager", MANAGER_TOOLS),
     prompt: undefined,
     permissionMode: "default",
   }));
-  assert.deepEqual(manager.args, ["--session-id", sessionId, "--agent", "manager"]);
+  assert.deepEqual(manager.args, ["--session-id", sessionId, ...definitionArgs("manager", MANAGER_TOOLS)]);
+});
+
+test("a resume re-passes every flag that shaped the launch", () => {
+  // `--resume` restores the conversation and nothing else. Verified against
+  // Claude Code 2.1.229: a session started with `--system-prompt-file` and
+  // `--tools` comes back on the default persona holding the *full* default tool
+  // set — Edit, Write, unrestricted Bash — unless both flags are repeated. A
+  // read-only worker resumed that way would hold powers its lease never covered.
+  const configuration = definition("webresearcher", READ_ONLY_TOOLS, { disallowedTools: ["mcp__aboard__*"] });
+  const resumed = planSessionResume({
+    agentId,
+    sessionId,
+    agentType: "webresearcher",
+    shell: "powershell",
+    permissionMode: "default",
+    configuration,
+  });
+  assert.deepEqual(resumed.args, [
+    "--resume",
+    sessionId,
+    ...definitionArgs("webresearcher", READ_ONLY_TOOLS),
+    "--disallowedTools=mcp__aboard__*",
+  ]);
+  // The system prompt file is rewritten on every resume, since nothing
+  // guarantees the runtime directory survived between sessions.
+  assert.equal(resumed.systemPrompt?.relativePath, ".aboard/runtime/agents/webresearcher.md");
+  // Capability is derived from the configuration the command line actually
+  // carries rather than accepted from the caller, so it cannot describe a
+  // session other than this one.
+  assert.equal(resumed.writeCapability, "read-only");
+  assert.equal(resumed.requiresWriteLease, false);
+
+  // A builtin keeps `--agent`, which `--resume` does restore, and raw carries
+  // only the optional restriction it was launched with.
+  assert.deepEqual(
+    planSessionResume({
+      agentId, sessionId, agentType: "Explore", shell: "powershell", permissionMode: "default",
+      configuration: resolveLaunchConfiguration({ agentName: "Explore" }),
+    }).args,
+    ["--resume", sessionId],
+  );
+  assert.deepEqual(
+    planSessionResume({
+      agentId, sessionId, agentType: "raw", shell: "powershell", permissionMode: "default",
+      configuration: resolveLaunchConfiguration({ tools: ["Read", "Grep"] }),
+    }).args,
+    ["--resume", sessionId, "--tools=Read,Grep"],
+  );
+
+  // The Manager resumes from its own definition or not at all.
+  assert.throws(
+    () => planManagerResume({
+      agentId, sessionId, shell: "powershell", permissionMode: "default",
+      configuration: definition("implementer", IMPLEMENTER_TOOLS),
+    }),
+    (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",
+  );
 });
 
 test("automated workers require a prompt and interactive workers do not", () => {
-  for (const agentType of ["implementer", "pr-doctor-afk"] as const) {
+  for (const agentType of ["webresearcher", "implementer", "pr-doctor-afk"] as const) {
     assert.throws(
       () =>
         planLaunch(
           request({
             agentType,
-            configuration: resolveLaunchConfiguration({ agentName: agentType }),
+            configuration: definition(agentType, IMPLEMENTER_TOOLS),
             prompt: "   ",
           }),
         ),
@@ -443,15 +571,12 @@ test("automated workers require a prompt and interactive workers do not", () => 
   const brainstormer = planLaunch(
     request({
       agentType: "brainstormer",
-      configuration: resolveLaunchConfiguration({
-        agentName: "brainstormer",
-        declaredTools: BRAINSTORMER_TOOLS,
-      }),
+      configuration: definition("brainstormer", BRAINSTORMER_TOOLS),
       prompt: undefined,
     }),
   );
   assert.equal(brainstormer.promptDelivery, "none");
-  assert.equal(brainstormer.requiresWriteLease, false);
+  assert.equal(brainstormer.requiresWriteLease, true);
 });
 
 test("honours the inline prompt threshold at its boundary", () => {
@@ -512,7 +637,7 @@ test("uses a launch executable path with spaces without breaking the plan", () =
   );
   assert.equal(
     plan.commandLine,
-    `& 'C:\\Program Files\\claude\\claude.exe' --session-id ${sessionId} --agent implementer --dangerously-skip-permissions Go.`,
+    `& 'C:\\Program Files\\claude\\claude.exe' --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md '--tools=Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions Go.`,
   );
 });
 
@@ -524,7 +649,7 @@ test("a wrapper command keeps its own arguments ahead of every aboard flag", () 
   assert.deepEqual(plan.command, ["clauder", "run", "kiro", "--"]);
   assert.equal(
     plan.commandLine,
-    `& clauder run kiro -- --session-id ${sessionId} --agent implementer --dangerously-skip-permissions Go.`,
+    `& clauder run kiro -- --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md '--tools=Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions Go.`,
   );
 });
 
@@ -602,7 +727,7 @@ test("writes spill files under the workspace runtime directory", async () => {
 test("derives write capability from the effective tool set", () => {
   assert.equal(deriveWriteCapability(IMPLEMENTER_TOOLS), "write-capable");
   assert.equal(deriveWriteCapability(READ_ONLY_TOOLS), "read-only");
-  assert.equal(deriveWriteCapability(BRAINSTORMER_TOOLS), "read-only");
+  assert.equal(deriveWriteCapability(BRAINSTORMER_TOOLS), "write-capable");
   assert.equal(deriveWriteCapability(undefined), "write-capable");
   assert.equal(deriveWriteCapability(["Read", "Bash"]), "write-capable");
   assert.equal(deriveWriteCapability(["Read", "PowerShell(git status)"]), "read-only");

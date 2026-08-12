@@ -1,6 +1,7 @@
 export const AGENT_TYPES = [
   "manager",
   "brainstormer",
+  "webresearcher",
   "implementer",
   "pr-doctor-afk",
   "pr-doctor-hitl",
@@ -33,7 +34,7 @@ export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT
  * to the user. They are never typed into, so their first prompt is mandatory
  * (spec section 5.3).
  */
-export const AUTOMATED_AGENT_TYPES = ["implementer", "pr-doctor-afk"] as const;
+export const AUTOMATED_AGENT_TYPES = ["webresearcher", "implementer", "pr-doctor-afk"] as const;
 
 export function isAutomatedAgentType(type: AgentType): boolean {
   return (AUTOMATED_AGENT_TYPES as readonly AgentType[]).includes(type);
@@ -56,10 +57,12 @@ export function isInteractiveAgentType(type: AgentType): boolean {
 }
 
 /**
- * Claude Code's builtin agents. aboard scaffolds no `.claude/agents/` file for
- * them — `--agent <name>` resolves to the definition Claude Code ships — and
- * the names deliberately match the builtin exactly, since a project definition
- * of the same name would override it upstream.
+ * Claude Code's builtin agents. aboard scaffolds no definition for them, so
+ * `--agent <name>` resolves to the one Claude Code ships; the names deliberately
+ * match the builtin exactly, since a project definition of the same name would
+ * override it upstream. They are the only types still launched with `--agent`:
+ * aboard's own agents are carried on the command line instead, so that nothing
+ * in the workspace can discover and spawn them.
  *
  * They are the dual-mode types the `interactive` flag exists for (spec section
  * 6.1): unlike INTERACTIVE_AGENT_TYPES they can work unattended and report a

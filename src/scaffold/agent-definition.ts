@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import {
   deriveWriteCapability,
   parseAgentDefinitionTools,
@@ -5,11 +7,45 @@ import {
 } from "../domain/capability.js";
 import { EFFORT_LEVELS, isEffortLevel, type EffortLevel } from "../claude/launch.js";
 
-/** The Manager runs as the main session agent (`--agent manager`). */
+/** The Manager runs as the main session agent. */
 export const MANAGER_AGENT_NAME = "manager";
+
+/**
+ * Where aboard keeps its agent definitions — deliberately *not*
+ * `.claude/agents/`, which Claude Code scans from every session that runs
+ * anywhere under the workspace. A definition there is a registered subagent
+ * type: the user's own `claude` sees `implementer` and the pr-doctors in its
+ * Agent tool and can spawn them outside the bridge and outside the write lease.
+ * aboard's agents are launched, never spawned, so their definitions live
+ * somewhere nothing discovers them and reach Claude Code as launch flags
+ * instead (spec §5.1.1).
+ */
+export const AGENT_DEFINITION_DIRECTORY = ".aboard/agents";
+
+/** Absolute path of a definition, from the one directory that holds them. */
+export function agentDefinitionPath(workspaceRoot: string, name: string): string {
+  return join(workspaceRoot, ...AGENT_DEFINITION_DIRECTORY.split("/"), `${name}.md`);
+}
+
+/**
+ * Denied on every launch whose definition does not ask for the bridge.
+ *
+ * `--tools` cannot express this: an MCP server's tools are in the session
+ * whether or not the allowlist names them, so a worker would hold
+ * `mcp__aboard__run_agent` — the Manager's own launch tool — despite declaring
+ * no MCP tools at all. `--disallowedTools` removes them from the session, and
+ * they do not reach the agent's context.
+ */
+export const ABOARD_MCP_TOOLS = "mcp__aboard__*";
+
+/** True when a definition's `tools:` asks for the bridge, as the Manager's does. */
+export function declaresAboardMcpTools(tools: readonly string[]): boolean {
+  return tools.some((rule) => rule.trim().startsWith("mcp__aboard"));
+}
 
 export const WORKER_AGENT_NAMES = [
   "brainstormer",
+  "webresearcher",
   "implementer",
   "pr-doctor-afk",
   "pr-doctor-hitl",

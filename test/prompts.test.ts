@@ -265,6 +265,27 @@ test("summarizes a prompt without repeating its content", async () => {
   assert.equal(describeResolvedPrompt(undefined), "prompt=none");
 });
 
+test("an issue-bound webresearcher receives resolved issue and parent-spec context", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
+    github: new FakeGitHub({ issues: [issue47, issue31] }),
+  }));
+  const prompt = await adapter.resolve({
+    type: "webresearcher",
+    description: "research current auth guidance",
+    prompt: "Verify whether the proposed token lifetime matches current guidance.",
+    issue: 47,
+  }, { interactive: false });
+
+  assert.match(String(prompt?.text), /Verify whether the proposed token lifetime/);
+  assert.match(String(prompt?.text), /Issue #47 — Add token refresh/);
+  assert.match(String(prompt?.text), /Parent spec #31 — Auth rework/);
+  assert.deepEqual(prompt?.sources.map((source) => [source.kind, source.number]), [
+    ["issue", 47],
+    ["parent-spec", 31],
+  ]);
+});
+
 test("interactive launches resolve to no prompt so the terminal opens empty", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));

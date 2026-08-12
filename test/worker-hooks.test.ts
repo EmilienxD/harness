@@ -59,14 +59,18 @@ test("records compact summaries, repeat count, and precise re-grounding", async 
   service.compact(parentId, "first summary"); service.compact(parentId, "second summary");
   assert.equal(fleet.get(parentId)?.telemetry.compactionCount, 2);
   assert.deepEqual(fleet.get(parentId)?.compactSummaries, ["first summary", "second summary"]);
-  assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, implementing issue #15 on branch feat/issue-15. Re-read the issue and spec before continuing.");
+  assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, implementing issue #15 on branch feat/issue-15. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.");
   const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
   assert.equal((await import("../src/domain/validation.js")).parseFleetPersistenceDto(serialized).ok, true);
 });
 
 test("worker Python hook is silent for non-aboard and wrong-role sessions", () => {
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
-  for (const env of [{}, { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" }]) {
+  for (const env of [
+    {},
+    { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" },
+    { ABOARD_AGENT_ID: "research-1", ABOARD_AGENT_TYPE: "webresearcher" },
+  ]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
   }

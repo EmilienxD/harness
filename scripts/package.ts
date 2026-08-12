@@ -14,8 +14,10 @@ const required = [
   "assets/scaffold/.claude/hooks/aboard_hook.py",
   "assets/scaffold/.claude/hooks/aboard-hooks.json",
   "assets/scaffold/.aboard/scripts/aboard_wrapper.py",
-  "assets/scaffold/.claude/agents/manager.md",
-  "assets/scaffold/.claude/agents/implementer.md",
+  // Under `.aboard/`, not `.claude/agents/`: a definition in the latter is a
+  // subagent type every session in the workspace can discover and spawn.
+  "assets/scaffold/.aboard/agents/manager.md",
+  "assets/scaffold/.aboard/agents/implementer.md",
   "assets/scaffold/.claude/skills/update-todo/SKILL.md",
   "assets/scaffold/.claude/skills/brainstorm/SKILL.md",
   "assets/scaffold/.claude/skills/raw/SKILL.md",

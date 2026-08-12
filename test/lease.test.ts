@@ -13,14 +13,14 @@ const definition = (tools: string) => `---\nname: fixture\ndescription: fixture\
 test("derives capability for catalogue fixtures and conservative boundaries", () => {
   const fixtures = {
     implementer: definition("Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill"),
-    reviewer: definition("Read, Grep, Glob, Bash(gh *), Bash(git diff*), LSP"),
-    brainstormer: definition("Read, Grep, Glob, Bash(gh *), Agent, Skill, AskUserQuestion"),
+    webresearcher: definition("WebSearch, WebFetch"),
+    brainstormer: definition("Read, Grep, Glob, Bash, Write, Edit, Agent, Skill"),
     raw: undefined,
     malformed: "---\ntools: [Read, Edit\n---",
   } as const;
   assert.equal(deriveAgentDefinitionWriteCapability(fixtures.implementer), "write-capable");
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.reviewer), "read-only");
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.brainstormer), "read-only");
+  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.webresearcher), "read-only");
+  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.brainstormer), "write-capable");
   assert.equal(deriveAgentDefinitionWriteCapability(fixtures.raw), "write-capable");
   assert.equal(deriveAgentDefinitionWriteCapability(fixtures.malformed), "write-capable");
   assert.equal(

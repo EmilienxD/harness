@@ -1,5 +1,5 @@
 import type { EffortLevel, LaunchConfiguration, WorkerPermissionMode } from "../claude/launch.js";
-import { launchWriteCapability, planLaunch, planSessionResume } from "../claude/launch.js";
+import { planLaunch, planSessionResume } from "../claude/launch.js";
 import type { ResolvedPrompt } from "../claude/prompts.js";
 import type { PromptSpillStore } from "../claude/spill.js";
 import type { ShellKind } from "../claude/shell.js";
@@ -159,8 +159,16 @@ export class DelegationCoordinator {
     if (session.identity.type === "manager") {
       throw new DelegationError("unknown-agent", "The Manager has its own lifecycle");
     }
+    if (session.identity.type === "webresearcher") {
+      throw new DelegationError(
+        "unresumable-session",
+        "A webresearcher cannot be restored after its result caller is gone; launch a fresh research task instead",
+      );
+    }
+    // The definition is required, not merely useful: a resume re-passes the
+    // system prompt and tool list, and reopening the session without them
+    // yields Claude Code's default persona holding every default tool.
     const configuration = await this.options.configurations.get(session.identity.type);
-    const capability = launchWriteCapability(session.identity.type, configuration);
     const resumable = await (this.options.isResumable ?? sessionIsResumable)(session.sessionId, this.options.workspaceRoot);
     if (!resumable) {
       throw new DelegationError("unresumable-session", `Session ${session.sessionId} has no Claude conversation to resume`);
@@ -171,11 +179,8 @@ export class DelegationCoordinator {
       agentType: session.identity.type,
       shell: this.options.shell,
       permissionMode: this.options.permissionMode,
-      writeCapability: capability,
-      model: configuration.shape === "agent-defined" ? configuration.declaredModel : undefined,
-      effort: configuration.shape === "agent-defined"
-        ? configuration.declaredEffort ?? this.options.effort?.()
-        : this.options.effort?.(),
+      configuration,
+      ...this.#effort(),
       ...this.#command(),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
@@ -183,6 +188,7 @@ export class DelegationCoordinator {
     const occurredAt = this.#timestamp();
     this.#acquire(plan.writeCapability, session.identity.agentId, session.sessionId, occurredAt, "restore persisted agent");
     try {
+      if (plan.systemPrompt !== undefined) await this.options.spills.write(plan.systemPrompt);
       const terminal = this.options.terminals.create({
         agentId: session.identity.agentId,
         sessionId: session.sessionId,
@@ -296,6 +302,7 @@ export class DelegationCoordinator {
     const occurredAt = this.#timestamp();
     this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, "launch agent");
     try {
+      if (plan.systemPrompt !== undefined) await this.options.spills.write(plan.systemPrompt);
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill);
       const terminal = this.options.terminals.create({
         agentId,

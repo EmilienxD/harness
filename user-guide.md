@@ -17,7 +17,7 @@ code -n C:\Users\emb\dev\aboard-e2e
 Phase 2 — Scaffold (5 min, no tokens)
 4. Open the aboard view. Expect a short description of the project and a single "Initialize" button (Command Palette equivalent: "Aboard: Initialize Project"). Expect an info message with created counts, and the view to switch to the ready state offering "Start Manager" and "Reset .aboard/".
 5. Verify in the sandbox:
-- .claude\agents\ has brainstormer.md, implementer.md, reviewer.md, fixer.md (no explorer.md)
+- .claude\agents\ has manager.md, brainstormer.md, webresearcher.md, implementer.md, pr-doctor-afk.md, pr-doctor-hitl.md (no explorer.md)
 - .claude\hooks\, .claude\skills\ (7 skills), .mcp.json with ${ABOARD_BRIDGE_PORT} placeholders and no secrets
 - .claude\settings.json contains hooks only — no permissions, no autoCompact keys (open it and look)
 - .claude\settings.local.json contains "enabledMcpjsonServers": ["aboard"], so Claude never asks to approve the bridge MCP server
@@ -50,7 +50,7 @@ Phase 6 — The money test: afk issue end-to-end $ (10–20 min)
 > Phases 6-8 below exercise the **superseded** implementation flow, in which the implementer commits and merges its own PR and a reviewer hands findings to a fixer. They are accurate for the current build. Once `docs/auto-implementation.md` is implemented they are replaced by: start a run with `/auto`, the extension commits and opens the PR, `afk` merges without a reviewer, `hitl` stops at the open PR, and review mode launches one pr-doctor that both reviews and fixes.
 
 20. Tell the Manager: "Implement issue #1." Watch:
-- A worker terminal appears running claude --agent implementer --session-id … with the task as a CLI argument (issue body inline — nobody typed into a TUI)
+- A worker terminal appears running claude --session-id … --system-prompt-file=.aboard/runtime/agents/implementer.md --tools=… with the task as a CLI argument (issue body inline — nobody typed into a TUI)
 - Tree: implementer running · lease holder; status bar shows lease holder
 - Worker: branch → edit → commit → PR referencing Closes #1 → merges itself (afk) → stops
 - While it runs: open calc.py, add a space, Ctrl+S → expect the lease warning notification
@@ -68,8 +68,9 @@ Phase 9 — Guards & restart (5 min, no tokens)
 28. In the sandbox window: Terminal → New Terminal → run claude by hand. Expect: no briefing injection, no new fleet node, hooks silent, and no Manager persona (it is an agent definition now, not project memory). Exit it.
 29. Developer: Reload Window → bridge rebinds → "Aboard: Resume Manager" resumes the same session; fleet state restored from .aboard\runtime\.
 Phase 10 — Manager tool list & launch command (5 min)
-30. In the sandbox project's .claude/agents/manager.md, delete Read, Grep, Glob, and Bash from the tools: line, run "Aboard: New Manager", ask it to read calc.py. Expected: it has no Read tool and must delegate/decline — the frontmatter list is the Manager's only tool authority; the launch command carries no --tools. Restore the line afterwards (or re-run "Aboard: Initialize/Update" to get the shipped asset back).
-31. Set aboard.launch.claudeCommand = clauder run kiro -- (or leave it at claude if you have no wrapper), run "Aboard: New Manager", and read the terminal's first line. Expected: & clauder run kiro -- --session-id ... --agent manager ..., i.e. your wrapper's arguments first and aboard's flags appended unchanged. A path with spaces goes in quotes: "C:\tools\my claude.exe" run --. Reset it to claude afterwards.What to report back to me
+30. In the sandbox project's .aboard/agents/manager.md, delete Read, Grep, Glob, and Bash from the tools: line, run "Aboard: New Manager", ask it to read calc.py. Expected: it has no Read tool and must delegate/decline — the frontmatter list is the Manager's only tool authority, carried onto the command line as --tools. Restore the line afterwards (or re-run "Aboard: Initialize/Update" to get the shipped asset back).
+30b. In the sandbox window: Terminal → New Terminal → run claude by hand, then type /agents (or ask it to list the subagents it can spawn). Expected: no implementer, pr-doctor-afk, pr-doctor-hitl, brainstormer, webresearcher, or manager — aboard's definitions live in .aboard/agents/, which Claude Code does not scan, so nothing outside aboard can spawn them. Confirm .claude/agents/ does not exist. Exit the session.
+31. Set aboard.launch.claudeCommand = clauder run kiro -- (or leave it at claude if you have no wrapper), run "Aboard: New Manager", and read the terminal's first line. Expected: & clauder run kiro -- --session-id ... --system-prompt-file=.aboard/runtime/agents/manager.md '--tools=...' ..., i.e. your wrapper's arguments first and aboard's flags appended unchanged. A path with spaces goes in quotes: "C:\tools\my claude.exe" run --. Reset it to claude afterwards.What to report back to me
 For each phase, one line: PASS or FAIL + step number. For any FAIL:
 1. Exact step number and what you saw instead (exact text/screenshot of the terminal)
 2. Output → aboard channel, last ~50 lines

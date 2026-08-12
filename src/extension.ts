@@ -59,7 +59,7 @@ import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessi
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
-import { parseAgentDefinition } from "./scaffold/agent-definition.js";
+import { ABOARD_MCP_TOOLS, agentDefinitionPath, declaresAboardMcpTools, parseAgentDefinition } from "./scaffold/agent-definition.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
@@ -192,15 +192,17 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
     // tool set — capability for both is fixed in `launchWriteCapability`, and
     // deriving from an unreadable file would conservatively mark even Explore
     // write-capable.
-    if (isBuiltinAgentType(type)) return { shape: "agent-defined", agentName: type };
-    const result = parseAgentDefinition(await readFile(join(workspaceRoot, ".claude", "agents", `${type}.md`), "utf8"));
+    if (isBuiltinAgentType(type)) return { shape: "builtin", agentName: type };
+    const result = parseAgentDefinition(await readFile(agentDefinitionPath(workspaceRoot, type), "utf8"));
     if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
-    // `model:` and `effort:` are read here and passed as flags because a
-    // main-thread `--agent` launch ignores them in the file (see
-    // `LaunchConfiguration`); `tools:` stays where it is, on no command line.
+    // The whole definition is carried onto the command line: the body as
+    // `--system-prompt-file`, `tools:` as `--tools`, and `model:`/`effort:` as
+    // their own flags. One file, no second authority (see `LaunchConfiguration`).
     return resolveLaunchConfiguration({
       agentName: type,
+      systemPrompt: result.value.prompt,
       declaredTools: result.value.tools,
+      ...(declaresAboardMcpTools(result.value.tools) ? {} : { disallowedTools: [ABOARD_MCP_TOOLS] }),
       declaredModel: result.value.model,
       declaredEffort: result.value.effort,
     });
@@ -299,13 +301,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const recordedManager = await managerStore.load();
   const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
   const launchConfigurations = workerConfigurations(workspaceRoot);
+  // Every command line that reads a file — a spilled prompt, an agent's system
+  // prompt — gets it from here, so all of them land under `.aboard/runtime/`.
+  const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot);
   const wrapperLayout = sessionWrapperLayout(workspaceRoot);
   // aboard types its launch into a shell it does not own and never sees the
   // command's exit status. Asking `claude --version` in a child process aboard
   // does own turns "the terminal is full of shell errors" into a refused launch
   // with a reason. Cached per command, so only the first launch pays.
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
-  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: new FileSystemPromptSpillStore(workspaceRoot), managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   // A settled session leaves its terminal to be collected: the record the
   // fleet dropped still names an open terminal, and the next launch for the
@@ -439,18 +444,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const reviewTerminals: ReviewTerminals = {
     focus: (terminalId) => { try { terminals.show(terminalId); return true; } catch { return false; } },
     resume: async (owner: PullRequestOwner) => {
-      // An unread tool set resolves to the restrictive answer, so a resumed
-      // worker is treated as write-capable and takes the lease like any other.
-      const capability = deriveWriteCapability(undefined);
-      // A resume carries no --agent, so the definition's model and effort have
-      // to be re-passed as flags. An unreadable definition is not fatal here:
-      // the session setting still applies, and refusing to reopen a finished
-      // agent's terminal over it would be worse than resuming at the default.
-      let declared: LaunchConfiguration | undefined;
-      try { declared = await launchConfigurations.get(owner.type); }
-      catch (error) { output.appendLine(`Could not read the ${owner.type} agent definition for resume; using the configured model and effort. ${error instanceof Error ? error.message : "unknown error"}`); }
-      const definition = declared?.shape === "agent-defined" ? declared : undefined;
-      const effort = definition?.declaredEffort ?? currentConfiguration.launchEffort;
+      // The definition is a precondition for reopening the session, not a
+      // refinement of it: a resume re-passes the system prompt and the tool
+      // list, so resuming without them would put a stock Claude Code session,
+      // holding every default tool, in a pr-doctor's terminal. Failing here is
+      // worse for the user than it used to be, and still better than that.
+      const configuration = await launchConfigurations.get(owner.type);
       const plan = planSessionResume({
         agentId: owner.agentId,
         sessionId: owner.sessionId,
@@ -458,9 +457,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         shell: process.platform === "win32" ? "powershell" : "git-bash",
         permissionMode: currentConfiguration.workerPermissionMode,
         command: currentConfiguration.claudeCommand,
-        writeCapability: capability,
+        configuration,
+        ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
         wrapper: wrapperLayout,
       });
+      const capability = plan.writeCapability;
+      if (plan.systemPrompt !== undefined) await runtimeFiles.write(plan.systemPrompt);
       const at = new Date().toISOString() as IsoTimestamp;
       const acquisition = lease.acquire(capability, { agentId: owner.agentId, sessionId: owner.sessionId }, at, "resume pull request session");
       if (!acquisition.acquired) throw new Error(`Write lease is held by ${acquisition.holder.agentId}; release it before resuming this session.`);
@@ -555,7 +557,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // awaits it so queued writes are flushed on a normal shutdown.
   context.subscriptions.push({ dispose: () => void persistence?.dispose() });
   const manager = new ManagerLifecycle({
-    store: managerStore, terminals, workspaceRoot,
+    store: managerStore, terminals, workspaceRoot, files: runtimeFiles,
     shell: process.platform === "win32" ? "powershell" : "git-bash",
     disallowedTools: currentConfiguration.managerDisallowedTools,
     preflight: (command) => claudeProbe.require(command),

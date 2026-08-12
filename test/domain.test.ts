@@ -158,10 +158,11 @@ test("exhaustively handles every specified failure type", () => {
 
 test("the legal agent catalogue ships no custom explorer definition", () => {
   // `Explore` and `general-purpose` are Claude Code's builtin agent names, not
-  // aboard definitions; a custom `explorer` stays excluded (spec section 9.4).
+  // aboard definitions; a custom `explorer` stays excluded (spec section 9.5).
   assert.deepEqual(AGENT_TYPES, [
     "manager",
     "brainstormer",
+    "webresearcher",
     "implementer",
     "pr-doctor-afk",
     "pr-doctor-hitl",

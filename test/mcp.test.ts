@@ -4,6 +4,15 @@ import test from "node:test";
 import { createMcpHandler, CORE_MCP_TOOLS } from "../src/bridge/mcp.js";
 import { DelegationCoordinator } from "../src/bridge/delegation.js";
 import { resolveLaunchConfiguration } from "../src/claude/launch.js";
+
+/** An aboard definition: body plus tool list, both carried as launch flags. */
+const definitionFor = (agentName: string, declaredTools: readonly string[]) =>
+  resolveLaunchConfiguration({
+    agentName,
+    systemPrompt: `You are the ${agentName}.`,
+    declaredTools,
+    disallowedTools: ["mcp__aboard__*"],
+  });
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
@@ -97,15 +106,15 @@ function setup() {
     agentIdFactory: () => agent(`worker-${++agentId}`),
     sessionIdFactory: () => session(ids[sessionId++]!),
     configurations: {
-      // Mirrors the production source: builtin types launch as `--agent <name>`
-      // against Claude Code's own definition, so there is no file to read.
-      get: async (type) => type === "brainstormer"
-        ? resolveLaunchConfiguration({ agentName: type, declaredTools: ["Read", "Grep"] })
-        : type === "raw"
-          ? resolveLaunchConfiguration({})
-          : isBuiltinAgentType(type)
-            ? resolveLaunchConfiguration({ agentName: type })
-            : resolveLaunchConfiguration({ agentName: type, declaredTools: ["Read", "Edit"] }),
+      // Mirrors the production source: an aboard definition carries its body and
+      // tool list onto the command line, while a builtin type launches as
+      // `--agent <name>` against Claude Code's own definition — there being no
+      // file for aboard to read, and none for any session to discover.
+      get: async (type) => type === "raw"
+        ? resolveLaunchConfiguration({})
+        : isBuiltinAgentType(type)
+          ? resolveLaunchConfiguration({ agentName: type })
+          : definitionFor(type, type === "brainstormer" || type === "webresearcher" ? ["Read", "Grep"] : ["Read", "Edit"]),
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
     spills: { write: async (spill) => spill.relativePath },
@@ -143,6 +152,26 @@ test("restores a persisted worker with --resume, no new prompt, and no focus", a
   assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
 });
 
+test("keeps an automated-only webresearcher paused after its result caller is gone", async () => {
+  const context = setup();
+  const workerId = agent("persisted-researcher");
+  context.fleet.register({
+    identity: { agentId: workerId, type: "webresearcher" },
+    sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"),
+    terminal: { terminalId: terminal("old-terminal"), name: "aboard: webresearcher" },
+    lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
+    resultDelivery: { mode: "tool-result" },
+    telemetry,
+  }, at("2026-07-30T10:00:00.000Z"));
+
+  await assert.rejects(
+    () => context.coordinator.resumePersisted(context.fleet.get(workerId)!),
+    /cannot be restored after its result caller is gone/,
+  );
+  assert.equal(context.host.created.length, 0);
+  assert.equal(context.fleet.get(workerId)?.resultDelivery.mode, "tool-result");
+});
+
 test("keeps a transcript-less persisted worker paused", async () => {
   const context = setup();
   const workerId = agent("persisted-worker");
@@ -158,7 +187,7 @@ test("keeps a transcript-less persisted worker paused", async () => {
     fleet: context.fleet, lease: context.lease, terminals: context.terminals,
     managerAgentId: agent("manager-1"), shell: "powershell", permissionMode: "default",
     agentIdFactory: () => agent("unused"), sessionIdFactory: () => session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    configurations: { get: async () => resolveLaunchConfiguration({ agentName: "implementer", declaredTools: ["Read", "Edit"] }) },
+    configurations: { get: async () => definitionFor("implementer", ["Read", "Edit"]) },
     prompts: { resolve: async () => undefined }, spills: { write: async (spill) => spill.relativePath },
   });
   await assert.rejects(() => refusing.resumePersisted(context.fleet.get(workerId)!), /no Claude conversation/);
@@ -215,6 +244,8 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     // A dual-mode type without the interactive flag is automated, and an
     // automated launch without a prompt is the one combination with no reading.
     ["run_agent", { type: "Explore", description: "map the auth flow" }],
+    ["run_agent", { type: "webresearcher", description: "research current API pricing" }],
+    ["run_agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
     ["update_todo", { body: "x", reason: "" }],
     ["review_pr", { pr: 0 }],
     ["start_auto_run", { spec: 12 }],
@@ -231,7 +262,7 @@ test("run_agent cannot launch an implementation agent by any route", async () =>
   const { call, fleet } = setup();
   const tool = CORE_MCP_TOOLS.find((entry) => entry.name === "run_agent")!;
   const schema = tool.inputSchema as { properties: { type: { enum: readonly string[] } } };
-  assert.deepEqual([...schema.properties.type.enum].sort(), ["Explore", "brainstormer", "general-purpose", "raw"]);
+  assert.deepEqual([...schema.properties.type.enum].sort(), ["Explore", "brainstormer", "general-purpose", "raw", "webresearcher"]);
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
     assert.equal("error" in resultBody(await call("run_agent", { type, prompt: "work", description: "do the work now" })), true, type);
   }
@@ -284,7 +315,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent[0]!, /^& clauder run kiro -- --session-id .* --agent implementer /);
+  assert.match(host.created[0]!.terminal.sent[0]!, /^& clauder run kiro -- --session-id .* --system-prompt-file=\.aboard\/runtime\/agents\/implementer\.md /);
 });
 
 test("an auto-run launch marks the tree it is expected to leave dirty", async () => {
@@ -313,11 +344,29 @@ test("interactive mode makes prompt optional at both the schema and runtime boun
   const omitted = resultBody(await call("run_agent", { type: "brainstormer", description: "open a brainstorm session", interactive: true }));
   assert.equal("error" in omitted, false, JSON.stringify(omitted));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent brainstormer\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/brainstormer\.md '--tools=Read,Grep' '--disallowedTools=mcp__aboard__\*'\s*$/);
 
   const withTopic = resultBody(await call("run_agent", { type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true }));
   assert.equal("error" in withTopic, false, JSON.stringify(withTopic));
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /caching layer/);
+});
+
+test("webresearcher runs unattended, reports a result, and takes no lease", async () => {
+  const { call, fleet, lease, host } = setup();
+  const launched = resultBody(await call("run_agent", {
+    type: "webresearcher",
+    prompt: "Find the current API pricing from official sources.",
+    description: "research current API pricing",
+    run_in_background: true,
+  }));
+  assert.equal("error" in launched, false, JSON.stringify(launched));
+  assert.match(JSON.stringify(launched), /running/);
+  const researcher = fleet.list().find((entry) => entry.identity.type === "webresearcher")!;
+  assert.equal(researcher.resultDelivery.mode, "mailbox");
+  assert.equal(lease.current(), undefined);
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/webresearcher\.md/);
+  assert.deepEqual(host.created.at(-1)!.terminal.shown, []);
 });
 
 test("builtin types run unattended: foreground blocks, and read-only Explore runs beside the lease holder", async () => {

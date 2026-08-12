@@ -1,4 +1,4 @@
-import { MCP_LAUNCHABLE_AGENT_TYPES, isInteractiveAgentType, type AgentType } from "../domain/contracts.js";
+import { MCP_LAUNCHABLE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentType } from "../domain/contracts.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
@@ -48,7 +48,8 @@ const RUN_AGENT_DESCRIPTION = `Launch a visible, independent Claude Code agent i
 Available agent types:
 - general-purpose: Claude Code's built-in full-tool agent for multi-step work that mixes exploring and editing. Runs in either mode.
 - Explore: Claude Code's built-in read-only search agent. Use it to find files by pattern (eg. "src/**/*.test.ts"), grep for symbols or keywords, or answer "where is X defined / which files reference Y". Do NOT use it for code review, design auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. State the breadth you want in the prompt: "quick" for a single targeted lookup, "medium" for moderate exploration, "very thorough" to search across multiple locations and naming conventions. Read-only, so it never holds the write lease. Runs in either mode.
-- brainstormer: Develop a product or architecture idea with the user and finish with a durable spec issue. Interactive only.
+- brainstormer: Develop a product or architecture idea with the user and finish with a durable spec. Interactive only.
+- webresearcher: Research current external facts from authoritative web sources and return a concise answer with citations. Automated and read-only; use it when the answer may have changed since your knowledge cutoff.
 - raw: An unconstrained Claude Code session with no agent definition, for a user who wants to work directly. Interactive only.
 
 To get an issue implemented, call mcp__aboard__start_auto_run. Implementation agents are not launchable here.
@@ -57,7 +58,7 @@ To get an issue implemented, call mcp__aboard__start_auto_run. Implementation ag
 
 **Interactive** (\`interactive: true\`) focuses the terminal and hands it to the user, who drives it from there. **No result is ever delivered** — never wait for one, never poll for one, and never tell the user you will report back. Hand off and continue the conversation. \`prompt\` is optional here and should be omitted unless the user named a specific topic to open on; they type the first message themselves. Never invent or paraphrase a topic to fill it in: an invented opening turn spends the agent's first turn on a question the user did not ask.
 
-**Automated** (the default) has the agent work alone and report back, and requires a \`prompt\`. \`brainstormer\` and \`raw\` exist only to be handed to the user, so requesting either without \`interactive: true\` launches interactively anyway and says so in the result.
+**Automated** (the default) has the agent work alone and report back, and requires a \`prompt\`. \`webresearcher\` is always used this way. \`brainstormer\` and \`raw\` exist only to be handed to the user, so requesting either without \`interactive: true\` launches interactively anyway and says so in the result.
 
 **Foreground vs background**: foreground (the default) blocks this call until the agent's final message is available — use it when you need the result before you can say anything useful, such as research that decides what you recommend next. \`run_in_background: true\` returns immediately and notifies you on completion — use it for genuinely independent work, or when the user is mid-conversation and should not be left waiting on a tool call.
 
@@ -224,6 +225,7 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   }
   const type = value.type as AgentType;
   if (value.interactive !== undefined && typeof value.interactive !== "boolean") return "interactive must be a boolean";
+  if (value.interactive === true && isAutomatedAgentType(type)) return `${type} is automated and cannot be launched interactively`;
   if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
   if (!nonEmptyString(value.description)) return "description must be a non-empty string";
   const words = value.description.trim().split(/\s+/).length;

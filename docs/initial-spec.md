@@ -1,10 +1,12 @@
 # aboard — Project Specification
 
-**Status:** Design complete, pre-implementation. This document is the authoritative starting point for scaffolding, agent-definition authoring, and all subsequent implementation work.
+**Status:** Implemented. This document is the authoritative product and behavior contract for scaffolding, agent definitions, and subsequent implementation work.
+
+**Version:** 1.4 — moved aboard's agent definitions out of `.claude/agents/`, where every session in the workspace could discover and spawn them, into `.aboard/agents/`; launches and resumes now carry each definition as `--system-prompt-file` plus `--tools` (§5.1.1). Version 1.3 aligned the agent catalogue with the shipped role-specific system prompts and exact tool allowlists, added the automated, read-only `webresearcher`, and removed the obsolete shared-prompt and `gh` compaction-recovery contracts.
 
 **Version:** 1.2 — the Manager's tool list moved from a runtime `toolPreset` setting passed as `--tools` on the command line into the `tools:` field of `.claude/agents/manager.md`, retiring the setting and the Manager's both-flags exception (§4.3, §5.1.1).
 
-**Version:** 1.1 — incorporates the first full review pass. Changes from 1.0: the TODO moved from a committed file to a GitHub issue (§7.1); session-task tools removed from every Manager preset (§4.3); aboard no longer writes user permission settings (§4.3.1); the `SessionStart` injection cap and its split-hook mitigation (§4.5); `--agent` XOR `--tools` and the CLI-argument first prompt (§5.1); the raw agent as a first-class launch type (§5.7); prompt resolution before launch (§5.8); intercepted commands deny with exit 2 and batch notifications (§6.3); the `explorer` agent dropped in favour of the built-in `Explore` (§9.4); skill ownership clarified — most skills already exist and must not be reimplemented (§10.0); and hooks must self-guard because they are project-scoped, not agent-scoped (§3.4).
+**Version:** 1.1 — incorporates the first full review pass. Changes from 1.0: the TODO moved from a committed file to a GitHub issue (§7.1); session-task tools removed from every Manager preset (§4.3); aboard no longer writes user permission settings (§4.3.1); the `SessionStart` injection cap and its split-hook mitigation (§4.5); `--agent` XOR `--tools` and the CLI-argument first prompt (§5.1); the raw agent as a first-class launch type (§5.7); prompt resolution before launch (§5.8); intercepted commands deny with exit 2 and batch notifications (§6.3); the `explorer` agent dropped in favour of the built-in `Explore` (§9.5); skill ownership clarified — most skills already exist and must not be reimplemented (§10.0); and hooks must self-guard because they are project-scoped, not agent-scoped (§3.4).
 
 ---
 
@@ -33,7 +35,7 @@ Several design decisions in this document look conservative in isolation and are
 | Automatic review defaults to **off** | Auto-review everything | LLM API cost is real and the user decides where to spend it |
 | `hitl` label gates chains on human action | Agents close their own work | The user chooses how far a chain runs unattended |
 | **No parallelism, no worktrees** | Fan out N agents concurrently | Merge conflicts and self-contradicting agents destroy quality |
-| Manager is read-only by default | Manager fixes small things itself | Keeps the Manager an orchestrator, not a drifting implementer |
+| Manager has no file-editing, `Agent`, or session-task tools | Manager fixes small things itself | Keeps the Manager an orchestrator, not a drifting implementer; residual Bash writes remain prompt- and deny-rule-constrained |
 | Interactive agents expect no result | Everything returns structured output | Some work is a conversation with the user, not a task |
 | **The raw agent** (§5.7) — plain Claude Code, no workflow | Every task must enter the issue pipeline | The user must never be worse off for having installed aboard |
 | aboard never writes user permission settings | Extension configures the workspace for you | The user's config is theirs; we add hooks and nothing else |
@@ -101,7 +103,8 @@ Several design decisions in this document look conservative in isolation and are
             ▼
 ┌───────────────────────┐  ┌───────────────────────┐  ┌──────────────┐
 │ Terminal: MANAGER     │  │ Terminal: worker #1   │  │ Terminal: …  │
-│ claude --agent manager│  │ claude --agent impl … │  │              │
+│ claude --system-prompt│  │ claude --system-prompt│  │              │
+│   -file=… --tools=…   │  │   -file=… --tools=… … │  │              │
 │                       │  │   └─ sub-sub-agents   │  │              │
 └───────────────────────┘  └───────────────────────┘  └──────────────┘
             │                          │
@@ -226,15 +229,15 @@ The Manager is **one long-lived Claude Code session**, running in its own VS Cod
 
 ### 4.2 The Manager never implements
 
-The Manager must never write code and must never spend time deeply reasoning about individual features. It delegates.
+The Manager must never implement or edit code and must stay shallow on feature details. It may use `Glob`, `Grep`, or `Read` for a bounded inspection of at most three queries when that is enough to understand the request. Broader codebase exploration goes to a visible `Explore` worker; research whose answer may have changed since the model's knowledge cutoff goes to `webresearcher` (§9.3).
 
 Rationale: a Manager that reads a 2,000-line file has spent its context on detail it will lose at the next compaction, and a Manager that reasons deeply about one feature has stopped being able to reason about the project. Its value is breadth and continuity, and both are destroyed by depth.
 
-This is enforced **structurally** (the tool list, §4.3) and **by prompt** (§9.1), because the read-only tool list cannot fully prevent deep reasoning — only deep *writing*.
+This is enforced by the absence of `Edit`, `Write`, Claude Code's `Agent` tool, and session-task tools (§4.3), plus the role prompt (§9.1). Unrestricted `Bash` remains a residual write vector, so "never implement" is not fully structural; launch-time deny rules (§4.3.1) and the prompt are the backstop.
 
 ### 4.3 The Manager's tool list
 
-The Manager's **persona** is a scaffolded agent definition, `.claude/agents/manager.md`, launched with `--agent manager` (§9.1). Like every other aboard agent, its **tool set is that file's `tools:` field**, and the launch command carries no `--tools` (§5.1.1). The shipped list is the read-only set:
+The Manager's **persona** is a scaffolded agent definition, `.aboard/agents/manager.md` (§9.1), carried onto the command line as `--system-prompt-file` plus `--tools` — never registered under `.claude/agents/`, where every session in the workspace could discover and spawn it. Like every other aboard agent, its **tool set is that file's `tools:` field** (§5.1.1). The shipped orchestration allowlist is:
 
 ```
 mcp__aboard__*, Read, Grep, Glob, Bash, Skill, AskUserQuestion
@@ -242,9 +245,9 @@ mcp__aboard__*, Read, Grep, Glob, Bash, Skill, AskUserQuestion
 
 The user tightens or loosens it by editing the file; the scaffolder preserves locally edited assets, so the change survives upgrades (a Manager restart is still required — the tool set is resolved at launch). An earlier draft kept the list in a `toolPreset` setting with two presets; that was retired in favour of one tool authority per agent, the definition file.
 
-**Critical:** `Agent` is **absent from the tool list**, not merely denied. A `tools:` allowlist controls what enters Claude's context, rather than `--disallowedTools` (which only auto-denies). The distinction matters twice: the Manager cannot reach for a tool it cannot see, and we do not pay context for the `Agent` tool's schema.
+**Critical:** `Agent` is **absent from the tool list**, not merely denied. A `tools:` allowlist controls what enters Claude's context, rather than `--disallowedTools` (which only auto-denies). The Manager delegates visible top-level workers through `mcp__aboard__run_agent`; it cannot create opaque in-process workers.
 
-**No task tools.** `TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate` (and the deprecated `TodoWrite`) are **deliberately excluded from the list.** Those tools exist to keep an agent on track through a long *coding* task, which is exactly the work the Manager never does. They would also invite a category error: an agent reaching for `TaskUpdate` to edit the project's global TODO. That TODO is a different artifact with a different lifetime, it lives in GitHub (§7.1), and it is edited through dedicated MCP tools (§6.2). The two must never be confused, and the cheapest way to guarantee that is for the session-task tools not to exist in the Manager's context at all.
+**No task tools.** `TaskCreate`, `TaskGet`, `TaskList`, `TaskStop`, `TaskUpdate`, and `TodoWrite` are **deliberately excluded from the list.** They exist to keep an agent on track through a long implementation task, which is exactly the work the Manager never does. They would also invite a category error with the project roadmap, which lives in GitHub (§7.1) and is edited through a dedicated MCP tool (§6.2).
 
 ### 4.3.1 aboard never writes user permission settings
 
@@ -260,20 +263,20 @@ Two reasons, both about user experience:
 **Per-agent restriction uses `--disallowedTools` at launch instead**, which takes the same `ToolName(specifier)` rule format documented in `tools-reference.md` and applies to exactly one process:
 
 ```
-claude --agent manager \
-       --disallowedTools "Bash(git push*)" "Bash(git commit*)" "Bash(git merge*)" ...
+claude --system-prompt-file=.aboard/runtime/agents/manager.md --tools=<list> \
+       --disallowedTools="Bash(git push*),Bash(git commit*),Bash(git merge*),..."
 ```
 
 **Two consequences to keep in view:**
 
-1. **`Bash` remains a write vector in the read-only list.** A Manager with unscoped `Bash` can write files regardless of lacking `Edit`/`Write`. The read-only property is only as real as the `--disallowedTools` list at launch. That list is a setting (`aboard.manager.disallowedTools`), starts empty, and the user tightens it after observing actual behaviour.
+1. **`Bash` remains a write vector in the orchestration list.** A Manager with unscoped `Bash` can write files regardless of lacking `Edit`/`Write`. Its no-implementation property is only as strong as the role prompt and the `--disallowedTools` list at launch. That list is a setting (`aboard.manager.disallowedTools`), starts empty, and the user tightens it after observing actual behaviour.
 2. **`Read` is path-scopable if wanted.** Per `tools-reference.md`, the `Read(path/**)` rule format applies to `Read`, `Grep`, `Glob`, and `LSP`, so `--disallowedTools "Read(./src/**)"` is expressible. Not used by default.
 
 ### 4.4 Lifecycle: one Manager, kept alive
 
 **The Manager is long-lived.** Resume is the default path; a fresh Manager is an explicit choice.
 
-- **`Aboard: Start Manager`** — mints a session ID, records it in `.aboard/runtime/manager.json`, creates the terminal, launches `claude --session-id <uuid> --agent manager`.
+- **`Aboard: Start Manager`** — mints a session ID, records it in `.aboard/runtime/manager.json`, writes the Manager's system prompt file under `.aboard/runtime/agents/`, creates the terminal, launches `claude --session-id <uuid> --system-prompt-file=… --tools=…`.
 - **`Aboard: Resume Manager`** — relaunches with `--resume <recorded-uuid>`. This is what the extension offers by default when a recorded Manager session exists.
 - **`Aboard: New Manager`** — explicit fresh start, replaces the recorded session ID.
 
@@ -336,33 +339,54 @@ Every worker is an independent process, launched via `sendText()` into a freshly
 
 **Terminals are created with `window.createTerminal()`** — a real PTY (conpty on Windows). This is a deliberate rejection of `vscode.Pseudoterminal`, which cannot emulate ANSI alternate screen buffers, cursor addressing, mouse reporting, or SIGWINCH; a real TUI renders garbled inside it. Claude Code is a real TUI.
 
-#### 5.1.1 An agent's tools come from its definition — `--agent` and `--tools` never mix
+#### 5.1.1 An agent's definition travels on the command line — and is never discoverable
 
 **This is a CLI constraint and it shapes the whole launch layer.**
 
-When `--agent <name>` is passed, Claude Code reads `.claude/agents/<name>.md` and takes the system prompt, the `tools:` allowlist, and the model **from that file's frontmatter.** Passing `--tools` alongside it is not the composition it looks like: the flag competes with the file the write lease (§8.1) reads to derive capability. aboard therefore never combines them — every aboard agent declares its tool set in its definition, including the Manager, and no launch command carries both flags.
+A definition placed in `.claude/agents/<name>.md` is a **registered Claude Code subagent type.** Claude Code discovers those by walking up from the working directory, so the file is visible to *every* session running anywhere in the workspace: aboard's own `raw` terminal, a worker, and the user's hand-started `claude` alike. All of them see `implementer` and the pr-doctors in their `Agent` tool and may spawn them — behind the bridge, outside the fleet, and outside the write lease. That defeats §5.0 (the bridge is the only creator of aboard agents) and §8.1 (at most one write-capable agent) at once.
 
-> **Amended (v1.2).** The Manager used to be the one exception: its definition declared no `tools:`, so a runtime `toolPreset` setting could narrow the inherited pool via `--tools <preset>`. That made the Manager's tool authority unlike every other agent's and split the answer to "what can this agent run?" across a file and a setting. The setting and the exception are gone; `.claude/agents/manager.md` declares the read-only list like any other definition.
+aboard therefore keeps its definitions in **`.aboard/agents/<name>.md`**, which nothing scans, and carries each one onto the command line instead:
 
-So there are exactly two launch shapes, and each agent uses exactly one:
+| Field | How it reaches Claude Code |
+| :-- | :-- |
+| body | `--system-prompt-file=<path>`, pointing at the body written under `.aboard/runtime/agents/` |
+| `tools:` | `--tools=<list>` |
+| `model:`, `effort:` | `--model` / `--effort` |
+
+One file, several flags, **no second authority.** The flags carry the definition rather than competing with it, which is what keeps the write-lease derivation in §8.1 sound: nothing on the command line can widen an agent past what its file declares.
+
+> **Amended (v1.4).** Launches used to pass `--agent <name>` against a definition in `.claude/agents/`, and the rule was that `--agent` and `--tools` never mix. The discovery problem above is why that shape is gone for aboard's own agents. The prohibition survives where it still applies: a **builtin** type is named with `--agent` and carries no tool list, because a builtin's tools are Claude Code's.
+
+> **Amended (v1.2).** The Manager used to be the one exception: its definition declared no `tools:`, so a runtime `toolPreset` setting could narrow the inherited pool via `--tools <preset>`. That made the Manager's tool authority unlike every other agent's and split the answer to "what can this agent run?" across a file and a setting. The setting and the exception are gone; `manager.md` declares its orchestration list like any other definition.
+
+So there are exactly three launch shapes, and each agent uses exactly one:
 
 | Shape | Command | Configuration source |
 | :-- | :-- | :-- |
-| **Agent-defined** (Manager and every worker type) | `claude --agent implementer --session-id <uuid>` | `.claude/agents/implementer.md` frontmatter |
+| **Agent-defined** (Manager and every worker type) | `claude --session-id <uuid> --system-prompt-file=.aboard/runtime/agents/implementer.md --tools=<list>` | `.aboard/agents/implementer.md` frontmatter |
+| **Builtin** (`general-purpose`, `Explore`) | `claude --agent Explore --session-id <uuid>` | Claude Code's own definition |
 | **Inline** (the raw agent of §5.7) | `claude --session-id <uuid> [--tools <list>]` | Launch flags |
 
-> **Amended.** The inline shape carried an optional `--system-prompt <text>` and nothing ever set it: §9.7 defines raw as unconstrained, so there is no prompt to pass, and `raw` is the shape's only user. Supporting an option no caller could reach put an unbounded argument on every command line the planner has to fit inside a shell's length limit, so it is gone. `--tools` stays on this shape — with no definition to read, a restriction on a raw session has nowhere else to live.
+> **Amended.** The inline shape carried an optional `--system-prompt <text>` and nothing ever set it: §9.8 defines raw as unconstrained, so there is no prompt to pass, and `raw` is the shape's only user. Supporting an option no caller could reach put an unbounded argument on every command line the planner has to fit inside a shell's length limit, so it is gone. `--tools` stays on this shape — with no definition to read, a restriction on a raw session has nowhere else to live.
 
-**Consequence for the write lease.** §8.1 derives write-capability by reading the agent definition's `tools:` frontmatter. That derivation is only sound because agent-defined workers take their tools from exactly that file — there is no launch flag that can widen them behind the bridge's back. The mutual exclusion is what makes the derivation trustworthy rather than a guess. The inline shape is therefore **refused for every type but raw**, and the Manager never holds the lease (§8.1).
+**A system prompt cannot be passed inline.** `--system-prompt <text>` is not an alternative to the file: §5.1.4 forbids an argument containing a newline in every supported shell, and every definition body is multi-line. `--system-prompt-file` takes a short path instead, so the command line stays well inside the limits of §5.1.5.
 
-**Consequence for the Manager.** The Manager's prompt, model, and tool list all live in `.claude/agents/manager.md`, so the whole Manager definition is a versioned scaffold asset rather than an instruction in the user's `CLAUDE.md` — which would otherwise apply to every session in the workspace, including workers and hand-started sessions.
+**Tool lists use the `--flag=value` form.** `--tools` and `--disallowedTools` are variadic: given as two arguments they swallow every following argument, including the positional launch prompt of §5.1.2. The `=` form binds exactly one value and ends there.
+
+**MCP tools are not filtered by `--tools`.** An MCP server's tools are present in a session whether or not the allowlist names them, so an allowlist that omits them is not a denial. Every launch whose definition does not declare `mcp__aboard__*` therefore passes `--disallowedTools=mcp__aboard__*`, which removes the bridge's tools from the session entirely; the Manager is the only agent that declares them.
+
+**Consequence for the write lease.** §8.1 derives write-capability by reading the definition's `tools:` frontmatter, and that same field becomes the `--tools` flag. One source feeds both, so the derivation describes the session the command line actually produces.
+
+**Consequence for resume.** `--resume` restores the conversation and nothing else. A session started from `--system-prompt-file` and `--tools` comes back on Claude Code's *default* persona holding the *full* default tool set — `Edit`, `Write`, unrestricted `Bash`. Every resume therefore re-passes the definition's flags exactly as the launch did, and re-writes the system prompt file first; a resume that could not read the definition is refused rather than downgraded. Builtins are the exception: their `--agent` is restored by `--resume` itself.
+
+**Consequence for the Manager.** The Manager's prompt, model, and tool list all live in `.aboard/agents/manager.md`, so the whole Manager definition is a versioned scaffold asset rather than an instruction in the user's `CLAUDE.md` — which would otherwise apply to every session in the workspace, including workers and hand-started sessions.
 
 #### 5.1.2 The first prompt is a CLI argument
 
 `claude` accepts an initial message as a positional argument:
 
 ```
-claude --agent implementer --session-id <uuid> "Implement issue #47. <full body…>"
+claude --session-id <uuid> --system-prompt-file=.aboard/runtime/agents/implementer.md --tools=<list> "Implement issue #47. <full body…>"
 ```
 
 That message becomes the session's first user turn. **This is the only way aboard ever sends a first prompt.**
@@ -393,7 +417,7 @@ An implementation issue body plus its parent spec excerpt can exceed the lower b
 2. Launches with a short prompt that references it:
 
    ```
-   claude --agent implementer --session-id <uuid> \
+   claude --session-id <uuid> --system-prompt-file=.aboard/runtime/agents/implementer.md --tools=<list> \
      "Implement issue #47. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first."
    ```
 
@@ -431,7 +455,7 @@ aboard.launch.effort   // "inherit" (default) | "low" | "medium" | "high" | "xhi
 
 The setting is passed as `--effort` on **every** command line aboard builds — start and `--resume` alike, the Manager included — and, like the permission mode, it is read at launch time so a change takes effect on the next start or resume rather than on a running session. `inherit` passes no flag at all, leaving Claude Code's own `effortLevel` in charge; that is the default, so aboard imposes nothing until asked.
 
-An agent definition's `effort:` frontmatter **overrides the session level**, exactly as its `model:` does — but aboard, not Claude Code, is what applies it. Claude Code honors the full frontmatter only when an agent is spawned as a *subagent*; a **main-thread** launch, which is every launch aboard makes, honors a smaller subset (`mcpServers`, `permissionMode`, `tools`/`disallowedTools`) and silently ignores `model:` and `effort:`, leaving the session at the user's global config. aboard therefore parses both fields from `.claude/agents/<name>.md` and passes `--model`/`--effort` itself, using the definition's values where it declares them and the setting where it does not.
+An agent definition's `effort:` frontmatter **overrides the session level**, exactly as its `model:` does — but aboard, not Claude Code, is what applies it. Claude Code honors the full frontmatter only when an agent is spawned as a *subagent*; a **main-thread** launch, which is every launch aboard makes, honors a smaller subset (`mcpServers`, `permissionMode`, `tools`/`disallowedTools`) and silently ignores `model:` and `effort:`, leaving the session at the user's global config. aboard therefore parses both fields from `.aboard/agents/<name>.md` and passes `--model`/`--effort` itself, using the definition's values where it declares them and the setting where it does not. The same is true of the persona and the tool list, which reach Claude Code as their own flags (§5.1.1); no part of the frontmatter is applied by the launch on its own.
 
 This does not weaken §5.1.1. The prohibition there is on `--tools` alongside `--agent`, because a tool flag would *compete* with the field the write lease derives capability from; `--model` and `--effort` carry the definition's own values and contradict nothing.
 
@@ -453,7 +477,7 @@ Session IDs are recorded in `.aboard/runtime/fleet.json` alongside agent type, i
 
 ### 5.3 Automated workers
 
-Perform a task and return a result. **Never typed into.** Their input is the launch prompt; their output is their final message.
+Perform a task and return a result. **Never typed into.** Their input is the launch prompt; their output is their final message. The always-automated types are `webresearcher`, `implementer`, and `pr-doctor-afk`; the built-in `Explore` and `general-purpose` types are automated when launched without `interactive: true`.
 
 **The prompt is mandatory.** An automated worker with no first message would sit at an empty TUI forever, and §5.1.3 forbids the only mechanism that could rescue it. `aboard__run_agent` therefore requires `prompt` in both delivery modes.
 
@@ -558,9 +582,9 @@ The bridge already has to be involved to create the terminal. It can make those 
 - The `gh` output is parsed by the bridge, so the model never sees the noise.
 - Fewer tools needed in each agent's allowlist.
 
-**Where it stops.** A worker still needs `gh` for **re-grounding after compaction** (§8.4), where re-reading `gh issue view 47` is the recovery path precisely because the prompt may no longer be in context. Resolution-before-launch removes the *routine* fetch, not the *capability*. It no longer needs `gh` for writes: opening, updating, and merging PRs became the extension's job ([`auto-implementation.md`](./auto-implementation.md) §1).
+**Where it stops.** Workers may fetch information that is intrinsic to their role: `webresearcher` searches and fetches current external sources, and a code worker reads repository files needed to perform its task. They do not fetch launch-contract material the bridge already resolved. The implementer and pr-doctors explicitly forbid every `gh` side effect and do not use `gh` as a compaction recovery path; if compaction loses the resolved contract, they stop and report rather than improvising (§8.4).
 
-**This applies to every agent type**, not just the implementer: a pr-doctor gets the diff, the issue, and the spec excerpt; the brainstormer gets the topic and any related issues.
+**This applies to every agent type**, not just the implementer: a pr-doctor gets the diff, issue, and spec excerpt; the brainstormer gets the topic and any related issues; a webresearcher gets the exact external question and the context needed to judge sources.
 
 ---
 
@@ -583,7 +607,7 @@ Both flags are kept because each carries information no other argument supplies:
 
 The single launch surface.
 
-> **Narrowed by [`auto-implementation.md`](./auto-implementation.md) §2.** `implementer`, `pr-doctor-afk`, and `pr-doctor-hitl` are **not** launchable through this tool. They belong to the auto-run engine and to `review_pr`; the Manager reaches implementation work through `start_auto_run`, never by launching an implementer itself.
+> **Narrowed by [`auto-implementation.md`](./auto-implementation.md) §2.** `implementer`, `pr-doctor-afk`, and `pr-doctor-hitl` are **not** launchable through this tool. They belong to the auto-run engine and to `review_pr`; the Manager reaches implementation work through `start_auto_run`, never by launching an implementer itself. `webresearcher` is launchable here and is always automated: it returns current, cited external research to the Manager.
 
 ```jsonc
 {
@@ -609,6 +633,7 @@ The single launch surface.
 | :-- | :-- |
 | An interactive-only type (`brainstormer`, `raw`) without `interactive: true` | **Coerced.** The launch has exactly one valid reading — those types exist only to be handed to the user, and their `Stop` hook is guarded off — so the bridge launches interactively and returns a `notice` telling the Manager no result is coming and to continue with the user. Rejecting would cost a round trip whose only possible retry is this same launch. |
 | An automated launch with no `prompt` | **Rejected.** There is no valid reading to coerce to: the worker would sit at an empty TUI forever and §5.1.3 forbids the only mechanism that could rescue it. |
+| `webresearcher` with `interactive: true` | **Rejected.** The role has no interactive contract or user-question tool; its only valid output is a result returned to the Manager. |
 
 `run_in_background` alongside `interactive: true` is meaningless rather than ambiguous; it is ignored and noted in the result.
 
@@ -829,8 +854,8 @@ This collapses two concepts into one primitive. There is no separate approval st
 
 1. **Start/resume the Manager.** It briefs the user on project state and recommends a next priority — revisit an incorrectly implemented feature, address review comments, start a new feature, update the roadmap.
 2. **User picks a direction.**
-3. **Brainstorm.** The Manager launches an interactive brainstorm agent (or the user invokes `/brainstorm` directly, §6.3) and hands off. That agent's sole responsibility is producing a complete specification as a large GitHub issue. It may launch built-in `Explore` sub-sub-agents, explore the codebase itself, and use the `grill-me` skill. **A brainstorming session always ends with an issue labelled `spec`** — the implementation contract.
-4. **Split — three skills, in order.** The spec becomes implementation issues through a pipeline the user already owns and uses:
+3. **Brainstorm.** The Manager launches an interactive brainstormer (or the user invokes `/brainstorm` directly, §6.3) and hands off. The agent grounds the discussion in the codebase, surfaces high-impact decisions, and converges with the user on an implementation-ready specification. Once the user confirms the discussion is done, the brainstormer asks where to create the durable spec — a file, a GitHub issue, or another destination — and uses `Write`/`Edit` only when that chosen destination is a spec file. It never implements application code.
+4. **Publish and split — three skills, in order.** Before auto-run, the durable spec must exist as a GitHub issue labelled `spec`. The user's issue pipeline creates that issue when the brainstorming deliverable was produced elsewhere, then turns it into implementation issues:
 
    | Skill | Does |
    | :-- | :-- |
@@ -880,13 +905,13 @@ This is enforced **structurally**, not by prompting. The bridge is the only path
 
 - `run_agent` for a **write-capable** type **fails immediately** if the lease is held, returning who holds it and since when.
 - The Manager surfaces that to the user rather than queuing. With "quality over speed", a task that waits 20 minutes for a lease is a task whose premise may have gone stale by the time it runs.
-- **Read-only types are exempt** and stay concurrent. Three reviewers at once cost nothing and touch nothing.
+- **Read-only types are exempt** and stay concurrent. `webresearcher` and automated built-in `Explore` workers can run beside the writer because they cannot modify the workspace.
 
-**Capability class is derived, not declared.** The bridge reads the agent's `.claude/agents/<type>.md` frontmatter: a `tools:` list with no `Edit`, `Write`, or `NotebookEdit`, and no unrestricted `Bash`/`PowerShell`, **cannot** write, so the bridge classifies it read-only. There is no flag to forget and no flag to lie about. This derivation is sound because every aboard agent declares its tool set in its definition and no launch combines `--agent` with `--tools` (§5.1.1) — no launch flag can widen an agent past what its file declares. The Manager declares the read-only list like any other agent and never holds the lease.
+**Capability class is derived, not declared.** The bridge reads the agent's `.aboard/agents/<type>.md` frontmatter: a `tools:` list with no `Edit`, `Write`, or `NotebookEdit`, and no unrestricted `Bash`/`PowerShell`, **cannot** write, so the bridge classifies it read-only. There is no flag to forget and no flag to lie about. This derivation is sound because that same `tools:` field *is* the `--tools` flag the launch carries (§5.1.1) — one source feeds both, so nothing on the command line can widen an agent past what its file declares. It holds across a resume for the same reason: the flags are re-passed there, because `--resume` would otherwise restore the conversation with Claude Code's full default tool set. `webresearcher` is read-only (`WebSearch`, `WebFetch`). `brainstormer` is write-capable (`Write`, `Edit`, unrestricted `Bash`) and takes the lease even though its prompt reserves writes for the final spec. The Manager also derives as write-capable because of unrestricted `Bash`, but is explicitly exempt from the lease: a permanent Manager lease would deadlock every worker, so its residual write vector is constrained by prompt and `aboard.manager.disallowedTools` instead.
 
 **An agent with no definition is write-capable.** The raw agent (§5.7) has no frontmatter to read and Claude Code's default tool set can write, so it takes the lease. Unknown capability resolves to the restrictive answer, always.
 
-**Clean handoff.** Linearity only holds if each worker leaves the tree in a defined state. "Ends with a commit" is the implementation agent's contract, and the bridge verifies `git status --porcelain` is empty before releasing the lease. A dirty tree is a typed failure (§8.2) reported to the Manager — never a silent handoff of someone else's half-finished work to the next agent.
+**Clean handoff.** Linearity only holds if each worker leaves the tree in the state its launch contract expects. Auto-run implementers and pr-doctors intentionally finish with uncommitted changes; the engine verifies the branch, captures those changes in its own commit, and restores a clean tree before the next issue. Other result-delivering write-capable launches must finish clean unless their launch explicitly carries the same `expectsUncommittedTree` contract. An unexpected dirty tree is a typed failure (§8.2), never a silent handoff.
 
 **The user is also a writer.** The user editing `src/foo.ts` while an implementation agent edits it is the same conflict, minus the merge. Therefore:
 
@@ -934,15 +959,15 @@ No bridge-mediated permission policy engine is built. (A `PreToolUse` http hook 
 
 **Auto-compact removes the hard failure.** A worker that fills its window compacts and continues rather than dying. It is on by default in Claude Code. The scaffolder **detects whether the user has disabled it and warns** — it does not write the setting (§10.3), because silently overriding a user preference in a shared file is exactly the UX failure §4.3.1 rules out.
 
-**Compaction is lossy, and the residual risk is specific:** an implementation agent that compacts mid-task can lose its launch prompt — which, per §5.8, is where its entire contract was handed to it. This is survivable for a structural reason: **the contract also lives in GitHub.** A compacted worker re-reads `gh issue view N` and recovers everything. This is the second dividend of the GitHub-as-backbone choice, and it is why §5.8 removes the *routine* fetch without removing the *capability*.
+**Compaction is lossy, and the residual risk is specific:** an implementation agent that compacts mid-task can lose its launch prompt — which, per §5.8, is where its entire contract was handed to it. The implementer prompt forbids every `gh` command. The pr-doctors allow read-only inspection but forbid non-idempotent `git` or `gh` actions; their resolved issue/spec contract still comes from the launch prompt, not an after-compaction fetch. Compaction recovery therefore must not direct any of these roles to rebuild its contract with `gh`. They continue from the compacted conversation and retained launch material; if the issue/spec contract is no longer available, they stop and report the loss plainly. A typed failure is safer than silently rebuilding a different contract.
 
 **Compaction becomes a re-grounding event.** Per `hooks.md`, two hooks fire on compaction: `SessionStart` with `source: "compact"`, and `InstructionsLoaded` with `load_reason: "compact"`. **Only the first can re-inject context.** `InstructionsLoaded` is documented as having no decision control — it cannot block or modify instruction loading, and its exit code is ignored — so `additionalContext` returned from it is silently discarded. The re-grounding hook therefore registers on `SessionStart` with `matcher: "compact"` alone. `InstructionsLoaded` remains available for observability, but must never be relied on to deliver context.
 
 The scaffolder installs a re-orientation hook so that after any compaction the worker is re-injected with:
 
-> You are aboard worker `$ABOARD_AGENT_ID`, implementing issue #N on branch X. Re-read the issue and spec before continuing.
+> You are aboard worker `$ABOARD_AGENT_ID`, implementing issue #N on branch X. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with `gh`.
 
-A compacted worker therefore comes back **oriented**, rather than guessing from a summary. Cheap, precise, and aimed exactly at the failure mode.
+A compacted worker therefore comes back with its identity, branch, and safe failure rule. The hook does not pretend it can reconstruct contract content it does not hold.
 
 **Two free wins:**
 
@@ -974,85 +999,88 @@ Per `settings.md`, Claude Code watches settings files and reloads them on change
 
 ## 9. Agent Catalogue
 
-Agent definitions live in `.claude/agents/*.md` and are scaffolded and owned by the extension (§10.3). Each declares a system prompt, a `tools:` allowlist, a model, and optional frontmatter hooks. An optional `effort:` field overrides the session effort level for that agent (§5.1.6): the Manager declares `medium` because it is told to stay shallow, `implementer` and both pr-doctors declare `high` because they carry the actual work, and `brainstormer` declares none — it is the interactive type, so the user's own session level is the one to keep.
+Agent definitions live in `.aboard/agents/*.md` — deliberately not `.claude/agents/`, which would register each as a subagent type any session in the workspace could spawn (§5.1.1) — and are scaffolded and owned by the extension (§10.3). Each file contains one role's **entire** system prompt, not an addendum to Claude Code's default. The prompts are intentionally role-specific; there is no shared baseline or engineering block whose wording must remain identical across roles. This section is the normative behavior contract, the scaffolded files are its concrete prompts, and focused tests pin their exact tool allowlists and load-bearing instructions.
 
-**The `tools:` list is load-bearing twice:** it constrains the agent, and it is what the bridge reads to derive write-capability for the lease (§8.1). It must never be edited casually. Per §5.1.1, an agent launched with `--agent` takes its tools from this file and nothing at launch can widen them — which is what makes the derivation sound.
+Each definition declares a `tools:` allowlist, model, optional `effort:`, description, and display color. `model:` and `effort:` are parsed and carried onto top-level launch and resume commands (§5.1.6). The Manager declares medium effort; `webresearcher`, `implementer`, and both pr-doctors declare high; `brainstormer` inherits the user's session level.
 
-**Reuse Claude Code's built-in agents wherever they already do the job.** aboard defines an agent type only where the built-in roster has no equivalent. Every custom definition is a file to maintain, a prompt to keep current, and a divergence from what Claude Code does on its own.
-
-**This section specifies the roster and contracts. The system prompts themselves are the highest-value remaining work** — quality lives in the prompts, and they deserve dedicated iteration rather than being drafted here.
+**The `tools:` list is load-bearing twice:** it constrains the agent, and it is what the bridge reads to derive write-capability for the lease (§8.1). It must never be edited casually. Per §5.1.1, an agent launched with `--agent` takes its tools from this file and nothing at launch can widen them.
 
 ### 9.1 `manager`
 
-Launched as the main session agent: `claude --agent manager` (§5.1.1). Its contract is enforced structurally by the `tools:` allowlist and by prompt through `.claude/agents/manager.md`.
+Launched as the main session agent, its definition carried on the command line rather than registered as a discoverable subagent (§5.1.1). aboard scaffolds no `CLAUDE.md`; that file belongs to the user and would leak a Manager persona into workers and hand-started sessions.
 
-**aboard scaffolds no `CLAUDE.md`.** That file is the user's, it applies to every Claude Code session in the workspace — workers and hand-started sessions included — and a Manager persona written there would leak into all of them.
+- **Model:** opus. **Effort:** medium.
+- **Tools:** `mcp__aboard__*`, `Read`, `Grep`, `Glob`, `Bash`, `Skill`, `AskUserQuestion`.
+- **Capability derivation:** technically write-capable because `Bash` is unrestricted, but explicitly exempt from the write lease (§8.1).
+- **Contract:** hold the project's through-line, challenge questionable requests, recommend what should happen next, and delegate approved work to visible workers. Treat aboard MCP tools as first-class harness tools.
+- **Depth limit:** use at most three direct codebase queries for shallow orientation; delegate broader exploration to `Explore`. Never implement, edit code, or read large files.
+- **Recency rule:** when a recommendation depends on current versions, pricing, providers, deprecations, or other cutoff-sensitive facts, launch `webresearcher` and ground the recommendation in its result.
+- **Context rule:** use the `<aboard-state>` briefing without re-fetching facts it already carries, but re-check any stale snapshot fact immediately before acting on it.
 
-- **Model:** opus. **Effort:** medium — it stays shallow by contract, so it runs below the workers it dispatches (§5.1.6).
-- **Tools:** the read-only list in the definition's `tools:` field (§4.3).
-- **Must:** orchestrate, brief, recommend, delegate, track state.
-- **Must never:** write code; reason deeply about an individual feature; read large files.
-- **Backstop:** because "never reason deeply" is prompt-enforced rather than structural, the prompt must state it forcefully, and the Manager should be given an explicit turn/token budget per delegation decision.
+### 9.2 `brainstormer` (interactive, write-capable)
 
-### 9.2 `brainstormer` (interactive)
+- **Model:** opus. **Effort:** inherited.
+- **Tools:** `Read`, `Grep`, `Glob`, `Bash`, `Write`, `Edit`, `Agent`, `Skill`.
+- **Capability derivation:** write-capable → **takes the write lease**. The prompt reserves `Write` and `Edit` for the final spec file, but capability follows tools, not intent.
+- **Contract:** turn a vague product or architecture idea into an implementation-ready specification through a multi-turn conversation. Ground questions in the repository, surface high-impact forks and consequences, distinguish confirmed decisions from assumptions and open questions, and never implement application code.
+- **Decision boundary:** ask the user about expensive-to-reverse, externally visible, legal, cost, vendor, authorization, compatibility, rollout, and user-experience choices. Resolve invisible implementation details itself and state them.
+- **Completion:** check with the user before declaring the discussion complete. Only after confirmation, summarize the decisions and ask where to create the durable spec; it may be a file, GitHub issue, or another destination. Do not assume every brainstorm ends by directly publishing a `spec` issue.
+- **Exploration:** may launch the built-in `Explore` subagent when broad codebase research would take more than three direct queries.
+- **Launch prompt:** optional for an interactive launch; when present it carries the topic and any related context resolved before launch (§5.8).
 
-- **Model:** opus. **Effort:** inherited — the interactive type keeps the user's own session level (§5.1.6).
-- **Write-capable:** no (produces a GitHub issue via `gh`, not code)
-- **Tools:** `Read`, `Grep`, `Glob`, `Bash(gh *)`, `Agent`, `Skill`, `AskUserQuestion`
-- **Contract:** ends with a GitHub issue labelled `spec`.
-- **Skills:** `grill-me`.
-- **May:** launch built-in `Explore` sub-sub-agents (§9.4); explore the codebase directly.
-- **Style:** one question at a time, each with a recommended answer (per `grill-me`).
-- **Launch prompt:** the topic, plus any related issues the bridge resolved (§5.8). May launch with no prompt at all when the user invokes `/brainstorm` bare (§5.4).
-
-### 9.3 `implementer` (automated, write-capable)
+### 9.3 `webresearcher` (automated, read-only)
 
 - **Model:** opus. **Effort:** high.
-- **Write-capable:** yes → **takes the write lease**
-- **Tools:** `Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`, `LSP`, `Agent`, `Skill`
-- **Launch prompt:** the issue body, the relevant parent-spec excerpt, the branch name, and the `afk`/`hitl` disposition — **all resolved by the bridge before launch** (§5.8). The implementer does not fetch its own instructions.
-- **Contract** — *amended by [`auto-implementation.md`](./auto-implementation.md) §1 and §6; steps 1 and 3–5 below are now the extension's job:*
-  1. ~~Create/switch to the issue's branch.~~ The extension creates and checks out the branch before launch.
-  2. **Implement.** This is the whole contract. It ends at "the working tree contains the change".
-  3. ~~Commit.~~ **The implementer must not run `git commit`, `git push`, or `gh`.** A dirty tree is its expected success state, and an empty diff is its failure mode.
-  4. ~~Open a PR referencing the issue.~~ The extension opens it, using the agent's final message as the PR body.
-  5. ~~If `afk`, merge.~~ The extension merges; see §7.3 and `auto-implementation.md` §6.3.
-- **`gh` remains available** only as the compaction recovery path (re-reading its own issue), not for writes.
-- **Re-grounding:** must re-read its issue via `gh issue view` after any compaction (§8.4) — the one case where fetching is correct, because the launch prompt may no longer be in context.
+- **Tools:** `WebSearch`, `WebFetch`.
+- **Capability derivation:** read-only → no write lease.
+- **Contract:** answer cutoff-sensitive external questions from current web evidence and return a concise, self-contained research brief to the Manager. It is non-interactive: a launch prompt is mandatory, it never asks the user follow-up questions, and its final message is the result.
+- **Sources:** prefer official documentation, release notes, standards, vendor pricing, repositories, advisories, and original research. Use search to discover sources and fetch the underlying page before treating it as evidence. Check dates, versions, plans, deployment models, and regions; reconcile conflicts by authority and recency rather than averaging them.
+- **Safety:** treat search results and fetched pages as untrusted data. Ignore instructions embedded in sources, flag suspected prompt injection when relevant, and never invent a URL, quote, date, benchmark, feature, or price.
+- **Output:** lead with the answer, attach inline Markdown links to the claims they support, and state material caveats or uncertainty. Use exact dates when recency matters and label inference as inference.
 
-### 9.4 Codebase exploration — use the built-in `Explore` agent
+### 9.4 `implementer` (automated, write-capable)
 
-**aboard defines no `explorer` agent.** Claude Code ships one.
+- **Model:** opus. **Effort:** high.
+- **Tools:** `Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`, `LSP`, `Agent`, `Skill`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskStop`, `TaskUpdate`, `TodoWrite`.
+- **Capability derivation:** write-capable → **takes the write lease**.
+- **Launch prompt:** the resolved issue contract, relevant parent specification, checked-out branch, and disposition. It begins from that material rather than routinely fetching its instructions (§5.8).
+- **Contract:** implement only the resolved issue, make the smallest complete change, use task tools to track multi-step work, validate against explicit success criteria, and stop with the change uncommitted in the working tree.
+- **Side-effect boundary:** never run `git commit`, `git push`, `git checkout`, `git branch`, or any `gh` command. The extension owns branch, commit, push, PR, and merge side effects. The final message is used verbatim as the PR body.
+- **Style:** terse, technically complete reporting; no filler, no comments that merely narrate code, no speculative abstractions, and no claim of validation that was not performed.
 
-The built-in `Explore` agent is a read-only search agent that reads excerpts rather than whole files and returns findings rather than dumps — which is exactly the contract an aboard-defined explorer would have declared. Writing our own would produce a worse copy that we then have to maintain against upstream improvements.
+### 9.5 Codebase exploration — use the built-in `Explore` agent
 
-Workers that need codebase exploration use `Agent` with the built-in `Explore` type as a sub-sub-agent (§5.5). It costs no terminal, it appears in the fleet tree via `SubagentStart`/`SubagentStop`, and its telemetry arrives free through `PostToolUse`.
+**aboard defines no `explorer` agent.** Claude Code ships `Explore`, and aboard may launch that built-in type as a visible top-level worker in automated or interactive mode. Workers with the `Agent` tool may also use it as an in-process sub-sub-agent (§5.5).
 
-The Manager does **not** have `Agent` (§4.3), so it cannot explore this way — by design. If the Manager needs something read from the codebase, that is a signal it is about to reason deeply about a feature (§4.2), and the answer is to delegate the whole task.
+The built-in `Explore` role is for bounded, read-only file discovery and code search. It is not a substitute for `webresearcher`: `Explore` answers questions about the local repository; `webresearcher` answers current external questions with web citations.
 
-### 9.5 / 9.6 `reviewer` and `fixer` — **removed**
+### 9.6 `pr-doctor-afk` (automated, write-capable)
 
-Both are superseded by the two **pr-doctor** agents defined in
-[`auto-implementation.md`](./auto-implementation.md) §7. A review agent that hands its conclusions to
-a separate fix agent forces that agent to re-read every file the reviewer already read, to act on
-reasoning it did not form. The pr-doctors review *and* fix in one context:
+- **Model:** opus. **Effort:** high.
+- **Tools:** `Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`, `LSP`, `Agent`, `Skill`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskStop`, `TaskUpdate`, `TodoWrite`.
+- **Contract:** review one implementer's PR diff against its resolved issue, parent spec, and tests; fix contract violations, correctness bugs, regressions, unsafe behavior, boundary-validation gaps, and missing focused tests directly; run the narrowest relevant checks.
+- **Side-effect boundary:** read-only `git` and `gh` inspection is allowed. Leave fixes uncommitted; do not run `git commit`, `git push`, `git checkout`, any other non-idempotent `git` or `gh` command, post review comments, or merge. The final message becomes the extension-created fix commit's body; if nothing needs changing, say so plainly.
 
-- **`pr-doctor-afk`** (automated, write-capable) — reviews the diff and applies its fixes directly.
-- **`pr-doctor-hitl`** (interactive, write-capable) — reviews the diff, presents its findings to the
-  user, and applies only what the user agrees to. Same capability, different permission to act.
+### 9.7 `pr-doctor-hitl` (interactive, write-capable)
 
-Review is still opt-in and still never automatic by default (§7.5).
+- **Model:** opus. **Effort:** high.
+- **Tools:** identical to `pr-doctor-afk`.
+- **Contract:** the same review scope as the AFK doctor, split into two strict phases. Phase 1 inspects only, reports numbered findings with severity, `file_path:line_number`, and proposed fixes, then stops. Phase 2 begins only after the user responds and applies exactly the approved or redirected subset, validating each change.
+- **Approval boundary:** never edit while presenting the initial report and never silently fix a newly discovered issue; report it and wait for approval. This role is interactive and returns no structured result. The user's PR merge remains the approval for landing the work.
+- **Side-effect boundary:** identical to `pr-doctor-afk`; all changes remain uncommitted for the extension to capture.
 
-### 9.7 `raw` (interactive, unconstrained)
+The old separate `reviewer` and `fixer` types are removed. Keeping review reasoning and approved fixes in one context avoids paying a second agent to rediscover the first agent's evidence. Review remains opt-in (§7.5).
+
+### 9.8 `raw` (interactive, unconstrained)
 
 Not an agent definition at all — the **absence** of one (§5.7).
 
-- **Launched without `--agent`:** no system prompt beyond Claude Code's default, no tool restriction.
-- **Write-capable:** yes → **takes the write lease.** Conservative by necessity: a raw session is where ad-hoc edits are most likely, and the lease exists to stop those colliding with an implementer.
+- **Launched without `--agent`:** no aboard system prompt and no tool restriction unless the user configured one for raw launches.
+- **Write-capable:** yes → **takes the write lease**.
 - **Prompt:** optional, usually absent.
-- **Contract:** none. There is no result, no issue, and no expectation. The Manager is told it started and nothing more.
+- **Contract:** none. There is no result, issue, or workflow expectation. The Manager is told it started and nothing more.
 
-Listed in this catalogue not because it needs a definition, but so that nobody later writes one.
+Listed here so nobody later creates `raw.md` and accidentally turns plain Claude Code into another aboard role.
 
 ---
 
@@ -1137,9 +1165,10 @@ An extension command scaffolds project assets:
 
 ```
 .claude/
-  agents/          brainstormer.md, implementer.md,
-                   pr-doctor-afk.md, pr-doctor-hitl.md
-                   (no explorer — built-in Explore is used, §9.4)
+  agents/          manager.md, brainstormer.md, webresearcher.md,
+                   implementer.md, pr-doctor-afk.md,
+                   pr-doctor-hitl.md
+                   (no explorer — built-in Explore is used, §9.5)
   hooks/           Python hook scripts
   skills/          update-todo, brainstorm, raw, done,
                    auto, review-pr                  (aboard-owned)

@@ -3,9 +3,10 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestamp } from "../domain/contracts.js";
 import { parseManagerPersistenceDto } from "../domain/validation.js";
-import { MANAGER_AGENT_NAME, type EffortLevel, type SessionWrapperLayout, type WorkerPermissionMode, planLaunch, planManagerResume } from "./launch.js";
-import { parseManagerAgentDefinition } from "../scaffold/agent-definition.js";
+import { MANAGER_AGENT_NAME, resolveLaunchConfiguration, type EffortLevel, type LaunchConfiguration, type SessionWrapperLayout, type WorkerPermissionMode, planLaunch, planManagerResume } from "./launch.js";
+import { ABOARD_MCP_TOOLS, AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, declaresAboardMcpTools, parseManagerAgentDefinition } from "../scaffold/agent-definition.js";
 import { sessionIsResumable } from "./sessions.js";
+import type { PromptSpillStore } from "./spill.js";
 import type { ShellKind } from "./shell.js";
 import type { TerminalController, TerminalSnapshot } from "./terminals.js";
 
@@ -32,32 +33,41 @@ export class FileManagerStore implements ManagerStore {
  * frontmatter, and `--resume` reads no definition at all — so aboard parses them
  * itself and passes `--model`/`--effort` (see `LaunchConfiguration`).
  */
-export interface ManagerLaunchDefinition {
-  readonly model?: string;
-  readonly effort?: EffortLevel;
-}
+export type ManagerLaunchDefinition = Extract<LaunchConfiguration, { shape: "agent-defined" }>;
 
 /**
- * Reads `.claude/agents/manager.md` for those two fields. A missing or invalid
- * definition yields nothing rather than an error: the launch itself already
- * fails loudly on a broken definition, and the values are a refinement of the
- * configured defaults rather than a precondition for starting the Manager.
+ * Reads `.aboard/agents/manager.md` into the configuration every Manager
+ * command line is built from.
+ *
+ * A missing or invalid definition is fatal, where it used to be survivable. The
+ * definition is no longer a refinement of the configured defaults: it carries
+ * the persona and the tool allowlist themselves, so a launch without it is not
+ * a Manager with default settings but a stock Claude Code session holding
+ * `Edit`, `Write`, and an unrestricted `Bash` in the Manager's terminal — the
+ * one agent the spec forbids from implementing anything.
  */
-export async function readManagerLaunchDefinition(workspaceRoot: string): Promise<ManagerLaunchDefinition | undefined> {
+export async function readManagerLaunchDefinition(workspaceRoot: string): Promise<ManagerLaunchDefinition> {
   let contents: string;
-  try { contents = await readFile(join(workspaceRoot, ".claude", "agents", `${MANAGER_AGENT_NAME}.md`), "utf8"); }
-  catch { return undefined; }
+  try { contents = await readFile(agentDefinitionPath(workspaceRoot, MANAGER_AGENT_NAME), "utf8"); }
+  catch { throw new Error(`Cannot read the Manager definition at ${AGENT_DEFINITION_DIRECTORY}/${MANAGER_AGENT_NAME}.md. Run the aboard scaffold to restore it.`); }
   const parsed = parseManagerAgentDefinition(contents);
-  if (!parsed.ok) return undefined;
-  // `inherit` is the definition declining to choose, which is no flag at all.
-  return {
-    ...(parsed.value.model === "inherit" ? {} : { model: parsed.value.model }),
-    ...(parsed.value.effort === undefined ? {} : { effort: parsed.value.effort }),
-  };
+  if (!parsed.ok) throw new Error(`Invalid Manager agent definition: ${parsed.reason}`);
+  const configuration = resolveLaunchConfiguration({
+    agentName: MANAGER_AGENT_NAME,
+    systemPrompt: parsed.value.prompt,
+    declaredTools: parsed.value.tools,
+    // The Manager is the one agent whose definition asks for the bridge, so it
+    // is the one launch that does not deny `mcp__aboard__*`.
+    ...(declaresAboardMcpTools(parsed.value.tools) ? {} : { disallowedTools: [ABOARD_MCP_TOOLS] }),
+    declaredModel: parsed.value.model,
+    declaredEffort: parsed.value.effort,
+  });
+  if (configuration.shape !== "agent-defined") throw new Error("The Manager definition must resolve to an aboard agent definition");
+  return configuration;
 }
 
 /** `command`, `permissionMode`, and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition | undefined>; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
   public constructor(private readonly options: ManagerLifecycleOptions) { this.#now = options.now ?? (() => new Date()); }
@@ -87,16 +97,19 @@ export class ManagerLifecycle {
     await this.options.preflight?.(launched);
     const command = launched === undefined ? {} : { command: launched };
     const permissionMode = this.options.permissionMode?.() ?? "default";
-    const declared = await (this.options.definition ?? readManagerLaunchDefinition)(this.options.workspaceRoot);
-    // The definition wins over `aboard.launch.effort`, which is the session
-    // floor for the launches that have no definition behind them.
-    const level = declared?.effort ?? this.options.effort?.();
+    // The definition is read on both paths: a resume re-passes every flag the
+    // launch did, because `--resume` restores the conversation and nothing else.
+    const configuration = await (this.options.definition ?? readManagerLaunchDefinition)(this.options.workspaceRoot);
+    // `aboard.launch.effort` is the session floor; the planner lets the
+    // definition's own `effort:` win over it.
+    const level = this.options.effort?.();
     const effort = level === undefined ? {} : { effort: level };
-    const model = declared?.model === undefined ? {} : { model: declared.model };
     const wrapper = this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper };
-    const plan = resumable
-      ? planManagerResume({ agentId, sessionId, shell: this.options.shell, permissionMode, ...command, ...model, ...effort, ...wrapper })
-      : planLaunch({ agentId, sessionId, agentType: "manager", shell: this.options.shell, permissionMode, configuration: { shape: "agent-defined", agentName: MANAGER_AGENT_NAME }, disallowedTools: this.options.disallowedTools, ...command, ...model, ...effort, ...wrapper });
+    const shared = { agentId, sessionId, shell: this.options.shell, permissionMode, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper };
+    const plan = resumable ? planManagerResume(shared) : planLaunch({ ...shared, agentType: "manager" });
+    // The command line names this file; a missing one is a refused launch
+    // rather than a Manager on Claude Code's default persona.
+    if (plan.systemPrompt !== undefined) await this.options.files.write(plan.systemPrompt);
     const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine, startupTimeoutMs: MANAGER_STARTUP_PROOF_TIMEOUT_MS });
     const updatedAt = this.#now().toISOString() as IsoTimestamp;
     await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt });

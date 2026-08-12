@@ -157,6 +157,7 @@ test("only automated agents with a waiting caller are reconciled on terminal clo
     assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type } }), false, type);
   }
   // The dual-mode builtin types owe a result exactly when their launch does.
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "webresearcher" } }), true);
   for (const type of ["general-purpose", "Explore"] as const) {
     assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type } }), true, type);
     assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type }, resultDelivery: { mode: "none" } }), false, type);

@@ -362,11 +362,15 @@ test("aboard-owned command skills are user-only shims and raw has no agent defin
     // No argument-hint: these commands are argumentless, and hinting otherwise
     // invites a topic the launch deliberately does not forward.
     assert.doesNotMatch(skill, /argument-hint:/);
-    // The body must stay inert. The UserPromptSubmit hook exits 2 before this
-    // file is ever loaded, so any instruction here is unreachable at best and,
-    // if the hook fails, becomes a prompt the Manager acts on.
+    // The body is reachable only when the hook failed to intercept, so it must
+    // read as an error notice: an empty body leaves the model to invent a
+    // response, and any instruction resembling the command would have it
+    // simulate work the extension alone can perform.
     const body = skill.replace(/^---\n[\s\S]*?\n---\n/u, "").replace(/<!--[\s\S]*?-->/gu, "").trim();
-    assert.equal(body, "", `${name} SKILL.md must have no model-visible body`);
+    assert.notEqual(body, "", `${name} SKILL.md must explain the hook failure rather than leave an empty body`);
+    assert.match(body, /should not have reached you/, `${name} SKILL.md body must announce it is an error state`);
+    assert.match(body, /Do not try to carry it out yourself/, `${name} SKILL.md body must forbid simulating the command`);
+    assert.match(body, /UserPromptSubmit/, `${name} SKILL.md body must name the hook the user has to fix`);
   }
   await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".claude", "agents", "raw.md")));
 });

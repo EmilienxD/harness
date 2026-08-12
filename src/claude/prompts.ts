@@ -96,6 +96,11 @@ export type PromptResolutionRequest =
       readonly branch?: string | undefined;
     }
   | {
+      readonly kind: "issue-context";
+      readonly instruction: string;
+      readonly issueNumber: number;
+    }
+  | {
       readonly kind: "review";
       readonly instruction: string;
       readonly pullRequestNumber: number;
@@ -148,11 +153,14 @@ interface Excerpt {
   readonly truncated: boolean;
 }
 
-function excerpt(text: string, limit: number, pointer: string): Excerpt {
+function excerpt(text: string, limit: number, pointer?: string): Excerpt {
   const trimmed = text.trim();
   if (trimmed.length <= limit) return { text: trimmed, truncated: false };
+  const suffix = pointer === undefined
+    ? "…truncated by aboard. Base the task only on the supplied context."
+    : `…truncated. Read the rest with \`${pointer}\`.`;
   return {
-    text: `${trimmed.slice(0, limit).trimEnd()}\n\n…truncated. Read the rest with \`${pointer}\`.`,
+    text: `${trimmed.slice(0, limit).trimEnd()}\n\n${suffix}`,
     truncated: true,
   };
 }
@@ -253,6 +261,8 @@ export class PromptResolver {
     switch (request.kind) {
       case "implementation":
         return this.#resolveImplementation(request);
+      case "issue-context":
+        return this.#resolveIssueContext(request);
       case "review":
         return this.#resolveReview(request);
       case "fix":
@@ -327,6 +337,30 @@ export class PromptResolver {
 
     builder.section("Disposition", dispositionGuidance(issueDisposition(issue.labels)));
     return builder.build(`Implement issue #${issue.number} — ${issue.title}.`);
+  }
+
+  async #resolveIssueContext(
+    request: Extract<PromptResolutionRequest, { kind: "issue-context" }>,
+  ): Promise<ResolvedPrompt> {
+    const instruction = requireInstruction(request.instruction);
+    const issue = await this.#requireIssue(request.issueNumber);
+    const builder = new PromptBuilder();
+    builder.section(undefined, instruction);
+
+    const body = excerpt(issue.body, this.#limits.issueBodyChars);
+    builder.section(`Issue #${issue.number} — ${issue.title}`, body.text);
+    builder.source("issue", issue.number, body);
+
+    if (issue.parentIssueNumber !== undefined) {
+      const parent = await this.#github.getIssue(issue.parentIssueNumber);
+      if (parent !== undefined) {
+        const parentBody = excerpt(parent.body, this.#limits.parentSpecChars);
+        builder.section(`Parent spec #${parent.number} — ${parent.title}`, parentBody.text);
+        builder.source("parent-spec", parent.number, parentBody);
+      }
+    }
+
+    return builder.build(`Use the resolved context for issue #${issue.number} — ${issue.title}.`);
   }
 
   async #resolveReview(

@@ -3,12 +3,7 @@
 **Status:** Implemented
 **Date:** 2026-07-31
 
-This document is the authoritative contract for aboard's automatic implementation workflow. It
-**supersedes** [`initial-spec.md`](./initial-spec.md) §7.5 (auto-review tri-state, reviewer → fixer
-hand-off), §9.3 steps 3–5 (the implementer commits, opens, and merges its own PR), §9.5 (`reviewer`),
-and §9.6 (`fixer`). Everything else in the spec still holds and is load-bearing here — in particular
-the four-label model (§7.2), the visibility invariants (§0), hook self-guards (§8), and the rule that
-the bridge is the only creator of agents (§1.4.5).
+This document is the authoritative detailed contract for aboard's automatic implementation workflow. [`initial-spec.md`](./initial-spec.md) incorporates its outcome in §7.5 and the current agent catalogue (§9.4, §9.6, §9.7); where a lower-level workflow detail differs, this document wins. It replaced the historical tri-state reviewer → fixer design and the historical contract in which implementers performed their own git and GitHub side effects. The four-label model (§7.2), visibility invariants (§1), hook self-guards (§3.4), and rule that the bridge is the only creator of agents (§1.4.5) remain load-bearing.
 
 The write lease is **out of scope**. Its process is being reworked separately; nothing in this
 document should be read as changing it, and an implementer of this design should take the lease
@@ -25,8 +20,7 @@ launches exactly one implementation agent (plus, optionally, one review agent) a
 git and GitHub side effect itself**. The Manager triggers a run and is told about its progress; it
 does not drive it, and `implementer` and the pr-doctors leave its delegation surface entirely.
 
-This inverts spec §9.3, where the implementer ran `git commit`, `gh pr create`, and `gh pr merge`
-from its own prompt contract. Three reasons:
+This inverts the original implementer design, where the agent ran `git commit`, `gh pr create`, and `gh pr merge` from its own prompt contract. Three reasons:
 
 1. **Determinism.** A branch name, commit message, PR title, and `Closes #N` trailer derived from
    the issue are correct by construction. An agent producing them is a sampling operation that
@@ -303,7 +297,7 @@ differs.
 
 ### 7.1 `pr-doctor-afk` (automated, write-capable)
 
-- Model: opus. Effort: high. Tools: as `implementer`.
+- Model: opus. Effort: high. Tools: `Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`, `LSP`, `Agent`, `Skill`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskStop`, `TaskUpdate`, `TodoWrite`.
 - Launch prompt, resolved by the bridge: the PR diff, the issue body, the parent spec excerpt, the PR
   number, and the branch name.
 - Contract: review the diff against the issue contract, apply fixes directly, stop. Do **not** commit,
@@ -313,7 +307,7 @@ differs.
 
 ### 7.2 `pr-doctor-hitl` (interactive, write-capable)
 
-- Model: opus. Effort: high. Tools: as `implementer`, plus `AskUserQuestion`.
+- Model: opus. Effort: high. Tools: exactly the same as `pr-doctor-afk`; there is no `AskUserQuestion` tool.
 - Same launch prompt as `pr-doctor-afk`.
 - Contract: review the diff, **present the findings to the user and stop**. Apply changes only on the
   user's word, and then only the ones they agreed to. The user may accept the summary, adjust it, or
@@ -323,9 +317,7 @@ differs.
 - The implementation terminal stays open alongside it, so the user can read what was built while
   discussing what to change.
 
-Their system prompts should be near-identical, with the HITL one adding the propose-and-wait contract.
-Divergence between them is a bug — the whole design rests on them being the same reviewer with
-different permission to act.
+Their complete system prompts are role-specific rather than byte-identical, but their review scope, tool allowlist, git/GitHub side-effect boundary, and coding standards must agree. The HITL prompt adds the two-phase report-and-wait contract; divergence in shared authority is a bug.
 
 ### 7.3 Commit safety during review
 
@@ -526,7 +518,7 @@ before a failure stay; the engine's job on failure is to stop cleanly and say ex
 
 **Docs**
 
-- `initial-spec.md` §7.5, §9.3, §9.5, §9.6 amended to point here.
+- `initial-spec.md` §7.5 and the implementer/pr-doctor catalogue entries amended to point here.
 - `AGENTS.md` skill-ownership list gains `auto` and `review-pr`.
 
 ---

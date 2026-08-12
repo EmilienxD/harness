@@ -23,8 +23,13 @@ test("fresh scaffold installs real assets, runtime ignore rules, MCP, hooks, and
   // CLAUDE.md is the user's file: aboard's Manager persona ships as an agent
   // definition instead, so no scaffolded instruction applies to every session.
   await assert.rejects(readFile(join(root, "CLAUDE.md")));
-  assert.match(await readFile(join(root, ".claude", "agents", "manager.md"), "utf8"), /name: manager/);
-  for (const name of ["raw", "explorer"]) await assert.rejects(readFile(join(root, ".claude", "agents", `${name}.md`)));
+  // Definitions land outside `.claude/`, where Claude Code does not scan for
+  // subagents: a file there would make every session in the workspace — a raw
+  // aboard terminal, the user's own `claude` — able to spawn aboard's agents
+  // behind the bridge and outside the write lease.
+  assert.match(await readFile(join(root, ".aboard", "agents", "manager.md"), "utf8"), /name: manager/);
+  await assert.rejects(readFile(join(root, ".claude", "agents", "manager.md")));
+  for (const name of ["raw", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
   // User-owned skills are never shipped as assets; without an installer every
   // one is reported instead of being written here.
   for (const skill of VENDORED_SKILLS) {
@@ -80,11 +85,11 @@ test("rerun is idempotent and settings and MCP merges preserve unrelated configu
 test("owned assets upgrade only when unchanged and warn rather than clobber local edits", async () => {
   const root = await project();
   await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
-  const target = join(root, ".claude", "agents", "implementer.md");
+  const target = join(root, ".aboard", "agents", "implementer.md");
   await writeFile(target, "local edit\n");
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets, todo, autoCompactEnabled: false });
   assert.equal(await readFile(target, "utf8"), "local edit\n");
-  assert.ok(report.preserved.includes(".claude/agents/implementer.md"));
+  assert.ok(report.preserved.includes(".aboard/agents/implementer.md"));
   assert.ok(report.warnings.some((warning) => warning.includes("autoCompact")));
 });
 
@@ -114,14 +119,14 @@ test("retires an asset aboard no longer ships unless the user edited it", async 
 
 test("unchanged owned files upgrade to the shipped version", async () => {
   const root = await project(); const source = await project();
-  await mkdir(join(source, ".claude", "agents"), { recursive: true }); await mkdir(join(source, ".claude", "hooks"), { recursive: true });
-  await writeFile(join(source, ".claude", "agents", "implementer.md"), "v1");
+  await mkdir(join(source, ".aboard", "agents"), { recursive: true }); await mkdir(join(source, ".claude", "hooks"), { recursive: true });
+  await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v1");
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
   await scaffoldProject({ projectRoot: root, assetRoot: source, todo, vendoredSkills: [] });
-  await writeFile(join(source, ".claude", "agents", "implementer.md"), "v2");
+  await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v2");
   const report = await scaffoldProject({ projectRoot: root, assetRoot: source, todo, vendoredSkills: [] });
-  assert.equal(await readFile(join(root, ".claude", "agents", "implementer.md"), "utf8"), "v2");
-  assert.ok(report.updated.includes(".claude/agents/implementer.md"));
+  assert.equal(await readFile(join(root, ".aboard", "agents", "implementer.md"), "utf8"), "v2");
+  assert.ok(report.updated.includes(".aboard/agents/implementer.md"));
 });
 
 test("vendored skills are installed by command and failures are reported, not authored around", async () => {

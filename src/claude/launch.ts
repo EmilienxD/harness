@@ -8,12 +8,22 @@
  * Two invariants shape the whole module:
  *
  * - An agent's tool set lives in the `tools:` field of its
- *   `.claude/agents/<name>.md` definition, never on the command line (5.1.1):
- *   a launch flag that widened an agent past its file would silently defeat the
- *   write-lease derivation, which reads exactly that field. The planner
- *   therefore rejects `--agent` combined with `--tools`; the only `--tools`
- *   flag left is the optional restriction on a raw launch, which is the
- *   *absence* of a definition and has no file to contradict.
+ *   `.aboard/agents/<name>.md` definition, and every flag that carries it comes
+ *   from that one file (5.1.1). aboard's own agents are not registered as
+ *   Claude Code subagents at all: a definition under `.claude/agents/` is
+ *   discovered by *every* session in the workspace, including a user's own
+ *   `claude`, which then sees `implementer` and the pr-doctors as spawnable
+ *   types — outside the bridge and outside the write lease. So the definition
+ *   lives where nothing discovers it, and the launch carries its body as
+ *   `--system-prompt-file` and its tools as `--tools`. One file, two flags, no
+ *   second authority: nothing can widen an agent past what it declares, which
+ *   is what the write-lease derivation depends on.
+ *
+ *   `--agent` therefore survives only for Claude Code's builtin types, which
+ *   have no aboard definition to read; the planner still rejects `--agent`
+ *   combined with `--tools`, because a builtin's tool set is Claude Code's.
+ *   The other `--tools` flag is the optional restriction on a raw launch, which
+ *   is the *absence* of a definition and has no file to contradict.
  * - The first message and every later message travel as CLI arguments (5.1.2,
  *   5.1.3). aboard never types into a running TUI, so a message that cannot be
  *   represented on a command line spills to a file and is `@`-referenced.
@@ -22,6 +32,7 @@
 import { deriveWriteCapability, type WriteCapability } from "../domain/capability.js";
 import {
   isAutomatedAgentType,
+  isBuiltinAgentType,
   type AgentId,
   type AgentType,
   type SessionId,
@@ -162,31 +173,48 @@ export function isEffortLevel(value: unknown): value is EffortLevel {
 }
 
 export type LaunchConfiguration =
+  /**
+   * An aboard agent definition (`.aboard/agents/<name>.md`), carried onto the
+   * command line in full: the body as `--system-prompt-file` and `tools:` as
+   * `--tools`. The file is not under `.claude/agents/`, so no session in the
+   * workspace can discover the agent or spawn it — see the module header.
+   */
   | {
       readonly shape: "agent-defined";
       readonly agentName: string;
-      /** `tools:` read from `.claude/agents/<name>.md`; absent when unreadable. */
-      readonly declaredTools?: readonly string[];
+      /** The definition body, written to the runtime file the launch points at. */
+      readonly systemPrompt: string;
+      /** `tools:` read from the same definition. Never empty. */
+      readonly declaredTools: readonly string[];
+      /**
+       * Denied on top of `declaredTools`, because `--tools` cannot express the
+       * denial: an MCP server's tools are present in the session whether or not
+       * the allowlist names them, so the bridge's own tools reach a worker whose
+       * definition never asked for them. `--disallowedTools` removes them from
+       * the session outright.
+       */
+      readonly disallowedTools?: readonly string[];
       /**
        * `model:` and `effort:` read from the same definition, carried onto the
-       * command line because `--agent` does not honor them.
+       * command line because no flag short of these two applies them.
        *
        * Claude Code applies the *full* frontmatter only when an agent is spawned
-       * as a subagent. A main-thread launch — which is every launch aboard makes
-       * — honors a smaller subset (`mcpServers`, `permissionMode`,
-       * `tools`/`disallowedTools`), so `model:` and `effort:` in the file are
-       * silently ignored and the session falls back to the user's global config.
-       * aboard therefore reads both fields itself and passes `--model`/`--effort`
-       * explicitly. Unlike `tools:`, this contradicts nothing: the flags carry
-       * the definition's own values rather than competing with them, which is why
-       * the `--agent`/`--tools` prohibition does not extend here.
-       *
-       * `inherit` is normalized away at resolve time, because "inherit" is the
-       * frontmatter spelling of "pass no flag".
+       * as a subagent; a main-thread launch honors a smaller subset, and one
+       * launched from a system-prompt file has no frontmatter to read at all. So
+       * aboard reads both fields itself and passes `--model`/`--effort`
+       * explicitly. `inherit` is normalized away at resolve time, because
+       * "inherit" is the frontmatter spelling of "pass no flag".
        */
       readonly declaredModel?: string;
       readonly declaredEffort?: EffortLevel;
     }
+  /**
+   * A builtin type (`general-purpose`, `Explore`). aboard ships no definition
+   * for these, so the launch names Claude Code's own with `--agent` and passes
+   * no tool list: the builtin's tool set belongs to Claude Code, and a `--tools`
+   * flag beside it would be the second authority 5.1.1 forbids.
+   */
+  | { readonly shape: "builtin"; readonly agentName: string }
   /**
    * The raw agent of spec section 5.7, which is the *absence* of an agent
    * definition. It carries no `--system-prompt`: raw is defined as unconstrained
@@ -206,7 +234,10 @@ export type LaunchConfiguration =
 /** The flat shape a caller supplies, so the exclusive pair can be rejected. */
 export interface LaunchConfigurationInput {
   readonly agentName?: string | undefined;
+  /** Present for an aboard definition, absent for a builtin type. */
+  readonly systemPrompt?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
+  readonly disallowedTools?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
   readonly tools?: readonly string[] | undefined;
@@ -215,6 +246,8 @@ export interface LaunchConfigurationInput {
 export type LaunchPlanErrorCode =
   | "conflicting-launch-shape"
   | "declared-tools-without-agent"
+  | "missing-declared-tools"
+  | "missing-system-prompt"
   | "invalid-agent-name"
   | "invalid-tool-rule"
   | "invalid-model"
@@ -264,6 +297,49 @@ export function resolveLaunchConfiguration(
         `Invalid agent definition name: ${input.agentName}`,
       );
     }
+    // A builtin type: Claude Code owns the definition, so there is nothing for
+    // aboard to read and nothing of its own to pass.
+    if (input.systemPrompt === undefined) {
+      if (
+        input.declaredTools !== undefined ||
+        input.disallowedTools !== undefined ||
+        input.declaredModel !== undefined ||
+        input.declaredEffort !== undefined
+      ) {
+        throw new LaunchPlanError(
+          "declared-tools-without-agent",
+          `A builtin agent type has no aboard definition to declare fields from: ${input.agentName}`,
+        );
+      }
+      return { shape: "builtin", agentName: input.agentName };
+    }
+
+    // The name becomes a file name under the runtime directory, so it must be a
+    // single path segment. A plugin-scoped name (`plugin:agent`) is a legal
+    // `--agent` value but can never name an aboard definition.
+    if (!AGENT_ID_PATTERN.test(input.agentName)) {
+      throw new LaunchPlanError(
+        "invalid-agent-name",
+        `An aboard agent definition name must be a single path segment: ${input.agentName}`,
+      );
+    }
+    if (input.systemPrompt.trim().length === 0) {
+      // An empty file is the one failure Claude Code does not report: it starts
+      // the session on its own default persona, which for a definition-launched
+      // agent means full default behavior under a tool list it never chose.
+      throw new LaunchPlanError(
+        "missing-system-prompt",
+        `The ${input.agentName} agent definition has an empty system prompt`,
+      );
+    }
+    if (input.declaredTools === undefined || input.declaredTools.length === 0) {
+      // Without `tools:` there is no allowlist to pass, and `--tools=` would
+      // disable every tool rather than inherit one.
+      throw new LaunchPlanError(
+        "missing-declared-tools",
+        `The ${input.agentName} agent definition declares no tools`,
+      );
+    }
     // `inherit` means the definition declines to choose, which on a command
     // line is the absence of the flag rather than a model named "inherit".
     const declaredModel =
@@ -279,14 +355,18 @@ export function resolveLaunchConfiguration(
     return {
       shape: "agent-defined",
       agentName: input.agentName,
-      ...(input.declaredTools === undefined ? {} : { declaredTools: input.declaredTools }),
+      systemPrompt: input.systemPrompt,
+      declaredTools: input.declaredTools,
+      ...(input.disallowedTools === undefined ? {} : { disallowedTools: input.disallowedTools }),
       ...(declaredModel === undefined ? {} : { declaredModel }),
       ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
     };
   }
 
   if (
+    input.systemPrompt !== undefined ||
     input.declaredTools !== undefined ||
+    input.disallowedTools !== undefined ||
     input.declaredModel !== undefined ||
     input.declaredEffort !== undefined
   ) {
@@ -316,9 +396,16 @@ export function launchWriteCapability(
 ): WriteCapability {
   if (agentType === "raw") return "write-capable";
   if (agentType === "Explore") return "read-only";
-  return deriveWriteCapability(
-    configuration.shape === "agent-defined" ? configuration.declaredTools : configuration.tools,
-  );
+  switch (configuration.shape) {
+    case "agent-defined":
+      return deriveWriteCapability(configuration.declaredTools);
+    // A builtin has no readable tool set, which is unknown capability and
+    // therefore the restrictive answer.
+    case "builtin":
+      return deriveWriteCapability(undefined);
+    case "inline":
+      return deriveWriteCapability(configuration.tools);
+  }
 }
 
 /**
@@ -333,12 +420,25 @@ export function requiresWriteLease(
   return agentType !== "manager" && capability === "write-capable";
 }
 
-export interface PromptSpillFile {
+/** A file the plan needs on disk before its command line can run. */
+export interface RuntimeFile {
   readonly agentId: AgentId;
-  /** Workspace-relative, POSIX separators, the exact text after `@`. */
+  /** Workspace-relative, POSIX separators. */
   readonly relativePath: string;
   readonly contents: string;
 }
+
+/** The relative path is the exact text after `@`, so it carries no whitespace. */
+export type PromptSpillFile = RuntimeFile;
+
+/**
+ * The definition body, written where `--system-prompt-file` points. It is
+ * derived data under the gitignored runtime directory rather than the
+ * definition itself, because the file the flag reads must hold the body alone:
+ * pointing at `.aboard/agents/<name>.md` would put its YAML frontmatter into
+ * the agent's system prompt.
+ */
+export type SystemPromptFile = RuntimeFile;
 
 export type PromptDelivery = "none" | "inline" | "spilled";
 
@@ -356,6 +456,12 @@ export interface LaunchPlan {
   readonly requiresWriteLease: boolean;
   readonly promptDelivery: PromptDelivery;
   readonly spill?: PromptSpillFile;
+  /**
+   * Present for every agent-defined launch *and resume*: unlike `--agent`, a
+   * system prompt passed by flag is not restored by `--resume`, so the file has
+   * to exist again each time the command line is run.
+   */
+  readonly systemPrompt?: SystemPromptFile;
 }
 
 interface CommonPlanRequest {
@@ -391,10 +497,14 @@ export interface LaunchPlanRequest extends CommonPlanRequest {
   readonly disallowedTools?: readonly string[] | undefined;
 }
 
-export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType">;
+export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType"> & {
+  readonly configuration: LaunchConfiguration;
+  readonly disallowedTools?: readonly string[] | undefined;
+};
 
 export interface SessionResumePlanRequest extends CommonPlanRequest {
-  readonly writeCapability: WriteCapability;
+  readonly configuration: LaunchConfiguration;
+  readonly disallowedTools?: readonly string[] | undefined;
 }
 
 /**
@@ -425,17 +535,24 @@ function assertFlagValue(
 }
 
 /**
- * `claude --help` documents tool lists as comma-separated values in a single
- * argument ("Bash,Edit,Read"). They must not be spread as separate arguments:
- * the flags are variadic, so trailing values would swallow the positional
- * launch prompt.
+ * `claude --help` documents tool lists as comma-separated values ("Bash,Edit,
+ * Read"), and the flags are variadic. Variadic means the option consumes every
+ * following argument until the next one starting with `-`, so `--tools a,b`
+ * followed by the positional prompt swallows the prompt as another tool name —
+ * verified against Claude Code 2.1.229, which then refuses the launch with
+ * "Input must be provided either through stdin or as a prompt argument".
+ *
+ * The `--flag=value` form binds exactly one value and ends there, so it is
+ * emitted unconditionally rather than relying on some other flag happening to
+ * follow this one on the line.
  */
 function toolListArguments(
   flag: string,
   rules: readonly string[] | undefined,
 ): readonly string[] {
   if (rules === undefined || rules.length === 0) return [];
-  return [flag, rules.map((rule) => assertFlagValue(rule, "invalid-tool-rule", "tool rule")).join(",")];
+  const list = rules.map((rule) => assertFlagValue(rule, "invalid-tool-rule", "tool rule")).join(",");
+  return [`${flag}=${list}`];
 }
 
 /**
@@ -481,6 +598,51 @@ function spillRelativePath(runtimeDirectory: string, stem: string): string {
     );
   }
   return path;
+}
+
+/**
+ * Unlike a spill reference this is an ordinary argument rather than `@path`
+ * text, so the shell quoting handles whitespace and only the separators need
+ * normalizing.
+ */
+function systemPromptRelativePath(runtimeDirectory: string, agentName: string): string {
+  const directory = runtimeDirectory.replaceAll("\\", "/").replace(/\/+$/, "");
+  return `${directory}/agents/${agentName}.md`;
+}
+
+/**
+ * The flags that carry an aboard definition, and the file one of them reads.
+ * Emitted identically by `planLaunch` and by both resume planners: a resumed
+ * session keeps neither the system prompt nor the tool restriction, so leaving
+ * them off a resume would silently reopen a read-only agent with the full
+ * default tool set (verified against Claude Code 2.1.229).
+ */
+function definitionArguments(
+  configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
+  agentId: AgentId,
+  runtimeDirectory: string,
+): { readonly args: readonly string[]; readonly file: SystemPromptFile } {
+  const relativePath = systemPromptRelativePath(runtimeDirectory, configuration.agentName);
+  return {
+    args: [
+      `--system-prompt-file=${relativePath}`,
+      ...toolListArguments("--tools", configuration.declaredTools),
+    ],
+    file: { agentId, relativePath, contents: `${configuration.systemPrompt.trim()}\n` },
+  };
+}
+
+/**
+ * A definition's own denials and the caller's are one flag, so they are one
+ * list. Duplicates are dropped rather than repeated, since the same rule twice
+ * says nothing more than once.
+ */
+function mergeDisallowedTools(
+  configuration: LaunchConfiguration,
+  requested: readonly string[] | undefined,
+): readonly string[] {
+  const declared = configuration.shape === "agent-defined" ? configuration.disallowedTools ?? [] : [];
+  return [...new Set([...declared, ...(requested ?? [])])];
 }
 
 interface PromptPlan {
@@ -601,30 +763,39 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 
   if (agentType === "manager") {
     // The Manager's persona and tool list both live in
-    // .claude/agents/manager.md; it never launches from a bare tool list.
+    // .aboard/agents/manager.md; it never launches from a bare tool list.
     if (
       configuration.shape !== "agent-defined" ||
       configuration.agentName !== MANAGER_AGENT_NAME
     ) {
       throw new LaunchPlanError(
         "shape-not-allowed",
-        "The Manager launches as --agent manager from .claude/agents/manager.md",
+        "The Manager launches from .aboard/agents/manager.md",
       );
     }
   }
   if (agentType === "raw" && configuration.shape !== "inline") {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      "raw is the absence of an agent definition and never launches with --agent",
+      "raw is the absence of an agent definition and never launches from one",
     );
   }
   if (agentType !== "raw" && agentType !== "manager" && configuration.shape === "inline") {
-    // Every other type has a definition — scaffolded or builtin. A bare `--tools`
-    // launch would drop its persona and put an allowlist on the command line
-    // that competes with the `tools:` field the write lease trusts.
+    // Every other type has a definition — aboard's or Claude Code's. A bare
+    // `--tools` launch would drop its persona and put an allowlist on the
+    // command line that competes with the `tools:` field the write lease trusts.
     throw new LaunchPlanError(
       "shape-not-allowed",
       `Automated and builtin agent types launch from their definition, not an inline tool list: ${agentType}`,
+    );
+  }
+  if (isBuiltinAgentType(agentType) !== (configuration.shape === "builtin")) {
+    // `--agent` names Claude Code's own definitions and nothing else: aboard
+    // ships no file a builtin name could resolve to, and its own agents are
+    // deliberately undiscoverable, so neither can borrow the other's shape.
+    throw new LaunchPlanError(
+      "shape-not-allowed",
+      `Only Claude Code's builtin agent types launch with --agent: ${agentType}`,
     );
   }
 
@@ -639,10 +810,20 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const shapeArguments: string[] = [];
-  if (configuration.shape === "agent-defined") {
-    shapeArguments.push("--agent", configuration.agentName);
-  } else {
-    shapeArguments.push(...toolListArguments("--tools", configuration.tools));
+  let systemPrompt: SystemPromptFile | undefined;
+  switch (configuration.shape) {
+    case "agent-defined": {
+      const definition = definitionArguments(configuration, request.agentId, runtimeDirectory);
+      shapeArguments.push(...definition.args);
+      systemPrompt = definition.file;
+      break;
+    }
+    case "builtin":
+      shapeArguments.push("--agent", configuration.agentName);
+      break;
+    case "inline":
+      shapeArguments.push(...toolListArguments("--tools", configuration.tools));
+      break;
   }
 
   // The definition wins over the session settings for both fields: it is the
@@ -658,7 +839,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--session-id",
     request.sessionId,
     ...shapeArguments,
-    ...toolListArguments("--disallowedTools", request.disallowedTools),
+    ...toolListArguments("--disallowedTools", mergeDisallowedTools(configuration, request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
     ...permissionArguments(request.permissionMode),
@@ -710,6 +891,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     requiresWriteLease: requiresWriteLease(agentType, capability),
     promptDelivery: promptPlan.delivery,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
+    ...(systemPrompt === undefined ? {} : { systemPrompt }),
   };
 }
 
@@ -718,20 +900,32 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
  * keystrokes into a live TUI. The long-lived Manager resumes without an
  * automated message.
  *
- * Resume carries no `--agent`/`--tools`, matching the spec's resume command and
- * keeping the mutually exclusive pair out of a second code path. Permission
- * mode is re-passed because `bypassPermissions` is documented as never carried
- * over by `--resume` (`docs/CLAUDE-REFERENCES/hooks.md`); `--model`/`--effort`
- * are re-passed for the stronger reason that there is no definition left to read
- * them from, so the caller supplies the values it parsed from the file.
+ * Every flag that shaped the original launch is passed again. `--resume`
+ * restores the conversation and nothing else: permission mode is documented as
+ * never carried over (`docs/CLAUDE-REFERENCES/hooks.md`), and a session started
+ * from `--system-prompt-file`/`--tools` comes back with Claude Code's default
+ * persona and its *full* default tool set unless both flags are repeated. For
+ * the Manager that would mean resuming an orchestrator that can implement.
  */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper } = commonPreconditions({ ...request, agentType: "manager" });
+  const { command, wrapper, runtimeDirectory } = commonPreconditions({ ...request, agentType: "manager" });
+  if (
+    request.configuration.shape !== "agent-defined" ||
+    request.configuration.agentName !== MANAGER_AGENT_NAME
+  ) {
+    throw new LaunchPlanError(
+      "shape-not-allowed",
+      "The Manager resumes from .aboard/agents/manager.md",
+    );
+  }
+  const definition = definitionArguments(request.configuration, request.agentId, runtimeDirectory);
   const args = [
     "--resume",
     request.sessionId,
-    ...modelArguments(request.model),
-    ...effortArguments(request.effort),
+    ...definition.args,
+    ...toolListArguments("--disallowedTools", mergeDisallowedTools(request.configuration, request.disallowedTools)),
+    ...modelArguments(request.configuration.declaredModel ?? request.model),
+    ...effortArguments(request.configuration.declaredEffort ?? request.effort),
     ...permissionArguments(request.permissionMode),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
@@ -747,28 +941,45 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     writeCapability: "read-only",
     requiresWriteLease: false,
     promptDelivery: "none",
+    systemPrompt: definition.file,
   };
 }
 
 /**
- * Reopens a worker's recorded session (`docs/auto-implementation.md` §9). Like
- * the Manager's resume it carries no `--agent`/`--tools`: the session already
- * has its configuration, and re-passing it would put the mutually exclusive pair
- * into a second code path. Permission mode is re-passed because
- * `bypassPermissions` is documented as never carried over by `--resume`, and
- * `--model`/`--effort` because the definition that declared them is not read on
- * a resume any more than it is on a `--agent` launch.
+ * Reopens a worker's recorded session (`docs/auto-implementation.md` §9),
+ * re-passing the same flags as the Manager's resume and for the same reason:
+ * `--resume` restores the conversation, not the configuration. A read-only
+ * worker resumed without `--tools` comes back holding `Edit`, `Write`, and an
+ * unrestricted `Bash`, which the lease it was granted at launch does not cover.
+ *
+ * Capability is therefore derived here from the configuration rather than
+ * accepted from the caller: it must describe the session this command line
+ * actually produces.
  */
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper } = commonPreconditions(request);
+  const { command, wrapper, runtimeDirectory } = commonPreconditions(request);
+  const { configuration } = request;
+  const definition = configuration.shape === "agent-defined"
+    ? definitionArguments(configuration, request.agentId, runtimeDirectory)
+    : undefined;
+  const shapeArguments = definition?.args
+    // A builtin's `--agent` is restored by `--resume` itself, and a raw session
+    // has only the optional restriction it was launched with.
+    ?? (configuration.shape === "inline" ? toolListArguments("--tools", configuration.tools) : []);
+  const declared = configuration.shape === "agent-defined"
+    ? configuration
+    : { declaredModel: undefined, declaredEffort: undefined };
   const args = [
     "--resume",
     request.sessionId,
-    ...modelArguments(request.model),
-    ...effortArguments(request.effort),
+    ...shapeArguments,
+    ...toolListArguments("--disallowedTools", mergeDisallowedTools(configuration, request.disallowedTools)),
+    ...modelArguments(declared.declaredModel ?? request.model),
+    ...effortArguments(declared.declaredEffort ?? request.effort),
     ...permissionArguments(request.permissionMode),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
+  const capability = launchWriteCapability(request.agentType, configuration);
   return {
     kind: "resume",
     agentId: request.agentId,
@@ -778,9 +989,10 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     command,
     args,
     commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args),
-    writeCapability: request.writeCapability,
-    requiresWriteLease: requiresWriteLease(request.agentType, request.writeCapability),
+    writeCapability: capability,
+    requiresWriteLease: requiresWriteLease(request.agentType, capability),
     promptDelivery: "none",
+    ...(definition === undefined ? {} : { systemPrompt: definition.file }),
   };
 }
 

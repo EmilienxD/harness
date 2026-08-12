@@ -52,7 +52,7 @@ export class WorkerHookService {
     const worker = this.fleet.get(parentAgentId);
     if (worker === undefined || worker.identity.type === "manager" || worker.issueNumber === undefined) throw new Error("Compaction re-grounding requires a registered issue-bound worker");
     const branch = await this.branches.current(cwd);
-    return `You are aboard worker ${parentAgentId}, implementing issue #${worker.issueNumber} on branch ${branch}. Re-read the issue and spec before continuing.`;
+    return `You are aboard worker ${parentAgentId}, implementing issue #${worker.issueNumber} on branch ${branch}. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.`;
   }
 
   private timestamp(): IsoTimestamp { return this.now().toISOString() as IsoTimestamp; }

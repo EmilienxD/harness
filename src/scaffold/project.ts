@@ -253,9 +253,11 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
     next[path] = { sourceHash };
   }
 
-  // An asset aboard used to ship but no longer does (the Manager persona moved
-  // from CLAUDE.md into .claude/agents/manager.md) would otherwise linger and
-  // keep applying to every session in the project. Retire it only when it still
+  // An asset aboard used to ship but no longer does would otherwise linger and
+  // keep applying to every session in the project. That is exactly what the
+  // definitions left behind in `.claude/agents/` would do — Claude Code scans
+  // that directory from every session, which is why they moved to
+  // `.aboard/agents/`. Retire such a file only when it still
   // matches what we installed; a locally edited copy is the user's file now.
   for (const [path, asset] of Object.entries(previous.assets)) {
     if (sourcePaths.has(path)) continue;
@@ -293,7 +295,9 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
     const prefix = ignore.length === 0 || ignore.endsWith("\n") ? ignore : `${ignore}\n`;
     await writeFile(ignorePath, `${prefix}${missing.map((entry) => `${entry}\n`).join("")}`, "utf8");
   }
-  await Promise.all(["prompts", "events"].map((directory) => mkdir(join(projectRoot, ".aboard", "runtime", directory), { recursive: true })));
+  // `agents` holds the derived system-prompt files every agent-defined launch
+  // and resume points `--system-prompt-file` at.
+  await Promise.all(["prompts", "events", "agents"].map((directory) => mkdir(join(projectRoot, ".aboard", "runtime", directory), { recursive: true })));
   await writeJson(manifestPath, { version: 1, assets: next });
   await installVendoredSkills(vendoredSkills, options.installer, projectRoot, installed, warnings);
   if (options.autoCompactEnabled === false || settings.autoCompact === false) warnings.push("Claude Code autoCompact is disabled; aboard workers may exhaust their context window.");
