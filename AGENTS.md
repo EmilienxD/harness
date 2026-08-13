@@ -23,11 +23,11 @@ Do not add placeholder classes or speculative abstractions merely to fill the pl
 
 - One npm package; no workspace or monorepo tooling.
 - Strict TypeScript VS Code extension, bundled with esbuild to CommonJS.
-- The authenticated HTTP/MCP bridge runs in-process in the extension host.
+- The authenticated HTTP bridge runs in-process in the extension host.
 - Python hook assets run through `uv` and are shipped as scaffold templates.
 - Prefer native VS Code and Node APIs. Add frameworks only for a demonstrated need.
 - Keep domain state independent from VS Code, HTTP, subprocess, filesystem, clock, and GitHub CLI details.
-- Parse and validate data at process, HTTP, MCP, hook, settings, and persisted-file boundaries.
+- Parse and validate data at process, HTTP, CLI, hook, settings, and persisted-file boundaries.
 
 Follow the intended module layout in `docs/architecture.md`, but create a directory only when adding its first real file.
 
@@ -44,7 +44,8 @@ Follow the intended module layout in `docs/architecture.md`, but create a direct
 - aboard's agent definitions live in `.aboard/agents/<name>.md` and are **never** placed under `.claude/agents/`. A file there is a registered Claude Code subagent type, discoverable by every session that runs anywhere in the workspace — aboard's own `raw` terminal and the user's hand-started `claude` included — which would make `implementer` and the pr-doctors spawnable outside the bridge and outside the write lease.
 - Every aboard agent takes its whole definition onto the command line: the body as `--system-prompt-file`, `tools:` as `--tools`, and `model:`/`effort:` as their own flags. One file, several flags, no second authority — which is what keeps the write-lease derivation sound. `--agent` survives only for Claude Code's builtin types, which have no aboard definition; the planner still rejects `--agent` combined with `--tools`, and the other `--tools` flag is the optional restriction on a raw launch, which is the absence of a definition.
 - Resume re-passes every flag the launch carried. `--resume` restores the conversation and nothing else: a session started from `--system-prompt-file` and `--tools` comes back on Claude Code's default persona holding the full default tool set, so a resume that omitted them would silently widen a read-only agent past its lease.
-- `--tools` cannot keep MCP tools out of a session — they are present whether or not the allowlist names them — so every launch whose definition does not declare `mcp__aboard__*` denies it with `--disallowedTools`. The Manager is the only agent that declares it.
+- The delegation surface is a command, not an MCP server: `.aboard/scripts/aboard_cli.py`, served by `src/bridge/cli.ts` under `/cli/*`. aboard registers no MCP server and writes no `.mcp.json`, because a project MCP registration loads into every Claude Code session in the workspace — the user's own included — where it collides with their servers and spends context on tools only the Manager can use. Its isolation is threefold and all three parts are load-bearing: the command is documented in the Manager's system prompt alone, `ABOARD_CLI` is exported into the Manager's terminal alone, and the bridge rejects any caller whose `ABOARD_AGENT_ID` is not the recorded Manager's. Never document the command in another agent's definition, and never widen the caller check.
+- An agent definition declares no denied tools. `tools:` is the whole tool authority; `--disallowedTools` carries `aboard.manager.disallowedTools` and nothing else.
 - aboard scaffolds no `CLAUDE.md`. That file belongs to the user's project and applies to every session in the workspace; the Manager persona lives in its agent definition.
 - An agent definition's body is the agent's *entire* system prompt: `--agent` replaces Claude Code's default rather than adding to it. The shipped definitions are intentionally role-specific rather than assembled from shared prompt blocks. Keep each complete enough to stand alone, and update the catalogue and focused contract tests whenever a prompt or tool allowlist changes.
 - The Manager's session-start briefing inlines any fact it would otherwise spend a turn fetching — issue titles and dispositions, the roadmap body, auto-run state. There is no read tool for context the briefing already carries.

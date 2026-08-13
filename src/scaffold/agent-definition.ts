@@ -32,22 +32,6 @@ export function agentDefinitionPath(workspaceRoot: string, name: string): string
   return join(workspaceRoot, ...AGENT_DEFINITION_DIRECTORY.split("/"), `${name}.md`);
 }
 
-/**
- * Denied on every launch whose definition does not ask for the bridge.
- *
- * `--tools` cannot express this: an MCP server's tools are in the session
- * whether or not the allowlist names them, so a worker would hold
- * `mcp__aboard__run_agent` — the Manager's own launch tool — despite declaring
- * no MCP tools at all. `--disallowedTools` removes them from the session, and
- * they do not reach the agent's context.
- */
-export const ABOARD_MCP_TOOLS = "mcp__aboard__*";
-
-/** True when a definition's `tools:` asks for the bridge, as the Manager's does. */
-export function declaresAboardMcpTools(tools: readonly string[]): boolean {
-  return tools.some((rule) => rule.trim().startsWith("mcp__aboard"));
-}
-
 export const WORKER_AGENT_NAMES = [
   "brainstormer",
   "webresearcher",

@@ -76,12 +76,26 @@ interface Manifest {
 
 const MANIFEST_PATH = ".aboard/scaffold.json";
 const HOOK_MARKER = ".claude/hooks/aboard_hook.py";
-const MCP_SERVER_NAME = "aboard";
-const MCP_REGISTRATION = {
-  type: "http",
-  url: "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
-  headers: { Authorization: "Bearer ${ABOARD_BRIDGE_TOKEN}" },
-};
+
+/**
+ * The Manager's delegation CLI, workspace-relative with POSIX separators. The
+ * terminal controller exports its absolute path as `ABOARD_CLI` into the Manager's
+ * terminal alone.
+ */
+export const MANAGER_CLI_SCRIPT = ".aboard/scripts/aboard_cli.py";
+
+/**
+ * The bridge used to register itself as a project MCP server. It no longer does:
+ * a `.mcp.json` entry is loaded by every Claude Code session in the workspace,
+ * where it competed with the user's own servers and spent context on tools only
+ * the Manager could use. The delegation surface is `MANAGER_CLI_SCRIPT` instead.
+ *
+ * The registration is *removed* on the next scaffold rather than merely no
+ * longer written: a stale entry would leave every session in the project
+ * pointing at a route the bridge no longer serves. Other servers in either file
+ * are the user's and are left exactly as they are.
+ */
+const RETIRED_MCP_SERVER_NAME = "aboard";
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -179,16 +193,32 @@ function mergeHooks(settings: Record<string, unknown>, registration: Record<stri
 }
 
 /**
- * Approving the bridge server in `enabledMcpjsonServers` is what stops Claude
- * Code from prompting for `.mcp.json` trust on the first launch of every
- * scaffolded project. It must live in `settings.local.json`: Claude Code honors
- * the key in an untrusted folder only from a settings file that is not checked
- * into the repository. Merge into the user's list instead of replacing it.
+ * Drops aboard's own approval from `enabledMcpjsonServers`, and the key itself
+ * once nothing else is listed under it. Approvals the user granted to their own
+ * servers are untouched.
  */
-function mergeEnabledMcpServers(settings: Record<string, unknown>): Record<string, unknown> {
-  const current = Array.isArray(settings.enabledMcpjsonServers) ? settings.enabledMcpjsonServers : [];
-  if (current.includes(MCP_SERVER_NAME)) return settings;
-  return { ...settings, enabledMcpjsonServers: [...current, MCP_SERVER_NAME] };
+function withoutRetiredMcpApproval(settings: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(settings.enabledMcpjsonServers)) return settings;
+  const remaining = settings.enabledMcpjsonServers.filter((name) => name !== RETIRED_MCP_SERVER_NAME);
+  if (remaining.length === settings.enabledMcpjsonServers.length) return settings;
+  const { enabledMcpjsonServers: _approved, ...rest } = settings;
+  return remaining.length === 0 ? rest : { ...rest, enabledMcpjsonServers: remaining };
+}
+
+/**
+ * Drops the bridge's server from `.mcp.json`, and the file's `mcpServers` key
+ * once it is empty. A `.mcp.json` that aboard created and that now holds nothing
+ * is removed outright, so a project that never had one is left as it was found.
+ * Returns `undefined` when the file should be deleted rather than rewritten.
+ */
+function withoutRetiredMcpServer(mcp: Record<string, unknown>): Record<string, unknown> | undefined {
+  const servers = typeof mcp.mcpServers === "object" && mcp.mcpServers !== null && !Array.isArray(mcp.mcpServers)
+    ? mcp.mcpServers as Record<string, unknown> : undefined;
+  if (servers === undefined || !(RETIRED_MCP_SERVER_NAME in servers)) return mcp;
+  const { [RETIRED_MCP_SERVER_NAME]: _retired, ...remaining } = servers;
+  if (Object.keys(remaining).length > 0) return { ...mcp, mcpServers: remaining };
+  const { mcpServers: _servers, ...rest } = mcp;
+  return Object.keys(rest).length === 0 ? undefined : rest;
 }
 
 /**
@@ -233,7 +263,7 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   for (const source of sourceFiles) {
     const path = portable(relative(assetRoot, source));
     if (path === ".claude/hooks/aboard-hooks.json") continue;
-    if (path === ".claude/settings.json" || path === ".claude/settings.local.json" || path === ".mcp.json" || path === ".gitignore") continue;
+    if (path === ".claude/settings.json" || path === ".claude/settings.local.json" || path === ".gitignore") continue;
     const content = await readFile(source, "utf8");
     const sourceHash = hash(content);
     const destination = join(projectRoot, ...path.split("/"));
@@ -277,16 +307,28 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   const settings = await readObject(settingsPath);
   await writeJson(settingsPath, mergeHooks(settings, { hooks: registration }));
 
+  // Both files are only ever *cleaned* now, and only of aboard's own entries.
+  // An untouched file is not rewritten, so a project that never registered the
+  // bridge keeps its formatting and a project that has no `.mcp.json` never
+  // gains one.
   const localSettingsPath = join(projectRoot, ".claude", "settings.local.json");
-  await writeJson(localSettingsPath, mergeEnabledMcpServers(await readObject(localSettingsPath)));
+  if (await exists(localSettingsPath)) {
+    const local = await readObject(localSettingsPath);
+    const cleaned = withoutRetiredMcpApproval(local);
+    if (cleaned !== local) await writeJson(localSettingsPath, cleaned);
+  }
 
   const mcpPath = join(projectRoot, ".mcp.json");
-  const mcp = await readObject(mcpPath);
-  const servers = typeof mcp.mcpServers === "object" && mcp.mcpServers !== null && !Array.isArray(mcp.mcpServers) ? mcp.mcpServers as Record<string, unknown> : {};
-  await writeJson(mcpPath, { ...mcp, mcpServers: { ...servers, [MCP_SERVER_NAME]: MCP_REGISTRATION } });
+  if (await exists(mcpPath)) {
+    const mcp = await readObject(mcpPath);
+    const cleaned = withoutRetiredMcpServer(mcp);
+    if (cleaned === undefined) await rm(mcpPath, { force: true });
+    else if (cleaned !== mcp) await writeJson(mcpPath, cleaned);
+  }
 
-  // `settings.local.json` is ignored on purpose: Claude Code only honors the MCP
-  // approval from a settings file that is not checked into the repository.
+  // `.claude/settings.local.json` is machine-local by construction — Claude Code
+  // writes per-machine permission decisions into it — so it stays ignored even
+  // though aboard no longer has an MCP approval to put there.
   const ignorePath = join(projectRoot, ".gitignore");
   const ignore = await exists(ignorePath) ? await readFile(ignorePath, "utf8") : "";
   const present = new Set(ignore.split(/\r?\n/u).map((line) => line.trim()));

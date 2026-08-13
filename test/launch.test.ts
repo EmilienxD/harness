@@ -35,7 +35,7 @@ const sessionId = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b" as SessionId;
 const IMPLEMENTER_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill"];
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash(gh *)", "Bash(git diff*)", "LSP"];
 const BRAINSTORMER_TOOLS = ["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Agent", "Skill"];
-const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
+const MANAGER_TOOLS = ["Read", "Grep", "Glob", "Bash", "Skill"];
 
 /**
  * An aboard definition, which is now carried onto the command line in full: the
@@ -91,7 +91,7 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   // three reach Claude Code as flags: nothing is registered under
   // .claude/agents/, so no other session in the workspace can see or spawn the
   // Manager. The allowlist's contents (no Agent, no session-task tools, the
-  // mcp__aboard__* delegation surface) are pinned in agent-definitions.test.ts.
+  // delegation surface is a command, not a tool) are pinned in agent-definitions.test.ts.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
@@ -102,7 +102,7 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   ]);
   assert.equal(
     plan.commandLine,
-    `& claude --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/manager.md '--tools=mcp__aboard__*,Read,Grep,Glob,Bash,Skill' '--disallowedTools=Bash(git push*)' --model opus`,
+    `& claude --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/manager.md '--tools=Read,Grep,Glob,Bash,Skill' '--disallowedTools=Bash(git push*)' --model opus`,
   );
   // The file the command line reads is part of the plan, because a launch that
   // cannot write it is a launch that would silently start on Claude Code's own
@@ -172,20 +172,18 @@ test("plans a read-only agent that stays concurrent", () => {
   const plan = planLaunch(
     request({
       agentType: "webresearcher",
-      configuration: definition("webresearcher", READ_ONLY_TOOLS, { disallowedTools: ["mcp__aboard__*"] }),
+      configuration: definition("webresearcher", READ_ONLY_TOOLS),
       prompt: "Research current API pricing.",
       permissionMode: "acceptEdits",
     }),
   );
 
-  // `--tools` cannot keep the bridge's own tools out of a worker: MCP tools are
-  // in the session whether or not the allowlist names them, so the definition's
-  // silence about them is expressed as a denial instead.
+  // No deny rule: `tools:` is the whole tool authority, and there is no
+  // project-scoped MCP server whose tools an allowlist would fail to exclude.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
     ...definitionArgs("webresearcher", READ_ONLY_TOOLS),
-    "--disallowedTools=mcp__aboard__*",
     "--permission-mode",
     "acceptEdits",
     "Research current API pricing.",
@@ -500,7 +498,7 @@ test("a resume re-passes every flag that shaped the launch", () => {
   // `--tools` comes back on the default persona holding the *full* default tool
   // set — Edit, Write, unrestricted Bash — unless both flags are repeated. A
   // read-only worker resumed that way would hold powers its lease never covered.
-  const configuration = definition("webresearcher", READ_ONLY_TOOLS, { disallowedTools: ["mcp__aboard__*"] });
+  const configuration = definition("webresearcher", READ_ONLY_TOOLS);
   const resumed = planSessionResume({
     agentId,
     sessionId,
@@ -513,7 +511,6 @@ test("a resume re-passes every flag that shaped the launch", () => {
     "--resume",
     sessionId,
     ...definitionArgs("webresearcher", READ_ONLY_TOOLS),
-    "--disallowedTools=mcp__aboard__*",
   ]);
   // The system prompt file is rewritten on every resume, since nothing
   // guarantees the runtime directory survived between sessions.

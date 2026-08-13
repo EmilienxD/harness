@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestamp } from "../domain/contracts.js";
 import { parseManagerPersistenceDto } from "../domain/validation.js";
 import { MANAGER_AGENT_NAME, resolveLaunchConfiguration, type EffortLevel, type LaunchConfiguration, type SessionWrapperLayout, type WorkerPermissionMode, planLaunch, planManagerResume } from "./launch.js";
-import { ABOARD_MCP_TOOLS, AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, declaresAboardMcpTools, parseManagerAgentDefinition } from "../scaffold/agent-definition.js";
+import { AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, parseManagerAgentDefinition } from "../scaffold/agent-definition.js";
 import { sessionIsResumable } from "./sessions.js";
 import type { PromptSpillStore } from "./spill.js";
 import type { ShellKind } from "./shell.js";
@@ -56,9 +56,6 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
     agentName: MANAGER_AGENT_NAME,
     systemPrompt: parsed.value.prompt,
     declaredTools: parsed.value.tools,
-    // The Manager is the one agent whose definition asks for the bridge, so it
-    // is the one launch that does not deny `mcp__aboard__*`.
-    ...(declaresAboardMcpTools(parsed.value.tools) ? {} : { disallowedTools: [ABOARD_MCP_TOOLS] }),
     declaredModel: parsed.value.model,
     declaredEffort: parsed.value.effort,
     declaredCommand: parsed.value.command,

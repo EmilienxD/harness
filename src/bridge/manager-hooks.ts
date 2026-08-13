@@ -233,7 +233,7 @@ export class ManagerBriefings {
   async #roadmap(signal: AbortSignal): Promise<string> {
     const roadmap = await this.sources.roadmap(signal);
     if (roadmap === undefined) {
-      return "No issue is labelled `todo`. Write one with mcp__aboard__update_todo when the project has a direction worth recording.";
+      return "No issue is labelled `todo`. Write one with `aboard todo` when the project has a direction worth recording.";
     }
     const body = roadmap.body.trim();
     const bounded = body.length <= ROADMAP_BODY_LIMIT

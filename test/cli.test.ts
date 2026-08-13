@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createMcpHandler, CORE_MCP_TOOLS } from "../src/bridge/mcp.js";
+import { createCliHandler } from "../src/bridge/cli.js";
 import { DelegationCoordinator } from "../src/bridge/delegation.js";
 import { resolveLaunchConfiguration } from "../src/claude/launch.js";
 
@@ -11,12 +11,11 @@ const definitionFor = (agentName: string, declaredTools: readonly string[]) =>
     agentName,
     systemPrompt: `You are the ${agentName}.`,
     declaredTools,
-    disallowedTools: ["mcp__aboard__*"],
   });
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
-import { isBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
+import { CLI_LAUNCHABLE_AGENT_TYPES, isBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
 
@@ -56,9 +55,11 @@ const terminal = (value: string) => value as TerminalId;
 const telemetry = { totalTokens: 12, totalDurationMs: 34, totalToolUseCount: 2, compactionCount: 0 };
 const success: WorkerResult = { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "finished", telemetry };
 
+const MANAGER = agent("manager-1");
+
 function managerSession(): AgentSession {
   return {
-    identity: { agentId: agent("manager-1"), type: "manager" },
+    identity: { agentId: MANAGER, type: "manager" },
     sessionId: session("140b5c21-eb37-4147-b5cb-6a5ca2592146"),
     terminal: { terminalId: terminal("manager-terminal"), name: "Manager" },
     lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
@@ -70,17 +71,19 @@ function managerSession(): AgentSession {
 function setup() {
   const fleet = new FleetRegistry();
   fleet.register(managerSession(), at("2026-07-30T10:00:00.000Z"));
-  fleet.transition(
-    agent("manager-1"),
-    { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") },
-    at("2026-07-30T10:00:00.000Z"),
-  );
+  fleet.transition(MANAGER, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
   const lease = new WriteLease();
   const host = new FakeHost();
   let terminalId = 0;
   const terminals = new TerminalController({
     host,
-    environment: () => ({ port: 4823, token: "secret", workspaceRoot: "C:\\repo" }),
+    environment: () => ({
+      port: 4823,
+      token: "secret",
+      workspaceRoot: "C:\\repo",
+      managerCli: "C:\\repo\\.aboard\\scripts\\aboard_cli.py",
+      managerBashTimeoutMs: 3_600_000,
+    }),
     terminalIdFactory: () => terminal(`terminal-${++terminalId}`),
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
@@ -98,7 +101,7 @@ function setup() {
     fleet,
     lease,
     terminals,
-    managerAgentId: agent("manager-1"),
+    managerAgentId: MANAGER,
     shell: "powershell",
     permissionMode: "default",
     // aboard.launch.claudeCommand: a wrapper that takes its own arguments.
@@ -120,15 +123,24 @@ function setup() {
     spills: { write: async (spill) => spill.relativePath },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
-  const handler = createMcpHandler(coordinator);
-  const call = (name: string, args: unknown = {}) => handler({
+  const handler = createCliHandler(coordinator, { managerAgentId: MANAGER });
+  const post = (path: string, body: unknown, caller: readonly [string | undefined] = [MANAGER]) => handler({
     method: "POST",
-    url: new URL("/mcp", "http://127.0.0.1"),
-    headers: {},
-    body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
+    url: new URL(path, "http://127.0.0.1"),
+    headers: caller[0] === undefined ? {} : { "x-aboard-agent-id": caller[0] },
+    body,
     signal: new AbortController().signal,
   } as AuthenticatedBridgeRequest);
-  return { fleet, lease, host, terminals, coordinator, handler, call };
+  const launch = (args: unknown = {}) => post("/cli/agent", args);
+  return { fleet, lease, host, terminals, coordinator, handler, post, launch };
+}
+
+function body(response: { readonly body?: unknown }): Record<string, unknown> {
+  return response.body as Record<string, unknown>;
+}
+
+function result(response: { readonly body?: unknown }): unknown {
+  return (response.body as { result?: unknown }).result;
 }
 
 test("restores a persisted worker with --resume, no new prompt, and no focus", async () => {
@@ -185,7 +197,7 @@ test("keeps a transcript-less persisted worker paused", async () => {
   const refusing = new DelegationCoordinator({
     workspaceRoot: "C:\\repo", isResumable: async () => false,
     fleet: context.fleet, lease: context.lease, terminals: context.terminals,
-    managerAgentId: agent("manager-1"), shell: "powershell", permissionMode: "default",
+    managerAgentId: MANAGER, shell: "powershell", permissionMode: "default",
     agentIdFactory: () => agent("unused"), sessionIdFactory: () => session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     configurations: { get: async () => definitionFor("implementer", ["Read", "Edit"]) },
     prompts: { resolve: async () => undefined }, spills: { write: async (spill) => spill.relativePath },
@@ -195,85 +207,74 @@ test("keeps a transcript-less persisted worker paused", async () => {
   assert.equal(context.fleet.get(workerId)?.terminal.terminalId, "old-terminal");
 });
 
-function resultBody(response: Awaited<ReturnType<ReturnType<typeof createMcpHandler>>>): Record<string, unknown> {
-  return response.body as Record<string, unknown>;
-}
-
-test("publishes five distinct core tools and no fetch tool for state it is already given", async () => {
-  const { handler, call } = setup();
-  assert.equal(CORE_MCP_TOOLS.length, 5);
-  assert.equal(new Set(CORE_MCP_TOOLS.map((tool) => tool.name)).size, 5);
+test("serves five commands and nothing that fetches state the Manager is already given", async () => {
+  const { post } = setup();
   // The roadmap arrives inline in the session-start briefing, so there is no
-  // tool to fetch it: a round trip for context the Manager already holds is a
-  // turn spent on nothing.
-  assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === "get_todo"), false);
-  assert.match(JSON.stringify((await call("get_todo")).body), /Unknown MCP tool get_todo/);
-  // Delivery timing and delivery existence are flags on one launch tool. Near
-  // identical descriptions are what the Manager kept selecting between wrongly.
-  for (const removed of ["spawn_agent", "spawn_interactive_agent"]) {
-    assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === removed), false);
+  // command to fetch it: a round trip for context the Manager already holds is
+  // a turn spent on nothing. Fleet awareness is pushed by hooks, and the
+  // Manager never drives the UI, so there is no list or focus command either.
+  for (const path of ["/cli/get-todo", "/cli/list-agents", "/cli/focus-agent", "/cli/send-to-agent", "/mcp"]) {
+    assert.equal((await post(path, {})).status, 404, path);
   }
-  // Messaging a finished agent is not part of v1; the tool stays removed.
-  assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === "send_to_agent"), false);
-  assert.match(JSON.stringify((await call("send_to_agent", { agentId: "worker-1", message: "hi" })).body), /Unknown MCP tool send_to_agent/);
-  // The Manager never drives the UI; there is no focus tool.
-  assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === "focus_agent"), false);
-  assert.match(JSON.stringify((await call("focus_agent", { agentId: "worker-1" })).body), /Unknown MCP tool focus_agent/);
-  // Fleet awareness is pushed via hooks, not pulled by polling; there is no
-  // list tool to turn into a decision.
-  assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === "list_agents"), false);
-  assert.match(JSON.stringify((await call("list_agents")).body), /Unknown MCP tool list_agents/);
-  // `initialize` carries no `instructions`: the only text it ever held was
-  // operator timeout configuration, which no agent can act on.
-  const initialized = await handler({
-    method: "POST", url: new URL("/mcp", "http://127.0.0.1"), headers: {},
-    body: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, signal: new AbortController().signal,
-  });
-  const result = (initialized.body as { result: Record<string, unknown> }).result;
-  assert.equal("instructions" in result, false);
+  for (const path of ["/cli/agent", "/cli/todo", "/cli/auto-run", "/cli/review-pr", "/cli/release-lease"]) {
+    assert.notEqual((await post(path, {})).status, 404, path);
+  }
 });
 
-test("runtime-validates every tool boundary and rejects unknown fields", async () => {
-  const { call } = setup();
-  for (const [name, args] of [
-    ["run_agent", { type: "raw", prompt: "", description: "do the work" }],
-    ["run_agent", { type: "bogus", prompt: "work", description: "do the work" }],
-    ["run_agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
-    ["run_agent", { type: "raw", description: "too short", interactive: true }],
-    ["run_agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
-    // A dual-mode type without the interactive flag is automated, and an
-    // automated launch without a prompt is the one combination with no reading.
-    ["run_agent", { type: "Explore", description: "map the auth flow" }],
-    ["run_agent", { type: "webresearcher", description: "research current API pricing" }],
-    ["run_agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
-    ["update_todo", { body: "x", reason: "" }],
-    ["review_pr", { pr: 0 }],
-    ["start_auto_run", { spec: 12 }],
-    ["release_lease", { reason: "" }],
+// The token is in every aboard terminal's environment, so it cannot be what
+// separates the Manager from a worker that went looking for the script.
+test("refuses every command from any session but the Manager", async () => {
+  const { post, fleet } = setup();
+  for (const caller of [[undefined], ["worker-1"]] as const) {
+    const response = await post("/cli/agent", { type: "raw", description: "open a raw session" }, caller);
+    assert.equal(response.status, 403);
+    assert.match(JSON.stringify(response.body), /Only the aboard Manager session/);
+  }
+  assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
+});
+
+test("runtime-validates every command boundary and rejects unknown fields", async () => {
+  const { post } = setup();
+  for (const [path, args] of [
+    ["/cli/agent", { type: "raw", prompt: "", description: "do the work" }],
+    ["/cli/agent", { type: "bogus", prompt: "work", description: "do the work" }],
+    ["/cli/agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
+    ["/cli/agent", { type: "raw", description: "too short", interactive: true }],
+    ["/cli/agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
+    // A dual-mode type without --interactive is automated, and an automated
+    // launch without a prompt is the one combination with no reading.
+    ["/cli/agent", { type: "Explore", description: "map the auth flow" }],
+    ["/cli/agent", { type: "webresearcher", description: "research current API pricing" }],
+    ["/cli/agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
+    ["/cli/todo", { body: "x", reason: "" }],
+    ["/cli/review-pr", { pr: 0 }],
+    ["/cli/auto-run", { spec: 12 }],
+    ["/cli/release-lease", { reason: "" }],
   ] as const) {
-    assert.equal("error" in resultBody(await call(name, args)), true, name);
+    const response = await post(path, args);
+    assert.equal(response.status, 400, `${path} ${JSON.stringify(args)}`);
+    assert.equal(body(response).ok, false);
   }
 });
 
 // The extension owns the implementation loop, so the Manager must not be able to
-// reach an implementation agent directly — not through the schema enum, and not
-// through a hand-written call that ignores it.
-test("run_agent cannot launch an implementation agent by any route", async () => {
-  const { call, fleet } = setup();
-  const tool = CORE_MCP_TOOLS.find((entry) => entry.name === "run_agent")!;
-  const schema = tool.inputSchema as { properties: { type: { enum: readonly string[] } } };
-  assert.deepEqual([...schema.properties.type.enum].sort(), ["Explore", "brainstormer", "general-purpose", "raw", "webresearcher"]);
+// reach an implementation agent directly.
+test("the agent command cannot launch an implementation agent", async () => {
+  const { launch, fleet } = setup();
+  assert.deepEqual([...CLI_LAUNCHABLE_AGENT_TYPES].sort(), ["Explore", "brainstormer", "general-purpose", "raw", "webresearcher"]);
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
-    assert.equal("error" in resultBody(await call("run_agent", { type, prompt: "work", description: "do the work now" })), true, type);
+    const response = await launch({ type, prompt: "work", description: "do the work now" });
+    assert.equal(response.status, 400, type);
+    assert.match(JSON.stringify(response.body), /--type must be one of/);
   }
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
-  assert.match(tool.description, /start_auto_run/);
 });
 
-// The implementation types left run_agent, but both delivery modes are still
-// load-bearing for the auto-run engine, so they are exercised on the coordinator.
+// The implementation types left the agent command, but both delivery modes are
+// still load-bearing for the auto-run engine, so they are exercised on the
+// coordinator.
 test("foreground delegation blocks until a result lands, background returns at once", async () => {
-  const { call, fleet, coordinator } = setup();
+  const { post, fleet, coordinator } = setup();
   let foregroundSettled = false;
   const foreground = coordinator
     .run({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine" })
@@ -286,7 +287,7 @@ test("foreground delegation blocks until a result lands, background returns at o
 
   const background = await coordinator.spawn({ type: "implementer", prompt: "Implement issue ten", description: "implement issue ten", issue: 10 });
   assert.match(JSON.stringify(background), /running/);
-  assert.match(JSON.stringify((await call("release_lease", { reason: "user intervention" })).body), /released/);
+  assert.match(JSON.stringify(result(await post("/cli/release-lease", { reason: "user intervention" }))), /released/);
 });
 
 test("lease conflicts fail immediately with holder details", async () => {
@@ -302,9 +303,20 @@ test("lease conflicts fail immediately with holder details", async () => {
   );
 });
 
+test("a lease conflict reaches the command as a readable refusal, not a stack trace", async () => {
+  const { launch, coordinator } = setup();
+  await coordinator.spawn({ type: "general-purpose", prompt: "Hold the lease", description: "hold the write lease" });
+  const refused = await launch({ type: "general-purpose", prompt: "Compete for it", description: "compete for the lease" });
+  assert.equal(refused.status, 409);
+  const error = (refused.body as { error: { code: string; message: string; details: unknown } }).error;
+  assert.equal(error.code, "lease-conflict");
+  assert.match(error.message, /worker-1/);
+  assert.notEqual(error.details, undefined);
+});
+
 test("interactive launch focuses the terminal and expects no result", async () => {
-  const { call, host } = setup();
-  const launched = await call("run_agent", {
+  const { launch, host } = setup();
+  const launched = await launch({
     type: "brainstormer", description: "brainstorm the caching design", interactive: true,
   });
   assert.match(JSON.stringify(launched.body), /no agent result/);
@@ -329,38 +341,28 @@ test("an auto-run launch marks the tree it is expected to leave dirty", async ()
   assert.equal(worker.resultDelivery.mode, "tool-result");
 });
 
-test("interactive mode makes prompt optional at both the schema and runtime boundary", async () => {
-  const tool = CORE_MCP_TOOLS.find((entry) => entry.name === "run_agent");
-  assert.ok(tool);
-  const schema = tool.inputSchema as { required: string[]; properties: Record<string, { description: string }> };
-  // Only interactive launches may omit the prompt, which JSON Schema cannot
-  // express conditionally; the parser carries that half of the contract.
-  assert.deepEqual(schema.required, ["type", "description"]);
-  assert.match(schema.properties.prompt!.description, /Required unless interactive is true/);
-  assert.match(schema.properties.interactive!.description, /No result is ever delivered/);
-  assert.match(schema.properties.run_in_background!.description, /Ignored when interactive is true/);
-
-  const { call, host } = setup();
-  const omitted = resultBody(await call("run_agent", { type: "brainstormer", description: "open a brainstorm session", interactive: true }));
-  assert.equal("error" in omitted, false, JSON.stringify(omitted));
+test("interactive mode makes the prompt optional", async () => {
+  const { launch, host } = setup();
+  const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true });
+  assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/brainstormer\.md '--tools=Read,Grep' '--disallowedTools=mcp__aboard__\*'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/brainstormer\.md '--tools=Read,Grep'\s*$/);
 
-  const withTopic = resultBody(await call("run_agent", { type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true }));
-  assert.equal("error" in withTopic, false, JSON.stringify(withTopic));
+  const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true });
+  assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /caching layer/);
 });
 
 test("webresearcher runs unattended, reports a result, and takes no lease", async () => {
-  const { call, fleet, lease, host } = setup();
-  const launched = resultBody(await call("run_agent", {
+  const { launch, fleet, lease, host } = setup();
+  const launched = await launch({
     type: "webresearcher",
     prompt: "Find the current API pricing from official sources.",
     description: "research current API pricing",
     run_in_background: true,
-  }));
-  assert.equal("error" in launched, false, JSON.stringify(launched));
-  assert.match(JSON.stringify(launched), /running/);
+  });
+  assert.equal(launched.status, 200, JSON.stringify(launched.body));
+  assert.match(JSON.stringify(launched.body), /running/);
   const researcher = fleet.list().find((entry) => entry.identity.type === "webresearcher")!;
   assert.equal(researcher.resultDelivery.mode, "mailbox");
   assert.equal(lease.current(), undefined);
@@ -370,9 +372,9 @@ test("webresearcher runs unattended, reports a result, and takes no lease", asyn
 });
 
 test("builtin types run unattended: foreground blocks, and read-only Explore runs beside the lease holder", async () => {
-  const { call, fleet, lease, host, coordinator } = setup();
+  const { launch, fleet, lease, host, coordinator } = setup();
   let foregroundSettled = false;
-  const foreground = Promise.resolve(call("run_agent", {
+  const foreground = Promise.resolve(launch({
     type: "general-purpose", prompt: "hunt the retry bug", description: "hunt the retry bug",
   })).then((response) => { foregroundSettled = true; return response; });
   await new Promise((resolve) => setImmediate(resolve));
@@ -385,11 +387,11 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
   assert.equal(worker.resultDelivery.mode, "tool-result");
 
   // Explore is read-only, so it launches concurrently instead of conflicting.
-  const background = resultBody(await call("run_agent", {
+  const background = await launch({
     type: "Explore", prompt: "map the auth flow", description: "map the auth flow", run_in_background: true,
-  }));
-  assert.equal("error" in background, false, JSON.stringify(background));
-  assert.match(JSON.stringify(background), /running/);
+  });
+  assert.equal(background.status, 200, JSON.stringify(background.body));
+  assert.match(JSON.stringify(background.body), /running/);
   const explorer = fleet.list().find((entry) => entry.identity.type === "Explore")!;
   assert.equal(explorer.resultDelivery.mode, "mailbox");
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
@@ -404,22 +406,20 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
 });
 
 test("builtin types run interactively: focused, hook-silent, prompt optional", async () => {
-  const { call, host } = setup();
-  const launched = resultBody(await call("run_agent", {
-    type: "Explore", description: "browse the auth flow", interactive: true,
-  }));
-  assert.equal("error" in launched, false, JSON.stringify(launched));
-  assert.match(JSON.stringify(launched), /no agent result/);
+  const { launch, host } = setup();
+  const launched = await launch({ type: "Explore", description: "browse the auth flow", interactive: true });
+  assert.equal(launched.status, 200, JSON.stringify(launched.body));
+  assert.match(JSON.stringify(launched.body), /no agent result/);
   // Focused like any handed-off session, with no result to report and no
   // positional prompt: the user types the first message.
   assert.deepEqual(host.created.at(-1)!.terminal.shown, [false]);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent Explore\s*$/);
 
-  const withTopic = resultBody(await call("run_agent", {
+  const withTopic = await launch({
     type: "general-purpose", prompt: "start from src/auth.ts", description: "drive the auth cleanup", interactive: true,
-  }));
-  assert.equal("error" in withTopic, false, JSON.stringify(withTopic));
+  });
+  assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
   const command = host.created.at(-1)!.terminal.sent.at(-1)!;
   assert.match(command, /--agent general-purpose/);
   assert.match(command, /start from src\/auth\.ts/);
@@ -427,19 +427,19 @@ test("builtin types run interactively: focused, hook-silent, prompt optional", a
 });
 
 test("an interactive-only type is launched interactively and the correction is reported", async () => {
-  const { call, host } = setup();
+  const { launch, host } = setup();
   // The only valid reading of the call, so it is honoured rather than refused —
   // but the Manager must learn it is waiting for a result that cannot arrive.
-  const coerced = resultBody(await call("run_agent", { type: "raw", description: "open a raw session" }));
-  assert.equal("error" in coerced, false, JSON.stringify(coerced));
-  assert.match(JSON.stringify(coerced), /no result will be delivered/);
-  assert.match(JSON.stringify(coerced), /continue with the user/);
+  const coerced = await launch({ type: "raw", description: "open a raw session" });
+  assert.equal(coerced.status, 200, JSON.stringify(coerced.body));
+  assert.match(JSON.stringify(coerced.body), /no result will be delivered/);
+  assert.match(JSON.stringify(coerced.body), /continue with the user/);
   assert.deepEqual(host.created[0]!.terminal.shown, [false]);
 
   // Backgrounding an interactive session is meaningless rather than ambiguous.
-  const flagged = resultBody(await call("run_agent", {
+  const flagged = await launch({
     type: "brainstormer", description: "brainstorm the caching design", interactive: true, run_in_background: true,
-  }));
-  assert.match(JSON.stringify(flagged), /run_in_background was ignored/);
-  assert.match(JSON.stringify(flagged), /handoff/);
+  });
+  assert.match(JSON.stringify(flagged.body), /--background was ignored/);
+  assert.match(JSON.stringify(flagged.body), /handoff/);
 });

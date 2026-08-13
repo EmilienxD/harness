@@ -91,25 +91,26 @@ One primitive, three entry points, all converging on `AutoRunEngine.start()`:
 
 | Entry point | Shape |
 | :-- | :-- |
-| `mcp__aboard__start_auto_run` | Manager's MCP tool. Non-blocking. No arguments. |
+| `aboard auto` | Manager's CLI command (`initial-spec.md` §6.2). Non-blocking. No options. |
 | `/auto` | Intercepted in `ManagerPromptService`, exactly as `/brainstorm` and `/raw` are today. Takes no arguments; trailing text is matched and dropped, never forwarded. Backed by a scaffolded `auto` skill so it appears in the slash-command list. |
 | `aboard.startAutoRun` | Panel/palette command, so a run is startable with no Manager alive. |
 
 Only one run exists at a time. `start` while a run is active returns the active run's state instead
 of starting a second one, and says so.
 
-### The MCP tool is non-blocking
+### The command is non-blocking
 
 Three independent reasons:
 
-- A foreground MCP call is bounded by `ABOARD_MCP_TIMEOUT_SECONDS` (3600). A multi-issue run exceeds
-  that routinely and a HITL run can span days.
+- A blocking command is bounded by the Manager's Bash timeout, whose ceiling is
+  `aboard.timeouts.managerStop` (3600s). A multi-issue run exceeds that routinely and a HITL run can
+  span days.
 - Blocking pins the Manager's turn, so the user cannot talk to it while the run proceeds — precisely
-  the failure `run_in_background` exists to avoid.
+  the failure `--background` exists to avoid.
 - The run must outlive the Manager. A Manager crash, `/clear`, or context exhaustion must not abort a
   run mid-merge.
 
-`start_auto_run` returns immediately with the resolved plan so the Manager can tell the user exactly
+`aboard auto` returns immediately with the resolved plan so the Manager can tell the user exactly
 what is about to happen:
 
 ```jsonc
@@ -376,9 +377,9 @@ continues, which costs one gesture and buys a re-prioritization point.
 
 ---
 
-## 9. `review_pr` is reframed as "reopen the session for the open PR"
+## 9. `aboard review` is reframed as "reopen the session for the open PR"
 
-`review_pr` no longer launches a reviewer. It becomes the way back into work already in flight:
+`aboard review` no longer launches a reviewer. It becomes the way back into work already in flight:
 
 1. Find the latest open pull request. None → report that and stop; nothing is launched.
 2. Pick the agent that owns it: the **`implementer`** when review mode is off, the **pr-doctor** when
@@ -393,7 +394,7 @@ This is a handoff, so it returns no result; the Manager learns what happened fro
 run, so a transcript exists — the closed-before-first-message case that breaks `--resume`
 (`architecture.md`) cannot apply to a worker that produced a commit.
 
-Reachable three ways, like the auto-run trigger: the `review_pr` MCP tool, a `/review-pr` skill, and
+Reachable three ways, like the auto-run trigger: the `aboard review` command, a `/review-pr` skill, and
 a panel command. If the owning session is unknown (extension restarted with no record), fall back to
 launching a fresh `pr-doctor-hitl` against the PR and say so.
 
@@ -496,14 +497,14 @@ before a failure stay; the engine's job on failure is to stop cleanly and say ex
 **Changed**
 
 - `domain/contracts.ts` — `reviewer`/`fixer` out, `pr-doctor-afk`/`pr-doctor-hitl` in; the
-  MCP-launchable type list splits from the full type list.
+  CLI-launchable type list splits from the full type list.
 - `bridge/delegation.ts` — `expectsUncommittedTree` on `DelegationLaunchInput`, set only by the engine.
 - `bridge/lifecycle.ts` — `stop()` skips the `no-commit` check when that flag is set. Today a dirty
   tree is a `no-commit` **failure**; for an auto-run implementer it is the expected **success** state,
   and an empty diff is the failure. This is a property of the agent's contract, not of where its
   result goes, which is why it lives on the launch input and not on `ResultDelivery`.
-- `bridge/mcp.ts` — add `start_auto_run`; reframe `review_pr` (§9); `implementer` and both pr-doctors
-  leave `run_agent`'s enum.
+- `bridge/cli.ts` — add the `auto` command; reframe `review` (§9); `implementer` and both pr-doctors
+  leave the `agent` command's launchable type list.
 - `bridge/manager-hooks.ts` — `/auto` and `/review-pr` interception alongside `/brainstorm` and `/raw`.
 - `github/client.ts` — add sub-issue listing by parent, spec listing by `createdAt`, PR create/merge.
 - `github/review.ts` — `ReviewCoordinator.routeFixes` and `AutoReviewSetting` removed.
@@ -540,7 +541,7 @@ before a failure stay; the engine's job on failure is to stop cleanly and say ex
   delegated write-capable agent.
 - **Interruption:** terminal closed mid-implement leaves no commit and no PR; resume re-enters
   correctly from each phase, including when the repository disagrees with the persisted record.
-- **`review_pr`:** no open PR launches nothing; open PR focuses a live terminal, resumes a closed one,
+- **`aboard review`:** no open PR launches nothing; open PR focuses a live terminal, resumes a closed one,
   and delivers no result either way.
 - **Notifications:** one line per transition, and the bounded-summary path when many accumulate.
 - **HITL fix capture:** a doctor's changes applied mid-wait are committed and pushed *before* the

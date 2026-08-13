@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import test from "node:test";
+
+import { createCliHandler } from "../src/bridge/cli.js";
+import { startBridge, type BridgeRuntime } from "../src/bridge/server.js";
+import type { BridgeDiscoveryPersistence } from "../src/bridge/discovery.js";
+import type { AgentId } from "../src/domain/contracts.js";
+
+const CLI = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_cli.py");
+const MANAGER = "manager-1" as AgentId;
+const persistence: BridgeDiscoveryPersistence = { write: async () => undefined, clear: async () => undefined };
+
+interface Call { readonly type: string; readonly description: string; readonly prompt?: string }
+
+interface Outcome { readonly status: number | null; readonly stdout: string; readonly stderr: string }
+
+/**
+ * The real script, in a real child process. It must be spawned asynchronously:
+ * the bridge it talks to runs in *this* process, so a synchronous spawn would
+ * block the event loop that has to answer the request and deadlock the test.
+ */
+function run(
+  args: readonly string[],
+  options: { readonly input?: string; readonly env?: Readonly<Record<string, string>> } = {},
+): Promise<Outcome> {
+  const child = spawn("uv", ["run", "--no-project", "python", CLI, ...args], {
+    env: { ...process.env, ...options.env },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+  child.stdin.end(options.input ?? "");
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+/** Environment for a session aboard launched, as the terminal controller sets it. */
+function launched(bridge: BridgeRuntime, agentId: string = MANAGER): Record<string, string> {
+  return {
+    ABOARD_BRIDGE_PORT: String(bridge.port),
+    ABOARD_BRIDGE_TOKEN: bridge.token,
+    ABOARD_AGENT_ID: agentId,
+  };
+}
+
+async function bridgeWith(calls: Call[], todo: string[]): Promise<BridgeRuntime> {
+  return startBridge({
+    preferredPort: 0,
+    persistence,
+    tokenFactory: () => "integration-token",
+    handler: createCliHandler(
+      {
+        run: async (input) => {
+          calls.push({ type: input.type, description: input.description, ...(input.prompt === undefined ? {} : { prompt: input.prompt }) });
+          return { agentId: "worker-1", result: "reviewed" };
+        },
+        spawn: () => { throw new Error("not used"); },
+        // `raw` and `brainstormer` are interactive-only, so a launch that omits
+        // the flag is coerced onto this path rather than refused.
+        spawnInteractive: async (input) => {
+          calls.push({ type: input.type, description: input.description, ...(input.prompt === undefined ? {} : { prompt: input.prompt }) });
+          return { agentId: "worker-1", handoff: "Terminal focused." };
+        },
+        releaseLease: () => ({ released: false }),
+      },
+      {
+        managerAgentId: MANAGER,
+        services: { github: { updateTodo: async (body: string) => { todo.push(body); return { number: 4 }; } } as never },
+      },
+    ),
+  });
+}
+
+test("the shipped CLI reaches the bridge, and only from the Manager", async (context) => {
+  const calls: Call[] = [];
+  const todo: string[] = [];
+  const bridge = await bridgeWith(calls, todo);
+  context.after(() => bridge.stop());
+
+  // A session that aboard did not start has no bridge address at all, so the
+  // script refuses before it can reach the network.
+  const unlaunched = await run(["auto"], { env: { ABOARD_BRIDGE_PORT: "", ABOARD_BRIDGE_TOKEN: "", ABOARD_AGENT_ID: "" } });
+  assert.equal(unlaunched.status, 1);
+  assert.match(unlaunched.stderr, /not started by the aboard extension/);
+
+  // A worker that found the script still cannot orchestrate with it.
+  const worker = await run(["agent", "--type", "raw", "--description", "open a raw session"], { env: launched(bridge, "worker-9") });
+  assert.equal(worker.status, 1);
+  assert.match(worker.stderr, /Only the aboard Manager session/);
+  assert.deepEqual(calls, []);
+
+  // A refusal from the bridge is surfaced verbatim rather than as a status code.
+  const invalid = await run(["agent", "--type", "Explore", "--description", "map the auth flow"], { env: launched(bridge) });
+  assert.equal(invalid.status, 1);
+  assert.match(invalid.stderr, /--prompt is required unless --interactive/);
+
+  const started = await run(
+    ["agent", "--type", "brainstormer", "--description", "brainstorm the current changes", "--prompt", "The current changes"],
+    { env: launched(bridge) },
+  );
+  assert.equal(started.status, 0, started.stderr);
+  assert.match(started.stdout, /worker-1/);
+  assert.deepEqual(calls, [{ type: "brainstormer", description: "brainstorm the current changes", prompt: "The current changes" }]);
+
+  // `-` is how a multi-line document reaches the bridge without being escaped
+  // onto a command line — the same mechanism a heredoc feeds.
+  const roadmap = "# Roadmap\n\n- Ship the CLI\n- Then \"quote\" $everything 'oddly'\n";
+  const written = await run(["todo", "--reason", "recorded the next priorities", "--body", "-"], { env: launched(bridge), input: roadmap });
+  assert.equal(written.status, 0, written.stderr);
+  assert.deepEqual(todo, [roadmap]);
+});
+
+test("the CLI documents its own commands", async () => {
+  const help = await run(["--help"]);
+  assert.equal(help.status, 0);
+  for (const command of ["agent", "todo", "auto", "review", "release-lease"]) {
+    assert.match(help.stdout, new RegExp(command));
+  }
+  // A command the extension owns must not be reachable by guessing a name.
+  assert.notEqual((await run(["implement"])).status, 0);
+});

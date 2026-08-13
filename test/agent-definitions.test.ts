@@ -4,11 +4,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  ABOARD_MCP_TOOLS,
   AGENT_DEFINITION_DIRECTORY,
   SCAFFOLDED_AGENT_NAMES,
   WORKER_AGENT_NAMES,
-  declaresAboardMcpTools,
   parseAgentDefinition,
   parseManagerAgentDefinition,
   type WorkerAgentName,
@@ -126,7 +124,7 @@ test("the Manager definition declares its orchestration tool list", async () => 
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   assert.equal(parsed.value.model, "opus");
   assert.equal(parsed.value.effort, "medium");
-  assert.deepEqual(parsed.value.tools, ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"]);
+  assert.deepEqual(parsed.value.tools, ["Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"]);
   for (const forbidden of ["Agent", "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TodoWrite", "Edit", "Write"]) {
     assert.equal(parsed.value.tools.includes(forbidden), false, `${forbidden} must be absent`);
   }
@@ -189,27 +187,30 @@ test("rejects definitions outside the aboard catalogue or without required front
   assert.equal(parseAgentDefinition("---\nname: reviewer\ndescription: no\ntools: Read\nmodel: future\n---\nNo.").ok, false);
 });
 
-test("only the Manager reaches the bridge, and the rest have it denied by flag", async () => {
-  // `--tools` cannot express this. An MCP server's tools are in the session
-  // whether or not the allowlist names them (verified end to end against Claude
-  // Code 2.1.229), so a worker launched from its definition would hold
-  // mcp__aboard__run_agent — the Manager's own launch tool — while declaring no
-  // MCP tools at all. `--disallowedTools` removes them from the session, and
-  // they never reach the agent's context.
-  const manager = parseManagerAgentDefinition(await readFile(join(agentsRoot, "manager.md"), "utf8"));
-  assert.equal(manager.ok, true);
-  assert.equal(manager.ok && declaresAboardMcpTools(manager.value.tools), true);
+test("only the Manager's definition documents the delegation command", async () => {
+  // The delegation surface is a command, not a tool, so no definition grants it
+  // and no launch has to deny it. Isolation is that the command is described in
+  // exactly one system prompt, `ABOARD_CLI` is exported into exactly one
+  // terminal, and the bridge answers exactly one agent id (`bridge/cli.ts`).
+  const manager = await readFile(join(agentsRoot, "manager.md"), "utf8");
+  const parsedManager = parseManagerAgentDefinition(manager);
+  assert.equal(parsedManager.ok, true);
+  assert.match(manager, /\$ABOARD_CLI/);
 
   for (const name of WORKER_AGENT_NAMES) {
-    const parsed = parseAgentDefinition(await readFile(join(agentsRoot, `${name}.md`), "utf8"));
+    const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");
+    const parsed = parseAgentDefinition(source);
     assert.equal(parsed.ok, true, `${name} must parse`);
+    assert.equal(source.includes("ABOARD_CLI"), false, `${name} must not be told the delegation command exists`);
+    // The MCP surface is gone; a definition that still asked for it would be
+    // declaring a tool no session has.
     assert.equal(
-      parsed.ok && declaresAboardMcpTools(parsed.value.tools),
+      parsed.ok && parsed.value.tools.some((rule) => rule.includes("mcp__aboard")),
       false,
-      `${name} must not declare the bridge's tools, so its launch denies them`,
+      `${name} must not declare a retired MCP tool`,
     );
   }
+  assert.equal(parsedManager.ok && parsedManager.value.tools.some((rule) => rule.includes("mcp__aboard")), false);
 
-  assert.equal(ABOARD_MCP_TOOLS, "mcp__aboard__*");
   assert.equal(AGENT_DEFINITION_DIRECTORY, ".aboard/agents");
 });

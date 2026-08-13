@@ -187,14 +187,6 @@ export type LaunchConfiguration =
       /** `tools:` read from the same definition. Never empty. */
       readonly declaredTools: readonly string[];
       /**
-       * Denied on top of `declaredTools`, because `--tools` cannot express the
-       * denial: an MCP server's tools are present in the session whether or not
-       * the allowlist names them, so the bridge's own tools reach a worker whose
-       * definition never asked for them. `--disallowedTools` removes them from
-       * the session outright.
-       */
-      readonly disallowedTools?: readonly string[];
-      /**
        * `model:` and `effort:` read from the same definition, carried onto the
        * command line because no flag short of these two applies them.
        *
@@ -247,7 +239,6 @@ export interface LaunchConfigurationInput {
   /** Present for an aboard definition, absent for a builtin type. */
   readonly systemPrompt?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
-  readonly disallowedTools?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
   readonly declaredCommand?: readonly string[] | undefined;
@@ -313,7 +304,6 @@ export function resolveLaunchConfiguration(
     if (input.systemPrompt === undefined) {
       if (
         input.declaredTools !== undefined ||
-        input.disallowedTools !== undefined ||
         input.declaredModel !== undefined ||
         input.declaredEffort !== undefined ||
         input.declaredCommand !== undefined
@@ -378,7 +368,6 @@ export function resolveLaunchConfiguration(
       agentName: input.agentName,
       systemPrompt: input.systemPrompt,
       declaredTools: input.declaredTools,
-      ...(input.disallowedTools === undefined ? {} : { disallowedTools: input.disallowedTools }),
       ...(declaredModel === undefined ? {} : { declaredModel }),
       ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
       ...(declaredCommand === undefined ? {} : { declaredCommand }),
@@ -388,7 +377,6 @@ export function resolveLaunchConfiguration(
   if (
     input.systemPrompt !== undefined ||
     input.declaredTools !== undefined ||
-    input.disallowedTools !== undefined ||
     input.declaredModel !== undefined ||
     input.declaredEffort !== undefined ||
     input.declaredCommand !== undefined
@@ -668,16 +656,14 @@ function definitionArguments(
 }
 
 /**
- * A definition's own denials and the caller's are one flag, so they are one
- * list. Duplicates are dropped rather than repeated, since the same rule twice
- * says nothing more than once.
+ * Deny rules come from one place — `aboard.manager.disallowedTools` — and are
+ * deduplicated, since the same rule twice says nothing more than once. An agent
+ * definition declares no denials of its own: its `tools:` allowlist is the whole
+ * tool authority (spec section 5.1.1), and there is no longer a project-scoped
+ * MCP server whose tools an allowlist could fail to exclude.
  */
-function mergeDisallowedTools(
-  configuration: LaunchConfiguration,
-  requested: readonly string[] | undefined,
-): readonly string[] {
-  const declared = configuration.shape === "agent-defined" ? configuration.disallowedTools ?? [] : [];
-  return [...new Set([...declared, ...(requested ?? [])])];
+function denyRules(requested: readonly string[] | undefined): readonly string[] {
+  return [...new Set(requested ?? [])];
 }
 
 interface PromptPlan {
@@ -894,7 +880,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--session-id",
     request.sessionId,
     ...shapeArguments,
-    ...toolListArguments("--disallowedTools", mergeDisallowedTools(configuration, request.disallowedTools)),
+    ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
     ...permissionArguments(request.permissionMode),
@@ -978,7 +964,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     "--resume",
     request.sessionId,
     ...definition.args,
-    ...toolListArguments("--disallowedTools", mergeDisallowedTools(request.configuration, request.disallowedTools)),
+    ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(request.configuration.declaredModel ?? request.model),
     ...effortArguments(request.configuration.declaredEffort ?? request.effort),
     ...permissionArguments(request.permissionMode),
@@ -1028,7 +1014,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     "--resume",
     request.sessionId,
     ...shapeArguments,
-    ...toolListArguments("--disallowedTools", mergeDisallowedTools(configuration, request.disallowedTools)),
+    ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
     ...permissionArguments(request.permissionMode),

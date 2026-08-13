@@ -18,8 +18,8 @@ export const DISCOVERY_FILE_NAME = "bridge.json";
 
 /**
  * The discovery file lives outside the workspace, in the extension's
- * per-workspace storage. Nothing in the project reads it — hooks and MCP
- * clients receive the port and token through inherited `ABOARD_BRIDGE_*`
+ * per-workspace storage. Nothing in the project reads it — the hooks and the
+ * Manager's CLI receive the port and token through inherited `ABOARD_BRIDGE_*`
  * environment variables — so writing it into the project only leaked a
  * bearer-token file into the user's tree and made `.aboard/` exist before the
  * project was ever initialized. `.vscode/` would be worse: it is routinely

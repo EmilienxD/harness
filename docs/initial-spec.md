@@ -57,7 +57,7 @@ Several design decisions in this document look conservative in isolation and are
 
 | Term | Meaning |
 | :-- | :-- |
-| **Bridge** | HTTP + MCP server running in-process in the VS Code extension host. The sole creator of agents. |
+| **Bridge** | HTTP server running in-process in the VS Code extension host. The sole creator of agents. |
 | **Manager** | The single long-lived Claude Code session the user converses with. Orchestrates; does not implement. |
 | **Worker** | An independent `claude` process in its own VS Code terminal, created by the bridge. |
 | **Automated worker** | A worker that performs a task and returns a result to the Manager. |
@@ -91,7 +91,7 @@ Several design decisions in this document look conservative in isolation and are
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │ BRIDGE (127.0.0.1:<port>, token-authed, loopback only)         │ │
 │  │                                                                │ │
-│  │  MCP endpoint  /mcp        → aboard__* tools for the Manager    │ │
+│  │  CLI endpoint  /cli/*      → the Manager's delegation command   │ │
 │  │  Hook endpoint /hooks/*    → callbacks from every agent         │ │
 │  │  Control API   /terminals  → terminal lifecycle (from prototype)│ │
 │  │                                                                │ │
@@ -122,7 +122,7 @@ The bridge is the heart of the system. It runs **in-process in the extension hos
 **Responsibilities:**
 
 1. Create and track terminals (grown from the `"C:\Users\emb\Desktop\dev\prototypes\board-terminal-bridge1"` prototype).
-2. Expose the `aboard__*` MCP tool surface to the Manager.
+2. Serve the `/cli/*` delegation surface to the Manager, and to nothing else.
 3. Receive hook callbacks from every agent in the system.
 4. Hold the write lease and enforce single-writer.
 5. Mint and record session IDs.
@@ -205,19 +205,9 @@ def guard(expected_types: set[str] | None = None):
 - Hooks that legitimately apply to *all* aboard agents (result reporting, compaction logging) still guard on `ABOARD_AGENT_ID` — they just pass no `expected_types`.
 - The guard is **not** a place for cleverness. Any hook that cannot determine who it is must exit, not guess.
 
-This also allows `.mcp.json` to be **committed with no secrets in it**:
+The same injection is what lets the Manager's delegation command reach the bridge with **no secret written to disk**: `.aboard/scripts/aboard_cli.py` reads `ABOARD_BRIDGE_PORT`, `ABOARD_BRIDGE_TOKEN`, and `ABOARD_AGENT_ID` from its inherited environment, and the bridge answers only when the last of the three is the recorded Manager's (§6).
 
-```jsonc
-{
-  "mcpServers": {
-    "aboard": {
-      "type": "http",
-      "url": "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
-      "headers": { "Authorization": "Bearer ${ABOARD_BRIDGE_TOKEN}" }
-    }
-  }
-}
-```
+> **Superseded.** This section once described a committed `.mcp.json` holding `${ABOARD_BRIDGE_PORT}` placeholders, which registered the bridge as a project MCP server. §6.2 retired it: a project MCP registration loads into every Claude Code session in the workspace — the user's own included — where it collides with their own servers and spends context on tools only the Manager can call. aboard now writes no `.mcp.json` at all, and removes its own entry from one it previously wrote.
 
 ---
 
@@ -240,14 +230,16 @@ This is enforced by the absence of `Edit`, `Write`, Claude Code's `Agent` tool, 
 The Manager's **persona** is a scaffolded agent definition, `.aboard/agents/manager.md` (§9.1), carried onto the command line as `--system-prompt-file` plus `--tools` — never registered under `.claude/agents/`, where every session in the workspace could discover and spawn it. Like every other aboard agent, its **tool set is that file's `tools:` field** (§5.1.1). The shipped orchestration allowlist is:
 
 ```
-mcp__aboard__*, Read, Grep, Glob, Bash, Skill, AskUserQuestion
+Read, Grep, Glob, Bash, Skill, AskUserQuestion
 ```
 
 The user tightens or loosens it by editing the file; the scaffolder preserves locally edited assets, so the change survives upgrades (a Manager restart is still required — the tool set is resolved at launch). An earlier draft kept the list in a `toolPreset` setting with two presets; that was retired in favour of one tool authority per agent, the definition file.
 
-**Critical:** `Agent` is **absent from the tool list**, not merely denied. A `tools:` allowlist controls what enters Claude's context, rather than `--disallowedTools` (which only auto-denies). The Manager delegates visible top-level workers through `mcp__aboard__run_agent`; it cannot create opaque in-process workers.
+**Critical:** `Agent` is **absent from the tool list**, not merely denied. A `tools:` allowlist controls what enters Claude's context, rather than `--disallowedTools` (which only auto-denies). The Manager delegates visible top-level workers by running `aboard agent` through `Bash` (§6.2); it cannot create opaque in-process workers.
 
-**No task tools.** `TaskCreate`, `TaskGet`, `TaskList`, `TaskStop`, `TaskUpdate`, and `TodoWrite` are **deliberately excluded from the list.** They exist to keep an agent on track through a long implementation task, which is exactly the work the Manager never does. They would also invite a category error with the project roadmap, which lives in GitHub (§7.1) and is edited through a dedicated MCP tool (§6.2).
+**`Bash` is the delegation surface, not only a shell.** The Manager's command reaches the bridge through it, which is one more reason the tool list keeps unrestricted `Bash` despite §4.2 — and why the residual write vector it leaves is addressed by launch-time deny rules and the role prompt rather than by removing it.
+
+**No task tools.** `TaskCreate`, `TaskGet`, `TaskList`, `TaskStop`, `TaskUpdate`, and `TodoWrite` are **deliberately excluded from the list.** They exist to keep an agent on track through a long implementation task, which is exactly the work the Manager never does. They would also invite a category error with the project roadmap, which lives in GitHub (§7.1) and is edited through a dedicated command (§6.2).
 
 ### 4.3.1 aboard never writes user permission settings
 
@@ -373,7 +365,7 @@ So there are exactly three launch shapes, and each agent uses exactly one:
 
 **Tool lists use the `--flag=value` form.** `--tools` and `--disallowedTools` are variadic: given as two arguments they swallow every following argument, including the positional launch prompt of §5.1.2. The `=` form binds exactly one value and ends there.
 
-**MCP tools are not filtered by `--tools`.** An MCP server's tools are present in a session whether or not the allowlist names them, so an allowlist that omits them is not a denial. Every launch whose definition does not declare `mcp__aboard__*` therefore passes `--disallowedTools=mcp__aboard__*`, which removes the bridge's tools from the session entirely; the Manager is the only agent that declares them.
+**A definition declares no denials.** `tools:` is the whole tool authority, and `--disallowedTools` carries `aboard.manager.disallowedTools` and nothing else. An earlier design had every non-Manager launch pass `--disallowedTools=mcp__aboard__*`, because an MCP server's tools are present in a session whether or not the allowlist names them — so an allowlist that omitted them was not a denial. §6 retired the MCP server, so there is nothing left for an allowlist to fail to exclude.
 
 **Consequence for the write lease.** §8.1 derives write-capability by reading the definition's `tools:` frontmatter, and that same field becomes the `--tools` flag. One source feeds both, so the derivation describes the session the command line actually produces.
 
@@ -479,7 +471,7 @@ Session IDs are recorded in `.aboard/runtime/fleet.json` alongside agent type, i
 
 Perform a task and return a result. **Never typed into.** Their input is the launch prompt; their output is their final message. The always-automated types are `webresearcher`, `implementer`, and `pr-doctor-afk`; the built-in `Explore` and `general-purpose` types are automated when launched without `interactive: true`.
 
-**The prompt is mandatory.** An automated worker with no first message would sit at an empty TUI forever, and §5.1.3 forbids the only mechanism that could rescue it. `aboard__run_agent` therefore requires `prompt` in both delivery modes.
+**The prompt is mandatory.** An automated worker with no first message would sit at an empty TUI forever, and §5.1.3 forbids the only mechanism that could rescue it. `aboard agent` therefore requires `--prompt` in both delivery modes.
 
 **The prompt must be self-sufficient (§5.8).** It carries the issue body inline, not a reference to fetch.
 
@@ -495,7 +487,7 @@ The bridge focuses the terminal on creation. The user works directly with the ag
 
 | Path | Prompt |
 | :-- | :-- |
-| **Manager calls `aboard__run_agent` with `interactive: true`** | Usually supplies one — it has been talking to the user and knows the topic. Still optional. |
+| **Manager runs `aboard agent --interactive`** | Usually supplies one — it has been talking to the user and knows the topic. Still optional. |
 | **User runs the skill directly (§6.3)** | Usually **none**. The user is about to switch terminals and type the real message themselves. |
 
 When no prompt is given, `claude` launches with no positional argument and opens at an empty prompt, ready for the user. This is the correct behaviour, not a degraded one — the user asked to go talk to an agent, not to have the Manager guess what they were going to say.
@@ -523,7 +515,7 @@ POST /hooks/stop
 { "agentId": "...", "sessionId": "...", "lastMessage": "...", "cwd": "..." }
 ```
 
-The bridge then classifies the outcome (§8.1), releases the lease if held, updates the tree, and either fulfils a blocking `run_agent` call or files the result in a mailbox for the Manager's `Stop` hook to drain.
+The bridge then classifies the outcome (§8.1), releases the lease if held, updates the tree, and either fulfils a blocking `aboard agent` call or files the result in a mailbox for the Manager's `Stop` hook to drain.
 
 **Note on subagent frontmatter:** per `hooks.md`, `Stop` hooks declared in a subagent's frontmatter are automatically converted to `SubagentStop`. aboard's workers are top-level sessions, not subagents, so their `Stop` hooks fire as `Stop` — but any hook we place in an agent definition intended for *sub-sub-agent* use must account for this conversion.
 
@@ -549,7 +541,7 @@ claude --session-id <uuid> ["optional first message"]
 **Two launch paths, mirroring §6.3:**
 
 - **The user runs the skill** (`/raw`, or whatever it ends up named) in the Manager's terminal. Hook-backed, zero tool calls, usually with no first message.
-- **The Manager calls `aboard__run_agent` with type `raw`** (interactive, coerced if it forgets the flag). Useful when the Manager concludes the right move is "this needs a human poking at it directly" rather than a structured task.
+- **The Manager runs `aboard agent --type raw`** (interactive, coerced if it forgets the flag). Useful when the Manager concludes the right move is "this needs a human poking at it directly" rather than a structured task.
 
 **Why the Manager is told either way.** The raw agent is outside the workflow, but the *knowledge that the user went off to use one* is inside it. A Manager that knows the user has spent twenty minutes in a raw session on the auth module will not confidently brief them on a stale picture of the auth module — and it may sensibly ask whether that work should become an issue. **Being outside the workflow is not the same as being invisible to it.**
 
@@ -592,94 +584,106 @@ The bridge already has to be involved to create the terminal. It can make those 
 
 ### 6.1 Design intent
 
-The delegation tool description should mirror the structure *and the wording* of Claude Code's internal `Agent` tool definition (available to the user at `prompt-engineering/claude-code-prompts/default-tools.json`, `tools[0]`), so the Manager brings the same priors to `aboard__run_agent` that it would to `Agent`. That includes its sections — the agent-type roster, "When not to use", usage notes, and "Writing the prompt" — and its parameter names, notably `run_in_background`.
+> **Reshaped.** The surface was an HTTP MCP server registered in the project's `.mcp.json` and served at `/mcp`, whose five tools reached the Manager as `mcp__aboard__*`. It is now a **command** — `.aboard/scripts/aboard_cli.py`, served under `/cli/*` — that the Manager runs through `Bash`. Everything below describes the same five actions with the same arguments, semantics, and refusals; only the calling convention changed. The tool descriptions became the corresponding sections of `.aboard/agents/manager.md`.
+>
+> **Why.** A `.mcp.json` registration is *project*-scoped, not agent-scoped. It loaded into every Claude Code session in the workspace — every worker, every raw terminal, and any `claude` the user started by hand — where it sat among the MCP servers they had configured themselves, and where each session paid for five tool schemas in its context window whether or not it could act on them. The bridge had to spend `--disallowedTools=mcp__aboard__*` on every non-Manager launch just to undo the registration's reach. A command has no registration and therefore no reach: it costs an unrelated session nothing, because nothing tells that session it exists.
+>
+> **Isolation is three independent facts**, and all three are load-bearing:
+>
+> 1. The command is documented in `.aboard/agents/manager.md` and in no other prompt.
+> 2. `ABOARD_CLI` — the script's absolute path — is exported into the Manager's terminal and no other (§3.3).
+> 3. The bridge compares every `/cli/*` request's `ABOARD_AGENT_ID` against the recorded Manager's and refuses anything else, so a worker that discovered the script still cannot launch an agent with it.
+>
+> The third is what `--disallowedTools` used to approximate, and is strictly stronger: the deny rule kept the tools out of a worker's *context*, but left the endpoint open to anything holding the bridge token — which every aboard terminal has.
 
-**One launch tool with two flags, not three tools.** The earlier design used a tool per launch shape on the theory that what the Manager does *next* differs in each case. In practice the descriptions were near-identical, the Manager selected between them unreliably, and every shared instruction was paid for twice — a cost that grows as the descriptions earn the detail they need.
+**Invocation.** `uv run --no-project "$ABOARD_CLI" <command> [options]`. The script prints JSON on success; on refusal it prints the bridge's reason and exits non-zero. Long text — a launch prompt, a roadmap body — is passed as `-` and piped in on stdin, which is how a multi-line document reaches the bridge without being escaped onto a command line. `uv` is already a hard dependency (§3.4, §5.1.5): every hook and every launch wrapper runs through it.
+
+**The command's documentation should mirror** the structure *and the wording* of Claude Code's internal `Agent` tool definition (available to the user at `prompt-engineering/claude-code-prompts/default-tools.json`, `tools[0]`), so the Manager brings the same priors to `aboard agent` that it would to `Agent`. That includes its sections — the agent-type roster, "When not to use", usage notes, and "Writing the prompt".
+
+**One launch command with two flags, not three commands.** The earlier design used a tool per launch shape on the theory that what the Manager does *next* differs in each case. In practice the descriptions were near-identical, the Manager selected between them unreliably, and every shared instruction was paid for twice — a cost that grows as the descriptions earn the detail they need.
 
 Both flags are kept because each carries information no other argument supplies:
 
-- `interactive` decides whether a result exists **at all**. It is not derivable from `type`: the general-purpose worker types are launchable in either mode, and only the caller knows whether this one is the user's to drive.
-- `run_in_background` decides **when** an automated result arrives, exactly as `Agent` models it.
+- `--interactive` decides whether a result exists **at all**. It is not derivable from `--type`: the general-purpose worker types are launchable in either mode, and only the caller knows whether this one is the user's to drive.
+- `--background` decides **when** an automated result arrives, exactly as `Agent`'s `run_in_background` models it.
 
-### 6.2 The tools
+### 6.2 The commands
 
-#### `aboard__run_agent`
+#### `aboard agent`
 
 The single launch surface.
 
-> **Narrowed by [`auto-implementation.md`](./auto-implementation.md) §2.** `implementer`, `pr-doctor-afk`, and `pr-doctor-hitl` are **not** launchable through this tool. They belong to the auto-run engine and to `review_pr`; the Manager reaches implementation work through `start_auto_run`, never by launching an implementer itself. `webresearcher` is launchable here and is always automated: it returns current, cited external research to the Manager.
+> **Narrowed by [`auto-implementation.md`](./auto-implementation.md) §2.** `implementer`, `pr-doctor-afk`, and `pr-doctor-hitl` are **not** launchable through this command. They belong to the auto-run engine and to `aboard review`; the Manager reaches implementation work through `aboard auto`, never by launching an implementer itself. `webresearcher` is launchable here and is always automated: it returns current, cited external research to the Manager.
 
-```jsonc
-{
-  "type": "string",           // agent type; "manager" is never launchable
-  "prompt": "string",         // REQUIRED unless interactive; the first user turn
-  "description": "string",    // 3-6 words, shown in the tree
-  "issue": 123,               // optional; binds the worker and triggers
-                              // prompt resolution (§5.8)
-  "interactive": false,       // optional; default false
-  "run_in_background": false  // optional; default false (foreground)
-}
+```
+--type <type>                 agent type; "manager" is never launchable
+--prompt <text|->             REQUIRED unless --interactive; the first user turn.
+                              `-` reads it from stdin, for a prompt too long to quote
+--description "<3-6 words>"   shown in the tree
+--issue <n>                   optional; binds the worker and triggers
+                              prompt resolution (§5.8)
+--interactive                 optional; default off
+--background                  optional; default off (foreground)
 ```
 
-**Automated** (`interactive` absent or false). The worker works alone and reports back. Foreground blocks until it finishes and returns its final message as the `tool_result`; `run_in_background: true` returns immediately and the result is delivered at a later turn boundary by the Manager's `Stop` hook (§6.4). Returns `{ agentId, sessionId, status, result, telemetry }` or `{ agentId, sessionId, terminalId, status: "running" }` respectively. Foreground use requires `ABOARD_MCP_TIMEOUT` to be generous (§8.5).
+**Automated** (`--interactive` absent). The worker works alone and reports back. Foreground blocks the command until it finishes and prints its final message; `--background` returns immediately and the result is delivered at a later turn boundary by the Manager's `Stop` hook (§6.4). Prints `{ agentId, sessionId, status, result, telemetry }` or `{ agentId, sessionId, terminalId, status: "running" }` respectively. Foreground use requires a generous Bash `timeout` (§8.5).
 
-**Interactive** (`interactive: true`). Focuses the terminal, hands it to the user, and returns handoff instructions. **No result is ever expected.** Returns `{ agentId, sessionId, terminalId, handoff: "..." }`.
+**Interactive** (`--interactive`). Focuses the terminal, hands it to the user, and prints handoff instructions. **No result is ever expected.** Prints `{ agentId, sessionId, terminalId, handoff: "..." }`.
 
-`prompt` is **required for an automated launch** (§5.3) and **optional for an interactive one** (§5.4), where omitting it launches `claude` with no positional argument and leaves the user at a fresh prompt to type their own opening message. When `issue` is present the bridge resolves the issue and its parent spec and merges them into the launch prompt, so the Manager's `prompt` can be short and directive rather than a copy of the issue body.
+`--prompt` is **required for an automated launch** (§5.3) and **optional for an interactive one** (§5.4), where omitting it launches `claude` with no positional argument and leaves the user at a fresh prompt to type their own opening message. When `--issue` is present the bridge resolves the issue and its parent spec and merges them into the launch prompt, so the Manager's prompt can be short and directive rather than a copy of the issue body.
 
 **Two illegal combinations, handled differently, because only one of them is ambiguous:**
 
 | Call | Bridge behaviour |
 | :-- | :-- |
-| An interactive-only type (`brainstormer`, `raw`) without `interactive: true` | **Coerced.** The launch has exactly one valid reading — those types exist only to be handed to the user, and their `Stop` hook is guarded off — so the bridge launches interactively and returns a `notice` telling the Manager no result is coming and to continue with the user. Rejecting would cost a round trip whose only possible retry is this same launch. |
-| An automated launch with no `prompt` | **Rejected.** There is no valid reading to coerce to: the worker would sit at an empty TUI forever and §5.1.3 forbids the only mechanism that could rescue it. |
-| `webresearcher` with `interactive: true` | **Rejected.** The role has no interactive contract or user-question tool; its only valid output is a result returned to the Manager. |
+| An interactive-only type (`brainstormer`, `raw`) without `--interactive` | **Coerced.** The launch has exactly one valid reading — those types exist only to be handed to the user, and their `Stop` hook is guarded off — so the bridge launches interactively and returns a `notice` telling the Manager no result is coming and to continue with the user. Rejecting would cost a round trip whose only possible retry is this same launch. |
+| An automated launch with no `--prompt` | **Rejected.** There is no valid reading to coerce to: the worker would sit at an empty TUI forever and §5.1.3 forbids the only mechanism that could rescue it. |
+| `webresearcher` with `--interactive` | **Rejected.** The role has no interactive contract or user-question tool; its only valid output is a result returned to the Manager. |
 
-`run_in_background` alongside `interactive: true` is meaningless rather than ambiguous; it is ignored and noted in the result.
+`--background` alongside `--interactive` is meaningless rather than ambiguous; it is ignored and noted in the result.
 
-**Backgrounding and linearity are orthogonal.** `run_in_background` on a write-capable type does not violate single-writer; it means the Manager stays conversational while the single writer works. This is expected to be the dominant mode for `afk` work.
+**Backgrounding and linearity are orthogonal.** `--background` on a write-capable type does not violate single-writer; it means the Manager stays conversational while the single writer works. This is expected to be the dominant mode for `afk` work.
 
-#### `aboard__start_auto_run`
+#### `aboard auto`
 
 Starts the automatic implementation workflow over the oldest open `spec` issue. Defined in full by
-[`auto-implementation.md`](./auto-implementation.md) §3.
-
-```jsonc
-{}
-```
+[`auto-implementation.md`](./auto-implementation.md) §3. Takes no options.
 
 **Non-blocking.** It returns the resolved plan — spec, ordered issues with dispositions, skips with
 reasons — and the run proceeds independently of the Manager's turn, outliving it if necessary.
 Progress arrives one bounded line at a time through the `UserPromptSubmit` notification drain, not as
 a tool result. Also reachable as `/auto` and as a panel command.
 
-#### TODO tools
+#### `aboard todo`
 
-The project TODO is a GitHub issue (§7.1), and these are how it is read and written. They exist so no agent is ever tempted to reach for session-task tools (§4.3) or to hand-roll `gh` calls against it.
+The project TODO is a GitHub issue (§7.1), and this is how it is written. It exists so no agent is ever tempted to reach for session-task tools (§4.3) or to hand-roll `gh` calls against it.
 
-> **Superseded.** `aboard__get_todo` no longer exists. The TODO body is delivered inline in the `SessionStart` briefing (§4.5), so the read tool only ever bought a round trip for context the Manager already held. Writing still needs a tool.
+> **Superseded.** There is no read command. The TODO body is delivered inline in the `SessionStart` briefing (§4.5), so a fetch only ever bought a round trip for context the Manager already held. Writing still needs a command.
 
-**`aboard__update_todo`** — replaces the TODO body. The caller writes the full replacement, reading the current roadmap from the session-start briefing rather than fetching it.
+It replaces the TODO body. The caller writes the full replacement, reading the current roadmap from the session-start briefing rather than fetching it.
 
-```jsonc
-{ "body": "string", "reason": "string" }  // reason is logged, not stored in the issue
+```
+--body <text|->   full replacement body; `-` reads it from stdin, which is
+                  how a multi-line roadmap is passed
+--reason <text>   logged for the user, not stored in the issue
 ```
 
 The bridge resolves the TODO issue number itself (by the `todo` label, cached in `.aboard/runtime/`), so no caller ever needs to know or pass it. A missing TODO issue is created on first write.
 
-#### `aboard__review_pr`
+#### `aboard review`
 
-> **Reframed by [`auto-implementation.md`](./auto-implementation.md) §9.** It no longer launches a reviewer. It reopens the session that owns the latest open PR — focusing that terminal if it is live, resuming it if closed — and hands it to the user. It takes no arguments and returns no result.
+> **Reframed by [`auto-implementation.md`](./auto-implementation.md) §9.** It no longer launches a reviewer. It reopens the session that owns the latest open PR — focusing that terminal if it is live, resuming it if closed — and hands it to the user. It returns no result.
 
 On-demand review (§7.5). The **only** automatic-review path is the config setting, which ships off.
 
-```jsonc
-{}
+```
+--pr <n>         optional; targets a specific pull request instead of the latest open one
+--focus <text>   optional; what the user wants looked at
 ```
 
-#### `aboard__release_lease`
+#### `aboard release-lease`
 
-Escape hatch. Force-releases a stuck lease with a reason. Logged conspicuously; the extension also offers this as a command, because a lease that cannot be broken is worse than no lease.
+Escape hatch. Force-releases a stuck lease with a `--reason`. Logged conspicuously; the extension also offers this as a command, because a lease that cannot be broken is worse than no lease.
 
 ### 6.3 User-initiated actions are hooks, not tool calls
 
@@ -758,8 +762,8 @@ Two modes, matching Claude Code's own `run_in_background` axis:
 
 | Mode | Manager behaviour | Delivery |
 | :-- | :-- | :-- |
-| `run_agent` (default) | Blocks inside the tool call | `tool_result` |
-| `run_agent` with `run_in_background: true` | Continues immediately | Drained by `Stop` hook |
+| `aboard agent` (default) | Blocks inside the Bash call | printed result |
+| `aboard agent --background` | Continues immediately | Drained by `Stop` hook |
 
 **The Manager's `Stop` hook** is the mechanism for background delivery *and* the safety net that prevents the Manager going idle on live work. It is a **Python command hook** that polls the bridge and sleeps (per the user's design):
 
@@ -787,7 +791,7 @@ An earlier draft put this in a committed `.aboard/TODO.md`, on the reasoning tha
 
 | | Committed file | GitHub issue |
 | :-- | :-- | :-- |
-| Editing by an agent | Needs `Edit`/`Write` → makes the editor **write-capable** → takes the write lease | An MCP call. No lease, no file access |
+| Editing by an agent | Needs `Edit`/`Write` → makes the editor **write-capable** → takes the write lease | One `aboard todo` call. No lease, no file access |
 | Editing by the user | Open the repo, edit, commit, push | Open the issue in a browser or the app, type |
 | Editing from a phone | No | Yes |
 | Visible without a clone | No | Yes |
@@ -798,7 +802,7 @@ The lease row is the decisive one. A Manager that edits `.aboard/TODO.md` needs 
 
 It also puts the roadmap in the same place as every other durable fact in this system (§1.4.4), which is the point of having chosen GitHub at all.
 
-**Reads arrive in the session-start briefing and writes go through `aboard__update_todo`** (§6.2), never raw `gh`. The bridge resolves the issue by label and caches its number in `.aboard/runtime/`, so no agent handles an identifier.
+**Reads arrive in the session-start briefing and writes go through `aboard todo`** (§6.2), never raw `gh`. The bridge resolves the issue by label and caches its number in `.aboard/runtime/`, so no agent handles an identifier.
 
 The cached number is a *hint, not the truth*: GitHub remains the source, and aboard revalidates the record on use. If several open issues carry the `todo` label — someone hand-labelled a second roadmap — the bridge never errors on the ambiguity: a read adopts the newest carrier, and a write mints a fresh issue, records its number, and removes the label from the older carriers so discovery converges again. If the recorded issue has been deleted or closed, the record is discarded: the next read reports "no roadmap" and the next write recreates the issue, exactly as on first write.
 
@@ -865,7 +869,7 @@ This collapses two concepts into one primitive. There is no separate approval st
 
    Splitting this into three steps is the point: **the user reviews the decomposition before it exists on GitHub.** A bad split discovered after publication is a cleanup job; discovered at the draft stage it is an edit. Each issue is sized for exactly one agent and labelled `afk` or `hitl`.
 
-5. **Implement.** The user starts an auto-run (`/auto`), or the Manager does via `start_auto_run`. The extension walks the spec's issues one at a time, creating each branch, launching an implementation agent, and committing and opening the PR itself. **The bridge resolves the issue and its parent spec into the launch prompt** (§5.8), so each agent starts with its full contract already in hand rather than fetching it. See [`auto-implementation.md`](./auto-implementation.md).
+5. **Implement.** The user starts an auto-run (`/auto`), or the Manager does via `aboard auto`. The extension walks the spec's issues one at a time, creating each branch, launching an implementation agent, and committing and opening the PR itself. **The bridge resolves the issue and its parent spec into the launch prompt** (§5.8), so each agent starts with its full contract already in hand rather than fetching it. See [`auto-implementation.md`](./auto-implementation.md).
 6. **Land.** `afk` is merged by the extension; `hitl` waits for the user's merge.
 7. **Repeat.** Via hooks and the bridge, the Manager always knows exactly what has completed and can recommend the next action.
 
@@ -875,7 +879,7 @@ This collapses two concepts into one primitive. There is no separate approval st
 
 **Implementation lands as branch + PR per implementation issue.** Chosen because review comments become durable, `gh`-readable artifacts that a fix agent retrieves by exactly the same mechanism it retrieves the spec — and because the Manager's "what needs attention" becomes one `gh` call rather than a reconstruction from session history. Branches are sequential (single-writer), so there are no worktrees and no merge conflicts.
 
-> **Superseded by [`auto-implementation.md`](./auto-implementation.md) §7 and §9.** The invariant below — review never runs automatically unless the user opts in — is unchanged and still binding. What changed is its shape: the tri-state `aboard.review.autoReview` is replaced by the boolean `aboard.autoRun.review`, the read-only reviewer and the separate fixer are replaced by the two **pr-doctor** agents that review *and* fix in one context, and `review_pr` is reframed as "reopen the session for the latest open PR" rather than "launch a reviewer". The paragraphs below describe the original design and are kept for the reasoning, not the mechanism.
+> **Superseded by [`auto-implementation.md`](./auto-implementation.md) §7 and §9.** The invariant below — review never runs automatically unless the user opts in — is unchanged and still binding. What changed is its shape: the tri-state `aboard.review.autoReview` is replaced by the boolean `aboard.autoRun.review`, the read-only reviewer and the separate fixer are replaced by the two **pr-doctor** agents that review *and* fix in one context, and `aboard review` is reframed as "reopen the session for the latest open PR" rather than "launch a reviewer". The paragraphs below describe the original design and are kept for the reasoning, not the mechanism.
 
 **Review never runs automatically.**
 
@@ -885,7 +889,7 @@ aboard.review.autoReview: "never" | "hitl" | "all"     // ships as "never"
 
 This is a **default, not a recommendation** — nothing in the system may re-derive it. The whole workflow already costs significant LLM API spend, and review is the user's call. The `"hitl"` and `"all"` values exist for a user who deliberately opts in.
 
-**On-demand review** is the only path that runs by default: `aboard__review_pr`, or a button on the PR in the extension UI. A read-only reviewer agent reviews the diff against the spec issue and posts findings as **PR review comments** on specific lines. The user triages — dismisses noise, adds their own. The Manager then launches a fix agent against the surviving threads.
+**On-demand review** is the only path that runs by default: `aboard review`, or a button on the PR in the extension UI. A read-only reviewer agent reviews the diff against the spec issue and posts findings as **PR review comments** on specific lines. The user triages — dismisses noise, adds their own. The Manager then launches a fix agent against the surviving threads.
 
 **Why findings go to GitHub rather than back to the Manager:** they survive session loss, they are retrievable by a fix agent via `gh`, and the user can reply or dismiss inline. A structured report into the Manager's context evaporates when that context does.
 
@@ -903,7 +907,7 @@ This is a **default, not a recommendation** — nothing in the system may re-der
 
 This is enforced **structurally**, not by prompting. The bridge is the only path by which any agent is created (§1.4.5), so it holds a **single write lease on the workspace**:
 
-- `run_agent` for a **write-capable** type **fails immediately** if the lease is held, returning who holds it and since when.
+- `aboard agent` for a **write-capable** type **fails immediately** if the lease is held, returning who holds it and since when.
 - The Manager surfaces that to the user rather than queuing. With "quality over speed", a task that waits 20 minutes for a lease is a task whose premise may have gone stale by the time it runs.
 - **Read-only types are exempt** and stay concurrent. `webresearcher` and automated built-in `Explore` workers can run beside the writer because they cannot modify the workspace.
 
@@ -986,7 +990,7 @@ Hook timeouts are configurable per-hook via the `timeout` field, and the default
 | `SessionStart` | 600s | 120s | Briefing assembly with `gh` calls |
 | `PostCompact` | 600s | default | Logging only |
 
-A foreground `aboard__run_agent` blocks for as long as a worker runs, so the MCP client timeout must match the Manager `Stop` value.
+A foreground `aboard agent` blocks for as long as a worker runs. It reaches the model through the Bash tool, whose ceiling is ten minutes, so the Manager's terminal is given `BASH_MAX_TIMEOUT_MS` at the Manager `Stop` value and its prompt tells it to pass an explicit `timeout` on such a launch. `BASH_DEFAULT_TIMEOUT_MS` is deliberately left alone: an ordinary hung command should still fail fast.
 
 ### 8.6 Settings hot-reload
 
@@ -1010,9 +1014,9 @@ Each definition declares a `tools:` allowlist, model, optional `effort:`, descri
 Launched as the main session agent, its definition carried on the command line rather than registered as a discoverable subagent (§5.1.1). aboard scaffolds no `CLAUDE.md`; that file belongs to the user and would leak a Manager persona into workers and hand-started sessions.
 
 - **Model:** opus. **Effort:** medium.
-- **Tools:** `mcp__aboard__*`, `Read`, `Grep`, `Glob`, `Bash`, `Skill`, `AskUserQuestion`.
+- **Tools:** `Read`, `Grep`, `Glob`, `Bash`, `Skill`, `AskUserQuestion`. The delegation surface is the `aboard` command, run through `Bash`.
 - **Capability derivation:** technically write-capable because `Bash` is unrestricted, but explicitly exempt from the write lease (§8.1).
-- **Contract:** hold the project's through-line, challenge questionable requests, recommend what should happen next, and delegate approved work to visible workers. Treat aboard MCP tools as first-class harness tools.
+- **Contract:** hold the project's through-line, challenge questionable requests, recommend what should happen next, and delegate approved work to visible workers. Treat the `aboard` command as a first-class harness tool.
 - **Depth limit:** use at most three direct codebase queries for shallow orientation; delegate broader exploration to `Explore`. Never implement, edit code, or read large files.
 - **Recency rule:** when a recommendation depends on current versions, pricing, providers, deprecations, or other cutoff-sensitive facts, launch `webresearcher` and ground the recommendation in its result.
 - **Context rule:** use the `<aboard-state>` briefing without re-fetching facts it already carries, but re-check any stale snapshot fact immediately before acting on it.
@@ -1110,7 +1114,7 @@ aboard **integrates** these — invokes them, registers them, ships them alongsi
 
 | Skill | Why aboard owns it |
 | :-- | :-- |
-| `update-todo` | Operates on the TODO issue via `aboard__update_todo`. Meaningless outside aboard. |
+| `update-todo` | Operates on the TODO issue via `aboard todo`. Meaningless outside aboard. |
 | `brainstorm` | Hook-backed launch of an aboard interactive worker. Meaningless outside aboard. |
 | `raw` | Hook-backed launch of an unconstrained aboard interactive worker. Meaningless outside aboard. |
 | `done` | Hook-backed closure of the invoking aboard terminal. Meaningless outside aboard. |
@@ -1148,7 +1152,7 @@ The scaffolder therefore **never writes under `.claude/skills/<user-owned-skill>
 | `to-spec-draft-issue` | **user** | user, in brainstormer | The same synthesis, drafted as a GitHub issue |
 | `grill-me` | **user** | user, in brainstormer | One-question-at-a-time interviewing, each with a recommended answer |
 | `commit` | **user** | user | Commit-message quality; already uses the exit-2 pattern of §6.3.1 |
-| `update-todo` | **aboard** | user, in Manager | Evolve the TODO issue via `aboard__update_todo` |
+| `update-todo` | **aboard** | user, in Manager | Evolve the TODO issue via `aboard todo` |
 | `brainstorm` | **aboard** | user, in Manager | Hook-backed interactive-agent launch (§6.3) |
 | `raw` | **aboard** | user, in Manager | Hook-backed unconstrained interactive-agent launch (§5.7) |
 | `done` | **aboard** | user, in any aboard terminal | Hook-backed terminal closure (§6.3) |
@@ -1178,7 +1182,6 @@ An extension command scaffolds project assets:
                    commit                           (user-owned: installed by
                                                      command, never shipped, §10.1)
   settings.json    HOOK REGISTRATION ONLY
-.mcp.json          bridge MCP registration (no secrets)
 .aboard/
   runtime/         gitignored: bridge.json, manager.json, fleet.json,
                    prompts/, events
@@ -1201,7 +1204,7 @@ The extension **owns the files it wrote**, versions them, can upgrade them, and 
 | :-- | :-- | :-- |
 | Extension | **TypeScript**, esbuild bundle | Types across the bridge protocol catch drift between extension and hooks — the protocol will have a dozen message shapes |
 | Repo layout | **Single repo**, no monorepo tooling | Right size for the project; workspaces add setup without benefit yet |
-| Bridge + MCP | **In-process** in the extension host, streamable HTTP | Direct VS Code API access, shared lifecycle, no IPC |
+| Bridge | **In-process** in the extension host, loopback HTTP | Direct VS Code API access, shared lifecycle, no IPC |
 | Hooks | **Python** command hooks | Hand-debuggable and hand-editable; the user's machines have `uv`. The `type: "http"` alternative would remove the interpreter dependency but costs inspectability. **Every script opens with the §3.4 self-guard** — hooks are project-scoped, not agent-scoped |
 | Terminals | `window.createTerminal()` | Real PTY/conpty. `vscode.Pseudoterminal` cannot render a real TUI |
 | UI | **Native TreeView + status bar** | Cheap, fast, native theming, click-to-focus. Webview deferred until telemetry outgrows it |
@@ -1253,7 +1256,6 @@ Present: `README.md`, `settings.md`, `skills.md`, `hooks.md`, `tools-reference.m
 
 - `cli-reference.md` — exact `--tools`, `--session-id`, `--agent`, `--resume`, `--permission-mode` semantics
 - `sub-agents.md` — full agent frontmatter reference
-- `mcp.md` — HTTP MCP server registration and `.mcp.json` schema
 - `headless.md` — `-p` behaviour, exit codes
 - `permissions.md` — rule format, read-only command set, working directories
 
@@ -1282,7 +1284,7 @@ For quick reference, and to prevent silent re-litigation:
 
 | # | Decision | Consequence if reversed |
 | :-- | :-- | :-- |
-| 1 | `tools:` allowlist omits `Agent`; MCP replaces it | Manager reaches for in-process sub-agents; all visibility lost |
+| 1 | `tools:` allowlist omits `Agent`; the `aboard` command replaces it | Manager reaches for in-process sub-agents; all visibility lost |
 | 2 | Bridge mints `--session-id` | No Manager resume; no durable fleet history |
 | 3 | Bridge is the only creator of agents | Fleet state becomes unreliable; lease unenforceable |
 | 4 | Env injection carries port + token + identity | Multi-window breaks; hooks need heuristic correlation |

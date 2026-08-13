@@ -19,7 +19,7 @@ import { sessionIsResumable } from "./claude/sessions.js";
 import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
-import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
+import { MANAGER_CLI_SCRIPT, readScaffoldState, scaffoldProject } from "./scaffold/project.js";
 import { createVendoredSkillInstaller } from "./scaffold/vendored.js";
 import { basename, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
@@ -39,7 +39,7 @@ import {
 import { FileFleetStore, FileTodoNumberStore, PersistOnChange } from "./runtime/persistence.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
-import { createMcpHandler } from "./bridge/mcp.js";
+import { createCliHandler } from "./bridge/cli.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
 import {
   ManagerBriefings,
@@ -59,7 +59,7 @@ import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessi
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
-import { ABOARD_MCP_TOOLS, agentDefinitionPath, declaresAboardMcpTools, parseAgentDefinition } from "./scaffold/agent-definition.js";
+import { agentDefinitionPath, parseAgentDefinition } from "./scaffold/agent-definition.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
@@ -204,7 +204,6 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
       agentName: type,
       systemPrompt: result.value.prompt,
       declaredTools: result.value.tools,
-      ...(declaresAboardMcpTools(result.value.tools) ? {} : { disallowedTools: [ABOARD_MCP_TOOLS] }),
       declaredModel: result.value.model,
       declaredEffort: result.value.effort,
       declaredCommand: result.value.command,
@@ -250,7 +249,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     host: createVsCodeTerminalHost(),
     environment: () => {
       if (bridgeEnvironment === undefined) throw new Error("Bridge is not ready");
-      return { ...bridgeEnvironment, workspaceRoot };
+      return {
+        ...bridgeEnvironment,
+        workspaceRoot,
+        managerCli: join(workspaceRoot, ...MANAGER_CLI_SCRIPT.split("/")),
+        // A foreground delegation blocks for the worker's whole run, which is
+        // the same bound the Manager's Stop hook waits under.
+        managerBashTimeoutMs: currentConfiguration.managerStopTimeoutSeconds * 1000,
+      };
     },
     terminalIdFactory: () => randomUUID() as TerminalId,
     startupProofs: sessionProofs,
@@ -519,7 +525,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { github, reviews, autoRun }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
+    handler: combineHandlers(createCliHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun } }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
     persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });

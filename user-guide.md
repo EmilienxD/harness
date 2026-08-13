@@ -18,9 +18,8 @@ Phase 2 — Scaffold (5 min, no tokens)
 4. Open the aboard view. Expect a short description of the project and a single "Initialize" button (Command Palette equivalent: "Aboard: Initialize Project"). Expect an info message with created counts, and the view to switch to the ready state offering "Start Manager" and "Reset .aboard/".
 5. Verify in the sandbox:
 - .claude\agents\ has manager.md, brainstormer.md, webresearcher.md, implementer.md, pr-doctor-afk.md, pr-doctor-hitl.md (no explorer.md)
-- .claude\hooks\, .claude\skills\ (7 skills), .mcp.json with ${ABOARD_BRIDGE_PORT} placeholders and no secrets
+- .claude\hooks\, .claude\skills\ (7 skills), .aboard\scripts\aboard_cli.py (the Manager's delegation command; no .mcp.json is written, and an entry from an older aboard is removed from one you already have)
 - .claude\settings.json contains hooks only — no permissions, no autoCompact keys (open it and look)
-- .claude\settings.local.json contains "enabledMcpjsonServers": ["aboard"], so Claude never asks to approve the bridge MCP server
 - .gitignore gained .aboard/runtime/ and .claude/settings.local.json; git status --porcelain does not list .aboard/ or the local settings file
 - .aboard/ now exists and holds scaffold.json plus runtime/ — and no bridge token file
 - On GitHub: a "Project TODO" issue exists with the (auto-created) todo label
@@ -29,14 +28,14 @@ Phase 2 — Scaffold (5 min, no tokens)
 7. Commit the scaffold: git add -A; git commit -m "aboard scaffold"; git push
 Phase 3 — Bridge security probes (2 min, no tokens)
 8. Get the port from Output → aboard or the status bar (the token lives in bridge.json under the extension's per-workspace storage, outside the project — do not paste it anywhere, including to me). Then:
-curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:<port>/mcp      # expect 401
-curl.exe -s -o NUL -w "%{http_code}" -H "Authorization: Bearer wrong" http://127.0.0.1:<port>/mcp   # expect 401
+curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:<port>/cli/agent      # expect 401
+curl.exe -s -o NUL -w "%{http_code}" -H "Authorization: Bearer wrong" http://127.0.0.1:<port>/cli/agent   # expect 401
 Test-NetConnection <your-LAN-IP-from-ipconfig> -Port <port>          # expect TcpTestSucceeded: False
 Phase 4 — Manager smoke $ (5–10 min)
  9. Click "+ New Manager" in the Agents section. On a fresh project it is the only launch button; no dialog should appear. Expect the one-time warning about permission prompts (workers aren't in bypass mode yet) — that's correct, acknowledge it. A Manager terminal opens and the launch buttons are replaced by a single Manager row, which stays pinned above any workers the Manager launches.
-10. If Claude Code asks to approve the aboard MCP server from .mcp.json → approve. (First launch may pause on trust/MCP notices.)
+10. If Claude Code pauses on a folder-trust notice → accept it. Nothing else should need approving: aboard registers no MCP server.
 11. Verify: SessionStart briefing is injected (git branch, GitHub state, fleet, TODO pointer); the fleet tree shows the Manager.
-12. Ask the Manager: "What's the project status?" → expect a briefing-based answer, possibly using aboard__get_todo visibly as a tool call.
+12. Ask the Manager: "What's the project status?" → expect a briefing-based answer straight from the session-start block, with no tool call at all. Then ask it to record a roadmap change: expect one visible Bash call running `uv run --no-project "$ABOARD_CLI" todo …`. In a worker terminal (say the brainstormer from step 15), run the same command by hand: expect it to refuse with "Only the aboard Manager session may orchestrate the fleet".
 13. Close the Manager terminal (bin icon or terminal kill). Expect: the Manager row disappears entirely — no "completed" row — and the empty Agents section falls back to "+ New Manager" above "↻ Resume Manager". Click Resume → no dialog, the same session continues (check .aboard\runtime\manager.json session id is unchanged). Close it again and click "+ New Manager" → a fresh session id is recorded. Later, with workers still listed, kill the Manager again: the tree is no longer empty, so the welcome buttons are gone — confirm both commands are still offered in the section's "..." title menu.
 Phase 5 — Interception & interactive agents $ (10 min)
 14. Now set the permission mode for unattended work: Settings (Ctrl+,) → search aboard → Workers: Permission Mode = bypass. It applies to every agent aboard launches, the Manager included, but only from the next launch: a Manager already running keeps the mode it started with, so kill it and Resume to see `--dangerously-skip-permissions` on its command line. (Before this, ask the Manager to implement something and watch it refuse or note the config; optional.)
@@ -82,4 +81,4 @@ Plus four qualitative answers:
 - (c) Any unexpected permission prompts, TUI stalls, or garbled terminals?
 - (d) Rough wall-clock time and feel of the afk run.
 Cleanup when done: kill all agents from the tree, and optionally gh repo delete aboard-e2e --yes.
-Known non-bugs (don't report): the permission warning firing once; MCP-server approval prompt in the Manager terminal; the aboard-repo window running its own bridge on a different port.
+Known non-bugs (don't report): the permission warning firing once; the aboard-repo window running its own bridge on a different port.

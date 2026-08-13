@@ -147,7 +147,7 @@ export class AutoRunEngine {
 
   /**
    * Starts a run. Returns as soon as the plan is resolved: a multi-issue run
-   * routinely exceeds the foreground MCP timeout, and the run must outlive the
+   * routinely outlasts any single command, and the run must outlive the
    * Manager that triggered it (§3).
    */
   public async start(): Promise<AutoRunStartResult> {

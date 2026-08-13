@@ -12,7 +12,7 @@ import type { TerminalController, TerminalSnapshot } from "../src/claude/termina
 const sessionId = "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId;
 const agentId = "manager-1" as AgentId;
 
-const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
+const MANAGER_TOOLS = ["Read", "Grep", "Glob", "Bash", "Skill"];
 /** The quoted PowerShell form of the two flags every Manager command line carries. */
 const DEFINITION_FLAGS = `--system-prompt-file=.aboard/runtime/agents/manager.md '--tools=${MANAGER_TOOLS.join(",")}'`;
 
