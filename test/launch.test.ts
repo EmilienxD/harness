@@ -665,6 +665,89 @@ test("refuses a launch command that is empty or unrepresentable, and defaults to
   }
 });
 
+test("a definition's command replaces the configured launch command for that agent alone", () => {
+  // The per-agent override of `aboard.launch.claudeCommand`: one agent behind a
+  // provider wrapper while the rest of the fleet keeps the setting. Wrapper
+  // arguments come first and aboard's flags are appended unchanged, exactly as
+  // the setting behaves.
+  const configuration = definition("implementer", IMPLEMENTER_TOOLS, {
+    declaredCommand: ["clauder", "run", "kiro", "--"],
+  });
+  const plan = planLaunch(
+    request({ configuration, command: ["claude"], permissionMode: "default", prompt: "Go." }),
+  );
+  assert.deepEqual(plan.command, ["clauder", "run", "kiro", "--"]);
+  assert.equal(
+    plan.commandLine,
+    `& clauder run kiro -- --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md '--tools=${IMPLEMENTER_TOOLS.join(",")}' Go.`,
+  );
+  // The flags aboard passes are untouched by the override: only the program
+  // in front of them changes.
+  assert.deepEqual(plan.args.slice(0, 2), ["--session-id", sessionId]);
+
+  // An agent that declares nothing still launches on the setting.
+  assert.deepEqual(
+    planLaunch(request({ command: ["openclaude"], prompt: "Go." })).command,
+    ["openclaude"],
+  );
+
+  // `--resume` reads no definition, so the override has to be re-applied by the
+  // planner or a resumed agent would come back on the wrong CLI.
+  assert.deepEqual(
+    planSessionResume({
+      agentId, sessionId, agentType: "implementer", shell: "powershell",
+      permissionMode: "default", configuration, command: ["claude"],
+    }).command,
+    ["clauder", "run", "kiro", "--"],
+  );
+  const manager = planManagerResume({
+    agentId, sessionId, shell: "powershell", permissionMode: "default", command: ["claude"],
+    configuration: definition("manager", MANAGER_TOOLS, { declaredCommand: ["clauder", "run", "kiro", "--"] }),
+  });
+  assert.match(manager.commandLine, new RegExp(`^& clauder run kiro -- --resume ${sessionId} `));
+
+  // The wrapper still owns the outermost program; the override is what it runs.
+  const wrapped = planLaunch(request({
+    configuration, prompt: "Go.", permissionMode: "default",
+    wrapper: { script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py", lockPathFor: () => "C:\\repo\\lock" },
+  }));
+  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' -- clauder run kiro -- --session-id"));
+});
+
+test("a declared command is validated like the setting, and is meaningless without a definition", () => {
+  // `--` is a legal token here — it is how a wrapper ends its own arguments —
+  // while an empty or unquotable one would launch the wrong program.
+  for (const command of [[" "], ['say "hi"'], ["line\nbreak"]]) {
+    assert.throws(
+      () => planLaunch(request({
+        configuration: definition("implementer", IMPLEMENTER_TOOLS, { declaredCommand: command }),
+        prompt: "Go.",
+      })),
+      (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-command",
+      JSON.stringify(command),
+    );
+  }
+  // An empty list is the frontmatter spelling of "no override", like
+  // `model: inherit`, rather than a launch with no program.
+  const empty = definition("implementer", IMPLEMENTER_TOOLS, { declaredCommand: [] });
+  assert.equal("declaredCommand" in empty, false);
+  assert.deepEqual(planLaunch(request({ configuration: empty, command: ["openclaude"], prompt: "Go." })).command, ["openclaude"]);
+
+  // A builtin type has no aboard definition to declare anything from, and a raw
+  // launch has no definition at all.
+  for (const input of [
+    { agentName: "Explore", declaredCommand: ["clauder"] },
+    { declaredCommand: ["clauder"] },
+  ]) {
+    assert.throws(
+      () => resolveLaunchConfiguration(input),
+      (error: unknown) =>
+        error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
+      JSON.stringify(input),
+    );
+  }
+});
+
 test("parses the launch command setting as tokens, from a string or an array", () => {
   const tokens = (value: unknown) => {
     const parsed = parseClaudeCommand(value);

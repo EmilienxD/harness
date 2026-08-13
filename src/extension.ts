@@ -198,6 +198,8 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
     // The whole definition is carried onto the command line: the body as
     // `--system-prompt-file`, `tools:` as `--tools`, and `model:`/`effort:` as
     // their own flags. One file, no second authority (see `LaunchConfiguration`).
+    // `command:` is the one field that shapes the line's *program* rather than
+    // its flags, replacing `aboard.launch.claudeCommand` for this agent alone.
     return resolveLaunchConfiguration({
       agentName: type,
       systemPrompt: result.value.prompt,
@@ -205,6 +207,7 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
       ...(declaresAboardMcpTools(result.value.tools) ? {} : { disallowedTools: [ABOARD_MCP_TOOLS] }),
       declaredModel: result.value.model,
       declaredEffort: result.value.effort,
+      declaredCommand: result.value.command,
     });
   } };
 }

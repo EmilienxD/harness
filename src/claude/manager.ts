@@ -61,6 +61,7 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
     ...(declaresAboardMcpTools(parsed.value.tools) ? {} : { disallowedTools: [ABOARD_MCP_TOOLS] }),
     declaredModel: parsed.value.model,
     declaredEffort: parsed.value.effort,
+    declaredCommand: parsed.value.command,
   });
   if (configuration.shape !== "agent-defined") throw new Error("The Manager definition must resolve to an aboard agent definition");
   return configuration;
@@ -92,9 +93,6 @@ export class ManagerLifecycle {
       ? recorded
       : (this.options.sessionIdFactory ?? (() => randomUUID() as SessionId))();
     const launched = this.options.command?.();
-    // Refuse a launch aboard already knows cannot run, rather than opening a
-    // terminal that will only ever show a shell error.
-    await this.options.preflight?.(launched);
     const command = launched === undefined ? {} : { command: launched };
     const permissionMode = this.options.permissionMode?.() ?? "default";
     // The definition is read on both paths: a resume re-passes every flag the
@@ -107,6 +105,11 @@ export class ManagerLifecycle {
     const wrapper = this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper };
     const shared = { agentId, sessionId, shell: this.options.shell, permissionMode, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper };
     const plan = resumable ? planManagerResume(shared) : planLaunch({ ...shared, agentType: "manager" });
+    // Refuse a launch aboard already knows cannot run, rather than opening a
+    // terminal that will only ever show a shell error. The plan is probed rather
+    // than the setting because manager.md may declare its own `command:`, and
+    // planning is pure — nothing has been created yet.
+    await this.options.preflight?.(plan.command);
     // The command line names this file; a missing one is a refused launch
     // rather than a Manager on Claude Code's default persona.
     if (plan.systemPrompt !== undefined) await this.options.files.write(plan.systemPrompt);

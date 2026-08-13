@@ -207,6 +207,16 @@ export type LaunchConfiguration =
        */
       readonly declaredModel?: string;
       readonly declaredEffort?: EffortLevel;
+      /**
+       * `command:` read from the same definition, in the same token form as
+       * `aboard.launch.claudeCommand`. It replaces the configured launch command
+       * for this agent alone, so one agent can run through a wrapper — a
+       * provider switcher such as `clauder run kiro --` — while the rest of the
+       * fleet keeps the configured default. Absent means "use the setting",
+       * which is the only reason it is optional rather than resolved here: the
+       * setting is read per launch, and baking it in would freeze it.
+       */
+      readonly declaredCommand?: readonly string[];
     }
   /**
    * A builtin type (`general-purpose`, `Explore`). aboard ships no definition
@@ -240,6 +250,7 @@ export interface LaunchConfigurationInput {
   readonly disallowedTools?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
+  readonly declaredCommand?: readonly string[] | undefined;
   readonly tools?: readonly string[] | undefined;
 }
 
@@ -304,7 +315,8 @@ export function resolveLaunchConfiguration(
         input.declaredTools !== undefined ||
         input.disallowedTools !== undefined ||
         input.declaredModel !== undefined ||
-        input.declaredEffort !== undefined
+        input.declaredEffort !== undefined ||
+        input.declaredCommand !== undefined
       ) {
         throw new LaunchPlanError(
           "declared-tools-without-agent",
@@ -352,6 +364,15 @@ export function resolveLaunchConfiguration(
         `Agent definition effort must be one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(input.declaredEffort)}`,
       );
     }
+    // An empty `command:` is the frontmatter spelling of "no override", exactly
+    // as `inherit` is for `model:`; an override that names no program at all
+    // would otherwise launch nothing.
+    const declaredCommand =
+      input.declaredCommand === undefined || input.declaredCommand.length === 0
+        ? undefined
+        : input.declaredCommand.map((token) =>
+            assertFlagValue(token, "invalid-command", "agent definition command token", { allowLeadingDash: true }),
+          );
     return {
       shape: "agent-defined",
       agentName: input.agentName,
@@ -360,6 +381,7 @@ export function resolveLaunchConfiguration(
       ...(input.disallowedTools === undefined ? {} : { disallowedTools: input.disallowedTools }),
       ...(declaredModel === undefined ? {} : { declaredModel }),
       ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
+      ...(declaredCommand === undefined ? {} : { declaredCommand }),
     };
   }
 
@@ -368,7 +390,8 @@ export function resolveLaunchConfiguration(
     input.declaredTools !== undefined ||
     input.disallowedTools !== undefined ||
     input.declaredModel !== undefined ||
-    input.declaredEffort !== undefined
+    input.declaredEffort !== undefined ||
+    input.declaredCommand !== undefined
   ) {
     throw new LaunchPlanError(
       "declared-tools-without-agent",
@@ -448,7 +471,12 @@ export interface LaunchPlan {
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
   readonly shell: ShellKind;
-  /** The launch command tokens (`aboard.launch.claudeCommand`), program first. */
+  /**
+   * The launch command tokens actually used, program first: the definition's
+   * `command:` where it declares one, `aboard.launch.claudeCommand` otherwise.
+   * Preflight probes this rather than the setting, so a per-agent override is
+   * verified as the command that will really run.
+   */
   readonly command: readonly string[];
   readonly args: readonly string[];
   readonly commandLine: string;
@@ -522,13 +550,20 @@ function permissionArguments(mode: WorkerPermissionMode): readonly string[] {
   }
 }
 
+/**
+ * A leading `-` normally means the value was mistaken for a flag and would be
+ * parsed as one. A launch command's tokens are the exception: `--` is how a
+ * wrapper separates its own arguments from Claude Code's (`clauder run kiro --`),
+ * so there the check is emptiness alone.
+ */
 function assertFlagValue(
   value: string,
   code: LaunchPlanErrorCode,
   description: string,
+  options: { readonly allowLeadingDash?: boolean } = {},
 ): string {
   const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.startsWith("-")) {
+  if (trimmed.length === 0 || (trimmed.startsWith("-") && options.allowLeadingDash !== true)) {
     throw new LaunchPlanError(code, `Invalid ${description}: ${JSON.stringify(value)}`);
   }
   return trimmed;
@@ -683,7 +718,28 @@ function planPrompt(
   };
 }
 
-function commonPreconditions(request: CommonPlanRequest): {
+/**
+ * The command tokens this launch actually runs. A definition's `command:` wins
+ * over `aboard.launch.claudeCommand`, for the same reason its `model:` and
+ * `effort:` do: it is the agent's own declaration, and the setting is the
+ * fleet-wide default for the launches that declare nothing. `--resume` reads no
+ * definition, so a resumed session gets the override re-applied here exactly as
+ * it gets `--system-prompt-file` and `--tools` re-passed.
+ */
+function effectiveCommand(
+  configuration: LaunchConfiguration,
+  configured: readonly string[] | undefined,
+): readonly string[] {
+  if (configuration.shape === "agent-defined" && configuration.declaredCommand !== undefined) {
+    return configuration.declaredCommand;
+  }
+  return configured === undefined || configured.length === 0 ? [...DEFAULT_CLAUDE_COMMAND] : configured;
+}
+
+function commonPreconditions(
+  request: CommonPlanRequest,
+  configuration: LaunchConfiguration,
+): {
   readonly command: readonly string[];
   readonly threshold: number;
   readonly runtimeDirectory: string;
@@ -710,12 +766,11 @@ function commonPreconditions(request: CommonPlanRequest): {
       "maxInlinePromptChars must be a non-negative integer",
     );
   }
-  const command = request.command === undefined || request.command.length === 0
-    ? [...DEFAULT_CLAUDE_COMMAND]
-    : request.command;
+  const command = effectiveCommand(configuration, request.command);
   // A wrapper's own arguments reach argv, so they are checked here rather than
-  // trusted from a setting: an empty token would launch the wrong program, and
-  // an unquotable one would be silently mangled into the command line.
+  // trusted from a setting or an agent definition: an empty token would launch
+  // the wrong program, and an unquotable one would be silently mangled into the
+  // command line.
   for (const token of command) {
     if (token.trim().length === 0 || !canQuoteArgument(request.shell, token)) {
       throw new LaunchPlanError(
@@ -758,7 +813,7 @@ function wrapCommand(
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { command, threshold, runtimeDirectory, wrapper } = commonPreconditions(request);
+  const { command, threshold, runtimeDirectory, wrapper } = commonPreconditions(request, request.configuration);
   const { agentType, configuration } = request;
 
   if (agentType === "manager") {
@@ -908,7 +963,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
  * the Manager that would mean resuming an orchestrator that can implement.
  */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory } = commonPreconditions({ ...request, agentType: "manager" });
+  const { command, wrapper, runtimeDirectory } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
   if (
     request.configuration.shape !== "agent-defined" ||
     request.configuration.agentName !== MANAGER_AGENT_NAME
@@ -957,7 +1012,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
  * actually produces.
  */
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory } = commonPreconditions(request);
+  const { command, wrapper, runtimeDirectory } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const definition = configuration.shape === "agent-defined"
     ? definitionArguments(configuration, request.agentId, runtimeDirectory)

@@ -5,7 +5,12 @@ import {
   parseAgentDefinitionTools,
   type WriteCapability,
 } from "../domain/capability.js";
-import { EFFORT_LEVELS, isEffortLevel, type EffortLevel } from "../claude/launch.js";
+import {
+  EFFORT_LEVELS,
+  isEffortLevel,
+  parseClaudeCommand,
+  type EffortLevel,
+} from "../claude/launch.js";
 
 /** The Manager runs as the main session agent. */
 export const MANAGER_AGENT_NAME = "manager";
@@ -68,6 +73,12 @@ export interface AgentDefinition {
   readonly description: string;
   readonly model: AgentModel;
   readonly effort?: AgentEffort;
+  /**
+   * The definition's `command:`, tokenized like `aboard.launch.claudeCommand`.
+   * Absent means the setting decides, so an agent that declares nothing keeps
+   * launching exactly as before.
+   */
+  readonly command?: readonly string[];
   readonly tools: readonly string[];
   readonly prompt: string;
   readonly writeCapability: WriteCapability;
@@ -83,6 +94,7 @@ export interface ManagerAgentDefinition {
   readonly description: string;
   readonly model: AgentModel;
   readonly effort?: AgentEffort;
+  readonly command?: readonly string[];
   readonly tools: readonly string[];
   readonly prompt: string;
   readonly writeCapability: WriteCapability;
@@ -134,6 +146,7 @@ interface CommonFields {
   readonly description: string;
   readonly model: AgentModel;
   readonly effort?: AgentEffort;
+  readonly command?: readonly string[];
 }
 
 type CommonFieldsResult =
@@ -153,12 +166,26 @@ function commonFields(frontmatter: readonly string[]): CommonFieldsResult {
   if (effort !== undefined && !isEffortLevel(effort)) {
     return { ok: false, reason: `Unsupported agent effort: ${effort}. Expected one of ${EFFORT_LEVELS.join(", ")}` };
   }
+  // `command:` overrides `aboard.launch.claudeCommand` for this agent alone —
+  // one agent behind a provider wrapper (`clauder run kiro --`) while the rest
+  // of the fleet keeps the configured default. It is read here rather than at
+  // launch time so a command line that cannot be built is a parse failure the
+  // user sees, not a terminal running the wrong program. An absent field means
+  // the setting decides.
+  const rawCommand = scalarField(frontmatter, "command");
+  let command: readonly string[] | undefined;
+  if (rawCommand !== undefined) {
+    const parsed = parseClaudeCommand(rawCommand);
+    if (!parsed.ok) return { ok: false, reason: `Invalid agent command: ${parsed.reason}` };
+    command = parsed.value;
+  }
   return {
     ok: true,
     value: {
       description,
       model: model as AgentModel,
       ...(effort === undefined ? {} : { effort }),
+      ...(command === undefined ? {} : { command }),
     },
   };
 }
@@ -185,6 +212,7 @@ export function parseAgentDefinition(definition: unknown): AgentDefinitionResult
       description: common.value.description,
       model: common.value.model,
       ...(common.value.effort === undefined ? {} : { effort: common.value.effort }),
+      ...(common.value.command === undefined ? {} : { command: common.value.command }),
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),
@@ -215,6 +243,7 @@ export function parseManagerAgentDefinition(
       description: common.value.description,
       model: common.value.model,
       ...(common.value.effort === undefined ? {} : { effort: common.value.effort }),
+      ...(common.value.command === undefined ? {} : { command: common.value.command }),
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),

@@ -184,7 +184,10 @@ export class DelegationCoordinator {
       ...this.#command(),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    await this.options.preflight?.(this.options.command?.());
+    // `plan.command`, not the setting: an agent whose definition declares
+    // `command:` runs that program, so probing the configured default would
+    // clear a command this launch never uses.
+    await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
     this.#acquire(plan.writeCapability, session.identity.agentId, session.sessionId, occurredAt, "restore persisted agent");
     try {
@@ -297,8 +300,9 @@ export class DelegationCoordinator {
     });
     // Before anything is registered or leased: a command that cannot run is a
     // refused launch, not a terminal full of shell errors and a fleet entry
-    // waiting on a session that will never start.
-    await this.options.preflight?.(this.options.command?.());
+    // waiting on a session that will never start. The plan's command is what
+    // actually runs — a definition's `command:` where it declares one.
+    await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
     this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, "launch agent");
     try {
