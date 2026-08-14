@@ -7,6 +7,10 @@
  * layer stays testable without a repository or the `gh` CLI.
  */
 
+import { issueDisposition } from "../shared/labels.js";
+
+export { issueDisposition };
+
 /** Everything a worker needs to know about an issue, already parsed. */
 export interface IssueSnapshot {
   readonly number: number;
@@ -51,17 +55,8 @@ export interface GitHubPromptSource {
   listReviewThreads(number: number): Promise<readonly ReviewThreadSnapshot[]>;
 }
 
-/** The `afk`/`hitl` classification of spec section 7.2. Absence is legitimate. */
+/** The `afk`/`hitl` classification of the work-model section. Absence is legitimate. */
 export type IssueDisposition = "afk" | "hitl" | "unclassified";
-
-export function issueDisposition(labels: readonly string[]): IssueDisposition {
-  const normalized = new Set(labels.map((label) => label.trim().toLowerCase()));
-  const afk = normalized.has("afk");
-  const hitl = normalized.has("hitl");
-  // `hitl` wins a contradictory pair: only a human may close it.
-  if (hitl) return "hitl";
-  return afk ? "afk" : "unclassified";
-}
 
 export type PromptSourceKind =
   | "issue"
@@ -185,11 +180,11 @@ function requireInstruction(instruction: string): string {
 function dispositionGuidance(disposition: IssueDisposition): string {
   switch (disposition) {
     case "afk":
-      return "This issue is labelled `afk`: aboard will commit your change, open a pull request, and merge it without further human review. Leave the work in the working tree and make sure the checks you can run pass first.";
+      return "This issue is labelled `ai:afk`: aboard will commit your change, open a pull request, and merge it without further human review. Leave the work in the working tree and make sure the checks you can run pass first.";
     case "hitl":
-      return "This issue is labelled `hitl`: aboard will commit your change and open a pull request, then wait for the user to review and merge it. Leave the work in the working tree, and make your final message a clear account of what you changed and why.";
+      return "This issue is labelled `ai:hitl`: aboard will commit your change and open a pull request, then wait for the user to review and merge it. Leave the work in the working tree, and make your final message a clear account of what you changed and why.";
     case "unclassified":
-      return "This issue carries neither `afk` nor `hitl`, which is a legitimate but unresolved state. Leave the work in the working tree and say in your final message that the issue is unclassified.";
+      return "This issue carries neither `ai:afk` nor `ai:hitl`, which is a legitimate but unresolved state. Leave the work in the working tree and say in your final message that the issue is unclassified.";
   }
 }
 

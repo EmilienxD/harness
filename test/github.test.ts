@@ -44,7 +44,7 @@ test("looks up, persists, and caches the singleton TODO number, then updates by 
   const gh = new FixtureGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return '[{"number":12}]';
     if (args[0] === "repo") return repo;
-    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: { number: 12, title: "TODO", body: "Now", state: "OPEN", labels: { nodes: [{ name: "todo" }] }, parent: null, closedByPullRequestsReferences: { nodes: [] } } });
+    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: { number: 12, title: "TODO", body: "Now", state: "OPEN", labels: { nodes: [{ name: "ai:todo" }] }, parent: null, closedByPullRequestsReferences: { nodes: [] } } });
     if (args[0] === "issue" && args[1] === "edit") return "";
     throw new Error(`unexpected ${args.join(" ")}`);
   });
@@ -73,7 +73,7 @@ test("ambiguity never fails: reads adopt the newest carrier, writes mint a fresh
   const readGh = new FixtureGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return '[{"number":50},{"number":3}]';
     if (args[0] === "repo") return repo;
-    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: { number: 50, title: "TODO", body: "Fifty", state: "OPEN", labels: { nodes: [{ name: "todo" }] }, parent: null, closedByPullRequestsReferences: { nodes: [] } } });
+    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: { number: 50, title: "TODO", body: "Fifty", state: "OPEN", labels: { nodes: [{ name: "ai:todo" }] }, parent: null, closedByPullRequestsReferences: { nodes: [] } } });
     throw new Error(`unexpected ${args.join(" ")}`);
   });
   assert.deepEqual(await new GitHubClient(readGh).getTodo(), { number: 50, body: "Fifty" });
@@ -88,8 +88,8 @@ test("ambiguity never fails: reads adopt the newest carrier, writes mint a fresh
     throw new Error(`unexpected ${args.join(" ")}`);
   });
   assert.deepEqual(await new GitHubClient(writeGh).updateTodo("Fresh"), { number: 44, body: "Fresh" });
-  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 50 --remove-label todo"), true);
-  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 3 --remove-label todo"), true);
+  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 50 --remove-label ai:todo"), true);
+  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 3 --remove-label ai:todo"), true);
 });
 
 test("with no cached number, reads report missing and writes create fresh", async () => {
@@ -112,10 +112,10 @@ test("derives readiness solely from dependency closedness and flags classificati
   const gh = new FixtureGh((args) => {
     if (args[0] === "repo") return repo;
     return graph({ issues: { nodes: [
-      { number: 16, title: "ready hitl", labels: { nodes: [{ name: "hitl" }] }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }] } },
-      { number: 17, title: "blocked afk", labels: { nodes: [{ name: "afk" }] }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }] } },
+      { number: 16, title: "ready hitl", labels: { nodes: [{ name: "ai:hitl" }] }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }] } },
+      { number: 17, title: "blocked afk", labels: { nodes: [{ name: "ai:afk" }] }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }] } },
       { number: 18, title: "unclassified", labels: { nodes: [] }, blockedBy: { nodes: [] } },
-      { number: 19, title: "umbrella", labels: { nodes: [{ name: "spec" }] }, blockedBy: { nodes: [] } },
+      { number: 19, title: "umbrella", labels: { nodes: [{ name: "ai:spec" }] }, blockedBy: { nodes: [] } },
     ] } });
   });
   const issues = await new GitHubClient(gh).listRoadmapIssues();
@@ -131,7 +131,7 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
     if (args[0] === "api" && args[1]?.startsWith("repos/")) return "{}";
     const query = args.find((arg) => arg.startsWith("query=")) ?? "";
     if (query.includes("reviewThreads(first:100){nodes{id")) return graph({ pullRequest: { reviewThreads: { nodes: [{ id: "T1", isResolved: false, path: "src/a.ts", line: 7, comments: { nodes: [{ body: "Bug", author: { login: "emb" } }] } }] } } });
-    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract", state: "OPEN", labels: { nodes: [{ name: "hitl" }] }, parent: { number: 9 }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
+    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract", state: "OPEN", labels: { nodes: [{ name: "ai:hitl" }] }, parent: { number: 9 }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
     return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
   });
   const github = new GitHubClient(gh);

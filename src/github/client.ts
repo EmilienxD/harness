@@ -7,11 +7,12 @@ import type {
   PullRequestSnapshot,
   ReviewThreadSnapshot,
 } from "../claude/prompts.js";
+import { LABEL_HITL, LABEL_SPEC, LABEL_TODO, issueDisposition } from "../shared/labels.js";
+
+export { ABOARD_LABELS } from "../shared/labels.js";
+export type { AboardLabel } from "../shared/labels.js";
 
 const execFileAsync = promisify(execFile);
-
-export const ABOARD_LABELS = ["spec", "todo", "afk", "hitl"] as const;
-export type AboardLabel = (typeof ABOARD_LABELS)[number];
 
 export type GitHubErrorCode =
   | "command-failed"
@@ -169,12 +170,6 @@ function state(value: unknown, context: string): "open" | "closed" {
   return normalized;
 }
 
-function disposition(issueLabels: readonly string[]): RoadmapIssue["disposition"] {
-  const normalized = new Set(issueLabels.map((label) => label.toLowerCase()));
-  if (normalized.has("hitl")) return "hitl";
-  return normalized.has("afk") ? "afk" : "unclassified";
-}
-
 function parseIssue(value: unknown, context: string): IssueSnapshot {
   const item = record(value, context);
   const issueLabels = labels(record(item.labels, `${context}.labels`).nodes, `${context}.labels.nodes`);
@@ -203,7 +198,7 @@ function repositoryFromGraphql(value: unknown): Record<string, unknown> {
 }
 
 const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:20){nodes{name}} parent{number} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
-const SPEC_QUERY = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){issues(first:100,states:OPEN,labels:["spec"],orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title createdAt}}}}`;
+const SPEC_QUERY = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){issues(first:100,states:OPEN,labels:["${LABEL_SPEC}"],orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title createdAt}}}}`;
 const SUB_ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100){nodes{number title state labels(first:20){nodes{name}} blockedBy(first:100){nodes{number state}}}}}}}`;
 const ROADMAP_QUERY = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){issues(first:100,states:OPEN){nodes{number title labels(first:20){nodes{name}} blockedBy(first:100){nodes{number state}}}}}}`;
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
@@ -276,13 +271,13 @@ export class GitHubClient implements GitHubPromptSource {
     // None found, or the label's singleton-locator property was violated by
     // hand. Instead of failing on ambiguity, mint a fresh issue and strip the
     // label from the older carriers, so later discovery converges.
-    await this.gh.run(["label", "create", "todo", "--description", "Project roadmap", "--color", "1D76DB", "--force"]);
-    const output = (await this.gh.run(["issue", "create", "--title", "Project TODO", "--body", normalized, "--label", "todo"])).trim();
+    await this.gh.run(["label", "create", LABEL_TODO, "--description", "Project roadmap", "--color", "1D76DB", "--force"]);
+    const output = (await this.gh.run(["issue", "create", "--title", "Project TODO", "--body", normalized, "--label", LABEL_TODO])).trim();
     const match = /\/issues\/(\d+)\/?$/.exec(output);
     if (match === null) throw new GitHubBoundaryError("malformed-output", "gh issue create did not return an issue URL");
     const number = integer(Number(match[1]), "created TODO number");
     for (const other of candidates) {
-      await this.gh.run(["issue", "edit", String(other), "--remove-label", "todo"]);
+      await this.gh.run(["issue", "edit", String(other), "--remove-label", LABEL_TODO]);
     }
     await this.#rememberTodo(number);
     return { number, body: normalized };
@@ -301,12 +296,12 @@ export class GitHubClient implements GitHubPromptSource {
     return nodes.flatMap((value, index) => {
       const item = record(value, `issues[${index}]`);
       const issueLabels = labels(record(item.labels, `issues[${index}].labels`).nodes, `issues[${index}].labels.nodes`);
-      if (issueLabels.some((label) => label.toLowerCase() === "spec" || label.toLowerCase() === "todo")) return [];
+      if (issueLabels.some((label) => label.toLowerCase() === LABEL_SPEC || label.toLowerCase() === LABEL_TODO)) return [];
       const dependencies = array(record(item.blockedBy, `issues[${index}].blockedBy`).nodes, `issues[${index}].blockedBy.nodes`);
       return [{
         number: integer(item.number, `issues[${index}].number`),
         title: string(item.title, `issues[${index}].title`),
-        disposition: disposition(issueLabels),
+        disposition: issueDisposition(issueLabels),
         ready: dependencies.every((dependency, dependencyIndex) => state(record(dependency, `dependency[${dependencyIndex}]`).state, `dependency[${dependencyIndex}].state`) === "closed"),
         dependencyNumbers: dependencies.map((dependency, dependencyIndex) => integer(record(dependency, `dependency[${dependencyIndex}]`).number, `dependency[${dependencyIndex}].number`)),
       }];
@@ -482,7 +477,7 @@ export class GitHubClient implements GitHubPromptSource {
    * default ordering.
    */
   async #scanTodoNumbers(): Promise<readonly number[]> {
-    const output = await this.gh.run(["issue", "list", "--state", "open", "--label", "todo", "--search", "sort:created-desc", "--limit", "50", "--json", "number"]);
+    const output = await this.gh.run(["issue", "list", "--state", "open", "--label", LABEL_TODO, "--search", "sort:created-desc", "--limit", "50", "--json", "number"]);
     const items = array(json(output, "TODO lookup"), "TODO lookup");
     return items.map((value, index) => integer(record(value, `TODO issue[${index}]`).number, `TODO issue[${index}].number`));
   }

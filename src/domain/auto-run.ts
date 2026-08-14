@@ -8,6 +8,8 @@
  * postcondition" and that decision must be testable without fakes.
  */
 
+import { issueDisposition } from "../shared/labels.js";
+
 export const AUTO_RUN_PHASES = [
   "branch",
   "implement",
@@ -291,7 +293,7 @@ export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
     if (candidate.state !== "open") continue;
     const disposition = classify(candidate.labels);
     if (disposition === undefined) {
-      skipped.push({ number: candidate.number, reason: "unclassified: neither afk nor hitl" });
+      skipped.push({ number: candidate.number, reason: "unclassified: neither ai:afk nor ai:hitl" });
       continue;
     }
     if (candidate.openBlockedByNumbers.length > 0) {
@@ -312,10 +314,8 @@ export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
 }
 
 function classify(labels: readonly string[]): IssueDisposition | undefined {
-  const normalized = new Set(labels.map((label) => label.trim().toLowerCase()));
-  // `hitl` wins a contradictory pair: only a human may close it.
-  if (normalized.has("hitl")) return "hitl";
-  return normalized.has("afk") ? "afk" : undefined;
+  const disposition = issueDisposition(labels);
+  return disposition === "unclassified" ? undefined : disposition;
 }
 
 /** Notification lines. Kept terse on purpose; they are read in bulk. */

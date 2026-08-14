@@ -163,7 +163,7 @@ export class AutoRunEngine {
 
     const specs = await this.options.github.listSpecIssues();
     const spec = specs[0];
-    if (spec === undefined) return { started: false, reason: "no open issue is labelled spec" };
+    if (spec === undefined) return { started: false, reason: "no open issue is labelled ai:spec" };
     const selection = selectIssues(await this.options.github.listSubIssues(spec.number));
     if (selection.issues.length === 0) {
       return {

@@ -47,7 +47,7 @@ const issue47: IssueSnapshot = {
   number: 47,
   title: "Add token refresh",
   body: "Refresh the access token before it expires.",
-  labels: ["afk"],
+  labels: ["ai:afk"],
   state: "open",
   parentIssueNumber: 31,
   branch: "feat/47-token-refresh",
@@ -57,7 +57,7 @@ const issue31: IssueSnapshot = {
   number: 31,
   title: "Auth rework",
   body: "The auth subsystem is replaced end to end.",
-  labels: ["spec"],
+  labels: ["ai:spec"],
   state: "open",
 };
 
@@ -99,10 +99,10 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
 
 test("carries the disposition each label implies", async () => {
   const cases: ReadonlyArray<readonly [readonly string[], RegExp]> = [
-    [["afk"], /aboard will commit your change, open a pull request, and merge it/],
-    [["hitl"], /wait for the user to review and merge it/],
-    [[], /neither `afk` nor `hitl`, which is a legitimate but unresolved state/],
-    [["afk", "hitl"], /wait for the user to review and merge it/],
+    [["ai:afk"], /aboard will commit your change, open a pull request, and merge it/],
+    [["ai:hitl"], /wait for the user to review and merge it/],
+    [[], /neither `ai:afk` nor `ai:hitl`, which is a legitimate but unresolved state/],
+    [["ai:afk", "ai:hitl"], /wait for the user to review and merge it/],
   ];
 
   for (const [labels, expected] of cases) {
@@ -117,8 +117,8 @@ test("carries the disposition each label implies", async () => {
     assert.match(prompt?.text ?? "", expected, `labels ${JSON.stringify(labels)}`);
   }
 
-  assert.equal(issueDisposition(["AFK"]), "afk");
-  assert.equal(issueDisposition(["spec"]), "unclassified");
+  assert.equal(issueDisposition(["AI:AFK"]), "afk");
+  assert.equal(issueDisposition(["ai:spec"]), "unclassified");
 });
 
 test("instructs the worker to create a branch when GitHub knows none", async () => {

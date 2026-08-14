@@ -131,7 +131,7 @@ test("an idle project renders every section without a failure note", async () =>
   assert.match(rendered, /Nothing is ready\./);
   assert.match(rendered, /## Pull requests\nNone open\./);
   assert.match(rendered, /No live agents/);
-  assert.match(rendered, /No issue is labelled `todo`/);
+  assert.match(rendered, /No issue is labelled `ai:todo`/);
   assert.doesNotMatch(rendered, /Unavailable/);
 });
 

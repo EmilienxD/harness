@@ -64,7 +64,7 @@ function harness(options: HarnessOptions = {}): Harness {
   let hitlPolls = 0;
 
   const subIssues = options.subIssues ?? [
-    { number: 34, title: "Add retry backoff", labels: ["afk"], state: "open" as const, openBlockedByNumbers: [] },
+    { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open" as const, openBlockedByNumbers: [] },
   ];
   const open = new Set(subIssues.filter((entry) => entry.state === "open").map((entry) => entry.number));
 
@@ -141,7 +141,7 @@ function harness(options: HarnessOptions = {}): Harness {
     return issueForBranch(branchesByPr.get(number) ?? "");
   }
   function isHitl(number: number): boolean {
-    return subIssues.find((entry) => entry.number === issueForPr(number))?.labels.includes("hitl") === true;
+    return subIssues.find((entry) => entry.number === issueForPr(number))?.labels.includes("ai:hitl") === true;
   }
 
   const launcher: AutoRunLauncher = {
@@ -249,7 +249,7 @@ test("review mode launches a pr-doctor-afk and commits its fixes as a second com
 
 test("a hitl issue waits at its pull request and continues once the user merges", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["hitl"], state: "open", openBlockedByNumbers: [] }],
+    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "merged",
   });
   await context.engine.start();
@@ -262,7 +262,7 @@ test("a hitl issue waits at its pull request and continues once the user merges"
 
 test("a hitl pull request closed unmerged stops the run and leaves the branch alone", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["hitl"], state: "open", openBlockedByNumbers: [] }],
+    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "closed",
   });
   await context.engine.start();
@@ -335,7 +335,7 @@ test("an unauthenticated GitHub CLI refuses resume without rejecting a dirty rec
 
 test("a second start returns the active run instead of starting another", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["hitl"], state: "open", openBlockedByNumbers: [] }],
+    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
   });
   await context.engine.start();
   const second = await context.engine.start();
@@ -347,7 +347,7 @@ test("a second start returns the active run instead of starting another", async 
 
 test("an active run takes precedence over a dirty working tree without repeating authentication preflight", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["hitl"], state: "open", openBlockedByNumbers: [] }],
+    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
   });
   assert.equal((await context.engine.start()).started, true);
   context.setDirty();
@@ -366,8 +366,8 @@ test("an active run takes precedence over a dirty working tree without repeating
 test("issues are processed serially and re-derived after every merge", async () => {
   const context = harness({
     subIssues: [
-      { number: 34, title: "Add retry backoff", labels: ["afk"], state: "open", openBlockedByNumbers: [] },
-      { number: 37, title: "Later", labels: ["afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
     ],
   });
   await context.engine.start();
@@ -385,8 +385,8 @@ test("scope spec stops after one spec and reports what remains", async () => {
       { number: 13, title: "Search", createdAt: "2026-02-01T00:00:00.000Z" },
     ],
     subIssues: [
-      { number: 121, title: "Add retry backoff", labels: ["afk"], state: "open", openBlockedByNumbers: [] },
-      { number: 131, title: "Index the corpus", labels: ["afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 121, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 131, title: "Index the corpus", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
     ],
   });
   await context.engine.start();
@@ -404,8 +404,8 @@ test("scope all continues into the next open spec", async () => {
       { number: 13, title: "Search", createdAt: "2026-02-01T00:00:00.000Z" },
     ],
     subIssues: [
-      { number: 121, title: "Add retry backoff", labels: ["afk"], state: "open", openBlockedByNumbers: [] },
-      { number: 131, title: "Index the corpus", labels: ["afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 121, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 131, title: "Index the corpus", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
     ],
   });
   await context.engine.start();
@@ -447,7 +447,7 @@ test("a hitl doctor's approved fixes are committed to the pull request before it
   // changes they just approved, and the work is stranded uncommitted.
   const context = harness({
     settings: { review: true },
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["hitl"], state: "open", openBlockedByNumbers: [] }],
+    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "merged",
     dirtyDuringWait: true,
   });

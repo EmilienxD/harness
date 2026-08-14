@@ -144,28 +144,28 @@ test("an afk issue has no approval gate", () => {
 
 test("selection skips unclassified, defers blocked, and orders by number", () => {
   const selection = selectIssues([
-    { number: 37, title: "Later", labels: ["afk"], state: "open", openBlockedByNumbers: [35] },
-    { number: 35, title: "Migrate the queue", labels: ["hitl"], state: "open", openBlockedByNumbers: [] },
-    { number: 34, title: "Add retry backoff", labels: ["afk"], state: "open", openBlockedByNumbers: [] },
+    { number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [35] },
+    { number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] },
+    { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
     { number: 36, title: "Unlabelled", labels: [], state: "open", openBlockedByNumbers: [] },
-    { number: 38, title: "Already done", labels: ["afk"], state: "closed", openBlockedByNumbers: [] },
+    { number: 38, title: "Already done", labels: ["ai:afk"], state: "closed", openBlockedByNumbers: [] },
   ]);
   assert.deepEqual(selection.issues.map((entry) => entry.number), [34, 35]);
   assert.deepEqual(selection.issues.map((entry) => entry.disposition), ["afk", "hitl"]);
   assert.deepEqual(selection.skipped, [
-    { number: 36, reason: "unclassified: neither afk nor hitl" },
+    { number: 36, reason: "unclassified: neither ai:afk nor ai:hitl" },
     { number: 37, reason: "blocked by open #35" },
   ]);
 });
 
 test("a blocked issue becomes selectable once its dependency closes", () => {
-  const before = selectIssues([{ number: 37, title: "Later", labels: ["afk"], state: "open", openBlockedByNumbers: [35] }]);
+  const before = selectIssues([{ number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [35] }]);
   assert.equal(before.issues.length, 0);
-  const after = selectIssues([{ number: 37, title: "Later", labels: ["afk"], state: "open", openBlockedByNumbers: [] }]);
+  const after = selectIssues([{ number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] }]);
   assert.deepEqual(after.issues.map((entry) => entry.number), [37]);
 });
 
 test("hitl wins a contradictory label pair because only a human may close it", () => {
-  const selection = selectIssues([{ number: 40, title: "Both", labels: ["afk", "hitl"], state: "open", openBlockedByNumbers: [] }]);
+  const selection = selectIssues([{ number: 40, title: "Both", labels: ["ai:afk", "ai:hitl"], state: "open", openBlockedByNumbers: [] }]);
   assert.equal(selection.issues[0]?.disposition, "hitl");
 });
