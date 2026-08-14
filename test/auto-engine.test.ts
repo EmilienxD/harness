@@ -21,6 +21,7 @@ interface Harness {
   readonly saved: AutoRunRecord[];
   readonly state: { cleared: boolean };
   readonly pullRequests: Map<number, { state: "open" | "closed" | "merged" }>;
+  readonly setDirty: () => void;
 }
 
 interface HarnessOptions {
@@ -198,7 +199,18 @@ function harness(options: HarnessOptions = {}): Harness {
     sleep: () => new Promise((resolve) => { setImmediate(resolve); }),
   });
 
-  return { engine, notifications, launches, interactiveOrigins, gitCalls, githubCalls, saved, state, pullRequests };
+  return {
+    engine,
+    notifications,
+    launches,
+    interactiveOrigins,
+    gitCalls,
+    githubCalls,
+    saved,
+    state,
+    pullRequests,
+    setDirty: () => { dirty = true; },
+  };
 }
 
 function telemetry() {
@@ -329,6 +341,24 @@ test("a second start returns the active run instead of starting another", async 
   const second = await context.engine.start();
   assert.equal(second.started, false);
   assert.match((second as { reason: string }).reason, /already active/);
+  context.engine.stop();
+  await context.engine.settle();
+});
+
+test("an active run takes precedence over a dirty working tree without repeating authentication preflight", async () => {
+  const context = harness({
+    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["hitl"], state: "open", openBlockedByNumbers: [] }],
+  });
+  assert.equal((await context.engine.start()).started, true);
+  context.setDirty();
+  const authenticationChecks = context.githubCalls.filter((call) => call === "checkAuthentication").length;
+
+  const second = await context.engine.start();
+
+  assert.equal(second.started, false);
+  assert.match((second as { reason: string }).reason, /already active/);
+  assert.equal((second as { active?: unknown }).active, context.engine.state());
+  assert.equal(context.githubCalls.filter((call) => call === "checkAuthentication").length, authenticationChecks);
   context.engine.stop();
   await context.engine.settle();
 });
