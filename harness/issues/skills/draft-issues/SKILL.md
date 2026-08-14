@@ -21,7 +21,7 @@ Use this template. The title is the first `# ` header. The line directly below i
 <issue-template>
 # {Issue title}
 
-> {difficulty-label}, {mode-label}
+> {labels}
 
 ## Parent
 
@@ -45,7 +45,7 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 </issue-template>
 
-`{difficulty-label}` is `difficulty:low`, `difficulty:medium`, or `difficulty:high`, matching the difficulty chosen in step 1. `{mode-label}` is `mode:afk` or `mode:hitl`, matching the mode chosen in step 1. Example second line: `> difficulty:medium, mode:hitl`.
+`{labels}` is a comma-separated list containing the difficulty and mode tokens decided in step 1 — `difficulty:low|medium|high` and `mode:afk|hitl` — plus any extra labels approved in step 1. Each token is written only if it was decided: if the user asked for the difficulty and/or mode labels to be skipped, they're simply absent, so `> difficulty:medium, mode:hitl`, `> mode:afk`, `> difficulty:low`, and `> ci, mode:hitl` are all valid lines. Every issue must carry at least one label. Any extra label approved in step 1 was verified to exist in this repo (`gh label list`) before being written here — never invent a label name.
 
 In "Blocked by", reference other issues in this batch by their `${CLAUDE_SESSION_ID}/{i}` token, wrapped in curly braces — e.g. if the session id were `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55` and the starting index were `2`, a reference to the first issue in this batch is `{6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/2}`. This works for references to issues in *this* batch only — a draft can't reference an issue from a different, unrelated batch. `/publish-issues` resolves these to real issue numbers once the referenced issue is published — don't try to resolve them yourself, and don't worry about getting the order perfect: unresolved references are retried automatically within a publish run, so an occasional misordering self-heals rather than getting silently stuck.
 

@@ -35,18 +35,23 @@ For each issue, decide:
 - **Title**: short descriptive name
 - **Summary**: what this issue covers, in a sentence or two
 - **Blocked by**: which other issues, if any, must complete first
-- **Difficulty**: `low`, `medium`, or `high` — your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Routine, well-understood work is `low`; multi-step work with real design decisions is `medium`; anything needing careful judgment, wide context, or unusual reasoning is `high`.
-- **Mode**: `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
+- **Difficulty** (default, but optional): `low`, `medium`, or `high` — your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Routine, well-understood work is `low`; multi-step work with real design decisions is `medium`; anything needing careful judgment, wide context, or unusual reasoning is `high`.
+- **Mode** (default, but optional): `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
+- **Extra labels** (only if the user asks): any other labels the user explicitly requests.
+
+Both the difficulty and mode labels are defaults, not requirements: if the user explicitly says not to use one or both of them, leave them off the breakdown entirely rather than forcing a value.
+
+If the user asks for extra labels, verify them before the breakdown is finalized: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding.
 
 4. Quiz the user
 
-Present the proposed breakdown as a numbered list, showing title, summary, blocked-by, difficulty, and mode for each issue.
+Present the proposed breakdown as a numbered list, showing title, summary, blocked-by, and whichever labels were decided (difficulty, mode, extras) for each issue.
 
 Ask the user:
 
 - Does the granularity feel right? (too coarse / too fine — remember, one agent per issue)
 - Are the dependency relationships correct?
-- Do the difficulty and mode assignments look right?
+- Do the label assignments look right — difficulty and mode where they're used, any extras?
 - Should any issues be merged or split further?
 
 Iterate until the user approves the breakdown. Once approved, tell them they can run `/draft-issues` to write it to disk for review.

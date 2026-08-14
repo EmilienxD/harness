@@ -18,8 +18,12 @@ Scope constraint: exactly **one agent, working alone, in one pass**. If what the
 
 Decide the labels:
 
-- **Difficulty**: `low`, `medium`, or `high` — your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Routine, well-understood work is `low`; multi-step work with real design decisions is `medium`; anything needing careful judgment, wide context, or unusual reasoning is `high`.
-- **Mode**: `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
+- **Difficulty** (default, but optional): `low`, `medium`, or `high` — your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Routine, well-understood work is `low`; multi-step work with real design decisions is `medium`; anything needing careful judgment, wide context, or unusual reasoning is `high`.
+- **Mode** (default, but optional): `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
+
+Both labels are defaults, not requirements: if the user explicitly says not to use the difficulty and/or mode label, leave that label off the declaration line entirely — don't fall back to a guessed value.
+
+If the user explicitly asks for other labels (e.g. `ci`, `good-first-issue`), verify each one before writing it: run `gh label list` and confirm the label name exists in this repo, mapping it through the repo's own spelling. Do not invent labels that aren't there — if a requested label doesn't exist, flag it to the user and ask, rather than writing a label `gh` will reject at publish time.
 
 2. Write 1 file
 
@@ -33,7 +37,7 @@ Use this template. The title is the first `# ` header. The line directly below i
 <issue-template>
 # {Issue title}
 
-> {difficulty-label}, {mode-label}
+> {labels}
 
 ## Parent
 
@@ -57,7 +61,7 @@ A reference to each blocking issue, or "None — can start immediately".
 
 </issue-template>
 
-`{difficulty-label}` is `difficulty:low`, `difficulty:medium`, or `difficulty:high`. `{mode-label}` is `mode:afk` or `mode:hitl`. Example second line: `> difficulty:medium, mode:hitl`.
+`{labels}` is a comma-separated list of `difficulty:low|medium|high`, `mode:afk|hitl`, and any extra labels requested and verified above — the difficulty and mode tokens are each included only when decided, so any of `> difficulty:medium, mode:hitl`, `> difficulty:low`, `> mode:afk`, or `> ci, difficulty:low` is a valid line. Every issue must carry at least one label.
 
 3. Hand off to the user
 

@@ -18,11 +18,16 @@ Design notes:
   *assumes* that ordering is perfect - see the retry pass below.
 - The first "# " header line in a draft file is the issue title. The first
   non-empty line after that declares labels (see /draft-issues, /draft-issue,
-  /to-spec-draft-issue): either "> difficulty:{low|medium|high}, mode:{afk|hitl}"
-  or "> spec". It is parsed and mapped to flat label names
+  /to-spec-draft-issue): either "> spec", or "> " followed by a
+  comma-separated list of label tokens in any order - "difficulty:{level}"
+  and "mode:{afk|hitl}" are each optional (the user can ask for them to be
+  left off), and extra labels the user asked for may be added alongside
+  (e.g. "> ci, difficulty:low"). Tokens are mapped to flat label names
   ("low-difficulty", "medium-difficulty", "high-difficulty", "afk", "hitl",
-  "spec") via LABEL_ALIASES, then stripped from the body that gets posted,
-  since the labels carry that information from then on.
+  "spec") via LABEL_ALIASES where an alias exists, then stripped from the
+  body that gets posted, since the labels carry that information from then
+  on. Extra (non-aliased) tokens pass through as-is - the drafting skills
+  are responsible for checking with `gh label list` that they exist.
 - A reference to another draft issue, written as "{session-id}/{i}" in the body, is
   rewritten to "#<real-issue-number>" once that draft has been published.
   This is how "blocked by" links get resolved without creating issues
@@ -80,11 +85,15 @@ FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
 # "issue-{i}-#{number}.md"
 PUBLISHED_FILENAME_PATTERN = re.compile(r"^issue-(\d+)-#(\d+)\.md$")
 
-# The label declaration line produced by /draft-issues or /draft-issue, e.g.
-# "> difficulty:medium, mode:hitl". Tolerant of leading whitespace before
-# the ">" and of surrounding spaces around the comma.
+# The label declaration line produced by /draft-issues or /draft-issue: a
+# comma-separated list of label tokens in any order, with "difficulty:*" and
+# "mode:*" each optional and extra labels allowed, e.g.
+# "> difficulty:medium, mode:hitl", "> mode:afk", "> ci, difficulty:low".
+# Tolerant of leading whitespace before the ">" and of surrounding spaces
+# around tokens and commas.
+_LABEL_TOKEN = r"[a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)?"
 LABEL_LINE_PATTERN = re.compile(
-    r"^\s*>\s*(difficulty:(?:low|medium|high))\s*,\s*(mode:(?:afk|hitl))\s*$",
+    rf"^\s*>(?:\s*{_LABEL_TOKEN}\s*,)*\s*{_LABEL_TOKEN}\s*$",
     re.IGNORECASE,
 )
 
@@ -104,7 +113,9 @@ CANONICAL_LABELS = {
 }
 
 # The declaration line uses "difficulty:{level}" / "mode:{mode}" tokens; the
-# labels actually created and applied are the flat names above.
+# labels actually created and applied are the flat names above. Any other
+# token on the line is applied as-is (the drafting skills check those exist
+# with `gh label list` before writing them).
 LABEL_ALIASES = {
     "difficulty:low": "low-difficulty",
     "difficulty:medium": "medium-difficulty",
@@ -162,26 +173,32 @@ def parse_issue_file(path: Path) -> tuple[str, str]:
 def extract_labels(rest: str) -> tuple[list[str], str]:
     """Pull the label declaration line out of the body.
 
-    Accepts either "> difficulty:..., mode:..." (two labels) or "> spec"
-    (one label). Returns (labels, remaining_body). labels is empty if the
-    line is missing or malformed.
+    Accepts either "> spec" (one label) or "> " followed by a comma-separated
+    list of label tokens in any order - "difficulty:*" and "mode:*" are each
+    optional, and extra labels pass through as-is. Returns (labels,
+    remaining_body). labels is empty if the line is missing or malformed
+    (e.g. a ">" quote, or a list carrying a token that can't be a label -
+    the whole line is left in the body untouched rather than silently
+    applying a partial set of labels).
     """
     lines = rest.splitlines()
     idx = 0
     while idx < len(lines) and not lines[idx].strip():
         idx += 1
     if idx < len(lines):
-        m = LABEL_LINE_PATTERN.match(lines[idx])
-        if m:
-            labels = [
-                LABEL_ALIASES[m.group(1).lower()],
-                LABEL_ALIASES[m.group(2).lower()],
-            ]
-            remaining = "\n".join(lines[idx + 1:]).strip()
-            return labels, remaining
         if SPEC_LABEL_LINE_PATTERN.match(lines[idx]):
             remaining = "\n".join(lines[idx + 1:]).strip()
             return ["spec"], remaining
+        if LABEL_LINE_PATTERN.match(lines[idx]):
+            content = lines[idx].strip()[1:]  # drop the leading ">"
+            labels = []
+            for token in content.split(","):
+                name = LABEL_ALIASES.get(token.strip().lower(), token.strip())
+                if name not in labels:
+                    labels.append(name)
+            if labels:
+                remaining = "\n".join(lines[idx + 1:]).strip()
+                return labels, remaining
     return [], rest.strip()
 
 
@@ -308,9 +325,9 @@ def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, i
             title, rest = parse_issue_file(path)
             labels, body_with_refs = extract_labels(rest)
 
-            if not labels or (labels != ["spec"] and len(labels) != 2):
+            if not labels:
                 failed_entries.append(
-                    f"  SKIP  {path.name} - missing label line"
+                    f"  SKIP  {path.name} - missing or malformed label line"
                 )
                 made_progress = True  # not retryable, don't requeue
                 continue
@@ -373,7 +390,7 @@ def publish_issues(dry: bool) -> str:
     if not batch_dirs:
         return "No draft batches found in .issues-gateway/. Nothing to publish."
 
-    header = "Dry run — nothing will be created" if dry else "Publishing drafted issues"
+    header = "Dry run -- nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
     label_warnings = ensure_labels(dry)
     if label_warnings:
@@ -398,7 +415,7 @@ def publish_issues(dry: bool) -> str:
         report.append(
             f"Published {total_published} issue(s). {total_failed} failed or were skipped."
         )
-        report.append("Failed drafts remain in .issues-gateway/ — fix and rerun.")
+        report.append("Failed drafts remain in .issues-gateway/ -- fix and rerun.")
     else:
         report.append(f"Published {total_published} issue(s) successfully.")
 

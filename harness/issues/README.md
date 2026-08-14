@@ -117,11 +117,14 @@ At runtime the drafting skills create a gateway folder at the project root — `
 - **Filename**: `{session-id}/issue-{i}.md`. `{i}` is the next free index for single-issue and spec
   drafts; for a batch, numbering continues from that index in publish order (blockers before what
   they block).
-- **Labels**: the first non-empty line after the title. For issues:
-  `> difficulty:{low|medium|high}, mode:{afk|hitl}`. For specs: `> spec`. The hook maps that line
-  to the real label names (`low-difficulty`, `medium-difficulty`, `high-difficulty`, `afk`, `hitl`,
-  `spec`), strips it from the published body, and creates the labels in the repo if they don't
-  already exist.
+- **Labels**: the first non-empty line after the title. For issues: `> ` followed by a
+  comma-separated list of label tokens — `difficulty:{low|medium|high}` and `mode:{afk|hitl}` are
+  each optional (the user can ask the drafting skill to skip them), and extra labels the user asks
+  for are listed alongside them after the skill verifies they exist in the repo (`gh label list`).
+  For specs: `> spec`. The hook maps the difficulty/mode tokens to their flat names
+  (`low-difficulty`, `medium-difficulty`, `high-difficulty`, `afk`, `hitl`), applies any extra
+  tokens as-is, strips the line from the published body, and creates the canonical labels in the
+  repo if they don't already exist (extras are expected to exist already).
 - **Blockers**: real tracker numbers only (`#42`) in single-issue drafts — there are no sibling
   drafts to resolve. In a batch, `{session-id}/{i}` in curly braces (e.g.
   `{6b1f0c2e-…-2e8a1d0c4f55/0}`) means "blocked by that issue"; the hook rewrites it to
