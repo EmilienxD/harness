@@ -153,7 +153,7 @@ test("only automated agents with a waiting caller are reconciled on terminal clo
   // The Manager and interactive agents cannot report: their Stop hook is guarded
   // off, so reconciling them would invent a failure that never happened.
   assert.equal(reportsResult({ ...automated, resultDelivery: { mode: "none" } }), false);
-  for (const type of ["manager", "brainstormer", "raw"] as const) {
+  for (const type of ["manager", "brainstormer"] as const) {
     assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type } }), false, type);
   }
   // The dual-mode builtin types owe a result exactly when their launch does.

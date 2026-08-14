@@ -59,7 +59,7 @@ test("ships the Manager definition and exactly the five worker definitions", asy
   assert.deepEqual(files, SCAFFOLDED_AGENT_NAMES.map((name) => `${name}.md`).sort());
   assert.equal(files.includes("manager.md"), true);
   assert.equal(files.includes("webresearcher.md"), true);
-  assert.equal(files.includes("raw.md"), false);
+  assert.equal(files.includes("general-purpose.md"), false);
   assert.equal(files.includes("explorer.md"), false);
 });
 
@@ -143,7 +143,7 @@ test("Manager guidance matches the current delegation contract", async () => {
   const manager = parsed.ok ? parsed.value.prompt : "";
   for (const required of [
     /interactive, long-lived manager agent/i,
-    /brainstormer, webresearcher, or raw/i,
+    /brainstormer, webresearcher, or general-purpose/i,
     /Do not implement, edit code/i,
     /do not read large files/i,
     /more than 3 queries, run an Explore type subagent/i,
@@ -182,7 +182,7 @@ test("an agent definition may declare an effort level, and an unknown one is ref
 });
 
 test("rejects definitions outside the aboard catalogue or without required frontmatter", () => {
-  assert.equal(parseAgentDefinition("---\nname: raw\ndescription: no\ntools: Read\nmodel: opus\n---\nNo.").ok, false);
+  assert.equal(parseAgentDefinition("---\nname: general-purpose\ndescription: no\ntools: Read\nmodel: opus\n---\nNo.").ok, false);
   assert.equal(parseAgentDefinition("---\nname: reviewer\ndescription: no\nmodel: opus\n---\nNo.").ok, false);
   assert.equal(parseAgentDefinition("---\nname: reviewer\ndescription: no\ntools: Read\nmodel: future\n---\nNo.").ok, false);
 });

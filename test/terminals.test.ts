@@ -253,9 +253,9 @@ test("focuses interactive terminals and exposes only takeover-named input contro
 test("captures closure once, releases the native handle, and treats a missing pid as information", async () => {
   const { controller, host, events } = setup();
   const created = controller.create({
-    agentId: agent("raw-1"),
+    agentId: agent("general-purpose-1"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "raw",
+    agentType: "general-purpose",
   });
   const native = host.created[0]!.terminal;
   native.processId = new Promise<number | undefined>(() => undefined);
@@ -275,7 +275,7 @@ test("captures closure once, releases the native handle, and treats a missing pi
   assert.deepEqual(events[1], {
     type: "terminal-closed",
     terminalId: "terminal-1",
-    agentId: "raw-1",
+    agentId: "general-purpose-1",
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
     exitCode: null,
     reason: "killed",
@@ -396,11 +396,11 @@ test("a cancelled or settled proof is not a verdict and never kills the terminal
 
 test("a launch with no startup timeout armed asks for no proof at all", async () => {
   const { controller, proofs } = setupProofs(() =>
-    Promise.reject(new SessionStartTimeoutError(agent("raw-1"), 60_000)));
+    Promise.reject(new SessionStartTimeoutError(agent("general-purpose-1"), 60_000)));
   controller.create({
-    agentId: agent("raw-1"),
+    agentId: agent("general-purpose-1"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "raw",
+    agentType: "general-purpose",
   });
   assert.equal(proofs.armed.length, 0);
 });

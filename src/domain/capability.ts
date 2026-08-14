@@ -137,8 +137,8 @@ function isUnrestricted(specifier: string | undefined): boolean {
 /**
  * Derives capability from an effective tool set.
  *
- * `undefined` means there is no tool set to read — a raw agent (spec section
- * 5.7) or an agent definition we failed to parse — and is write-capable by the
+ * `undefined` means there is no tool set to read — for example a built-in agent
+ * or an agent definition we failed to parse — and is write-capable by the
  * conservative rule above.
  */
 export function deriveWriteCapability(

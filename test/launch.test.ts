@@ -193,27 +193,23 @@ test("plans a read-only agent that stays concurrent", () => {
   assert.equal(plan.requiresWriteLease, false);
 });
 
-test("plans a raw launch with no agent definition, no prompt, and the write lease", () => {
+test("plans general-purpose as Claude Code's unmodified default session", () => {
   const plan = planLaunch(
     request({
-      agentType: "raw",
+      agentType: "general-purpose",
       configuration: resolveLaunchConfiguration({}),
       prompt: undefined,
       permissionMode: "default",
+      attended: true,
     }),
   );
 
   assert.deepEqual(plan.args, ["--session-id", sessionId]);
   assert.equal(plan.commandLine, `& claude --session-id ${sessionId}`);
+  assert.equal(plan.systemPrompt, undefined);
   assert.equal(plan.promptDelivery, "none");
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, true);
-});
-
-test("a configured raw tool set does not downgrade raw out of the lease", () => {
-  const configuration = resolveLaunchConfiguration({ tools: ["Read", "Grep"] });
-  assert.equal(deriveWriteCapability(["Read", "Grep"]), "read-only");
-  assert.equal(launchWriteCapability("raw", configuration), "write-capable");
 });
 
 test("the builtin types carry Claude Code's own capabilities, not a derived guess", () => {
@@ -226,7 +222,7 @@ test("the builtin types carry Claude Code's own capabilities, not a derived gues
   const builtin = (name: string) => resolveLaunchConfiguration({ agentName: name });
   assert.equal(builtin("Explore").shape, "builtin");
   assert.equal(launchWriteCapability("Explore", builtin("Explore")), "read-only");
-  assert.equal(launchWriteCapability("general-purpose", builtin("general-purpose")), "write-capable");
+  assert.equal(launchWriteCapability("general-purpose", resolveLaunchConfiguration({})), "write-capable");
 
   const explore = planLaunch(request({
     agentType: "Explore",
@@ -390,7 +386,7 @@ test("puts the definition's model and effort on the command line, overriding the
   }
 });
 
-test("rejects plans that mix --agent with inline configuration", () => {
+test("rejects --tools or aboard-only fields beside a builtin --agent", () => {
   // `--agent` names a builtin, whose tool set is Claude Code's; a `--tools`
   // flag beside it would be a second authority over the same session, which is
   // exactly what the write lease cannot survive (spec section 5.1.1).
@@ -461,18 +457,15 @@ test("pins each launch shape to the agent types allowed to use it", () => {
     );
   };
 
-  // raw has no definition to launch from; inline is its shape.
-  rejects({ agentType: "raw", configuration: definition("manager", MANAGER_TOOLS) });
-
   // The Manager launches from its own definition and nothing else: no bare
   // inline launch (it would lose the persona), and no other agent name.
-  rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({}) });
+  rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({ agentName: "Explore" }) });
   rejects({ agentType: "manager", configuration: definition("implementer", IMPLEMENTER_TOOLS) });
 
   // Every other type has a definition — aboard's or Claude Code's — and a bare
   // inline launch would leave it without persona and tool list alike.
-  for (const agentType of ["webresearcher", "implementer", "pr-doctor-afk", "pr-doctor-hitl", "brainstormer", "Explore"] as const) {
-    rejects({ agentType, configuration: resolveLaunchConfiguration({ tools: ["Read"] }) });
+  for (const agentType of ["webresearcher", "implementer", "pr-doctor-afk", "pr-doctor-hitl", "brainstormer"] as const) {
+    rejects({ agentType, configuration: resolveLaunchConfiguration({ agentName: "Explore" }) });
   }
 
   // `--agent` and an aboard definition cannot borrow each other's shape: only
@@ -480,12 +473,15 @@ test("pins each launch shape to the agent types allowed to use it", () => {
   // agents are carried on it.
   rejects({ agentType: "Explore", configuration: definition("Explore", ["Read"]) });
   rejects({ agentType: "implementer", configuration: resolveLaunchConfiguration({ agentName: "implementer" }) });
+  rejects({ agentType: "general-purpose", configuration: resolveLaunchConfiguration({ agentName: "general-purpose" }) });
 
-  // The one allowed pairing per side: raw inline, and the Manager from its file.
-  // (Raw is attended, so the suite's default bypass mode lands as no flag at
-  // all; the permission-mode tests below cover that gating in full.)
-  const raw = planLaunch(request({ agentType: "raw", configuration: resolveLaunchConfiguration({ tools: ["Read"] }) }));
-  assert.deepEqual(raw.args.slice(2), ["--tools=Read", "Implement issue #47."]);
+  // The allowed pairings retain their distinct launch shapes.
+  const generalPurpose = planLaunch(request({
+    agentType: "general-purpose",
+    configuration: resolveLaunchConfiguration({}),
+  }));
+  assert.deepEqual(generalPurpose.args.slice(2), ["--dangerously-skip-permissions", "Implement issue #47."]);
+  assert.equal(generalPurpose.systemPrompt, undefined);
   const manager = planLaunch(request({
     agentType: "manager",
     configuration: definition("manager", MANAGER_TOOLS),
@@ -524,8 +520,7 @@ test("a resume re-passes every flag that shaped the launch", () => {
   assert.equal(resumed.writeCapability, "read-only");
   assert.equal(resumed.requiresWriteLease, false);
 
-  // A builtin keeps `--agent`, which `--resume` does restore, and raw carries
-  // only the optional restriction it was launched with.
+  // A builtin's `--agent` selection is restored with its conversation.
   assert.deepEqual(
     planSessionResume({
       agentId, sessionId, agentType: "Explore", shell: "powershell", permissionMode: "default",
@@ -533,14 +528,6 @@ test("a resume re-passes every flag that shaped the launch", () => {
     }).args,
     ["--resume", sessionId],
   );
-  assert.deepEqual(
-    planSessionResume({
-      agentId, sessionId, agentType: "raw", shell: "powershell", permissionMode: "default",
-      configuration: resolveLaunchConfiguration({ tools: ["Read", "Grep"] }),
-    }).args,
-    ["--resume", sessionId, "--tools=Read,Grep"],
-  );
-
   // The Manager resumes from its own definition or not at all.
   assert.throws(
     () => planManagerResume({
@@ -733,8 +720,7 @@ test("a declared command is validated like the setting, and is meaningless witho
   assert.equal("declaredCommand" in empty, false);
   assert.deepEqual(planLaunch(request({ configuration: empty, command: ["openclaude"], prompt: "Go." })).command, ["openclaude"]);
 
-  // A builtin type has no aboard definition to declare anything from, and a raw
-  // launch has no definition at all.
+  // A builtin type has no aboard definition to declare anything from.
   for (const input of [
     { agentName: "Explore", declaredCommand: ["clauder"] },
     { declaredCommand: ["clauder"] },
@@ -856,10 +842,9 @@ test("a command line too long even with the prompt spilled is a typed refusal", 
   let error: LaunchPlanError | undefined;
   try {
     planLaunch(request({
-      agentType: "raw",
+      agentType: "implementer",
       shell: "cmd",
-      prompt: undefined,
-      configuration: resolveLaunchConfiguration({ tools }),
+      configuration: definition("implementer", tools),
     }));
   } catch (thrown) {
     error = thrown as LaunchPlanError;
@@ -889,12 +874,12 @@ test("resolvePermissionMode gates bypass by who drives the launch", () => {
   assert.equal(resolvePermissionMode("bypass", { attended: false, agentType: "implementer" }), "bypass");
   assert.equal(resolvePermissionMode("acceptEdits", { attended: false, agentType: "implementer" }), "acceptEdits");
   // Attended: no flag, so the user's own configuration decides.
-  assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "raw" }), "default");
+  assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "general-purpose" }), "default");
   assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "manager" }), "default");
   assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "implementer" }), "default");
   // Non-bypass modes pass through untouched.
-  assert.equal(resolvePermissionMode("default", { attended: true, agentType: "raw" }), "default");
-  assert.equal(resolvePermissionMode("acceptEdits", { attended: true, agentType: "raw" }), "acceptEdits");
+  assert.equal(resolvePermissionMode("default", { attended: true, agentType: "general-purpose" }), "default");
+  assert.equal(resolvePermissionMode("acceptEdits", { attended: true, agentType: "general-purpose" }), "acceptEdits");
   // The brainstormer never bypasses, whoever launched it.
   assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "brainstormer" }), "default");
   assert.equal(resolvePermissionMode("bypass", { attended: false, agentType: "brainstormer" }), "default");
@@ -924,14 +909,15 @@ test("an unattended implementer keeps bypass; attended and brainstorm launches c
   assert.ok(!brainstorm.args.includes("--dangerously-skip-permissions"));
   assert.ok(!brainstorm.args.includes("--permission-mode"));
 
-  // A raw session the user invoked is attended by its type: no flag either.
-  const raw = planLaunch(request({
-    agentType: "raw",
+  // An interactive general-purpose session is attended: no permission flag.
+  const generalPurpose = planLaunch(request({
+    agentType: "general-purpose",
     configuration: resolveLaunchConfiguration({}),
     prompt: undefined,
     permissionMode: "bypass",
+    attended: true,
   }));
-  assert.deepEqual(raw.args, ["--session-id", sessionId]);
+  assert.deepEqual(generalPurpose.args, ["--session-id", sessionId]);
 
   // Resuming an unattended worker re-passes bypass, exactly as launch does.
   const resumed = planSessionResume({

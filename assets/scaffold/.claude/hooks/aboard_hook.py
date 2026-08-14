@@ -33,7 +33,7 @@ ROUTES = {
 BLOCKING_ROUTE = "manager-prompt"
 
 # Roles that always run as automated, result-reporting workers. Interactive
-# roles (brainstormer, raw, pr-doctor-hitl) never report a result, so worker
+# roles (brainstormer, pr-doctor-hitl) never report a result, so worker
 # hooks skip them: pr-doctor-hitl waits on the user, and the run's continue
 # signal for a hitl issue is the pull request's resolution, not that agent's
 # completion. The dual-mode builtin types (general-purpose, Explore) report per
@@ -44,7 +44,7 @@ WORKER_AGENT_TYPES = frozenset({"webresearcher", "implementer", "pr-doctor-afk"}
 # Commands the bridge handles itself. `/done` is available in every aboard
 # terminal; the remaining commands belong only to the Manager. These expressions
 # match the bridge-side parsers.
-MANAGER_INTERCEPTED_COMMAND = re.compile(r"^\s*/(brainstorm|raw|done|auto|review-pr)(?:\s[\s\S]*)?$")
+MANAGER_INTERCEPTED_COMMAND = re.compile(r"^\s*/(brainstorm|general-purpose|done|auto|review-pr)(?:\s[\s\S]*)?$")
 DONE_COMMAND = re.compile(r"^\s*/done(?:\s[\s\S]*)?$")
 
 
@@ -52,7 +52,7 @@ def finish(message):
     """Erase the prompt and show `message` to the user in place of a response.
 
     This is the success path as much as the failure path. `/brainstorm` and
-    `/raw` are mechanical: the bridge spawns the terminal, and waking the
+    `/general-purpose` are mechanical: the bridge spawns the terminal, and waking the
     Manager to narrate that costs a turn and risks it acting on the command a
     second time. Exit 2 on `UserPromptSubmit` blocks prompt processing and
     erases the prompt, and stderr becomes what the user sees. The Manager is

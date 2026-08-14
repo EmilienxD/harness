@@ -15,13 +15,13 @@ test("derives capability for catalogue fixtures and conservative boundaries", ()
     implementer: definition("Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill"),
     webresearcher: definition("WebSearch, WebFetch"),
     brainstormer: definition("Read, Grep, Glob, Bash, Write, Edit, Agent, Skill"),
-    raw: undefined,
+    missing: undefined,
     malformed: "---\ntools: [Read, Edit\n---",
   } as const;
   assert.equal(deriveAgentDefinitionWriteCapability(fixtures.implementer), "write-capable");
   assert.equal(deriveAgentDefinitionWriteCapability(fixtures.webresearcher), "read-only");
   assert.equal(deriveAgentDefinitionWriteCapability(fixtures.brainstormer), "write-capable");
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.raw), "write-capable");
+  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.missing), "write-capable");
   assert.equal(deriveAgentDefinitionWriteCapability(fixtures.malformed), "write-capable");
   assert.equal(
     deriveAgentDefinitionWriteCapability(definition("Read, Agent(worker, researcher)")),
@@ -40,7 +40,7 @@ test("only launches aboard drives are leased: automated Manager work and every a
   const interactive = true;
   // The agent works alone and reports back to aboard.
   assert.equal(leaseRequired("manager", !interactive), true);
-  // A conversation handed to the user — /raw, /brainstorm, any --interactive
+  // A conversation handed to the user — /general-purpose, /brainstorm, any --interactive
   // launch. An opening --prompt only names the topic; the user drives from
   // there, and parallel work is theirs to allow.
   assert.equal(leaseRequired("manager", interactive), false);

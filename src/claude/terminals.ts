@@ -117,7 +117,7 @@ export interface CreateAboardTerminalRequest {
    * Proof-of-life timeout: if the SessionStart hook has not reported the TUI's
    * process id within this many milliseconds, the launch failed (bad command,
    * CLI error printed and exited) and the terminal is killed so the normal
-   * terminal-close settlement fires. Absent = no proof required (raw passthrough).
+   * terminal-close settlement fires. Absent = no startup proof was requested.
    */
   readonly startupTimeoutMs?: number;
 }

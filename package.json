@@ -275,7 +275,7 @@
             "Launch with --effort max."
           ],
           "default": "inherit",
-          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, including the Manager, passed as `--effort`. Available levels depend on the model.\n\nThis is the session level: an agent definition that sets `effort:` in its `.aboard/agents/<name>.md` frontmatter overrides it while that agent is active, so use the setting for the launches that have no definition to read — raw sessions, the builtin agent types, and resumed sessions. Applies to the next launch; a running agent keeps its level."
+          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, including the Manager, passed as `--effort`. Available levels depend on the model.\n\nThis is the session level: an agent definition that sets `effort:` in its `.aboard/agents/<name>.md` frontmatter overrides it while that agent is active, so use the setting for built-in agent launches, which have no aboard definition to read, and resumed sessions. Applies to the next launch; a running agent keeps its level."
         },
         "aboard.workers.permissionMode": {
           "type": "string",
@@ -290,7 +290,7 @@
             "Launch with Claude Code's default permission behaviour."
           ],
           "default": "default",
-          "description": "Permission mode for agents aboard launches or resumes. Bypass is passed only to unattended workers: a launch handed to you or driven by you — the Manager, a raw or brainstorm session, an interactive agent, a resumed pr-doctor — carries no permission flag at all, so your own Claude Code configuration applies rather than being overridden. Applied per process; aboard never writes a permissions block into .claude/settings.json."
+          "description": "Permission mode for agents aboard launches or resumes. Bypass is passed only to unattended workers: a launch handed to you or driven by you — the Manager, a brainstorm session, an interactive built-in agent, a resumed pr-doctor — carries no permission flag at all, so your own Claude Code configuration applies rather than being overridden. Applied per process; aboard never writes a permissions block into .claude/settings.json."
         },
         "aboard.terminals.closeOnSessionEnd": {
           "type": "boolean",

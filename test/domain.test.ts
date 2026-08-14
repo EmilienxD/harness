@@ -166,7 +166,6 @@ test("the legal agent catalogue ships no custom explorer definition", () => {
     "implementer",
     "pr-doctor-afk",
     "pr-doctor-hitl",
-    "raw",
     "general-purpose",
     "Explore",
   ]);

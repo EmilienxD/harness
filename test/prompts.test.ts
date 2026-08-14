@@ -289,7 +289,7 @@ test("an issue-bound webresearcher receives resolved issue and parent-spec conte
 test("interactive launches resolve to no prompt so the terminal opens empty", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
-  for (const type of ["brainstormer", "raw"] as const) {
+  for (const type of ["brainstormer"] as const) {
     assert.equal(await adapter.resolve({ type, description: "d" }, { interactive: true }), undefined);
     assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }, { interactive: true }), undefined);
     // A Manager delegating with a real topic still gets it; only filler is gone.

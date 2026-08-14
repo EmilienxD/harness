@@ -5,7 +5,6 @@ export const AGENT_TYPES = [
   "implementer",
   "pr-doctor-afk",
   "pr-doctor-hitl",
-  "raw",
   "general-purpose",
   "Explore",
 ] as const;
@@ -50,30 +49,28 @@ export function isAutomatedAgentType(type: AgentType): boolean {
  * The run's continue signal for a HITL issue is the pull request's resolution,
  * never that agent's completion (`AGENTS.md`).
  */
-export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "raw", "pr-doctor-hitl"] as const;
+export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "pr-doctor-hitl"] as const;
 
 export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
 /**
- * Claude Code's builtin agents. aboard scaffolds no definition for them, so
+ * Claude Code's named builtin agent launched through `--agent`. aboard
+ * scaffolds no definition for it, so
  * `--agent <name>` resolves to the one Claude Code ships; the names deliberately
  * match the builtin exactly, since a project definition of the same name would
  * override it upstream. They are the only types still launched with `--agent`:
  * aboard's own agents are carried on the command line instead, so that nothing
  * in the workspace can discover and spawn them.
  *
- * They are the dual-mode types the `interactive` flag exists for (spec section
- * 6.1): unlike INTERACTIVE_AGENT_TYPES they can work unattended and report a
- * result, and unlike AUTOMATED_AGENT_TYPES they can also be handed to the user,
- * so a first prompt stays optional and result reporting is decided per launch,
- * never per type.
+ * Explore is dual-mode: it can work unattended and report a result or be handed
+ * to the user, so result reporting is decided per launch, never per type.
  */
-export const BUILTIN_AGENT_TYPES = ["general-purpose", "Explore"] as const;
+export const NAMED_BUILTIN_AGENT_TYPES = ["Explore"] as const;
 
-export function isBuiltinAgentType(type: AgentType): boolean {
-  return (BUILTIN_AGENT_TYPES as readonly AgentType[]).includes(type);
+export function isNamedBuiltinAgentType(type: AgentType): boolean {
+  return (NAMED_BUILTIN_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
 export type AgentId = string & { readonly __brand: "AgentId" };

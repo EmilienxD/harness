@@ -19,11 +19,10 @@
  *   second authority: nothing can widen an agent past what it declares, which
  *   is what the write-lease derivation depends on.
  *
- *   `--agent` therefore survives only for Claude Code's builtin types, which
- *   have no aboard definition to read; the planner still rejects `--agent`
- *   combined with `--tools`, because a builtin's tool set is Claude Code's.
- *   The other `--tools` flag is the optional restriction on a raw launch, which
- *   is the *absence* of a definition and has no file to contradict.
+ *   `--agent` therefore survives only for Claude Code's named `Explore` type,
+ *   which has no aboard definition to read. Its system prompt and tool set
+ *   belong to Claude Code, so aboard neither reconstructs them nor adds a
+ *   competing `--tools` flag.
  * - The first message and every later message travel as CLI arguments (5.1.2,
  *   5.1.3). aboard never types into a running TUI, so a message that cannot be
  *   represented on a command line spills to a file and is `@`-referenced.
@@ -32,7 +31,7 @@
 import { deriveWriteCapability, type WriteCapability } from "../domain/capability.js";
 import {
   isAutomatedAgentType,
-  isBuiltinAgentType,
+  isNamedBuiltinAgentType,
   isInteractiveAgentType,
   type AgentId,
   type AgentType,
@@ -77,7 +76,7 @@ export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
   "git-bash": 24_000,
 };
 
-/** The scaffolded definition the Manager session runs as (`--agent manager`). */
+/** The scaffolded definition the Manager session runs from. */
 export const MANAGER_AGENT_NAME = "manager";
 
 export type ClaudeCommandResult =
@@ -182,8 +181,8 @@ export function resolvePermissionMode(
  * word: an agent definition's `effort:` frontmatter overrides it, and the
  * planner puts that value on the command line itself, because a main-thread
  * `--agent` launch does not honor the field (see `LaunchConfiguration`). The
- * setting is what reaches the launches with no definition to read — `raw` and
- * the builtin types.
+ * setting is what reaches the builtin launches, which have no aboard definition
+ * to read.
  *
  * Unset means "inherit", exactly as an absent `effort:` field does; aboard
  * passes no flag and Claude Code keeps whatever the user's own `effortLevel`
@@ -238,37 +237,23 @@ export type LaunchConfiguration =
       readonly declaredCommand?: readonly string[];
     }
   /**
-   * A builtin type (`general-purpose`, `Explore`). aboard ships no definition
-   * for these, so the launch names Claude Code's own with `--agent` and passes
-   * no tool list: the builtin's tool set belongs to Claude Code, and a `--tools`
-   * flag beside it would be the second authority 5.1.1 forbids.
+   * Claude Code's named `Explore` builtin. aboard ships no definition for it,
+   * so the launch names Claude Code's own with `--agent` and passes no tool list.
    */
   | { readonly shape: "builtin"; readonly agentName: string }
-  /**
-   * The raw agent of spec section 5.7, which is the *absence* of an agent
-   * definition. It carries no `--system-prompt`: raw is defined as unconstrained
-   * (section 9.7), so there is no prompt to pass, and nothing in the extension
-   * has ever produced one. The spec's shape table listed the flag as optional;
-   * supporting an option no caller can reach only added an unbounded argument to
-   * every command line the planner has to fit inside a shell's limit.
-   *
-   * `tools` is the one surviving `--tools` flag: with no definition to read,
-   * a restriction the user wants on a raw session has nowhere else to live.
-   */
-  | {
-      readonly shape: "inline";
-      readonly tools?: readonly string[];
-    };
+  /** Claude Code's unmodified default session, exposed as `general-purpose`. */
+  | { readonly shape: "default" };
 
 /** The flat shape a caller supplies, so the exclusive pair can be rejected. */
 export interface LaunchConfigurationInput {
   readonly agentName?: string | undefined;
-  /** Present for an aboard definition, absent for a builtin type. */
+  /** Present for an aboard definition, absent for named builtins and the default shape. */
   readonly systemPrompt?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
   readonly declaredCommand?: readonly string[] | undefined;
+  /** Rejected for builtins; retained here so the invalid combination is typed. */
   readonly tools?: readonly string[] | undefined;
 }
 
@@ -413,27 +398,28 @@ export function resolveLaunchConfiguration(
       "declared fields describe an agent definition and require agentName",
     );
   }
-  return {
-    shape: "inline",
-    ...(input.tools === undefined ? {} : { tools: input.tools }),
-  };
+  if (input.tools !== undefined) {
+    throw new LaunchPlanError(
+      "conflicting-launch-shape",
+      "The default Claude Code session cannot be combined with --tools",
+    );
+  }
+  return { shape: "default" };
 }
 
 /**
- * Capability is derived from the effective tool set, never declared. Two types
- * are fixed rather than derived. `raw` is fixed by the spec: it has no
- * definition to read and is exactly where ad-hoc edits happen, so it is
- * write-capable whatever tools the user configured (sections 5.7 and 9.7).
- * `Explore` is fixed by Claude Code itself: its builtin definition is a
- * read-only search agent, and aboard scaffolds no file that could be read to
- * derive that (`docs/CLAUDE-REFERENCES/subagents.md`).
+ * Capability is derived from an aboard definition's effective tool set, never
+ * declared separately. Builtin capabilities are fixed by Claude Code itself:
+ * Explore is read-only and general-purpose has the full tool set. aboard has no
+ * definition file from which either could be derived
+ * (`docs/CLAUDE-REFERENCES/subagents.md`).
  */
 export function launchWriteCapability(
   agentType: AgentType,
   configuration: LaunchConfiguration,
 ): WriteCapability {
-  if (agentType === "raw") return "write-capable";
   if (agentType === "Explore") return "read-only";
+  if (agentType === "general-purpose") return "write-capable";
   switch (configuration.shape) {
     case "agent-defined":
       return deriveWriteCapability(configuration.declaredTools);
@@ -441,8 +427,8 @@ export function launchWriteCapability(
     // therefore the restrictive answer.
     case "builtin":
       return deriveWriteCapability(undefined);
-    case "inline":
-      return deriveWriteCapability(configuration.tools);
+    case "default":
+      return deriveWriteCapability(undefined);
   }
 }
 
@@ -857,22 +843,19 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       );
     }
   }
-  if (agentType === "raw" && configuration.shape !== "inline") {
+  if (agentType === "general-purpose" && configuration.shape !== "default") {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      "raw is the absence of an agent definition and never launches from one",
+      "general-purpose launches as Claude Code's default session without --agent or a system prompt",
     );
   }
-  if (agentType !== "raw" && agentType !== "manager" && configuration.shape === "inline") {
-    // Every other type has a definition — aboard's or Claude Code's. A bare
-    // `--tools` launch would drop its persona and put an allowlist on the
-    // command line that competes with the `tools:` field the write lease trusts.
+  if (agentType !== "general-purpose" && configuration.shape === "default") {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      `Automated and builtin agent types launch from their definition, not an inline tool list: ${agentType}`,
+      `Only general-purpose launches as Claude Code's default session: ${agentType}`,
     );
   }
-  if (isBuiltinAgentType(agentType) !== (configuration.shape === "builtin")) {
+  if (isNamedBuiltinAgentType(agentType) !== (configuration.shape === "builtin")) {
     // `--agent` names Claude Code's own definitions and nothing else: aboard
     // ships no file a builtin name could resolve to, and its own agents are
     // deliberately undiscoverable, so neither can borrow the other's shape.
@@ -904,15 +887,14 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     case "builtin":
       shapeArguments.push("--agent", configuration.agentName);
       break;
-    case "inline":
-      shapeArguments.push(...toolListArguments("--tools", configuration.tools));
+    case "default":
       break;
   }
 
   // The definition wins over the session settings for both fields: it is the
   // agent's own declaration, and `--agent` would have applied it were this a
   // subagent spawn. The settings remain the floor for the launches with no
-  // definition to read — `raw` and every resume.
+  // definition to read: Explore, the default general-purpose session, and every resume.
   const declared =
     configuration.shape === "agent-defined"
       ? configuration
@@ -1045,10 +1027,8 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
   const definition = configuration.shape === "agent-defined"
     ? definitionArguments(configuration, request.agentId, runtimeDirectory)
     : undefined;
-  const shapeArguments = definition?.args
-    // A builtin's `--agent` is restored by `--resume` itself, and a raw session
-    // has only the optional restriction it was launched with.
-    ?? (configuration.shape === "inline" ? toolListArguments("--tools", configuration.tools) : []);
+  // Claude Code restores a builtin's `--agent` selection with the conversation.
+  const shapeArguments = definition?.args ?? [];
   const declared = configuration.shape === "agent-defined"
     ? configuration
     : { declaredModel: undefined, declaredEffort: undefined };

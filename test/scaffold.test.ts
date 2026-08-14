@@ -27,12 +27,12 @@ test("fresh scaffold installs real assets, runtime ignore rules, hooks, and no f
   // definition instead, so no scaffolded instruction applies to every session.
   await assert.rejects(readFile(join(root, "CLAUDE.md")));
   // Definitions land outside `.claude/`, where Claude Code does not scan for
-  // subagents: a file there would make every session in the workspace — a raw
-  // aboard terminal, the user's own `claude` — able to spawn aboard's agents
+  // subagents: a file there would make every session in the workspace — an
+  // aboard terminal or the user's own `claude` — able to spawn aboard's agents
   // behind the bridge and outside the write lease.
   assert.match(await readFile(join(root, ".aboard", "agents", "manager.md"), "utf8"), /name: manager/);
   await assert.rejects(readFile(join(root, ".claude", "agents", "manager.md")));
-  for (const name of ["raw", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
+  for (const name of ["general-purpose", "Explore", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
   // User-owned skills are never shipped as assets; without an installer every
   // one is reported instead of being written here.
   for (const skill of VENDORED_SKILLS) {

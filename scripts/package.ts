@@ -20,7 +20,7 @@ const required = [
   "assets/scaffold/.aboard/agents/implementer.md",
   "assets/scaffold/.claude/skills/update-todo/SKILL.md",
   "assets/scaffold/.claude/skills/brainstorm/SKILL.md",
-  "assets/scaffold/.claude/skills/raw/SKILL.md",
+  "assets/scaffold/.claude/skills/general-purpose/SKILL.md",
 ];
 
 const forbidden = [

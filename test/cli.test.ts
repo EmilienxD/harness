@@ -15,7 +15,7 @@ const definitionFor = (agentName: string, declaredTools: readonly string[]) =>
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
-import { CLI_LAUNCHABLE_AGENT_TYPES, isBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
+import { CLI_LAUNCHABLE_AGENT_TYPES, isNamedBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
 
@@ -113,9 +113,9 @@ function setup() {
       // tool list onto the command line, while a builtin type launches as
       // `--agent <name>` against Claude Code's own definition — there being no
       // file for aboard to read, and none for any session to discover.
-      get: async (type) => type === "raw"
+      get: async (type) => type === "general-purpose"
         ? resolveLaunchConfiguration({})
-        : isBuiltinAgentType(type)
+        : isNamedBuiltinAgentType(type)
           ? resolveLaunchConfiguration({ agentName: type })
           : definitionFor(type, type === "brainstormer" || type === "webresearcher" ? ["Read", "Grep"] : ["Read", "Edit"]),
     },
@@ -172,14 +172,14 @@ test("a terminal handed to the user takes no lease and runs beside the holder", 
   await coordinator.spawn({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine" });
   const holder = lease.current()?.agentId;
   assert.notEqual(holder, undefined);
-  // Both are write-capable — raw has no definition to derive from — but both
+  // Both are write-capable, but both
   // are conversations the user drives, so neither takes the lease nor conflicts
   // with the one already held. An opening --prompt names the topic; it does not
   // make the session aboard's to serialize.
-  const raw = await launch({ type: "raw", description: "open a raw session" });
-  assert.equal(raw.status, 200, JSON.stringify(raw.body));
+  const generalPurpose = await launch({ type: "general-purpose", description: "open general purpose session", interactive: true });
+  assert.equal(generalPurpose.status, 200, JSON.stringify(generalPurpose.body));
   const withTopic = await launch({
-    type: "raw", description: "drive the auth cleanup", prompt: "Start from src/auth.ts", interactive: true,
+    type: "general-purpose", description: "drive the auth cleanup", prompt: "Start from src/auth.ts", interactive: true,
   });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
   assert.equal(lease.current()?.agentId, holder);
@@ -247,7 +247,7 @@ test("serves five commands and nothing that fetches state the Manager is already
 test("refuses every command from any session but the Manager", async () => {
   const { post, fleet } = setup();
   for (const caller of [[undefined], ["worker-1"]] as const) {
-    const response = await post("/cli/agent", { type: "raw", description: "open a raw session" }, caller);
+    const response = await post("/cli/agent", { type: "general-purpose", description: "open general purpose session", interactive: true }, caller);
     assert.equal(response.status, 403);
     assert.match(JSON.stringify(response.body), /Only the aboard Manager session/);
   }
@@ -257,10 +257,10 @@ test("refuses every command from any session but the Manager", async () => {
 test("runtime-validates every command boundary and rejects unknown fields", async () => {
   const { post } = setup();
   for (const [path, args] of [
-    ["/cli/agent", { type: "raw", prompt: "", description: "do the work" }],
+    ["/cli/agent", { type: "general-purpose", prompt: "", description: "do the work" }],
     ["/cli/agent", { type: "bogus", prompt: "work", description: "do the work" }],
     ["/cli/agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
-    ["/cli/agent", { type: "raw", description: "too short", interactive: true }],
+    ["/cli/agent", { type: "general-purpose", description: "too short", interactive: true }],
     ["/cli/agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
     // A dual-mode type without --interactive is automated, and an automated
     // launch without a prompt is the one combination with no reading.
@@ -282,7 +282,7 @@ test("runtime-validates every command boundary and rejects unknown fields", asyn
 // reach an implementation agent directly.
 test("the agent command cannot launch an implementation agent", async () => {
   const { launch, fleet } = setup();
-  assert.deepEqual([...CLI_LAUNCHABLE_AGENT_TYPES].sort(), ["Explore", "brainstormer", "general-purpose", "raw", "webresearcher"]);
+  assert.deepEqual([...CLI_LAUNCHABLE_AGENT_TYPES].sort(), ["Explore", "brainstormer", "general-purpose", "webresearcher"]);
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
     const response = await launch({ type, prompt: "work", description: "do the work now" });
     assert.equal(response.status, 400, type);
@@ -442,16 +442,16 @@ test("builtin types run interactively: focused, hook-silent, prompt optional", a
   });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
   const command = host.created.at(-1)!.terminal.sent.at(-1)!;
-  assert.match(command, /--agent general-purpose/);
+  assert.doesNotMatch(command, /--agent|--system-prompt(?:-file)?/);
   assert.match(command, /start from src\/auth\.ts/);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
 });
 
-test("an interactive-only type is launched interactively and the correction is reported", async () => {
+test("an interactive-only brainstormer is launched interactively and the correction is reported", async () => {
   const { launch, host } = setup();
   // The only valid reading of the call, so it is honoured rather than refused —
   // but the Manager must learn it is waiting for a result that cannot arrive.
-  const coerced = await launch({ type: "raw", description: "open a raw session" });
+  const coerced = await launch({ type: "brainstormer", description: "open a brainstorm session" });
   assert.equal(coerced.status, 200, JSON.stringify(coerced.body));
   assert.match(JSON.stringify(coerced.body), /no result will be delivered/);
   assert.match(JSON.stringify(coerced.body), /continue with the user/);

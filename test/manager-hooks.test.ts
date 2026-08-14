@@ -86,11 +86,11 @@ test("hook output stays ASCII-only so the Claude TUI renders it cleanly", async 
   const ascii = /^[\x20-\x7E\n]*$/;
   const fleet = new FleetRegistry(); const managerId = manager(fleet); const workerId = worker(fleet, managerId);
   fleet.register({
-    identity: { agentId: agent("raw-1"), type: "raw" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
-    terminal: { terminalId: terminal("raw-terminal"), name: "raw" }, lifecycle: { status: "starting", startedAt: timestamp },
+    identity: { agentId: agent("general-purpose-1"), type: "general-purpose" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("general-purpose-terminal"), name: "general-purpose" }, lifecycle: { status: "starting", startedAt: timestamp },
     resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   }, timestamp);
-  fleet.transition(agent("raw-1"), { status: "running", startedAt: timestamp }, timestamp);
+  fleet.transition(agent("general-purpose-1"), { status: "running", startedAt: timestamp }, timestamp);
   const briefings = new ManagerBriefings(sources({
     github: async () => ({
       issues: [
@@ -254,29 +254,29 @@ test("Manager prompt route launches both interactive command types and drains or
     launches.push(input); return { agentId: `interactive-${next++}` };
   } }, () => new Date("2026-07-30T14:31:00.000Z"));
   assert.deepEqual(await prompts.handle(managerId, "/brainstorm"), { intercepted: true, message: "Brainstorm session launched and focused." });
-  assert.deepEqual(await prompts.handle(managerId, "/raw"), { intercepted: true, message: "Raw session launched and focused." });
+  assert.deepEqual(await prompts.handle(managerId, "/general-purpose"), { intercepted: true, message: "General-purpose session launched and focused." });
   // Neither launch carries a prompt: an interactive terminal has a user in
   // front of it, and filler would burn a turn before the conversation starts.
   assert.deepEqual(launches, [
     { type: "brainstormer", description: "interactive brainstorm session" },
-    { type: "raw", description: "raw interactive session" },
+    { type: "general-purpose", description: "general purpose interactive session" },
   ]);
   const drained = await prompts.handle(managerId, "what is the status?");
   assert.match(String(drained.additionalContext), /At 2026-07-30T14:31:00.000Z: you started a brainstormer \(agent interactive-1\)/);
-  assert.match(String(drained.additionalContext), /raw session \(agent interactive-2\)/);
+  assert.match(String(drained.additionalContext), /general-purpose session \(agent interactive-2\)/);
   assert.ok(String(drained.additionalContext).indexOf("interactive-1") < String(drained.additionalContext).indexOf("interactive-2"));
   assert.deepEqual(await prompts.handle(managerId, "and now?"), {});
 });
 
 test("/done closes the invoking Manager terminal without waking the model", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
-  const rawId = agent("raw-1");
+  const generalPurposeId = agent("general-purpose-1");
   fleet.register({
-    identity: { agentId: rawId, type: "raw" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
-    terminal: { terminalId: terminal("raw-terminal"), name: "raw" }, lifecycle: { status: "starting", startedAt: timestamp },
+    identity: { agentId: generalPurposeId, type: "general-purpose" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("general-purpose-terminal"), name: "general-purpose" }, lifecycle: { status: "starting", startedAt: timestamp },
     resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   }, timestamp);
-  fleet.transition(rawId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.transition(generalPurposeId, { status: "running", startedAt: timestamp }, timestamp);
   const killed: TerminalId[] = [];
   const prompts = new ManagerPromptService(
     fleet,
@@ -286,8 +286,8 @@ test("/done closes the invoking Manager terminal without waking the model", asyn
     { kill: (terminalId) => killed.push(terminalId) },
   );
   assert.deepEqual(await prompts.handle(managerId, "/done"), { intercepted: true, message: "Closing this terminal." });
-  assert.deepEqual(await prompts.handle(rawId, "/done"), { intercepted: true, message: "Closing this terminal." });
-  assert.deepEqual(killed, [terminal("manager-terminal"), terminal("raw-terminal")]);
+  assert.deepEqual(await prompts.handle(generalPurposeId, "/done"), { intercepted: true, message: "Closing this terminal." });
+  assert.deepEqual(killed, [terminal("manager-terminal"), terminal("general-purpose-terminal")]);
   assert.match(String((await prompts.handle(managerId, "/done trailing text")).message), /text you typed after it was not sent/);
 });
 
@@ -383,9 +383,9 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
 test("Python prompt hook erases successful and failed commands with exact output channels", async () => {
   const success = await runPromptHook(200, { intercepted: true, message: "Brainstorm session launched and focused." }, "/brainstorm caching layer");
   assert.deepEqual(success, { status: 2, stdout: "", stderr: `${EOL}${EOL}Brainstorm session launched and focused.` });
-  const rawDone = await runPromptHook(200, { intercepted: true, message: "Closing this terminal." }, "/done", "secret", "raw");
-  assert.deepEqual(rawDone, { status: 2, stdout: "", stderr: `${EOL}${EOL}Closing this terminal.` });
-  const authFailure = await runPromptHook(401, { ok: false }, "/raw", "wrong-token");
+  const generalPurposeDone = await runPromptHook(200, { intercepted: true, message: "Closing this terminal." }, "/done", "secret", "general-purpose");
+  assert.deepEqual(generalPurposeDone, { status: 2, stdout: "", stderr: `${EOL}${EOL}Closing this terminal.` });
+  const authFailure = await runPromptHook(401, { ok: false }, "/general-purpose", "wrong-token");
   assert.equal(authFailure.status, 2); assert.equal(authFailure.stdout, ""); assert.ok(authFailure.stderr.startsWith(`${EOL}${EOL}Aboard did not launch the requested session:`));
 });
 
@@ -396,9 +396,9 @@ test("Python prompt hook injects a drained queue on a real prompt", async () => 
   assert.deepEqual(JSON.parse(result.stdout), { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } });
 });
 
-test("aboard-owned command skills are user-only shims and raw has no agent definition", async () => {
+test("aboard-owned command skills are user-only shims and builtins have no aboard definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
-  for (const name of ["brainstorm", "raw", "done", "auto", "review-pr"]) {
+  for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
     // No argument-hint: these commands are argumentless, and hinting otherwise
@@ -417,11 +417,11 @@ test("aboard-owned command skills are user-only shims and raw has no agent defin
     assert.match(body, /except if the user explicitly asks/, `${name} SKILL.md body must forbid fixing the installation unprompted`);
     assert.match(body, /Reset \.aboard\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);
   }
-  await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".claude", "agents", "raw.md")));
+  await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".aboard", "agents", "general-purpose.md")));
 });
 
 test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
-  for (const prompt of ["/raw", "/raw fix the parser", "/brainstorm", "/brainstorm caching layer", "/done", "/done close now", "/auto", "/review-pr", "/auto the next spec"]) {
+  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/brainstorm", "/brainstorm caching layer", "/done", "/done close now", "/auto", "/review-pr", "/auto the next spec"]) {
     const result = await runPromptHook(500, { error: "boom" }, prompt);
     assert.equal(result.status, 2, `${prompt} must erase the prompt even when the bridge fails`);
     assert.equal(result.stdout, "");

@@ -360,11 +360,11 @@ export class ManagerPromptService {
     const launched = await this.launcher.spawnInteractive(command.input) as Record<string, unknown>;
     const occurredAt = this.#now().toISOString() as IsoTimestamp;
     const launchedAgentId = typeof launched.agentId === "string" ? launched.agentId : "unknown";
-    const event = command.type === "raw"
-      ? `you started a raw session (agent ${launchedAgentId}).`
+    const event = command.type === "general-purpose"
+      ? `you started a general-purpose session (agent ${launchedAgentId}).`
       : `you started a brainstormer (agent ${launchedAgentId}).`;
     this.fleet.enqueueNotification(agentId, event, occurredAt);
-    const opened = command.type === "raw" ? "Raw session launched and focused." : "Brainstorm session launched and focused.";
+    const opened = command.type === "general-purpose" ? "General-purpose session launched and focused." : "Brainstorm session launched and focused.";
     return {
       intercepted: true,
       message: command.ignoredArguments
@@ -456,7 +456,7 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
 }
 
 /**
- * Like `/brainstorm` and `/raw`, these take no arguments. Trailing text is
+ * Like `/brainstorm` and `/general-purpose`, these take no arguments. Trailing text is
  * matched and dropped rather than forwarded: leaking `/auto now please` into the
  * Manager's context is worse than declining to pass it on.
  */
@@ -468,24 +468,24 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
 }
 
 /**
- * `/brainstorm` and `/raw` take no arguments: they open a terminal the user then
+ * `/brainstorm` and `/general-purpose` take no arguments: they open a terminal the user then
  * drives directly, so an opening message would only spend a turn before the
  * conversation starts. Trailing text is still matched rather than passed
  * through, because leaking `/brainstorm foo` into the Manager's context is worse
  * than declining to forward it.
  */
 function parseInteractiveCommand(prompt: string): {
-  readonly type: "brainstormer" | "raw";
+  readonly type: "brainstormer" | "general-purpose";
   readonly command: string;
   readonly ignoredArguments: boolean;
   readonly input: DelegationLaunchInput;
 } | undefined {
-  const match = /^\s*\/(brainstorm|raw)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
+  const match = /^\s*\/(brainstorm|general-purpose)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
-  const command = match[1] as "brainstorm" | "raw";
+  const command = match[1] as "brainstorm" | "general-purpose";
   const ignoredArguments = (match[2]?.trim() ?? "").length > 0;
-  return command === "raw"
-    ? { type: "raw", command, ignoredArguments, input: { type: "raw", description: "raw interactive session" } }
+  return command === "general-purpose"
+    ? { type: "general-purpose", command, ignoredArguments, input: { type: "general-purpose", description: "general purpose interactive session" } }
     : { type: "brainstormer", command, ignoredArguments, input: { type: "brainstormer", description: "interactive brainstorm session" } };
 }
 

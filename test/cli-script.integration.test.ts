@@ -60,7 +60,7 @@ async function bridgeWith(calls: Call[], todo: string[]): Promise<BridgeRuntime>
           return { agentId: "worker-1", result: "reviewed" };
         },
         spawn: () => { throw new Error("not used"); },
-        // `raw` and `brainstormer` are interactive-only, so a launch that omits
+        // `brainstormer` is interactive-only, so a launch that omits
         // the flag is coerced onto this path rather than refused.
         spawnInteractive: async (input) => {
           calls.push({ type: input.type, description: input.description, ...(input.prompt === undefined ? {} : { prompt: input.prompt }) });
@@ -89,7 +89,7 @@ test("the shipped CLI reaches the bridge, and only from the Manager", async (con
   assert.match(unlaunched.stderr, /not started by the aboard extension/);
 
   // A worker that found the script still cannot orchestrate with it.
-  const worker = await run(["agent", "--type", "raw", "--description", "open a raw session"], { env: launched(bridge, "worker-9") });
+  const worker = await run(["agent", "--type", "general-purpose", "--description", "open general purpose session", "--interactive"], { env: launched(bridge, "worker-9") });
   assert.equal(worker.status, 1);
   assert.match(worker.stderr, /Only the aboard Manager session/);
   assert.deepEqual(calls, []);

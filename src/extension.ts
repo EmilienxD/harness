@@ -12,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { TerminalController } from "./claude/terminals.js";
-import { isBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
+import { isNamedBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
 import { sessionIsResumable } from "./claude/sessions.js";
@@ -186,13 +186,13 @@ function briefingSources(
 
 function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
   return { get: async (type) => {
-    if (type === "raw") return { shape: "inline" };
-    // The builtin types resolve to Claude Code's own definitions: aboard
+    if (type === "general-purpose") return { shape: "default" };
+    // Named builtins resolve to Claude Code's own definitions: aboard
     // scaffolds no file for them and there is no frontmatter to read for the
-    // tool set — capability for both is fixed in `launchWriteCapability`, and
+    // tool set — capability is fixed in `launchWriteCapability`, and
     // deriving from an unreadable file would conservatively mark even Explore
     // write-capable.
-    if (isBuiltinAgentType(type)) return { shape: "builtin", agentName: type };
+    if (isNamedBuiltinAgentType(type)) return { shape: "builtin", agentName: type };
     const result = parseAgentDefinition(await readFile(agentDefinitionPath(workspaceRoot, type), "utf8"));
     if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
     // The whole definition is carried onto the command line: the body as
