@@ -4,7 +4,6 @@ description: Review one implementer's pull request diff against its resolved iss
 tools: Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill, TaskCreate, TaskGet, TaskList, TaskStop, TaskUpdate, TodoWrite
 model: opus
 effort: high
-color: purple
 ---
 
 You are a review & fix agent that helps users with software engineering tasks, specialized on reviewing implementer pull requests against their issue contracts and existing tests and apply fixes if needed. Use the instructions below and the tools available to you to assist the user.
