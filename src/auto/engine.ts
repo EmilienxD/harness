@@ -29,6 +29,8 @@ import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHa
 
 /** The GitHub surface the engine needs, narrowed so tests can fake it whole. */
 export interface AutoRunGitHub {
+  /** Proves that gh can authenticate to and resolve the workspace repository. */
+  checkAuthentication(): Promise<void>;
   listSpecIssues(): Promise<readonly { readonly number: number; readonly title: string; readonly createdAt: string }[]>;
   listSubIssues(parentNumber: number): Promise<readonly {
     readonly number: number;
@@ -213,6 +215,8 @@ export class AutoRunEngine {
     if (this.#state !== undefined) {
       return { started: false, reason: "a run is already active", active: this.#state };
     }
+    const precondition = await this.#checkResumePreconditions();
+    if (precondition !== undefined) return { started: false, reason: precondition };
     const specs = await this.options.github.listSpecIssues();
     const spec = specs.find((candidate) => candidate.number === record.specNumber);
     const selection = selectIssues(await this.options.github.listSubIssues(record.specNumber));
@@ -704,6 +708,8 @@ export class AutoRunEngine {
     } catch (error) {
       return `the workspace is not a usable git repository (${message(error)})`;
     }
+    const githubFailure = await this.#checkGitHubAuthentication();
+    if (githubFailure !== undefined) return githubFailure;
     if (status.entries.length > 0) {
       // Binding: the engine stages with `git add -A`, so a dirty tree would
       // sweep unrelated work into an automated commit. Name the paths rather
@@ -712,6 +718,25 @@ export class AutoRunEngine {
       return `the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`;
     }
     return undefined;
+  }
+
+  /** Recovery needs the infrastructure checks, but its tree may be intentionally dirty. */
+  async #checkResumePreconditions(): Promise<string | undefined> {
+    try {
+      await this.options.git.defaultBranch();
+    } catch (error) {
+      return `the workspace is not a usable git repository (${message(error)})`;
+    }
+    return this.#checkGitHubAuthentication();
+  }
+
+  async #checkGitHubAuthentication(): Promise<string | undefined> {
+    try {
+      await this.options.github.checkAuthentication();
+      return undefined;
+    } catch (error) {
+      return `GitHub CLI cannot authenticate to this repository; run gh auth status and gh auth login if needed (${message(error)})`;
+    }
   }
 
   /**

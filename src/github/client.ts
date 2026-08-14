@@ -218,6 +218,18 @@ export class GitHubClient implements GitHubPromptSource {
 
   public constructor(private readonly gh: GhExecutor) {}
 
+  /**
+   * Proves the capability auto-run actually needs: the active gh account can
+   * authenticate to and resolve this workspace's repository. The probe always
+   * runs: a cached repository identity must not hide that the user logged out.
+   * Its successful identity is reused by the next GraphQL query, avoiding an
+   * extra subprocess and an all-host `gh auth status` false failure.
+   */
+  public async checkAuthentication(): Promise<void> {
+    const identity = await this.#resolveOwnerRepo();
+    this.#identity = Promise.resolve(identity);
+  }
+
   public async getTodo(): Promise<TodoSnapshot> {
     let number = await this.#rememberedTodo();
     if (number !== undefined) {
@@ -495,17 +507,19 @@ export class GitHubClient implements GitHubPromptSource {
    * phase and once per poll tick while a hitl pull request waits.
    */
   async #ownerRepo(): Promise<{ readonly owner: string; readonly repo: string }> {
-    this.#identity ??= (async () => {
-      const ownerRepo = record(json(await this.gh.run(["repo", "view", "--json", "owner,name"]), "repository identity"), "repository identity");
-      const owner = record(ownerRepo.owner, "repository owner");
-      return { owner: string(owner.login, "repository owner.login"), repo: string(ownerRepo.name, "repository name") };
-    })().catch((error: unknown) => {
+    this.#identity ??= this.#resolveOwnerRepo().catch((error: unknown) => {
       // A failed lookup must not be cached, or a transient `gh` outage would
       // poison every later query for the life of the extension host.
       this.#identity = undefined;
       throw error;
     });
     return this.#identity;
+  }
+
+  async #resolveOwnerRepo(): Promise<{ readonly owner: string; readonly repo: string }> {
+    const ownerRepo = record(json(await this.gh.run(["repo", "view", "--json", "owner,name"]), "repository identity"), "repository identity");
+    const owner = record(ownerRepo.owner, "repository owner");
+    return { owner: string(owner.login, "repository owner.login"), repo: string(ownerRepo.name, "repository name") };
   }
 
   async #graphql(query: string, variables: Readonly<Record<string, number>> = {}): Promise<unknown> {

@@ -16,6 +16,30 @@ class FixtureGh implements GhExecutor {
 const repo = JSON.stringify({ owner: { login: "EmilienxD" }, name: "aboard" });
 const graph = (value: unknown) => JSON.stringify({ data: { repository: value } });
 
+test("authentication preflight is fresh, targets the workspace repository, and primes GraphQL identity", async () => {
+  let failing = true;
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "repo") {
+      assert.deepEqual(args, ["repo", "view", "--json", "owner,name"]);
+      if (failing) throw new GitHubBoundaryError("command-failed", "GitHub CLI command failed");
+      return repo;
+    }
+    return graph({ issues: { nodes: [] } });
+  });
+  const github = new GitHubClient(gh);
+
+  await assert.rejects(
+    () => github.checkAuthentication(),
+    (error: unknown) => error instanceof GitHubBoundaryError && error.code === "command-failed",
+  );
+  failing = false;
+  await github.checkAuthentication();
+  assert.deepEqual(await github.listSpecIssues(), []);
+
+  assert.equal(gh.calls.filter((args) => args[0] === "repo").length, 2);
+  assert.equal(gh.calls.filter((args) => args[0] === "api").length, 1);
+});
+
 test("looks up, persists, and caches the singleton TODO number, then updates by argument", async () => {
   const gh = new FixtureGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return '[{"number":12}]';

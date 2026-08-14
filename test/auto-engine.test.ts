@@ -17,6 +17,7 @@ interface Harness {
   /** Origins the engine declared for its handed-off launches; they decide the lease. */
   readonly interactiveOrigins: LaunchOrigin[];
   readonly gitCalls: string[];
+  readonly githubCalls: string[];
   readonly saved: AutoRunRecord[];
   readonly state: { cleared: boolean };
   readonly pullRequests: Map<number, { state: "open" | "closed" | "merged" }>;
@@ -32,6 +33,7 @@ interface HarnessOptions {
   readonly resolveHitl?: "merged" | "closed";
   readonly startDirty?: boolean;
   readonly pushFails?: boolean;
+  readonly githubAuthenticationFails?: boolean;
   /** Simulates a hitl pr-doctor applying fixes the user approved, mid-wait. */
   readonly dirtyDuringWait?: boolean;
   /** More than one open spec, for the scope setting. Issue n belongs to spec n % 10. */
@@ -48,6 +50,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const launches: DelegationLaunchInput[] = [];
   const interactiveOrigins: LaunchOrigin[] = [];
   const gitCalls: string[] = [];
+  const githubCalls: string[] = [];
   const saved: AutoRunRecord[] = [];
   const state = { cleared: false };
   const pullRequests = new Map<number, { state: "open" | "closed" | "merged" }>();
@@ -86,7 +89,14 @@ function harness(options: HarnessOptions = {}): Harness {
   };
 
   const github: AutoRunGitHub = {
-    listSpecIssues: async () => options.specs ?? [{ number: 12, title: "Offline sync", createdAt: "2026-01-01T00:00:00.000Z" }],
+    checkAuthentication: async () => {
+      githubCalls.push("checkAuthentication");
+      if (options.githubAuthenticationFails === true) throw new Error("GitHub CLI command failed");
+    },
+    listSpecIssues: async () => {
+      githubCalls.push("listSpecIssues");
+      return options.specs ?? [{ number: 12, title: "Offline sync", createdAt: "2026-01-01T00:00:00.000Z" }];
+    },
     listSubIssues: async (parent) => subIssues.filter((entry) => open.has(entry.number) && (options.specs === undefined || parentOf(entry.number) === parent)),
     getIssue: async (number) => ({ state: open.has(number) ? "open" : "closed" }),
     createPullRequest: async () => { const number = nextPr++; pullRequests.set(number, { state: "open" }); return number; },
@@ -188,7 +198,7 @@ function harness(options: HarnessOptions = {}): Harness {
     sleep: () => new Promise((resolve) => { setImmediate(resolve); }),
   });
 
-  return { engine, notifications, launches, interactiveOrigins, gitCalls, saved, state, pullRequests };
+  return { engine, notifications, launches, interactiveOrigins, gitCalls, githubCalls, saved, state, pullRequests };
 }
 
 function telemetry() {
@@ -277,6 +287,38 @@ test("a dirty working tree refuses the run and names the dirty paths", async () 
   assert.match((result as { reason: string }).reason, /working tree is not clean: src\/a\.ts/);
   assert.equal(context.launches.length, 0);
   assert.equal(context.saved.length, 0);
+});
+
+test("an unauthenticated GitHub CLI refuses the run before querying or persisting a plan", async () => {
+  const context = harness({ githubAuthenticationFails: true });
+  const result = await context.engine.start();
+  assert.equal(result.started, false);
+  assert.match((result as { reason: string }).reason, /GitHub CLI cannot authenticate.*gh auth login/);
+  assert.deepEqual(context.githubCalls, ["checkAuthentication"]);
+  assert.equal(context.launches.length, 0);
+  assert.equal(context.saved.length, 0);
+});
+
+test("an unauthenticated GitHub CLI refuses resume without rejecting a dirty recovery tree", async () => {
+  const context = harness({ githubAuthenticationFails: true, startDirty: true });
+  const result = await context.engine.resume({
+    version: 1,
+    runId: "run_interrupted",
+    specNumber: 12,
+    issueNumbers: [34],
+    currentIssue: 34,
+    phase: "commit",
+    branch: "aboard/34-add-retry-backoff",
+    prNumber: undefined,
+    reviewMode: false,
+    scope: "spec",
+    reviewedIssues: [],
+    startedAt: "2026-01-01T00:00:00.000Z",
+  });
+  assert.equal(result.started, false);
+  assert.match((result as { reason: string }).reason, /GitHub CLI cannot authenticate/);
+  assert.deepEqual(context.githubCalls, ["checkAuthentication"]);
+  assert.equal(context.launches.length, 0);
 });
 
 test("a second start returns the active run instead of starting another", async () => {
