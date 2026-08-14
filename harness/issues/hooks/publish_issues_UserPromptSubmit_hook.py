@@ -18,16 +18,16 @@ Design notes:
   *assumes* that ordering is perfect - see the retry pass below.
 - The first "# " header line in a draft file is the issue title. The first
   non-empty line after that declares labels (see /draft-issues, /draft-issue,
-  /to-spec-draft-issue): either "> spec", or "> " followed by a
-  comma-separated list of label tokens in any order - "difficulty:{level}"
-  and "mode:{afk|hitl}" are each optional (the user can ask for them to be
-  left off), and extra labels the user asked for may be added alongside
-  (e.g. "> ci, difficulty:low"). Tokens are mapped to flat label names
-  ("low-difficulty", "medium-difficulty", "high-difficulty", "afk", "hitl",
-  "spec") via LABEL_ALIASES where an alias exists, then stripped from the
-  body that gets posted, since the labels carry that information from then
-  on. Extra (non-aliased) tokens pass through as-is - the drafting skills
-  are responsible for checking with `gh label list` that they exist.
+  /to-spec-draft-issue): either "> ai:spec" (legacy "> spec" also works), or
+  "> " followed by a comma-separated list of label tokens in any order -
+  "difficulty:{level}" and "mode:{afk|hitl}" are each optional (the user can
+  ask for them to be left off), and extra labels the user asked for may be
+  added alongside (e.g. "> ci, difficulty:low"). Aliased tokens map to the
+  workflow's own "ai:"-prefixed label names ("ai:low-difficulty", "ai:afk",
+  "ai:spec", ...) via LABEL_ALIASES, then are stripped from the body that
+  gets posted, since the labels carry that information from then on. Extra
+  (non-aliased) tokens pass through as-is - the drafting skills are
+  responsible for checking with `gh label list` that they exist.
 - A reference to another draft issue, written as "{session-id}/{i}" in the body, is
   rewritten to "#<real-issue-number>" once that draft has been published.
   This is how "blocked by" links get resolved without creating issues
@@ -97,36 +97,44 @@ LABEL_LINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# The label declaration line produced by /to-spec-draft-issue.
-SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*spec\s*$", re.IGNORECASE)
+# The label declaration line produced by /to-spec-draft-issue ("> ai:spec";
+# plain "> spec" from older installs also still matches).
+SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*(?:ai\s*:\s*)?spec\s*$", re.IGNORECASE)
 
-# Canonical labels this workflow depends on: (color, description). Created
-# (or updated) with --force at the start of every publish run, so they
-# always exist regardless of repo state.
+# Canonical labels this workflow depends on: (color, description). They carry
+# an "ai:" prefix so they can't collide with a repo's own labels, and so the
+# same labels can be shared across projects that use this tool as a dependency.
+# They are created at the start of every publish run if missing; existing ones
+# are left alone, so the user's own styling is never overwritten.
 CANONICAL_LABELS = {
-    "low-difficulty": ("0E8A16", "Routine, well-understood work - safe for a lighter model."),
-    "medium-difficulty": ("FBCA04", "Multi-step work with real design decisions."),
-    "high-difficulty": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
-    "afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
-    "hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
-    "spec": ("7057FF", "A product spec synthesized from conversation."),
+    "ai:low-difficulty": ("0E8A16", "Routine, well-understood work - safe for a lighter model."),
+    "ai:medium-difficulty": ("FBCA04", "Multi-step work with real design decisions."),
+    "ai:high-difficulty": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
+    "ai:afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
+    "ai:hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
+    "ai:spec": ("7057FF", "A product spec synthesized from conversation."),
 }
 
 # The declaration line uses "difficulty:{level}" / "mode:{mode}" tokens; the
-# labels actually created and applied are the flat names above. Any other
-# token on the line is applied as-is (the drafting skills check those exist
-# with `gh label list` before writing them).
+# labels actually created and applied are the names above. Any other token on
+# the line is applied as-is (the drafting skills check those exist with
+# `gh label list` before writing them).
 LABEL_ALIASES = {
-    "difficulty:low": "low-difficulty",
-    "difficulty:medium": "medium-difficulty",
-    "difficulty:high": "high-difficulty",
-    "mode:afk": "afk",
-    "mode:hitl": "hitl",
+    "difficulty:low": "ai:low-difficulty",
+    "difficulty:medium": "ai:medium-difficulty",
+    "difficulty:high": "ai:high-difficulty",
+    "mode:afk": "ai:afk",
+    "mode:hitl": "ai:hitl",
+    "spec": "ai:spec",
 }
 
 
 def ensure_labels(dry: bool) -> list[str]:
-    """Create or update the canonical labels. Returns warning lines, if any."""
+    """Create the canonical labels that are missing; never touch existing ones.
+
+    "gh label create" exits non-zero with an "already exists" error when the
+    label is present, so a plain create is create-only: an existing label's
+    color and description are left exactly as the user has them."""
     if dry:
         return []
 
@@ -137,11 +145,12 @@ def ensure_labels(dry: bool) -> list[str]:
                 "gh", "label", "create", name,
                 "--color", color,
                 "--description", description,
-                "--force",
             ],
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0 and "already exists" in (result.stderr or result.stdout):
+            continue  # already there - leave it untouched
         if result.returncode != 0:
             warnings.append(
                 f"  WARN  could not ensure label '{name}': "
@@ -173,7 +182,8 @@ def parse_issue_file(path: Path) -> tuple[str, str]:
 def extract_labels(rest: str) -> tuple[list[str], str]:
     """Pull the label declaration line out of the body.
 
-    Accepts either "> spec" (one label) or "> " followed by a comma-separated
+    Accepts either "> ai:spec" (one label; legacy "> spec" works too) or
+    "> " followed by a comma-separated
     list of label tokens in any order - "difficulty:*" and "mode:*" are each
     optional, and extra labels pass through as-is. Returns (labels,
     remaining_body). labels is empty if the line is missing or malformed
@@ -188,7 +198,7 @@ def extract_labels(rest: str) -> tuple[list[str], str]:
     if idx < len(lines):
         if SPEC_LABEL_LINE_PATTERN.match(lines[idx]):
             remaining = "\n".join(lines[idx + 1:]).strip()
-            return ["spec"], remaining
+            return [LABEL_ALIASES["spec"]], remaining
         if LABEL_LINE_PATTERN.match(lines[idx]):
             content = lines[idx].strip()[1:]  # drop the leading ">"
             labels = []

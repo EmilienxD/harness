@@ -57,7 +57,7 @@ whole dependency graph published without a single model call driving it.
 **Spec.** `/to-spec` synthesizes what you've already discussed into a spec and delivers it in chat —
 no interview, no files. `/to-spec-draft-issue` does the same synthesis but writes it to
 `.issues-gateway/{session-id}/issue-{n}.md` (same auto-indexing), so `/publish-issues` can put it
-on the tracker with a `spec` label.
+on the tracker with an `ai:spec` label.
 
 ### Why the batch flow is 3 API calls, not one-per-issue
 
@@ -121,10 +121,14 @@ At runtime the drafting skills create a gateway folder at the project root — `
   comma-separated list of label tokens — `difficulty:{low|medium|high}` and `mode:{afk|hitl}` are
   each optional (the user can ask the drafting skill to skip them), and extra labels the user asks
   for are listed alongside them after the skill verifies they exist in the repo (`gh label list`).
-  For specs: `> spec`. The hook maps the difficulty/mode tokens to their flat names
-  (`low-difficulty`, `medium-difficulty`, `high-difficulty`, `afk`, `hitl`), applies any extra
+  For specs: `> ai:spec` (plain `> spec` from older drafts also still parses). The hook maps the
+  difficulty/mode/spec tokens to the workflow's own label names (`ai:low-difficulty`,
+  `ai:medium-difficulty`, `ai:high-difficulty`, `ai:afk`, `ai:hitl`, `ai:spec`), applies any extra
   tokens as-is, strips the line from the published body, and creates the canonical labels in the
-  repo if they don't already exist (extras are expected to exist already).
+  repo only if they don't already exist — an existing label is never re-styled. The `ai:` prefix
+  keeps these labels from colliding with a repo's own, and lets projects that share this workflow
+  use one common label set. GitHub label renames don't migrate issues, so repos label-scoped before
+  this change keep their old `spec`/`afk`/… labels; the hook simply stops touching them.
 - **Blockers**: real tracker numbers only (`#42`) in single-issue drafts — there are no sibling
   drafts to resolve. In a batch, `{session-id}/{i}` in curly braces (e.g.
   `{6b1f0c2e-…-2e8a1d0c4f55/0}`) means "blocked by that issue"; the hook rewrites it to

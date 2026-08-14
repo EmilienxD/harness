@@ -24,7 +24,7 @@ Use this template. The title is the first `# ` header. The line directly below i
 <spec-template>
 # {Spec title}
 
-> spec
+> ai:spec
 
 ## Problem Statement
 
@@ -80,7 +80,7 @@ Any further notes about the feature.
 
 </spec-template>
 
-Make sur to respect the `> spec` second non-empty line because it will be parsed to a `spec` label, automatically created.
+Make sur to respect the `> ai:spec` second non-empty line because it will be parsed to the `ai:spec` label, automatically created in the repo if missing.
 
 5. Hand off to the user
 
