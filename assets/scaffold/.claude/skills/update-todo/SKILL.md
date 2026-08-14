@@ -12,9 +12,9 @@ Apply `$ARGUMENTS` as an evolution of that roadmap: add newly discovered work, r
 Write the full replacement body, including the parts you did not change, with a short audit reason:
 
 ```
-uv run --no-project "$ABOARD_CLI" todo --reason "<what moved and why>" --body - <<'BODY'
-<the full roadmap>
-BODY
+printf '%s' '<the full roadmap>' > "${TMPDIR:-/tmp}/aboard-todo.md" && uv run --no-project "$ABOARD_CLI" todo --reason "<what moved and why>" --body - < "${TMPDIR:-/tmp}/aboard-todo.md"
 ```
+
+Write the body to a file and consume it in the same call, as above — never a heredoc, which hangs Git Bash on Windows near 64 KB. Inside the single quotes everything is literal; escape each apostrophe as `'\''`.
 
 Then tell the user what moved, not the whole document.

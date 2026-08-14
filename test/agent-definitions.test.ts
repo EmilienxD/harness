@@ -149,6 +149,10 @@ test("Manager guidance matches the current delegation contract", async () => {
     /more than 3 queries, run an Explore type subagent/i,
     /run a webresearcher type subagent/i,
     /<aboard-state>/,
+    // Git Bash on Windows hangs on a heredoc body near 64 KB, so long stdin
+    // arguments go through a file written and consumed in the same call.
+    /Never write it as a heredoc/i,
+    /printf '%s' '.*' > "\$\{TMPDIR:-\/tmp\}\/aboard-prompt\.md" && uv run/,
   ]) {
     assert.match(manager, required);
   }
