@@ -340,11 +340,11 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
 
 test("Python prompt hook erases successful and failed commands with exact output channels", async () => {
   const success = await runPromptHook(200, { intercepted: true, message: "Brainstorm session launched and focused." }, "/brainstorm caching layer");
-  assert.deepEqual(success, { status: 2, stdout: "", stderr: `${EOL}Brainstorm session launched and focused.${EOL}` });
+  assert.deepEqual(success, { status: 2, stdout: "", stderr: `${EOL}${EOL}Brainstorm session launched and focused.` });
   const rawDone = await runPromptHook(200, { intercepted: true, message: "Closing this terminal." }, "/done", "secret", "raw");
-  assert.deepEqual(rawDone, { status: 2, stdout: "", stderr: `${EOL}Closing this terminal.${EOL}` });
+  assert.deepEqual(rawDone, { status: 2, stdout: "", stderr: `${EOL}${EOL}Closing this terminal.` });
   const authFailure = await runPromptHook(401, { ok: false }, "/raw", "wrong-token");
-  assert.equal(authFailure.status, 2); assert.equal(authFailure.stdout, ""); assert.ok(authFailure.stderr.startsWith(`${EOL}Aboard did not launch the requested session:`));
+  assert.equal(authFailure.status, 2); assert.equal(authFailure.stdout, ""); assert.ok(authFailure.stderr.startsWith(`${EOL}${EOL}Aboard did not launch the requested session:`));
 });
 
 test("Python prompt hook injects a drained queue on a real prompt", async () => {

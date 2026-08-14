@@ -58,7 +58,7 @@ def finish(message):
     erases the prompt, and stderr becomes what the user sees. The Manager is
     told what happened later, batched into the next real prompt.
     """
-    sys.stderr.write("\n" + message.strip() + "\n")
+    sys.stderr.write("\n\n" + message.strip())
     return 2
 
 
