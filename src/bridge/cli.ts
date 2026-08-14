@@ -28,7 +28,7 @@ import type { ReviewCoordinator } from "../github/review.js";
 
 /**
  * How long a foreground launch may block, matching the Manager Stop hook
- * timeout (`docs/auto-implementation.md` §111). It is not enforced here — the
+ * timeout (`AGENTS.md`). It is not enforced here — the
  * bridge waits as long as the caller does — but it is what the Manager terminal's
  * `BASH_MAX_TIMEOUT_MS` is set from, so a foreground delegation can outlive the
  * Bash tool's own ten-minute ceiling.

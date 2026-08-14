@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { deriveAgentDefinitionWriteCapability } from "../src/domain/capability.js";
 import type { AgentId, IsoTimestamp, SessionId } from "../src/domain/contracts.js";
-import { dirtyTreeFailure, isStaleLease, WriteLease } from "../src/domain/lease.js";
+import { dirtyTreeFailure, isStaleLease, leaseRequired, WriteLease } from "../src/domain/lease.js";
 
 const at = (value: string) => value as IsoTimestamp;
 const agent = (value: string) => value as AgentId;
@@ -34,6 +34,23 @@ test("treats direct writers and unrestricted shells as write-capable", () => {
     assert.equal(deriveAgentDefinitionWriteCapability(definition(tool)), "write-capable");
   }
   assert.equal(deriveAgentDefinitionWriteCapability(definition("Bash(gh *), PowerShell(git diff*)")), "read-only");
+});
+
+test("only launches aboard drives are leased: automated Manager work and every auto-run launch", () => {
+  const interactive = true;
+  // The agent works alone and reports back to aboard.
+  assert.equal(leaseRequired("manager", !interactive), true);
+  // A conversation handed to the user — /raw, /brainstorm, any --interactive
+  // launch. An opening --prompt only names the topic; the user drives from
+  // there, and parallel work is theirs to allow.
+  assert.equal(leaseRequired("manager", interactive), false);
+  // The run commits, pushes, and merges behind its terminals, so even the
+  // interactive pr-doctor-hitl is leased.
+  assert.equal(leaseRequired("auto-run", !interactive), true);
+  assert.equal(leaseRequired("auto-run", interactive), true);
+  // The user restoring or resuming a session of their own.
+  assert.equal(leaseRequired("user", !interactive), false);
+  assert.equal(leaseRequired("user", interactive), false);
 });
 
 test("acquires, refuses with holder age, releases, and permits concurrent readers", () => {

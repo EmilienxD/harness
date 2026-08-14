@@ -143,8 +143,8 @@ function result(response: { readonly body?: unknown }): unknown {
   return (response.body as { result?: unknown }).result;
 }
 
-test("restores a persisted worker with --resume, no new prompt, and no focus", async () => {
-  const { fleet, host, coordinator } = setup();
+test("restores a persisted worker with --resume, no new prompt, no focus, and no lease", async () => {
+  const { fleet, host, coordinator, lease } = setup();
   const workerId = agent("persisted-worker");
   const sessionId = session("c15badb6-d6c8-45a6-a59f-e931cd364332");
   fleet.register({
@@ -162,6 +162,27 @@ test("restores a persisted worker with --resume, no new prompt, and no focus", a
   assert.deepEqual(host.created[0]!.terminal.shown, []);
   assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
   assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
+  // Restoration is the user reopening their own fleet and hands the worker to
+  // them; the write-capable implementer therefore comes back unleased.
+  assert.equal(lease.current(), undefined);
+});
+
+test("a terminal handed to the user takes no lease and runs beside the holder", async () => {
+  const { launch, lease, coordinator } = setup();
+  await coordinator.spawn({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine" });
+  const holder = lease.current()?.agentId;
+  assert.notEqual(holder, undefined);
+  // Both are write-capable — raw has no definition to derive from — but both
+  // are conversations the user drives, so neither takes the lease nor conflicts
+  // with the one already held. An opening --prompt names the topic; it does not
+  // make the session aboard's to serialize.
+  const raw = await launch({ type: "raw", description: "open a raw session" });
+  assert.equal(raw.status, 200, JSON.stringify(raw.body));
+  const withTopic = await launch({
+    type: "raw", description: "drive the auth cleanup", prompt: "Start from src/auth.ts", interactive: true,
+  });
+  assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
+  assert.equal(lease.current()?.agentId, holder);
 });
 
 test("keeps an automated-only webresearcher paused after its result caller is gone", async () => {

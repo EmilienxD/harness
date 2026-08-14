@@ -22,7 +22,7 @@ export const LAUNCHABLE_AGENT_TYPES = AGENT_TYPES.filter((type) => type !== "man
  * The subset the Manager's `aboard agent` command may launch. `implementer` and
  * both pr-doctors are absent on purpose: they are reachable only through the
  * auto-run engine and `aboard review`, so the loop stays the extension's
- * (`docs/auto-implementation.md` §2, §13). A type the Manager cannot see is a
+ * (`AGENTS.md`). A type the Manager cannot see is a
  * type it cannot bypass the engine with.
  */
 export const CLI_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT_TYPES.filter(
@@ -48,7 +48,7 @@ export function isAutomatedAgentType(type: AgentType): boolean {
  * `pr-doctor-hitl` belongs here rather than with its `afk` twin: the two share a
  * contract and a tool set, and differ only in that the HITL one stops to ask.
  * The run's continue signal for a HITL issue is the pull request's resolution,
- * never that agent's completion (`docs/auto-implementation.md` §2).
+ * never that agent's completion (`AGENTS.md`).
  */
 export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "raw", "pr-doctor-hitl"] as const;
 
@@ -191,7 +191,7 @@ export interface AgentSession {
    * working tree contains the change", a dirty tree at Stop is the expected
    * success state rather than a `no-commit` failure — the engine commits. It is
    * a property of the agent's contract, not of where its result goes, so it does
-   * not live on `ResultDelivery` (`docs/auto-implementation.md` §13).
+   * not live on `ResultDelivery` (`AGENTS.md`).
    */
   readonly expectsUncommittedTree?: boolean;
   readonly compactSummaries?: readonly string[];

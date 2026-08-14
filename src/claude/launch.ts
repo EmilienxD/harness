@@ -33,6 +33,7 @@ import { deriveWriteCapability, type WriteCapability } from "../domain/capabilit
 import {
   isAutomatedAgentType,
   isBuiltinAgentType,
+  isInteractiveAgentType,
   type AgentId,
   type AgentType,
   type SessionId,
@@ -139,15 +140,41 @@ export function parseClaudeCommand(value: unknown): ClaudeCommandResult {
 /**
  * `aboard.workers.permissionMode` (spec section 8.3). The setting is named for
  * the case it exists to serve — an unattended `afk` worker deadlocks on a
- * permission prompt — but it is a property of how aboard launches Claude Code,
- * not of one agent type. It applies to every session aboard starts or resumes,
- * the Manager included: a Manager that stops on a prompt the user chose to
- * bypass everywhere else is the same surprise, in the one terminal that is
- * supposed to keep the fleet moving.
+ * permission prompt — so bypass is the value unattended launches get. A launch
+ * the user drives or is handed gets no flag at all, so the user's own Claude
+ * Code configuration decides; see `resolvePermissionMode`.
  */
 export const WORKER_PERMISSION_MODES = ["bypass", "acceptEdits", "default"] as const;
 
 export type WorkerPermissionMode = (typeof WORKER_PERMISSION_MODES)[number];
+
+/**
+ * Adjusts the configured permission mode for a specific launch (spec section
+ * 8.3). The setting exists so unattended `afk` work never deadlocks on a
+ * permission prompt in a terminal nobody is watching; a launch the user drives
+ * or is handed lives under their eye, so bypass there would strip the
+ * checkpoint they are the point of.
+ *
+ * - `attended` launches — the Manager itself, `pr-doctor-hitl`, and every
+ *   interactive handoff — keep a human in the loop by construction. aboard puts
+ *   no permission flag on their command line at all (`"default"` emits none):
+ *   substituting a mode of its own would override the user's own Claude Code
+ *   configuration, which is exactly what the setting must not do there.
+ * - `brainstormer` is pinned to `default` regardless: its whole contract is a
+ *   conversation with a present user (its definition says so), and a user who
+ *   set bypass for afk work never meant their brainstorm terminal to stop
+ *   asking entirely.
+ * - Unattended launches keep the mode unchanged: bypass is exactly what they
+ *   are for, and degrading one would recreate the silent deadlock an unattended permission prompt causes.
+ */
+export function resolvePermissionMode(
+  mode: WorkerPermissionMode,
+  launch: { readonly attended: boolean; readonly agentType: AgentType },
+): WorkerPermissionMode {
+  if (launch.agentType === "brainstormer") return "default";
+  if (mode === "bypass" && launch.attended) return "default";
+  return mode;
+}
 
 /**
  * `aboard.launch.effort` — the session-wide reasoning effort, the `--effort`
@@ -486,6 +513,14 @@ interface CommonPlanRequest {
   readonly agentType: AgentType;
   readonly shell: ShellKind;
   readonly permissionMode: WorkerPermissionMode;
+  /**
+   * Whether the launch lives under the user's eye — the Manager itself, a
+   * type that can only ever be handed over, or an explicit interactive handoff.
+   * Unattended launches (automated workers left to run) are the case bypass
+   * exists for; see `resolvePermissionMode`. Absent means "derive from the
+   * type", which the launch sites that know better override.
+   */
+  readonly attended?: boolean | undefined;
   readonly model?: string | undefined;
   readonly effort?: EffortLevel | undefined;
   readonly command?: readonly string[] | undefined;
@@ -730,6 +765,7 @@ function commonPreconditions(
   readonly threshold: number;
   readonly runtimeDirectory: string;
   readonly wrapper: SessionWrapperLayout | undefined;
+  readonly permissionMode: WorkerPermissionMode;
 } {
   if (!AGENT_ID_PATTERN.test(request.agentId)) {
     throw new LaunchPlanError(
@@ -776,11 +812,17 @@ function commonPreconditions(
       }
     }
   }
+  // The caller knows who will be driving; when it says nothing, the type
+  // answers: the Manager always works with the user watching, and the
+  // interactive types exist solely to be handed over.
+  const attended =
+    request.attended ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType));
   return {
     command,
     threshold,
     runtimeDirectory: request.runtimeDirectory ?? DEFAULT_RUNTIME_DIRECTORY,
     wrapper,
+    permissionMode: resolvePermissionMode(request.permissionMode, { attended, agentType: request.agentType }),
   };
 }
 
@@ -799,7 +841,7 @@ function wrapCommand(
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { command, threshold, runtimeDirectory, wrapper } = commonPreconditions(request, request.configuration);
+  const { command, threshold, runtimeDirectory, wrapper, permissionMode } = commonPreconditions(request, request.configuration);
   const { agentType, configuration } = request;
 
   if (agentType === "manager") {
@@ -883,7 +925,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
-    ...permissionArguments(request.permissionMode),
+    ...permissionArguments(permissionMode),
   ];
 
   const planFor = (promptThreshold: number): { readonly plan: PromptPlan; readonly args: string[]; readonly commandLine: string } => {
@@ -949,7 +991,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
  * the Manager that would mean resuming an orchestrator that can implement.
  */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
+  const { command, wrapper, runtimeDirectory, permissionMode } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
   if (
     request.configuration.shape !== "agent-defined" ||
     request.configuration.agentName !== MANAGER_AGENT_NAME
@@ -967,7 +1009,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(request.configuration.declaredModel ?? request.model),
     ...effortArguments(request.configuration.declaredEffort ?? request.effort),
-    ...permissionArguments(request.permissionMode),
+    ...permissionArguments(permissionMode),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
   return {
@@ -987,7 +1029,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
 }
 
 /**
- * Reopens a worker's recorded session (`docs/auto-implementation.md` §9),
+ * Reopens a worker's recorded session (`AGENTS.md`),
  * re-passing the same flags as the Manager's resume and for the same reason:
  * `--resume` restores the conversation, not the configuration. A read-only
  * worker resumed without `--tools` comes back holding `Edit`, `Write`, and an
@@ -998,7 +1040,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
  * actually produces.
  */
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory } = commonPreconditions(request, request.configuration);
+  const { command, wrapper, runtimeDirectory, permissionMode } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const definition = configuration.shape === "agent-defined"
     ? definitionArguments(configuration, request.agentId, runtimeDirectory)
@@ -1017,7 +1059,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
-    ...permissionArguments(request.permissionMode),
+    ...permissionArguments(permissionMode),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
   const capability = launchWriteCapability(request.agentType, configuration);

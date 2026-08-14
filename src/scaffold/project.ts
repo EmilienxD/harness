@@ -7,7 +7,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
  * copy of them: shipped copies drift from upstream silently and turn a user file
  * into an extension asset. Each is installed instead by running its upstream
  * install command in the project. A skill whose command is missing or fails is
- * reported, never authored here (spec §10.0, §10.1).
+ * reported, never authored here.
  */
 export interface VendoredSkill {
   readonly name: string;
@@ -15,7 +15,7 @@ export interface VendoredSkill {
 }
 
 /**
- * Deliberately unpinned: §10.1 wants upstream improvements picked up by
+ * Deliberately unpinned: `AGENTS.md` wants upstream improvements picked up by
  * re-running the install command, which a `@vX.Y.Z` suffix would defeat.
  * `harness install` defaults to project scope, so the installer's `cwd` decides
  * where the skill lands.
@@ -83,19 +83,6 @@ const HOOK_MARKER = ".claude/hooks/aboard_hook.py";
  * terminal alone.
  */
 export const MANAGER_CLI_SCRIPT = ".aboard/scripts/aboard_cli.py";
-
-/**
- * The bridge used to register itself as a project MCP server. It no longer does:
- * a `.mcp.json` entry is loaded by every Claude Code session in the workspace,
- * where it competed with the user's own servers and spent context on tools only
- * the Manager could use. The delegation surface is `MANAGER_CLI_SCRIPT` instead.
- *
- * The registration is *removed* on the next scaffold rather than merely no
- * longer written: a stale entry would leave every session in the project
- * pointing at a route the bridge no longer serves. Other servers in either file
- * are the user's and are left exactly as they are.
- */
-const RETIRED_MCP_SERVER_NAME = "aboard";
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -193,35 +180,6 @@ function mergeHooks(settings: Record<string, unknown>, registration: Record<stri
 }
 
 /**
- * Drops aboard's own approval from `enabledMcpjsonServers`, and the key itself
- * once nothing else is listed under it. Approvals the user granted to their own
- * servers are untouched.
- */
-function withoutRetiredMcpApproval(settings: Record<string, unknown>): Record<string, unknown> {
-  if (!Array.isArray(settings.enabledMcpjsonServers)) return settings;
-  const remaining = settings.enabledMcpjsonServers.filter((name) => name !== RETIRED_MCP_SERVER_NAME);
-  if (remaining.length === settings.enabledMcpjsonServers.length) return settings;
-  const { enabledMcpjsonServers: _approved, ...rest } = settings;
-  return remaining.length === 0 ? rest : { ...rest, enabledMcpjsonServers: remaining };
-}
-
-/**
- * Drops the bridge's server from `.mcp.json`, and the file's `mcpServers` key
- * once it is empty. A `.mcp.json` that aboard created and that now holds nothing
- * is removed outright, so a project that never had one is left as it was found.
- * Returns `undefined` when the file should be deleted rather than rewritten.
- */
-function withoutRetiredMcpServer(mcp: Record<string, unknown>): Record<string, unknown> | undefined {
-  const servers = typeof mcp.mcpServers === "object" && mcp.mcpServers !== null && !Array.isArray(mcp.mcpServers)
-    ? mcp.mcpServers as Record<string, unknown> : undefined;
-  if (servers === undefined || !(RETIRED_MCP_SERVER_NAME in servers)) return mcp;
-  const { [RETIRED_MCP_SERVER_NAME]: _retired, ...remaining } = servers;
-  if (Object.keys(remaining).length > 0) return { ...mcp, mcpServers: remaining };
-  const { mcpServers: _servers, ...rest } = mcp;
-  return Object.keys(rest).length === 0 ? undefined : rest;
-}
-
-/**
  * A damaged manifest degrades to "nothing installed" rather than failing the
  * scaffold: the manifest is only an upgrade hint, and every asset still falls
  * back to the preserve-on-local-edit path when it is missing.
@@ -307,25 +265,9 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   const settings = await readObject(settingsPath);
   await writeJson(settingsPath, mergeHooks(settings, { hooks: registration }));
 
-  // Both files are only ever *cleaned* now, and only of aboard's own entries.
-  // An untouched file is not rewritten, so a project that never registered the
-  // bridge keeps its formatting and a project that has no `.mcp.json` never
-  // gains one.
-  const localSettingsPath = join(projectRoot, ".claude", "settings.local.json");
-  if (await exists(localSettingsPath)) {
-    const local = await readObject(localSettingsPath);
-    const cleaned = withoutRetiredMcpApproval(local);
-    if (cleaned !== local) await writeJson(localSettingsPath, cleaned);
-  }
-
-  const mcpPath = join(projectRoot, ".mcp.json");
-  if (await exists(mcpPath)) {
-    const mcp = await readObject(mcpPath);
-    const cleaned = withoutRetiredMcpServer(mcp);
-    if (cleaned === undefined) await rm(mcpPath, { force: true });
-    else if (cleaned !== mcp) await writeJson(mcpPath, cleaned);
-  }
-
+  // `.claude/settings.local.json` and the user's own `.mcp.json` are never
+  // touched: aboard no longer writes an MCP registration, so it has nothing to
+  // put in either and nothing to take back out of them.
   // `.claude/settings.local.json` is machine-local by construction — Claude Code
   // writes per-machine permission decisions into it — so it stays ignored even
   // though aboard no longer has an MCP approval to put there.

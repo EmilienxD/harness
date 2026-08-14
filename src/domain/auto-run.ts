@@ -1,5 +1,5 @@
 /**
- * The auto-run phase reducer (`docs/auto-implementation.md` §6, §13).
+ * The auto-run phase reducer (`AGENTS.md`).
  *
  * Pure: no `vscode`, no process, no clock, no I/O. Given a run record and the
  * repository facts the engine observed, it returns the next step or the terminal
@@ -50,7 +50,7 @@ export interface SkippedIssue {
 }
 
 /**
- * The persisted run record (§11). A resume *hint*, never a source of truth: on
+ * The persisted run record. A resume *hint*, never a source of truth: on
  * resume the engine re-derives every fact from git and GitHub, and a record that
  * disagrees with the repository loses. It carries no prompt text.
  */
@@ -120,12 +120,12 @@ export interface ReducerInput {
  * Decides the next step for the current issue. `advance` means this issue is
  * finished; `stop` is terminal for the whole run, never a skip — a failing
  * implementer usually means the issue or the spec is wrong, and the siblings
- * share that spec (§6).
+ * share that spec.
  *
  * The walk always starts at the first phase and skips every already-satisfied
  * postcondition, so the observed repository — not a persisted phase — decides
  * where the run is. That is what makes resume and normal progress the same code
- * path, and it is why a record that disagrees with the repository loses (§11):
+ * path, and it is why a record that disagrees with the repository loses:
  * a record claiming `merge` on a branch that does not exist re-enters at
  * `branch` rather than stopping on a pull request that was never opened.
  */
@@ -141,7 +141,7 @@ export function nextStep(input: ReducerInput): AutoRunStep {
         if (facts.branchExists && facts.currentBranch === issue.branch) continue;
         // The implementer is told not to touch git, but it has `Bash`. Work left
         // uncommitted somewhere other than the issue's branch is not something to
-        // silently correct by checking out over it (§12).
+        // silently correct by checking out over it.
         if (facts.workingTreeDirty) {
           return {
             action: "stop",
@@ -211,7 +211,7 @@ function requirePullRequest(facts: RepositoryFacts, issue: PlannedIssue): PullRe
 }
 
 /**
- * `aboard/<issue-number>-<slug>` (§5.4). The number is part of the name because
+ * `aboard/<issue-number>-<slug>`. The number is part of the name because
  * slugs collide and because a branch must be greppable back to its issue.
  */
 export function branchName(issueNumber: number, title: string): string {
@@ -255,7 +255,7 @@ export const PR_BODY_MAX_CHARS = 4_000;
  * The implementer's final message is already a summary of what it did, so the
  * extension uses it verbatim rather than asking an agent for a second one. The
  * `Closes #N` trailer lives here and not in the commit message: PR-based closure
- * is what `closingIssuesReferences` reads and what the merge must trigger (§6.1).
+ * is what `closingIssuesReferences` reads and what the merge must trigger.
  */
 export function pullRequestBody(summary: string, issueNumber: number): string {
   const trimmed = summary.trim();
@@ -278,8 +278,8 @@ export interface Selection {
 }
 
 /**
- * Selection (§5.2). Unclassified is skipped and reported, never guessed at —
- * spec §7.2 is explicit that unclassified is a legitimate third state and that
+ * Selection. Unclassified is skipped and reported, never guessed at —
+ * `AGENTS.md` is explicit that unclassified is a legitimate third state and that
  * the system flags rather than infers. A blocked issue is deferred rather than
  * failed, because a later merge can unblock it; the engine re-runs this after
  * every merge.
@@ -318,7 +318,7 @@ function classify(labels: readonly string[]): IssueDisposition | undefined {
   return normalized.has("afk") ? "afk" : undefined;
 }
 
-/** Notification lines (§4). Kept terse on purpose; they are read in bulk. */
+/** Notification lines. Kept terse on purpose; they are read in bulk. */
 export const autoRunMessage = {
   started: (spec: number, title: string, afk: number, hitl: number, review: boolean): string =>
     `auto-run: started spec #${spec} "${title}" — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}.`,

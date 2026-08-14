@@ -1,5 +1,5 @@
 /**
- * The auto-run driver (`docs/auto-implementation.md` §1, §5-§8, §11, §12).
+ * The auto-run driver (`AGENTS.md`).
  *
  * The extension owns the loop; agents only produce content. Every git and GitHub
  * side effect below is performed here, never by an agent, so a branch name, a
@@ -23,6 +23,7 @@ import {
   type SkippedIssue,
 } from "../domain/auto-run.js";
 import type { AgentId, SessionId, TerminalId } from "../domain/contracts.js";
+import type { LaunchOrigin } from "../domain/lease.js";
 import type { GitClient } from "../git/client.js";
 import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles } from "../bridge/delegation.js";
 
@@ -46,7 +47,7 @@ export interface AutoRunGitHub {
 
 export interface AutoRunLauncher {
   runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome>;
-  launchInteractive(input: DelegationLaunchInput): Promise<InteractiveLaunchHandles>;
+  launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles>;
 }
 
 export interface AutoRunTerminals {
@@ -59,12 +60,12 @@ export interface AutoRunStore {
   clear(): Promise<void>;
 }
 
-/** One bounded line per phase transition, drained on the user's next message (§4). */
+/** One bounded line per phase transition, drained on the user's next message. */
 export interface AutoRunNotifier {
   notify(message: string): void;
 }
 
-/** Who owns an open pull request, so `review_pr` can reopen that session (§9). */
+/** Who owns an open pull request, so `review_pr` can reopen that session. */
 export interface PullRequestOwner {
   readonly prNumber: number;
   readonly agentId: AgentId;
@@ -140,7 +141,7 @@ export class AutoRunEngine {
     return this.#state;
   }
 
-  /** The owning agent for an open pull request, or `undefined` if unknown (§9). */
+  /** The owning agent for an open pull request, or `undefined` if unknown. */
   public owner(prNumber: number): PullRequestOwner | undefined {
     return this.#owners.get(prNumber);
   }
@@ -148,7 +149,7 @@ export class AutoRunEngine {
   /**
    * Starts a run. Returns as soon as the plan is resolved: a multi-issue run
    * routinely outlasts any single command, and the run must outlive the
-   * Manager that triggered it (§3).
+   * Manager that triggered it.
    */
   public async start(): Promise<AutoRunStartResult> {
     if (this.#state !== undefined) {
@@ -205,7 +206,7 @@ export class AutoRunEngine {
   /**
    * Resumes a persisted run. The record is a hint: every fact is re-derived from
    * git and GitHub, and the reducer re-enters at the first unsatisfied
-   * postcondition (§11). Never called automatically — activation offers
+   * postcondition. Never called automatically — activation offers
    * Resume/Discard and does nothing until answered.
    */
   public async resume(record: AutoRunRecord): Promise<AutoRunStartResult> {
@@ -229,7 +230,7 @@ export class AutoRunEngine {
 
   /**
    * Stops the run. A pause with no resume promise, not an undo: the current
-   * agent's terminal is left open and nothing is rolled back (§12).
+   * agent's terminal is left open and nothing is rolled back.
    */
   public stop(reason = "stopped by the user"): void {
     if (this.#state === undefined) return;
@@ -287,7 +288,7 @@ export class AutoRunEngine {
 
     while (!signal.aborted) {
       // Re-derived at every issue boundary: a merge can unblock a later sibling,
-      // so the plan returned at start is a forecast, not a commitment (§5.2).
+      // so the plan returned at start is a forecast, not a commitment.
       const selection = selectIssues(await this.options.github.listSubIssues(record.specNumber));
       const issue = selection.issues.find((candidate) => !processed.has(candidate.number));
       if (issue === undefined) {
@@ -298,7 +299,7 @@ export class AutoRunEngine {
         const remaining = (await this.options.github.listSpecIssues()).filter((spec) => !finishedSpecs.has(spec.number));
         this.options.notifier.notify(autoRunMessage.complete(record.specNumber, completed, remaining.length));
         // A spec is the natural human review unit, and the run's irreversible
-        // acts should have a bounded blast radius per invocation (§8.2). `all`
+        // acts should have a bounded blast radius per invocation. `all`
         // is the opt-in that trades that bound for fewer gestures.
         const next = settings.scope === "all" ? remaining[0] : undefined;
         if (next === undefined) {
@@ -322,7 +323,7 @@ export class AutoRunEngine {
       if (outcome.kind === "stopped") {
         this.options.notifier.notify(autoRunMessage.stopped(issue.number, outcome.reason));
         // The record survives a stop so an explicit resume can re-enter at the
-        // failed phase; nothing created before the failure is rolled back (§12).
+        // failed phase; nothing created before the failure is rolled back.
         await this.options.store.save({ ...record, currentIssue: issue.number, phase: outcome.phase, branch: issue.branch, prNumber: outcome.prNumber });
         return;
       }
@@ -413,7 +414,7 @@ export class AutoRunEngine {
           case "commit": {
             const sha = await this.#commit(issue, implementationSummary);
             // The PR is opened immediately after so the notification can carry
-            // both, which is the shape §4 specifies. A pull request this run
+            // both, which is the shape progress reporting specifies. A pull request this run
             // already knows about is reused rather than re-opened: the reducer
             // routes a second dirty tree (a doctor's fixes) back through this
             // same phase, and the branch lookup inside `#openPullRequest` only
@@ -460,7 +461,7 @@ export class AutoRunEngine {
     }
   }
 
-  /** Reads the repository, never the record. A record that disagrees loses (§11). */
+  /** Reads the repository, never the record. A record that disagrees loses. */
   async #observe(issue: PlannedIssue, defaultBranch: string, knownPullRequest: number | undefined, reviewed: ReadonlySet<number>): Promise<RepositoryFacts> {
     const status = await this.options.git.status();
     const branchExists = await this.options.git.branchExists(issue.branch);
@@ -483,7 +484,7 @@ export class AutoRunEngine {
         state: snapshot.state,
         // The extension opens the PR with the user's own credentials and GitHub
         // refuses self-approval, so an `approved` decision can only have come
-        // from another account (§6.3).
+        // from another account.
         approvedByOther: review.decision === "approved",
       };
     }
@@ -510,7 +511,7 @@ export class AutoRunEngine {
     await this.options.git.checkout(base);
     await this.options.git.fastForward(base);
     // Issue n+1 therefore branches from a default branch that already contains
-    // issue n's merge, which is what makes conflicts a non-event (§5.4).
+    // issue n's merge, which is what makes conflicts a non-event.
     if (await this.options.git.branchExists(branch)) await this.options.git.checkout(branch);
     else await this.options.git.createBranch(branch, base);
   }
@@ -533,7 +534,7 @@ export class AutoRunEngine {
 
   async #commit(issue: PlannedIssue, summary: string): Promise<string> {
     // The implementer is told not to touch git, but it has Bash. A mismatch
-    // stops the run rather than committing to the wrong place (§6.1).
+    // stops the run rather than committing to the wrong place.
     const current = await this.options.git.currentBranch();
     if (current !== issue.branch) {
       throw new Error(`the repository is on ${current ?? "a detached HEAD"} but issue #${issue.number} belongs on ${issue.branch}`);
@@ -569,13 +570,16 @@ export class AutoRunEngine {
   async #review(issue: PlannedIssue, prNumber: number, signal: AbortSignal): Promise<void> {
     if (issue.disposition === "hitl") {
       // Interactive: the terminal is focused and handed over, and no result is
-      // delivered. The run's continue signal is the PR's resolution (§7.2).
+      // delivered. The run's continue signal is the PR's resolution.
+      // Leased despite being handed to the user: the run is still in flight
+      // behind this terminal and the extension commits, pushes, and merges its
+      // branch, so a second writer here is the collision the lease exists for.
       const handles = await this.options.launcher.launchInteractive({
         type: "pr-doctor-hitl",
         issue: issue.number,
         pullRequest: prNumber,
         description: `review pull request ${prNumber}`,
-      });
+      }, "auto-run");
       this.#openTerminals.add(handles.terminalId);
       this.#owners.set(prNumber, { prNumber, ...handles, type: "pr-doctor-hitl", issueNumber: issue.number });
       return;
@@ -593,7 +597,7 @@ export class AutoRunEngine {
 
     // The user may have been typing into the still-open implementation terminal
     // while the doctor worked, so re-read the tree rather than assuming it holds
-    // only the doctor's changes, and say what is being committed (§7.3).
+    // only the doctor's changes, and say what is being committed.
     const status = await this.options.git.status();
     this.options.notifier.notify(autoRunMessage.reviewed(issue.number, status.entries.map((entry) => entry.path)));
     if (status.entries.length === 0) return;
@@ -617,7 +621,7 @@ export class AutoRunEngine {
       // produced. A hitl pr-doctor applies the fixes the user approved but never
       // commits them, and the implementation terminal is still open too; without
       // this the user merges a pull request that does not contain the changes
-      // they just approved, and the work is stranded uncommitted (§7.2).
+      // they just approved, and the work is stranded uncommitted.
       await this.#captureOpenWork(issue, prNumber);
       const snapshot = await this.options.github.getPullRequest(prNumber);
       if (snapshot?.state === "merged") {
@@ -626,7 +630,7 @@ export class AutoRunEngine {
       }
       if (snapshot?.state === "closed") return "rejected";
       // Approval is the secondary signal, for a repository with a second
-      // identity; there the engine performs the merge itself (§6.3).
+      // identity; there the engine performs the merge itself.
       if ((await this.options.github.getReviewState(prNumber)).decision === "approved") return "merged";
       await this.#waitForPoll(settings.pollSeconds, signal);
     }
@@ -667,7 +671,7 @@ export class AutoRunEngine {
         await this.options.github.mergePullRequest(prNumber, settings.mergeStrategy);
       } catch (error) {
         // Branch protection that requires a review cannot be satisfied without a
-        // second identity, and saying so beats appearing stuck (§6.3).
+        // second identity, and saying so beats appearing stuck.
         throw new Error(
           `merging PR #${prNumber} failed (${message(error)}). If the branch requires a review, auto-run cannot approve its own pull request — merge it yourself and re-run /auto.`,
         );
@@ -691,7 +695,7 @@ export class AutoRunEngine {
     }
   }
 
-  /** The preconditions of §5.1, in order; the first failure refuses the run. */
+  /** The run preconditions, in order; the first failure refuses the run. */
   async #checkPreconditions(): Promise<string | undefined> {
     let status;
     try {
@@ -715,7 +719,7 @@ export class AutoRunEngine {
    * yet when the implementer finishes, so ownership is keyed by issue first and
    * bound to the pull request by `#attach` once it is open. `review_pr` reads
    * the result: the implementer owns the PR when review is off, the pr-doctor
-   * when it is on (§9).
+   * when it is on.
    */
   #remember(issue: PlannedIssue, outcome: AutomatedLaunchOutcome, type: PullRequestOwner["type"]): void {
     this.#pending.set(issue.number, {

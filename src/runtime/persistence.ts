@@ -90,18 +90,6 @@ export class FileAutoRunStore extends AtomicJsonFile<AutoRunRecord> {
   }
 }
 
-/**
- * The TODO singleton's issue number (`docs/initial-spec.md` §7.1). A record
- * that is not a positive integer degrades to "no record" — discovery just
- * scans the `todo` label again.
- */
-export class FileTodoNumberStore extends AtomicJsonFile<number> {
-  public constructor(workspaceRoot: string) {
-    super(join(workspaceRoot, ".aboard", "runtime", "todo.json"), (value) =>
-      typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined);
-  }
-}
-
 export class PersistOnChange {
   readonly #registration: { dispose(): void };
   #pending: Promise<void> = Promise.resolve();

@@ -9,7 +9,7 @@ export interface ReviewCommandHost {
 }
 
 /**
- * The panel entry point for `review_pr` (`docs/auto-implementation.md` §9). It
+ * The panel entry point for `review_pr` (`AGENTS.md`). It
  * asks for nothing: the action is "reopen the session for the pull request
  * currently in flight", and the extension already knows which that is. A number
  * may still be passed positionally from a tree item.

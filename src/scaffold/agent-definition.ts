@@ -23,7 +23,7 @@ export const MANAGER_AGENT_NAME = "manager";
  * Agent tool and can spawn them outside the bridge and outside the write lease.
  * aboard's agents are launched, never spawned, so their definitions live
  * somewhere nothing discovers them and reach Claude Code as launch flags
- * instead (spec §5.1.1).
+ * instead.
  */
 export const AGENT_DEFINITION_DIRECTORY = ".aboard/agents";
 

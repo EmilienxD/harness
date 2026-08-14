@@ -73,13 +73,55 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
   assert.match(rendered, /<\/aboard-state>$/);
   // Titles, not bare numbers: a number alone costs a `gh` round trip per issue.
   assert.match(rendered, /#12 Rework the fleet tree \(afk\)/);
-  assert.match(rendered, /#14 Rotate bridge tokens \(hitl\) — waits on #12/);
+  assert.match(rendered, /#14 Rotate bridge tokens \(hitl\) - waits on #12/);
   assert.match(rendered, /#21 Fix lease recovery \(no review yet\)/);
   assert.match(rendered, /2 pull request\(s\) merged without review/);
   // The roadmap body itself, so no tool call is needed to read it.
   assert.match(rendered, /## Roadmap\nIssue #9[\s\S]*- Ship the bridge/);
   assert.match(rendered, /PR #21 is hitl and waiting/);
-  assert.match(rendered, /default branch main · verify with npm run check/);
+  assert.match(rendered, /default branch main \| verify with npm run check/);
+});
+
+test("hook output stays ASCII-only so the Claude TUI renders it cleanly", async () => {
+  const ascii = /^[\x20-\x7E\n]*$/;
+  const fleet = new FleetRegistry(); const managerId = manager(fleet); const workerId = worker(fleet, managerId);
+  fleet.register({
+    identity: { agentId: agent("raw-1"), type: "raw" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("raw-terminal"), name: "raw" }, lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(agent("raw-1"), { status: "running", startedAt: timestamp }, timestamp);
+  const briefings = new ManagerBriefings(sources({
+    github: async () => ({
+      issues: [
+        { number: 12, title: "Rework the fleet tree", disposition: "afk", blockedBy: [] },
+        { number: 14, title: "Rotate bridge tokens", disposition: "hitl", blockedBy: [12] },
+        ...Array.from({ length: 20 }, (_, index) => ({ number: 100 + index, title: `Extra issue ${index}`, disposition: "afk" as const, blockedBy: [] })),
+      ],
+      openPullRequests: [{ number: 21, title: "Fix lease recovery", reviewState: "no review yet" }],
+      unreviewedMergeCount: 2,
+    }),
+    roadmap: async () => ({ number: 9, body: "x".repeat(ROADMAP_BODY_LIMIT + 500) }),
+    autoRun: () => ({ specNumber: 4, specTitle: "Bridge hardening", phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
+  }), fleet, new WriteLease(), { write: async (_slice, content) => content });
+  // The briefing, including its truncated roadmap and oversized-block preview.
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.match(rendered, ascii, `non-ASCII briefing content: ${JSON.stringify(rendered.replace(/[\x20-\x7E\n]/g, ""))}`);
+  // Stop-hook mailbox results.
+  const stop = new ManagerStopService({ fleet, now: () => new Date(timestamp) });
+  fleet.transition(workerId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "implemented" }, timestamp);
+  fleet.recordResult(workerId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "implemented", telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 } }, timestamp);
+  const delivered = await stop.poll({ agentId: managerId, stopHookActive: false }, new AbortController().signal);
+  assert.equal(delivered.state, "results");
+  assert.match(delivered.state === "results" ? delivered.additionalContext : "", ascii);
+  // Intercepted-command messages and drained prompt notifications.
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => ({ agentId: "i-1" }) }, () => new Date("2026-07-30T14:31:00.000Z"), undefined, { kill: () => {} });
+  for (const prompt of ["/brainstorm extra", "/done reason", "/auto", "/review-pr"]) {
+    const result = await prompts.handle(managerId, prompt);
+    assert.match(String(result.message), ascii);
+  }
+  const drained = await prompts.handle(managerId, "what changed?");
+  assert.match(String(drained.additionalContext), ascii);
 });
 
 test("an idle project renders every section without a failure note", async () => {
@@ -119,7 +161,7 @@ test("the roadmap body is bounded and points at the rest", async () => {
     roadmap: async () => ({ number: 9, body: "x".repeat(ROADMAP_BODY_LIMIT + 500) }),
   }), new FleetRegistry(), new WriteLease());
   const rendered = await briefings.render(new AbortController().signal);
-  assert.match(rendered, /…truncated\. Read the rest with `gh issue view 9`/);
+  assert.match(rendered, /\.\.\.truncated\. Read the rest with `gh issue view 9`/);
   assert.ok(rendered.length < ROADMAP_BODY_LIMIT + 2_000);
 });
 
@@ -365,12 +407,15 @@ test("aboard-owned command skills are user-only shims and raw has no agent defin
     // The body is reachable only when the hook failed to intercept, so it must
     // read as an error notice: an empty body leaves the model to invent a
     // response, and any instruction resembling the command would have it
-    // simulate work the extension alone can perform.
+    // simulate work the extension alone can perform. Equally, the reader is a
+    // user of aboard, not its developer: the notice must steer them to the
+    // extension's own controls rather than into debugging the installation.
     const body = skill.replace(/^---\n[\s\S]*?\n---\n/u, "").replace(/<!--[\s\S]*?-->/gu, "").trim();
     assert.notEqual(body, "", `${name} SKILL.md must explain the hook failure rather than leave an empty body`);
-    assert.match(body, /should not have reached you/, `${name} SKILL.md body must announce it is an error state`);
+    assert.match(body, /is broken — report that to the user and stop/, `${name} SKILL.md body must announce it is an error state`);
     assert.match(body, /Do not try to carry it out yourself/, `${name} SKILL.md body must forbid simulating the command`);
-    assert.match(body, /UserPromptSubmit/, `${name} SKILL.md body must name the hook the user has to fix`);
+    assert.match(body, /except if the user explicitly asks/, `${name} SKILL.md body must forbid fixing the installation unprompted`);
+    assert.match(body, /Reset \.aboard\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);
   }
   await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".claude", "agents", "raw.md")));
 });

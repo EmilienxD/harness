@@ -15,6 +15,36 @@ export type LeaseAcquisition =
   | { readonly acquired: true; readonly required: boolean; readonly holder?: WriteLeaseHolder }
   | { readonly acquired: false; readonly required: true; readonly holder: WriteLeaseHolder; readonly ageMs: number };
 
+/** Who started an agent, which is what decides whether the launch is leased. */
+export type LaunchOrigin = "manager" | "auto-run" | "user";
+
+/**
+ * Which launches take the write lease.
+ *
+ * The lease serializes work *aboard* drives, not the user's own hands, so it
+ * follows who the agent answers to. An automated Manager launch reports its
+ * result back to aboard and is leased. An interactive launch is a conversation
+ * handed to the user — `--prompt` there only names the topic it opens on, and
+ * the user drives every turn after it — so it is **not** leased, whether or not
+ * a first message was supplied. Parallel work in a terminal the user is driving
+ * is theirs to allow.
+ *
+ * Auto-run is the one exception: every launch of a run is leased, the
+ * interactive `pr-doctor-hitl` included, because the extension keeps
+ * committing, pushing, and merging behind that terminal while the run is in
+ * flight — which is exactly the collision the lease exists to prevent.
+ *
+ * Restores, resumes, and anything the user starts or types by hand take no
+ * lease. The status bar, the fleet row, and `aboard release-lease` remain the
+ * controls there.
+ *
+ * Capability is still derived, never declared: this decides only *whether* a
+ * launch competes for the lease, and a read-only agent takes none either way.
+ */
+export function leaseRequired(origin: LaunchOrigin, interactive: boolean): boolean {
+  return origin === "auto-run" || (origin === "manager" && !interactive);
+}
+
 export type TerminalObservation = "open" | "closed" | "missing";
 export type SessionObservation = "live" | "ended" | "missing";
 

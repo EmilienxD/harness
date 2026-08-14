@@ -1,5 +1,5 @@
 /**
- * The git boundary (`docs/auto-implementation.md` §13).
+ * The git boundary (`AGENTS.md`).
  *
  * Every git side effect in the auto-run loop is performed by the extension, so
  * git needs a real seam rather than the ad-hoc `execFile("git", …)` calls it

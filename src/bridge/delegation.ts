@@ -15,7 +15,7 @@ import {
   type WorkerResult,
 } from "../domain/contracts.js";
 import { FleetRegistry } from "../domain/fleet.js";
-import { WriteLease, type WriteLeaseHolder } from "../domain/lease.js";
+import { WriteLease, leaseRequired, type LaunchOrigin, type WriteLeaseHolder } from "../domain/lease.js";
 import type { SessionWrapperLayout } from "../claude/launch.js";
 import { sessionIsResumable } from "../claude/sessions.js";
 
@@ -30,7 +30,7 @@ export interface DelegationLaunchInput {
    * Set only by the auto-run engine. It records that this agent's contract ends
    * at "the working tree contains the change", so a dirty tree at Stop is
    * success rather than a `no-commit` failure — the engine commits
-   * (`docs/auto-implementation.md` §13).
+   * (`AGENTS.md`).
    */
   readonly expectsUncommittedTree?: boolean;
 }
@@ -116,6 +116,10 @@ export class DelegationError extends Error {
   }
 }
 
+function leaseReason(origin: LaunchOrigin): string {
+  return origin === "auto-run" ? "auto-run launched agent" : "manager launched an automated agent";
+}
+
 const EMPTY_TELEMETRY: AgentTelemetry = {
   totalTokens: 0,
   totalDurationMs: 0,
@@ -132,7 +136,7 @@ export class DelegationCoordinator {
   }
 
   public async run(input: DelegationLaunchInput, signal?: AbortSignal): Promise<unknown> {
-    const launched = await this.#launch(input, { mode: "tool-result" });
+    const launched = await this.#launch(input, { mode: "tool-result" }, "manager");
     const result = await this.#waitForResult(launched.agentId, signal);
     return this.#foregroundResult(launched.agentId, result);
   }
@@ -141,17 +145,24 @@ export class DelegationCoordinator {
    * The auto-run engine's launch path. It is `run` plus the terminal id, which
    * the engine needs to close the terminal at cleanup; `tool-result` delivery is
    * correct because the engine is in-process async code and genuinely is the
-   * blocked caller that mode describes (`docs/auto-implementation.md` §2).
+   * blocked caller that mode describes (`AGENTS.md`).
    */
   public async runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome> {
-    const launched = await this.#launch(input, { mode: "tool-result" });
+    const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run");
     const result = await this.#waitForResult(launched.agentId, signal);
     return { ...launched, result };
   }
 
-  /** Interactive launch for the engine, typed to the handles it actually uses. */
-  public async launchInteractive(input: DelegationLaunchInput): Promise<InteractiveLaunchHandles> {
-    return this.#launch(input, { mode: "none" });
+  /**
+   * Interactive launch for the engine and for `review_pr`, typed to the handles
+   * they actually use. The origin decides the lease, which an interactive
+   * launch otherwise never takes: an auto-run `pr-doctor-hitl` is leased
+   * because the run commits behind it, while the doctor `review_pr` opens
+   * against a pull request nobody is running is a plain handoff
+   * (`leaseRequired`).
+   */
+  public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles> {
+    return this.#launch(input, { mode: "none" }, origin);
   }
 
   /** Reopens a persisted active worker after the extension host restarted. */
@@ -179,6 +190,9 @@ export class DelegationCoordinator {
       agentType: session.identity.type,
       shell: this.options.shell,
       permissionMode: this.options.permissionMode,
+      // Restoration hands the worker to the user whatever it was: the extension
+      // host that waited on its result is gone, so the terminal is theirs.
+      attended: true,
       configuration,
       ...this.#effort(),
       ...this.#command(),
@@ -189,48 +203,46 @@ export class DelegationCoordinator {
     // clear a command this launch never uses.
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    this.#acquire(plan.writeCapability, session.identity.agentId, session.sessionId, occurredAt, "restore persisted agent");
-    try {
-      if (plan.systemPrompt !== undefined) await this.options.spills.write(plan.systemPrompt);
-      const terminal = this.options.terminals.create({
-        agentId: session.identity.agentId,
-        sessionId: session.sessionId,
-        agentType: session.identity.type,
-        ...(session.issueNumber === undefined ? {} : { issueNumber: session.issueNumber }),
-        name: session.terminal.name,
-        initialCommand: plan.commandLine,
-        // The extension-host waiter that owned an automated result is gone.
-        // Restoration therefore hands every worker to the user instead of
-        // pretending the interrupted workflow can still receive its result.
-        deliversResult: false,
-        focus: false,
-        ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
-      });
-      this.options.fleet.reattach(
-        session.identity.agentId,
-        { terminalId: terminal.terminalId, name: terminal.name },
-        occurredAt,
-        undefined,
-        { mode: "none" },
-      );
-      this.options.fleet.transition(session.identity.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
-      return { agentId: session.identity.agentId, sessionId: session.sessionId, terminalId: terminal.terminalId };
-    } catch (error) {
-      this.options.lease.release(session.identity.agentId, occurredAt, "persisted agent restore failed");
-      throw error;
-    }
+    // No lease is taken: restoration is the user reopening their own fleet
+    // after a window reload, and it hands every worker back to them (see
+    // below). A run that still needs the lease relaunches through the auto-run
+    // engine, whose launches are leased.
+    if (plan.systemPrompt !== undefined) await this.options.spills.write(plan.systemPrompt);
+    const terminal = this.options.terminals.create({
+      agentId: session.identity.agentId,
+      sessionId: session.sessionId,
+      agentType: session.identity.type,
+      ...(session.issueNumber === undefined ? {} : { issueNumber: session.issueNumber }),
+      name: session.terminal.name,
+      initialCommand: plan.commandLine,
+      // The extension-host waiter that owned an automated result is gone.
+      // Restoration therefore hands every worker to the user instead of
+      // pretending the interrupted workflow can still receive its result.
+      deliversResult: false,
+      focus: false,
+      ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+    });
+    this.options.fleet.reattach(
+      session.identity.agentId,
+      { terminalId: terminal.terminalId, name: terminal.name },
+      occurredAt,
+      undefined,
+      { mode: "none" },
+    );
+    this.options.fleet.transition(session.identity.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
+    return { agentId: session.identity.agentId, sessionId: session.sessionId, terminalId: terminal.terminalId };
   }
 
   public async spawn(input: DelegationLaunchInput): Promise<unknown> {
     const launched = await this.#launch(input, {
       mode: "mailbox",
       managerAgentId: this.options.managerAgentId,
-    });
+    }, "manager");
     return { ...launched, status: "running" };
   }
 
   public async spawnInteractive(input: DelegationLaunchInput): Promise<unknown> {
-    const launched = await this.#launch(input, { mode: "none" });
+    const launched = await this.#launch(input, { mode: "none" }, "manager");
     return {
       ...launched,
       handoff: `Terminal focused for ${input.description}. Continue directly with the user; no agent result will be returned.`,
@@ -271,7 +283,7 @@ export class DelegationCoordinator {
     return true;
   }
 
-  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"]): Promise<{
+  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin): Promise<{
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
     readonly terminalId: AgentSession["terminal"]["terminalId"];
@@ -279,7 +291,9 @@ export class DelegationCoordinator {
     const agentId = this.options.agentIdFactory();
     const sessionId = this.options.sessionIdFactory();
     // Interactive is the launch's delivery mode, derivable from nothing else:
-    // `general-purpose` and `Explore` run in either mode.
+    // `general-purpose` and `Explore` run in either mode. It also settles who
+    // the launch lives with: a handed-off terminal is driven by the user, so
+    // its permission mode is gated (see `resolvePermissionMode`).
     const interactive = resultDelivery.mode === "none";
     const [configuration, prompt] = await Promise.all([
       this.options.configurations.get(input.type),
@@ -291,6 +305,7 @@ export class DelegationCoordinator {
       agentType: input.type,
       shell: this.options.shell,
       permissionMode: this.options.permissionMode,
+      attended: interactive,
       configuration,
       prompt,
       ...this.#command(),
@@ -304,7 +319,13 @@ export class DelegationCoordinator {
     // actually runs — a definition's `command:` where it declares one.
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, "launch agent");
+    // An unleased launch is not a weaker writer, it is a terminal aboard is not
+    // driving: an interactive launch is a conversation the user drives, and
+    // `--prompt` there only opens it on a topic. Concurrency in one of those is
+    // the user's to allow (`leaseRequired`).
+    if (leaseRequired(origin, interactive)) {
+      this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
+    }
     try {
       if (plan.systemPrompt !== undefined) await this.options.spills.write(plan.systemPrompt);
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill);

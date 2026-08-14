@@ -100,7 +100,7 @@ export interface SpecIssue {
   readonly createdAt: string;
 }
 
-/** A `spec` issue's child, with just what selection needs (`auto-implementation.md` §5.2). */
+/** A `spec` issue's child, with just what selection needs (`AGENTS.md`). */
 export interface SubIssue {
   readonly number: number;
   readonly title: string;
@@ -209,23 +209,14 @@ const ROADMAP_QUERY = `query($owner:String!,$repo:String!){repository(owner:$own
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
-/**
- * Where the resolved TODO singleton number persists between sessions
- * (`.aboard/runtime/todo.json` in the composed extension). The number is only
- * a locator hint: every use is revalidated against GitHub and a stale record is
- * discarded, because GitHub is the durable work-state source.
- */
-export interface TodoNumberStore {
-  load(): Promise<number | undefined>;
-  save(number: number): Promise<void>;
-  remove(): Promise<void>;
-}
-
 export class GitHubClient implements GitHubPromptSource {
+  // The resolved TODO singleton number is remembered only for the session. It
+  // is a locator hint, never state: every use is revalidated against GitHub and
+  // a stale record is discarded, because GitHub is the durable work-state source.
   #todoNumber: number | undefined;
   #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
 
-  public constructor(private readonly gh: GhExecutor, private readonly todoStore: TodoNumberStore) {}
+  public constructor(private readonly gh: GhExecutor) {}
 
   public async getTodo(): Promise<TodoSnapshot> {
     let number = await this.#rememberedTodo();
@@ -378,7 +369,7 @@ export class GitHubClient implements GitHubPromptSource {
     return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
   }
 
-  /** The most recently opened pull request still open, for `review_pr` (§9). */
+  /** The most recently opened pull request still open, for `review_pr`. */
   public async findLatestOpenPullRequest(): Promise<number | undefined> {
     const output = await this.gh.run(["pr", "list", "--state", "open", "--limit", "1", "--json", "number"]);
     const items = array(json(output, "open pull request lookup"), "open pull request lookup");
@@ -484,22 +475,17 @@ export class GitHubClient implements GitHubPromptSource {
     return items.map((value, index) => integer(record(value, `TODO issue[${index}]`).number, `TODO issue[${index}].number`));
   }
 
-  async #rememberedTodo(): Promise<number | undefined> {
-    // `??=` never caches a rejected load, so a transient read failure cannot
-    // poison discovery for the rest of the session.
-    this.#todoNumber ??= await this.todoStore.load();
+  #rememberedTodo(): number | undefined {
     return this.#todoNumber;
   }
 
-  async #rememberTodo(number: number): Promise<number> {
+  #rememberTodo(number: number): number {
     this.#todoNumber = number;
-    await this.todoStore.save(number);
     return number;
   }
 
-  async #forgetTodo(): Promise<void> {
+  #forgetTodo(): void {
     this.#todoNumber = undefined;
-    await this.todoStore.remove();
   }
 
   /**

@@ -4,6 +4,7 @@ import test from "node:test";
 import type { PullRequestOwner } from "../src/auto/engine.js";
 import type { DelegationCoordinator, DelegationLaunchInput } from "../src/bridge/delegation.js";
 import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
+import type { LaunchOrigin } from "../src/domain/lease.js";
 import type { GitHubClient } from "../src/github/client.js";
 import { ReviewCoordinator } from "../src/github/review.js";
 
@@ -21,11 +22,13 @@ function owner(overrides: Partial<PullRequestOwner> = {}): PullRequestOwner {
 
 function setup(options: { readonly latest?: number; readonly owner?: PullRequestOwner; readonly live?: boolean } = {}) {
   const launched: DelegationLaunchInput[] = [];
+  const origins: LaunchOrigin[] = [];
   const resumed: PullRequestOwner[] = [];
   const focused: TerminalId[] = [];
   const delegation = {
-    launchInteractive: async (input: DelegationLaunchInput) => {
+    launchInteractive: async (input: DelegationLaunchInput, origin: LaunchOrigin) => {
       launched.push(input);
+      origins.push(origin);
       return { agentId: "agent-2" as AgentId, sessionId: "0f9e8d7c-6b5a-4938-8271-6a5b4c3d2e1f" as SessionId, terminalId: "terminal-2" as TerminalId };
     },
   } as unknown as DelegationCoordinator;
@@ -41,7 +44,7 @@ function setup(options: { readonly latest?: number; readonly owner?: PullRequest
       resume: async (value) => { resumed.push(value); },
     },
   );
-  return { coordinator, launched, resumed, focused };
+  return { coordinator, launched, origins, resumed, focused };
 }
 
 test("no open pull request launches nothing", async () => {
@@ -69,7 +72,7 @@ test("a closed terminal resumes the owning session and delivers no result", asyn
 });
 
 test("an unknown owner falls back to a fresh pr-doctor-hitl and says so", async () => {
-  const { coordinator, launched } = setup({ latest: 7 });
+  const { coordinator, launched, origins } = setup({ latest: 7 });
   const outcome = await coordinator.review({ focus: "boundaries" });
   assert.equal(outcome.action, "launched");
   assert.match((outcome as { notice: string }).notice, /No aboard session is recorded for PR #7/);
@@ -79,6 +82,9 @@ test("an unknown owner falls back to a fresh pr-doctor-hitl and says so", async 
     description: "review pull request 7",
     focus: "boundaries",
   });
+  // No run owns this pull request, so nothing commits behind the terminal: the
+  // doctor is a handoff with no first message and takes no lease.
+  assert.deepEqual(origins, ["manager"]);
 });
 
 test("an explicit pull request number bypasses the latest-open lookup", async () => {

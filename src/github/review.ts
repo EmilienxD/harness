@@ -29,7 +29,7 @@ export interface ReviewTerminals {
 
 /**
  * `review_pr` is the way back into work already in flight
- * (`docs/auto-implementation.md` §9). It no longer launches a reviewer: it finds
+ * (`AGENTS.md`). It no longer launches a reviewer: it finds
  * the agent that owns the open pull request — the implementer when review mode
  * is off, the pr-doctor when it is on — and hands that session to the user, who
  * continues from there. This is a handoff, so it returns no result; the Manager
@@ -62,12 +62,15 @@ export class ReviewCoordinator {
     // No record of the owning session — the extension restarted, or the pull
     // request was opened outside a run. A fresh doctor against the diff is the
     // nearest useful thing, and saying so keeps the substitution visible.
+    // No auto-run owns this pull request, so nothing is committing behind the
+    // terminal: it is a handoff and takes no write lease. The user may already
+    // be editing the same branch, and that is theirs to decide.
     const launched = await this.delegation.launchInteractive({
       type: "pr-doctor-hitl",
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
       ...(request.focus === undefined ? {} : { focus: request.focus }),
-    });
+    }, "manager");
     return {
       action: "launched",
       prNumber,

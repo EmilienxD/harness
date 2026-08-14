@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FleetRegistry } from "../src/domain/fleet.js";
-import { FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore, FileTodoNumberStore } from "../src/runtime/persistence.js";
+import { FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore } from "../src/runtime/persistence.js";
 import type { AutoRunRecord } from "../src/domain/auto-run.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
@@ -19,19 +19,6 @@ test("fleet runtime metadata saves atomically and ignores corrupt recovery data"
   await writeFile(path, "truncated", "utf8");
   assert.equal(await store.load(), undefined);
   assert.equal((await readFile(path, "utf8")), "truncated");
-});
-
-test("the TODO number round-trips and degrades junk to no record", async () => {
-  const root = await mkdtemp(join(tmpdir(), "aboard-todo-"));
-  const store = new FileTodoNumberStore(root);
-  assert.equal(await store.load(), undefined);
-  await store.save(44);
-  assert.equal(await store.load(), 44);
-  const path = join(root, ".aboard", "runtime", "todo.json");
-  await writeFile(path, '"Project TODO"', "utf8");
-  assert.equal(await store.load(), undefined);
-  await store.remove();
-  assert.equal(await store.load(), undefined);
 });
 
 test("persistence drains queued writes and performs a final save on disposal", async () => {

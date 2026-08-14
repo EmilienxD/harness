@@ -95,7 +95,8 @@ function active(session: AgentSession): boolean {
 
 function boundedPreview(content: string, path: string): string {
   const suffix = `\nFull briefing: ${path}\n</aboard-state>`;
-  return `${content.slice(0, Math.max(0, HOOK_OUTPUT_LIMIT - suffix.length - 1))}…${suffix}`;
+  // Hook output is read by a TUI, so the truncation marker stays ASCII.
+  return `${content.slice(0, Math.max(0, HOOK_OUTPUT_LIMIT - suffix.length - 3))}...${suffix}`;
 }
 
 /** One failing boundary costs its own section, never the whole block. */
@@ -118,14 +119,14 @@ async function section(
 function issueLine(issue: BriefingIssue): string {
   const waits = issue.blockedBy.length === 0
     ? ""
-    : ` — waits on ${issue.blockedBy.map((number) => `#${number}`).join(", ")}`;
+    : ` - waits on ${issue.blockedBy.map((number) => `#${number}`).join(", ")}`;
   return `#${issue.number} ${issue.title} (${issue.disposition})${waits}`;
 }
 
 function list(issues: readonly BriefingIssue[]): string {
   const shown = issues.slice(0, ISSUE_LIST_LIMIT).map(issueLine);
   const omitted = issues.length - shown.length;
-  if (omitted > 0) shown.push(`…and ${omitted} more; list them with \`gh issue list\` if you need them.`);
+  if (omitted > 0) shown.push(`...and ${omitted} more; list them with \`gh issue list\` if you need them.`);
   return shown.join("\n");
 }
 
@@ -159,7 +160,7 @@ export class ManagerBriefings {
     ];
     const rendered = (await Promise.all(content)).filter((part) => part.length > 0).join("\n\n");
     if (rendered.length <= HOOK_OUTPUT_LIMIT) return rendered;
-    if (this.files === undefined) return `${rendered.slice(0, HOOK_OUTPUT_LIMIT - 1)}…`;
+    if (this.files === undefined) return rendered.slice(0, HOOK_OUTPUT_LIMIT);
     return boundedPreview(rendered, await this.files.write("state", rendered));
   }
 
@@ -173,7 +174,7 @@ export class ManagerBriefings {
         ? "no baseline checks are configured"
         : `verify with ${repository.checks.join(", ")}`;
       return [
-        `${repository.name} · default branch ${repository.defaultBranch} · ${checks}`,
+        `${repository.name} | default branch ${repository.defaultBranch} | ${checks}`,
         `Checked out: ${git.branch} @ ${git.head}, working tree ${git.dirty ? "dirty" : "clean"}`,
       ].join("\n");
     });
@@ -207,7 +208,7 @@ export class ManagerBriefings {
     const run = this.sources.autoRun();
     if (run === undefined) return "No run is active. `/auto` starts one on the oldest open spec.";
     const lines = [
-      `Running spec #${run.specNumber} "${run.specTitle}" — phase ${run.phase}, ${run.completedCount} issue(s) done.`,
+      `Running spec #${run.specNumber} "${run.specTitle}" - phase ${run.phase}, ${run.completedCount} issue(s) done.`,
     ];
     if (run.currentIssue !== undefined) lines.push(`Current issue: #${run.currentIssue}.`);
     if (run.waitingOnPullRequest !== undefined) {
@@ -223,7 +224,7 @@ export class ManagerBriefings {
       const lease = holder?.agentId === entry.identity.agentId ? ", holds the write lease" : "";
       // The description is what the user sees in the fleet tree, so it is what
       // makes this list legible when the Manager relays it back to them.
-      return `"${entry.terminal.name}" — ${entry.identity.type}, ${entry.lifecycle.status}${issue}${lease}`;
+      return `"${entry.terminal.name}" - ${entry.identity.type}, ${entry.lifecycle.status}${issue}${lease}`;
     });
     return agents.length === 0
       ? "No live agents. The write lease is unheld."
@@ -238,8 +239,8 @@ export class ManagerBriefings {
     const body = roadmap.body.trim();
     const bounded = body.length <= ROADMAP_BODY_LIMIT
       ? body
-      : `${body.slice(0, ROADMAP_BODY_LIMIT).trimEnd()}\n\n…truncated. Read the rest with \`gh issue view ${roadmap.number}\`.`;
-    return `Issue #${roadmap.number} — the full body follows, so do not fetch it again.\n\n${bounded}`;
+      : `${body.slice(0, ROADMAP_BODY_LIMIT).trimEnd()}\n\n...truncated. Read the rest with \`gh issue view ${roadmap.number}\`.`;
+    return `Issue #${roadmap.number} - the full body follows, so do not fetch it again.\n\n${bounded}`;
   }
 }
 
@@ -293,7 +294,7 @@ export class ManagerStopService {
     if (omitted > 0) lines.push(`${omitted} older result(s) were omitted from this bounded batch.`);
     for (const entry of selected) lines.push(formatResult(entry.agentId, entry.result));
     const joined = lines.join("\n");
-    return joined.length <= this.#maxContextChars ? joined : `${joined.slice(0, this.#maxContextChars - 1)}…`;
+    return joined.length <= this.#maxContextChars ? joined : joined.slice(0, this.#maxContextChars);
   }
 }
 

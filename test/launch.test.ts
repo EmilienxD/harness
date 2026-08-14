@@ -17,6 +17,7 @@ import {
   planManagerResume,
   planSessionResume,
   resolveLaunchConfiguration,
+  resolvePermissionMode,
   type EffortLevel,
   type LaunchPlanRequest,
 } from "../src/claude/launch.js";
@@ -481,8 +482,10 @@ test("pins each launch shape to the agent types allowed to use it", () => {
   rejects({ agentType: "implementer", configuration: resolveLaunchConfiguration({ agentName: "implementer" }) });
 
   // The one allowed pairing per side: raw inline, and the Manager from its file.
+  // (Raw is attended, so the suite's default bypass mode lands as no flag at
+  // all; the permission-mode tests below cover that gating in full.)
   const raw = planLaunch(request({ agentType: "raw", configuration: resolveLaunchConfiguration({ tools: ["Read"] }) }));
-  assert.deepEqual(raw.args.slice(2), ["--tools=Read", "--dangerously-skip-permissions", "Implement issue #47."]);
+  assert.deepEqual(raw.args.slice(2), ["--tools=Read", "Implement issue #47."]);
   const manager = planLaunch(request({
     agentType: "manager",
     configuration: definition("manager", MANAGER_TOOLS),
@@ -875,4 +878,65 @@ test("a long prompt is spilled once and the stub keeps its headline when it fits
   // The stub is the whole prompt argument; the body never reaches the line.
   assert.ok(!plan.commandLine.includes("x".repeat(100)));
   assert.equal(plan.spill?.relativePath, ".aboard/runtime/prompts/a1b2c3.md");
+});
+
+// `resolvePermissionMode` is the one home for who gets bypass: unattended
+// launches keep it (that is what the setting is for); attended launches get
+// "default", which emits no flag at all so the user's own Claude Code
+// configuration applies rather than being overridden.
+test("resolvePermissionMode gates bypass by who drives the launch", () => {
+  // Unattended automated launch: bypass survives.
+  assert.equal(resolvePermissionMode("bypass", { attended: false, agentType: "implementer" }), "bypass");
+  assert.equal(resolvePermissionMode("acceptEdits", { attended: false, agentType: "implementer" }), "acceptEdits");
+  // Attended: no flag, so the user's own configuration decides.
+  assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "raw" }), "default");
+  assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "manager" }), "default");
+  assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "implementer" }), "default");
+  // Non-bypass modes pass through untouched.
+  assert.equal(resolvePermissionMode("default", { attended: true, agentType: "raw" }), "default");
+  assert.equal(resolvePermissionMode("acceptEdits", { attended: true, agentType: "raw" }), "acceptEdits");
+  // The brainstormer never bypasses, whoever launched it.
+  assert.equal(resolvePermissionMode("bypass", { attended: true, agentType: "brainstormer" }), "default");
+  assert.equal(resolvePermissionMode("bypass", { attended: false, agentType: "brainstormer" }), "default");
+  assert.equal(resolvePermissionMode("acceptEdits", { attended: true, agentType: "brainstormer" }), "default");
+});
+
+test("an unattended implementer keeps bypass; attended and brainstorm launches carry no permission flag", () => {
+  // Unattended: the planner derives attendance from the type, and implementer
+  // is automated, so bypass reaches the command line unchanged.
+  const unattended = planLaunch(request({ permissionMode: "bypass" }));
+  assert.ok(unattended.args.includes("--dangerously-skip-permissions"));
+
+  // Explicitly attended (what the bridge passes for an interactive handoff):
+  // no permission flag at all, so the prompt simply follows the tool list.
+  const attended = planLaunch(request({ permissionMode: "bypass", attended: true }));
+  assert.ok(!attended.args.includes("--dangerously-skip-permissions"));
+  assert.ok(!attended.args.includes("--permission-mode"));
+  assert.deepEqual(attended.args.slice(-1), ["Implement issue #47."]);
+
+  // The brainstormer is pinned to the default mode even left unattended.
+  const brainstorm = planLaunch(request({
+    agentType: "brainstormer",
+    configuration: definition("brainstormer", BRAINSTORMER_TOOLS),
+    prompt: undefined,
+    permissionMode: "bypass",
+  }));
+  assert.ok(!brainstorm.args.includes("--dangerously-skip-permissions"));
+  assert.ok(!brainstorm.args.includes("--permission-mode"));
+
+  // A raw session the user invoked is attended by its type: no flag either.
+  const raw = planLaunch(request({
+    agentType: "raw",
+    configuration: resolveLaunchConfiguration({}),
+    prompt: undefined,
+    permissionMode: "bypass",
+  }));
+  assert.deepEqual(raw.args, ["--session-id", sessionId]);
+
+  // Resuming an unattended worker re-passes bypass, exactly as launch does.
+  const resumed = planSessionResume({
+    agentId, sessionId, agentType: "implementer", shell: "powershell",
+    permissionMode: "bypass", configuration: definition("implementer", IMPLEMENTER_TOOLS),
+  });
+  assert.ok(resumed.args.includes("--dangerously-skip-permissions"));
 });

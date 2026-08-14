@@ -36,7 +36,7 @@ import {
   readAboardConfiguration,
   type ProjectSettings,
 } from "./configuration.js";
-import { FileFleetStore, FileTodoNumberStore, PersistOnChange } from "./runtime/persistence.js";
+import { FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { createCliHandler } from "./bridge/cli.js";
@@ -306,7 +306,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
   const lease = new WriteLease();
   const managerStore = new FileManagerStore(workspaceRoot);
-  const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot), new FileTodoNumberStore(workspaceRoot));
+  const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const recordedManager = await managerStore.load();
   const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
   const launchConfigurations = workerConfigurations(workspaceRoot);
@@ -465,16 +465,20 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         agentType: owner.type,
         shell: process.platform === "win32" ? "powershell" : "git-bash",
         permissionMode: currentConfiguration.workerPermissionMode,
+        // `review_pr` exists to hand the session back to the user, so the
+        // resumed terminal is driven by them even when it owned an afk worker.
+        attended: true,
         command: currentConfiguration.claudeCommand,
         configuration,
         ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
         wrapper: wrapperLayout,
       });
-      const capability = plan.writeCapability;
       if (plan.systemPrompt !== undefined) await runtimeFiles.write(plan.systemPrompt);
       const at = new Date().toISOString() as IsoTimestamp;
-      const acquisition = lease.acquire(capability, { agentId: owner.agentId, sessionId: owner.sessionId }, at, "resume pull request session");
-      if (!acquisition.acquired) throw new Error(`Write lease is held by ${acquisition.holder.agentId}; release it before resuming this session.`);
+      // No lease: `review_pr` reopens the session for the user to drive, with
+      // no first message sent into it. Whatever the run held it released when
+      // the agent finished, and re-taking it here would block the user's own
+      // parallel work on the branch they asked to look at.
       const terminal = terminals.create({
         agentId: owner.agentId,
         sessionId: owner.sessionId,
@@ -778,7 +782,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // so returning to VS Code after merging does not cost a poll interval.
     window.onDidChangeWindowState((state) => { if (state.focused && autoRun.state()?.waiting === true) autoRun.continueNow(); }),
   );
-  // Resume is explicit, never automatic (§11). Auto-resuming would launch a
+  // Resume is explicit, never automatic. Auto-resuming would launch a
   // write-capable agent into a workspace nobody has looked at since the crash,
   // with no human present — exactly what the visibility invariants prevent.
   const offerAutoRunResume = async (): Promise<void> => {

@@ -180,7 +180,7 @@ function requireInstruction(instruction: string): string {
  * The disposition tells the worker what will happen to its change, not what to
  * do about it: the extension owns every git and GitHub side effect, so no
  * disposition ever asks an agent to commit, open, or merge anything
- * (`docs/auto-implementation.md` §1).
+ * (`AGENTS.md`).
  */
 function dispositionGuidance(disposition: IssueDisposition): string {
   switch (disposition) {

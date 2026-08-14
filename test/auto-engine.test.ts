@@ -4,6 +4,7 @@ import test from "node:test";
 import { AutoRunEngine, type AutoRunGitHub, type AutoRunLauncher } from "../src/auto/engine.js";
 import type { AutoRunRecord, AutoRunSettings } from "../src/domain/auto-run.js";
 import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
+import type { LaunchOrigin } from "../src/domain/lease.js";
 import type { GitClient, GitStatus } from "../src/git/client.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
@@ -13,6 +14,8 @@ interface Harness {
   readonly engine: AutoRunEngine;
   readonly notifications: string[];
   readonly launches: DelegationLaunchInput[];
+  /** Origins the engine declared for its handed-off launches; they decide the lease. */
+  readonly interactiveOrigins: LaunchOrigin[];
   readonly gitCalls: string[];
   readonly saved: AutoRunRecord[];
   readonly state: { cleared: boolean };
@@ -43,6 +46,7 @@ function parentOf(issueNumber: number): number {
 function harness(options: HarnessOptions = {}): Harness {
   const notifications: string[] = [];
   const launches: DelegationLaunchInput[] = [];
+  const interactiveOrigins: LaunchOrigin[] = [];
   const gitCalls: string[] = [];
   const saved: AutoRunRecord[] = [];
   const state = { cleared: false };
@@ -144,8 +148,9 @@ function harness(options: HarnessOptions = {}): Harness {
           : { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Implemented the change.", telemetry: telemetry() },
       };
     },
-    launchInteractive: async (input) => {
+    launchInteractive: async (input, origin) => {
       launches.push(input);
+      interactiveOrigins.push(origin);
       return {
         agentId: `agent-${launches.length}` as AgentId,
         sessionId: "0f9e8d7c-6b5a-4938-8271-6a5b4c3d2e1f" as SessionId,
@@ -183,7 +188,7 @@ function harness(options: HarnessOptions = {}): Harness {
     sleep: () => new Promise((resolve) => { setImmediate(resolve); }),
   });
 
-  return { engine, notifications, launches, gitCalls, saved, state, pullRequests };
+  return { engine, notifications, launches, interactiveOrigins, gitCalls, saved, state, pullRequests };
 }
 
 function telemetry() {
@@ -378,6 +383,9 @@ test("a hitl doctor's approved fixes are committed to the pull request before it
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-hitl"]);
+  // Handed to the user but still leased: the run is committing behind it, which
+  // is exactly the collision the lease exists to prevent.
+  assert.deepEqual(context.interactiveOrigins, ["auto-run"]);
   // The implementation commit, then the fixes captured while the PR was open.
   assert.equal(context.gitCalls.filter((call) => call === "commit").length, 2);
   assert.match(context.notifications.join("\n"), /committed 1 changed path\(s\) from issue #35's open terminals to PR #56/);
