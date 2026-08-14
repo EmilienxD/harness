@@ -61,9 +61,11 @@ commits with that literal message rather than parsing `--ai` as a flag.
 Only the files **Claude actually wrote this session**, not every dirty file
 in the repo. The hook reads the session's JSONL transcript, collects the
 `Edit`/`Write`/`NotebookEdit` tool calls, and stages exactly those paths.
-Writes that failed, writes outside the repo (`~/.claude/settings.json`), and
-files created then deleted are all dropped — `--dry` lists each discard
-so a "missing" file is never a mystery.
+Writes that failed, writes outside the repo (`~/.claude/settings.json`),
+gitignored paths (an agent-scratch dir like `.issues-gateway/`, build output,
+...), and files created then deleted are all dropped — `--dry` lists each
+discard so a "missing" file is never a mystery. A tracked file inside an
+ignored directory still stages, exactly as git itself treats it.
 
 The commit is pathspec-scoped, so anything you staged by hand beforehand
 stays staged and is left out. If the transcript can't be read at all, the

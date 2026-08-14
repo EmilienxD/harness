@@ -34,11 +34,11 @@ Flags = namedtuple("Flags", "dry use_ai")
 WRITE_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit", "Update"}
 
 # Result of reading a transcript. Everything the dry run needs to explain
-# itself, including the paths that were deliberately discarded — those are
+# itself, including the paths that were deliberately discarded -- those are
 # the silent filters, and silent filters are what make a hook baffling.
 WriteScan = namedtuple(
     "WriteScan",
-    "paths outside failed_paths records write_calls",
+    "paths outside failed_paths ignored records write_calls",
 )
 
 
@@ -185,10 +185,15 @@ def _scan_writes(transcript_path: str, repo_root: str):
     for path in succeeded:
         (inside if _is_within(path, repo_root) else outside).append(path)
 
+    # Drop gitignored paths next -- .issues-gateway/ scratch, build output,
+    # and the like, which Claude touching does not make commit-worthy.
+    paths, ignored = filter_ignored(inside, repo_root)
+
     return WriteScan(
-        paths=inside,
+        paths=paths,
         outside=outside,
         failed_paths=failed_paths,
+        ignored=ignored,
         records=records,
         write_calls=len(calls),
     )
@@ -214,8 +219,8 @@ def _is_within(path: str, root: str) -> bool:
         return False
 
 
-def run(cmd, cwd):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+def run(cmd, cwd, input=None):
+    return subprocess.run(cmd, cwd=cwd, input=input, capture_output=True, text=True)
 
 
 def finish(message: str):
@@ -242,7 +247,7 @@ def resolve_stage_set(paths, cwd):
     pathspec if git already tracks it, and one unmatched pathspec aborts
     the entire `git add` (taking the commit with it).
 
-    Read-only — safe to call from the dry run.
+    Read-only -- safe to call from the dry run.
     """
     present = [p for p in paths if os.path.exists(p)]
     missing = [p for p in paths if not os.path.exists(p)]
@@ -261,6 +266,31 @@ def resolve_stage_set(paths, cwd):
     return present, deletions, unmatched
 
 
+def filter_ignored(paths, cwd):
+    """
+    Split `paths` into (kept, ignored), where `ignored` matches a gitignore
+    rule -- `.issues-gateway/` scratch, build output, and the like, which
+    Claude touching does not make commit-worthy.
+
+    `git add -A -- <ignored untracked path>` exits 1, so one ignored path
+    would otherwise sink the whole commit with a spurious `git add failed`.
+
+    `git check-ignore` exits 0 when anything matches, 1 when nothing does,
+    >=128 on a real error. Anything else (not a repo, old git, ...) keeps
+    every path, which degrades to the pre-filter behaviour.
+    """
+    if not paths:
+        return paths, []
+    result = run(["git", "check-ignore", "--stdin", "-z"], cwd, input="\0".join(paths))
+    if result.returncode == 1:
+        return paths, []
+    if result.returncode != 0:
+        return paths, []
+    ignored = {os.path.normpath(p) for p in result.stdout.split("\0") if p.strip()}
+    kept = [p for p in paths if os.path.normpath(p) not in ignored]
+    return kept, [p for p in paths if os.path.normpath(p) in ignored]
+
+
 def stage_paths(paths, cwd):
     """
     Stage `paths`, returning (result, targets). The targets matter to the
@@ -276,7 +306,7 @@ def stage_paths(paths, cwd):
 
 def staged_elsewhere(targets, repo_root):
     """
-    Paths sitting in the index that we did NOT stage — typically staged by
+    Paths sitting in the index that we did NOT stage -- typically staged by
     hand before /commit ran. A pathspec-scoped commit leaves them alone.
     """
     result = run(["git", "diff", "--cached", "--name-only"], repo_root)
@@ -349,7 +379,7 @@ SECRET_PATTERNS = [
 
 # Resolution order for the API key. Live env vars come first because that is
 # what the google-genai SDK itself reads, so anyone who already has Gemini set
-# up needs to do nothing. Then the `env` dict of each settings file — Claude
+# up needs to do nothing. Then the `env` dict of each settings file -- Claude
 # Code's own mechanism for handing environment variables to hooks, and where a
 # user would reasonably expect to put this. Then a bare key file, for a secret
 # that outlives shells and is trivially easy to keep out of git.
@@ -416,20 +446,20 @@ def key_setup_help(repo_root):
     return f"""No Google AI Studio API key found. Get one (the free tier is ample
 for commit messages) at https://aistudio.google.com/apikey then pick one:
 
-  1. Claude Code's own env passthrough — {local}
+  1. Claude Code's own env passthrough -- {local}
        {{"env": {{"GEMINI_API_KEY": "your-key-here"}}}}
      settings.local.json is per-machine and gitignored by this tool's installer.
 
-  2. Key file — one line, nothing else, no restart needed:
+  2. Key file -- one line, nothing else, no restart needed:
        {key_file}
      Or .claude/{KEY_FILE_NAME} inside this repo, also gitignored for you.
 
-  3. Environment variable — shared with every other Gemini tool:
+  3. Environment variable -- shared with every other Gemini tool:
        setx GEMINI_API_KEY "your-key-here"        (Windows, new shells only)
        export GEMINI_API_KEY="your-key-here"      (add to ~/.bashrc / ~/.zshrc)
 
 Checked in the order: live environment, then each .claude/settings*.json `env`,
-then each .claude/{KEY_FILE_NAME} — project scope before user scope throughout.
+then each .claude/{KEY_FILE_NAME} -- project scope before user scope throughout.
 
 Do NOT paste the key into a Claude prompt: prompts are written verbatim to the
 session transcript. Prefer settings.local.json over a committed settings.json.
@@ -529,7 +559,7 @@ def _synth_new_file(path, repo_root):
 
 
 def collect_file_summary(repo_root, targets, staged):
-    """Compact `+added -deleted  path` list — complete even when the diff isn't."""
+    """Compact `+added -deleted  path` list -- complete even when the diff isn't."""
     scope = _diff_scope(targets)
     base = ["git", "diff", "--numstat", "--no-color", "-M"]
     base += ["--cached"] if staged else ["HEAD"]
@@ -575,7 +605,7 @@ def collect_diff(repo_root, targets, staged):
 def trim_diff(text, budget=DIFF_BUDGET):
     """
     Fit the diff into `budget` chars without letting one enormous file
-    swallow the whole allowance — a global tail would show the model an
+    swallow the whole allowance -- a global tail would show the model an
     exhaustive lockfile and nothing of the actual feature.
     """
     if not text.strip():
@@ -625,7 +655,7 @@ def _clean_prompt_text(text):
 
 def _truncate(text, limit):
     text = " ".join(text.split())
-    return text if len(text) <= limit else text[:limit] + " …"
+    return text if len(text) <= limit else text[:limit] + " ..."
 
 
 def collect_session_context(transcript_path, repo_root):
@@ -634,9 +664,9 @@ def collect_session_context(transcript_path, repo_root):
     what was done, in the order it happened. The diff says *what* changed;
     this is the only source for *why*.
 
-    Uses the same transcript reading as _scan_writes — user records whose
+    Uses the same transcript reading as _scan_writes -- user records whose
     content is a bare string or a list of blocks, assistant tool_use blocks
-    for actions — rather than guessing at the format.
+    for actions -- rather than guessing at the format.
 
     Earlier `/commit` invocations become explicit markers: everything above
     the last one is already committed, so the model should describe only
@@ -735,7 +765,7 @@ def _budget_events(lines):
     Fit the narrative into CONTEXT_BUDGET, keeping the highest-signal lines.
 
     A plain tail is the wrong trade here: user prompts are the only source
-    of *intent*, they are small, and they cluster at the START of a session —
+    of *intent*, they are small, and they cluster at the START of a session --
     exactly what a tail discards. So prompts and commit markers are admitted
     unconditionally, and tool events fill whatever is left, newest first.
     """
@@ -786,7 +816,7 @@ be committed, a summary of the files it touches, the recent commit log of the \
 repository, and a narrative of the coding session that produced the change.
 
 The diff is ground truth. Describe only what it actually shows. If the session \
-narrative suggests work that is not in the diff, ignore it — that work is not \
+narrative suggests work that is not in the diff, ignore it -- that work is not \
 part of this commit. Never invent a rationale you cannot see evidence for.
 
 The session narrative may contain '=== ALREADY COMMITTED UP TO HERE ===' \
@@ -974,10 +1004,10 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
     `git ls-files`, `git status`) and stopping before `add`/`commit`.
 
     With --ai the message is generated for real, so it can be copied,
-    edited, and replayed as `/commit <message>` — but only if there is
+    edited, and replayed as `/commit <message>` -- but only if there is
     genuinely something to commit.
     """
-    out = ["Dry run — nothing was staged or committed.", ""]
+    out = ["Dry run -- nothing was staged or committed.", ""]
     if message and not flags.use_ai:
         out.append(f"Message: {message}")
         out.append("")
@@ -998,12 +1028,16 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
         # hook look like it has silently lost a file.
         if scan.failed_paths:
             out.append("")
-            out.append(f"Skipped — tool call failed ({len(scan.failed_paths)}):")
+            out.append(f"Skipped -- tool call failed ({len(scan.failed_paths)}):")
             out += [f"  {_rel(p, repo_root)}" for p in scan.failed_paths]
         if scan.outside:
             out.append("")
-            out.append(f"Skipped — outside this repo ({len(scan.outside)}):")
+            out.append(f"Skipped -- outside this repo ({len(scan.outside)}):")
             out += [f"  {p}" for p in scan.outside]
+        if scan.ignored:
+            out.append("")
+            out.append(f"Skipped -- gitignored ({len(scan.ignored)}):")
+            out += [f"  {_rel(p, repo_root)}" for p in scan.ignored]
 
         if not scan.paths:
             out.append("")
@@ -1015,7 +1049,7 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
             if unmatched:
                 out.append("")
                 out.append(
-                    f"Skipped — no longer exist ({len(unmatched)}):"
+                    f"Skipped -- no longer exist ({len(unmatched)}):"
                 )
                 out += [f"  {_rel(p, repo_root)}" for p in unmatched]
 
@@ -1028,18 +1062,18 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
                 out.append(f"  {_rel(p, repo_root)}  [deletion]")
 
     # Anything already in the index that isn't ours. The commit is
-    # pathspec-scoped precisely so these are left alone — an unscoped
+    # pathspec-scoped precisely so these are left alone -- an unscoped
     # `git commit` would sweep every one of them into the commit.
     merging = in_merge(repo_root)
     others = staged_elsewhere(targets, repo_root) if targets else []
     if others:
         out.append("")
         if merging:
-            out.append(f"Already staged ({len(others)}) — WILL BE COMMITTED:")
+            out.append(f"Already staged ({len(others)}) -- WILL BE COMMITTED:")
             out += [f"  {p}" for p in others]
             out.append("  (mid-merge: git requires committing all staged changes)")
         else:
-            out.append(f"Already staged ({len(others)}) — would be left alone:")
+            out.append(f"Already staged ({len(others)}) -- would be left alone:")
             out += [f"  {p}" for p in others]
 
     # Whether those paths actually differ from HEAD is the other half of
@@ -1058,7 +1092,7 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
             out.append("Changes to commit:")
             out.append(pending_raw.rstrip("\n"))
         else:
-            out.append("No changes to commit — files match HEAD.")
+            out.append("No changes to commit -- files match HEAD.")
             out.append("A real /commit would exit with 'nothing to commit'.")
 
     if not flags.use_ai:
@@ -1067,7 +1101,7 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
     out.append("=" * 68)
 
     if not pending:
-        out.append("No changes to commit — --ai not called.")
+        out.append("No changes to commit -- --ai not called.")
         return "\n".join(out)
 
     try:
@@ -1185,7 +1219,7 @@ def main():
 
     toplevel = run(["git", "rev-parse", "--show-toplevel"], cwd)
     if toplevel.returncode != 0:
-        finish("Not a git repository — nothing to commit.")
+        finish("Not a git repository -- nothing to commit.")
         return
     repo_root = os.path.normpath(toplevel.stdout.strip()) or cwd
 
@@ -1205,7 +1239,7 @@ def main():
         if add_result is None:
             finish(
                 "Claude edited files this session, but none of them still "
-                "exist or are tracked — nothing to stage."
+                "exist or are tracked -- nothing to stage."
             )
             return
     else:
@@ -1219,14 +1253,14 @@ def main():
 
     # Scope every remaining step to our own paths. Both `git diff --cached`
     # and `git commit` default to the WHOLE INDEX, which may already hold
-    # files the user staged by hand before /commit ran — staging selectively
+    # files the user staged by hand before /commit ran -- staging selectively
     # is pointless if the commit then sweeps them all up anyway.
     # Mid-merge is the exception: git forbids partial commits there.
     scope = ["--", *targets] if targets and not in_merge(repo_root) else []
 
     staged = run(["git", "diff", "--cached", "--name-only", *scope], repo_root)
     if not staged.stdout.strip():
-        finish("Nothing to commit — working tree matches HEAD.")
+        finish("Nothing to commit -- working tree matches HEAD.")
         return
 
     # Only now, with something definitely to commit, is it worth an API call.
@@ -1239,7 +1273,7 @@ def main():
         except AiError as exc:
             finish(
                 f"{exc}\n\n"
-                f"{len(staged.stdout.strip().splitlines())} file(s) are still staged — "
+                f"{len(staged.stdout.strip().splitlines())} file(s) are still staged -- "
                 "nothing was committed.\nRerun with an explicit message: /commit <message>"
             )
             return
