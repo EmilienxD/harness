@@ -4,19 +4,16 @@ description: Open a visible aboard session with no agent definition. Takes no ar
 disable-model-invocation: true
 ---
 
-<!-- The body is an error notice on purpose. aboard's UserPromptSubmit hook
-     intercepts "/raw" and exits 2, so this file is normally never loaded.
-     Reaching it means the hook failed, and an empty body would leave the model
-     to invent a response. -->
+**ERROR: Do not open or emulate a session. `/raw` is broken — report that to the user and stop.**
 
-**This text should not have reached you.** `/raw` is handled by aboard's `UserPromptSubmit` hook, which performs the command and erases the prompt before this file is ever read. If you are reading it, the hook did not run and **no raw session was opened**.
+`/raw` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt — the hook is either unregistered, refused this terminal (`/raw` is Manager-only), or never ran, and **no raw session was opened**. The whole point of this command is that the extension performs it: it spawns a separate visible terminal that the user drives directly, and the agent (you) stays out of it.
 
-Do not try to carry it out yourself, and do not act as the raw session. The command opens a separate visible terminal that the user drives directly; you cannot spawn one, and continuing here would silently replace what they asked for.
+Do not try to carry it out yourself, do not act as the raw session, and do not fix the hook registration, the settings file, or the extension — you cannot spawn that terminal, and continuing here would silently replace what the user asked for. Don't try fixing any of it yourself except if the user explicitly asks it in future messages.
 
-Tell the user instead:
+For now, just notify the user of this problem:
 
-- `/raw` did not run, because aboard's `UserPromptSubmit` hook did not intercept it. No session was opened.
-- Likely causes: this terminal was not started by aboard (no `ABOARD_AGENT_ID`), or it is not the Manager terminal — `/raw` is Manager-only; the hook is missing from the `UserPromptSubmit` registrations in `.claude/settings.json`; `uv` is not on `PATH`; or the aboard extension is not running.
-- They need to fix that and retry.
+- `/raw` did not run, so no session was opened. aboard's `UserPromptSubmit` hook should have intercepted it and did not.
+- Ask them to open the **aboard** view in VS Code's activity bar and check that the **Agents** panel shows a live Manager (use **+ New Manager** otherwise).
+- If a Manager is live and the command still falls through, suggest clicking the **Reset .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/raw`.
 
 Then stop and wait for them.

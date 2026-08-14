@@ -4,19 +4,16 @@ description: Reopen the aboard session that owns the open pull request and hand 
 disable-model-invocation: true
 ---
 
-<!-- The body is an error notice on purpose. aboard's UserPromptSubmit hook
-     intercepts "/review-pr" and exits 2, so this file is normally never
-     loaded. Reaching it means the hook failed, and an empty body would leave
-     the model to invent a response. -->
+**ERROR: Do not resume or review anything. `/review-pr` is broken — report that to the user and stop.**
 
-**This text should not have reached you.** `/review-pr` is handled by aboard's `UserPromptSubmit` hook, which performs the command and erases the prompt before this file is ever read. If you are reading it, the hook did not run and **no session was handed to the user**.
+`/review-pr` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt — the hook is either unregistered, refused this terminal (`/review-pr` is Manager-only), or never ran, and **no session was handed to the user**. The command is a handoff: the extension resumes the session that built the pull request currently in flight and focuses its terminal.
 
-Do not try to carry it out yourself, and do not review the pull request here. The command is a handoff: the extension resumes the session that built the pull request currently in flight and focuses its terminal. You cannot resume that session, and reviewing in its place would produce an opinion detached from the work.
+Do not try to carry it out yourself — do not resume that session, do not review the pull request here, and do not fix the hook registration, the settings file, or the extension. You cannot resume that session, and reviewing in its place would produce an opinion detached from the work. Don't try fixing any of it yourself except if the user explicitly asks it in future messages.
 
-Tell the user instead:
+For now, just notify the user of this problem:
 
-- `/review-pr` did not run, because aboard's `UserPromptSubmit` hook did not intercept it. No session was resumed or focused.
-- Likely causes: this terminal was not started by aboard (no `ABOARD_AGENT_ID`), or it is not the Manager terminal — `/review-pr` is Manager-only; the hook is missing from the `UserPromptSubmit` registrations in `.claude/settings.json`; `uv` is not on `PATH`; or the aboard extension is not running.
-- They need to fix that and retry.
+- `/review-pr` did not run, so no session was resumed or focused. aboard's `UserPromptSubmit` hook should have intercepted it and did not.
+- Ask them to open the **aboard** view in VS Code's activity bar and check that the **Agents** panel shows a live Manager (use **+ New Manager** otherwise). The command **Aboard: Review a Pull Request** performs the same handoff and shows a precise error if it fails.
+- If a Manager is live and the command still falls through, suggest clicking the **Reset .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/review-pr`.
 
 Then stop and wait for them.

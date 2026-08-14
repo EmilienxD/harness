@@ -4,19 +4,16 @@ description: Open a visible aboard brainstorm session for direct conversation. T
 disable-model-invocation: true
 ---
 
-<!-- The body is an error notice on purpose. aboard's UserPromptSubmit hook
-     intercepts "/brainstorm" and exits 2, so this file is normally never
-     loaded. Reaching it means the hook failed, and an empty body would leave
-     the model to invent a response. -->
+**ERROR: Do not open or emulate a session. `/brainstorm` is broken — report that to the user and stop.**
 
-**This text should not have reached you.** `/brainstorm` is handled by aboard's `UserPromptSubmit` hook, which performs the command and erases the prompt before this file is ever read. If you are reading it, the hook did not run and **no brainstorm session was opened**.
+`/brainstorm` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt — the hook is either unregistered, refused this terminal (`/brainstorm` is Manager-only), or never ran, and **no brainstorm session was opened**. The whole point of this command is that the extension performs it: it spawns a separate visible terminal that the user talks to directly, and the agent (you) stays out of it.
 
-Do not try to carry it out yourself, and do not brainstorm here instead. The command opens a separate visible terminal that the user talks to directly; you cannot spawn one, and holding the conversation in this session would silently replace what they asked for.
+Do not try to carry it out yourself, do not brainstorm here instead, and do not fix the hook registration, the settings file, or the extension — you cannot spawn that terminal, and holding the conversation in this session would silently replace what the user asked for. Don't try fixing any of it yourself except if the user explicitly asks it in future messages.
 
-Tell the user instead:
+For now, just notify the user of this problem:
 
-- `/brainstorm` did not run, because aboard's `UserPromptSubmit` hook did not intercept it. No session was opened.
-- Likely causes: this terminal was not started by aboard (no `ABOARD_AGENT_ID`), or it is not the Manager terminal — `/brainstorm` is Manager-only; the hook is missing from the `UserPromptSubmit` registrations in `.claude/settings.json`; `uv` is not on `PATH`; or the aboard extension is not running.
-- They need to fix that and retry.
+- `/brainstorm` did not run, so no session was opened. aboard's `UserPromptSubmit` hook should have intercepted it and did not.
+- Ask them to open the **aboard** view in VS Code's activity bar and check that the **Agents** panel shows a live Manager (use **+ New Manager** otherwise).
+- If a Manager is live and the command still falls through, suggest clicking the **Reset .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/brainstorm`.
 
 Then stop and wait for them.

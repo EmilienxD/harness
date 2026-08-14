@@ -4,19 +4,16 @@ description: Close this visible aboard terminal. Takes no arguments. Handled ent
 disable-model-invocation: true
 ---
 
-<!-- The body is an error notice on purpose. aboard's UserPromptSubmit hook
-     intercepts "/done" and exits 2, so this file is normally never loaded.
-     Reaching it means the hook failed, and an empty body would leave the model
-     to invent a response. -->
+**ERROR: Do not close or kill anything. `/done` is broken — report that to the user and stop.**
 
-**This text should not have reached you.** `/done` is handled by aboard's `UserPromptSubmit` hook, which performs the command and erases the prompt before this file is ever read. If you are reading it, the hook did not run and **this terminal was not closed**.
+`/done` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt — the hook is either unregistered, does not apply to this terminal, or never ran, and **this terminal was not closed**. Closing an aboard terminal is the extension's job: it releases the session's write lease and records the end.
 
-Do not try to carry it out yourself. Closing an aboard terminal is the extension's job — it releases the session's write lease and records the end. Exiting or killing the process from here would strand that state.
+Do not try to carry it out yourself — do not exit or kill your own process, tell the user their session is done, or fix the hook registration, the settings file, or the extension. Exiting from here would strand the lease state. Don't try fixing any of it yourself except if the user explicitly asks it in future messages.
 
-Tell the user instead:
+For now, just notify the user of this problem:
 
-- `/done` did not run, because aboard's `UserPromptSubmit` hook did not intercept it. The terminal is still open.
-- Likely causes: this terminal was not started by aboard (no `ABOARD_AGENT_ID`), so aboard's hooks skip it; the hook is missing from the `UserPromptSubmit` registrations in `.claude/settings.json`; `uv` is not on `PATH`; or the aboard extension is not running.
-- They need to fix that and retry.
+- `/done` did not run, so this terminal is still open. aboard's `UserPromptSubmit` hook should have intercepted it and did not.
+- Ask them to open the **aboard** view in VS Code's activity bar and check that the **Agents** panel shows this agent; killing it from there is the manual equivalent.
+- If the agent is listed and the command still falls through, suggest clicking the **Reset .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/done`.
 
 Then stop and wait for them.

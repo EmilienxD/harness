@@ -3,7 +3,6 @@ name: update-todo
 description: Evolve the aboard project roadmap issue while keeping it concise and directional
 argument-hint: "[roadmap change]"
 disable-model-invocation: true
-allowed-tools: Bash
 ---
 
 The current roadmap is already in your context, in the `## Roadmap` section of the aboard state block delivered at session start. Read it there; there is no fetch step.
