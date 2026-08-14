@@ -4,14 +4,12 @@ Thanks for looking. aboard is pre-1.0 and the fastest way to help is to use it o
 
 ## Before you write code
 
-Read [`AGENTS.md`](./AGENTS.md) — it is short and it is binding. Then read the relevant part of the source of truth:
+Read [`AGENTS.md`](./AGENTS.md) — it is the product, behavior, and architecture contract, and it is binding. Then read the relevant reference material:
 
-- [`docs/initial-spec.md`](./docs/initial-spec.md) — the product and behavior contract.
-- [`docs/auto-implementation.md`](./docs/auto-implementation.md) — the auto-run contract. Where it and the spec disagree, it wins.
-- [`docs/architecture.md`](./docs/architecture.md) — the accepted module layout.
+- [`docs/configuration.md`](./docs/configuration.md) — every `aboard.*` setting and how the three config layers resolve.
 - [`docs/CLAUDE-REFERENCES/`](./docs/CLAUDE-REFERENCES/) — Claude Code documentation snapshots. Verify hook, settings, tool, agent, and CLI behavior there rather than from memory.
 
-If implementation convenience conflicts with a load-bearing decision in the spec, follow the spec. A change that reduces the user's visibility or removes a decision point is a regression no matter how much time it saves — open an issue and argue the decision instead of quietly reinterpreting it.
+If implementation convenience conflicts with a load-bearing decision in `AGENTS.md`, follow `AGENTS.md`. A change that reduces the user's visibility or removes a decision point is a regression no matter how much time it saves — open an issue and argue the decision instead of quietly reinterpreting it.
 
 ## Development baseline
 

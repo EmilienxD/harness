@@ -31,7 +31,7 @@ aboard ─ Agents                                       claude --agent implement
 └─ raw                   running                      └───────────────────────────┘
 ```
 
-You talk to the **Manager**. It plans, delegates, and reports — and it cannot edit your code. Each delegated task opens as its own terminal. Click a node and you're inside it. One agent at a time is the *lease holder*: at most one agent can touch your working tree, ever, and the status bar always names it.
+You talk to the **Manager**. It plans, delegates, and reports — and it cannot edit your code. Each delegated task opens as its own terminal. Click a node and you're inside it. One agent at a time is the *lease holder*: no two delegated tasks touch your working tree at once, and the status bar always names the one that holds it.
 
 ## Quick start
 
@@ -62,7 +62,7 @@ Then try one of these in the Manager terminal:
 
 ## Why you can leave it running
 
-- **One writer, enforced.** The write lease is derived from each agent's actual tool set, not a flag someone remembered to set. Two agents cannot edit your tree at once.
+- **One writer, enforced.** The write lease is derived from each agent's actual tool set, not a flag someone remembered to set. Two delegated tasks cannot edit your tree at once. It locks automated work, never your own hands: a terminal you're chatting in takes no lease, so you stay free to work in parallel.
 - **Loopback only.** The bridge binds `127.0.0.1` and requires a per-activation bearer token on every request. Tokens live outside your project and are never committed.
 - **Your config stays yours.** aboard adds hook registrations to `.claude/settings.json` and nothing else. It never writes `permissions`. It never scaffolds a `CLAUDE.md` — that file is yours.
 - **Nothing hidden runs.** The bridge is the only creator of agents. A Claude session you start by hand is outside the system, and aboard's hooks stay silent in it.
@@ -70,7 +70,7 @@ Then try one of these in the Manager terminal:
 
 ## Things aboard will never do
 
-This list is a feature, and it's [written into the spec](./docs/initial-spec.md#13-the-goal-is-experience-not-automation) so it survives future contributors:
+This list is a feature, and it's [written into the contract](./AGENTS.md#mission) so it survives future contributors:
 
 - Approve its own pull requests.
 - Let the Manager quietly implement something itself.
@@ -84,14 +84,12 @@ This list is a feature, and it's [written into the spec](./docs/initial-spec.md#
 
 | | |
 | :-- | :-- |
-| [docs/initial-spec.md](./docs/initial-spec.md) | The product and behavior contract — the reasoning behind every decision above |
-| [docs/auto-implementation.md](./docs/auto-implementation.md) | How the auto-run works, phase by phase |
-| [docs/architecture.md](./docs/architecture.md) | Module layout and boundaries |
+| [AGENTS.md](./AGENTS.md) | The product, behavior, and architecture contract — the reasoning behind every decision above, the auto-run phase by phase, and the module layout |
 | [docs/configuration.md](./docs/configuration.md) | Every `aboard.*` setting and how the three config layers resolve |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Build, test, package |
 
 ## Status
 
-Pre-1.0 and moving. The runtime works end to end; the API, scaffold assets, and settings may still change between versions. Issues and discussion are welcome — the [spec](./docs/initial-spec.md) is the best place to argue with a decision, and it names its open questions.
+Pre-1.0 and moving. The runtime works end to end; the API, scaffold assets, and settings may still change between versions. Issues and discussion are welcome — [AGENTS.md](./AGENTS.md) is the best place to argue with a decision, and it names its open questions.
 
 Licensed under [MIT](./LICENSE).

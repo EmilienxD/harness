@@ -285,12 +285,12 @@
             "default"
           ],
           "enumDescriptions": [
-            "Launch with --dangerously-skip-permissions. Required for unattended afk work.",
+            "Launch unattended workers with --dangerously-skip-permissions. Launches you drive yourself carry no permission flag, so your own Claude Code configuration applies; the brainstormer never bypasses either.",
             "Launch with --permission-mode acceptEdits.",
             "Launch with Claude Code's default permission behaviour."
           ],
           "default": "default",
-          "description": "Permission mode for every agent aboard launches or resumes, including the Manager. Applied per process; aboard never writes a permissions block into .claude/settings.json."
+          "description": "Permission mode for agents aboard launches or resumes. Bypass is passed only to unattended workers: a launch handed to you or driven by you — the Manager, a raw or brainstorm session, an interactive agent, a resumed pr-doctor — carries no permission flag at all, so your own Claude Code configuration applies rather than being overridden. Applied per process; aboard never writes a permissions block into .claude/settings.json."
         },
         "aboard.terminals.closeOnSessionEnd": {
           "type": "boolean",
