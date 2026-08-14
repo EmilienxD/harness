@@ -7,15 +7,13 @@ import test from "node:test";
 import { readScaffoldState, scaffoldProject, VENDORED_SKILLS } from "../src/scaffold/project.js";
 
 const assets = join(process.cwd(), "assets", "scaffold");
-const todo = { ensure: async () => "existing" as const };
 
 async function project(): Promise<string> { return mkdtemp(join(tmpdir(), "aboard-scaffold-")); }
 async function json(path: string): Promise<Record<string, unknown>> { return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>; }
 
 test("fresh scaffold installs real assets, runtime ignore rules, hooks, and no forbidden files", async () => {
   const root = await project();
-  const report = await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
-  assert.equal(report.todo, "existing");
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: assets });
   assert.match(await readFile(join(root, ".gitignore"), "utf8"), /^\.aboard\/runtime\/$/m);
   // The Manager's delegation surface is a script, not a registered MCP server:
   // aboard writes no `.mcp.json` at all.
@@ -40,6 +38,13 @@ test("fresh scaffold installs real assets, runtime ignore rules, hooks, and no f
     assert.ok(report.warnings.includes(`Cannot install vendored skill ${skill.name}: no installer available`));
   }
   assert.deepEqual(report.installed, []);
+  // The scaffolder reaches no GitHub boundary at all: a repository with no
+  // `ai:todo` carrier is the normal first-run state, and an empty placeholder
+  // issue is worse than none because it looks like a roadmap. The briefing
+  // reports the absence as work to do, and `/update-todo` writes the first one.
+  assert.equal("todo" in report, false);
+  // An existing installation upgrades the same way, with nothing to reconcile.
+  assert.equal("todo" in await scaffoldProject({ projectRoot: root, assetRoot: assets }), false);
   // A project with no local settings file does not gain one.
   await assert.rejects(readFile(join(root, ".claude", "settings.local.json")));
   assert.match(await readFile(join(root, ".gitignore"), "utf8"), /^\.claude\/settings\.local\.json$/m);
@@ -51,7 +56,7 @@ test("scaffold state distinguishes a first initialize from a later update", asyn
   await mkdir(join(root, ".aboard"), { recursive: true });
   await writeFile(join(root, ".aboard", "scaffold.json"), "not json at all");
   assert.equal(await readScaffoldState(root), "uninitialized");
-  await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
+  await scaffoldProject({ projectRoot: root, assetRoot: assets });
   assert.equal(await readScaffoldState(root), "initialized");
 });
 
@@ -62,9 +67,9 @@ test("rerun is idempotent and settings merges preserve unrelated configuration",
   await writeFile(join(root, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Read"] }, autoCompact: true, hooks: { PostToolUse: [customHook] } }));
   const userMcp = JSON.stringify({ custom: 7, mcpServers: { other: { command: "other" } } });
   await writeFile(join(root, ".mcp.json"), userMcp);
-  await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
+  await scaffoldProject({ projectRoot: root, assetRoot: assets });
   const firstSettings = await readFile(join(root, ".claude", "settings.json"), "utf8");
-  await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
+  await scaffoldProject({ projectRoot: root, assetRoot: assets });
   assert.equal(await readFile(join(root, ".claude", "settings.json"), "utf8"), firstSettings);
   // The user's `.mcp.json` is not touched at all, formatting included.
   assert.equal(await readFile(join(root, ".mcp.json"), "utf8"), userMcp);
@@ -75,10 +80,10 @@ test("rerun is idempotent and settings merges preserve unrelated configuration",
 
 test("owned assets upgrade only when unchanged and warn rather than clobber local edits", async () => {
   const root = await project();
-  await scaffoldProject({ projectRoot: root, assetRoot: assets, todo });
+  await scaffoldProject({ projectRoot: root, assetRoot: assets });
   const target = join(root, ".aboard", "agents", "implementer.md");
   await writeFile(target, "local edit\n");
-  const report = await scaffoldProject({ projectRoot: root, assetRoot: assets, todo, autoCompactEnabled: false });
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: assets, autoCompactEnabled: false });
   assert.equal(await readFile(target, "utf8"), "local edit\n");
   assert.ok(report.preserved.includes(".aboard/agents/implementer.md"));
   assert.ok(report.warnings.some((warning) => warning.includes("autoCompact")));
@@ -90,11 +95,11 @@ test("retires an asset aboard no longer ships unless the user edited it", async 
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
   await writeFile(join(source, "CLAUDE.md"), "manager persona");
   await writeFile(join(source, "retired.md"), "retired");
-  await scaffoldProject({ projectRoot: root, assetRoot: source, todo });
+  await scaffoldProject({ projectRoot: root, assetRoot: source });
 
   await rm(join(source, "CLAUDE.md")); await rm(join(source, "retired.md"));
   await writeFile(join(root, "retired.md"), "the user made this theirs");
-  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, todo });
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: source });
 
   await assert.rejects(readFile(join(root, "CLAUDE.md")));
   assert.deepEqual(report.removed, ["CLAUDE.md"]);
@@ -103,7 +108,7 @@ test("retires an asset aboard no longer ships unless the user edited it", async 
   assert.ok(report.warnings.some((warning) => warning.includes("no longer ships: retired.md")));
 
   // The retirement is recorded, so a third run has nothing left to report.
-  const third = await scaffoldProject({ projectRoot: root, assetRoot: source, todo });
+  const third = await scaffoldProject({ projectRoot: root, assetRoot: source });
   assert.deepEqual(third.removed, []);
   assert.deepEqual(third.preserved, []);
 });
@@ -113,9 +118,9 @@ test("unchanged owned files upgrade to the shipped version", async () => {
   await mkdir(join(source, ".aboard", "agents"), { recursive: true }); await mkdir(join(source, ".claude", "hooks"), { recursive: true });
   await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v1");
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
-  await scaffoldProject({ projectRoot: root, assetRoot: source, todo, vendoredSkills: [] });
+  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
   await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v2");
-  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, todo, vendoredSkills: [] });
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
   assert.equal(await readFile(join(root, ".aboard", "agents", "implementer.md"), "utf8"), "v2");
   assert.ok(report.updated.includes(".aboard/agents/implementer.md"));
 });
@@ -132,7 +137,7 @@ test("vendored skills are installed by command and failures are reported, not au
     },
   };
   const report = await scaffoldProject({
-    projectRoot: root, assetRoot: source, todo, installer,
+    projectRoot: root, assetRoot: source, installer,
     vendoredSkills: [{ name: "commit", command: "install commit" }, { name: "unreliable", command: "install unreliable" }, { name: "grill-me", command: null }],
   });
 
@@ -168,7 +173,7 @@ test("skills sharing one upstream tool install with a single command run", async
   const calls: string[] = [];
   const installer = { run: async (command: string) => { calls.push(command); } };
   const report = await scaffoldProject({
-    projectRoot: root, assetRoot: source, todo, installer,
+    projectRoot: root, assetRoot: source, installer,
     vendoredSkills: [
       { name: "map-issues", command: "install issues" },
       { name: "draft-issues", command: "install issues" },
@@ -188,7 +193,7 @@ test("a shared install command that fails is reported once per skill it owns", a
   const calls: string[] = [];
   const installer = { run: async (command: string) => { calls.push(command); throw new Error("uvx not found"); } };
   const report = await scaffoldProject({
-    projectRoot: root, assetRoot: source, todo, installer,
+    projectRoot: root, assetRoot: source, installer,
     vendoredSkills: [
       { name: "map-issues", command: "install issues" },
       { name: "publish-issues", command: "install issues" },
@@ -207,13 +212,13 @@ test("a skill name that prefixes a vendored one is matched by segment, not by pr
   await mkdir(join(source, ".claude", "skills", "draft-issues"), { recursive: true });
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
   await writeFile(join(source, ".claude", "skills", "draft-issues", "SKILL.md"), "shipped copy");
-  await scaffoldProject({ projectRoot: root, assetRoot: source, todo, vendoredSkills: [] });
+  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
 
   await rm(join(source, ".claude", "skills", "draft-issues"), { recursive: true });
   // `draft-issue` is vendored; `draft-issues` is a different skill and must not
   // be shielded by its neighbour's name.
   const report = await scaffoldProject({
-    projectRoot: root, assetRoot: source, todo,
+    projectRoot: root, assetRoot: source,
     vendoredSkills: [{ name: "draft-issue", command: null }],
   });
   assert.deepEqual(report.removed, [".claude/skills/draft-issues/SKILL.md"]);
@@ -225,10 +230,10 @@ test("a vendored skill copy from an earlier build is handed back to the user, no
   await mkdir(join(source, ".claude", "hooks"), { recursive: true }); await mkdir(join(source, ".claude", "skills", "commit"), { recursive: true });
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
   await writeFile(join(source, ".claude", "skills", "commit", "SKILL.md"), "shipped copy");
-  await scaffoldProject({ projectRoot: root, assetRoot: source, todo, vendoredSkills: [] });
+  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
 
   await rm(join(source, ".claude", "skills", "commit"), { recursive: true });
-  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, todo, vendoredSkills: [{ name: "commit", command: null }] });
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [{ name: "commit", command: null }] });
   assert.equal(await readFile(join(root, ".claude", "skills", "commit", "SKILL.md"), "utf8"), "shipped copy");
   assert.deepEqual(report.removed, []);
   const manifest = await json(join(root, ".aboard", "scaffold.json"));

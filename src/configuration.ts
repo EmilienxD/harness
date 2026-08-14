@@ -11,6 +11,14 @@ export interface AboardConfiguration {
   /** `aboard.launch.effort`; absent means aboard passes no `--effort` and Claude Code's own setting stands. */
   readonly launchEffort?: EffortLevel;
   readonly managerDisallowedTools: readonly string[];
+  /**
+   * Transcript bytes that may pass with no roadmap injection before the Manager
+   * is reminded. Zero disables the reminder. Bytes rather than turns because
+   * turn counts vary too much to be meaningful, and bytes rather than
+   * accumulated hook payloads because thinking blocks and intermediate
+   * assistant text appear in no payload and would be systematically undercounted.
+   */
+  readonly managerRoadmapReminderBytes: number;
   readonly workerPermissionMode: WorkerPermissionMode;
   /**
    * Whether a session's death also closes the terminal it ran in. Off by
@@ -35,6 +43,7 @@ export const ABOARD_SETTINGS = [
   "aboard.workers.permissionMode",
   "aboard.terminals.closeOnSessionEnd",
   "aboard.manager.disallowedTools",
+  "aboard.manager.roadmapReminderBytes",
   "aboard.autoRun.review",
   "aboard.autoRun.scope",
   "aboard.autoRun.pauseAfterHitl",
@@ -179,6 +188,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     claudeCommand: claudeCommand(reader, diagnostics),
     ...(effort === undefined ? {} : { launchEffort: effort }),
     managerDisallowedTools,
+    managerRoadmapReminderBytes: integer(reader, "aboard.manager.roadmapReminderBytes", 150_000, 0, 100_000_000, diagnostics),
     workerPermissionMode: choice(reader, "aboard.workers.permissionMode", WORKER_PERMISSION_MODES, "default", diagnostics),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {

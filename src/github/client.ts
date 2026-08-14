@@ -7,6 +7,19 @@ import type {
   PullRequestSnapshot,
   ReviewThreadSnapshot,
 } from "../claude/prompts.js";
+import {
+  ROADMAP_BODY_LIMIT,
+  createTasks,
+  describeSubjectRejection,
+  nearBodyLimit,
+  numberedTasks,
+  parseRoadmap,
+  updateTask,
+  type RoadmapCreateInput,
+  type RoadmapEdit,
+  type RoadmapTask,
+  type RoadmapUpdateInput,
+} from "../domain/roadmap.js";
 import { LABEL_HITL, LABEL_SPEC, LABEL_TODO, issueDisposition } from "../shared/labels.js";
 
 export { ABOARD_LABELS } from "../shared/labels.js";
@@ -18,6 +31,8 @@ export type GitHubErrorCode =
   | "command-failed"
   | "malformed-output"
   | "missing-todo"
+  | "unknown-task"
+  | "invalid-subject"
   | "invalid-finding";
 
 export class GitHubBoundaryError extends Error {
@@ -57,9 +72,27 @@ export class ProcessGhExecutor implements GhExecutor {
   }
 }
 
-export interface TodoSnapshot {
+/**
+ * The roadmap issue as one label query returns it. `carrierCount` is reported,
+ * never repaired: aboard does not modify an issue it did not create, so extra
+ * carriers become inert rather than ambiguous.
+ */
+export interface RoadmapSnapshot {
   readonly number: number;
   readonly body: string;
+  readonly tasks: readonly RoadmapTask[];
+  readonly duplicateSubjects: readonly string[];
+  readonly carrierCount: number;
+  readonly nearBound: boolean;
+}
+
+export interface RoadmapWriteResult {
+  readonly issue: number;
+  /** Ids of the tasks the call created, in the order their subjects were given. */
+  readonly ids?: readonly string[];
+  /** The edited task's current id, absent when it was deleted. */
+  readonly task?: string | undefined;
+  readonly notices: readonly string[];
 }
 
 export interface RoadmapIssue {
@@ -205,10 +238,6 @@ const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(ow
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
 export class GitHubClient implements GitHubPromptSource {
-  // The resolved TODO singleton number is remembered only for the session. It
-  // is a locator hint, never state: every use is revalidated against GitHub and
-  // a stale record is discarded, because GitHub is the durable work-state source.
-  #todoNumber: number | undefined;
   #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
 
   public constructor(private readonly gh: GhExecutor) {}
@@ -225,62 +254,102 @@ export class GitHubClient implements GitHubPromptSource {
     this.#identity = Promise.resolve(identity);
   }
 
-  public async getTodo(): Promise<TodoSnapshot> {
-    let number = await this.#rememberedTodo();
-    if (number !== undefined) {
-      const issue = await this.getIssue(number);
-      if (issue !== undefined && issue.state === "open") return { number, body: issue.body };
-      // Deleted or closed underneath us: the record is a hint, not the truth.
-      // Discard it and fall through to a fresh label scan before giving up.
-      await this.#forgetTodo();
-    }
-    const candidates = await this.#scanTodoNumbers();
-    const newest = candidates[0];
-    if (newest === undefined) throw new GitHubBoundaryError("missing-todo", "No open issue has the todo label");
-    // Ambiguity on a read adopts the newest carrier without creating issues or
-    // rewriting labels — reads stay read-only; the write path heals those.
-    number = await this.#rememberTodo(newest);
-    const issue = await this.getIssue(number);
-    if (issue === undefined || issue.state !== "open") {
-      await this.#forgetTodo();
-      throw new GitHubBoundaryError("missing-todo", "The TODO issue changed state while being read");
-    }
-    return { number, body: issue.body };
+  /**
+   * The roadmap, or `undefined` when no open issue carries the label — the
+   * ordinary first-run state of a repository, distinct from a failed fetch.
+   *
+   * One query answers both halves of the question: `--json number,body` returns
+   * the locator *and* the document, so there is nothing a cached number could
+   * have saved. The previous session cache saved zero round trips, because
+   * every use of it had to revalidate and revalidation costs exactly what
+   * resolving from scratch costs.
+   */
+  public async readRoadmap(): Promise<RoadmapSnapshot | undefined> {
+    const carriers = await this.#scanTodoCarriers();
+    const chosen = carriers[0];
+    if (chosen === undefined) return undefined;
+    const parsed = parseRoadmap(chosen.body);
+    return {
+      number: chosen.number,
+      body: chosen.body,
+      tasks: parsed.tasks,
+      duplicateSubjects: parsed.duplicateSubjects,
+      carrierCount: carriers.length,
+      nearBound: nearBodyLimit(chosen.body),
+    };
   }
 
-  public async updateTodo(body: string): Promise<TodoSnapshot> {
-    const normalized = body.trim();
-    const remembered = await this.#rememberedTodo();
-    if (remembered !== undefined) {
-      const issue = await this.getIssue(remembered);
-      if (issue !== undefined && issue.state === "open") {
-        await this.gh.run(["issue", "edit", String(remembered), "--body", normalized]);
-        return { number: remembered, body: normalized };
-      }
-      // The recorded issue was deleted or closed: discard the stale hint and
-      // let discovery below find or recreate the singleton.
-      await this.#forgetTodo();
+  /**
+   * Appends tasks, minting the roadmap issue when no carrier exists. Minting is
+   * the only creation path and happens only here: `updateTask` against an empty
+   * candidate set is a failure, because there is no document its id could name.
+   */
+  public async createRoadmapTasks(input: RoadmapCreateInput): Promise<RoadmapWriteResult> {
+    const carriers = await this.#scanTodoCarriers();
+    const chosen = carriers[0];
+    if (chosen === undefined) {
+      const edit = this.#applied(createTasks("", input), []);
+      const number = await this.#mintRoadmap(edit.body);
+      return { issue: number, ids: edit.value, notices: [`Created issue #${number} and labelled it \`${LABEL_TODO}\`; this repository had no roadmap yet.`, ...this.#boundNotices(edit.body)] };
     }
-    const candidates = await this.#scanTodoNumbers();
-    const adopted = candidates.length === 1 ? candidates[0] : undefined;
-    if (adopted !== undefined) {
-      const number = await this.#rememberTodo(adopted);
-      await this.gh.run(["issue", "edit", String(number), "--body", normalized]);
-      return { number, body: normalized };
+    const edit = this.#applied(createTasks(chosen.body, input), parseRoadmap(chosen.body).tasks);
+    await this.gh.run(["issue", "edit", String(chosen.number), "--body", edit.body]);
+    return { issue: chosen.number, ids: edit.value, notices: [...this.#carrierNotices(carriers, chosen.number), ...this.#boundNotices(edit.body)] };
+  }
+
+  public async updateRoadmapTask(input: RoadmapUpdateInput): Promise<RoadmapWriteResult> {
+    const carriers = await this.#scanTodoCarriers();
+    const chosen = carriers[0];
+    if (chosen === undefined) {
+      throw new GitHubBoundaryError("missing-todo", `No open issue carries \`${LABEL_TODO}\`, so there is no task to update. Create the roadmap first with \`todo create\`.`);
     }
-    // None found, or the label's singleton-locator property was violated by
-    // hand. Instead of failing on ambiguity, mint a fresh issue and strip the
-    // label from the older carriers, so later discovery converges.
-    await this.gh.run(["label", "create", LABEL_TODO, "--description", "Project roadmap", "--color", "1D76DB", "--force"]);
-    const output = (await this.gh.run(["issue", "create", "--title", "Project TODO", "--body", normalized, "--label", LABEL_TODO])).trim();
+    const edit = this.#applied(updateTask(chosen.body, input), parseRoadmap(chosen.body).tasks);
+    await this.gh.run(["issue", "edit", String(chosen.number), "--body", edit.body]);
+    return { issue: chosen.number, task: edit.value, notices: [...this.#carrierNotices(carriers, chosen.number), ...this.#boundNotices(edit.body)] };
+  }
+
+  /**
+   * Turns a rejected edit into a typed failure. An unknown id carries the
+   * current numbered list, because that is exactly the data a retry needs and
+   * the situation is rare by construction — the alternative, matching a subject
+   * fuzzily, writes silently to the wrong task when it guesses wrong.
+   */
+  #applied<T>(edit: RoadmapEdit<T>, tasks: readonly RoadmapTask[]): { readonly body: string; readonly value: T } {
+    if (edit.ok) return { body: edit.body, value: edit.value };
+    if (edit.failure.reason === "invalid-subject") {
+      throw new GitHubBoundaryError("invalid-subject", describeSubjectRejection(edit.failure.rejection), { subject: edit.failure.subject });
+    }
+    throw new GitHubBoundaryError(
+      "unknown-task",
+      `No roadmap task has id ${edit.failure.id}. Ids are derived from the subject text, so editing a subject changes its id; copy one from the list below.`,
+      { tasks: numberedTasks(tasks) },
+    );
+  }
+
+  /**
+   * The bound is advisory. A one-sentence `create` that crosses it means the
+   * roadmap was already there, and deletion needs the user's explicit request,
+   * so refusing the write would deadlock the Manager with no way out.
+   */
+  #boundNotices(body: string): readonly string[] {
+    if (body.length > ROADMAP_BODY_LIMIT) return [`The roadmap is now ${body.length} characters, past the ${ROADMAP_BODY_LIMIT} bound. The write was accepted; ask the user whether to prune completed items.`];
+    return nearBodyLimit(body) ? [`The roadmap is ${body.length} characters, near its ${ROADMAP_BODY_LIMIT} bound; consider asking the user about pruning.`] : [];
+  }
+
+  /** Reported, never repaired: aboard does not relabel an issue it does not own. */
+  #carrierNotices(carriers: readonly { readonly number: number }[], chosen: number): readonly string[] {
+    return carriers.length <= 1 ? [] : [`${carriers.length} open issues carry \`${LABEL_TODO}\`; #${chosen} is in use and the others were left untouched.`];
+  }
+
+  async #mintRoadmap(body: string): Promise<number> {
+    // Plain create, not `--force`: a user-owned `ai:todo` label keeps its colour
+    // and description, and "already exists" is a success for our purposes.
+    try { await this.gh.run(["label", "create", LABEL_TODO, "--description", "Project roadmap", "--color", "1D76DB"]); }
+    catch { /* the label already exists, which is what we wanted anyway */ }
+    const output = (await this.gh.run(["issue", "create", "--title", "Project roadmap", "--body", body, "--label", LABEL_TODO])).trim();
     const match = /\/issues\/(\d+)\/?$/.exec(output);
     if (match === null) throw new GitHubBoundaryError("malformed-output", "gh issue create did not return an issue URL");
-    const number = integer(Number(match[1]), "created TODO number");
-    for (const other of candidates) {
-      await this.gh.run(["issue", "edit", String(other), "--remove-label", LABEL_TODO]);
-    }
-    await this.#rememberTodo(number);
-    return { number, body: normalized };
+    return integer(Number(match[1]), "created roadmap number");
   }
 
   public async getIssue(number: number): Promise<IssueSnapshot | undefined> {
@@ -472,27 +541,28 @@ export class GitHubClient implements GitHubPromptSource {
   }
 
   /**
-   * Open issues carrying the `todo` label, newest first. The explicit sort
-   * keeps the ambiguity tiebreak ("adopt the newest") independent of `gh`'s
-   * default ordering.
+   * Open issues carrying the roadmap label, newest first and ties on the lowest
+   * number. Read and write resolve through this one rule, so they converge on
+   * the same issue with no mutation and no healing pass.
+   *
+   * There is deliberately no `--search sort:created-desc`. Passing `--search`
+   * moves the query off the deterministic label filter onto GitHub's
+   * asynchronously indexed search API, where an issue created seconds ago can be
+   * missing — which would mint a duplicate roadmap. The sort is done here.
    */
-  async #scanTodoNumbers(): Promise<readonly number[]> {
-    const output = await this.gh.run(["issue", "list", "--state", "open", "--label", LABEL_TODO, "--search", "sort:created-desc", "--limit", "50", "--json", "number"]);
-    const items = array(json(output, "TODO lookup"), "TODO lookup");
-    return items.map((value, index) => integer(record(value, `TODO issue[${index}]`).number, `TODO issue[${index}].number`));
-  }
-
-  #rememberedTodo(): number | undefined {
-    return this.#todoNumber;
-  }
-
-  #rememberTodo(number: number): number {
-    this.#todoNumber = number;
-    return number;
-  }
-
-  #forgetTodo(): void {
-    this.#todoNumber = undefined;
+  async #scanTodoCarriers(): Promise<readonly { readonly number: number; readonly body: string; readonly createdAt: string }[]> {
+    const output = await this.gh.run(["issue", "list", "--state", "open", "--label", LABEL_TODO, "--limit", "50", "--json", "number,body,createdAt"]);
+    const items = array(json(output, "roadmap lookup"), "roadmap lookup");
+    return items
+      .map((value, index) => {
+        const item = record(value, `roadmap issue[${index}]`);
+        return {
+          number: integer(item.number, `roadmap issue[${index}].number`),
+          body: string(item.body ?? "", `roadmap issue[${index}].body`),
+          createdAt: string(item.createdAt, `roadmap issue[${index}].createdAt`),
+        };
+      })
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.number - right.number);
   }
 
   /**

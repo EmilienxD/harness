@@ -92,6 +92,14 @@ export interface BridgeTerminalEnvironment {
    * fast and the Manager opts in per call.
    */
   readonly managerBashTimeoutMs: number;
+  /**
+   * `ABOARD_ROADMAP_REMINDER_BYTES` for the Manager's terminal, from
+   * `aboard.manager.roadmapReminderBytes`. The reminder hooks read the span
+   * from the environment rather than from the bridge, so the common path — a
+   * roadmap injection already inside the tail window — never opens a connection.
+   * Zero disables the reminder.
+   */
+  readonly managerRoadmapReminderBytes: number;
 }
 
 export interface CreateAboardTerminalRequest {
@@ -283,6 +291,7 @@ export class TerminalController {
     if (request.agentType === "manager") {
       env.ABOARD_CLI = environment.managerCli;
       env.BASH_MAX_TIMEOUT_MS = String(environment.managerBashTimeoutMs);
+      env.ABOARD_ROADMAP_REMINDER_BYTES = String(environment.managerRoadmapReminderBytes);
     }
 
     const creationOptions: TerminalCreationOptions = {

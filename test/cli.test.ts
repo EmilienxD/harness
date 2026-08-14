@@ -83,6 +83,7 @@ function setup() {
       workspaceRoot: "C:\\repo",
       managerCli: "C:\\repo\\.aboard\\scripts\\aboard_cli.py",
       managerBashTimeoutMs: 3_600_000,
+      managerRoadmapReminderBytes: 150_000,
     }),
     terminalIdFactory: () => terminal(`terminal-${++terminalId}`),
     now: () => new Date("2026-07-30T10:01:00.000Z"),
@@ -228,16 +229,65 @@ test("keeps a transcript-less persisted worker paused", async () => {
   assert.equal(context.fleet.get(workerId)?.terminal.terminalId, "old-terminal");
 });
 
-test("serves five commands and nothing that fetches state the Manager is already given", async () => {
+test("the todo verbs pass their arguments through and coerce in_progress with a notice", async () => {
+  const calls: unknown[] = [];
+  const logged: string[] = [];
+  const handler = createCliHandler(
+    setup().coordinator,
+    {
+      managerAgentId: MANAGER,
+      services: {
+        log: (message: string) => logged.push(message),
+        github: {
+          createRoadmapTasks: async (input: unknown) => { calls.push(["create", input]); return { issue: 9, ids: ["a3f9", "b2c1"], notices: [] }; },
+          updateRoadmapTask: async (input: unknown) => { calls.push(["update", input]); return { issue: 9, task: "a3f9", notices: ["2 open issues carry `ai:todo`"] }; },
+        } as never,
+      },
+    },
+  );
+  const post = (path: string, args: unknown) => handler({
+    method: "POST", url: new URL(path, "http://127.0.0.1"),
+    headers: { "x-aboard-agent-id": MANAGER }, body: args, signal: new AbortController().signal,
+  } as AuthenticatedBridgeRequest);
+
+  const created = await post("/cli/todo-create", { subjects: ["First task", "Second task"], after: "top" });
+  assert.equal(created.status, 200);
+  // The minimum on success: the new ids, which are what a follow-up update in
+  // the same turn needs. The full list is far too many tokens for the frequency.
+  assert.deepEqual(body(created).result, { ids: ["a3f9", "b2c1"], issue: 9 });
+
+  // `in_progress` has exactly one sensible reading here, so it is coerced rather
+  // than rejected — and the coerced call must not look clean.
+  const updated = await post("/cli/todo-update", { task: "a3f9", status: "in_progress" });
+  assert.equal(updated.status, 200);
+  const result = (body(updated).result as Record<string, unknown>);
+  assert.equal(result.task, "a3f9");
+  assert.match(String(result.notice), /recorded as pending/);
+  assert.match(String(result.notice), /2 open issues carry `ai:todo`/);
+  assert.deepEqual(calls, [
+    ["create", { subjects: ["First task", "Second task"], after: "top" }],
+    ["update", { task: "a3f9", status: "pending" }],
+  ]);
+  // The user-facing line is derived from the operation, which is what dropping
+  // `--reason` bought: a narrated reason could disagree with the edit it named.
+  assert.deepEqual(logged, [
+    'Roadmap #9: 2 task(s) added at the top - "First task", "Second task"',
+    "Roadmap #9: task a3f9 marked pending",
+  ]);
+});
+
+test("serves the delegation commands and nothing that fetches state the Manager is already given", async () => {
   const { post } = setup();
-  // The roadmap arrives inline in the session-start briefing, so there is no
-  // command to fetch it: a round trip for context the Manager already holds is
-  // a turn spent on nothing. Fleet awareness is pushed by hooks, and the
-  // Manager never drives the UI, so there is no list or focus command either.
-  for (const path of ["/cli/get-todo", "/cli/list-agents", "/cli/focus-agent", "/cli/send-to-agent", "/mcp"]) {
+  // The roadmap arrives inline in the session-start briefing and again in the
+  // periodic reminder, so there is no command to fetch it: a round trip for
+  // context the Manager already holds is a turn spent on nothing. Fleet
+  // awareness is pushed by hooks, and the Manager never drives the UI, so there
+  // is no list or focus command either. `/cli/todo` itself is gone: full-body
+  // replacement is what let a truncated re-emission silently destroy the tail.
+  for (const path of ["/cli/get-todo", "/cli/todo", "/cli/todo-list", "/cli/list-agents", "/cli/focus-agent", "/cli/send-to-agent", "/mcp"]) {
     assert.equal((await post(path, {})).status, 404, path);
   }
-  for (const path of ["/cli/agent", "/cli/todo", "/cli/auto-run", "/cli/review-pr", "/cli/release-lease"]) {
+  for (const path of ["/cli/agent", "/cli/todo-create", "/cli/todo-update", "/cli/auto-run", "/cli/review-pr", "/cli/release-lease"]) {
     assert.notEqual((await post(path, {})).status, 404, path);
   }
 });
@@ -267,7 +317,13 @@ test("runtime-validates every command boundary and rejects unknown fields", asyn
     ["/cli/agent", { type: "Explore", description: "map the auth flow" }],
     ["/cli/agent", { type: "webresearcher", description: "research current API pricing" }],
     ["/cli/agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
-    ["/cli/todo", { body: "x", reason: "" }],
+    ["/cli/todo-create", { subjects: [] }],
+    ["/cli/todo-create", { subjects: ["A task"], reason: "obsolete flag" }],
+    ["/cli/todo-create", { subjects: ["A task"], after: "" }],
+    // An update naming no change at all would spend a round trip on nothing.
+    ["/cli/todo-update", { task: "a3f9" }],
+    ["/cli/todo-update", { task: "", status: "completed" }],
+    ["/cli/todo-update", { task: "a3f9", status: "archived" }],
     ["/cli/review-pr", { pr: 0 }],
     ["/cli/auto-run", { spec: 12 }],
     ["/cli/release-lease", { reason: "" }],

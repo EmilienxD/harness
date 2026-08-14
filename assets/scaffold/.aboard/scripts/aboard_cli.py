@@ -1,7 +1,7 @@
 """aboard's Manager CLI — the delegation surface, as a command instead of an MCP server.
 
 This is the only way an agent reaches the bridge's orchestration actions:
-launching a visible worker, rewriting the project roadmap, starting an automatic
+launching a visible worker, editing the project roadmap, starting an automatic
 implementation run, reopening the session that owns a pull request, and breaking
 a stuck write lease.
 
@@ -18,9 +18,9 @@ Invoked as:
 
     uv run --no-project "$ABOARD_CLI" <command> [options]
 
-Long text arguments — a launch prompt, a roadmap body — accept `-` to read the
-value from stdin, which is how a multi-line document reaches the bridge without
-being escaped onto a command line.
+A launch prompt accepts `-` to read the value from stdin, which is how a
+multi-line document reaches the bridge without being escaped onto a command
+line. Roadmap subjects are single-line by construction and take no such path.
 """
 
 import argparse
@@ -36,7 +36,8 @@ import urllib.request
 # argument would arrive as `C:/Program Files/Git/cli/...`.
 ROUTES = {
     "agent": "/cli/agent",
-    "todo": "/cli/todo",
+    "todo create": "/cli/todo-create",
+    "todo update": "/cli/todo-update",
     "auto": "/cli/auto-run",
     "review": "/cli/review-pr",
     "release-lease": "/cli/release-lease",
@@ -74,9 +75,23 @@ def build_parser():
     agent.add_argument("--interactive", action="store_true", help="Hand the terminal to the user. No result is ever delivered.")
     agent.add_argument("--background", action="store_true", help="Return immediately; the result arrives at a later turn boundary.")
 
-    todo = commands.add_parser("todo", help="Replace the body of the project roadmap issue.")
-    todo.add_argument("--body", required=True, help="Full replacement body. `-` reads it from stdin.")
-    todo.add_argument("--reason", required=True, help="Short audit reason, shown to the user and not stored in the issue.")
+    todo = commands.add_parser("todo", help="Add to or edit the project roadmap, one task at a time.")
+    todo_commands = todo.add_subparsers(dest="todo_command", required=True)
+
+    # `--subject` repeats so a bootstrap writes ten or twenty items in one spawn
+    # and one issue revision, rather than twenty of each. Discrete flags beat a
+    # newline-delimited stdin contract: they are easier to emit correctly.
+    todo_create = todo_commands.add_parser("create", help="Add one or more tasks to the roadmap.")
+    todo_create.add_argument("--subject", action="append", required=True, metavar="TEXT",
+                             help="One task, one short sentence. Repeat for several. Single-quote it; write '\\'' for each apostrophe.")
+    todo_create.add_argument("--after", metavar="ID|top", help="Place the new tasks after this task id, or at `top`. Default appends.")
+
+    todo_update = todo_commands.add_parser("update", help="Edit, complete, delete, or move one roadmap task.")
+    todo_update.add_argument("--task", required=True, metavar="ID", help="The 4-character task id, copied from the roadmap block.")
+    todo_update.add_argument("--subject", metavar="TEXT", help="Replacement text. This changes the task's id.")
+    todo_update.add_argument("--status", choices=["pending", "completed", "deleted", "in_progress"],
+                             help="pending, completed, or deleted. in_progress is recorded as pending.")
+    todo_update.add_argument("--after", metavar="ID|top", help="Move the task after this task id, or to `top`.")
 
     commands.add_parser("auto", help="Start the automatic implementation run for the oldest open spec issue.")
 
@@ -88,6 +103,13 @@ def build_parser():
     release.add_argument("--reason", required=True, help="Audit reason. Concurrent editing may become possible immediately.")
 
     return parser
+
+
+def route_key(arguments):
+    """`todo` dispatches on its subcommand; every other command is its own route."""
+    if arguments.command == "todo":
+        return "todo {0}".format(arguments.todo_command)
+    return arguments.command
 
 
 def request_for(arguments):
@@ -107,7 +129,18 @@ def request_for(arguments):
         timeout = DEFAULT_TIMEOUT_SECONDS if (arguments.interactive or arguments.background) else FOREGROUND_TIMEOUT_SECONDS
         return body, timeout
     if arguments.command == "todo":
-        return {"body": text_argument(arguments.body), "reason": arguments.reason}, DEFAULT_TIMEOUT_SECONDS
+        body = {}
+        if arguments.todo_command == "create":
+            body["subjects"] = arguments.subject
+        else:
+            body["task"] = arguments.task
+            if arguments.subject is not None:
+                body["subject"] = arguments.subject
+            if arguments.status is not None:
+                body["status"] = arguments.status
+        if arguments.after is not None:
+            body["after"] = arguments.after
+        return body, DEFAULT_TIMEOUT_SECONDS
     if arguments.command == "auto":
         return {}, DEFAULT_TIMEOUT_SECONDS
     if arguments.command == "review":
@@ -156,7 +189,7 @@ def main(argv):
 
     body, timeout = request_for(arguments)
     try:
-        payload = post(ROUTES[arguments.command], body, timeout, port, token, agent_id)
+        payload = post(ROUTES[route_key(arguments)], body, timeout, port, token, agent_id)
     except urllib.error.HTTPError as error:
         # The bridge reports refusals as JSON on a non-2xx status; a lease
         # conflict and an invalid argument both arrive here and both are the

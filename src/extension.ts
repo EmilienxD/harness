@@ -45,8 +45,10 @@ import {
   ManagerBriefings,
   ManagerPromptService,
   ManagerStopService,
+  RoadmapReminderService,
   createManagerHookRoutes,
   type BriefingSources,
+  type RoadmapBriefing,
 } from "./bridge/manager-hooks.js";
 import { GitWorkingTreeInspector, WorkerLifecycleReconciler, createWorkerLifecycleRoutes, reportsResult } from "./bridge/lifecycle.js";
 import {
@@ -119,6 +121,27 @@ async function repositoryChecks(workspaceRoot: string): Promise<readonly string[
 }
 
 /**
+ * The roadmap as both the session-start briefing and the periodic reminder need
+ * it. One definition, because the two must render the same ids from the same
+ * document: a second resolve path is exactly the sync bug the derived-id design
+ * exists to avoid. No carrier is a fact about the repository, not a failure, so
+ * it resolves to `undefined` rather than throwing.
+ */
+function roadmapBriefing(github: GitHubClient): (signal: AbortSignal) => Promise<RoadmapBriefing | undefined> {
+  return async () => {
+    const snapshot = await github.readRoadmap();
+    if (snapshot === undefined) return undefined;
+    return {
+      number: snapshot.number,
+      tasks: snapshot.tasks,
+      carrierCount: snapshot.carrierCount,
+      nearBound: snapshot.nearBound,
+      duplicateSubjects: snapshot.duplicateSubjects,
+    };
+  };
+}
+
+/**
  * Sources for the Manager's single SessionStart briefing. Each is independently
  * fallible by design: `ManagerBriefings` converts a rejection into a one-line
  * "unavailable" note, so one broken `gh` call degrades one section instead of
@@ -163,10 +186,7 @@ function briefingSources(
         unreviewedMergeCount: merges.length,
       };
     },
-    roadmap: async () => {
-      try { return await github.getTodo(); }
-      catch (error) { if (error instanceof GitHubBoundaryError && error.code === "missing-todo") return undefined; throw error; }
-    },
+    roadmap: roadmapBriefing(github),
     autoRun: () => {
       const state = autoRunState();
       if (state === undefined) return undefined;
@@ -256,6 +276,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         // A foreground delegation blocks for the worker's whole run, which is
         // the same bound the Manager's Stop hook waits under.
         managerBashTimeoutMs: currentConfiguration.managerStopTimeoutSeconds * 1000,
+        managerRoadmapReminderBytes: currentConfiguration.managerRoadmapReminderBytes,
       };
     },
     terminalIdFactory: () => randomUUID() as TerminalId,
@@ -504,7 +525,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     fleet,
     lease,
     {
-      write: async (slice: "state", content: string) => {
+      write: async (slice: "state" | "roadmap", content: string) => {
         const path = join(workspaceRoot, ".aboard", "runtime", "events", `brief-${slice}.txt`);
         await mkdir(join(workspaceRoot, ".aboard", "runtime", "events"), { recursive: true });
         await writeFile(path, content, "utf8");
@@ -522,14 +543,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       signal.addEventListener("abort", onAbort, { once: true });
     }),
   });
+  // The reminder reads GitHub live at delivery time rather than from a bridge
+  // copy: at this span the calls are minutes apart, and a reminder must reflect
+  // an edit the user made on their phone.
+  const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
     startAutoRun: () => autoRun.start(),
     reviewPullRequest: () => reviews.review(),
-  }, terminals);
+  }, terminals, roadmapReminders);
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createCliHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun } }), createManagerHookRoutes(briefings, managerStop, managerPrompts), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
+    handler: combineHandlers(createCliHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
     persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
@@ -735,15 +760,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         assetRoot: join(context.extensionPath, "assets", "scaffold"),
         installer: createVendoredSkillInstaller(),
         ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
-        todo: {
-          ensure: async () => {
-            try { await github.getTodo(); return "existing"; }
-            catch (error) {
-              if (!(error instanceof GitHubBoundaryError) || error.code !== "missing-todo") throw error;
-              await github.updateTodo("# Project TODO\n\n- Add the next project priorities here."); return "created";
-            }
-          },
-        },
       });
       for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
       void window.showInformationMessage(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.removed.length} removed, ${report.preserved.length} preserved, ${report.installed.length} skills installed).`);

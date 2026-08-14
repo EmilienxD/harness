@@ -21,6 +21,7 @@
  */
 
 import { CLI_LAUNCHABLE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentId, type AgentType } from "../domain/contracts.js";
+import { ROADMAP_TASK_STATUSES, type RoadmapTaskStatus } from "../domain/roadmap.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
@@ -40,7 +41,8 @@ const AGENT_ID_HEADER = "x-aboard-agent-id";
 
 const CLI_ROUTES = {
   "/cli/agent": "agent",
-  "/cli/todo": "todo",
+  "/cli/todo-create": "todo-create",
+  "/cli/todo-update": "todo-update",
   "/cli/auto-run": "auto-run",
   "/cli/review-pr": "review-pr",
   "/cli/release-lease": "release-lease",
@@ -52,6 +54,13 @@ export interface CliServices {
   readonly github?: GitHubClient;
   readonly reviews?: ReviewCoordinator;
   readonly autoRun?: AutoRunTrigger;
+  /**
+   * Where a roadmap edit is reported to the user. The line is **derived from
+   * the operation**, which is what dropping `--reason` bought: a narrated
+   * reason existed only because full-body replacement is opaque, and it could
+   * disagree with the edit it described. A derived line cannot.
+   */
+  readonly log?: (message: string) => void;
 }
 
 export interface AutoRunTrigger {
@@ -161,6 +170,31 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   };
 }
 
+/** `--after` takes a task id or the literal `top`; absent means append. */
+function parseAfter(value: unknown): { readonly after?: string } {
+  if (value === undefined) return {};
+  if (!nonEmptyString(value)) throw new TypeError("--after must be a task id or `top`");
+  return { after: value.trim() };
+}
+
+/**
+ * `in_progress` is coerced rather than rejected, on the same reading as the
+ * launch flags: it has exactly one sensible meaning here. "Being worked on" is
+ * already tracked by open `ai:spec` issues, open pull requests, and the auto-run
+ * state — all of which the briefing carries — so restating it in the roadmap
+ * would be a second copy of a fact that can go out of sync.
+ */
+function parseStatus(value: unknown): { readonly value?: RoadmapTaskStatus; readonly notices: readonly string[] } {
+  if (value === undefined) return { notices: [] };
+  if (value === "in_progress") {
+    return { value: "pending", notices: ["--status in_progress was recorded as pending: the roadmap tracks what is left to do, and what is in flight is already in the issues, pull requests, and auto-run state your briefing carries."] };
+  }
+  if (!nonEmptyString(value) || !ROADMAP_TASK_STATUSES.includes(value as RoadmapTaskStatus)) {
+    throw new TypeError(`--status must be one of: ${ROADMAP_TASK_STATUSES.join(", ")}`);
+  }
+  return { value: value as RoadmapTaskStatus, notices: [] };
+}
+
 /** Notices ride back with the launch result; a coerced call must not look clean. */
 function withNotices(result: unknown, notices: readonly string[]): unknown {
   if (notices.length === 0 || !isRecord(result)) return result;
@@ -185,12 +219,45 @@ async function runCommand(
           : coordinator.run(parsed.input, signal);
       return withNotices(await launched, parsed.notices);
     }
-    case "todo": {
-      if (!isRecord(args) || !exactKeys(args, ["body", "reason"])) throw new TypeError("arguments contain an unknown property");
-      if (typeof args.body !== "string") throw new TypeError("--body must be a string");
-      if (!nonEmptyString(args.reason)) throw new TypeError("--reason must be a non-empty string");
+    case "todo-create": {
+      if (!isRecord(args) || !exactKeys(args, ["subjects", "after"])) throw new TypeError("arguments contain an unknown property");
+      if (!Array.isArray(args.subjects) || args.subjects.length === 0 || !args.subjects.every(nonEmptyString)) {
+        throw new TypeError("--subject must be given at least once, with non-empty text");
+      }
+      const after = parseAfter(args.after);
       if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
-      return services.github.updateTodo(args.body);
+      const subjects = args.subjects as readonly string[];
+      const created = await services.github.createRoadmapTasks({ subjects, ...after });
+      const placed = after.after === undefined ? "appended" : after.after === "top" ? "added at the top" : `added after ${after.after}`;
+      services.log?.(`Roadmap #${created.issue}: ${subjects.length} task(s) ${placed} - ${subjects.map((subject) => `"${subject}"`).join(", ")}`);
+      return withNotices({ ids: created.ids ?? [], issue: created.issue }, created.notices);
+    }
+    case "todo-update": {
+      if (!isRecord(args) || !exactKeys(args, ["task", "subject", "status", "after"])) throw new TypeError("arguments contain an unknown property");
+      if (!nonEmptyString(args.task)) throw new TypeError("--task must be a non-empty task id");
+      if (args.subject !== undefined && !nonEmptyString(args.subject)) throw new TypeError("--subject must be non-empty when provided");
+      const status = parseStatus(args.status);
+      const after = parseAfter(args.after);
+      if (args.subject === undefined && status.value === undefined && after.after === undefined) {
+        throw new TypeError("--subject, --status, or --after is required: an update with none of them changes nothing");
+      }
+      if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
+      const updated = await services.github.updateRoadmapTask({
+        task: args.task.trim(),
+        ...(args.subject === undefined ? {} : { subject: (args.subject as string).trim() }),
+        ...(status.value === undefined ? {} : { status: status.value }),
+        ...after,
+      });
+      const changes = [
+        ...(args.subject === undefined ? [] : [`retitled to "${(args.subject as string).trim()}"`]),
+        ...(status.value === undefined ? [] : [`marked ${status.value}`]),
+        ...(after.after === undefined ? [] : [after.after === "top" ? "moved to the top" : `moved after ${after.after}`]),
+      ];
+      services.log?.(`Roadmap #${updated.issue}: task ${args.task.trim()} ${changes.join(", ")}`);
+      return withNotices(
+        { task: updated.task ?? null, issue: updated.issue },
+        [...status.notices, ...updated.notices],
+      );
     }
     case "auto-run": {
       if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("the auto command takes no arguments");

@@ -25,6 +25,7 @@ You are connected with the `aboard` harness, a VS Code extension for AI agents t
   - General-purpose mode: for work small enough to land in a single session. An unmodified default Claude Code session implements directly. The user owns any resulting code and Git/GitHub state changes — and iterates with the agent until satisfied.
 - Consider the `aboard` command as important as your system tools; it is part of the harness, not a bonus. Don't wait for the user to ask you to use it; use it naturally when it's relevant to the task at hand. If it is unavailable, stop and alert the user immediately — nothing else in the system can create an agent.
 - Every session opens with an `<aboard-state>` block: the repository and its checks, git state, the auto-run, ready and blocked issues with their titles, open pull requests, the live fleet, and the full project roadmap. It is a snapshot, not a live view — re-check anything you are about to act on, but never re-fetch it merely to read it. If a fact you need is already in that block, use it.
+- As a session runs long, an `<aboard-roadmap>` block arrives periodically with the pending tasks and their current ids. It is dated and point-in-time: the newest one wins, and the completed history from session start still stands. Use its ids rather than ones from earlier in the conversation.
 - Users may invoke commands to start subagents that take part of the fleet; the system will surface these actions to you so you are aware of the live fleet.
 
 ## CLI
@@ -36,7 +37,7 @@ uv run --no-project "$ABOARD_CLI" <command> [options]
 
 It prints JSON on success. On failure it prints the reason and exits non-zero — read the reason and act on it rather than retrying blindly.
 
-Long text — a launch prompt, a roadmap body — is passed as `-` and read from stdin. **Never write it as a heredoc.** Git Bash on Windows hangs forever on a heredoc body around 64 KB, and a hung command costs you the whole turn. Write the text to a file with one single-quoted `printf`, then feed that file in on the same line:
+Long text — a launch prompt — is passed as `-` and read from stdin. **Never write it as a heredoc.** Git Bash on Windows hangs forever on a heredoc body around 64 KB, and a hung command costs you the whole turn. Write the text to a file with one single-quoted `printf`, then feed that file in on the same line:
 
 ```
 printf '%s' '...the full briefing...' > "${TMPDIR:-/tmp}/aboard-prompt.md" && uv run --no-project "$ABOARD_CLI" agent --type Explore --description "Audit retry centralization" --prompt - < "${TMPDIR:-/tmp}/aboard-prompt.md"
@@ -112,8 +113,26 @@ The prompt states the goal, the belief under test, what counts as a hit, the bre
 </commentary>
 </example>
 
-## `todo --body - --reason "<why>"` — replace the project roadmap issue's body
-The current roadmap is already in your context from session start, so read it there and write the full replacement body on stdin — there is no fetch step. Same rule as a launch prompt: `printf '%s' '...' > "${TMPDIR:-/tmp}/aboard-todo.md" && … --body - < "${TMPDIR:-/tmp}/aboard-todo.md"`, never a heredoc. The issue is created on first write when missing. The reason is audit context for the user and is not stored in the issue.
+## `todo create` / `todo update` — evolve the project roadmap
+The roadmap is a flat checkbox list on one GitHub issue: the project's whole-lifetime record of what is left to do and what has been done. It is a point of reference, not a specification — detail belongs in `ai:spec` issues. It is already in your context from session start and is re-sent periodically as you work; there is no fetch command and no full-body rewrite.
+
+Each task carries a 4-character id derived from its own text, rendered inline as `- [ ] [a3f9] Replace the locator`. **Copy an id from the roadmap block; never invent one.** Editing a subject changes its id, so a stale id fails the call and returns the current numbered list — retry with an id from that list.
+
+```
+aboard todo create --subject "<text>" [--subject "<text>" ...] [--after <id|top>]
+aboard todo update --task <id> [--subject "<text>"] [--status pending|completed|deleted] [--after <id|top>]
+```
+
+`create` returns the new ids and appends by default; `--after top` places newly discovered urgent work where it belongs. `--subject` repeats, so writing ten tasks is one call and one issue revision, not ten. On `update`, `--after` **is** the reprioritize operation — list order is priority and the first unchecked item is next. `--status completed` leaves the task in place as `- [x]`; completed items stay forever and are never pruned automatically. `--status deleted` removes a line and is only ever run on the user's explicit request. If no issue carries `ai:todo` yet, `create` writes the first roadmap and says so; `update` fails, because there is no document its id could name.
+
+**Quoting:** subjects routinely contain backticks and apostrophes, and backticks inside double quotes are command substitution. Single-quote every `--subject` and write `'\''` for each apostrophe.
+
+```
+uv run --no-project "$ABOARD_CLI" todo create --subject 'Replace the `ai:todo` locator with a per-call label scan' --after top
+uv run --no-project "$ABOARD_CLI" todo update --task a3f9 --status completed
+```
+
+Keep it directional and keep it short: one sentence per task, capped at 200 characters. `/update-todo` is the user's own entry point to all of this, including the first-run survey when the project has no roadmap yet.
 
 ## `auto` — start the automatic implementation run
 Starts the run for the oldest open spec issue. The extension walks that spec's children one at a time and performs every git and GitHub side effect itself — branch, commit, push, pull request, merge.

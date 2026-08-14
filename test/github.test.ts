@@ -40,72 +40,144 @@ test("authentication preflight is fresh, targets the workspace repository, and p
   assert.equal(gh.calls.filter((args) => args[0] === "api").length, 1);
 });
 
-test("looks up, persists, and caches the singleton TODO number, then updates by argument", async () => {
-  const gh = new FixtureGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return '[{"number":12}]';
-    if (args[0] === "repo") return repo;
-    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: { number: 12, title: "TODO", body: "Now", state: "OPEN", labels: { nodes: [{ name: "ai:todo" }] }, parent: null, closedByPullRequestsReferences: { nodes: [] } } });
+/** Open issues carrying `ai:todo`, as `gh issue list --json number,body,createdAt` returns them. */
+function carriers(...issues: readonly { number: number; body: string; createdAt: string }[]): string {
+  return JSON.stringify(issues);
+}
+
+const ROADMAP = "- [ ] Ship the bridge\n- [x] Rotate the tokens";
+
+function roadmapGh(response: (args: readonly string[]) => string): FixtureGh {
+  return new FixtureGh((args) => {
     if (args[0] === "issue" && args[1] === "edit") return "";
+    if (args[0] === "label") return "";
+    return response(args);
+  });
+}
+
+test("one label query resolves the locator and the document, with no cache and no search index", async () => {
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
     throw new Error(`unexpected ${args.join(" ")}`);
   });
   const github = new GitHubClient(gh);
-  assert.deepEqual(await github.getTodo(), { number: 12, body: "Now" });
-  assert.deepEqual(await github.updateTodo("Next"), { number: 12, body: "Next" });
-  // The in-session cache kept updateTodo from rescanning the label.
-  assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "list").length, 1);
-  assert.deepEqual(gh.calls.at(-1), ["issue", "edit", "12", "--body", "Next"]);
+  const roadmap = await github.readRoadmap();
+  assert.equal(roadmap?.number, 12);
+  assert.deepEqual(roadmap?.tasks.map((task) => [task.subject, task.completed]), [["Ship the bridge", false], ["Rotate the tokens", true]]);
+  assert.equal(roadmap?.carrierCount, 1);
+
+  // `--search` would move the query onto GitHub's asynchronously indexed search
+  // API, where an issue created seconds ago can be missing — and a missing
+  // carrier mints a duplicate roadmap. The sort is done client-side instead.
+  const lookup = gh.calls.find((args) => args[0] === "issue" && args[1] === "list");
+  assert.equal(lookup?.includes("--search"), false);
+  assert.deepEqual(lookup, ["issue", "list", "--state", "open", "--label", "ai:todo", "--limit", "50", "--json", "number,body,createdAt"]);
+
+  // A second read re-resolves: the cache it replaced saved nothing, because
+  // every use of it had to revalidate at exactly the cost of resolving.
+  await github.readRoadmap();
+  assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "list").length, 2);
 });
 
-test("creates the TODO on first write and reports a missing read", async () => {
-  const createGh = new FixtureGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return "[]";
-    if (args[0] === "label") return "";
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
-    throw new Error("unexpected");
-  });
-  assert.deepEqual(await new GitHubClient(createGh).updateTodo("First roadmap"), { number: 44, body: "First roadmap" });
-  assert.equal(createGh.calls.some((args) => args.includes("--force")), true);
-
-  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "[]")).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo");
-});
-
-test("ambiguity never fails: reads adopt the newest carrier, writes mint a fresh issue and strip the rest", async () => {
-  const readGh = new FixtureGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return '[{"number":50},{"number":3}]';
-    if (args[0] === "repo") return repo;
-    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: { number: 50, title: "TODO", body: "Fifty", state: "OPEN", labels: { nodes: [{ name: "ai:todo" }] }, parent: null, closedByPullRequestsReferences: { nodes: [] } } });
+test("newest carrier wins, ties break on the lowest number, and read and write agree", async () => {
+  const listed = carriers(
+    { number: 50, body: "- [ ] Fifty", createdAt: "2026-07-02T00:00:00Z" },
+    { number: 3, body: "- [ ] Three", createdAt: "2026-07-09T00:00:00Z" },
+    { number: 9, body: "- [ ] Nine", createdAt: "2026-07-09T00:00:00Z" },
+  );
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return listed;
     throw new Error(`unexpected ${args.join(" ")}`);
   });
-  assert.deepEqual(await new GitHubClient(readGh).getTodo(), { number: 50, body: "Fifty" });
-  // Reads stay read-only: the surviving labels are the write path's problem.
-  assert.equal(readGh.calls.some((args) => args.includes("--remove-label")), false);
-
-  const writeGh = new FixtureGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return '[{"number":50},{"number":3}]';
-    if (args[0] === "label") return "";
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
-    if (args[0] === "issue" && args[1] === "edit") return "";
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  assert.deepEqual(await new GitHubClient(writeGh).updateTodo("Fresh"), { number: 44, body: "Fresh" });
-  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 50 --remove-label ai:todo"), true);
-  assert.equal(writeGh.calls.some((args) => args.join(" ") === "issue edit 3 --remove-label ai:todo"), true);
+  const github = new GitHubClient(gh);
+  // Newest createdAt, then the lower number among the two that tie.
+  assert.equal((await github.readRoadmap())?.number, 3);
+  assert.equal((await github.createRoadmapTasks({ subjects: ["Added"] })).issue, 3);
+  assert.deepEqual(gh.calls.filter((args) => args[1] === "edit").at(-1)?.slice(0, 3), ["issue", "edit", "3"]);
 });
 
-test("with no cached number, reads report missing and writes create fresh", async () => {
-  const deleted = (args: readonly string[]) => {
-    if (args[0] === "repo") return repo;
-    if (args[0] === "api" && args[1] === "graphql") return graph({ issue: null });
+test("extra carriers are reported, never repaired", async () => {
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") {
+      return carriers({ number: 50, body: "- [ ] Fifty", createdAt: "2026-07-09T00:00:00Z" }, { number: 3, body: "- [ ] Three", createdAt: "2026-07-02T00:00:00Z" });
+    }
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const github = new GitHubClient(gh);
+  assert.equal((await github.readRoadmap())?.carrierCount, 2);
+  const written = await github.createRoadmapTasks({ subjects: ["Added"] });
+  assert.equal(written.issue, 50);
+  assert.match(written.notices.join(" "), /2 open issues carry `ai:todo`; #50 is in use/);
+  // aboard never modifies an issue it did not create: no relabelling, and no
+  // third issue minted to escape the ambiguity.
+  assert.equal(gh.calls.some((args) => args.includes("--remove-label")), false);
+  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "create"), false);
+});
+
+test("an empty candidate set mints on create, is the first-run state on read, and fails on update", async () => {
+  const empty = (args: readonly string[]) => {
     if (args[0] === "issue" && args[1] === "list") return "[]";
-    if (args[0] === "label") return "";
     if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
     throw new Error(`unexpected ${args.join(" ")}`);
   };
-  await assert.rejects(() => new GitHubClient(new FixtureGh(deleted)).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo");
+  // No carrier is a fact about the repository, not a failure: the briefing
+  // renders it as work to do rather than as an unavailable section.
+  assert.equal(await new GitHubClient(roadmapGh(empty)).readRoadmap(), undefined);
 
-  const writeGh = new FixtureGh(deleted);
-  assert.deepEqual(await new GitHubClient(writeGh).updateTodo("New roadmap"), { number: 44, body: "New roadmap" });
-  assert.equal(writeGh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), false);
+  const createGh = roadmapGh(empty);
+  const created = await new GitHubClient(createGh).createRoadmapTasks({ subjects: ["Write the first task"] });
+  assert.equal(created.issue, 44);
+  assert.equal(created.ids?.length, 1);
+  assert.match(created.notices.join(" "), /Created issue #44/);
+  // Plain `label create`, so a user-owned `ai:todo` keeps its colour.
+  assert.equal(createGh.calls.some((args) => args.includes("--force")), false);
+  assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "create")?.slice(0, 4), ["issue", "create", "--title", "Project roadmap"]);
+
+  await assert.rejects(
+    () => new GitHubClient(roadmapGh(empty)).updateRoadmapTask({ task: "a3f9", status: "completed" }),
+    (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo",
+  );
+});
+
+test("a batch create is one issue edit, returns ids in order, and honours --after", async () => {
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: "- [ ] First\n- [ ] Second", createdAt: "2026-07-01T00:00:00Z" });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const github = new GitHubClient(gh);
+  const created = await github.createRoadmapTasks({ subjects: ["Third", "Fourth"], after: "top" });
+  assert.equal(created.ids?.length, 2);
+  // One write for N subjects: the bootstrap must not cost twenty issue revisions.
+  assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "edit").length, 1);
+  assert.equal(gh.calls.find((args) => args[1] === "edit")?.at(-1), "- [ ] Third\n- [ ] Fourth\n- [ ] First\n- [ ] Second");
+});
+
+test("an unknown task id writes nothing and returns the current numbered list", async () => {
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  await assert.rejects(
+    () => new GitHubClient(gh).updateRoadmapTask({ task: "zzzz", status: "completed" }),
+    (error: unknown) => {
+      assert.ok(error instanceof GitHubBoundaryError && error.code === "unknown-task");
+      const details = (error as GitHubBoundaryError).details as { tasks: readonly string[] };
+      assert.equal(details.tasks.length, 2);
+      assert.match(details.tasks[0] as string, /^1\. \[[0-9a-f]{4}\] pending - Ship the bridge$/);
+      return true;
+    },
+  );
+  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), false);
+});
+
+test("the size bound accepts the write and warns rather than deadlocking the Manager", async () => {
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: `- [ ] ${"x".repeat(60_000)}`, createdAt: "2026-07-01T00:00:00Z" });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const written = await new GitHubClient(gh).createRoadmapTasks({ subjects: ["One more"] });
+  assert.match(written.notices.join(" "), /past the 60000 bound. The write was accepted/);
+  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), true);
 });
 
 test("derives readiness solely from dependency closedness and flags classification", async () => {
@@ -145,7 +217,7 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
 });
 
 test("malformed gh JSON is a typed boundary failure", async () => {
-  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json")).getTodo(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
+  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json")).readRoadmap(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
 });
 
 test("briefing data surfaces only merges with no durable review", async () => {

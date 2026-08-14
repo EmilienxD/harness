@@ -48,7 +48,7 @@ function launched(bridge: BridgeRuntime, agentId: string = MANAGER): Record<stri
   };
 }
 
-async function bridgeWith(calls: Call[], todo: string[]): Promise<BridgeRuntime> {
+async function bridgeWith(calls: Call[], todo: unknown[]): Promise<BridgeRuntime> {
   return startBridge({
     preferredPort: 0,
     persistence,
@@ -70,7 +70,12 @@ async function bridgeWith(calls: Call[], todo: string[]): Promise<BridgeRuntime>
       },
       {
         managerAgentId: MANAGER,
-        services: { github: { updateTodo: async (body: string) => { todo.push(body); return { number: 4 }; } } as never },
+        services: {
+          github: {
+            createRoadmapTasks: async (input: unknown) => { todo.push(["create", input]); return { issue: 4, ids: ["a3f9"], notices: [] }; },
+            updateRoadmapTask: async (input: unknown) => { todo.push(["update", input]); return { issue: 4, task: "a3f9", notices: [] }; },
+          } as never,
+        },
       },
     ),
   });
@@ -78,7 +83,7 @@ async function bridgeWith(calls: Call[], todo: string[]): Promise<BridgeRuntime>
 
 test("the shipped CLI reaches the bridge, and only from the Manager", async (context) => {
   const calls: Call[] = [];
-  const todo: string[] = [];
+  const todo: unknown[] = [];
   const bridge = await bridgeWith(calls, todo);
   context.after(() => bridge.stop());
 
@@ -107,12 +112,26 @@ test("the shipped CLI reaches the bridge, and only from the Manager", async (con
   assert.match(started.stdout, /worker-1/);
   assert.deepEqual(calls, [{ type: "brainstormer", description: "brainstorm the current changes", prompt: "The current changes" }]);
 
-  // `-` is how a multi-line document reaches the bridge without being escaped
-  // onto a command line — the same mechanism a heredoc feeds.
-  const roadmap = "# Roadmap\n\n- Ship the CLI\n- Then \"quote\" $everything 'oddly'\n";
-  const written = await run(["todo", "--reason", "recorded the next priorities", "--body", "-"], { env: launched(bridge), input: roadmap });
+  // Repeated `--subject` is what makes a bootstrap one spawn and one issue
+  // revision instead of twenty of each, and subjects routinely carry the
+  // backticks and apostrophes that make quoting worth pinning down.
+  const written = await run(
+    ["todo", "create", "--subject", "Replace the `ai:todo` locator", "--subject", "Don't lose the tail", "--after", "top"],
+    { env: launched(bridge) },
+  );
   assert.equal(written.status, 0, written.stderr);
-  assert.deepEqual(todo, [roadmap]);
+  assert.match(written.stdout, /a3f9/);
+
+  const edited = await run(["todo", "update", "--task", "a3f9", "--status", "completed"], { env: launched(bridge) });
+  assert.equal(edited.status, 0, edited.stderr);
+  assert.deepEqual(todo, [
+    ["create", { subjects: ["Replace the `ai:todo` locator", "Don't lose the tail"], after: "top" }],
+    ["update", { task: "a3f9", status: "completed" }],
+  ]);
+
+  // `todo` alone is not a command: the verb decides which route is called, so
+  // omitting it must fail locally rather than post an ambiguous body.
+  assert.notEqual((await run(["todo", "--subject", "no verb"], { env: launched(bridge) })).status, 0);
 });
 
 test("the CLI documents its own commands", async () => {
@@ -121,6 +140,9 @@ test("the CLI documents its own commands", async () => {
   for (const command of ["agent", "todo", "auto", "review", "release-lease"]) {
     assert.match(help.stdout, new RegExp(command));
   }
+  const todoHelp = await run(["todo", "--help"]);
+  assert.equal(todoHelp.status, 0);
+  for (const verb of ["create", "update"]) assert.match(todoHelp.stdout, new RegExp(verb));
   // A command the extension owns must not be reachable by guessing a name.
   assert.notEqual((await run(["implement"])).status, 0);
 });

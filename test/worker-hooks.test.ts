@@ -12,7 +12,7 @@ import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from 
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
 import { combineHandlers } from "../src/bridge/router.js";
-import { ManagerBriefings, ManagerPromptService, ManagerStopService, createManagerHookRoutes } from "../src/bridge/manager-hooks.js";
+import { ManagerBriefings, ManagerPromptService, ManagerStopService, RoadmapReminderService, createManagerHookRoutes } from "../src/bridge/manager-hooks.js";
 import { createWorkerLifecycleRoutes } from "../src/bridge/lifecycle.js";
 import { SessionLifecycleService, SessionProcessMonitor, createSessionLifecycleRoutes } from "../src/bridge/session-lifecycle.js";
 
@@ -239,13 +239,18 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
       repository: async () => ({ name: "aboard", defaultBranch: "main", checks: [] }),
       git: async () => ({ branch: "main", head: "abc1234", dirty: false }),
       github: async () => ({ issues: [], openPullRequests: [], unreviewedMergeCount: 0 }),
-      roadmap: async () => ({ number: 12, body: "roadmap" }),
+      roadmap: async () => ({ number: 12, tasks: [{ id: "a3f9", subject: "Ship the bridge", completed: false }], carrierCount: 1, nearBound: false, duplicateSubjects: [] }),
       autoRun: () => undefined,
     },
     fleet, lease,
   );
   const handler = combineHandlers(
-    createManagerHookRoutes(briefings, new ManagerStopService({ fleet }), new ManagerPromptService(fleet, { spawnInteractive: async () => ({ agentId: "a" }) })),
+    createManagerHookRoutes(
+      briefings,
+      new ManagerStopService({ fleet }),
+      new ManagerPromptService(fleet, { spawnInteractive: async () => ({ agentId: "a" }) }),
+      new RoadmapReminderService({ roadmap: async () => undefined }),
+    ),
     createWorkerLifecycleRoutes({ stop: async () => true, stopFailure: async () => true, timeout: async () => true, terminalClosed: async () => true } as never),
     createWorkerHookRoutes(new WorkerHookService(fleet)),
     createSessionLifecycleRoutes({

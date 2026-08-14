@@ -5,7 +5,8 @@ import { EOL } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ManagerBriefings, ManagerPromptService, ManagerStopService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT, ROADMAP_BODY_LIMIT, type BriefingSources } from "../src/bridge/manager-hooks.js";
+import { ManagerBriefings, ManagerPromptService, ManagerStopService, RoadmapReminderService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT, ROADMAP_INLINE_LIMIT, ROADMAP_MARKER, type BriefingSources, type RoadmapBriefing } from "../src/bridge/manager-hooks.js";
+import { parseRoadmap } from "../src/domain/roadmap.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId, WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
@@ -40,7 +41,16 @@ function worker(fleet: FleetRegistry, managerAgentId: AgentId, status: AgentSess
   return id;
 }
 
+/** Long enough that the roadmap section alone exceeds its inline allowance. */
+const LONG_ROADMAP = Array.from({ length: 400 }, (_, index) => `- [ ] Roadmap task number ${index}`).join("\n");
+
 const EMPTY_GITHUB = { issues: [], openPullRequests: [], unreviewedMergeCount: 0 } as const;
+
+/** A roadmap briefing built from a real body, so ids are the ones the CLI derives. */
+function roadmapOf(body: string, overrides: Partial<RoadmapBriefing> = {}): RoadmapBriefing {
+  const parsed = parseRoadmap(body);
+  return { number: 9, tasks: parsed.tasks, duplicateSubjects: parsed.duplicateSubjects, carrierCount: 1, nearBound: false, ...overrides };
+}
 
 function sources(overrides: Partial<BriefingSources> = {}): BriefingSources {
   return {
@@ -64,7 +74,7 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
       openPullRequests: [{ number: 21, title: "Fix lease recovery", reviewState: "no review yet" }],
       unreviewedMergeCount: 2,
     }),
-    roadmap: async () => ({ number: 9, body: "# Roadmap\n\n- Ship the bridge" }),
+    roadmap: async () => roadmapOf("- [ ] Ship the bridge\n- [x] Rotate the tokens"),
     autoRun: () => ({ specNumber: 4, specTitle: "Bridge hardening", phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
   }), fleet, new WriteLease());
   const rendered = await briefings.render(new AbortController().signal);
@@ -76,8 +86,13 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
   assert.match(rendered, /#14 Rotate bridge tokens \(hitl\) - waits on #12/);
   assert.match(rendered, /#21 Fix lease recovery \(no review yet\)/);
   assert.match(rendered, /2 pull request\(s\) merged without review/);
-  // The roadmap body itself, so no tool call is needed to read it.
-  assert.match(rendered, /## Roadmap\nIssue #9[\s\S]*- Ship the bridge/);
+  // The roadmap itself, with its ids, so no tool call is needed to read or
+  // address it — and the completed history included, because session start is
+  // one of the two moments the Manager's context is empty.
+  assert.match(rendered, /## Roadmap\n<aboard-roadmap>\nIssue #9/);
+  assert.match(rendered, /^- \[ \] \[[0-9a-f]{4}\] Ship the bridge$/m);
+  assert.match(rendered, /^- \[x\] \[[0-9a-f]{4}\] Rotate the tokens$/m);
+  assert.match(rendered, /<\/aboard-roadmap>/);
   assert.match(rendered, /PR #21 is hitl and waiting/);
   assert.match(rendered, /default branch main \| verify with npm run check/);
 });
@@ -101,7 +116,7 @@ test("hook output stays ASCII-only so the Claude TUI renders it cleanly", async 
       openPullRequests: [{ number: 21, title: "Fix lease recovery", reviewState: "no review yet" }],
       unreviewedMergeCount: 2,
     }),
-    roadmap: async () => ({ number: 9, body: "x".repeat(ROADMAP_BODY_LIMIT + 500) }),
+    roadmap: async () => roadmapOf(LONG_ROADMAP),
     autoRun: () => ({ specNumber: 4, specTitle: "Bridge hardening", phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
   }), fleet, new WriteLease(), { write: async (_slice, content) => content });
   // The briefing, including its truncated roadmap and oversized-block preview.
@@ -131,7 +146,11 @@ test("an idle project renders every section without a failure note", async () =>
   assert.match(rendered, /Nothing is ready\./);
   assert.match(rendered, /## Pull requests\nNone open\./);
   assert.match(rendered, /No live agents/);
-  assert.match(rendered, /No issue is labelled `ai:todo`/);
+  // No carrier is a fact about the repository and the normal first-run state,
+  // so it reads as work to do — deliberately not the "Unavailable" that a
+  // failed fetch produces.
+  assert.match(rendered, /No open issue carries `ai:todo`, so this project has no roadmap yet/);
+  assert.match(rendered, /Recommend `\/update-todo`/);
   assert.doesNotMatch(rendered, /Unavailable/);
 });
 
@@ -139,7 +158,7 @@ test("one failing boundary costs its own section, not the block", async () => {
   const fleet = new FleetRegistry(); manager(fleet);
   const briefings = new ManagerBriefings(sources({
     github: async () => { throw new Error("gh unavailable"); },
-    roadmap: async () => ({ number: 9, body: "still readable" }),
+    roadmap: async () => roadmapOf("- [ ] still readable"),
   }), fleet, new WriteLease());
   const rendered = await briefings.render(new AbortController().signal);
   assert.match(rendered, /## Work\nUnavailable: gh unavailable/);
@@ -156,13 +175,46 @@ test("a cancelled briefing names the cancellation rather than a boundary error",
   assert.match(await briefings.render(controller.signal), /Unavailable: the request was cancelled or timed out/);
 });
 
-test("the roadmap body is bounded and points at the rest", async () => {
-  const briefings = new ManagerBriefings(sources({
-    roadmap: async () => ({ number: 9, body: "x".repeat(ROADMAP_BODY_LIMIT + 500) }),
-  }), new FleetRegistry(), new WriteLease());
+test("an oversized roadmap spills alone, leaving the rest of the briefing inline", async () => {
+  const written: Record<string, string> = {};
+  const briefings = new ManagerBriefings(
+    sources({
+      roadmap: async () => roadmapOf(LONG_ROADMAP),
+      github: async () => ({ issues: [{ number: 12, title: "Rework the fleet tree", disposition: "afk", blockedBy: [] }], openPullRequests: [], unreviewedMergeCount: 0 }),
+    }),
+    new FleetRegistry(),
+    new WriteLease(),
+    { write: async (slice, content) => { written[slice] = content; return `C:\\runtime\\brief-${slice}.txt`; } },
+  );
   const rendered = await briefings.render(new AbortController().signal);
-  assert.match(rendered, /\.\.\.truncated\. Read the rest with `gh issue view 9`/);
-  assert.ok(rendered.length < ROADMAP_BODY_LIMIT + 2_000);
+  assert.ok(rendered.length <= HOOK_OUTPUT_LIMIT);
+  // Only the roadmap went to a file. Demoting the other sections for a reason
+  // that belongs to none of them would be the wrong trade.
+  assert.deepEqual(Object.keys(written), ["roadmap"]);
+  assert.match(rendered, /pre-rendered with its ids at C:\\runtime\\brief-roadmap\.txt/);
+  assert.match(rendered, /#12 Rework the fleet tree \(afk\)/);
+  assert.match(rendered, /## Repository/);
+  assert.doesNotMatch(rendered, /Full briefing:/);
+  // The spilled file carries the whole document, ids already computed, so
+  // reading it costs one Read and no derivation.
+  assert.ok((written.roadmap as string).length > ROADMAP_INLINE_LIMIT);
+  assert.match(written.roadmap as string, /Roadmap task number 399/);
+});
+
+test("a small roadmap stays inline and never touches the file store", async () => {
+  let writes = 0;
+  const briefings = new ManagerBriefings(
+    sources({ roadmap: async () => roadmapOf("- [ ] Ship the bridge", { carrierCount: 2, nearBound: true, duplicateSubjects: ["Ship the bridge"] }) }),
+    new FleetRegistry(),
+    new WriteLease(),
+    { write: async (_slice, content) => { writes += 1; return content; } },
+  );
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.equal(writes, 0);
+  // Extra carriers and a near-full document are reported, never repaired.
+  assert.match(rendered, /2 issues carry `ai:todo`; #9 is in use\./);
+  assert.match(rendered, /Duplicate task text in the roadmap: "Ship the bridge"/);
+  assert.match(rendered, /near its size bound/);
 });
 
 test("an oversized block uses a bounded preview and file reference", async () => {
@@ -193,6 +245,96 @@ test("the briefing is served on one route", async () => {
   for (const slice of ["git", "github", "fleet", "todo"]) {
     assert.equal((await call(`/hooks/manager/brief-${slice}`)).status, 404);
   }
+});
+
+test("the reminder carries pending tasks only, is self-dating, and leads with the marker", async () => {
+  let clock = Date.parse("2026-07-30T14:32:00.000Z");
+  const reminders = new RoadmapReminderService(
+    { roadmap: async () => roadmapOf("- [x] Replace the locator\n- [ ] Pace the reminders") },
+    { now: () => new Date(clock) },
+  );
+  const first = await reminders.serve(agent("manager-1"), new AbortController().signal);
+  const context = String(first.additionalContext);
+  // The marker leads the block so it survives the >10,000-character preview
+  // rule, and so the hook's tail search finds it wherever the block is cut.
+  assert.ok(context.startsWith(ROADMAP_MARKER));
+  assert.match(context, /Roadmap as of 2026-07-30T14:32:00\.000Z/);
+  // Pending only: the completed history is still verbatim in the window, and
+  // repeating it would make the reminder grow with the project's age.
+  assert.match(context, /^- \[ \] \[[0-9a-f]{4}\] Pace the reminders$/m);
+  assert.doesNotMatch(context, /Replace the locator/);
+
+  // The transcript is written asynchronously, so a duplicate clusters right
+  // behind the first. The bridge refuses it.
+  assert.deepEqual(await reminders.serve(agent("manager-1"), new AbortController().signal), {});
+  // A different agent is not affected by another's window.
+  assert.notEqual((await reminders.serve(agent("manager-2"), new AbortController().signal)).additionalContext, undefined);
+  clock += 30_000;
+  assert.notEqual((await reminders.serve(agent("manager-1"), new AbortController().signal)).additionalContext, undefined);
+});
+
+test("a failed reminder fetch is a non-event, and a missing roadmap still says so", async () => {
+  const failing = new RoadmapReminderService({ roadmap: async () => { throw new Error("gh unavailable"); } });
+  assert.deepEqual(await failing.serve(agent("manager-1"), new AbortController().signal), {});
+
+  const empty = new RoadmapReminderService({ roadmap: async () => undefined }, { now: () => new Date("2026-07-30T14:32:00.000Z") });
+  const served = String((await empty.serve(agent("manager-1"), new AbortController().signal)).additionalContext);
+  assert.ok(served.startsWith(ROADMAP_MARKER));
+  assert.match(served, /no open issue carries `ai:todo`/);
+});
+
+test("a due reminder rides the existing prompt drain rather than opening a second channel", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const reminders = new RoadmapReminderService(
+    { roadmap: async () => roadmapOf("- [ ] Pace the reminders") },
+    { now: () => new Date("2026-07-30T14:32:00.000Z") },
+  );
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => ({ agentId: "i-1" }) },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    undefined,
+    undefined,
+    reminders,
+  );
+  // Not due: the drain behaves exactly as before, and an empty drain stays empty.
+  assert.deepEqual(await prompts.handle(managerId, "what changed?"), {});
+
+  fleet.enqueueNotification(managerId, "an auto-run merged PR #21.", at("2026-07-30T14:30:00.000Z"));
+  const both = await prompts.handle(managerId, "and now?", true);
+  assert.match(String(both.additionalContext), /an auto-run merged PR #21/);
+  assert.match(String(both.additionalContext), /<aboard-roadmap>/);
+
+  // A reminder with nothing else pending is still delivered on its own.
+  const alone = await prompts.handle(managerId, "still there?", true);
+  assert.equal(alone.additionalContext, undefined, "the 30s debounce suppresses the immediate repeat");
+});
+
+test("an intercepted command is erased, so no reminder is attached to it", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  let served = 0;
+  const reminders = new RoadmapReminderService({ roadmap: async () => { served += 1; return roadmapOf("- [ ] Pace"); } });
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => ({ agentId: "i-1" }) },
+    undefined, undefined, undefined, reminders,
+  );
+  assert.equal((await prompts.handle(managerId, "/brainstorm", true)).intercepted, true);
+  assert.equal(served, 0);
+});
+
+test("the reminder route validates its caller and is absent when no service is wired", async () => {
+  const briefings = new ManagerBriefings(sources(), new FleetRegistry(), new WriteLease());
+  const stop = new ManagerStopService({ fleet: new FleetRegistry() });
+  const request = (body: unknown): AuthenticatedBridgeRequest => ({ method: "POST", url: new URL("http://127.0.0.1/hooks/manager/roadmap"), headers: {}, body, signal: new AbortController().signal });
+  assert.equal((await createManagerHookRoutes(briefings, stop)(request({ agentId: "manager-1" }))).status, 404);
+
+  const reminders = new RoadmapReminderService({ roadmap: async () => roadmapOf("- [ ] Pace the reminders") });
+  const route = createManagerHookRoutes(briefings, stop, undefined, reminders);
+  assert.equal((await route(request({}))).status, 400);
+  const served = await route(request({ agentId: "manager-1" }));
+  assert.equal(served.status, 200);
+  assert.match(String((served.body as { additionalContext: string }).additionalContext), /<aboard-roadmap>/);
 });
 
 test("Manager Stop returns pending results, waits for running work, and permits idle stop", async () => {

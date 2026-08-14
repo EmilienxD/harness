@@ -42,14 +42,16 @@ export interface VendoredSkillInstaller {
   run(command: string, cwd: string): Promise<void>;
 }
 
-export interface ScaffoldTodo {
-  ensure(): Promise<"created" | "existing">;
-}
-
+/**
+ * The scaffolder deliberately creates no roadmap issue. A repository with no
+ * `ai:todo` carrier is the normal first-run state, and an empty placeholder
+ * issue is worse than none: it looks like a roadmap, so nothing prompts anyone
+ * to write one. The Manager's briefing reports the absence as something to do,
+ * and `/update-todo` surveys the codebase and writes the first one.
+ */
 export interface ScaffoldOptions {
   readonly projectRoot: string;
   readonly assetRoot: string;
-  readonly todo: ScaffoldTodo;
   readonly autoCompactEnabled?: boolean;
   readonly vendoredSkills?: readonly VendoredSkill[];
   readonly installer?: VendoredSkillInstaller;
@@ -62,7 +64,6 @@ export interface ScaffoldReport {
   readonly preserved: readonly string[];
   readonly installed: readonly string[];
   readonly warnings: readonly string[];
-  readonly todo: "created" | "existing";
 }
 
 interface InstalledAsset {
@@ -285,6 +286,5 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   await writeJson(manifestPath, { version: 1, assets: next });
   await installVendoredSkills(vendoredSkills, options.installer, projectRoot, installed, warnings);
   if (options.autoCompactEnabled === false || settings.autoCompact === false) warnings.push("Claude Code autoCompact is disabled; aboard workers may exhaust their context window.");
-  const todo = await options.todo.ensure();
-  return { created, updated, removed, preserved, installed, warnings, todo };
+  return { created, updated, removed, preserved, installed, warnings };
 }

@@ -17,6 +17,7 @@ ROUTES = {
     "manager-prompt": "/hooks/manager/prompt",
     "manager-stop": "/hooks/manager/stop",
     "manager-brief": "/hooks/manager/brief",
+    "manager-roadmap": "/hooks/manager/roadmap",
     "worker-subagent-start": "/hooks/worker/subagent-start",
     "worker-subagent-stop": "/hooks/worker/subagent-stop",
     "worker-agent-tool": "/hooks/worker/agent-tool",
@@ -46,6 +47,48 @@ WORKER_AGENT_TYPES = frozenset({"webresearcher", "implementer", "pr-doctor-afk"}
 # match the bridge-side parsers.
 MANAGER_INTERCEPTED_COMMAND = re.compile(r"^\s*/(brainstorm|general-purpose|done|auto|review-pr)(?:\s[\s\S]*)?$")
 DONE_COMMAND = re.compile(r"^\s*/done(?:\s[\s\S]*)?$")
+
+# Leads every roadmap injection the bridge emits, on the session-start briefing
+# and on the periodic reminder alike. Plain ASCII with no quotes, backslashes, or
+# newlines, so it matches identically inside the JSON-escaped `stdout` string and
+# the unescaped `content` array that the transcript records for a hook.
+ROADMAP_MARKER = b"<aboard-roadmap>"
+
+# How many transcript bytes may pass with no roadmap injection before one is due.
+# Set from `aboard.manager.roadmapReminderBytes` into the Manager's terminal
+# alone; absent or zero disables the reminder entirely.
+ROADMAP_SPAN_VARIABLE = "ABOARD_ROADMAP_REMINDER_BYTES"
+
+
+def roadmap_reminder_due(payload):
+    """Is there no roadmap injection within the transcript's last `span` bytes?
+
+    Stateless by construction. The question is not "where was the last
+    reminder", which would need a counter to persist, re-seed on resume, and
+    lose in a crash, but "is one inside the tail window" — one `getsize`, one
+    bounded read, constant work whether the transcript is 200 KB or 40 MB. The
+    session-start and post-compact briefings carry the same marker, so they
+    reset the window for free and there is no separate reset rule.
+
+    Every uncertain answer is "not due": a reminder is a convenience, and
+    injecting one on a transcript we could not read would be guessing.
+    """
+    try:
+        span = int(os.environ.get(ROADMAP_SPAN_VARIABLE) or 0)
+    except ValueError:
+        return False
+    path = payload.get("transcript_path")
+    if span <= 0 or not isinstance(path, str) or not path:
+        return False
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as transcript:
+            if size > span:
+                transcript.seek(size - span)
+            tail = transcript.read()
+    except OSError:
+        return False
+    return ROADMAP_MARKER not in tail
 
 
 def finish(message):
@@ -106,6 +149,11 @@ def main():
             not expected_manager and agent_type not in WORKER_AGENT_TYPES and not delivers_result
         )
     ):
+        return 0
+    # The reminder's entire cost on the common path — a reminder already inside
+    # the tail window — is one `getsize` and one bounded read. No bridge call, no
+    # `gh`, no output.
+    if route == "manager-roadmap" and not roadmap_reminder_due(payload):
         return 0
     blocking = route == BLOCKING_ROUTE
     is_intercepted = blocking and intercepted_prompt(prompt, agent_type)
@@ -168,6 +216,11 @@ def main():
         body = {"agentId": agent_id}
         if endpoint == "/hooks/manager/prompt":
             body["prompt"] = prompt
+            # A due reminder rides along with the prompt instead of costing its
+            # own spawn and round trip. An intercepted command erases the turn,
+            # so there is nothing to attach a reminder to.
+            if not is_intercepted and roadmap_reminder_due(payload):
+                body["roadmapDue"] = True
         if endpoint == "/hooks/manager/stop":
             body["stopHookActive"] = bool(payload.get("stop_hook_active", False))
     body = {key: value for key, value in body.items() if value is not None}
@@ -197,7 +250,7 @@ def main():
     if endpoint == "/hooks/manager/stop":
         if result.get("state") == "results":
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": result["additionalContext"]}}))
-    elif "additionalContext" in result and event in ("SessionStart", "UserPromptSubmit"):
+    elif "additionalContext" in result and event in ("SessionStart", "UserPromptSubmit", "PostToolUse"):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": result["additionalContext"]}}))
     return 0
 

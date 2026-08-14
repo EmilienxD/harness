@@ -27,7 +27,8 @@
     { "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "${CLAUDE_PROJECT_DIR}/.claude/hooks/aboard_hook.py", "worker-subagent-stop"] } ] }
   ],
   "PostToolUse": [
-    { "matcher": "Agent", "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "${CLAUDE_PROJECT_DIR}/.claude/hooks/aboard_hook.py", "worker-agent-tool"] } ] }
+    { "matcher": "Agent", "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "${CLAUDE_PROJECT_DIR}/.claude/hooks/aboard_hook.py", "worker-agent-tool"] } ] },
+    { "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "${CLAUDE_PROJECT_DIR}/.claude/hooks/aboard_hook.py", "manager-roadmap"], "timeout": 60 } ] }
   ],
   "PostCompact": [
     { "matcher": "manual|auto", "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "${CLAUDE_PROJECT_DIR}/.claude/hooks/aboard_hook.py", "worker-post-compact"] } ] }

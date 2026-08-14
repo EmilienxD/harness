@@ -1,4 +1,5 @@
 import type { AgentId, AgentSession, IsoTimestamp, WorkerResult } from "../domain/contracts.js";
+import { renderTasks, type RoadmapTask } from "../domain/roadmap.js";
 import type { FleetRegistry, MailboxEntry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import type { DelegationLaunchInput } from "./delegation.js";
@@ -25,8 +26,41 @@ export const MANAGER_PROMPT_TIMEOUT_SECONDS = 60;
  * environment and git-status blocks with it, so the repository card restores
  * the orientation every other Claude Code session starts with.
  */
-export const ROADMAP_BODY_LIMIT = 2_000;
+/**
+ * How much of the roadmap renders inline. It is not the storage bound — GitHub
+ * holds the whole document, up to `ROADMAP_BODY_LIMIT` — but the share of the
+ * 10,000-character hook cap the roadmap may take while every other section
+ * still renders in full.
+ */
+export const ROADMAP_INLINE_LIMIT = 6_000;
 const ISSUE_LIST_LIMIT = 15;
+
+/**
+ * Leads every roadmap injection, on the session-start briefing and on the
+ * periodic reminder alike.
+ *
+ * It is what the reminder hook looks for in the transcript's tail: "is there a
+ * reminder within the last `span` bytes" is answerable with one seek and one
+ * read, where "when was the last reminder" would need a counter to persist,
+ * re-seed on resume, and lose in a crash. Because the session-start and compact
+ * briefings carry the same marker, they reset the window for free and there is
+ * no separate reset rule.
+ *
+ * Plain ASCII with no quotes, backslashes, or newlines, so it matches
+ * identically inside the JSON-escaped `stdout` string and the unescaped
+ * `content` array the transcript records — and it leads the block so it survives
+ * the >10,000-character preview rule.
+ */
+export const ROADMAP_MARKER = "<aboard-roadmap>";
+
+/**
+ * How long the bridge refuses to serve a second reminder to the same agent. The
+ * transcript is written asynchronously, so the tail search comes up empty most
+ * readily right after a reminder was emitted and before it flushed: duplicates
+ * cluster rather than scatter. In-memory is enough — a bridge restart costs at
+ * most one duplicate reminder.
+ */
+export const ROADMAP_REMINDER_DEBOUNCE_MS = 30_000;
 
 export type BriefingDisposition = "afk" | "hitl" | "unclassified";
 
@@ -63,7 +97,11 @@ export interface GitHubBriefingState {
 
 export interface RoadmapBriefing {
   readonly number: number;
-  readonly body: string;
+  readonly tasks: readonly RoadmapTask[];
+  /** Open issues carrying the label. More than one is reported, never repaired. */
+  readonly carrierCount: number;
+  readonly nearBound: boolean;
+  readonly duplicateSubjects: readonly string[];
 }
 
 /** What the auto-run engine is doing, flattened to the facts that change advice. */
@@ -86,7 +124,7 @@ export interface BriefingSources {
 }
 
 export interface BriefingFileStore {
-  write(slice: "state", content: string): Promise<string>;
+  write(slice: "state" | "roadmap", content: string): Promise<string>;
 }
 
 function active(session: AgentSession): boolean {
@@ -231,16 +269,130 @@ export class ManagerBriefings {
       : `${agents.join("\n")}\nWrite lease: ${holder === undefined ? "unheld" : holder.agentId}`;
   }
 
+  /**
+   * The roadmap section, full history included. A missing carrier is a fact
+   * about the repository — the ordinary first-run state — and is phrased as
+   * something to do, deliberately unlike the "Unavailable" a failed fetch
+   * produces.
+   */
   async #roadmap(signal: AbortSignal): Promise<string> {
     const roadmap = await this.sources.roadmap(signal);
     if (roadmap === undefined) {
-      return "No issue is labelled `ai:todo`. Write one with `aboard todo` when the project has a direction worth recording.";
+      return marked("No open issue carries `ai:todo`, so this project has no roadmap yet. That is the normal state of a fresh repository, not a deletion. Recommend `/update-todo` to the user: it surveys the codebase, asks a few questions, and writes the first one.");
     }
-    const body = roadmap.body.trim();
-    const bounded = body.length <= ROADMAP_BODY_LIMIT
-      ? body
-      : `${body.slice(0, ROADMAP_BODY_LIMIT).trimEnd()}\n\n...truncated. Read the rest with \`gh issue view ${roadmap.number}\`.`;
-    return `Issue #${roadmap.number} - the full body follows, so do not fetch it again.\n\n${bounded}`;
+    const notes = roadmapNotes(roadmap);
+    const inline = roadmapBlock(roadmap.tasks, "full", `Issue #${roadmap.number} - the whole roadmap follows, so do not fetch it again. Task ids are derived from the subject text: copy one to edit that task, never invent one.`, notes);
+    if (inline.length <= ROADMAP_INLINE_LIMIT || this.files === undefined) return inline;
+    // Only the roadmap spills. Today's whole-block spill would demote
+    // Repository, Auto-run, Issues, Pull requests, and Fleet to a file
+    // reference for a reason that belongs to none of them.
+    const path = await this.files.write("roadmap", inline);
+    const heading = `Issue #${roadmap.number} - the full roadmap, completed history included, is pre-rendered with its ids at ${path}; one Read gets it, with no ids left for you to derive.`;
+    // What stays inline is the head of the pending list: the tasks most likely
+    // to matter next, bounded so this section cannot grow past its share again.
+    const pending = roadmap.tasks.filter((task) => !task.completed);
+    const kept = bounded(pending, ROADMAP_INLINE_LIMIT - heading.length - notes.join("\n").length - 200);
+    return roadmapBlock(kept, "full", heading, notes, pending.length - kept.length);
+  }
+}
+
+/** As many tasks as fit the budget, with the omission stated rather than implied. */
+function bounded(tasks: readonly RoadmapTask[], budget: number): readonly RoadmapTask[] {
+  let used = 0;
+  const kept: RoadmapTask[] = [];
+  for (const task of tasks) {
+    used += task.subject.length + 12;
+    if (used > budget) break;
+    kept.push(task);
+  }
+  return kept;
+}
+
+/**
+ * Wraps an injection in the marker the reminder hook searches the transcript's
+ * tail for, so a session-start or post-compact briefing resets the reminder
+ * window with no separate rule. A briefing large enough to spill whole leaves no
+ * marker inline, which is correct: the roadmap was not delivered, only a path.
+ */
+function marked(content: string): string {
+  return `${ROADMAP_MARKER}\n${content}\n</aboard-roadmap>`;
+}
+
+/** Facts about the roadmap's condition that the Manager may need to act on. */
+function roadmapNotes(roadmap: RoadmapBriefing): readonly string[] {
+  const notes: string[] = [];
+  if (roadmap.carrierCount > 1) notes.push(`${roadmap.carrierCount} issues carry \`ai:todo\`; #${roadmap.number} is in use.`);
+  if (roadmap.duplicateSubjects.length > 0) notes.push(`Duplicate task text in the roadmap: ${roadmap.duplicateSubjects.map((subject) => `"${subject}"`).join(", ")}. Ask the user whether one should be removed.`);
+  if (roadmap.nearBound) notes.push("The roadmap is near its size bound; consider asking the user about pruning completed items.");
+  return notes;
+}
+
+function roadmapBlock(tasks: readonly RoadmapTask[], mode: "full" | "pending", heading: string, notes: readonly string[], omitted = 0): string {
+  const list = renderTasks(tasks, mode);
+  const parts = [...notes, heading, list.length === 0 ? "The roadmap issue exists but has no tasks yet." : list];
+  if (omitted > 0) parts.push(`...and ${omitted} further pending task(s), in the file above.`);
+  return marked(parts.join("\n\n"));
+}
+
+/**
+ * The periodic reminder. Pending items only: the completed history is still
+ * verbatim in the window at this point, and repeating it would make the
+ * reminder the largest recurring line item two years into a project instead of
+ * a flat cost.
+ *
+ * Self-dating because a mid-session injection is replayed rather than re-run on
+ * resume; phrased as standing truth it would present a stale list as current.
+ */
+export function renderRoadmapReminder(roadmap: RoadmapBriefing | undefined, at: IsoTimestamp): string {
+  if (roadmap === undefined) {
+    return marked(`Roadmap as of ${at}: no open issue carries \`ai:todo\`, so there is still no roadmap. Recommend \`/update-todo\` when the project has a direction worth recording.`);
+  }
+  const pending = renderTasks(roadmap.tasks, "pending");
+  const body = pending.length === 0
+    ? `every task on issue #${roadmap.number} is complete.`
+    : `pending tasks on issue #${roadmap.number}, with the ids to edit them by. Completed history is unchanged and is not repeated here.\n\n${pending}`;
+  return marked(`Roadmap as of ${at} - ${body}`);
+}
+
+export interface RoadmapReminderSource {
+  roadmap(signal: AbortSignal): Promise<RoadmapBriefing | undefined>;
+}
+
+/**
+ * Serves the reminder, at most once per agent per debounce window. The hook has
+ * already decided the reminder is due from the transcript itself; this refuses
+ * the duplicate that the transcript's write lag makes likely.
+ */
+export class RoadmapReminderService {
+  readonly #served = new Map<AgentId, number>();
+  readonly #now: () => Date;
+  readonly #debounceMs: number;
+
+  public constructor(
+    private readonly source: RoadmapReminderSource,
+    options: { readonly now?: () => Date; readonly debounceMs?: number } = {},
+  ) {
+    this.#now = options.now ?? (() => new Date());
+    this.#debounceMs = options.debounceMs ?? ROADMAP_REMINDER_DEBOUNCE_MS;
+  }
+
+  public async serve(agentId: AgentId, signal: AbortSignal): Promise<{ readonly additionalContext?: string }> {
+    const at = this.#now();
+    const previous = this.#served.get(agentId);
+    if (previous !== undefined && at.getTime() - previous < this.#debounceMs) return {};
+    this.#served.set(agentId, at.getTime());
+    try {
+      // Live `gh`, no cache: at this span the calls are minutes apart, and a
+      // reminder must be truthful about an edit the user made on their phone —
+      // which is the whole reason the roadmap lives on GitHub.
+      const roadmap = await this.source.roadmap(signal);
+      return { additionalContext: renderRoadmapReminder(roadmap, at.toISOString() as IsoTimestamp) };
+    } catch {
+      // A failed reminder is a non-event: the roadmap is not the turn's subject,
+      // and the next trigger point retries. The debounce stamp stays so a broken
+      // `gh` cannot turn every tool call into a failed fetch.
+      return {};
+    }
   }
 }
 
@@ -331,11 +483,18 @@ export class ManagerPromptService {
     now?: () => Date,
     private readonly actions?: ManagerCommandActions,
     private readonly terminals?: InvokingTerminalKiller,
+    private readonly reminders?: RoadmapReminderService,
   ) {
     this.#now = now ?? (() => new Date());
   }
 
-  public async handle(agentId: AgentId, prompt: string): Promise<Record<string, unknown>> {
+  /**
+   * `roadmapDue` is the hook's own tail-window verdict on the transcript. It
+   * rides along with the prompt rather than being a second hook call, so the
+   * common path — a user turn with no reminder owing — costs no extra spawn and
+   * no extra round trip.
+   */
+  public async handle(agentId: AgentId, prompt: string, roadmapDue = false, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const done = parseDoneCommand(prompt);
     if (done !== undefined) return this.#done(agentId, done);
     const action = parseActionCommand(prompt);
@@ -344,17 +503,25 @@ export class ManagerPromptService {
     if (command === undefined) {
       const deliveredAt = this.#now().toISOString() as IsoTimestamp;
       const delivery = this.fleet.drainNotifications(agentId, deliveredAt);
-      if (delivery.notifications.length === 0 && delivery.summarized === undefined) return {};
-      const lines = [`Since your last message (delivered at ${deliveredAt}):`];
-      if (delivery.summarized !== undefined) {
-        lines.push(
-          `${delivery.summarized.count} earlier aboard action(s) occurred between ${delivery.summarized.firstOccurredAt} and ${delivery.summarized.lastOccurredAt}; details were summarized to keep this context bounded.`,
-        );
+      const lines: string[] = [];
+      if (delivery.notifications.length > 0 || delivery.summarized !== undefined) {
+        lines.push(`Since your last message (delivered at ${deliveredAt}):`);
+        if (delivery.summarized !== undefined) {
+          lines.push(
+            `${delivery.summarized.count} earlier aboard action(s) occurred between ${delivery.summarized.firstOccurredAt} and ${delivery.summarized.lastOccurredAt}; details were summarized to keep this context bounded.`,
+          );
+        }
+        for (const notification of delivery.notifications) {
+          lines.push(`At ${notification.occurredAt}: ${notification.message}`);
+        }
       }
-      for (const notification of delivery.notifications) {
-        lines.push(`At ${notification.occurredAt}: ${notification.message}`);
-      }
-      return { additionalContext: lines.join("\n") };
+      // The reminder shares this drain rather than opening its own channel: one
+      // injection carries both, and neither costs the Manager a turn.
+      const reminder = roadmapDue && this.reminders !== undefined
+        ? (await this.reminders.serve(agentId, signal ?? new AbortController().signal)).additionalContext
+        : undefined;
+      if (reminder !== undefined) lines.push(reminder);
+      return lines.length === 0 ? {} : { additionalContext: lines.join("\n") };
     }
 
     const launched = await this.launcher.spawnInteractive(command.input) as Record<string, unknown>;
@@ -489,7 +656,12 @@ function parseInteractiveCommand(prompt: string): {
     : { type: "brainstormer", command, ignoredArguments, input: { type: "brainstormer", description: "interactive brainstorm session" } };
 }
 
-export function createManagerHookRoutes(briefings: ManagerBriefings, stop: ManagerStopService, prompts?: ManagerPromptService): BridgeRequestHandler {
+export function createManagerHookRoutes(
+  briefings: ManagerBriefings,
+  stop: ManagerStopService,
+  prompts?: ManagerPromptService,
+  reminders?: RoadmapReminderService,
+): BridgeRequestHandler {
   return async (request): Promise<BridgeResponse> => {
     if (request.method !== "POST") return protocolError(405, "invalid-request", "Method not allowed");
     if (request.url.pathname === "/hooks/manager/brief") {
@@ -502,13 +674,20 @@ export function createManagerHookRoutes(briefings: ManagerBriefings, stop: Manag
       }
       return { status: 200, body: await stop.poll({ agentId: body.agentId as AgentId, stopHookActive: (body.stopHookActive ?? body.stop_hook_active) as boolean }, request.signal) };
     }
+    if (request.url.pathname === "/hooks/manager/roadmap" && reminders !== undefined) {
+      const body = record(request.body);
+      if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "") {
+        return protocolError(400, "invalid-request", "agentId is required");
+      }
+      return { status: 200, body: await reminders.serve(body.agentId as AgentId, request.signal) };
+    }
     if (request.url.pathname === "/hooks/manager/prompt" && prompts !== undefined) {
       const body = record(request.body);
       if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "" || typeof body.prompt !== "string") {
         return protocolError(400, "invalid-request", "agentId and prompt are required");
       }
       try {
-        return { status: 200, body: await prompts.handle(body.agentId as AgentId, body.prompt) };
+        return { status: 200, body: await prompts.handle(body.agentId as AgentId, body.prompt, body.roadmapDue === true, request.signal) };
       } catch (error) {
         return protocolError(error instanceof Error && "code" in error && error.code === "lease-conflict" ? 409 : 500, error instanceof Error && "code" in error && error.code === "lease-conflict" ? "conflict" : "internal-error", error instanceof Error ? error.message : "Interactive launch failed");
       }

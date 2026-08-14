@@ -65,7 +65,7 @@ function setup() {
   let id = 0;
   const controller = new TerminalController({
     host,
-    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerCli: "C:\\work\\aboard\\.aboard\\scripts\\aboard_cli.py", managerBashTimeoutMs: 3_600_000 }),
+    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerCli: "C:\\work\\aboard\\.aboard\\scripts\\aboard_cli.py", managerBashTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
     sleep: async () => undefined,
@@ -350,7 +350,7 @@ function setupProofs(verdict: () => Promise<unknown>) {
   let id = 0;
   const controller = new TerminalController({
     host,
-    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerCli: "C:\\work\\aboard\\.aboard\\scripts\\aboard_cli.py", managerBashTimeoutMs: 3_600_000 }),
+    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerCli: "C:\\work\\aboard\\.aboard\\scripts\\aboard_cli.py", managerBashTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
     onLifecycleEvent: (event) => events.push(event),
