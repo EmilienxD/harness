@@ -62,7 +62,6 @@ def test_install_leaves_no_lock_or_backup(target):
         "skills/draft-issue/SKILL.md",
         "skills/draft-issues/SKILL.md",
         "skills/map-issues/SKILL.md",
-        "skills/publish-issue/SKILL.md",
         "skills/publish-issues/SKILL.md",
         "skills/to-spec-draft-issue/SKILL.md",
         "skills/to-spec/SKILL.md",

@@ -5,8 +5,8 @@ Claude Code PostToolUse hook: on-read-reminder.
 Fires after a Read call, and after Bash commands that read files through
 cat/more/less/head/tail/type. When the path being read matches a
 gitignore-style pattern from an `on-read-reminder.rules` file, the hook
-reminds the agent — via additionalContext — to read the file(s) the rule
-maps to (a glossary, conventions doc, …) before going further.
+reminds the agent -- via additionalContext -- to read the file(s) the rule
+maps to (a glossary, conventions doc, ...) before going further.
 
 Rules file format (the shipped sample has the full description):
 
@@ -276,7 +276,7 @@ def main():
             listing.append(f"`{reminder}`{missing}")
         reads = ", ".join(f"`{p}`" for p in triggers[:3])
         if len(triggers) > 3:
-            reads += ", …"
+            reads += ", ..."
         noun = "this file" if len(reminders) == 1 else "these files"
         parts.append(
             f"You just read {reads}, which matches {RULES_NAME}. "

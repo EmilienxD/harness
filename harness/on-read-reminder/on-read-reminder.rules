@@ -1,4 +1,4 @@
-# on-read-reminder — rules
+# on-read-reminder -- rules
 #
 # Each rule maps a gitignore-style pattern to the file(s) the agent should
 # read when it reads a matching path. Lines that don't parse are reported

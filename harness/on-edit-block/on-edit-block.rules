@@ -1,4 +1,4 @@
-# on-edit-block — rules
+# on-edit-block -- rules
 #
 # Each rule maps a gitignore-style pattern to the file(s) the agent must have
 # read this session before it may Write/Edit/MultiEdit a matching path.
@@ -25,7 +25,7 @@
 # How blocking works: an edit of a matching path is denied with the required
 # file's content inlined in the denial message (or, if too large, an
 # instruction to Read it). A file blocks at most once per session: afterwards
-# it counts as read — whether because the transcript shows a Read/Bash-cat
+# it counts as read -- whether because the transcript shows a Read/Bash-cat
 # of it, or because the hook already injected it.
 #
 # Examples:

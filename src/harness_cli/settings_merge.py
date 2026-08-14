@@ -29,11 +29,16 @@ def identity(item: Json) -> tuple:
             if isinstance(args, list) and args:
                 # Exec-form hook: the script and its arguments are the entry's
                 # identity; which interpreter launches it (${PYTHON}) is a
-                # property of the machine, re-resolved on every install. Keying
-                # by args means an upgrade replaces the interpreter string in
-                # place instead of stacking a duplicate hook, and uninstall
-                # removes the entry even if the resolution drifted since.
-                return ("command", item.get("type", "command"), tuple(args))
+                # property of the machine, re-resolved on every install. The
+                # interpreter itself sits before the script in argv, under any
+                # number of option flags the resolver happens to emit (`uv run
+                # --no-project`, `uv run --managed-python`, a bare path), so
+                # the identity must skip to the operands rather than key by
+                # raw argv: two writes of one hook with a stale or revised
+                # prefix are one hook, and keeping both would fire it twice.
+                # Keying by script+args also survives an interpreter upgrade,
+                # replacing the launch string in place instead of stacking.
+                return ("command", item.get("type", "command"), _operand_tail(args))
             return ("command", item.get("type", "command"), item["command"])
         return ("obj", json.dumps(item, sort_keys=True))
     if isinstance(item, (list, dict)):
@@ -41,50 +46,156 @@ def identity(item: Json) -> tuple:
     return ("scalar", type(item).__name__, item)
 
 
-def _merge_lists(base: list, incoming: list) -> list:
+def _operand_tail(args: list) -> tuple:
+    """The hook's own argv: script path plus its arguments, launcher flags stripped.
+
+    `${PYTHON}` expands to things like `uv run --no-project` (plus whatever
+    flags that install's resolver emitted) or a bare interpreter path with
+    no args at all. None of that identifies the hook — the script it runs
+    does. Two writes of one hook may carry whatever launcher flags an older
+    or newer resolver happened to emit (`--managed-python` vs
+    `--no-managed-python` is the one a real settings file turned up), so
+    `-`-prefixed tokens are dropped anywhere before the hook itself is
+    identified: by the first token that ends in a script suffix (`.py`,
+    `.sh`, …) or is a path. Everything from there on is the hook.
+    """
+    for i, arg in enumerate(args):
+        a = str(arg)
+        if a.endswith((".py", ".sh", ".js", ".ts", ".ps1", ".bash")) or "/" in a or "\\" in a:
+            return tuple(args[i:])
+    for i, arg in enumerate(args):
+        if arg != "run" and not str(arg).startswith("-"):
+            return tuple(args[i:])
+    return tuple(args)
+
+
+def normalize_scope(matcher) -> tuple | None:
+    """A hook group's matcher, folded to its semantic scope.
+
+    A group with no `matcher` fires its hooks unconditionally — which is also
+    exactly what an explicit `""` or `".*"` matcher does, so all spellings of
+    match-everything share one scope. Returns None for things that aren't
+    hook groups, so they fall back to plain identity below.
+    """
+    if not (isinstance(matcher, dict) and "hooks" in matcher):
+        return None
+    m = matcher.get("matcher", "")
+    return ("matcher", "_any_" if m in ("", ".*") else m)
+
+
+def _is_group(item) -> bool:
+    return isinstance(item, dict) and "hooks" in item
+
+
+def _merge_lists(base: list, incoming: list, *, hook_event: bool | None = None) -> list:
+    # A list whose items include hook groups (`{"hooks": [...]}`) is a hook
+    # event's group list. Groups there key by *scope*, not exact identity:
+    # any group whose scope matches the incoming group's — whether we
+    # installed it or the user wrote it — is merged into, never duplicated.
+    # Two groups with the same scope would both fire on the event, running
+    # every hook present in both twice; folding every spelling of
+    # match-everything ("", ".*", missing) into one canonical no-`matcher`
+    # group keeps Claude Code firing each hook exactly once, which is the
+    # only correct layout no matter who authored the file.
+    #
+    # `hook_event` is inherited from the parent recursion when that is known:
+    # the `hooks` list *inside* a group holds commands, not groups, so its
+    # own items never declare it — but commands there still key by operand
+    # identity, and only at the group level does the scope pass apply.
+    if hook_event is None:
+        hook_event = any(_is_group(v) for v in (*base, *incoming))
     out = list(base)
-    index = {identity(v): i for i, v in enumerate(out)}
+    index = {normalize_scope(v) or identity(v): i for i, v in enumerate(out)}
     for item in incoming:
-        key = identity(item)
+        key = normalize_scope(item) or identity(item)
         if key in index:
             existing = out[index[key]]
             if isinstance(existing, dict) and isinstance(item, dict):
-                out[index[key]] = merge(existing, item)
+                out[index[key]] = merge(existing, item, hook_event=hook_event)
             else:
                 out[index[key]] = item
         else:
             index[key] = len(out)
             out.append(item)
+    if hook_event:
+        # Coalesce same-scope groups into their first sibling. A file can
+        # already carry twins (e.g. one group written with an explicit ""
+        # matcher, back when only exact identity matched) whose hooks would
+        # otherwise keep firing once per group; folding them through merge
+        # dedupes shared hooks by identity and keeps each group's own hooks.
+        first: dict[tuple, int] = {}
+        collapsed: list = []
+        for group in out:
+            scope = normalize_scope(group)
+            if scope is None or scope not in first:
+                if scope is not None:
+                    first[scope] = len(collapsed)
+                collapsed.append(group)
+            else:
+                collapsed[first[scope]] = merge(collapsed[first[scope]], group)
+        out = [_flatten_group(v) if _is_group(v) else v for v in collapsed]
     return out
 
 
-def merge(base: dict, fragment: dict) -> dict:
+def _flatten_group(group: dict) -> dict:
+    """Write a match-everything group's scope the canonical way: no `matcher` key."""
+    if group.get("matcher") in ("", ".*"):
+        return {k: v for k, v in group.items() if k != "matcher"}
+    return group
+
+
+def merge(base: dict, fragment: dict, *, hook_event: bool | None = None) -> dict:
     """Deep-merge `fragment` into `base`, returning a new dict.
 
     Dicts recurse, lists merge by entry identity, scalars are overwritten.
+    Hook-group lists merge by scope instead — see `_merge_lists`.
     """
     out = dict(base)
     for key, value in fragment.items():
         current = out.get(key)
-        if isinstance(current, dict) and isinstance(value, dict):
+        if key == "args" and isinstance(current, list) and isinstance(value, list):
+            # A command's argv is positional and atomic — merging it element-
+            # by-element would union two launcher prefixes ("--no-managed-
+            # python" alongside "--managed-python") into nonsense argv. The
+            # fragment is the fresher resolution of the same hook; it wins.
+            out[key] = value
+        elif isinstance(current, dict) and isinstance(value, dict):
             out[key] = merge(current, value)
         elif isinstance(current, list) and isinstance(value, list):
-            out[key] = _merge_lists(current, value)
+            out[key] = _merge_lists(current, value, hook_event=hook_event)
         else:
             out[key] = value
     return out
 
 
 def _unmerge_lists(base: list, incoming: list) -> list:
+    # The mirror image of `_merge_lists`. Where merging keyed hook groups by
+    # scope, unmerging removes the incoming group's hooks from *every* base
+    # group of the same scope — not just the exact-identity twin the fragment
+    # was last seen in. A scope-collapsed merge can leave the same hook
+    # identity in a user group and in one we wrote, and uninstall must back
+    # both copies out or the hook stays wired after we promised to remove it.
+    hook_event = any(_is_group(v) for v in (*base, *incoming))
     out = list(base)
     for item in incoming:
+        scope = normalize_scope(item) if hook_event else None
+        if scope is not None:
+            for i in range(len(out) - 1, -1, -1):
+                if normalize_scope(out[i]) != scope:
+                    continue
+                pruned = unmerge_group(out[i], item)
+                if "hooks" in pruned:
+                    out[i] = pruned
+                else:
+                    # A group whose hooks all belonged to us is ours to drop.
+                    del out[i]
+            continue
         key = identity(item)
         for i, existing in enumerate(out):
             if identity(existing) != key:
                 continue
-            if isinstance(existing, dict) and isinstance(item, dict) and "hooks" in item:
+            if _is_group(existing) and _is_group(item):
                 pruned = unmerge(existing, item)
-                # A matcher group whose hooks all belonged to us is ours to drop.
                 if not pruned.get("hooks"):
                     del out[i]
                 else:
@@ -92,6 +203,25 @@ def _unmerge_lists(base: list, incoming: list) -> list:
             else:
                 del out[i]
             break
+    return out
+
+
+def unmerge_group(existing: dict, fragment_group: dict) -> dict:
+    """Prune one fragment group's hooks out of one existing group.
+
+    Only the `hooks` list is touched: `matcher` (and anything else on the
+    group) stays exactly as the user has it. Removal goes by hook identity,
+    and every matching copy is removed — an existing file may carry the same
+    hook more than once. A group left with no hooks fires nothing, so it is
+    dropped by the caller.
+    """
+    keys = {identity(h) for h in fragment_group.get("hooks", [])}
+    hooks = [h for h in existing.get("hooks", []) if identity(h) not in keys]
+    out = dict(existing)
+    if hooks:
+        out["hooks"] = hooks
+    else:
+        out.pop("hooks", None)
     return out
 
 

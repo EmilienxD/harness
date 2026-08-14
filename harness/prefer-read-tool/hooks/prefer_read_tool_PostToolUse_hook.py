@@ -3,7 +3,7 @@
 Claude Code PostToolUse hook: fires after a Bash command has run.
 
 If the command invoked `cat` or `sed`, it reminds Claude to prefer the
-built-in Read tool for file reads. It never blocks — PostToolUse fires
+built-in Read tool for file reads. It never blocks -- PostToolUse fires
 after the command already executed, so there's nothing to undo. It only
 adds context via additionalContext.
 """
@@ -20,7 +20,7 @@ CAT_SED = re.compile(r"(^|[;&|(`]+)\s*(cat|sed)\b")
 
 REMINDER = (
     "This command used cat/sed to read a file. For reading file contents, "
-    "prefer the built-in Read tool instead of shelling out to cat/sed — "
+    "prefer the built-in Read tool instead of shelling out to cat/sed -- "
     "it's faster, avoids shell-quoting/escaping issues, and has built-in "
     "support for line ranges and large files."
 )

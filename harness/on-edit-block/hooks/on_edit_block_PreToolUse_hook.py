@@ -5,9 +5,9 @@ Claude Code PreToolUse hook: on-edit-block.
 Fires before Write/Edit/MultiEdit. When the file being edited matches a
 gitignore-style pattern from an `on-edit-block.rules` file, the hook denies
 the edit until the agent has read the file(s) the rule maps to (a style
-guide, conventions doc, …) that session.
+guide, conventions doc, ...) that session.
 
-Rules file — same format as the sibling on-read-reminder tool:
+Rules file -- same format as the sibling on-read-reminder tool:
 
     # comment
     server/**/models/**   -> docs/PYTHON-GUIDE.md            one file
@@ -324,14 +324,14 @@ def build_deny_message(rel_path, missing):
 
     Contents are inlined in model order while the message stays under the
     hook output cap; files that don't fit are listed with an instruction to
-    read them instead — never a truncated dump.
+    read them instead -- never a truncated dump.
     """
     def render(injected, not_injected):
         lines = [f"Editing `{rel_path}` blocked: read the required file(s) first (see `{RULES_NAME}`)."]
         for path, _ in injected:
             lines.append(f"- `{path}` (content injected below)")
         for path, _ in not_injected:
-            lines.append(f"- `{path}` (too large to inject here — read it with the Read tool)")
+            lines.append(f"- `{path}` (too large to inject here -- read it with the Read tool)")
         lines.append("Follow them, then retry the edit. This block fires once per required file per session.")
         message = "\n".join(lines)
         for path, content in injected:
@@ -399,7 +399,7 @@ def main():
     required = matching_files(all_rules, rel_path)
 
     # Required files that don't exist on disk can never be read: don't block
-    # on them (that would deadlock the edit), but report them — per session,
+    # on them (that would deadlock the edit), but report them -- per session,
     # the same way deliveries are reported once.
     readable, unreadable = [], []
     for required_file in required:
