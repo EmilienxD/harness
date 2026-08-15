@@ -331,8 +331,8 @@ def build_deny_message(rel_path, missing):
         for path, _ in injected:
             lines.append(f"- `{path}` (content injected below)")
         for path, _ in not_injected:
-            lines.append(f"- `{path}` (too large to inject here -- read it with the Read tool)")
-        lines.append("Follow them, then retry the edit. This block fires once per required file per session.")
+            lines.append(f"- `{path}` (too large to inject here; read it with the Read tool)")
+        lines.append("Follow them, then retry the edit.")
         message = "\n".join(lines)
         for path, content in injected:
             message += f"\n\n--- {path} ---\n{content}"
