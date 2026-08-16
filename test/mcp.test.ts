@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createCliHandler } from "../src/bridge/cli.js";
+import { CORE_MCP_TOOLS, createMcpHandler } from "../src/bridge/mcp.js";
 import { DelegationCoordinator } from "../src/bridge/delegation.js";
 import { resolveLaunchConfiguration } from "../src/claude/launch.js";
 
@@ -15,7 +15,7 @@ const definitionFor = (agentName: string, declaredTools: readonly string[]) =>
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
-import { CLI_LAUNCHABLE_AGENT_TYPES, isNamedBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
+import { MCP_LAUNCHABLE_AGENT_TYPES, isNamedBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
 
@@ -81,8 +81,7 @@ function setup() {
       port: 4823,
       token: "secret",
       workspaceRoot: "C:\\repo",
-      managerCli: "C:\\repo\\.aboard\\scripts\\aboard_cli.py",
-      managerBashTimeoutMs: 3_600_000,
+      managerMcpTimeoutMs: 3_600_000,
       managerRoadmapReminderBytes: 150_000,
     }),
     terminalIdFactory: () => terminal(`terminal-${++terminalId}`),
@@ -105,6 +104,7 @@ function setup() {
     managerAgentId: MANAGER,
     shell: "powershell",
     permissionMode: "default",
+    disallowedTools: ["mcp__aboard__*"],
     // aboard.launch.claudeCommand: a wrapper that takes its own arguments.
     command: () => ["clauder", "run", "kiro", "--"],
     agentIdFactory: () => agent(`worker-${++agentId}`),
@@ -124,16 +124,31 @@ function setup() {
     spills: { write: async (spill) => spill.relativePath },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
-  const handler = createCliHandler(coordinator, { managerAgentId: MANAGER });
-  const post = (path: string, body: unknown, caller: readonly [string | undefined] = [MANAGER]) => handler({
+  const handler = createMcpHandler(coordinator, { managerAgentId: MANAGER });
+  const call = (name: string, args: unknown = {}, caller: readonly [string | undefined] = [MANAGER]) =>
+    mcpCall(handler, name, args, caller[0]);
+  const launch = (args: unknown = {}) => call("run_agent", args);
+  return { fleet, lease, host, terminals, coordinator, handler, call, launch };
+}
+
+async function mcpCall(
+  handler: ReturnType<typeof createMcpHandler>,
+  name: string,
+  args: unknown,
+  caller: string | undefined,
+): Promise<{ readonly status: number; readonly body?: unknown }> {
+  const response = await handler({
     method: "POST",
-    url: new URL(path, "http://127.0.0.1"),
-    headers: caller[0] === undefined ? {} : { "x-aboard-agent-id": caller[0] },
-    body,
+    url: new URL("/mcp", "http://127.0.0.1"),
+    headers: caller === undefined ? {} : { "x-aboard-agent-id": caller },
+    body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
     signal: new AbortController().signal,
   } as AuthenticatedBridgeRequest);
-  const launch = (args: unknown = {}) => post("/cli/agent", args);
-  return { fleet, lease, host, terminals, coordinator, handler, post, launch };
+  if (response.status !== 200) return response;
+  const envelope = response.body as { error?: unknown; result?: { structuredContent?: unknown; isError?: boolean } };
+  if (envelope.error !== undefined) return { status: 400, body: { ok: false, error: envelope.error } };
+  if (envelope.result?.isError === true) return { status: 409, body: { ok: false, error: envelope.result.structuredContent } };
+  return { status: 200, body: { ok: true, result: envelope.result?.structuredContent } };
 }
 
 function body(response: { readonly body?: unknown }): Record<string, unknown> {
@@ -175,7 +190,7 @@ test("a terminal handed to the user takes no lease and runs beside the holder", 
   assert.notEqual(holder, undefined);
   // Both are write-capable, but both
   // are conversations the user drives, so neither takes the lease nor conflicts
-  // with the one already held. An opening --prompt names the topic; it does not
+  // with the one already held. An opening prompt names the topic; it does not
   // make the session aboard's to serialize.
   const generalPurpose = await launch({ type: "general-purpose", description: "open general purpose session", interactive: true });
   assert.equal(generalPurpose.status, 200, JSON.stringify(generalPurpose.body));
@@ -232,7 +247,7 @@ test("keeps a transcript-less persisted worker paused", async () => {
 test("the todo verbs pass their arguments through and coerce in_progress with a notice", async () => {
   const calls: unknown[] = [];
   const logged: string[] = [];
-  const handler = createCliHandler(
+  const handler = createMcpHandler(
     setup().coordinator,
     {
       managerAgentId: MANAGER,
@@ -245,12 +260,9 @@ test("the todo verbs pass their arguments through and coerce in_progress with a 
       },
     },
   );
-  const post = (path: string, args: unknown) => handler({
-    method: "POST", url: new URL(path, "http://127.0.0.1"),
-    headers: { "x-aboard-agent-id": MANAGER }, body: args, signal: new AbortController().signal,
-  } as AuthenticatedBridgeRequest);
+  const call = (name: string, args: unknown) => mcpCall(handler, name, args, MANAGER);
 
-  const created = await post("/cli/todo-create", { subjects: ["First task", "Second task"], after: "top" });
+  const created = await call("todo_create", { subjects: ["First task", "Second task"], after: "top" });
   assert.equal(created.status, 200);
   // The minimum on success: the new ids, which are what a follow-up update in
   // the same turn needs. The full list is far too many tokens for the frequency.
@@ -258,7 +270,7 @@ test("the todo verbs pass their arguments through and coerce in_progress with a 
 
   // `in_progress` has exactly one sensible reading here, so it is coerced rather
   // than rejected — and the coerced call must not look clean.
-  const updated = await post("/cli/todo-update", { task: "a3f9", status: "in_progress" });
+  const updated = await call("todo_update", { task: "a3f9", status: "in_progress" });
   assert.equal(updated.status, 200);
   const result = (body(updated).result as Record<string, unknown>);
   assert.equal(result.task, "a3f9");
@@ -276,82 +288,115 @@ test("the todo verbs pass their arguments through and coerce in_progress with a 
   ]);
 });
 
-test("serves the delegation commands and nothing that fetches state the Manager is already given", async () => {
-  const { post } = setup();
-  // The roadmap arrives inline in the session-start briefing and again in the
-  // periodic reminder, so there is no command to fetch it: a round trip for
-  // context the Manager already holds is a turn spent on nothing. Fleet
-  // awareness is pushed by hooks, and the Manager never drives the UI, so there
-  // is no list or focus command either. `/cli/todo` itself is gone: full-body
-  // replacement is what let a truncated re-emission silently destroy the tail.
-  for (const path of ["/cli/get-todo", "/cli/todo", "/cli/todo-list", "/cli/list-agents", "/cli/focus-agent", "/cli/send-to-agent", "/mcp"]) {
-    assert.equal((await post(path, {})).status, 404, path);
+test("serves exactly the current delegation tools and no duplicate state-fetch surface", async () => {
+  assert.deepEqual(CORE_MCP_TOOLS.map((tool) => tool.name), [
+    "run_agent",
+    "todo_create",
+    "todo_update",
+    "start_auto_run",
+    "review_pr",
+    "release_lease",
+  ]);
+  // Roadmap and fleet state arrive through hooks, so there is deliberately no
+  // read/list/focus tool and no full-body todo replacement tool.
+  for (const absent of ["get_todo", "update_todo", "list_agents", "focus_agent", "send_to_agent"]) {
+    assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === absent), false);
   }
-  for (const path of ["/cli/agent", "/cli/todo-create", "/cli/todo-update", "/cli/auto-run", "/cli/review-pr", "/cli/release-lease"]) {
-    assert.notEqual((await post(path, {})).status, 404, path);
+});
+
+test("MCP definitions carry the complete operation guidance", () => {
+  const descriptions = Object.fromEntries(CORE_MCP_TOOLS.map((tool) => [tool.name, tool.description]));
+  for (const [name, description] of Object.entries(descriptions)) {
+    assert.equal(description.length >= 600, true, `${name} needs a self-contained description`);
+  }
+
+  assert.match(descriptions.run_agent!, /general-purpose[\s\S]*Explore[\s\S]*brainstormer[\s\S]*webresearcher/);
+  assert.match(descriptions.run_agent!, /interactive launch[\s\S]*never returns an agent result/i);
+  assert.match(descriptions.run_agent!, /single-writer lease/i);
+  assert.match(descriptions.todo_create!, /batch is atomic/i);
+  assert.match(descriptions.todo_create!, /after='top'/);
+  assert.match(descriptions.todo_create!, /creates the first one/i);
+  assert.match(descriptions.todo_update!, /stale or unknown id writes nothing/i);
+  assert.match(descriptions.todo_update!, /deleted[\s\S]*user explicitly/i);
+  assert.match(descriptions.todo_update!, /in_progress[\s\S]*coerced to pending/i);
+  assert.match(descriptions.start_auto_run!, /non-blocking/i);
+  assert.match(descriptions.start_auto_run!, /do not wait or poll/i);
+  assert.match(descriptions.start_auto_run!, /working tree is clean/i);
+  assert.match(descriptions.start_auto_run!, /ai:hitl[\s\S]*user merges/i);
+  assert.match(descriptions.review_pr!, /does not perform a review/i);
+  assert.match(descriptions.review_pr!, /no matching open pull request exists, nothing is launched/i);
+  assert.match(descriptions.release_lease!, /does not stop the holder/i);
+  assert.match(descriptions.release_lease!, /concurrent edits and repository corruption/i);
+
+  for (const tool of CORE_MCP_TOOLS) {
+    const properties = tool.inputSchema.properties as Record<string, { description?: unknown }> | undefined;
+    for (const [name, schema] of Object.entries(properties ?? {})) {
+      assert.equal(typeof schema.description, "string", `${tool.name}.${name} needs field guidance`);
+      assert.equal((schema.description as string).length >= 40, true, `${tool.name}.${name} field guidance is too terse`);
+    }
   }
 });
 
 // The token is in every aboard terminal's environment, so it cannot be what
 // separates the Manager from a worker that went looking for the script.
-test("refuses every command from any session but the Manager", async () => {
-  const { post, fleet } = setup();
+test("refuses every MCP call from any session but the Manager", async () => {
+  const { call, fleet } = setup();
   for (const caller of [[undefined], ["worker-1"]] as const) {
-    const response = await post("/cli/agent", { type: "general-purpose", description: "open general purpose session", interactive: true }, caller);
+    const response = await call("run_agent", { type: "general-purpose", description: "open general purpose session", interactive: true }, caller);
     assert.equal(response.status, 403);
     assert.match(JSON.stringify(response.body), /Only the aboard Manager session/);
   }
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
 });
 
-test("runtime-validates every command boundary and rejects unknown fields", async () => {
-  const { post } = setup();
-  for (const [path, args] of [
-    ["/cli/agent", { type: "general-purpose", prompt: "", description: "do the work" }],
-    ["/cli/agent", { type: "bogus", prompt: "work", description: "do the work" }],
-    ["/cli/agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
-    ["/cli/agent", { type: "general-purpose", description: "too short", interactive: true }],
-    ["/cli/agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
-    // A dual-mode type without --interactive is automated, and an automated
+test("runtime-validates every tool boundary and rejects unknown fields", async () => {
+  const { call } = setup();
+  for (const [name, args] of [
+    ["run_agent", { type: "general-purpose", prompt: "", description: "do the work" }],
+    ["run_agent", { type: "bogus", prompt: "work", description: "do the work" }],
+    ["run_agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
+    ["run_agent", { type: "general-purpose", description: "too short", interactive: true }],
+    ["run_agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
+    // A dual-mode type without interactive is automated, and an automated
     // launch without a prompt is the one combination with no reading.
-    ["/cli/agent", { type: "Explore", description: "map the auth flow" }],
-    ["/cli/agent", { type: "webresearcher", description: "research current API pricing" }],
-    ["/cli/agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
-    ["/cli/todo-create", { subjects: [] }],
-    ["/cli/todo-create", { subjects: ["A task"], reason: "obsolete flag" }],
-    ["/cli/todo-create", { subjects: ["A task"], after: "" }],
+    ["run_agent", { type: "Explore", description: "map the auth flow" }],
+    ["run_agent", { type: "webresearcher", description: "research current API pricing" }],
+    ["run_agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
+    ["todo_create", { subjects: [] }],
+    ["todo_create", { subjects: ["A task"], reason: "obsolete field" }],
+    ["todo_create", { subjects: ["A task"], after: "" }],
     // An update naming no change at all would spend a round trip on nothing.
-    ["/cli/todo-update", { task: "a3f9" }],
-    ["/cli/todo-update", { task: "", status: "completed" }],
-    ["/cli/todo-update", { task: "a3f9", status: "archived" }],
-    ["/cli/review-pr", { pr: 0 }],
-    ["/cli/auto-run", { spec: 12 }],
-    ["/cli/release-lease", { reason: "" }],
+    ["todo_update", { task: "a3f9" }],
+    ["todo_update", { task: "", status: "completed" }],
+    ["todo_update", { task: "a3f9", status: "archived" }],
+    ["review_pr", { pr: 0 }],
+    ["start_auto_run", { spec: 12 }],
+    ["release_lease", { reason: "" }],
   ] as const) {
-    const response = await post(path, args);
-    assert.equal(response.status, 400, `${path} ${JSON.stringify(args)}`);
+    const response = await call(name, args);
+    assert.equal(response.status, 400, `${name} ${JSON.stringify(args)}`);
     assert.equal(body(response).ok, false);
   }
 });
 
 // The extension owns the implementation loop, so the Manager must not be able to
 // reach an implementation agent directly.
-test("the agent command cannot launch an implementation agent", async () => {
+test("run_agent cannot launch an implementation agent", async () => {
   const { launch, fleet } = setup();
-  assert.deepEqual([...CLI_LAUNCHABLE_AGENT_TYPES].sort(), ["Explore", "brainstormer", "general-purpose", "webresearcher"]);
+  assert.deepEqual([...MCP_LAUNCHABLE_AGENT_TYPES].sort(), ["Explore", "brainstormer", "general-purpose", "webresearcher"]);
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
     const response = await launch({ type, prompt: "work", description: "do the work now" });
     assert.equal(response.status, 400, type);
-    assert.match(JSON.stringify(response.body), /--type must be one of/);
+    assert.match(JSON.stringify(response.body), /type must be one of/);
   }
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
 });
 
-// The implementation types left the agent command, but both delivery modes are
+// The implementation types are absent from run_agent, but both delivery modes are
 // still load-bearing for the auto-run engine, so they are exercised on the
 // coordinator.
 test("foreground delegation blocks until a result lands, background returns at once", async () => {
-  const { post, fleet, coordinator } = setup();
+  const { call, fleet, coordinator } = setup();
   let foregroundSettled = false;
   const foreground = coordinator
     .run({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine" })
@@ -364,7 +409,7 @@ test("foreground delegation blocks until a result lands, background returns at o
 
   const background = await coordinator.spawn({ type: "implementer", prompt: "Implement issue ten", description: "implement issue ten", issue: 10 });
   assert.match(JSON.stringify(background), /running/);
-  assert.match(JSON.stringify(result(await post("/cli/release-lease", { reason: "user intervention" }))), /released/);
+  assert.match(JSON.stringify(result(await call("release_lease", { reason: "user intervention" }))), /released/);
 });
 
 test("lease conflicts fail immediately with holder details", async () => {
@@ -380,7 +425,7 @@ test("lease conflicts fail immediately with holder details", async () => {
   );
 });
 
-test("a lease conflict reaches the command as a readable refusal, not a stack trace", async () => {
+test("a lease conflict reaches the MCP tool as a readable error result", async () => {
   const { launch, coordinator } = setup();
   await coordinator.spawn({ type: "general-purpose", prompt: "Hold the lease", description: "hold the write lease" });
   const refused = await launch({ type: "general-purpose", prompt: "Compete for it", description: "compete for the lease" });
@@ -423,7 +468,7 @@ test("interactive mode makes the prompt optional", async () => {
   const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true });
   assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/brainstormer\.md '--tools=Read,Grep'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/brainstormer\.md '--tools=Read,Grep' '--disallowedTools=mcp__aboard__\*'\s*$/);
 
   const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
@@ -491,7 +536,7 @@ test("builtin types run interactively: focused, hook-silent, prompt optional", a
   // positional prompt: the user types the first message.
   assert.deepEqual(host.created.at(-1)!.terminal.shown, [false]);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent Explore\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent Explore '--disallowedTools=mcp__aboard__\*'\s*$/);
 
   const withTopic = await launch({
     type: "general-purpose", prompt: "start from src/auth.ts", description: "drive the auth cleanup", interactive: true,
@@ -517,6 +562,6 @@ test("an interactive-only brainstormer is launched interactively and the correct
   const flagged = await launch({
     type: "brainstormer", description: "brainstorm the caching design", interactive: true, run_in_background: true,
   });
-  assert.match(JSON.stringify(flagged.body), /--background was ignored/);
+  assert.match(JSON.stringify(flagged.body), /run_in_background was ignored/);
   assert.match(JSON.stringify(flagged.body), /handoff/);
 });

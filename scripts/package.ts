@@ -21,6 +21,7 @@ const required = [
   "assets/scaffold/.claude/skills/update-todo/SKILL.md",
   "assets/scaffold/.claude/skills/brainstorm/SKILL.md",
   "assets/scaffold/.claude/skills/general-purpose/SKILL.md",
+  "LICENSE",
 ];
 
 const forbidden = [
@@ -36,6 +37,7 @@ const forbidden = [
   /(^|\/)manager\.json$/,
   /(^|\/)fleet\.json$/,
   /(^|\/)prompts(\/|$)/,
+  /(^|\/)aboard_cli\.py$/,
   /(^|\/)test(\/|$)/,
   /(^|\/)src(\/|$)/,
 ];

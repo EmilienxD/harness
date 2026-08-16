@@ -11,14 +11,24 @@ const assets = join(process.cwd(), "assets", "scaffold");
 async function project(): Promise<string> { return mkdtemp(join(tmpdir(), "aboard-scaffold-")); }
 async function json(path: string): Promise<Record<string, unknown>> { return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>; }
 
-test("fresh scaffold installs real assets, runtime ignore rules, hooks, and no forbidden files", async () => {
+test("fresh scaffold installs assets, hooks, and the authenticated aboard MCP registration", async () => {
   const root = await project();
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets });
   assert.match(await readFile(join(root, ".gitignore"), "utf8"), /^\.aboard\/runtime\/$/m);
-  // The Manager's delegation surface is a script, not a registered MCP server:
-  // aboard writes no `.mcp.json` at all.
-  assert.match(await readFile(join(root, ".aboard", "scripts", "aboard_cli.py"), "utf8"), /\/cli\/agent/);
-  await assert.rejects(readFile(join(root, ".mcp.json")));
+  await assert.rejects(readFile(join(root, ".aboard", "scripts", "aboard_cli.py")));
+  const mcp = await json(join(root, ".mcp.json"));
+  assert.deepEqual(mcp, {
+    mcpServers: {
+      aboard: {
+        type: "http",
+        url: "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
+        headers: {
+          Authorization: "Bearer ${ABOARD_BRIDGE_TOKEN}",
+          "X-Aboard-Agent-Id": "${ABOARD_AGENT_ID}",
+        },
+      },
+    },
+  });
   assert.equal((await json(join(root, ".claude", "settings.json"))).hooks !== undefined, true);
   await assert.rejects(readFile(join(root, "TODO.md")));
   // CLAUDE.md is the user's file: aboard's Manager persona ships as an agent
@@ -45,8 +55,8 @@ test("fresh scaffold installs real assets, runtime ignore rules, hooks, and no f
   assert.equal("todo" in report, false);
   // An existing installation upgrades the same way, with nothing to reconcile.
   assert.equal("todo" in await scaffoldProject({ projectRoot: root, assetRoot: assets }), false);
-  // A project with no local settings file does not gain one.
-  await assert.rejects(readFile(join(root, ".claude", "settings.local.json")));
+  assert.deepEqual((await json(join(root, ".claude", "settings.local.json"))).enabledMcpjsonServers, ["aboard"]);
+  assert.equal((await json(join(root, ".claude", "settings.json"))).enabledMcpjsonServers, undefined);
   assert.match(await readFile(join(root, ".gitignore"), "utf8"), /^\.claude\/settings\.local\.json$/m);
 });
 
@@ -65,14 +75,19 @@ test("rerun is idempotent and settings merges preserve unrelated configuration",
   await mkdir(join(root, ".claude"), { recursive: true });
   const customHook = { matcher: "Write", hooks: [{ type: "command", command: "custom-hook" }] };
   await writeFile(join(root, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Read"] }, autoCompact: true, hooks: { PostToolUse: [customHook] } }));
-  const userMcp = JSON.stringify({ custom: 7, mcpServers: { other: { command: "other" } } });
-  await writeFile(join(root, ".mcp.json"), userMcp);
+  await writeFile(join(root, ".claude", "settings.local.json"), JSON.stringify({ enabledMcpjsonServers: ["memory"], permissions: { allow: ["Read"] } }));
+  await writeFile(join(root, ".mcp.json"), JSON.stringify({ custom: 7, mcpServers: { other: { command: "other" } } }));
   await scaffoldProject({ projectRoot: root, assetRoot: assets });
   const firstSettings = await readFile(join(root, ".claude", "settings.json"), "utf8");
   await scaffoldProject({ projectRoot: root, assetRoot: assets });
   assert.equal(await readFile(join(root, ".claude", "settings.json"), "utf8"), firstSettings);
-  // The user's `.mcp.json` is not touched at all, formatting included.
-  assert.equal(await readFile(join(root, ".mcp.json"), "utf8"), userMcp);
+  const mcp = await json(join(root, ".mcp.json"));
+  assert.equal(mcp.custom, 7);
+  assert.deepEqual((mcp.mcpServers as Record<string, unknown>).other, { command: "other" });
+  assert.equal((mcp.mcpServers as Record<string, unknown>).aboard !== undefined, true);
+  const local = await json(join(root, ".claude", "settings.local.json"));
+  assert.deepEqual(local.enabledMcpjsonServers, ["memory", "aboard"]);
+  assert.deepEqual(local.permissions, { allow: ["Read"] });
   const settings = await json(join(root, ".claude", "settings.json"));
   assert.deepEqual(settings.permissions, { allow: ["Read"] }); assert.equal(settings.autoCompact, true);
   assert.match(JSON.stringify(settings), /custom-hook/);

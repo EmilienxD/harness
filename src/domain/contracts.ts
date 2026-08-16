@@ -18,13 +18,13 @@ export type AgentType = (typeof AGENT_TYPES)[number];
 export const LAUNCHABLE_AGENT_TYPES = AGENT_TYPES.filter((type) => type !== "manager");
 
 /**
- * The subset the Manager's `aboard agent` command may launch. `implementer` and
+ * The subset the Manager's `run_agent` MCP tool may launch. `implementer` and
  * both pr-doctors are absent on purpose: they are reachable only through the
- * auto-run engine and `aboard review`, so the loop stays the extension's
+ * auto-run engine and `review_pr`, so the loop stays the extension's
  * (`AGENTS.md`). A type the Manager cannot see is a
  * type it cannot bypass the engine with.
  */
-export const CLI_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT_TYPES.filter(
+export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT_TYPES.filter(
   (type) => type !== "implementer" && type !== "pr-doctor-afk" && type !== "pr-doctor-hitl",
 );
 

@@ -76,22 +76,11 @@ export interface BridgeTerminalEnvironment {
   readonly token: string;
   readonly workspaceRoot: string;
   /**
-   * Absolute path of the Manager's delegation CLI, exported as `ABOARD_CLI` into
-   * the Manager's terminal and nowhere else. The command is documented only in
-   * the Manager's system prompt, so this is the one session that can name it —
-   * which is the whole of the isolation an MCP server could never give, since a
-   * project-scoped server enters every session in the workspace.
+   * Hard wall-clock timeout for a foreground Manager MCP tool call. The Manager
+   * receives this as `MCP_TOOL_TIMEOUT`; worker terminals do not need it because
+   * the aboard MCP tools are denied there.
    */
-  readonly managerCli: string;
-  /**
-   * `BASH_MAX_TIMEOUT_MS` for the Manager's terminal. A foreground delegation
-   * blocks for as long as its worker runs, and the Bash tool's own ceiling is
-   * ten minutes; without this, a long foreground launch would be killed
-   * mid-flight and its result stranded. Only the ceiling is raised — the default
-   * per-command timeout is untouched, so an ordinary hung command still fails
-   * fast and the Manager opts in per call.
-   */
-  readonly managerBashTimeoutMs: number;
+  readonly managerMcpTimeoutMs: number;
   /**
    * `ABOARD_ROADMAP_REMINDER_BYTES` for the Manager's terminal, from
    * `aboard.manager.roadmapReminderBytes`. The reminder hooks read the span
@@ -289,8 +278,12 @@ export class TerminalController {
     if (request.issueNumber !== undefined) env.ABOARD_ISSUE_NUMBER = String(request.issueNumber);
     if (request.deliversResult === true) env.ABOARD_DELIVERS_RESULT = "1";
     if (request.agentType === "manager") {
-      env.ABOARD_CLI = environment.managerCli;
-      env.BASH_MAX_TIMEOUT_MS = String(environment.managerBashTimeoutMs);
+      env.MCP_TOOL_TIMEOUT = String(environment.managerMcpTimeoutMs);
+      // A foreground run_agent call intentionally waits for the worker. Disable
+      // Claude Code's automatic MCP backgrounding and idle cutoff so only the
+      // configured wall-clock timeout decides when that wait ends.
+      env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS = "0";
+      env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT = "0";
       env.ABOARD_ROADMAP_REMINDER_BYTES = String(environment.managerRoadmapReminderBytes);
     }
 

@@ -27,6 +27,13 @@ export const MANAGER_AGENT_NAME = "manager";
  */
 export const AGENT_DEFINITION_DIRECTORY = ".aboard/agents";
 
+/** Claude Code's namespaced rule for every tool served by the aboard MCP. */
+export const ABOARD_MCP_TOOLS = "mcp__aboard__*";
+
+export function declaresAboardMcpTools(tools: readonly string[]): boolean {
+  return tools.some((rule) => rule.trim().startsWith("mcp__aboard__"));
+}
+
 /** Absolute path of a definition, from the one directory that holds them. */
 export function agentDefinitionPath(workspaceRoot: string, name: string): string {
   return join(workspaceRoot, ...AGENT_DEFINITION_DIRECTORY.split("/"), `${name}.md`);

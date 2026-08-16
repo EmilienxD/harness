@@ -19,7 +19,7 @@ import { sessionIsResumable } from "./claude/sessions.js";
 import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
-import { MANAGER_CLI_SCRIPT, readScaffoldState, scaffoldProject } from "./scaffold/project.js";
+import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
 import { createVendoredSkillInstaller } from "./scaffold/vendored.js";
 import { basename, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
@@ -39,7 +39,7 @@ import {
 import { FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
-import { createCliHandler } from "./bridge/cli.js";
+import { ABOARD_MCP_TOOL_PATTERN, createMcpHandler } from "./bridge/mcp.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
 import {
   ManagerBriefings,
@@ -272,10 +272,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       return {
         ...bridgeEnvironment,
         workspaceRoot,
-        managerCli: join(workspaceRoot, ...MANAGER_CLI_SCRIPT.split("/")),
-        // A foreground delegation blocks for the worker's whole run, which is
-        // the same bound the Manager's Stop hook waits under.
-        managerBashTimeoutMs: currentConfiguration.managerStopTimeoutSeconds * 1000,
+        // A foreground MCP delegation and the Manager's Stop hook share one
+        // operator-controlled wall-clock bound.
+        managerMcpTimeoutMs: currentConfiguration.managerStopTimeoutSeconds * 1000,
         managerRoadmapReminderBytes: currentConfiguration.managerRoadmapReminderBytes,
       };
     },
@@ -340,7 +339,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // does own turns "the terminal is full of shell errors" into a refused launch
   // with a reason. Cached per command, so only the first launch pays.
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
-  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => randomUUID() as AgentId, sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   // A settled session leaves its terminal to be collected: the record the
   // fleet dropped still names an open terminal, and the next launch for the
@@ -491,6 +490,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         attended: true,
         command: currentConfiguration.claudeCommand,
         configuration,
+        disallowedTools: [ABOARD_MCP_TOOL_PATTERN],
         ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
         wrapper: wrapperLayout,
       });
@@ -554,7 +554,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createCliHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
+    handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
     persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });

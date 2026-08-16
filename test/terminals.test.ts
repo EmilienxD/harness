@@ -65,7 +65,7 @@ function setup() {
   let id = 0;
   const controller = new TerminalController({
     host,
-    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerCli: "C:\\work\\aboard\\.aboard\\scripts\\aboard_cli.py", managerBashTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
+    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerMcpTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
     sleep: async () => undefined,
@@ -85,8 +85,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
   });
 
   assert.equal(created.terminalId, "terminal-1");
-  // Exhaustive on purpose: a worker is never told the delegation command
-  // exists, so `ABOARD_CLI` must be absent here rather than merely unused.
+  // Exhaustive on purpose: MCP timeout controls belong only to the Manager.
   assert.deepEqual(host.created[0]?.options.env, {
     ABOARD_BRIDGE_PORT: "4932",
     ABOARD_BRIDGE_TOKEN: "secret",
@@ -108,15 +107,16 @@ test("creates one real-terminal record with the complete aboard environment", ()
     agentType: "pr-doctor-afk",
   }), /already has a live aboard terminal/);
 
-  // The Manager's terminal carries the delegation command, and the raised Bash
-  // ceiling a foreground launch needs to outlive the tool's ten-minute default.
+  // Foreground MCP calls keep waiting under the configured wall-clock bound
+  // rather than being auto-backgrounded or cut off as idle.
   controller.create({
     agentId: agent("manager-1"),
     sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"),
     agentType: "manager",
   });
-  assert.equal(host.created[1]?.options.env.ABOARD_CLI, "C:\\work\\aboard\\.aboard\\scripts\\aboard_cli.py");
-  assert.equal(host.created[1]?.options.env.BASH_MAX_TIMEOUT_MS, "3600000");
+  assert.equal(host.created[1]?.options.env.MCP_TOOL_TIMEOUT, "3600000");
+  assert.equal(host.created[1]?.options.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0");
+  assert.equal(host.created[1]?.options.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT, "0");
 });
 
 test("an agent's live terminal is findable without the fleet, so settlement can collect it", () => {
@@ -350,7 +350,7 @@ function setupProofs(verdict: () => Promise<unknown>) {
   let id = 0;
   const controller = new TerminalController({
     host,
-    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerCli: "C:\\work\\aboard\\.aboard\\scripts\\aboard_cli.py", managerBashTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
+    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerMcpTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
     onLifecycleEvent: (event) => events.push(event),

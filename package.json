@@ -356,7 +356,7 @@
           "default": 3600,
           "minimum": 1,
           "maximum": 86400,
-          "description": "Manager Stop hook timeout in seconds, and the Bash ceiling (BASH_MAX_TIMEOUT_MS) the Manager's terminal gets so a foreground delegation can outlive the tool's own limit."
+          "description": "Manager Stop hook and foreground aboard MCP tool timeout in seconds."
         },
         "aboard.timeouts.managerPrompt": {
           "type": "integer",
@@ -384,12 +384,13 @@
     "dist/extension.js.map",
     "assets/aboard.svg",
     "assets/scaffold/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outfile=dist/extension.js --sourcemap",
     "check": "tsc --noEmit",
-    "test:build": "esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test",
+    "test:build": "node -e \"require('node:fs').rmSync('dist/test',{recursive:true,force:true})\" && esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test",
     "test": "npm run test:build && node --test dist/test/*.test.js",
     "test:integration": "npm run test && npm run test:vscode",
     "test:vscode:build": "esbuild test/vscode/run.ts test/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/vscode-test",

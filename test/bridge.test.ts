@@ -50,10 +50,10 @@ test("binds to IPv4 loopback and authenticates every route", async (context) => 
   assert.equal(bridge.host, "127.0.0.1");
   assert.equal(persistence.metadata?.host, "127.0.0.1");
   assert.equal((await request(bridge.port, "/hook")).status, 401);
-  assert.equal((await request(bridge.port, "/cli/agent", "wrong-token")).status, 401);
-  assert.deepEqual(await request(bridge.port, "/cli/agent", bridge.token), {
+  assert.equal((await request(bridge.port, "/mcp", "wrong-token")).status, 401);
+  assert.deepEqual(await request(bridge.port, "/mcp", bridge.token), {
     status: 200,
-    body: { path: "/cli/agent" },
+    body: { path: "/mcp" },
   });
 });
 
@@ -151,7 +151,7 @@ test("logs and typed errors never disclose the bearer token", async (context) =>
   });
   context.after(() => bridge.stop());
 
-  const response = await request(bridge.port, "/cli/agent", bridge.token);
+  const response = await request(bridge.port, "/mcp", bridge.token);
   assert.equal(response.status, 500);
   assert.equal(messages.join("\n").includes(bridge.token), false);
   assert.equal(JSON.stringify(response.body).includes(bridge.token), false);

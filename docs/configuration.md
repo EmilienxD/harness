@@ -35,7 +35,7 @@ The full list, with descriptions, is in VS Code Settings under **aboard**.
 
 ## Agent tool sets are not settings
 
-Every aboard agent takes its tool set from the `tools:` field of its `.aboard/agents/<name>.md` definition — including the Manager. To widen or narrow what an agent may do, edit that file; the change applies to that agent's next launch.
+Every aboard-defined agent takes its capability set from the `tools:` field of its `.aboard/agents/<name>.md` definition — including the Manager. The Manager alone admits `mcp__aboard__*`; non-Manager launches additionally receive that namespace as an infrastructure-level denial because the project-scoped MCP registration is visible to every Claude Code session in the workspace. To widen or narrow an agent's ordinary capabilities, edit its definition; the change applies on its next launch.
 
 The definitions are deliberately **not** in `.claude/agents/`. A file there is a registered Claude Code subagent type, which every session in the workspace can see and spawn — including a `claude` you start yourself, which would then be able to run aboard's `implementer` outside aboard entirely. aboard keeps them where nothing scans and passes each aboard definition to Claude Code as launch flags instead: the body as `--system-prompt-file`, the `tools:` list as `--tools`. `Explore` is the named built-in exception and launches with `--agent Explore`. `general-purpose` is aboard's name for Claude Code's unmodified default session, so its command includes neither `--agent` nor any system-prompt flag.
 

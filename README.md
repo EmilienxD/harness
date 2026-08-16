@@ -38,7 +38,7 @@ You talk to the **Manager**. It plans, delegates, and reports — and it cannot 
 **You need:** VS Code 1.125+, Claude Code, Git, the GitHub CLI (`gh`), and [`uv`](https://docs.astral.sh/uv/).
 
 1. Install the extension (`code --install-extension aboard-*.vsix`).
-2. Open your project, click the aboard icon, hit **Initialize**. It installs agent definitions, skills, and hooks, starts a loopback-only bridge, and leaves the rest of your config exactly as it found it — including your own MCP servers, which aboard neither reads nor joins.
+2. Open your project, click the aboard icon, hit **Initialize**. It installs agent definitions, skills, and hooks, starts a loopback-only bridge, and adds the authenticated aboard MCP registration while preserving your existing servers and settings.
 3. Click **+ New Manager** and ask it something: *"What's the state of this project?"*
 
 Then try one of these in the Manager terminal:

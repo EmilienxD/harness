@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  ABOARD_MCP_TOOLS,
   AGENT_DEFINITION_DIRECTORY,
   SCAFFOLDED_AGENT_NAMES,
   WORKER_AGENT_NAMES,
@@ -124,7 +125,7 @@ test("the Manager definition declares its orchestration tool list", async () => 
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   assert.equal(parsed.value.model, "opus");
   assert.equal(parsed.value.effort, "medium");
-  assert.deepEqual(parsed.value.tools, ["Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"]);
+  assert.deepEqual(parsed.value.tools, ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"]);
   for (const forbidden of ["Agent", "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TodoWrite", "Edit", "Write"]) {
     assert.equal(parsed.value.tools.includes(forbidden), false, `${forbidden} must be absent`);
   }
@@ -137,25 +138,28 @@ test("the Manager definition declares its orchestration tool list", async () => 
   assert.equal(parseAgentDefinition(source).ok, false);
 });
 
-test("Manager guidance matches the current delegation contract", async () => {
+test("Manager guidance stays focused on judgement and continuity", async () => {
   const parsed = parseManagerAgentDefinition(await readFile(join(agentsRoot, "manager.md"), "utf8"));
   assert.equal(parsed.ok, true);
   const manager = parsed.ok ? parsed.value.prompt : "";
   for (const required of [
-    /interactive, long-lived manager agent/i,
-    /brainstormer, webresearcher, or general-purpose/i,
+    /interactive, long-lived project manager/i,
+    /human stays in control/i,
     /Do not implement, edit code/i,
-    /do not read large files/i,
-    /more than 3 queries, run an Explore type subagent/i,
-    /run a webresearcher type subagent/i,
-    /<aboard-state>/,
-    // Git Bash on Windows hangs on a heredoc body near 64 KB, so long stdin
-    // arguments go through a file written and consumed in the same call.
-    /Never write it as a heredoc/i,
-    /printf '%s' '.*' > "\$\{TMPDIR:-\/tmp\}\/aboard-prompt\.md" && uv run/,
+    /at most three direct codebase queries/i,
+    /cutoff-sensitive claims as uncertain/i,
+    /point-in-time snapshot/i,
+    /compact rather than restarting/i,
+    /Surface blockers plainly/i,
   ]) {
     assert.match(manager, required);
   }
+  assert.equal(manager.length < 5_000, true, "the Manager prompt must stay compact");
+  assert.doesNotMatch(
+    manager,
+    /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr|release_lease|MCP tool/i,
+    "MCP operation guidance belongs in tool definitions, not the system prompt",
+  );
 });
 
 test("an agent definition may declare an effort level, and an unknown one is refused", () => {
@@ -191,30 +195,25 @@ test("rejects definitions outside the aboard catalogue or without required front
   assert.equal(parseAgentDefinition("---\nname: reviewer\ndescription: no\ntools: Read\nmodel: future\n---\nNo.").ok, false);
 });
 
-test("only the Manager's definition documents the delegation command", async () => {
-  // The delegation surface is a command, not a tool, so no definition grants it
-  // and no launch has to deny it. Isolation is that the command is described in
-  // exactly one system prompt, `ABOARD_CLI` is exported into exactly one
-  // terminal, and the bridge answers exactly one agent id (`bridge/cli.ts`).
+test("only the Manager's definition admits the aboard MCP tools", async () => {
   const manager = await readFile(join(agentsRoot, "manager.md"), "utf8");
   const parsedManager = parseManagerAgentDefinition(manager);
   assert.equal(parsedManager.ok, true);
-  assert.match(manager, /\$ABOARD_CLI/);
+  assert.equal(parsedManager.ok && parsedManager.value.tools.includes(ABOARD_MCP_TOOLS), true);
+  assert.doesNotMatch(parsedManager.ok ? parsedManager.value.prompt : "", /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr|release_lease/i);
 
   for (const name of WORKER_AGENT_NAMES) {
     const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");
     const parsed = parseAgentDefinition(source);
     assert.equal(parsed.ok, true, `${name} must parse`);
-    assert.equal(source.includes("ABOARD_CLI"), false, `${name} must not be told the delegation command exists`);
-    // The MCP surface is gone; a definition that still asked for it would be
-    // declaring a tool no session has.
+    assert.equal(source.includes("ABOARD_CLI"), false);
     assert.equal(
       parsed.ok && parsed.value.tools.some((rule) => rule.includes("mcp__aboard")),
       false,
-      `${name} must not declare a retired MCP tool`,
+      `${name} must not admit Manager orchestration tools`,
     );
   }
-  assert.equal(parsedManager.ok && parsedManager.value.tools.some((rule) => rule.includes("mcp__aboard")), false);
 
+  assert.equal(ABOARD_MCP_TOOLS, "mcp__aboard__*");
   assert.equal(AGENT_DEFINITION_DIRECTORY, ".aboard/agents");
 });

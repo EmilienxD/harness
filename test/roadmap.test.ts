@@ -37,7 +37,7 @@ test("parsing keeps order, completion, and every line the user wrote", () => {
 
   // Round trip: an edit that changes one task leaves the heading, the blank
   // lines, and the trailing note exactly where they were. The user owns this
-  // issue, so a note they added must survive an `aboard todo` call.
+  // issue, so a note they added must survive a roadmap tool call.
   const edited = updateTask(BODY, { task: ids(BODY)[1] as string, status: "completed" });
   assert.ok(edited.ok);
   assert.equal(edited.body, BODY.replace("- [ ] Pace the reminders", "- [x] Pace the reminders"));

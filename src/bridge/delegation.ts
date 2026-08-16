@@ -75,6 +75,8 @@ export interface DelegationCoordinatorOptions {
   readonly managerAgentId: AgentId;
   readonly shell: ShellKind;
   readonly permissionMode: WorkerPermissionMode;
+  /** Infrastructure-level denials applied to every delegated launch and resume. */
+  readonly disallowedTools?: readonly string[];
   /**
    * `aboard.launch.claudeCommand` tokens. Read at launch time so a settings
    * change applies to the next agent without reloading the window.
@@ -194,6 +196,7 @@ export class DelegationCoordinator {
       // host that waited on its result is gone, so the terminal is theirs.
       attended: true,
       configuration,
+      disallowedTools: this.options.disallowedTools,
       ...this.#effort(),
       ...this.#command(),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
@@ -308,6 +311,7 @@ export class DelegationCoordinator {
       attended: interactive,
       configuration,
       prompt,
+      disallowedTools: this.options.disallowedTools,
       ...this.#command(),
       ...this.#effort(),
       maxInlinePromptChars: this.options.maxInlinePromptChars,

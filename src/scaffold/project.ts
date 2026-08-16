@@ -77,13 +77,15 @@ interface Manifest {
 
 const MANIFEST_PATH = ".aboard/scaffold.json";
 const HOOK_MARKER = ".claude/hooks/aboard_hook.py";
-
-/**
- * The Manager's delegation CLI, workspace-relative with POSIX separators. The
- * terminal controller exports its absolute path as `ABOARD_CLI` into the Manager's
- * terminal alone.
- */
-export const MANAGER_CLI_SCRIPT = ".aboard/scripts/aboard_cli.py";
+const MCP_SERVER_NAME = "aboard";
+const MCP_REGISTRATION = {
+  type: "http",
+  url: "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
+  headers: {
+    Authorization: "Bearer ${ABOARD_BRIDGE_TOKEN}",
+    "X-Aboard-Agent-Id": "${ABOARD_AGENT_ID}",
+  },
+};
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -181,6 +183,16 @@ function mergeHooks(settings: Record<string, unknown>, registration: Record<stri
 }
 
 /**
+ * Project MCP approval belongs in untracked local settings. Merge aboard into
+ * the user's list rather than replacing approvals for their own servers.
+ */
+function mergeEnabledMcpServers(settings: Record<string, unknown>): Record<string, unknown> {
+  const current = Array.isArray(settings.enabledMcpjsonServers) ? settings.enabledMcpjsonServers : [];
+  if (current.includes(MCP_SERVER_NAME)) return settings;
+  return { ...settings, enabledMcpjsonServers: [...current, MCP_SERVER_NAME] };
+}
+
+/**
  * A damaged manifest degrades to "nothing installed" rather than failing the
  * scaffold: the manifest is only an upgrade hint, and every asset still falls
  * back to the preserve-on-local-edit path when it is missing.
@@ -266,12 +278,18 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   const settings = await readObject(settingsPath);
   await writeJson(settingsPath, mergeHooks(settings, { hooks: registration }));
 
-  // `.claude/settings.local.json` and the user's own `.mcp.json` are never
-  // touched: aboard no longer writes an MCP registration, so it has nothing to
-  // put in either and nothing to take back out of them.
-  // `.claude/settings.local.json` is machine-local by construction — Claude Code
-  // writes per-machine permission decisions into it — so it stays ignored even
-  // though aboard no longer has an MCP approval to put there.
+  const localSettingsPath = join(projectRoot, ".claude", "settings.local.json");
+  await writeJson(localSettingsPath, mergeEnabledMcpServers(await readObject(localSettingsPath)));
+
+  const mcpPath = join(projectRoot, ".mcp.json");
+  const mcp = await readObject(mcpPath);
+  const servers = typeof mcp.mcpServers === "object" && mcp.mcpServers !== null && !Array.isArray(mcp.mcpServers)
+    ? mcp.mcpServers as Record<string, unknown>
+    : {};
+  await writeJson(mcpPath, { ...mcp, mcpServers: { ...servers, [MCP_SERVER_NAME]: MCP_REGISTRATION } });
+
+  // MCP approval is machine-local and must not be committed. Claude Code also
+  // writes per-machine permission decisions to this file.
   const ignorePath = join(projectRoot, ".gitignore");
   const ignore = await exists(ignorePath) ? await readFile(ignorePath, "utf8") : "";
   const present = new Set(ignore.split(/\r?\n/u).map((line) => line.trim()));
