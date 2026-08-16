@@ -206,8 +206,10 @@ const REVIEW_PR_DESCRIPTION =
 
   "Omit pr to select the latest open pull request, " +
   "or provide a positive pull-request number to target one explicitly. " +
-  "The optional focus text names what the user wants to inspect " +
-  "and becomes the handoff topic when a fallback session is required. " +
+  "The optional focus text names what the user wants to inspect. " +
+  "It steers the first pass only when aboard must create a fallback session; " +
+  "an existing session is already loaded and cannot be steered, " +
+  "so the focus is returned as unusedFocus instead of being applied. " +
   "If the owning implementer or pull-request doctor is live, its terminal is focused; " +
   "if its recorded session is closed, it is resumed with its original restrictions. " +
   "If ownership is unavailable after a restart, " +
@@ -322,7 +324,8 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
           minLength: 1,
           description:
             "Optional concise topic naming what the user wants to inspect or discuss. " +
-            "Used as the opening handoff context when aboard must create a fallback interactive session.",
+            "Used as the opening handoff context when aboard must create a fallback interactive session; " +
+            "otherwise it is returned as unusedFocus and the user retypes it in the terminal.",
         },
       },
       additionalProperties: false,

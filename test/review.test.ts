@@ -87,6 +87,24 @@ test("an unknown owner falls back to a fresh pr-doctor-hitl and says so", async 
   assert.deepEqual(origins, ["manager"]);
 });
 
+test("a focus that lands on an existing session is reported unused, never silently dropped", async () => {
+  // Neither branch can apply it — showing a terminal sends nothing and
+  // `--resume` re-passes the original flags with no new prompt — and the caller
+  // cannot predict which branch it gets, so the discard has to be visible.
+  const live = setup({ latest: 42, owner: owner() });
+  assert.deepEqual(await live.coordinator.review({ focus: "boundary validation" }), {
+    action: "focused", prNumber: 42, agentId: "agent-1", type: "implementer", unusedFocus: "boundary validation",
+  });
+  assert.equal(live.launched.length, 0);
+
+  const closed = setup({ latest: 42, owner: owner(), live: false });
+  assert.deepEqual(await closed.coordinator.review({ focus: "boundary validation" }), {
+    action: "resumed", prNumber: 42, agentId: "agent-1", type: "implementer", unusedFocus: "boundary validation",
+  });
+  assert.equal(closed.resumed.length, 1);
+  assert.equal(closed.launched.length, 0);
+});
+
 test("an explicit pull request number bypasses the latest-open lookup", async () => {
   const { coordinator } = setup({ owner: owner({ prNumber: 99 }) });
   assert.equal((await coordinator.review({ pr: 99 })).action, "focused");

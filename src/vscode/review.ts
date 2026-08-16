@@ -28,8 +28,15 @@ export function registerReviewCommand(host: ReviewCommandHost, reviews: ReviewCo
 function describe(outcome: ReviewOutcome): string {
   switch (outcome.action) {
     case "none": return "No pull request is open, so there is no session to reopen.";
-    case "focused": return `Focused the ${outcome.type} terminal for PR #${outcome.prNumber}.`;
-    case "resumed": return `Resumed the ${outcome.type} session for PR #${outcome.prNumber}.`;
+    case "focused": return `Focused the ${outcome.type} terminal for PR #${outcome.prNumber}.${unusedFocusNote(outcome.unusedFocus)}`;
+    case "resumed": return `Resumed the ${outcome.type} session for PR #${outcome.prNumber}.${unusedFocusNote(outcome.unusedFocus)}`;
     case "launched": return outcome.notice;
   }
+}
+
+/** A focus only steers a fallback session; anywhere else it is reported, never silently dropped. */
+function unusedFocusNote(focus: string | undefined): string {
+  return focus === undefined
+    ? ""
+    : " The focus text was not applied — that session is already loaded; type it in the terminal.";
 }

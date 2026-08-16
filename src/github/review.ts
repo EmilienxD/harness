@@ -11,8 +11,8 @@ export interface ReviewRequest {
 
 export type ReviewOutcome =
   | { readonly action: "none"; readonly reason: "no-open-pull-request" }
-  | { readonly action: "focused"; readonly prNumber: number; readonly agentId: string; readonly type: string }
-  | { readonly action: "resumed"; readonly prNumber: number; readonly agentId: string; readonly type: string }
+  | { readonly action: "focused"; readonly prNumber: number; readonly agentId: string; readonly type: string; readonly unusedFocus?: string }
+  | { readonly action: "resumed"; readonly prNumber: number; readonly agentId: string; readonly type: string; readonly unusedFocus?: string }
   | { readonly action: "launched"; readonly prNumber: number; readonly agentId: string; readonly notice: string };
 
 /** Looks up who owns a pull request; the auto-run engine is the only source. */
@@ -49,14 +49,20 @@ export class ReviewCoordinator {
 
     const owner = this.ownership.owner(prNumber);
     if (owner !== undefined) {
+      // A focus has nowhere to go on these two branches: showing a live terminal
+      // sends nothing, and `--resume` re-passes the original flags with no new
+      // prompt. Report it back rather than dropping it silently — the caller
+      // cannot predict which branch it lands on, so an unreported discard makes
+      // the parameter look honored when it was not.
+      const unused = request.focus === undefined ? {} : { unusedFocus: request.focus };
       if (this.terminals.focus(owner.terminalId)) {
-        return { action: "focused", prNumber, agentId: owner.agentId, type: owner.type };
+        return { action: "focused", prNumber, agentId: owner.agentId, type: owner.type, ...unused };
       }
       // Resume is safe here: the agent has already run, so a transcript exists.
       // The closed-before-first-message case that breaks `--resume` cannot apply
       // to a worker that produced a commit.
       await this.terminals.resume(owner);
-      return { action: "resumed", prNumber, agentId: owner.agentId, type: owner.type };
+      return { action: "resumed", prNumber, agentId: owner.agentId, type: owner.type, ...unused };
     }
 
     // No record of the owning session — the extension restarted, or the pull

@@ -471,7 +471,8 @@ export interface InvokingTerminalKiller {
 /** The extension-owned actions `/auto` and `/review-pr` trigger. */
 export interface ManagerCommandActions {
   startAutoRun(): Promise<unknown>;
-  reviewPullRequest(): Promise<unknown>;
+  /** `focus` is the user's trailing text: what they want the session to look at. */
+  reviewPullRequest(focus?: string): Promise<unknown>;
 }
 
 export class ManagerPromptService {
@@ -570,7 +571,9 @@ export class ManagerPromptService {
     }
     let outcome: unknown;
     try {
-      outcome = action.type === "auto" ? await this.actions.startAutoRun() : await this.actions.reviewPullRequest();
+      outcome = action.type === "auto"
+        ? await this.actions.startAutoRun()
+        : await this.actions.reviewPullRequest(action.focus);
     } catch (error) {
       return { intercepted: true, message: `aboard could not run /${action.command}: ${error instanceof Error ? error.message : "the action failed"}.` };
     }
@@ -599,17 +602,30 @@ function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unkno
   }
   switch (value.action) {
     case "none": return "No pull request is open, so nothing was launched.";
-    case "focused": return `Focused the ${String(value.type)} terminal for PR #${String(value.prNumber)}.`;
-    case "resumed": return `Resumed the ${String(value.type)} session for PR #${String(value.prNumber)}.`;
+    case "focused": return `Focused the ${String(value.type)} terminal for PR #${String(value.prNumber)}.${unusedFocusNote(value.unusedFocus)}`;
+    case "resumed": return `Resumed the ${String(value.type)} session for PR #${String(value.prNumber)}.${unusedFocusNote(value.unusedFocus)}`;
     case "launched": return String(value.notice ?? `Launched a reviewer for PR #${String(value.prNumber)}.`);
     default: return "Reopened the session for the open pull request.";
   }
+}
+
+/**
+ * A focus only steers a fallback doctor's first pass. When the owning session
+ * already exists there is nothing to steer, and saying so is what keeps
+ * `/review-pr <text>` from looking like it was honored.
+ */
+function unusedFocusNote(focus: unknown): string {
+  return typeof focus === "string" && focus.length > 0
+    ? " The focus you typed was not applied — that session is already loaded; type it in the terminal."
+    : "";
 }
 
 interface ParsedActionCommand {
   readonly type: "auto" | "review-pr";
   readonly command: string;
   readonly ignoredArguments: boolean;
+  /** `/review-pr` only: the trailing text, forwarded as the review focus. */
+  readonly focus?: string;
 }
 
 interface ParsedDoneCommand {
@@ -623,15 +639,22 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
 }
 
 /**
- * Like `/brainstorm` and `/general-purpose`, these take no arguments. Trailing text is
- * matched and dropped rather than forwarded: leaking `/auto now please` into the
- * Manager's context is worse than declining to pass it on.
+ * Like `/brainstorm` and `/general-purpose`, `/auto` takes no arguments, so trailing text
+ * is matched and dropped rather than forwarded: leaking `/auto now please` into
+ * the Manager's context is worse than declining to pass it on. `/review-pr` is
+ * the exception, because the action behind it has a real parameter — its
+ * trailing text becomes `focus`, which steers a fallback doctor's first pass
+ * over the diff.
  */
 function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   const match = /^\s*\/(auto|review-pr)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
   const command = match[1] as "auto" | "review-pr";
-  return { type: command, command, ignoredArguments: (match[2]?.trim() ?? "").length > 0 };
+  const trailing = match[2]?.trim() ?? "";
+  if (command === "review-pr") {
+    return { type: command, command, ignoredArguments: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
+  }
+  return { type: command, command, ignoredArguments: trailing.length > 0 };
 }
 
 /**

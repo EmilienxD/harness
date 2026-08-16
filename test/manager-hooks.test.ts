@@ -474,6 +474,38 @@ test("/auto and /review-pr are performed by the extension, reported to the user,
   assert.match(String(drained.additionalContext), /you ran \/review-pr: Focused the implementer terminal/);
 });
 
+test("/review-pr forwards its trailing text as the review focus, and reports it when unused", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const focuses: (string | undefined)[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("an extension action must not launch an agent") },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    {
+      startAutoRun: async () => assert.fail("no auto-run"),
+      reviewPullRequest: async (focus) => {
+        focuses.push(focus);
+        return focus === undefined
+          ? { action: "launched", prNumber: 56, notice: "Launched a fresh doctor for PR #56." }
+          : { action: "focused", prNumber: 56, type: "implementer", unusedFocus: focus };
+      },
+    },
+  );
+
+  // Unlike /auto, this action has a real parameter, so the text is forwarded
+  // rather than matched and dropped.
+  const withFocus = await prompts.handle(managerId, "/review-pr the boundary validation");
+  assert.deepEqual(focuses, ["the boundary validation"]);
+  assert.equal(withFocus.intercepted, true);
+  assert.match(String(withFocus.message), /Focused the implementer terminal for PR #56\./);
+  assert.match(String(withFocus.message), /focus you typed was not applied/);
+  assert.doesNotMatch(String(withFocus.message), /takes no arguments/);
+
+  const bare = await prompts.handle(managerId, "/review-pr");
+  assert.deepEqual(focuses, ["the boundary validation", undefined]);
+  assert.equal(bare.message, "Launched a fresh doctor for PR #56.");
+});
+
 test("an extension action reports a refusal verbatim and drops trailing arguments", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const prompts = new ManagerPromptService(
@@ -543,9 +575,11 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
   for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
-    // No argument-hint: these commands are argumentless, and hinting otherwise
-    // invites a topic the launch deliberately does not forward.
-    assert.doesNotMatch(skill, /argument-hint:/);
+    // These commands are argumentless, and hinting otherwise invites a topic the
+    // launch deliberately does not forward. `/review-pr` is the exception: its
+    // trailing text is forwarded as the review focus, so it must advertise one.
+    if (name === "review-pr") assert.match(skill, /argument-hint:/);
+    else assert.doesNotMatch(skill, /argument-hint:/);
     // The body is reachable only when the hook failed to intercept, so it must
     // read as an error notice: an empty body leaves the model to invent a
     // response, and any instruction resembling the command would have it

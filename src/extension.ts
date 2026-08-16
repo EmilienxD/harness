@@ -567,7 +567,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
     startAutoRun: () => autoRun.start(),
-    reviewPullRequest: () => reviews.review(),
+    reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
   }, terminals, roadmapReminders);
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
