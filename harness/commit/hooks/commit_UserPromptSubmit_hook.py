@@ -987,7 +987,7 @@ def generate_commit_message(repo_root, targets, staged, transcript_path, guidanc
     }
     model = urllib.parse.quote(AI_MODEL, safe="")
     request = urllib.request.Request(
-        f"{GEMINI_BASE_URL}/models/{model}:generateContent",
+        f"{GEMINI_BASE_URL}/v1beta/models/{model}:generateContent",
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
