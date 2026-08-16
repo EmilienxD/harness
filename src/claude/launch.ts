@@ -509,8 +509,12 @@ interface CommonPlanRequest {
    * Whether the launch lives under the user's eye — the Manager itself, a
    * type that can only ever be handed over, or an explicit interactive handoff.
    * Unattended launches (automated workers left to run) are the case bypass
-   * exists for; see `resolvePermissionMode`. Absent means "derive from the
-   * type", which the launch sites that know better override.
+   * exists for; see `resolvePermissionMode`. It also gates
+   * `--disable-slash-commands` (see `slashCommandArguments`): an unattended
+   * launch's first message is the only one it will ever get and nobody is
+   * watching to catch a hijack, while an attended terminal is exactly where the
+   * user types real slash commands. Absent means "derive from the type", which
+   * the launch sites that know better override.
    */
   readonly attended?: boolean | undefined;
   readonly model?: string | undefined;
@@ -626,6 +630,23 @@ function effortArguments(effort: EffortLevel | undefined): readonly string[] {
     );
   }
   return ["--effort", effort];
+}
+
+/**
+ * An unattended launch's first message is attacker-reachable text — an issue
+ * body, a PR diff, a roadmap subject — delivered as the only message the
+ * session will ever get, with no human present to notice a hijack. Claude
+ * Code parses that message for slash commands before aboard's prompt is "just
+ * text" to it, so a prompt that happens to open with `/clear` or the name of
+ * any project skill fires that command instead of being read as a task.
+ * `--disable-slash-commands` turns the parser off for the whole session,
+ * which is exactly what an unattended launch needs and an attended one must
+ * never get: the user types real slash commands into those terminals
+ * (`/compact`, `/auto`, aboard's own skills), and disabling the parser would
+ * silently break that.
+ */
+function slashCommandArguments(attended: boolean): readonly string[] {
+  return attended ? [] : ["--disable-slash-commands"];
 }
 
 function normalizePrompt(
@@ -759,6 +780,7 @@ function commonPreconditions(
   readonly runtimeDirectory: string;
   readonly wrapper: SessionWrapperLayout | undefined;
   readonly permissionMode: WorkerPermissionMode;
+  readonly attended: boolean;
 } {
   if (!AGENT_ID_PATTERN.test(request.agentId)) {
     throw new LaunchPlanError(
@@ -816,6 +838,7 @@ function commonPreconditions(
     runtimeDirectory: request.runtimeDirectory ?? DEFAULT_RUNTIME_DIRECTORY,
     wrapper,
     permissionMode: resolvePermissionMode(request.permissionMode, { attended, agentType: request.agentType }),
+    attended,
   };
 }
 
@@ -834,7 +857,7 @@ function wrapCommand(
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { command, threshold, runtimeDirectory, wrapper, permissionMode } = commonPreconditions(request, request.configuration);
+  const { command, threshold, runtimeDirectory, wrapper, permissionMode, attended } = commonPreconditions(request, request.configuration);
   const { agentType, configuration } = request;
 
   if (agentType === "manager") {
@@ -914,6 +937,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
     ...permissionArguments(permissionMode),
+    ...slashCommandArguments(attended),
   ];
 
   const planFor = (promptThreshold: number): { readonly plan: PromptPlan; readonly args: string[]; readonly commandLine: string } => {
@@ -979,7 +1003,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
  * the Manager that would mean resuming an orchestrator that can implement.
  */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, permissionMode } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
+  const { command, wrapper, runtimeDirectory, permissionMode, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
   if (
     request.configuration.shape !== "agent-defined" ||
     request.configuration.agentName !== MANAGER_AGENT_NAME
@@ -998,6 +1022,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     ...modelArguments(request.configuration.declaredModel ?? request.model),
     ...effortArguments(request.configuration.declaredEffort ?? request.effort),
     ...permissionArguments(permissionMode),
+    ...slashCommandArguments(attended),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
   return {
@@ -1028,7 +1053,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
  * actually produces.
  */
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, permissionMode } = commonPreconditions(request, request.configuration);
+  const { command, wrapper, runtimeDirectory, permissionMode, attended } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const definition = configuration.shape === "agent-defined"
     ? definitionArguments(configuration, request.agentId, runtimeDirectory)
@@ -1046,6 +1071,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
     ...permissionArguments(permissionMode),
+    ...slashCommandArguments(attended),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
   const capability = launchWriteCapability(request.agentType, configuration);
