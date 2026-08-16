@@ -3,14 +3,15 @@ import { access, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/p
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 /**
- * User-owned skills live upstream in the `harness` repository. aboard ships no
+ * User-owned tools live upstream in the `harness` repository. aboard ships no
  * copy of them: shipped copies drift from upstream silently and turn a user file
  * into an extension asset. Each is installed instead by running its upstream
- * install command in the project. A skill whose command is missing or fails is
+ * install command in the project. A tool whose command is missing or fails is
  * reported, never authored here.
  */
-export interface VendoredSkill {
+export interface VendoredTool {
   readonly name: string;
+  readonly kind: "skill" | "hooks";
   readonly command: string | null;
 }
 
@@ -22,23 +23,24 @@ export interface VendoredSkill {
  */
 const HARNESS_INSTALL = "uvx --from git+https://github.com/EmilienxD/harness harness install";
 
-export const VENDORED_SKILLS: readonly VendoredSkill[] = [
+export const VENDORED_TOOLS: readonly VendoredTool[] = [
   // Every issue skill is part of the one upstream `issues` tool, which installs
   // all seven together, so they name one command; a repeated command runs once
   // per scaffold. Listing each by name is what keeps its directory recognized as
   // the user's, both here and in the packaging exclusions.
-  { name: "map-issues", command: `${HARNESS_INSTALL} issues` },
-  { name: "draft-issues", command: `${HARNESS_INSTALL} issues` },
-  { name: "publish-issues", command: `${HARNESS_INSTALL} issues` },
-  { name: "draft-issue", command: `${HARNESS_INSTALL} issues` },
-  { name: "publish-issue", command: `${HARNESS_INSTALL} issues` },
-  { name: "to-spec", command: `${HARNESS_INSTALL} issues` },
-  { name: "to-spec-draft-issue", command: `${HARNESS_INSTALL} issues` },
-  { name: "grill-me", command: `${HARNESS_INSTALL} grill-me` },
-  { name: "commit", command: `${HARNESS_INSTALL} commit` },
+  { name: "map-issues", kind: "skill", command: `${HARNESS_INSTALL} issues` },
+  { name: "draft-issues", kind: "skill", command: `${HARNESS_INSTALL} issues` },
+  { name: "publish-issues", kind: "skill", command: `${HARNESS_INSTALL} issues` },
+  { name: "draft-issue", kind: "skill", command: `${HARNESS_INSTALL} issues` },
+  { name: "publish-issue", kind: "skill", command: `${HARNESS_INSTALL} issues` },
+  { name: "to-spec", kind: "skill", command: `${HARNESS_INSTALL} issues` },
+  { name: "to-spec-draft-issue", kind: "skill", command: `${HARNESS_INSTALL} issues` },
+  { name: "grill-me", kind: "skill", command: `${HARNESS_INSTALL} grill-me` },
+  { name: "commit", kind: "skill", command: `${HARNESS_INSTALL} commit` },
+  { name: "usage-limit-wait", kind: "hooks", command: `${HARNESS_INSTALL} usage-limit-wait` },
 ];
 
-export interface VendoredSkillInstaller {
+export interface VendoredToolInstaller {
   run(command: string, cwd: string): Promise<void>;
 }
 
@@ -53,8 +55,8 @@ export interface ScaffoldOptions {
   readonly projectRoot: string;
   readonly assetRoot: string;
   readonly autoCompactEnabled?: boolean;
-  readonly vendoredSkills?: readonly VendoredSkill[];
-  readonly installer?: VendoredSkillInstaller;
+  readonly vendoredTools?: readonly VendoredTool[];
+  readonly installer?: VendoredToolInstaller;
 }
 
 export interface ScaffoldReport {
@@ -124,20 +126,20 @@ async function files(root: string): Promise<readonly string[]> {
 
 function portable(path: string): string { return path.split(sep).join("/"); }
 
-function isVendored(path: string, skills: readonly VendoredSkill[]): boolean {
+function isVendoredSkill(path: string, tools: readonly VendoredTool[]): boolean {
   const match = /^\.claude\/skills\/([^/]+)\//.exec(path);
-  return match !== null && skills.some((skill) => skill.name === match[1]);
+  return match !== null && tools.some((tool) => tool.kind === "skill" && tool.name === match[1]);
 }
 
 /**
- * Vendored skills are installed by command, so aboard neither writes nor owns
+ * Vendored tools are installed by command, so aboard neither writes nor owns
  * their files. Any that a shipped-copy build left behind is handed back to the
  * user: dropped from the manifest, left on disk for the install command to
  * replace.
  */
-async function installVendoredSkills(
-  skills: readonly VendoredSkill[],
-  installer: VendoredSkillInstaller | undefined,
+async function installVendoredTools(
+  tools: readonly VendoredTool[],
+  installer: VendoredToolInstaller | undefined,
   projectRoot: string,
   installed: string[],
   warnings: string[],
@@ -147,16 +149,16 @@ async function installVendoredSkills(
   // installer is not invoked once per skill, while every skill still reports its
   // own result under its own name.
   const outcomes = new Map<string, string | null>();
-  for (const skill of skills) {
-    if (skill.command === null) { warnings.push(`No install command configured for vendored skill: ${skill.name}`); continue; }
-    if (installer === undefined) { warnings.push(`Cannot install vendored skill ${skill.name}: no installer available`); continue; }
-    if (!outcomes.has(skill.command)) {
-      try { await installer.run(skill.command, projectRoot); outcomes.set(skill.command, null); }
-      catch (error) { outcomes.set(skill.command, error instanceof Error ? error.message : "install command failed"); }
+  for (const tool of tools) {
+    if (tool.command === null) { warnings.push(`No install command configured for vendored tool: ${tool.name}`); continue; }
+    if (installer === undefined) { warnings.push(`Cannot install vendored tool ${tool.name}: no installer available`); continue; }
+    if (!outcomes.has(tool.command)) {
+      try { await installer.run(tool.command, projectRoot); outcomes.set(tool.command, null); }
+      catch (error) { outcomes.set(tool.command, error instanceof Error ? error.message : "install command failed"); }
     }
-    const failure = outcomes.get(skill.command) ?? null;
-    if (failure === null) installed.push(skill.name);
-    else warnings.push(`Failed to install vendored skill ${skill.name}: ${failure}`);
+    const failure = outcomes.get(tool.command) ?? null;
+    if (failure === null) installed.push(tool.name);
+    else warnings.push(`Failed to install vendored tool ${tool.name}: ${failure}`);
   }
 }
 
@@ -226,7 +228,7 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   const manifestPath = join(projectRoot, MANIFEST_PATH);
   const previous = await loadManifest(manifestPath);
   const next: Record<string, InstalledAsset> = { ...previous.assets };
-  const vendoredSkills = options.vendoredSkills ?? VENDORED_SKILLS;
+  const vendoredTools = options.vendoredTools ?? VENDORED_TOOLS;
 
   const sourceFiles = await files(assetRoot);
   const sourcePaths = new Set(sourceFiles.map((path) => portable(relative(assetRoot, path))));
@@ -263,7 +265,7 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   for (const [path, asset] of Object.entries(previous.assets)) {
     if (sourcePaths.has(path)) continue;
     delete next[path];
-    if (isVendored(path, vendoredSkills)) continue;
+    if (isVendoredSkill(path, vendoredTools)) continue;
     const destination = join(projectRoot, ...path.split("/"));
     if (!await exists(destination)) continue;
     if (hash(await readFile(destination, "utf8")) === asset.sourceHash) {
@@ -302,7 +304,7 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   // and resume points `--system-prompt-file` at.
   await Promise.all(["prompts", "events", "agents"].map((directory) => mkdir(join(projectRoot, ".aboard", "runtime", directory), { recursive: true })));
   await writeJson(manifestPath, { version: 1, assets: next });
-  await installVendoredSkills(vendoredSkills, options.installer, projectRoot, installed, warnings);
+  await installVendoredTools(vendoredTools, options.installer, projectRoot, installed, warnings);
   if (options.autoCompactEnabled === false || settings.autoCompact === false) warnings.push("Claude Code autoCompact is disabled; aboard workers may exhaust their context window.");
   return { created, updated, removed, preserved, installed, warnings };
 }

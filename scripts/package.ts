@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { createVSIX, listFiles, PackageManager } from "@vscode/vsce";
 
-import { VENDORED_SKILLS } from "../src/scaffold/project.js";
+import { VENDORED_TOOLS } from "../src/scaffold/project.js";
 
 const root = process.cwd();
 const output = join(root, "dist", "aboard-0.0.0.vsix");
@@ -27,7 +27,9 @@ const required = [
 const forbidden = [
   // User-owned skills are installed from upstream by command; a copy in the VSIX
   // would resurrect the drift that removing them was meant to end.
-  ...VENDORED_SKILLS.map((skill) => new RegExp(`(^|/)\\.claude/skills/${skill.name}(/|$)`)),
+  ...VENDORED_TOOLS
+    .filter((tool) => tool.kind === "skill")
+    .map((tool) => new RegExp(`(^|/)\\.claude/skills/${tool.name}(/|$)`)),
   // Runtime state belongs to a live project and must never ship, but
   // `assets/scaffold/.aboard/scripts/` is extension-owned and legitimately
   // packaged (it is installed by the scaffolder like every other asset).

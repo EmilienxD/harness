@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { readScaffoldState, scaffoldProject, VENDORED_SKILLS } from "../src/scaffold/project.js";
+import { readScaffoldState, scaffoldProject, VENDORED_TOOLS } from "../src/scaffold/project.js";
 
 const assets = join(process.cwd(), "assets", "scaffold");
 
@@ -43,9 +43,9 @@ test("fresh scaffold installs assets, hooks, and the authenticated aboard MCP re
   for (const name of ["general-purpose", "Explore", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
   // User-owned skills are never shipped as assets; without an installer every
   // one is reported instead of being written here.
-  for (const skill of VENDORED_SKILLS) {
-    await assert.rejects(readFile(join(root, ".claude", "skills", skill.name, "SKILL.md")));
-    assert.ok(report.warnings.includes(`Cannot install vendored skill ${skill.name}: no installer available`));
+  for (const tool of VENDORED_TOOLS) {
+    if (tool.kind === "skill") await assert.rejects(readFile(join(root, ".claude", "skills", tool.name, "SKILL.md")));
+    assert.ok(report.warnings.includes(`Cannot install vendored tool ${tool.name}: no installer available`));
   }
   assert.deepEqual(report.installed, []);
   // The scaffolder reaches no GitHub boundary at all: a repository with no
@@ -133,14 +133,14 @@ test("unchanged owned files upgrade to the shipped version", async () => {
   await mkdir(join(source, ".aboard", "agents"), { recursive: true }); await mkdir(join(source, ".claude", "hooks"), { recursive: true });
   await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v1");
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
-  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
+  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredTools: [] });
   await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v2");
-  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredTools: [] });
   assert.equal(await readFile(join(root, ".aboard", "agents", "implementer.md"), "utf8"), "v2");
   assert.ok(report.updated.includes(".aboard/agents/implementer.md"));
 });
 
-test("vendored skills are installed by command and failures are reported, not authored around", async () => {
+test("vendored tools are installed by command and failures are reported, not authored around", async () => {
   const root = await project(); const source = await project();
   await mkdir(join(source, ".claude", "hooks"), { recursive: true });
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
@@ -153,32 +153,35 @@ test("vendored skills are installed by command and failures are reported, not au
   };
   const report = await scaffoldProject({
     projectRoot: root, assetRoot: source, installer,
-    vendoredSkills: [{ name: "commit", command: "install commit" }, { name: "unreliable", command: "install unreliable" }, { name: "grill-me", command: null }],
+    vendoredTools: [{ name: "commit", kind: "skill", command: "install commit" }, { name: "unreliable", kind: "hooks", command: "install unreliable" }, { name: "grill-me", kind: "skill", command: null }],
   });
 
   assert.deepEqual(calls, [{ command: "install commit", cwd: root }, { command: "install unreliable", cwd: root }]);
   assert.deepEqual(report.installed, ["commit"]);
-  assert.ok(report.warnings.includes("Failed to install vendored skill unreliable: upstream unavailable"));
-  assert.ok(report.warnings.includes("No install command configured for vendored skill: grill-me"));
+  assert.ok(report.warnings.includes("Failed to install vendored tool unreliable: upstream unavailable"));
+  assert.ok(report.warnings.includes("No install command configured for vendored tool: grill-me"));
   // aboard writes nothing under a vendored skill: the command owns that directory.
   assert.deepEqual(report.created.filter((path) => path.startsWith(".claude/skills/")), []);
 });
 
-test("every vendored skill names a runnable install command", () => {
-  for (const skill of VENDORED_SKILLS) {
-    assert.notEqual(skill.command, null, `${skill.name} has no install command`);
-    assert.match(skill.command ?? "", /^(uvx|npx) /u);
+test("every vendored tool names a runnable install command", () => {
+  for (const tool of VENDORED_TOOLS) {
+    assert.notEqual(tool.command, null, `${tool.name} has no install command`);
+    assert.match(tool.command ?? "", /^(uvx|npx) /u);
   }
   // The issue skills all come from one upstream tool, so each must be listed by
   // name — that is what marks its directory as the user's — and all must agree
   // on the single command that installs them.
-  const issues = VENDORED_SKILLS.filter((skill) => (skill.command ?? "").endsWith(" issues"));
-  assert.deepEqual(issues.map((skill) => skill.name).sort(), [
+  const issues = VENDORED_TOOLS.filter((tool) => (tool.command ?? "").endsWith(" issues"));
+  assert.deepEqual(issues.map((tool) => tool.name).sort(), [
     "draft-issue", "draft-issues", "map-issues", "publish-issue", "publish-issues", "to-spec", "to-spec-draft-issue",
   ]);
   // Names must not collide as path prefixes: `.claude/skills/draft-issues/` is a
   // different skill's directory from `draft-issue`'s.
-  assert.equal(new Set(VENDORED_SKILLS.map((skill) => skill.name)).size, VENDORED_SKILLS.length);
+  assert.equal(new Set(VENDORED_TOOLS.map((tool) => tool.name)).size, VENDORED_TOOLS.length);
+  assert.deepEqual(VENDORED_TOOLS.find((tool) => tool.name === "usage-limit-wait"), {
+    name: "usage-limit-wait", kind: "hooks", command: "uvx --from git+https://github.com/EmilienxD/harness harness install usage-limit-wait",
+  });
 });
 
 test("skills sharing one upstream tool install with a single command run", async () => {
@@ -189,16 +192,16 @@ test("skills sharing one upstream tool install with a single command run", async
   const installer = { run: async (command: string) => { calls.push(command); } };
   const report = await scaffoldProject({
     projectRoot: root, assetRoot: source, installer,
-    vendoredSkills: [
-      { name: "map-issues", command: "install issues" },
-      { name: "draft-issues", command: "install issues" },
-      { name: "commit", command: "install commit" },
+    vendoredTools: [
+      { name: "map-issues", kind: "skill", command: "install issues" },
+      { name: "draft-issues", kind: "skill", command: "install issues" },
+      { name: "commit", kind: "skill", command: "install commit" },
     ],
   });
 
   assert.deepEqual(calls, ["install issues", "install commit"]);
   assert.deepEqual(report.installed, ["map-issues", "draft-issues", "commit"]);
-  assert.deepEqual(report.warnings.filter((warning) => warning.includes("vendored skill")), []);
+  assert.deepEqual(report.warnings.filter((warning) => warning.includes("vendored tool")), []);
 });
 
 test("a shared install command that fails is reported once per skill it owns", async () => {
@@ -209,16 +212,16 @@ test("a shared install command that fails is reported once per skill it owns", a
   const installer = { run: async (command: string) => { calls.push(command); throw new Error("uvx not found"); } };
   const report = await scaffoldProject({
     projectRoot: root, assetRoot: source, installer,
-    vendoredSkills: [
-      { name: "map-issues", command: "install issues" },
-      { name: "publish-issues", command: "install issues" },
+    vendoredTools: [
+      { name: "map-issues", kind: "skill", command: "install issues" },
+      { name: "publish-issues", kind: "skill", command: "install issues" },
     ],
   });
 
   assert.deepEqual(calls, ["install issues"]);
   assert.deepEqual(report.installed, []);
-  assert.ok(report.warnings.includes("Failed to install vendored skill map-issues: uvx not found"));
-  assert.ok(report.warnings.includes("Failed to install vendored skill publish-issues: uvx not found"));
+  assert.ok(report.warnings.includes("Failed to install vendored tool map-issues: uvx not found"));
+  assert.ok(report.warnings.includes("Failed to install vendored tool publish-issues: uvx not found"));
 });
 
 test("a skill name that prefixes a vendored one is matched by segment, not by prefix", async () => {
@@ -227,14 +230,14 @@ test("a skill name that prefixes a vendored one is matched by segment, not by pr
   await mkdir(join(source, ".claude", "skills", "draft-issues"), { recursive: true });
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
   await writeFile(join(source, ".claude", "skills", "draft-issues", "SKILL.md"), "shipped copy");
-  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
+  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredTools: [] });
 
   await rm(join(source, ".claude", "skills", "draft-issues"), { recursive: true });
   // `draft-issue` is vendored; `draft-issues` is a different skill and must not
   // be shielded by its neighbour's name.
   const report = await scaffoldProject({
     projectRoot: root, assetRoot: source,
-    vendoredSkills: [{ name: "draft-issue", command: null }],
+    vendoredTools: [{ name: "draft-issue", kind: "skill", command: null }],
   });
   assert.deepEqual(report.removed, [".claude/skills/draft-issues/SKILL.md"]);
   await assert.rejects(readFile(join(root, ".claude", "skills", "draft-issues", "SKILL.md")));
@@ -245,10 +248,10 @@ test("a vendored skill copy from an earlier build is handed back to the user, no
   await mkdir(join(source, ".claude", "hooks"), { recursive: true }); await mkdir(join(source, ".claude", "skills", "commit"), { recursive: true });
   await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
   await writeFile(join(source, ".claude", "skills", "commit", "SKILL.md"), "shipped copy");
-  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [] });
+  await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredTools: [] });
 
   await rm(join(source, ".claude", "skills", "commit"), { recursive: true });
-  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredSkills: [{ name: "commit", command: null }] });
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: source, vendoredTools: [{ name: "commit", kind: "skill", command: null }] });
   assert.equal(await readFile(join(root, ".claude", "skills", "commit", "SKILL.md"), "utf8"), "shipped copy");
   assert.deepEqual(report.removed, []);
   const manifest = await json(join(root, ".aboard", "scaffold.json"));

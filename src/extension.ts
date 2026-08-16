@@ -20,7 +20,7 @@ import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
-import { createVendoredSkillInstaller } from "./scaffold/vendored.js";
+import { createVendoredToolInstaller } from "./scaffold/vendored.js";
 import { basename, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
@@ -760,11 +760,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const report = await scaffoldProject({
         projectRoot: workspaceRoot,
         assetRoot: join(context.extensionPath, "assets", "scaffold"),
-        installer: createVendoredSkillInstaller(),
+        installer: createVendoredToolInstaller(),
         ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
       });
       for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
-      void window.showInformationMessage(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.removed.length} removed, ${report.preserved.length} preserved, ${report.installed.length} skills installed).`);
+      void window.showInformationMessage(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.removed.length} removed, ${report.preserved.length} preserved, ${report.installed.length} vendored tools installed).`);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
     finally { await publishScaffoldState(); }
   };
