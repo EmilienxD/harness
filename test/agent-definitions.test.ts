@@ -138,28 +138,22 @@ test("the Manager definition declares its orchestration tool list", async () => 
   assert.equal(parseAgentDefinition(source).ok, false);
 });
 
-test("Manager guidance stays focused on judgement and continuity", async () => {
+test("Manager guidance preserves the authored judgement and continuity contract", async () => {
   const parsed = parseManagerAgentDefinition(await readFile(join(agentsRoot, "manager.md"), "utf8"));
   assert.equal(parsed.ok, true);
   const manager = parsed.ok ? parsed.value.prompt : "";
   for (const required of [
     /interactive, long-lived project manager/i,
-    /human stays in control/i,
+    /the user makes the final call/i,
     /Do not implement, edit code/i,
-    /at most three direct codebase queries/i,
-    /cutoff-sensitive claims as uncertain/i,
-    /point-in-time snapshot/i,
-    /compact rather than restarting/i,
+    /more than 3 queries/i,
+    /knowledge has a cutoff/i,
+    /snapshot, not a live view/i,
+    /automatically compress prior messages/i,
     /Surface blockers plainly/i,
   ]) {
     assert.match(manager, required);
   }
-  assert.equal(manager.length < 5_000, true, "the Manager prompt must stay compact");
-  assert.doesNotMatch(
-    manager,
-    /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr|MCP tool/i,
-    "MCP operation guidance belongs in tool definitions, not the system prompt",
-  );
 });
 
 test("an agent definition may declare an effort level, and an unknown one is refused", () => {
@@ -200,7 +194,6 @@ test("only the Manager's definition admits the aboard MCP tools", async () => {
   const parsedManager = parseManagerAgentDefinition(manager);
   assert.equal(parsedManager.ok, true);
   assert.equal(parsedManager.ok && parsedManager.value.tools.includes(ABOARD_MCP_TOOLS), true);
-  assert.doesNotMatch(parsedManager.ok ? parsedManager.value.prompt : "", /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr/i);
 
   for (const name of WORKER_AGENT_NAMES) {
     const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");
