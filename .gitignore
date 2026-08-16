@@ -33,3 +33,7 @@ Thumbs.db
 .claude/settings.local.json
 
 private-notes/
+
+# >>> harness:commit >>>
+.claude/commit-ai.key
+# <<< harness:commit <<<

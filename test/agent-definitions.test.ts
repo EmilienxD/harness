@@ -180,6 +180,10 @@ test("Manager guidance preserves the authored judgement and continuity contract"
     /more than 3 queries/i,
     /knowledge has a cutoff/i,
     /snapshot, not a live view/i,
+    // The roadmap's format is standing knowledge, not something `/update-todo`
+    // re-teaches on every invocation.
+    /flat checkbox list living on a single GitHub issue/i,
+    /positions are absolute over the whole list/i,
     /automatically compress prior messages/i,
     /Surface blockers plainly/i,
   ]) {

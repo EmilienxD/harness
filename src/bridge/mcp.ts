@@ -147,7 +147,12 @@ const TODO_CREATE_DESCRIPTION =
   "When that happens the result also carries tasks, the pending list as it now stands; " +
   "use it and discard the positions you were holding. " +
   "A plain append renumbers nothing and omits that list. " +
-  "Multiple roadmap carriers are reported but never modified or consolidated automatically.";
+  "Multiple roadmap carriers are reported but never modified or consolidated automatically.\n\n" +
+
+  "Never issue this call alongside another roadmap write in the same message. " +
+  "Every roadmap write rewrites the same issue body, so two in flight together lose one of the two edits, " +
+  "and a call that renumbers invalidates the positions its neighbour was addressed against. " +
+  "Batch within the call instead: one call takes many subjects.";
 
 const TODO_UPDATE_DESCRIPTION =
   "Mutate exactly one existing roadmap task, addressed by its position " +
@@ -182,7 +187,12 @@ const TODO_UPDATE_DESCRIPTION =
 
   "A replacement subject follows the same single-line, 200-character, no-leading-markup rules as creation. " +
   "Retitling does not change the task's position. " +
-  "Non-checkbox roadmap text and all unrelated tasks remain untouched.";
+  "Non-checkbox roadmap text and all unrelated tasks remain untouched.\n\n" +
+
+  "Never issue this call alongside another roadmap write in the same message. " +
+  "Every roadmap write rewrites the same issue body, so two in flight together lose one of the two edits, " +
+  "and a call that renumbers invalidates the positions its neighbour was addressed against. " +
+  "Send them one at a time, each addressed against the result of the last.";
 
 const START_AUTO_RUN_DESCRIPTION = 
   "Start aboard's automatic implementation workflow for the oldest open ai:spec issue. " +
