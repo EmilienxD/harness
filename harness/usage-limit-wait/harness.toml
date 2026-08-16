@@ -1,0 +1,9 @@
+name = "usage-limit-wait"
+version = "1.0.0"
+description = "Blocks the session until an exhausted Claude subscription usage window resets, instead of failing the turn"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/usage-limit-wait/README.md"
+
+[[files]]
+src = "hooks/usage_limit_wait_hook.py"
+dest = "hooks/usage_limit_wait_hook.py"
+executable = true

@@ -47,6 +47,8 @@ uninstall.
 - `harness/prefer-read-tool/` — PostToolUse hook reminding the agent to use Read instead of cat/sed.
   See `README.md`.
 - `harness/senior-advisor/` — read-only senior-developer advisory mode. See `SKILL.md`.
+- `harness/usage-limit-wait/` — `UserPromptSubmit` + `PostToolBatch` hook that blocks the session
+  until an exhausted Claude subscription usage window resets. See `README.md`.
 - `harness/zoom-out/` — gives a higher-level map of a codebase area. See `SKILL.md`.
 - `harness/itsclaudehistory/` — nested git repo; leave its internals alone unless asked.
 

@@ -76,6 +76,7 @@ Restart Claude Code after installing so it picks up new hooks and skills.
 | [`on-read-reminder`](harness/on-read-reminder/README.md) | Reminds Claude to read your key files when it reads matching paths |
 | [`prefer-read-tool`](harness/prefer-read-tool/README.md) | Nudges Claude to use Read instead of `cat`/`sed` |
 | [`senior-advisor`](harness/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
+| [`usage-limit-wait`](harness/usage-limit-wait/README.md) | Waits out a subscription usage limit instead of failing the turn |
 | [`zoom-out`](harness/zoom-out/SKILL.md) | Higher-level map of a codebase area |
 
 Skill-only tools are just a `SKILL.md` — if you'd rather not use the installer,
