@@ -669,7 +669,8 @@ function definitionArguments(
   const relativePath = systemPromptRelativePath(runtimeDirectory, configuration.agentName);
   return {
     args: [
-      `--system-prompt-file=${relativePath}`,
+      "--system-prompt-file",
+      relativePath,
       ...toolListArguments("--tools", configuration.declaredTools),
     ],
     file: { agentId, relativePath, contents: `${configuration.systemPrompt.trim()}\n` },

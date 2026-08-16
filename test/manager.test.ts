@@ -14,7 +14,7 @@ const agentId = "manager-1" as AgentId;
 
 const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
 /** The quoted PowerShell form of the two flags every Manager command line carries. */
-const DEFINITION_FLAGS = `--system-prompt-file=.aboard/runtime/agents/manager.md --tools '${MANAGER_TOOLS.join(",")}'`;
+const DEFINITION_FLAGS = `--system-prompt-file .aboard/runtime/agents/manager.md --tools '${MANAGER_TOOLS.join(",")}'`;
 
 /**
  * The Manager definition, which now carries the persona and the tool list onto
@@ -48,7 +48,8 @@ test("plans a promptless Manager resume with only the recorded UUID", () => {
   assert.deepEqual(plan.args, [
     "--resume",
     sessionId,
-    "--system-prompt-file=.aboard/runtime/agents/manager.md",
+    "--system-prompt-file",
+    ".aboard/runtime/agents/manager.md",
     "--tools",
     MANAGER_TOOLS.join(","),
   ]);
@@ -203,7 +204,7 @@ test("an unresumable recorded session starts afresh under a new id, keeping the 
   assert.match(records[0].request.initialCommand, /--session-id 9f1d6e57-0000-4000-8000-000000000001/);
   assert.doesNotMatch(records[0].request.initialCommand, new RegExp(sessionId));
   assert.doesNotMatch(records[0].request.initialCommand, /--resume/);
-  assert.match(records[0].request.initialCommand, /--system-prompt-file=\.aboard\/runtime\/agents\/manager\.md/);
+  assert.match(records[0].request.initialCommand, /--system-prompt-file \.aboard\/runtime\/agents\/manager\.md/);
   // Manager identity is the agent id, which survives; the new conversation id
   // is recorded so the next resume targets it.
   assert.equal(records[0].request.agentId, agentId);

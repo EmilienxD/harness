@@ -58,7 +58,8 @@ function definition(
 /** The two flags every agent-defined launch and resume carries, in order. */
 function definitionArgs(agentName: string, declaredTools: readonly string[]): readonly string[] {
   return [
-    `--system-prompt-file=.aboard/runtime/agents/${agentName}.md`,
+    "--system-prompt-file",
+    `.aboard/runtime/agents/${agentName}.md`,
     "--tools",
     declaredTools.join(","),
   ];
@@ -105,7 +106,7 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   ]);
   assert.equal(
     plan.commandLine,
-    `& claude --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/manager.md --tools 'mcp__aboard__*,Read,Grep,Glob,Bash,Skill' --disallowedTools 'Bash(git push*)' --model opus`,
+    `& claude --session-id ${sessionId} --system-prompt-file .aboard/runtime/agents/manager.md --tools 'mcp__aboard__*,Read,Grep,Glob,Bash,Skill' --disallowedTools 'Bash(git push*)' --model opus`,
   );
   // The file the command line reads is part of the plan, because a launch that
   // cannot write it is a launch that would silently start on Claude Code's own
@@ -126,7 +127,7 @@ test("wrapper layout prefixes the launch and resume lines without reshaping the 
   };
   const plan = planLaunch(request({ wrapper }));
   // plan.args keeps the claude-side view; only the command line changes.
-  assert.equal(plan.args[2], "--system-prompt-file=.aboard/runtime/agents/implementer.md");
+  assert.equal(plan.args[2], "--system-prompt-file");
   assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
   assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' -- claude --session-id ${sessionId}`));
 
@@ -163,7 +164,7 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   ]);
   assert.equal(
     plan.commandLine,
-    `claude --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md --tools 'Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions 'Implement issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.'`,
+    `claude --session-id ${sessionId} --system-prompt-file .aboard/runtime/agents/implementer.md --tools 'Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions 'Implement issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.'`,
   );
   assert.equal(plan.promptDelivery, "spilled");
   assert.equal(plan.spill?.relativePath, ".aboard/runtime/prompts/a1b2c3.md");
@@ -285,7 +286,7 @@ test("passes the session effort level on every launch shape and refuses an unkno
 
   for (const level of EFFORT_LEVELS) {
     assert.equal(isEffortLevel(level), true);
-    assert.deepEqual(planLaunch(request({ effort: level })).args.slice(5, 7), ["--effort", level]);
+    assert.deepEqual(planLaunch(request({ effort: level })).args.slice(6, 8), ["--effort", level]);
   }
   // The value reaches the planner from a settings file, where a typo is a user
   // mistake rather than a compile error, and Claude Code refuses the launch on
@@ -331,7 +332,7 @@ test("puts the definition's model and effort on the command line, overriding the
       agentType: "brainstormer",
       permissionMode: "default",
       effort: "low",
-    })).args.slice(5),
+    })).args.slice(6),
     ["--model", "opus", "--effort", "low", "Implement issue #47."],
   );
 
@@ -626,7 +627,7 @@ test("uses a launch executable path with spaces without breaking the plan", () =
   );
   assert.equal(
     plan.commandLine,
-    `& 'C:\\Program Files\\claude\\claude.exe' --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md --tools 'Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions Go.`,
+    `& 'C:\\Program Files\\claude\\claude.exe' --session-id ${sessionId} --system-prompt-file .aboard/runtime/agents/implementer.md --tools 'Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions Go.`,
   );
 });
 
@@ -638,7 +639,7 @@ test("a wrapper command keeps its own arguments ahead of every aboard flag", () 
   assert.deepEqual(plan.command, ["clauder", "run", "kiro", "--"]);
   assert.equal(
     plan.commandLine,
-    `& clauder run kiro -- --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md --tools 'Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions Go.`,
+    `& clauder run kiro -- --session-id ${sessionId} --system-prompt-file .aboard/runtime/agents/implementer.md --tools 'Read,Grep,Glob,Edit,Write,Bash,LSP,Agent,Skill' --dangerously-skip-permissions Go.`,
   );
 });
 
@@ -668,7 +669,7 @@ test("a definition's command replaces the configured launch command for that age
   assert.deepEqual(plan.command, ["clauder", "run", "kiro", "--"]);
   assert.equal(
     plan.commandLine,
-    `& clauder run kiro -- --session-id ${sessionId} --system-prompt-file=.aboard/runtime/agents/implementer.md --tools '${IMPLEMENTER_TOOLS.join(",")}' Go.`,
+    `& clauder run kiro -- --session-id ${sessionId} --system-prompt-file .aboard/runtime/agents/implementer.md --tools '${IMPLEMENTER_TOOLS.join(",")}' Go.`,
   );
   // The flags aboard passes are untouched by the override: only the program
   // in front of them changes.
