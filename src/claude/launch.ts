@@ -347,8 +347,8 @@ export function resolveLaunchConfiguration(
       );
     }
     if (input.declaredTools === undefined || input.declaredTools.length === 0) {
-      // Without `tools:` there is no allowlist to pass, and `--tools=` would
-      // disable every tool rather than inherit one.
+      // Without `tools:` there is no allowlist to pass, so no `--tools` flag is
+      // emitted; an empty allowlist must not disable every tool or inherit one.
       throw new LaunchPlanError(
         "missing-declared-tools",
         `The ${input.agentName} agent definition declares no tools`,
@@ -586,9 +586,9 @@ function assertFlagValue(
  * verified against Claude Code 2.1.229, which then refuses the launch with
  * "Input must be provided either through stdin or as a prompt argument".
  *
- * The `--flag=value` form binds exactly one value and ends there, so it is
- * emitted unconditionally rather than relying on some other flag happening to
- * follow this one on the line.
+ * Keep the option and its value as separate arguments. Claude Code's documented
+ * form is `--tools "Bash,Edit,Read"`; the shell quoting layer will quote the
+ * value as needed when it builds the command line.
  */
 function toolListArguments(
   flag: string,
@@ -596,7 +596,7 @@ function toolListArguments(
 ): readonly string[] {
   if (rules === undefined || rules.length === 0) return [];
   const list = rules.map((rule) => assertFlagValue(rule, "invalid-tool-rule", "tool rule")).join(",");
-  return [`${flag}=${list}`];
+  return [flag, list];
 }
 
 /**

@@ -14,7 +14,7 @@ const agentId = "manager-1" as AgentId;
 
 const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
 /** The quoted PowerShell form of the two flags every Manager command line carries. */
-const DEFINITION_FLAGS = `--system-prompt-file=.aboard/runtime/agents/manager.md '--tools=${MANAGER_TOOLS.join(",")}'`;
+const DEFINITION_FLAGS = `--system-prompt-file=.aboard/runtime/agents/manager.md --tools '${MANAGER_TOOLS.join(",")}'`;
 
 /**
  * The Manager definition, which now carries the persona and the tool list onto
@@ -49,7 +49,8 @@ test("plans a promptless Manager resume with only the recorded UUID", () => {
     "--resume",
     sessionId,
     "--system-prompt-file=.aboard/runtime/agents/manager.md",
-    `--tools=${MANAGER_TOOLS.join(",")}`,
+    "--tools",
+    MANAGER_TOOLS.join(","),
   ]);
   assert.equal(plan.promptDelivery, "none");
   assert.equal(plan.requiresWriteLease, false);
@@ -101,7 +102,7 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   // session in the workspace can discover or spawn the Manager.
   assert.doesNotMatch((records[1] as any).request.initialCommand, /--agent/);
   assert.ok((records[1] as any).request.initialCommand.includes(DEFINITION_FLAGS));
-  assert.match((records[1] as any).request.initialCommand, /'--disallowedTools=Bash\(git push\*\)'/);
+  assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
   // Both the resume and the fresh start write the file the flag reads.
   assert.deepEqual(files.written, [".aboard/runtime/agents/manager.md", ".aboard/runtime/agents/manager.md"]);
 });

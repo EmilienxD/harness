@@ -541,7 +541,7 @@ test("interactive mode makes the prompt optional", async () => {
   const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true });
   assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/brainstormer\.md '--tools=Read,Grep' '--disallowedTools=mcp__aboard__\*'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file=\.aboard\/runtime\/agents\/brainstormer\.md --tools 'Read,Grep' --disallowedTools 'mcp__aboard__\*'\s*$/);
 
   const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
@@ -609,7 +609,7 @@ test("builtin types run interactively: focused, hook-silent, prompt optional", a
   // positional prompt: the user types the first message.
   assert.deepEqual(host.created.at(-1)!.terminal.shown, [false]);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent Explore '--disallowedTools=mcp__aboard__\*'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent Explore --disallowedTools 'mcp__aboard__\*'\s*$/);
 
   const withTopic = await launch({
     type: "general-purpose", prompt: "start from src/auth.ts", description: "drive the auth cleanup", interactive: true,
