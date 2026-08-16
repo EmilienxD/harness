@@ -19,10 +19,10 @@
  *   second authority: nothing can widen an agent past what it declares, which
  *   is what the write-lease derivation depends on.
  *
- *   `--agent` therefore survives only for Claude Code's named `Explore` type,
- *   which has no aboard definition to read. Its system prompt and tool set
- *   belong to Claude Code, so aboard neither reconstructs them nor adds a
- *   competing `--tools` flag.
+ *   `--agent` therefore survives only for Claude Code's named `Explore` type.
+ *   Its metadata-only aboard profile may select the command, model, and effort,
+ *   but its system prompt and tool set belong to Claude Code, so aboard neither
+ *   reconstructs them nor adds a competing `--tools` flag.
  * - The first message and every later message travel as CLI arguments (5.1.2,
  *   5.1.3). aboard never types into a running TUI, so a message that cannot be
  *   represented on a command line spills to a file and is `@`-referenced.
@@ -181,8 +181,8 @@ export function resolvePermissionMode(
  * word: an agent definition's `effort:` frontmatter overrides it, and the
  * planner puts that value on the command line itself, because a main-thread
  * `--agent` launch does not honor the field (see `LaunchConfiguration`). The
- * setting is what reaches the builtin launches, which have no aboard definition
- * to read.
+ * setting is what reaches launches whose definition or builtin profile declines
+ * to choose its own level.
  *
  * Unset means "inherit", exactly as an absent `effort:` field does; aboard
  * passes no flag and Claude Code keeps whatever the user's own `effortLevel`
@@ -237,17 +237,24 @@ export type LaunchConfiguration =
       readonly declaredCommand?: readonly string[];
     }
   /**
-   * Claude Code's named `Explore` builtin. aboard ships no definition for it,
-   * so the launch names Claude Code's own with `--agent` and passes no tool list.
+   * Claude Code's named `Explore` builtin. Its aboard profile carries launch
+   * policy only; `--agent` still selects Claude's prompt and tools, and aboard
+   * deliberately passes neither a system-prompt flag nor `--tools`.
    */
-  | { readonly shape: "builtin"; readonly agentName: string }
+  | {
+      readonly shape: "builtin";
+      readonly agentName: string;
+      readonly declaredModel?: string;
+      readonly declaredEffort?: EffortLevel;
+      readonly declaredCommand?: readonly string[];
+    }
   /** Claude Code's unmodified default session, exposed as `general-purpose`. */
   | { readonly shape: "default" };
 
 /** The flat shape a caller supplies, so the exclusive pair can be rejected. */
 export interface LaunchConfigurationInput {
   readonly agentName?: string | undefined;
-  /** Present for an aboard definition, absent for named builtins and the default shape. */
+  /** Present only for a complete aboard-owned agent definition. */
   readonly systemPrompt?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
@@ -290,10 +297,9 @@ const SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
- * Rejects the `--agent` plus `--tools` combination that looks like composition
- * but is not (spec section 5.1.1): an agent's tool set is its definition's
- * `tools:` field, and a launch flag alongside it would compete with the file
- * the write lease trusts.
+ * Rejects the `--agent` plus `--tools` combination: a named builtin's prompt and
+ * tool set remain Claude Code's. aboard may layer only launch policy (command,
+ * model, effort) over that opaque definition.
  */
 export function resolveLaunchConfiguration(
   input: LaunchConfigurationInput,
@@ -311,21 +317,42 @@ export function resolveLaunchConfiguration(
         `Invalid agent definition name: ${input.agentName}`,
       );
     }
-    // A builtin type: Claude Code owns the definition, so there is nothing for
-    // aboard to read and nothing of its own to pass.
+    // Normalize the launch-policy fields for both complete definitions and
+    // metadata-only builtin profiles. `inherit` and an empty command both mean
+    // the fleet-wide setting remains in charge.
+    const declaredModel =
+      input.declaredModel === undefined || input.declaredModel === "inherit"
+        ? undefined
+        : assertFlagValue(input.declaredModel, "invalid-model", "agent model");
+    if (input.declaredEffort !== undefined && !isEffortLevel(input.declaredEffort)) {
+      throw new LaunchPlanError(
+        "invalid-effort",
+        `Agent effort must be one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(input.declaredEffort)}`,
+      );
+    }
+    const declaredCommand =
+      input.declaredCommand === undefined || input.declaredCommand.length === 0
+        ? undefined
+        : input.declaredCommand.map((token) =>
+            assertFlagValue(token, "invalid-command", "agent command token", { allowLeadingDash: true }),
+          );
+
+    // A builtin profile never supplies a prompt or tools. Claude Code resolves
+    // both through `--agent`; aboard passes only the policy fields above.
     if (input.systemPrompt === undefined) {
-      if (
-        input.declaredTools !== undefined ||
-        input.declaredModel !== undefined ||
-        input.declaredEffort !== undefined ||
-        input.declaredCommand !== undefined
-      ) {
+      if (input.declaredTools !== undefined) {
         throw new LaunchPlanError(
-          "declared-tools-without-agent",
-          `A builtin agent type has no aboard definition to declare fields from: ${input.agentName}`,
+          "conflicting-launch-shape",
+          `The ${input.agentName} builtin profile must not declare tools`,
         );
       }
-      return { shape: "builtin", agentName: input.agentName };
+      return {
+        shape: "builtin",
+        agentName: input.agentName,
+        ...(declaredModel === undefined ? {} : { declaredModel }),
+        ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
+        ...(declaredCommand === undefined ? {} : { declaredCommand }),
+      };
     }
 
     // The name becomes a file name under the runtime directory, so it must be a
@@ -354,27 +381,6 @@ export function resolveLaunchConfiguration(
         `The ${input.agentName} agent definition declares no tools`,
       );
     }
-    // `inherit` means the definition declines to choose, which on a command
-    // line is the absence of the flag rather than a model named "inherit".
-    const declaredModel =
-      input.declaredModel === undefined || input.declaredModel === "inherit"
-        ? undefined
-        : assertFlagValue(input.declaredModel, "invalid-model", "agent definition model");
-    if (input.declaredEffort !== undefined && !isEffortLevel(input.declaredEffort)) {
-      throw new LaunchPlanError(
-        "invalid-effort",
-        `Agent definition effort must be one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(input.declaredEffort)}`,
-      );
-    }
-    // An empty `command:` is the frontmatter spelling of "no override", exactly
-    // as `inherit` is for `model:`; an override that names no program at all
-    // would otherwise launch nothing.
-    const declaredCommand =
-      input.declaredCommand === undefined || input.declaredCommand.length === 0
-        ? undefined
-        : input.declaredCommand.map((token) =>
-            assertFlagValue(token, "invalid-command", "agent definition command token", { allowLeadingDash: true }),
-          );
     return {
       shape: "agent-defined",
       agentName: input.agentName,
@@ -738,7 +744,7 @@ function effectiveCommand(
   configuration: LaunchConfiguration,
   configured: readonly string[] | undefined,
 ): readonly string[] {
-  if (configuration.shape === "agent-defined" && configuration.declaredCommand !== undefined) {
+  if (configuration.shape !== "default" && configuration.declaredCommand !== undefined) {
     return configuration.declaredCommand;
   }
   return configured === undefined || configured.length === 0 ? [...DEFAULT_CLAUDE_COMMAND] : configured;
@@ -892,12 +898,11 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       break;
   }
 
-  // The definition wins over the session settings for both fields: it is the
-  // agent's own declaration, and `--agent` would have applied it were this a
-  // subagent spawn. The settings remain the floor for the launches with no
-  // definition to read: Explore, the default general-purpose session, and every resume.
+  // A complete definition or builtin profile wins over the session settings.
+  // Explore's profile affects only these launch flags; its prompt and tools
+  // still come exclusively from Claude Code through `--agent`.
   const declared =
-    configuration.shape === "agent-defined"
+    configuration.shape !== "default"
       ? configuration
       : { declaredModel: undefined, declaredEffort: undefined };
 
@@ -1030,7 +1035,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     : undefined;
   // Claude Code restores a builtin's `--agent` selection with the conversation.
   const shapeArguments = definition?.args ?? [];
-  const declared = configuration.shape === "agent-defined"
+  const declared = configuration.shape !== "default"
     ? configuration
     : { declaredModel: undefined, declaredEffort: undefined };
   const args = [

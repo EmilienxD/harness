@@ -3,9 +3,9 @@
  *
  * Capability is *derived* from the effective tool set, never declared. The
  * derivation is only sound because `--agent` and `--tools` are mutually
- * exclusive (spec section 5.1.1): nothing at launch can widen an agent past
- * what its definition declares. Unknown capability always resolves to the
- * restrictive answer, which is write-capable.
+ * exclusive (spec section 5.1.1): complete definitions own their tool list,
+ * while the named Explore builtin owns its opaque list upstream. Unknown
+ * capability always resolves to the restrictive answer, which is write-capable.
  */
 
 export type WriteCapability = "write-capable" | "read-only";

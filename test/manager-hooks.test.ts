@@ -538,7 +538,7 @@ test("Python prompt hook injects a drained queue on a real prompt", async () => 
   assert.deepEqual(JSON.parse(result.stdout), { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } });
 });
 
-test("aboard-owned command skills are user-only shims and builtins have no aboard definition", async () => {
+test("aboard-owned command skills are user-only shims and general-purpose has no aboard definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
   for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");

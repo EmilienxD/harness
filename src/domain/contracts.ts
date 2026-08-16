@@ -56,9 +56,9 @@ export function isInteractiveAgentType(type: AgentType): boolean {
 }
 
 /**
- * Claude Code's named builtin agent launched through `--agent`. aboard
- * scaffolds no definition for it, so
- * `--agent <name>` resolves to the one Claude Code ships; the names deliberately
+ * Claude Code's named builtin agent launched through `--agent`. aboard's
+ * metadata-only profile supplies no prompt or tools, so `--agent <name>`
+ * resolves both from the version Claude Code ships; the names deliberately
  * match the builtin exactly, since a project definition of the same name would
  * override it upstream. They are the only types still launched with `--agent`:
  * aboard's own agents are carried on the command line instead, so that nothing

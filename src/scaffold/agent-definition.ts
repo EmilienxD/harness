@@ -47,9 +47,13 @@ export const WORKER_AGENT_NAMES = [
   "pr-doctor-hitl",
 ] as const;
 
-export const SCAFFOLDED_AGENT_NAMES = [MANAGER_AGENT_NAME, ...WORKER_AGENT_NAMES] as const;
+/** Claude Code builtins with an aboard-owned launch profile but no copied prompt or tools. */
+export const BUILTIN_AGENT_NAMES = ["Explore"] as const;
+
+export const SCAFFOLDED_AGENT_NAMES = [MANAGER_AGENT_NAME, ...WORKER_AGENT_NAMES, ...BUILTIN_AGENT_NAMES] as const;
 
 export type WorkerAgentName = (typeof WORKER_AGENT_NAMES)[number];
+export type BuiltinAgentName = (typeof BUILTIN_AGENT_NAMES)[number];
 export type ScaffoldedAgentName = (typeof SCAFFOLDED_AGENT_NAMES)[number];
 export type AgentModel = "opus" | "sonnet" | "haiku" | "fable" | "inherit";
 /**
@@ -91,12 +95,28 @@ export interface ManagerAgentDefinition {
   readonly writeCapability: WriteCapability;
 }
 
+/**
+ * Launch policy layered over a Claude Code builtin. It deliberately has no
+ * prompt or tool fields: `--agent Explore` remains the sole authority for both.
+ */
+export interface BuiltinAgentProfile {
+  readonly name: BuiltinAgentName;
+  readonly description: string;
+  readonly model: AgentModel;
+  readonly effort?: AgentEffort;
+  readonly command?: readonly string[];
+}
+
 export type AgentDefinitionResult =
   | { readonly ok: true; readonly value: AgentDefinition }
   | { readonly ok: false; readonly reason: string };
 
 export type ManagerAgentDefinitionResult =
   | { readonly ok: true; readonly value: ManagerAgentDefinition }
+  | { readonly ok: false; readonly reason: string };
+
+export type BuiltinAgentProfileResult =
+  | { readonly ok: true; readonly value: BuiltinAgentProfile }
   | { readonly ok: false; readonly reason: string };
 
 const MODELS: ReadonlySet<string> = new Set(["opus", "sonnet", "haiku", "fable", "inherit"]);
@@ -117,7 +137,7 @@ type DocumentResult =
   | { readonly ok: true; readonly value: ParsedDocument }
   | { readonly ok: false; readonly reason: string };
 
-function splitDefinition(definition: unknown): DocumentResult {
+function splitDefinition(definition: unknown, allowEmptyPrompt = false): DocumentResult {
   if (typeof definition !== "string") {
     return { ok: false, reason: "Agent definition must be text" };
   }
@@ -129,7 +149,7 @@ function splitDefinition(definition: unknown): DocumentResult {
   if (end === -1) return { ok: false, reason: "Agent frontmatter is not terminated" };
 
   const prompt = lines.slice(end + 1).join("\n").trim();
-  if (prompt.length === 0) return { ok: false, reason: "Agent system prompt is empty" };
+  if (!allowEmptyPrompt && prompt.length === 0) return { ok: false, reason: "Agent system prompt is empty" };
   return { ok: true, value: { frontmatter: lines.slice(1, end), prompt } };
 }
 
@@ -238,6 +258,43 @@ export function parseManagerAgentDefinition(
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),
+    },
+  };
+}
+
+/**
+ * Parses the metadata-only profile for a named Claude Code builtin. A prompt
+ * body or `tools:` field would shadow policy Claude owns, so both are rejected
+ * instead of being silently ignored.
+ */
+export function parseBuiltinAgentProfile(
+  definition: unknown,
+): BuiltinAgentProfileResult {
+  const document = splitDefinition(definition, true);
+  if (!document.ok) return document;
+
+  const { frontmatter, prompt } = document.value;
+  const name = scalarField(frontmatter, "name");
+  if (!BUILTIN_AGENT_NAMES.includes(name as BuiltinAgentName)) {
+    return { ok: false, reason: `Unsupported builtin agent name: ${name ?? "missing"}` };
+  }
+  if (frontmatter.some((line) => /^\s*tools\s*:/.test(line))) {
+    return { ok: false, reason: `The ${name} builtin profile must not declare tools; Claude Code owns its tool set` };
+  }
+  if (prompt.length > 0) {
+    return { ok: false, reason: `The ${name} builtin profile must not contain a system prompt; Claude Code owns it` };
+  }
+  const common = commonFields(frontmatter);
+  if (!common.ok) return common;
+
+  return {
+    ok: true,
+    value: {
+      name: name as BuiltinAgentName,
+      description: common.value.description,
+      model: common.value.model,
+      ...(common.value.effort === undefined ? {} : { effort: common.value.effort }),
+      ...(common.value.command === undefined ? {} : { command: common.value.command }),
     },
   };
 }

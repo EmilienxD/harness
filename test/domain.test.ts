@@ -156,9 +156,9 @@ test("exhaustively handles every specified failure type", () => {
   assert.equal(descriptions.length, 6);
 });
 
-test("the legal agent catalogue ships no custom explorer definition", () => {
-  // `Explore` and `general-purpose` are Claude Code's builtin agent names, not
-  // aboard definitions; a custom `explorer` stays excluded (spec section 9.5).
+test("the legal agent catalogue ships no custom lowercase explorer type", () => {
+  // `Explore` remains Claude Code's named builtin even though aboard now ships
+  // launch metadata for it; a custom `explorer` stays excluded.
   assert.deepEqual(AGENT_TYPES, [
     "manager",
     "brainstormer",

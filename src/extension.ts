@@ -61,7 +61,7 @@ import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessi
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
-import { agentDefinitionPath, parseAgentDefinition } from "./scaffold/agent-definition.js";
+import { agentDefinitionPath, parseAgentDefinition, parseBuiltinAgentProfile } from "./scaffold/agent-definition.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
@@ -207,12 +207,28 @@ function briefingSources(
 function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
   return { get: async (type) => {
     if (type === "general-purpose") return { shape: "default" };
-    // Named builtins resolve to Claude Code's own definitions: aboard
-    // scaffolds no file for them and there is no frontmatter to read for the
-    // tool set — capability is fixed in `launchWriteCapability`, and
-    // deriving from an unreadable file would conservatively mark even Explore
-    // write-capable.
-    if (isNamedBuiltinAgentType(type)) return { shape: "builtin", agentName: type };
+    // Named builtins resolve their prompt and tools from Claude Code. aboard's
+    // metadata-only profile contributes only command, model, and effort.
+    // Capability remains fixed by the upstream Explore contract.
+    if (isNamedBuiltinAgentType(type)) {
+      let source: string;
+      try {
+        source = await readFile(agentDefinitionPath(workspaceRoot, type), "utf8");
+      } catch (error) {
+        // Existing initialized projects may not have received the new profile
+        // yet. Preserve the old launch until the user updates the scaffold.
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return { shape: "builtin", agentName: type };
+        throw error;
+      }
+      const result = parseBuiltinAgentProfile(source);
+      if (!result.ok) throw new Error(`Invalid ${type} builtin profile: ${result.reason}`);
+      return resolveLaunchConfiguration({
+        agentName: type,
+        declaredModel: result.value.model,
+        declaredEffort: result.value.effort,
+        declaredCommand: result.value.command,
+      });
+    }
     const result = parseAgentDefinition(await readFile(agentDefinitionPath(workspaceRoot, type), "utf8"));
     if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
     // The whole definition is carried onto the command line: the body as

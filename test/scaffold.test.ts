@@ -39,8 +39,11 @@ test("fresh scaffold installs assets, hooks, and the authenticated aboard MCP re
   // aboard terminal or the user's own `claude` — able to spawn aboard's agents
   // behind the bridge and outside the write lease.
   assert.match(await readFile(join(root, ".aboard", "agents", "manager.md"), "utf8"), /name: manager/);
+  const explore = await readFile(join(root, ".aboard", "agents", "Explore.md"), "utf8");
+  assert.match(explore, /name: Explore/);
+  assert.doesNotMatch(explore, /^tools\s*:/mu);
   await assert.rejects(readFile(join(root, ".claude", "agents", "manager.md")));
-  for (const name of ["general-purpose", "Explore", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
+  for (const name of ["general-purpose", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
   // User-owned skills are never shipped as assets; without an installer every
   // one is reported instead of being written here.
   for (const tool of VENDORED_TOOLS) {

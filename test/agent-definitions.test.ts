@@ -6,9 +6,11 @@ import test from "node:test";
 import {
   ABOARD_MCP_TOOLS,
   AGENT_DEFINITION_DIRECTORY,
+  BUILTIN_AGENT_NAMES,
   SCAFFOLDED_AGENT_NAMES,
   WORKER_AGENT_NAMES,
   parseAgentDefinition,
+  parseBuiltinAgentProfile,
   parseManagerAgentDefinition,
   type WorkerAgentName,
 } from "../src/scaffold/agent-definition.js";
@@ -55,13 +57,42 @@ async function definition(name: WorkerAgentName) {
   return parsed.value;
 }
 
-test("ships the Manager definition and exactly the five worker definitions", async () => {
+test("ships the Manager, five complete worker definitions, and the Explore builtin profile", async () => {
   const files = (await readdir(agentsRoot)).sort();
   assert.deepEqual(files, SCAFFOLDED_AGENT_NAMES.map((name) => `${name}.md`).sort());
   assert.equal(files.includes("manager.md"), true);
   assert.equal(files.includes("webresearcher.md"), true);
+  assert.equal(files.includes("Explore.md"), true);
   assert.equal(files.includes("general-purpose.md"), false);
   assert.equal(files.includes("explorer.md"), false);
+});
+
+test("the Explore profile configures launch policy without copying Claude's prompt or tools", async () => {
+  assert.deepEqual(BUILTIN_AGENT_NAMES, ["Explore"]);
+  const source = await readFile(join(agentsRoot, "Explore.md"), "utf8");
+  const parsed = parseBuiltinAgentProfile(source);
+  assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
+  assert.deepEqual(parsed.ok && parsed.value, {
+    name: "Explore",
+    description: "Claude Code's built-in read-only codebase exploration agent",
+    model: "inherit",
+  });
+  assert.doesNotMatch(source, /^tools\s*:/mu);
+  assert.equal(source.replace(/^---\n[\s\S]*?\n---\s*/u, ""), "");
+
+  const configured = parseBuiltinAgentProfile(
+    "---\nname: Explore\ndescription: d\nmodel: haiku\neffort: high\ncommand: clauder run kiro --\n---\n",
+  );
+  assert.deepEqual(configured.ok && configured.value, {
+    name: "Explore", description: "d", model: "haiku", effort: "high", command: ["clauder", "run", "kiro", "--"],
+  });
+
+  for (const invalid of [
+    "---\nname: Explore\ndescription: d\nmodel: inherit\ntools: Read, Grep\n---\n",
+    "---\nname: Explore\ndescription: d\nmodel: inherit\n---\nYou are a copied Explore prompt.",
+  ]) {
+    assert.equal(parseBuiltinAgentProfile(invalid).ok, false);
+  }
 });
 
 test("parses every worker definition and derives capability from its exact tools", async () => {

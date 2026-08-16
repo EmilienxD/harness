@@ -215,13 +215,13 @@ test("plans general-purpose as Claude Code's unmodified default session", () => 
   assert.equal(plan.requiresWriteLease, true);
 });
 
-test("the builtin types carry Claude Code's own capabilities, not a derived guess", () => {
-  // No scaffolded definition exists to derive from: general-purpose is Claude
+test("the builtin types carry Claude Code's own capabilities and Explore accepts policy-only overrides", () => {
+  // No aboard-owned tool list exists to derive from: general-purpose is Claude
   // Code's full-tool agent, and Explore is its read-only search agent — the
   // conservative fallback for an unreadable definition would wrongly put
   // Explore on the write lease.
-  // A builtin is the only shape that still carries `--agent`: Claude Code owns
-  // the definition, so there is nothing for aboard to read or to pass.
+  // A builtin is the only shape that still carries `--agent`: its aboard
+  // profile may add policy flags, but Claude Code owns prompt and tools.
   const builtin = (name: string) => resolveLaunchConfiguration({ agentName: name });
   assert.equal(builtin("Explore").shape, "builtin");
   assert.equal(launchWriteCapability("Explore", builtin("Explore")), "read-only");
@@ -234,8 +234,27 @@ test("the builtin types carry Claude Code's own capabilities, not a derived gues
     permissionMode: "default",
   }));
   assert.equal(explore.requiresWriteLease, false);
-  // Both resolve to --agent <builtin name> with no tool flags.
+  // The bare profile resolves to --agent <builtin name> with no tool flags.
   assert.deepEqual(explore.args, ["--session-id", sessionId, "--agent", "Explore", "Map the auth flow."]);
+
+  const profiled = resolveLaunchConfiguration({
+    agentName: "Explore",
+    declaredModel: "haiku",
+    declaredEffort: "high",
+    declaredCommand: ["clauder", "run", "kiro", "--"],
+  });
+  const configured = planLaunch(request({
+    agentType: "Explore",
+    configuration: profiled,
+    permissionMode: "default",
+    prompt: "Map the auth flow.",
+  }));
+  assert.deepEqual(configured.command, ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(configured.args, [
+    "--session-id", sessionId, "--agent", "Explore", "--model", "haiku", "--effort", "high", "Map the auth flow.",
+  ]);
+  assert.equal(configured.args.includes("--tools"), false);
+  assert.equal(configured.systemPrompt, undefined);
 });
 
 test("passes the session effort level on every launch shape and refuses an unknown one", () => {
@@ -389,7 +408,7 @@ test("puts the definition's model and effort on the command line, overriding the
   }
 });
 
-test("rejects --tools or aboard-only fields beside a builtin --agent", () => {
+test("rejects every tool override beside a builtin --agent but accepts launch policy", () => {
   // `--agent` names a builtin, whose tool set is Claude Code's; a `--tools`
   // flag beside it would be a second authority over the same session, which is
   // exactly what the write lease cannot survive (spec section 5.1.1).
@@ -404,17 +423,23 @@ test("rejects --tools or aboard-only fields beside a builtin --agent", () => {
     );
   }
 
-  // A builtin has no aboard definition, so it can declare none of its fields.
+  // A builtin profile is metadata-only: its parser produces no declaredTools,
+  // and the launch boundary refuses one even if a caller tries to bypass it.
   for (const input of [
     { agentName: "Explore", declaredTools: ["Read"] },
-    { agentName: "Explore", declaredModel: "opus" },
   ]) {
     assert.throws(
       () => resolveLaunchConfiguration(input),
       (error: unknown) =>
-        error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
+        error instanceof LaunchPlanError && error.code === "conflicting-launch-shape",
     );
   }
+
+  assert.deepEqual(resolveLaunchConfiguration({
+    agentName: "Explore", declaredModel: "opus", declaredEffort: "high", declaredCommand: ["clauder"],
+  }), {
+    shape: "builtin", agentName: "Explore", declaredModel: "opus", declaredEffort: "high", declaredCommand: ["clauder"],
+  });
 
   assert.throws(
     () => resolveLaunchConfiguration({ declaredTools: ["Read"] }),
@@ -531,6 +556,16 @@ test("a resume re-passes every flag that shaped the launch", () => {
     }).args,
     ["--resume", sessionId],
   );
+  const resumedExplore = planSessionResume({
+    agentId, sessionId, agentType: "Explore", shell: "powershell", permissionMode: "default",
+    configuration: resolveLaunchConfiguration({
+      agentName: "Explore", declaredModel: "haiku", declaredEffort: "high", declaredCommand: ["clauder", "run", "kiro", "--"],
+    }),
+  });
+  assert.deepEqual(resumedExplore.command, ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(resumedExplore.args, ["--resume", sessionId, "--model", "haiku", "--effort", "high"]);
+  assert.equal(resumedExplore.args.includes("--tools"), false);
+  assert.equal(resumedExplore.systemPrompt, undefined);
   // The Manager resumes from its own definition or not at all.
   assert.throws(
     () => planManagerResume({
@@ -704,7 +739,7 @@ test("a definition's command replaces the configured launch command for that age
   assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' -- clauder run kiro -- --session-id"));
 });
 
-test("a declared command is validated like the setting, and is meaningless without a definition", () => {
+test("a declared command is validated like the setting, and requires a definition or builtin profile", () => {
   // `--` is a legal token here — it is how a wrapper ends its own arguments —
   // while an empty or unquotable one would launch the wrong program.
   for (const command of [[" "], ['say "hi"'], ["line\nbreak"]]) {
@@ -723,18 +758,13 @@ test("a declared command is validated like the setting, and is meaningless witho
   assert.equal("declaredCommand" in empty, false);
   assert.deepEqual(planLaunch(request({ configuration: empty, command: ["openclaude"], prompt: "Go." })).command, ["openclaude"]);
 
-  // A builtin type has no aboard definition to declare anything from.
-  for (const input of [
-    { agentName: "Explore", declaredCommand: ["clauder"] },
-    { declaredCommand: ["clauder"] },
-  ]) {
-    assert.throws(
-      () => resolveLaunchConfiguration(input),
-      (error: unknown) =>
-        error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
-      JSON.stringify(input),
-    );
-  }
+  assert.deepEqual(resolveLaunchConfiguration({ agentName: "Explore", declaredCommand: ["clauder"] }), {
+    shape: "builtin", agentName: "Explore", declaredCommand: ["clauder"],
+  });
+  assert.throws(
+    () => resolveLaunchConfiguration({ declaredCommand: ["clauder"] }),
+    (error: unknown) => error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
+  );
 });
 
 test("parses the launch command setting as tokens, from a string or an array", () => {

@@ -18,6 +18,7 @@ const required = [
   // subagent type every session in the workspace can discover and spawn.
   "assets/scaffold/.aboard/agents/manager.md",
   "assets/scaffold/.aboard/agents/implementer.md",
+  "assets/scaffold/.aboard/agents/Explore.md",
   "assets/scaffold/.claude/skills/update-todo/SKILL.md",
   "assets/scaffold/.claude/skills/brainstorm/SKILL.md",
   "assets/scaffold/.claude/skills/general-purpose/SKILL.md",
