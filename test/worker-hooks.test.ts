@@ -70,30 +70,35 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
     {},
     { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" },
     { ABOARD_AGENT_ID: "research-1", ABOARD_AGENT_TYPE: "webresearcher" },
+    // Explore is automated-only and read-only: like webresearcher it has no
+    // implementation contract to re-ground and spawns no subagents, so every
+    // route but its stop and the lifecycle pair is guarded off.
+    { ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" },
   ]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
   }
 });
 
-test("worker Python hook guards the dual-mode builtin types on ABOARD_DELIVERS_RESULT", async () => {
+test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and treats Explore as automated worker", async () => {
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
   const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "done" });
-  // An interactive Explore session reports nothing: without the delivery flag
+  // An interactive general-purpose session reports nothing: without the delivery flag
   // the guard exits 0 with no output, exactly like a brainstormer.
-  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" } });
+  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose" } });
   assert.equal(silent.status, 0); assert.equal(silent.stdout, ""); assert.equal(silent.stderr, "");
 
-  // The same type launched to deliver a result reports its stop: the flag, not
-  // the type, opens the worker route. Spawned asynchronously — a synchronous
-  // spawn would block the event loop that has to answer the hook's POST.
-  const received: { url?: string; body?: string } = {};
+  // general-purpose launched to deliver a result reports its stop: the flag opens the worker route.
+  // Explore is automated-only and in WORKER_AGENT_TYPES, so it reports its stop directly.
+  const received: { url?: string; body?: string }[] = [];
   const server = createServer((incoming, outgoing) => {
     const chunks: Buffer[] = [];
     incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
     incoming.on("end", () => {
-      if (incoming.url !== undefined) received.url = incoming.url;
-      received.body = Buffer.concat(chunks).toString("utf8");
+      received.push({
+        ...(incoming.url !== undefined ? { url: incoming.url } : {}),
+        body: Buffer.concat(chunks).toString("utf8"),
+      });
       outgoing.writeHead(200, { "content-type": "application/json" });
       outgoing.end("{}");
     });
@@ -102,21 +107,36 @@ test("worker Python hook guards the dual-mode builtin types on ABOARD_DELIVERS_R
   try {
     const address = server.address();
     assert.ok(address !== null && typeof address !== "string");
-    const child = spawn("uv", ["run", "--no-project", "python", script, "worker-stop"], {
-      env: { ...process.env, ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore", ABOARD_DELIVERS_RESULT: "1", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = ""; let stderr = "";
-    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-    child.stdin.end(stopPayload);
-    const status = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
-    assert.equal(status, 0);
-    assert.equal(stderr, "");
-    assert.equal(stdout, "");
-    assert.equal(received.url, "/hooks/stop");
-    assert.match(received.body ?? "", /explore-1/);
+
+    // Spawned asynchronously — a synchronous spawn would block the event loop
+    // that has to answer the hook's POST. A reporting hook stays silent on both
+    // streams: its output is the bridge call, never terminal text.
+    const report = async (env: NodeJS.ProcessEnv): Promise<void> => {
+      const child = spawn("uv", ["run", "--no-project", "python", script, "worker-stop"], {
+        env: { ...process.env, ...env, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = ""; let stderr = "";
+      child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+      child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+      child.stdin.end(stopPayload);
+      const status = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+      assert.equal(status, 0);
+      assert.equal(stdout, "");
+      assert.equal(stderr, "");
+    };
+
+    // The flag, not the type, opens the worker route for general-purpose.
+    await report({ ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose", ABOARD_DELIVERS_RESULT: "1" });
+    // Explore is automated-only, so its type alone opens the route.
+    await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" });
+
+    assert.equal(received.length, 2);
+    assert.equal(received[0]!.url, "/hooks/stop");
+    assert.match(received[0]!.body ?? "", /gp-1/);
+    assert.equal(received[1]!.url, "/hooks/stop");
+    assert.match(received[1]!.body ?? "", /explore-1/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
   }

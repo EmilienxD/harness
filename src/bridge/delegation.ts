@@ -62,9 +62,9 @@ export interface DelegationConfigurationSource {
 
 export interface DelegationPromptResolver {
   /**
-   * `interactive` is the launch's mode, not the type's: a dual-mode builtin
-   * type launched interactively needs no opening message any more than a
-   * brainstormer does, and an automated launch always needs one.
+   * `interactive` is the launch's mode, not the type's: a type launched
+   * interactively needs no opening message any more than a brainstormer does,
+   * and an automated launch always needs one.
    */
   resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined>;
 }
@@ -190,10 +190,12 @@ export class DelegationCoordinator {
     if (session.identity.type === "manager") {
       throw new DelegationError("unknown-agent", "The Manager has its own lifecycle");
     }
-    if (session.identity.type === "webresearcher") {
+    // Automated-only research types have no user conversation to hand off, so a
+    // restore whose result caller is gone leaves nobody to talk to.
+    if (session.identity.type === "webresearcher" || session.identity.type === "Explore") {
       throw new DelegationError(
         "unresumable-session",
-        "A webresearcher cannot be restored after its result caller is gone; launch a fresh research task instead",
+        `The ${session.identity.type} session cannot be restored after its result caller is gone; launch a fresh ${session.identity.type} instead`,
       );
     }
     // The definition is required, not merely useful: a resume re-passes the
@@ -306,9 +308,9 @@ export class DelegationCoordinator {
     const agentId = this.options.agentIdFactory();
     const sessionId = this.options.sessionIdFactory();
     // Interactive is the launch's delivery mode, derivable from nothing else:
-    // `general-purpose` and `Explore` run in either mode. It also settles who
-    // the launch lives with: a handed-off terminal is driven by the user, so
-    // its permission mode is gated (see `resolvePermissionMode`).
+    // `general-purpose` runs in either mode. It also settles who the launch
+    // lives with: a handed-off terminal is driven by the user, so its
+    // permission mode is gated (see `resolvePermissionMode`).
     const interactive = resultDelivery.mode === "none";
     const [configuration, prompt] = await Promise.all([
       this.options.configurations.get(input.type),

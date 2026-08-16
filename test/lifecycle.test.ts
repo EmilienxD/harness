@@ -156,10 +156,14 @@ test("only automated agents with a waiting caller are reconciled on terminal clo
   for (const type of ["manager", "brainstormer"] as const) {
     assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type } }), false, type);
   }
-  // The dual-mode builtin types owe a result exactly when their launch does.
-  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "webresearcher" } }), true);
-  for (const type of ["general-purpose", "Explore"] as const) {
+  // The automated types always owe one; general-purpose owes one exactly when
+  // its launch does.
+  for (const type of ["webresearcher", "Explore"] as const) {
     assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type } }), true, type);
+    // Defence in depth: the delivery half still decides, even though an
+    // automated type with no delivery is now rejected at the parse boundary.
     assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type }, resultDelivery: { mode: "none" } }), false, type);
   }
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "general-purpose" } }), true);
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "general-purpose" }, resultDelivery: { mode: "none" } }), false);
 });

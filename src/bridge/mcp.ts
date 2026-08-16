@@ -64,7 +64,7 @@ const LAUNCH_PROPERTIES = {
       "Set true only when the user should drive the terminal directly. " +
       "The terminal is focused and no result is delivered back to the caller, " +
       "so continue with the user and never wait, poll, or promise a later summary. " +
-      "brainstormer is always interactive; webresearcher cannot be interactive.",
+      "brainstormer is always interactive; webresearcher and Explore cannot be interactive.",
   },
   run_in_background: {
     type: "boolean",
@@ -91,7 +91,7 @@ const RUN_AGENT_DESCRIPTION =
   "- Explore: Claude Code's built-in read-only repository search role. " +
   "Use for locating files, references, patterns, or answering where code lives. " +
   "State quick, medium, or very thorough breadth in the prompt. " +
-  "It can be automated or handed to the user.\n" +
+  "It is automated only.\n" +
   "- brainstormer: a user-driven conversation that resolves a vague product or architecture idea " +
   "into an implementation-ready durable specification. " +
   "It is interactive only.\n" +

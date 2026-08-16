@@ -131,6 +131,27 @@ test("enforces result and lifecycle invariants for agent roles", () => {
   (automatedAwaitingUser.lifecycle as Record<string, unknown>).status =
     "awaiting-user";
   assert.equal(parseAgentSession(automatedAwaitingUser).ok, false);
+
+  // Explore is automated-only, so it owes a result like any other worker.
+  const exploreWithoutResult = structuredClone(validSession) as unknown as Record<
+    string,
+    unknown
+  >;
+  (exploreWithoutResult.identity as Record<string, unknown>).type = "Explore";
+  (exploreWithoutResult.resultDelivery as Record<string, unknown>).mode = "none";
+  assert.equal(parseAgentSession(exploreWithoutResult).ok, false);
+
+  // general-purpose is neither automated nor interactive-only: handed to the
+  // user it legally persists with no delivery, and rejecting it here would
+  // discard the whole fleet snapshot on restore.
+  const interactiveGeneralPurpose = structuredClone(validSession) as unknown as Record<
+    string,
+    unknown
+  >;
+  (interactiveGeneralPurpose.identity as Record<string, unknown>).type = "general-purpose";
+  (interactiveGeneralPurpose.resultDelivery as Record<string, unknown>).mode = "none";
+  delete (interactiveGeneralPurpose.resultDelivery as Record<string, unknown>).managerAgentId;
+  assert.equal(parseAgentSession(interactiveGeneralPurpose).ok, true);
 });
 
 test("requires valid identifiers, timestamps, and telemetry", () => {

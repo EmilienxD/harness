@@ -207,24 +207,33 @@ test("a terminal handed to the user takes no lease and runs beside the holder", 
   assert.equal(lease.current()?.agentId, holder);
 });
 
-test("keeps an automated-only webresearcher paused after its result caller is gone", async () => {
-  const context = setup();
-  const workerId = agent("persisted-researcher");
-  context.fleet.register({
-    identity: { agentId: workerId, type: "webresearcher" },
-    sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"),
-    terminal: { terminalId: terminal("old-terminal"), name: "aboard: webresearcher" },
-    lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
-    resultDelivery: { mode: "tool-result" },
-    telemetry,
-  }, at("2026-07-30T10:00:00.000Z"));
+test("keeps the automated-only research types paused after their result caller is gone", async () => {
+  // Neither has a user conversation to hand off, so restoration would open a
+  // terminal nobody can use. Explore belongs here for the same reason as
+  // webresearcher: it is automated only.
+  for (const [type, agentId, sessionId] of [
+    ["webresearcher", "persisted-researcher", "c15badb6-d6c8-45a6-a59f-e931cd364332"],
+    ["Explore", "persisted-explorer", "2f2f0f4c-1c3e-4c0a-9d2e-3f5f0a1b2c3d"],
+  ] as const) {
+    const context = setup();
+    const workerId = agent(agentId);
+    context.fleet.register({
+      identity: { agentId: workerId, type },
+      sessionId: session(sessionId),
+      terminal: { terminalId: terminal("old-terminal"), name: `aboard: ${type}` },
+      lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
+      resultDelivery: { mode: "tool-result" },
+      telemetry,
+    }, at("2026-07-30T10:00:00.000Z"));
 
-  await assert.rejects(
-    () => context.coordinator.resumePersisted(context.fleet.get(workerId)!),
-    /cannot be restored after its result caller is gone/,
-  );
-  assert.equal(context.host.created.length, 0);
-  assert.equal(context.fleet.get(workerId)?.resultDelivery.mode, "tool-result");
+    await assert.rejects(
+      () => context.coordinator.resumePersisted(context.fleet.get(workerId)!),
+      /cannot be restored after its result caller is gone/,
+      type,
+    );
+    assert.equal(context.host.created.length, 0, type);
+    assert.equal(context.fleet.get(workerId)?.resultDelivery.mode, "tool-result", type);
+  }
 });
 
 test("keeps a transcript-less persisted worker paused", async () => {
@@ -406,9 +415,9 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["run_agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
     ["run_agent", { type: "general-purpose", description: "too short", interactive: true }],
     ["run_agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
-    // A dual-mode type without interactive is automated, and an automated
-    // launch without a prompt is the one combination with no reading.
+    // An automated launch without a prompt is rejected.
     ["run_agent", { type: "Explore", description: "map the auth flow" }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", interactive: true }],
     ["run_agent", { type: "webresearcher", description: "research current API pricing" }],
     ["run_agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
     ["todo_create", { subjects: [] }],
@@ -644,17 +653,21 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
   assert.equal(lease.current(), undefined);
 });
 
-test("builtin types run interactively: focused, hook-silent, prompt optional", async () => {
+test("general-purpose runs interactively: focused, hook-silent, prompt optional", async () => {
   const { launch, host } = setup();
-  const launched = await launch({ type: "Explore", description: "browse the auth flow", interactive: true });
+  const launched = await launch({ type: "general-purpose", description: "browse the auth flow", interactive: true });
   assert.equal(launched.status, 200, JSON.stringify(launched.body));
   assert.match(JSON.stringify(launched.body), /no agent result/);
   // Focused like any handed-off session, with no result to report and no
   // positional prompt: the user types the first message.
   assert.deepEqual(host.created.at(-1)!.terminal.shown, [false]);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent Explore --disallowedTools 'mcp__aboard__\*'\s*$/);
+  // The default shape: no `--agent`, no system-prompt flag.
+  const bare = host.created.at(-1)!.terminal.sent.at(-1)!;
+  assert.doesNotMatch(bare, /--agent|--system-prompt(?:-file)?/);
 
+  // The same shape with an opening topic, which names the conversation rather
+  // than delivering a task.
   const withTopic = await launch({
     type: "general-purpose", prompt: "start from src/auth.ts", description: "drive the auth cleanup", interactive: true,
   });
@@ -663,6 +676,13 @@ test("builtin types run interactively: focused, hook-silent, prompt optional", a
   assert.doesNotMatch(command, /--agent|--system-prompt(?:-file)?/);
   assert.match(command, /start from src\/auth\.ts/);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+});
+
+test("Explore is automated only and cannot be launched interactively", async () => {
+  const { launch } = setup();
+  const launched = await launch({ type: "Explore", description: "browse the auth flow", interactive: true });
+  assert.equal(launched.status, 400);
+  assert.match(JSON.stringify(launched.body), /Explore is automated and cannot be launched interactively/);
 });
 
 test("an interactive-only brainstormer is launched interactively and the correction is reported", async () => {

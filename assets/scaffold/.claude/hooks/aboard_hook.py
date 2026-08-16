@@ -37,10 +37,10 @@ BLOCKING_ROUTE = "manager-prompt"
 # roles (brainstormer, pr-doctor-hitl) never report a result, so worker
 # hooks skip them: pr-doctor-hitl waits on the user, and the run's continue
 # signal for a hitl issue is the pull request's resolution, not that agent's
-# completion. The dual-mode builtin types (general-purpose, Explore) report per
-# launch rather than per role: the extension sets ABOARD_DELIVERS_RESULT=1 only
-# for result-delivering sessions, so an interactive one stays silent here.
-WORKER_AGENT_TYPES = frozenset({"webresearcher", "implementer", "pr-doctor-afk"})
+# completion. general-purpose reports per launch rather than per role: the
+# extension sets ABOARD_DELIVERS_RESULT=1 only for result-delivering sessions,
+# so an interactive one stays silent here.
+WORKER_AGENT_TYPES = frozenset({"webresearcher", "implementer", "pr-doctor-afk", "Explore"})
 
 # Commands the bridge handles itself. `/done` is available in every aboard
 # terminal; the remaining commands belong only to the Manager. These expressions
@@ -140,9 +140,9 @@ def main():
     # pid and its end, so the write-lease recovery and startup proof-of-life
     # cover Managers, interactive types, and workers alike. Only `ABOARD_AGENT_ID`
     # gates them (checked above), never the agent type.
-    # webresearcher reports completion but has no implementation branch or issue
-    # contract to re-ground, and it cannot spawn code-exploration subagents.
-    if agent_type == "webresearcher" and route not in ("worker-stop", "worker-stop-failure", "session-start", "session-end"):
+    # webresearcher and Explore report completion but have no implementation branch or issue
+    # contract to re-ground, and neither spawns code-exploration subagents.
+    if agent_type in ("webresearcher", "Explore") and route not in ("worker-stop", "worker-stop-failure", "session-start", "session-end"):
         return 0
     if route not in ("session-start", "session-end") and (
         (expected_manager and route != BLOCKING_ROUTE and agent_type != "manager") or (

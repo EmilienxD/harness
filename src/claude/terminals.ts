@@ -104,8 +104,8 @@ export interface CreateAboardTerminalRequest {
   readonly focus?: boolean;
   /**
    * Whether this session reports its result over the bridge. It is a property
-   * of the launch, not of the type: the dual-mode builtin types
-   * (`general-purpose`, `Explore`) report exactly when their launch is
+   * of the launch, not of the type: dual-mode sessions
+   * (`general-purpose`) report exactly when their launch is
    * result-delivering. The hooks read it as `ABOARD_DELIVERS_RESULT`, and its
    * absence means the session is handed to the user and stays hook-silent.
    */

@@ -33,7 +33,7 @@ export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT
  * to the user. They are never typed into, so their first prompt is mandatory
  * (spec section 5.3).
  */
-export const AUTOMATED_AGENT_TYPES = ["webresearcher", "implementer", "pr-doctor-afk"] as const;
+export const AUTOMATED_AGENT_TYPES = ["webresearcher", "implementer", "pr-doctor-afk", "Explore"] as const;
 
 export function isAutomatedAgentType(type: AgentType): boolean {
   return (AUTOMATED_AGENT_TYPES as readonly AgentType[]).includes(type);
@@ -64,8 +64,7 @@ export function isInteractiveAgentType(type: AgentType): boolean {
  * aboard's own agents are carried on the command line instead, so that nothing
  * in the workspace can discover and spawn them.
  *
- * Explore is dual-mode: it can work unattended and report a result or be handed
- * to the user, so result reporting is decided per launch, never per type.
+ * Explore is automated only: it runs unattended and reports a result.
  */
 export const NAMED_BUILTIN_AGENT_TYPES = ["Explore"] as const;
 

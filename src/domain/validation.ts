@@ -2,6 +2,7 @@ import {
   AGENT_TYPES,
   INTERACTIVE_AGENT_TYPES,
   WORKER_FAILURE_TYPES,
+  isAutomatedAgentType,
   type AgentId,
   type AgentIdentity,
   type AgentLifecycle,
@@ -419,9 +420,12 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
         `session.resultDelivery.mode must be none for ${identity.type} agents`,
       );
     }
+    // Only the automated types owe a result. `general-purpose` is neither
+    // automated nor interactive-only, so an interactive launch of it legally
+    // persists with `mode: "none"`; flagging that here discarded the whole
+    // `fleet.json`, because a session that fails to parse fails the snapshot.
     if (
-      identity.type !== "manager" &&
-      !INTERACTIVE_TYPES.has(identity.type) &&
+      isAutomatedAgentType(identity.type) &&
       resultDelivery.mode === "none"
     ) {
       issues.push(
