@@ -24,77 +24,195 @@ const LAUNCH_PROPERTIES = {
   type: {
     type: "string",
     enum: MCP_LAUNCHABLE_AGENT_TYPES,
-    description: "Agent role. Use general-purpose for direct full-tool work, Explore for read-only repository search, brainstormer for a user-driven product or architecture conversation, and webresearcher for current external facts with citations. Implementation roles are intentionally unavailable here; use start_auto_run for issue implementation.",
+    description:
+      "Agent role. " +
+      "Use general-purpose for direct full-tool work, Explore for read-only repository search, " +
+      "brainstormer for a user-driven product or architecture conversation, " +
+      "and webresearcher for current external facts with citations. " +
+      "Implementation roles are intentionally unavailable here; use start_auto_run for issue implementation.",
   },
   prompt: {
     type: "string",
     minLength: 1,
-    description: "The agent's complete opening task and first user turn. Required for automated launches. For interactive launches, omit it unless the user explicitly supplied an opening topic; never invent or paraphrase one merely to fill this field.",
+    description:
+      "The agent's complete opening task and first user turn. " +
+      "Required for automated launches. " +
+      "For interactive launches, omit it unless the user explicitly supplied an opening topic; " +
+      "never invent or paraphrase one merely to fill this field.",
   },
   description: {
     type: "string",
     minLength: 1,
-    description: "Required concise 3-6 word label shown to the user in the fleet tree. Describe the concrete purpose, such as 'Audit retry logic centralization', rather than a generic label such as 'Investigate code'.",
+    description:
+      "Required concise 3-6 word label shown to the user in the fleet tree. " +
+      "Describe the concrete purpose, such as 'Audit retry logic centralization', " +
+      "rather than a generic label such as 'Investigate code'.",
   },
   issue: {
     type: "integer",
     minimum: 1,
-    description: "Optional positive GitHub issue number. When present, aboard resolves the issue and parent specification and merges that contract into the opening prompt; do not spend an agent turn fetching launch-contract material again.",
+    description:
+      "Optional positive GitHub issue number. " +
+      "When present, aboard resolves the issue and parent specification " +
+      "and merges that contract into the opening prompt; " +
+      "do not spend an agent turn fetching launch-contract material again.",
   },
   interactive: {
     type: "boolean",
-    description: "Defaults to false. Set true only when the user should drive the terminal directly. The terminal is focused and no result is delivered back to the caller, so continue with the user and never wait, poll, or promise a later summary. brainstormer is always interactive; webresearcher cannot be interactive.",
+    description:
+      "Defaults to false. " +
+      "Set true only when the user should drive the terminal directly. " +
+      "The terminal is focused and no result is delivered back to the caller, " +
+      "so continue with the user and never wait, poll, or promise a later summary. " +
+      "brainstormer is always interactive; webresearcher cannot be interactive.",
   },
   run_in_background: {
     type: "boolean",
-    description: "Applies only to automated launches. Defaults to false, which blocks until the final result is needed for the current decision. Set true only for independent work that may finish later; the call returns immediately and completion is delivered as a later notification. Ignored with a notice when interactive is true.",
+    description:
+      "Applies only to automated launches. " +
+      "Defaults to false, which blocks until the final result is needed for the current decision. " +
+      "Set true only for independent work that may finish later; " +
+      "the call returns immediately and completion is delivered as a later notification. " +
+      "Ignored with a notice when interactive is true.",
   },
 } as const;
 
-const RUN_AGENT_DESCRIPTION = `Launch one visible, independent Claude Code session in a real terminal created by aboard. Use this when a coherent unit of work should be delegated and the user should be able to watch, interrupt, or take over. Do not use it for one known-file read, one targeted symbol lookup, or to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.
+const RUN_AGENT_DESCRIPTION = 
+  "Launch one visible, independent Claude Code session in a real terminal created by aboard. " +
+  "Use this when a coherent unit of work should be delegated " +
+  "and the user should be able to watch, interrupt, or take over. " +
+  "Do not use it for one known-file read, one targeted symbol lookup, " +
+  "or to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n\n" +
 
-Choose the role deliberately:
-- general-purpose: Claude Code's unmodified default full-tool session, for direct work that may mix investigation and editing. It can be automated or handed to the user.
-- Explore: Claude Code's built-in read-only repository search role. Use for locating files, references, patterns, or answering where code lives. State quick, medium, or very thorough breadth in the prompt. It can be automated or handed to the user.
-- brainstormer: a user-driven conversation that resolves a vague product or architecture idea into an implementation-ready durable specification. It is interactive only.
-- webresearcher: automated, read-only research for cutoff-sensitive external facts. Use for current documentation, versions, pricing, standards, advisories, or vendor behavior that may have changed; it returns cited current evidence.
-Implementation agents and pull-request doctors are not available through this tool. Use start_auto_run for approved issue implementation and review_pr to hand an existing pull-request session back to the user.
+  "Choose the role deliberately:\n" +
+  "- general-purpose: Claude Code's unmodified default full-tool session, " +
+  "for direct work that may mix investigation and editing. " +
+  "It can be automated or handed to the user.\n" +
+  "- Explore: Claude Code's built-in read-only repository search role. " +
+  "Use for locating files, references, patterns, or answering where code lives. " +
+  "State quick, medium, or very thorough breadth in the prompt. " +
+  "It can be automated or handed to the user.\n" +
+  "- brainstormer: a user-driven conversation that resolves a vague product or architecture idea " +
+  "into an implementation-ready durable specification. " +
+  "It is interactive only.\n" +
+  "- webresearcher: automated, read-only research for cutoff-sensitive external facts. " +
+  "Use for current documentation, versions, pricing, standards, advisories, " +
+  "or vendor behavior that may have changed; it returns cited current evidence.\n" +
+  "Implementation agents and pull-request doctors are not available through this tool. " +
+  "Use start_auto_run for approved issue implementation " +
+  "and review_pr to hand an existing pull-request session back to the user.\n\n" +
 
-Mode and delivery are separate decisions. An interactive launch focuses the terminal for the user and never returns an agent result. An automated foreground launch waits for the final result when that answer is required before making the next recommendation. run_in_background returns immediately and should be used only when the work is independent; its eventual result arrives through a later notification. Every launch starts a fresh conversation with no knowledge of the Manager's conversation.
+  "Mode and delivery are separate decisions. " +
+  "An interactive launch focuses the terminal for the user and never returns an agent result. " +
+  "An automated foreground launch waits for the final result " +
+  "when that answer is required before making the next recommendation. " +
+  "run_in_background returns immediately and should be used only when the work is independent; " +
+  "its eventual result arrives through a later notification. " +
+  "Every launch starts a fresh conversation with no knowledge of the Manager's conversation.\n\n" +
 
-Write an automated prompt as a self-sufficient briefing for a capable colleague entering cold: state the goal and why it matters, relevant files and constraints, known facts and rejected approaches, the exact question or bounded task, and what output or validation proves completion. Do not delegate synthesis with vague instructions such as "investigate and do the right thing." Ask for a concise result when appropriate.
+  "Write an automated prompt as a self-sufficient briefing for a capable colleague entering cold: " +
+  "state the goal and why it matters, relevant files and constraints, " +
+  "known facts and rejected approaches, the exact question or bounded task, " +
+  "and what output or validation proves completion. " +
+  'Do not delegate synthesis with vague instructions such as "investigate and do the right thing." ' +
+  "Ask for a concise result when appropriate.\n\n" +
 
-Automated write-capable launches participate in the single-writer lease. If another writer holds it, the call fails immediately with holder details; surface that conflict instead of retrying or queueing. Read-only and interactive sessions may run concurrently because interactive overlap is the user's decision.`;
+  "Automated write-capable launches participate in the single-writer lease. " +
+  "If another writer holds it, the call fails immediately with holder details; " +
+  "surface that conflict instead of retrying or queueing. " +
+  "Read-only and interactive sessions may run concurrently " +
+  "because interactive overlap is the user's decision.";
 
-const TODO_CREATE_DESCRIPTION = `Add one or more new tasks to the project's durable roadmap, which is a flat checkbox list on the GitHub issue labelled ai:todo. Use this only to record newly identified project-level work or priorities; implementation detail belongs in an ai:spec issue. The current roadmap is supplied in context, so there is deliberately no roadmap read tool and no full-body replacement operation.
+const TODO_CREATE_DESCRIPTION = 
+  "Add one or more new tasks to the project's durable roadmap, " +
+  "which is a flat checkbox list on the GitHub issue labelled ai:todo. " +
+  "Use this only to record newly identified project-level work or priorities; " +
+  "implementation detail belongs in an ai:spec issue. " +
+  "The current roadmap is supplied in context, " +
+  "so there is deliberately no roadmap read tool and no full-body replacement operation.\n\n" +
 
-Send all related new subjects in one call. The batch is atomic, preserves the supplied order, and costs one GitHub issue edit. Each subject must be a directional single line of at most 200 characters with no leading list or heading markup. If any subject is invalid, nothing is written.
+  "Send all related new subjects in one call. " +
+  "The batch is atomic, preserves the supplied order, and costs one GitHub issue edit. " +
+  "Each subject must be a directional single line of at most 200 characters " +
+  "with no leading list or heading markup. " +
+  "If any subject is invalid, nothing is written.\n\n" +
 
-Placement is explicit: omit after to append, use after='top' to make the batch highest priority, or pass a current 4-character task id to place the batch immediately after that task. If no roadmap issue exists, this tool creates the first one. It returns the new derived task ids in subject order and the roadmap issue number; retain those ids for dependent updates. Multiple roadmap carriers are reported but never modified or consolidated automatically.`;
+  "Placement is explicit: omit after to append, " +
+  "use after='top' to make the batch highest priority, " +
+  "or pass a current 4-character task id to place the batch immediately after that task. " +
+  "If no roadmap issue exists, this tool creates the first one. " +
+  "It returns the new derived task ids in subject order and the roadmap issue number; " +
+  "retain those ids for dependent updates. " +
+  "Multiple roadmap carriers are reported but never modified or consolidated automatically.";
 
-const TODO_UPDATE_DESCRIPTION = `Mutate exactly one existing roadmap task using its current 4-character derived id from the newest roadmap context. Use this to retitle a task, change its completion status, reprioritize it, delete it on the user's explicit request, or combine those changes atomically. At least one of subject, status, or after is required.
+const TODO_UPDATE_DESCRIPTION = 
+  "Mutate exactly one existing roadmap task using its current 4-character derived id " +
+  "from the newest roadmap context. " +
+  "Use this to retitle a task, change its completion status, reprioritize it, " +
+  "delete it on the user's explicit request, or combine those changes atomically. " +
+  "At least one of subject, status, or after is required.\n\n" +
 
-Task ids are derived from subject text rather than stored. Copy the id from the newest roadmap block and never invent or fuzzy-match one. Retitling changes the id. A stale or unknown id writes nothing and returns the current numbered list so the operation can be retried safely.
+  "Task ids are derived from subject text rather than stored. " +
+  "Copy the id from the newest roadmap block and never invent or fuzzy-match one. " +
+  "Retitling changes the id. " +
+  "A stale or unknown id writes nothing " +
+  "and returns the current numbered list so the operation can be retried safely.\n\n" +
 
-Status semantics: pending marks remaining work; completed changes the checkbox to complete but leaves the task in its current position forever; deleted removes the task and must be used only when the user explicitly asks for deletion. in_progress is accepted but coerced to pending with a notice because live work is already derived from issues, pull requests, and auto-run state.
+  "Status semantics: pending marks remaining work; " +
+  "completed changes the checkbox to complete but leaves the task in its current position forever; " +
+  "deleted removes the task and must be used only when the user explicitly asks for deletion. " +
+  "in_progress is accepted but coerced to pending with a notice " +
+  "because live work is already derived from issues, pull requests, and auto-run state.\n\n" +
 
-Reprioritize with after='top' or after='<current task id>'; moving is part of this update, not a separate operation. A replacement subject follows the same single-line, 200-character, no-leading-markup rules as creation. Non-checkbox roadmap text and all unrelated tasks remain untouched.`;
+  "Reprioritize with after='top' or after='<current task id>'; " +
+  "moving is part of this update, not a separate operation. " +
+  "A replacement subject follows the same single-line, 200-character, no-leading-markup rules as creation. " +
+  "Non-checkbox roadmap text and all unrelated tasks remain untouched.";
 
-const START_AUTO_RUN_DESCRIPTION = `Start aboard's automatic implementation workflow for the oldest open ai:spec issue. Use this only after the user has approved implementation and the specification and child issues are ready. Do not use run_agent to bypass this workflow: the extension, not an agent, owns branch creation, commits, pushes, pull requests, optional review launches, merges, and cleanup.
+const START_AUTO_RUN_DESCRIPTION = 
+  "Start aboard's automatic implementation workflow for the oldest open ai:spec issue. " +
+  "Use this only after the user has approved implementation " +
+  "and the specification and child issues are ready. " +
+  "Do not use run_agent to bypass this workflow: " +
+  "the extension, not an agent, owns branch creation, commits, pushes, " +
+  "pull requests, optional review launches, merges, and cleanup.\n\n" +
 
-The call is non-blocking and takes no inputs. It validates that no run is active, the repository and GitHub authentication are usable, the working tree is clean, an open specification exists, and that specification has at least one processable child. The first failed precondition launches nothing; relay its reason verbatim, especially dirty paths, because only the user may decide what to do with unrelated work.
+  "The call is non-blocking and takes no inputs. " +
+  "It validates that no run is active, the repository and GitHub authentication are usable, " +
+  "the working tree is clean, an open specification exists, " +
+  "and that specification has at least one processable child. " +
+  "The first failed precondition launches nothing; relay its reason verbatim, especially dirty paths, " +
+  "because only the user may decide what to do with unrelated work.\n\n" +
 
-On success it immediately returns the run id, selected specification, forecast issue order, dispositions, branch names, and skips with reasons. Report that plan and continue the conversation; do not wait or poll. Calling again while a run is active returns the current run instead of creating a second one. Progress is delivered later through bounded notifications.
+  "On success it immediately returns the run id, selected specification, " +
+  "forecast issue order, dispositions, branch names, and skips with reasons. " +
+  "Report that plan and continue the conversation; do not wait or poll. " +
+  "Calling again while a run is active returns the current run instead of creating a second one. " +
+  "Progress is delivered later through bounded notifications.\n\n" +
 
-Issues are processed serially and re-derived from GitHub at each boundary. ai:afk work may merge automatically. ai:hitl work waits at its pull request until the user merges it; that merge is the approval and normally resumes the run. A failure stops the run rather than skipping to siblings, leaving visible work in place for inspection.`;
+  "Issues are processed serially and re-derived from GitHub at each boundary. " +
+  "ai:afk work may merge automatically. " +
+  "ai:hitl work waits at its pull request until the user merges it; " +
+  "that merge is the approval and normally resumes the run. " +
+  "A failure stops the run rather than skipping to siblings, " +
+  "leaving visible work in place for inspection.";
 
-const REVIEW_PR_DESCRIPTION = `Hand an existing open pull request's owning aboard session back to the user for interactive inspection or follow-up. Use this when the user asks to review, inspect, discuss, or continue work on a pull request. This does not perform a review, launch an automated reviewer, post comments, approve, merge, or return a later agent result.
+const REVIEW_PR_DESCRIPTION = 
+  "Hand an existing open pull request's owning aboard session back to the user " +
+  "for interactive inspection or follow-up. " +
+  "Use this when the user asks to review, inspect, discuss, or continue work on a pull request. " +
+  "This does not perform a review, launch an automated reviewer, post comments, " +
+  "approve, merge, or return a later agent result.\n\n" +
 
-Omit pr to select the latest open pull request, or provide a positive pull-request number to target one explicitly. The optional focus text names what the user wants to inspect and becomes the handoff topic when a fallback session is required. If the owning implementer or pull-request doctor is live, its terminal is focused; if its recorded session is closed, it is resumed with its original restrictions. If ownership is unavailable after a restart, aboard opens a fresh interactive pull-request doctor and reports that fallback. If no matching open pull request exists, nothing is launched.`;
-
-const RELEASE_LEASE_DESCRIPTION = `Force-release aboard's current automated write lease. This is an exceptional recovery action, not normal scheduling. Use it only when the recorded holder is stale, dead, irrecoverably blocked, or the user explicitly chooses to allow another automated writer after understanding the risk. A normal active writer should finish, be stopped, or be inspected instead.
-
-Provide a concise, truthful audit reason describing why forced release is justified. The release is logged conspicuously. It does not stop the holder, close a terminal, revert files, repair the working tree, or prove that writing has ceased; it only removes aboard's coordination lock. Another writer may start immediately, so concurrent edits and repository corruption become possible if the old holder is still active.`;
+  "Omit pr to select the latest open pull request, " +
+  "or provide a positive pull-request number to target one explicitly. " +
+  "The optional focus text names what the user wants to inspect " +
+  "and becomes the handoff topic when a fallback session is required. " +
+  "If the owning implementer or pull-request doctor is live, its terminal is focused; " +
+  "if its recorded session is closed, it is resumed with its original restrictions. " +
+  "If ownership is unavailable after a restart, " +
+  "aboard opens a fresh interactive pull-request doctor and reports that fallback. " +
+  "If no matching open pull request exists, nothing is launched.";
 
 export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
@@ -117,12 +235,20 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
           type: "array",
           minItems: 1,
           items: { type: "string", minLength: 1, maxLength: 200 },
-          description: "Required non-empty batch of directional task subjects. Each subject must be one line, at most 200 characters, and must not begin with list or heading markup. The batch is atomic and inserted in this order.",
+          description:
+            "Required non-empty batch of directional task subjects. " +
+            "Each subject must be one line, at most 200 characters, " +
+            "and must not begin with list or heading markup. " +
+            "The batch is atomic and inserted in this order.",
         },
         after: {
           type: "string",
           minLength: 1,
-          description: "Optional placement anchor. Omit to append after every current task, use 'top' to insert before the first task, or provide a current 4-character derived task id to insert the whole batch immediately after it.",
+          description:
+            "Optional placement anchor. " +
+            "Omit to append after every current task, use 'top' to insert before the first task, " +
+            "or provide a current 4-character derived task id " +
+            "to insert the whole batch immediately after it.",
         },
       },
       required: ["subjects"],
@@ -135,10 +261,39 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        task: { type: "string", minLength: 1, description: "Required current 4-character derived id copied from the newest roadmap context. A stale or unknown id fails without writing and returns the current task list." },
-        subject: { type: "string", minLength: 1, maxLength: 200, description: "Optional replacement subject: one directional line of at most 200 characters with no leading list or heading markup. Retitling changes the task's derived id." },
-        status: { type: "string", enum: [...ROADMAP_TASK_STATUSES, "in_progress"], description: "Optional status. pending reopens remaining work; completed checks the task in place permanently; deleted removes it and is allowed only on the user's explicit request; in_progress is coerced to pending because live state is derived elsewhere." },
-        after: { type: "string", minLength: 1, description: "Optional reprioritization anchor. Use 'top' to move before the first task or a current 4-character task id to move immediately after it." },
+        task: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Required current 4-character derived id copied from the newest roadmap context. " +
+            "A stale or unknown id fails without writing and returns the current task list.",
+        },
+        subject: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "Optional replacement subject: one directional line of at most 200 characters " +
+            "with no leading list or heading markup. " +
+            "Retitling changes the task's derived id.",
+        },
+        status: {
+          type: "string",
+          enum: [...ROADMAP_TASK_STATUSES, "in_progress"],
+          description:
+            "Optional status. " +
+            "pending reopens remaining work; completed checks the task in place permanently; " +
+            "deleted removes it and is allowed only on the user's explicit request; " +
+            "in_progress is coerced to pending because live state is derived elsewhere.",
+        },
+        after: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Optional reprioritization anchor. " +
+            "Use 'top' to move before the first task or a current 4-character task id " +
+            "to move immediately after it.",
+        },
       },
       required: ["task"],
       additionalProperties: false,
@@ -155,8 +310,20 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        pr: { type: "integer", minimum: 1, description: "Optional positive pull-request number. Omit to use the latest open pull request." },
-        focus: { type: "string", minLength: 1, description: "Optional concise topic naming what the user wants to inspect or discuss. Used as the opening handoff context when aboard must create a fallback interactive session." },
+        pr: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Optional positive pull-request number. " +
+            "Omit to use the latest open pull request.",
+        },
+        focus: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Optional concise topic naming what the user wants to inspect or discuss. " +
+            "Used as the opening handoff context when aboard must create a fallback interactive session.",
+        },
       },
       additionalProperties: false,
     },
@@ -276,7 +443,14 @@ function parseAfter(value: unknown): { readonly after?: string } {
 function parseStatus(value: unknown): { readonly value?: RoadmapTaskStatus; readonly notices: readonly string[] } {
   if (value === undefined) return { notices: [] };
   if (value === "in_progress") {
-    return { value: "pending", notices: ["status in_progress was recorded as pending: the roadmap tracks what is left to do, and what is in flight is already in the issues, pull requests, and auto-run state your briefing carries."] };
+    return {
+      value: "pending",
+      notices: [
+        "status in_progress was recorded as pending: the roadmap tracks what is left to do, " +
+        "and what is in flight is already in the issues, pull requests, " +
+        "and auto-run state your briefing carries.",
+      ],
+    };
   }
   if (!nonEmptyString(value) || !ROADMAP_TASK_STATUSES.includes(value as RoadmapTaskStatus)) {
     throw new TypeError(`status must be one of: ${ROADMAP_TASK_STATUSES.join(", ")}`);
