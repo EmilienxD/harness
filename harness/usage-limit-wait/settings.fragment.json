@@ -6,9 +6,16 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py"],
+            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py", "--notify"],
+            "timeout": 120,
+            "statusMessage": "Checking Claude usage limits"
+          },
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py", "--wait"],
             "timeout": 604800,
-            "statusMessage": "Checking Claude usage limits — waits here if they are exhausted"
+            "statusMessage": "Waiting for the Claude usage limit to reset"
           }
         ]
       }
@@ -19,9 +26,16 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py"],
+            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py", "--notify"],
+            "timeout": 120,
+            "statusMessage": "Checking Claude usage limits"
+          },
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py", "--wait"],
             "timeout": 604800,
-            "statusMessage": "Checking Claude usage limits — waits here if they are exhausted"
+            "statusMessage": "Waiting for the Claude usage limit to reset"
           }
         ]
       }

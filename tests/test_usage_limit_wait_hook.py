@@ -108,21 +108,26 @@ def test_subscription_session_passes_the_guards():
     assert hook.third_party_session() is False
 
 
-def test_run_exits_before_reading_anything_when_a_provider_is_set(monkeypatch):
+@pytest.mark.parametrize("mode", [["--notify"], ["--wait"], []])
+def test_a_provider_session_is_left_alone(monkeypatch, capsys, mode):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-whatever")
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: pytest.fail("read usage anyway"))
-    assert hook.run() is None
+    assert hook.main(mode) == 0
+    assert capsys.readouterr().out == ""
 
 
-def test_run_exits_immediately_when_disabled(monkeypatch):
+@pytest.mark.parametrize("mode", [["--notify"], ["--wait"], []])
+def test_the_kill_switch_stops_both_halves(monkeypatch, capsys, mode):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_DISABLE", "1")
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: pytest.fail("read usage anyway"))
-    assert hook.run() is None
+    assert hook.main(mode) == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_unreadable_usage_is_not_an_error(monkeypatch):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: None)
-    assert hook.run() is None
+    assert hook.run_wait() is None
+    assert hook.run_notify() is None
 
 
 # --------------------------------------------------------------------------
@@ -333,9 +338,11 @@ def test_a_stale_reading_is_refetched(monkeypatch):
     assert hook.read_usage(now=1_000.0 + hook.DEFAULTS["CACHE_TTL"] + 1) is None
 
 
-def test_an_exhausted_reading_is_never_cached():
+def test_an_exhausted_reading_is_shared_for_a_moment_only():
+    """Just long enough for the notifier and the waiter to agree, no longer."""
     hook.write_cache(snapshot(("session", 100.0, 5_000.0)), now=1_000.0)
-    assert hook.read_cache(now=1_000.5) is None
+    assert hook.read_cache(now=1_000.5) is not None
+    assert hook.read_cache(now=1_000.0 + hook.BLOCKED_CACHE_TTL + 1) is None
 
 
 def test_a_near_the_wall_reading_is_cached_only_briefly():
@@ -459,28 +466,150 @@ def test_polling_slows_down_on_the_cli_fallback(monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# notices
+# --------------------------------------------------------------------------
+
+NOW = 1_700_000_000.0
+
+
+def notify(monkeypatch, *windows, session="s1", now=NOW, credits=None):
+    monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(*windows, credits=credits))
+    monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: pytest.fail("the notifier waited"))
+    return hook.run_notify(session, now=now)
+
+
+def test_a_quiet_window_says_nothing(monkeypatch):
+    assert notify(monkeypatch, ("session", 40.0, NOW + 3600)) is None
+
+
+def test_nearing_the_wall_warns_once_with_the_numbers(monkeypatch):
+    payload = notify(monkeypatch, ("session", 94.0, NOW + 3600))
+    message = payload["systemMessage"]
+    assert "94%" in message and "5-hour" in message and "1h00m" in message
+    # A warning is a standing condition, not news: it must not repeat on every
+    # prompt and every tool batch.
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is None
+
+
+def test_the_warning_threshold_is_configurable(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_WARN", "50")
+    assert notify(monkeypatch, ("session", 60.0, NOW + 3600)) is not None
+
+
+def test_another_session_is_still_told(monkeypatch):
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), session="s2") is not None
+
+
+def test_a_warning_returns_once_the_interval_has_passed(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_NOTIFY_EVERY", "600")
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), now=NOW + 599) is None
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), now=NOW + 601) is not None
+
+
+def test_an_exhausted_window_announces_the_pause_every_time(monkeypatch):
+    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600))
+    message = payload["systemMessage"]
+    assert "Pausing until" in message and "1h00m" in message and "Esc" in message
+    # The pause is about to happen: never throttled.
+    assert notify(monkeypatch, ("session", 100.0, NOW + 3600)) is not None
+
+
+def test_the_pause_rings_the_terminal(monkeypatch):
+    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600))
+    assert payload["terminalSequence"].startswith("\x1b]777;notify;")
+    assert payload["terminalSequence"].endswith("\x07")
+
+
+def test_the_bell_can_be_silenced(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_BELL", "0")
+    assert "terminalSequence" not in notify(monkeypatch, ("session", 100.0, NOW + 3600))
+
+
+def test_a_reset_past_the_cap_promises_no_pause(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_MAX_WAIT", "60")
+    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600))
+    assert "Not pausing" in payload["systemMessage"]
+    assert "terminalSequence" not in payload
+
+
+def test_an_undatable_limit_promises_no_pause(monkeypatch):
+    payload = notify(monkeypatch, ("session", 100.0, None))
+    assert "no reset time" in payload["systemMessage"] and "Not pausing" in payload["systemMessage"]
+
+
+def test_credits_are_reported_as_money_being_spent(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_USE_CREDITS", "1")
+    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600), credits=LIVE)
+    assert "pay-as-you-go" in payload["systemMessage"] and "Not pausing" in payload["systemMessage"]
+
+
+def test_an_ignored_window_is_not_worth_a_notice(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_IGNORE", "weekly_all")
+    assert notify(monkeypatch, ("weekly_all", 100.0, NOW + 3600)) is None
+
+
+def test_the_most_pressing_window_wins(monkeypatch):
+    payload = notify(monkeypatch, ("session", 40.0, NOW + 600), ("weekly_all", 99.0, NOW + 86_400))
+    assert "weekly" in payload["systemMessage"]
+
+
+def test_stale_sessions_are_forgotten(monkeypatch):
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), session="old") is not None
+    assert notify(monkeypatch, ("session", 94.0, NOW + hook.NOTICE_TTL + 7200),
+                  session="new", now=NOW + hook.NOTICE_TTL + 1) is not None
+    stored = json.loads(hook.notices_path().read_text(encoding="utf-8"))
+    assert list(stored["sessions"]) == ["new"]
+
+
+def test_a_corrupt_notice_file_is_ignored(monkeypatch):
+    hook.notices_path().parent.mkdir(parents=True, exist_ok=True)
+    hook.notices_path().write_text("[]", encoding="utf-8")
+    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
+
+
+# --------------------------------------------------------------------------
 # output
 # --------------------------------------------------------------------------
 
 def test_a_completed_wait_reports_itself_to_the_user_only(monkeypatch, capsys):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, time.time() + 30)))
     monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: (3600 * 3 + 720, "session"))
-    assert hook.main() == 0
+    assert hook.main(["--wait"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    # `systemMessage` reaches the user; nothing here reaches the model.
-    assert list(printed) == ["systemMessage"]
+    # `systemMessage` reaches the user, `terminalSequence` reaches the
+    # terminal; nothing here reaches the model.
+    assert set(printed) == {"systemMessage", "terminalSequence"}
     assert "3h12m" in printed["systemMessage"] and "5-hour" in printed["systemMessage"]
+
+
+def test_a_short_wait_does_not_ring_the_bell(monkeypatch, capsys):
+    monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, time.time() + 30)))
+    monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: (12, "session"))
+    assert hook.main(["--wait"]) == 0
+    assert list(json.loads(capsys.readouterr().out)) == ["systemMessage"]
+
+
+def test_no_arguments_still_means_the_waiter(monkeypatch, capsys):
+    """An entry installed before the split passes no arguments."""
+    monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, time.time() + 30)))
+    monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: (300, "session"))
+    assert hook.main([]) == 0
+    assert "waited" in json.loads(capsys.readouterr().out)["systemMessage"]
 
 
 def test_the_common_path_prints_nothing(monkeypatch, capsys):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 2.0, time.time() + 30)))
-    assert hook.main() == 0
+    assert hook.main(["--wait"]) == 0
+    assert hook.main(["--notify"]) == 0
     assert capsys.readouterr().out == ""
 
 
 def test_an_unexpected_failure_never_breaks_the_session(monkeypatch, capsys):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: 1 / 0)
-    assert hook.main() == 0
+    assert hook.main(["--wait"]) == 0
+    assert hook.main(["--notify"]) == 0
     assert capsys.readouterr().out == ""
 
 

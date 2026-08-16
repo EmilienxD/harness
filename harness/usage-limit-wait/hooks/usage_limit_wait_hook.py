@@ -7,10 +7,22 @@ request) and `PostToolBatch` (once per batch, immediately before the next
 model request). Both are the last moment before Claude Code talks to the API,
 which is the only useful place to stall.
 
-It reads the account's usage windows, and if one is exhausted it blocks --
-literally `time.sleep` -- until that window resets, re-polling along the way so
-an early reset, a cancelled subscription, or a ban ends the wait promptly. The
-session then continues on its own instead of dying with "limit reached".
+The script runs in one of two modes, and both are registered on both events:
+
+    --notify   report where usage stands, and never block. Warns as the wall
+               approaches and announces the pause before it starts.
+    --wait     block until an exhausted window resets. This is the default,
+               for an entry that passes no arguments.
+
+They are separate hooks because hooks on one event run in parallel: the
+notifier finishes in milliseconds and says what is about to happen, while the
+waiter is still asleep. One process cannot do both -- a message that arrives
+after a three-hour wait explains nothing.
+
+The waiter blocks -- literally `time.sleep` -- until the window resets,
+re-polling along the way so an early reset, a cancelled subscription, or a ban
+ends the wait promptly. The session then continues on its own instead of dying
+with "limit reached".
 
 Everything fails open. The hook is only meaningful for a Claude subscription,
 so any sign of another credential path (API key, bearer gateway, Bedrock,
@@ -68,11 +80,26 @@ CLI_MIN_POLL_SECONDS = 300.0
 RELAXED_PERCENT = 90.0
 ALERT_CACHE_TTL = 30.0
 
+# An exhausted reading is shared for just long enough that the notifier and the
+# waiter -- which start at the same instant, on the same event -- read usage
+# once and agree about it, instead of fetching twice and possibly disagreeing.
+BLOCKED_CACHE_TTL = 15.0
+
+# A notice older than this is forgotten, so the throttle file cannot grow
+# without bound as sessions come and go.
+NOTICE_TTL = 86400.0
+
+# Short waits are the machine catching its breath; nobody needs a desktop
+# notification for those. A wait long enough to walk away from earns one.
+BELL_AFTER_SECONDS = 60.0
+
 DEFAULTS = {
     "THRESHOLD": 98.0,
+    "WARN": RELAXED_PERCENT,
     "MAX_WAIT": 604800.0,  # 7 days
     "POLL": 60.0,
     "CACHE_TTL": 300.0,
+    "NOTIFY_EVERY": 600.0,
 }
 
 # `kind` values as the API spells them, mapped to what a human calls the window.
@@ -84,6 +111,11 @@ WINDOW_LABELS = {
 }
 
 Verdict = namedtuple("Verdict", "blocked reset_at kind")
+
+# What the user is told about, and why. `waiting` is the only state that
+# precedes an actual pause; the rest exist so the notice never promises a wait
+# the waiter is not going to perform.
+Notice = namedtuple("Notice", "state kind percent reset_at")
 
 
 # --------------------------------------------------------------------------
@@ -394,8 +426,8 @@ def cache_ttl(snapshot):
         return base
     peak = max((window["percent"] for window in snapshot["windows"]), default=0.0)
     if peak >= _number("THRESHOLD"):
-        return 0.0
-    if peak >= RELAXED_PERCENT:
+        return min(BLOCKED_CACHE_TTL, base)
+    if peak >= _number("WARN"):
         return min(ALERT_CACHE_TTL, base)
     return base
 
@@ -428,16 +460,18 @@ def _looks_like_snapshot(value):
 
 
 def write_cache(snapshot, now):
-    path = cache_path()
+    _write_json(cache_path(), {"fetched_at": now, "snapshot": snapshot})
+
+
+def _write_json(path, data):
     temporary = path.with_suffix(".tmp.%d" % os.getpid())
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(
-            json.dumps({"fetched_at": now, "snapshot": snapshot}), encoding="utf-8"
-        )
+        temporary.write_text(json.dumps(data), encoding="utf-8")
         os.replace(temporary, path)
-    except OSError:
-        # A cache is an optimisation. Losing it costs a request, not a session.
+    except (OSError, ValueError):
+        # This is bookkeeping. Losing it costs a request or a repeated notice,
+        # never a session.
         try:
             temporary.unlink()
         except OSError:
@@ -531,6 +565,127 @@ def wait_for_reset(snapshot, now=time.time, sleep=time.sleep, refresh=None):
 
 
 # --------------------------------------------------------------------------
+# telling the user
+# --------------------------------------------------------------------------
+
+def assess(snapshot, now):
+    """What the user should be told right now, or None for "nothing".
+
+    This deliberately re-derives the waiter's decision through `evaluate` so a
+    notice can never announce a pause that is not going to happen: an exhausted
+    window with no announced reset, or one that resets past the cap, produces a
+    notice saying exactly that.
+    """
+    if snapshot is None:
+        return None
+    ignored = _ignored_kinds()
+    windows = [
+        window for window in snapshot["windows"]
+        if str(window.get("kind", "")).lower() not in ignored
+    ]
+    if not windows:
+        return None
+
+    peak = max(windows, key=lambda window: window["percent"])
+    if peak["percent"] < _number("THRESHOLD"):
+        if peak["percent"] < _number("WARN"):
+            return None
+        return Notice("warn", peak.get("kind"), peak["percent"], peak.get("resets_at"))
+
+    verdict = evaluate(snapshot)
+    window = next((item for item in windows if item.get("kind") == verdict.kind), peak)
+    if not verdict.blocked:
+        # The only way past `evaluate` at this level is the credits opt-out.
+        return Notice("credits", window.get("kind"), window["percent"], window.get("resets_at"))
+    if verdict.reset_at is None:
+        return Notice("no-reset", verdict.kind, window["percent"], None)
+    if verdict.reset_at - now > _number("MAX_WAIT"):
+        return Notice("too-far", verdict.kind, window["percent"], verdict.reset_at)
+    return Notice("waiting", verdict.kind, window["percent"], verdict.reset_at)
+
+
+def _clock(epoch):
+    return time.strftime("%H:%M", time.localtime(epoch))
+
+
+def notice_text(notice, now):
+    """The one line the user sees, in their own terms: window, wall, clock."""
+    window = "%s window is %d%% used" % (
+        WINDOW_LABELS.get(notice.kind, notice.kind or "usage"), round(notice.percent),
+    )
+    if notice.state == "warn":
+        if notice.reset_at is None:
+            return "Claude usage: the %s. The session will pause here by itself if it runs out." % window
+        return (
+            "Claude usage: the %s and resets at %s, in %s. The session will pause "
+            "here by itself if it runs out." % (window, _clock(notice.reset_at),
+                                                format_duration(notice.reset_at - now))
+        )
+    if notice.state == "waiting":
+        return (
+            "Claude usage limit reached: the %s. Pausing until %s, about %s, then "
+            "carrying on by itself. Esc interrupts the wait."
+            % (window, _clock(notice.reset_at), format_duration(notice.reset_at - now))
+        )
+    if notice.state == "credits":
+        return (
+            "Claude usage limit reached: the %s. Not pausing -- USAGE_LIMIT_WAIT_USE_CREDITS "
+            "is set, so this session keeps going on pay-as-you-go credits." % window
+        )
+    if notice.state == "too-far":
+        return (
+            "Claude usage limit reached: the %s and does not reset for %s, which is longer "
+            "than USAGE_LIMIT_WAIT_MAX_WAIT. Not pausing."
+            % (window, format_duration(notice.reset_at - now))
+        )
+    return (
+        "Claude usage limit reached: the %s, and no reset time came back with it. "
+        "Not pausing." % window
+    )
+
+
+def notices_path():
+    return claude_dir() / ".usage-limit-wait.notices.json"
+
+
+def announce_once(key, session_id, now, interval):
+    """True when this notice has not been shown recently in this session.
+
+    Without this the warning would reappear after every prompt and every tool
+    batch, which is the noise this hook exists to avoid. State is per session,
+    so a second session in another project still gets told once.
+    """
+    stored = _read_json(notices_path()) or {}
+    sessions = stored.get("sessions")
+    sessions = sessions if isinstance(sessions, dict) else {}
+    sessions = {
+        name: seen for name, seen in sessions.items()
+        if isinstance(seen, dict)
+        and any(isinstance(when, (int, float)) and now - when < NOTICE_TTL for when in seen.values())
+    }
+    seen = sessions.setdefault(session_id, {})
+    last = seen.get(key)
+    if isinstance(last, (int, float)) and 0 <= now - last < interval:
+        return False
+    seen[key] = now
+    _write_json(notices_path(), {"sessions": sessions})
+    return True
+
+
+def terminal_notice(title, body):
+    """An OSC 777 desktop notification plus a bell, for Claude Code to emit.
+
+    Hooks have no terminal of their own, so this is handed back in the
+    `terminalSequence` field; Claude Code writes it, and ignores it outside an
+    interactive session. Semicolons would split the sequence, so they go.
+    """
+    if _off("BELL"):
+        return None
+    clean = lambda text: re.sub(r"[^\w .,:%()'-]+", " ", text).strip()
+    return "\x1b]777;notify;%s;%s\x07\x07" % (clean(title), clean(body))
+
+
+# --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
 
@@ -545,9 +700,31 @@ def format_duration(seconds):
     return "%ds" % seconds
 
 
-def run():
-    if _on("DISABLE") or third_party_session():
+def run_notify(session_id="", now=None):
+    """The fast half: say where usage stands, block nothing, return quickly."""
+    now = time.time() if now is None else now
+    notice = assess(read_usage(now=now), now)
+    if notice is None:
         return None
+    # A pause is always worth announcing -- it is about to happen. Everything
+    # else is a standing condition, and repeats at most once per interval.
+    interval = 0.0 if notice.state == "waiting" else _number("NOTIFY_EVERY")
+    if not announce_once("%s:%s" % (notice.state, notice.kind or ""), session_id, now, interval):
+        return None
+
+    payload = {"systemMessage": notice_text(notice, now)}
+    if notice.state == "waiting":
+        sequence = terminal_notice(
+            "Claude Code paused",
+            "Usage limit reached. Resuming around %s" % _clock(notice.reset_at),
+        )
+        if sequence:
+            payload["terminalSequence"] = sequence
+    return payload
+
+
+def run_wait():
+    """The slow half: block until the exhausted window resets."""
     snapshot = read_usage()
     verdict = evaluate(snapshot)
     if not verdict.blocked:
@@ -557,24 +734,51 @@ def run():
     if waited < 1:
         return None
     label = WINDOW_LABELS.get(kind, kind or "usage")
-    return "usage-limit-wait: waited %s for the %s limit to reset." % (format_duration(waited), label)
+    payload = {
+        "systemMessage": "usage-limit-wait: waited %s for the %s limit to reset."
+                         % (format_duration(waited), label),
+    }
+    if waited >= BELL_AFTER_SECONDS:
+        # The whole point of the wait is that you walked away from it.
+        sequence = terminal_notice(
+            "Claude Code resumed", "Waited %s for the %s limit to reset" % (format_duration(waited), label),
+        )
+        if sequence:
+            payload["terminalSequence"] = sequence
+    return payload
 
 
-def main():
+def hook_input():
+    """The event payload, or an empty one -- it is never worth failing over."""
     try:
-        sys.stdin.read()
+        raw = sys.stdin.read()
     except (OSError, ValueError):
-        pass
+        return {}
     try:
-        message = run()
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    event = hook_input()
+    try:
+        if _on("DISABLE") or third_party_session():
+            return 0
+        if "--notify" in argv:
+            payload = run_notify(str(event.get("session_id") or ""))
+        else:
+            payload = run_wait()
     except Exception:
         # A hook that fails must never take the session with it.
         return 0
-    if message:
+    if payload:
         # `systemMessage` goes to the user only. Plain stdout would land in the
         # model's context on UserPromptSubmit, which is the one thing this hook
         # promises not to do.
-        print(json.dumps({"systemMessage": message}))
+        print(json.dumps(payload))
     return 0
 
 
