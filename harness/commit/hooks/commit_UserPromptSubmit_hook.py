@@ -347,7 +347,10 @@ def _rel(path, root):
 
 AI_MODEL = os.environ.get("COMMIT_AI_MODEL", "gemini-3.5-flash-lite")
 AI_TIMEOUT_SECONDS = 45
-GEMINI_API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_BASE_URL = (
+    os.environ.get("COMMIT_AI_BASE_URL") or DEFAULT_GEMINI_BASE_URL
+).rstrip("/")
 
 # Character budgets for the prompt. The diff is the ground truth so it gets
 # the lion's share; session narrative is supporting evidence for *why*.
@@ -984,7 +987,7 @@ def generate_commit_message(repo_root, targets, staged, transcript_path, guidanc
     }
     model = urllib.parse.quote(AI_MODEL, safe="")
     request = urllib.request.Request(
-        f"{GEMINI_API_ROOT}/models/{model}:generateContent",
+        f"{GEMINI_BASE_URL}/models/{model}:generateContent",
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",

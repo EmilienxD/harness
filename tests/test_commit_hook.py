@@ -10,6 +10,7 @@ refuses, and a real `/commit` whose only write is ignored dies on a spurious
 These run the hook's own helpers against a real throwaway repo, so they need
 git on PATH (declared by the tool's `requires`).
 """
+import importlib.util
 import io
 import json
 import os
@@ -206,6 +207,40 @@ def test_generate_commit_message_calls_gemini_rest_api(monkeypatch):
     assert message.subject == "add stdlib Gemini transport"
     assert message.body == "Avoid requiring a separately installed SDK."
     assert message.model == hook.AI_MODEL
+
+
+def test_generate_commit_message_uses_configured_base_url(monkeypatch):
+    _mock_ai_inputs(monkeypatch)
+    monkeypatch.setattr(hook, "GEMINI_BASE_URL", "https://gateway.example/v1beta")
+    captured = {}
+    response = {
+        "candidates": [{"content": {"parts": [{"text": json.dumps({
+            "reasoning": "Uses the configured gateway.",
+            "subject": "route Gemini through gateway",
+        })}]}}]
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return io.BytesIO(json.dumps(response).encode())
+
+    monkeypatch.setattr(hook.urllib.request, "urlopen", fake_urlopen)
+
+    hook.generate_commit_message("repo", [], True, "", "")
+
+    assert captured["url"] == (
+        f"https://gateway.example/v1beta/models/{hook.AI_MODEL}:generateContent"
+    )
+
+
+def test_configured_base_url_strips_trailing_slashes(monkeypatch):
+    monkeypatch.setenv("COMMIT_AI_BASE_URL", "https://gateway.example/v1beta///")
+
+    spec = importlib.util.spec_from_file_location("commit_hook_base_url_test", HOOK)
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+
+    assert loaded.GEMINI_BASE_URL == "https://gateway.example/v1beta"
 
 
 def test_generate_commit_message_surfaces_gemini_http_error(monkeypatch):

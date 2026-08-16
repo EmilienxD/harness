@@ -135,6 +135,10 @@ from your own prompts, the hook also runs a redaction pass over it for
 key-shaped strings before anything leaves the machine.
 
 Set `COMMIT_AI_MODEL` to override the default `gemini-3.5-flash-lite`.
+Set `COMMIT_AI_BASE_URL` to override the Gemini API root, which defaults to
+`https://generativelanguage.googleapis.com/v1beta`. A trailing slash is
+optional. This is useful for a Gemini-compatible proxy or gateway; the hook
+appends `/models/<model>:generateContent` to the configured value.
 
 Everything except `--ai` works with no key or network. Neither mode needs
 third-party Python packages.
