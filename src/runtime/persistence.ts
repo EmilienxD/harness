@@ -71,6 +71,10 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     prNumber: positiveInteger(record.prNumber),
     reviewMode: record.reviewMode,
     scope,
+    // Optional: records written before this field existed degrade to "no safe
+    // branch to return to", and a run that started on a detached HEAD stored
+    // none either. The end-of-run restore is skipped in both cases.
+    returnBranch: typeof record.returnBranch === "string" && record.returnBranch.length > 0 ? record.returnBranch : undefined,
     // Degrades to "nothing reviewed yet" rather than rejecting the record: a
     // repeated review costs tokens, a skipped one loses the review.
     reviewedIssues: Array.isArray(record.reviewedIssues)

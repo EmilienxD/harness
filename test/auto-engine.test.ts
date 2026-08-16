@@ -39,6 +39,8 @@ interface HarnessOptions {
   readonly dirtyDuringWait?: boolean;
   /** More than one open spec, for the scope setting. Issue n belongs to spec n % 10. */
   readonly specs?: readonly { number: number; title: string; createdAt: string }[];
+  /** The branch checked out when the run starts. Defaults to `main`. */
+  readonly startBranch?: string;
 }
 
 /** With multiple specs, an issue's parent is encoded in its number: 121 → spec 12. */
@@ -55,10 +57,10 @@ function harness(options: HarnessOptions = {}): Harness {
   const saved: AutoRunRecord[] = [];
   const state = { cleared: false };
   const pullRequests = new Map<number, { state: "open" | "closed" | "merged" }>();
-  const branches = new Set<string>(["main"]);
+  const branches = new Set<string>(["main", "feature/wip"]);
   const commits = new Set<number>();
   const pushed = new Set<string>();
-  let currentBranch = "main";
+  let currentBranch = options.startBranch ?? "main";
   let dirty = options.startDirty === true;
   let nextPr = 56;
   let hitlPolls = 0;
@@ -234,6 +236,48 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.match(context.notifications.join("\n"), /issue #34 committed \(a1b2c3d\) and opened PR #56/);
   assert.match(context.notifications.join("\n"), /issue #34 merged, issue closed/);
   assert.equal(context.state.cleared, true);
+});
+
+test("a run started off the default branch returns there when it ends", async () => {
+  const context = harness({ startBranch: "feature/wip" });
+  assert.equal((await context.engine.start()).started, true);
+  await context.engine.settle();
+
+  const calls = context.gitCalls;
+  assert.equal(calls[calls.length - 1], "checkout feature/wip", "the last checkout lands back on the branch the run started from");
+  assert.match(context.notifications.join("\n"), /auto-run: back on feature\/wip/);
+});
+
+test("the end-of-run restore does not trigger on the mid-run cleanup checkout", async () => {
+  const context = harness({ startBranch: "feature/wip" });
+  await context.engine.start();
+  await context.engine.settle();
+
+  const cleanups = context.gitCalls.filter((call) => call === "checkout feature/wip");
+  assert.equal(cleanups.length, 1, "only the terminal restore touches the original branch — per-issue cleanup still uses the default");
+});
+
+test("a stop restores the original branch when the tree is clean", async () => {
+  // A failed implementer stops the run; with producesChanges off the launch
+  // left nothing behind, so the restore is safe and must run.
+  const context = harness({ startBranch: "feature/wip", implementerFails: true, producesChanges: false });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.match(context.notifications.join("\n"), /implementer failed/);
+  assert.equal(context.gitCalls[context.gitCalls.length - 1], "checkout feature/wip");
+});
+
+test("a stop with uncommitted work does not check out over it", async () => {
+  // The failed implementer still dirtied the tree before the engine noticed the
+  // failure, so the run stops on the issue branch holding uncommitted work —
+  // exactly when a checkout would strand it. The restore must stay home.
+  const context = harness({ startBranch: "feature/wip", implementerFails: true });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.match(context.notifications.join("\n"), /implementer failed/);
+  assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
 });
 
 test("review mode launches a pr-doctor-afk and commits its fixes as a second commit", async () => {

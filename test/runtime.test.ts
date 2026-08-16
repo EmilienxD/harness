@@ -50,11 +50,35 @@ test("the auto-run record round-trips, carries no prompt text, and clears on dis
     startedAt: "2026-07-31T09:12:04.221Z",
   };
   await store.save(record);
-  assert.deepEqual(await store.load(), record);
+  // The record carries the branch the user was on when the run started, so a
+  // resumed run still knows where to return after a restart.
+  assert.deepEqual(await store.load(), { ...record, returnBranch: undefined });
   const raw = await readFile(join(root, ".aboard", "runtime", "auto-run.json"), "utf8");
   assert.doesNotMatch(raw, /prompt/i);
   await store.clear();
   assert.equal(await store.load(), undefined);
+});
+
+test("an auto-run record preserves the branch to return to at end-of-run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-autorun-return-"));
+  const store = new FileAutoRunStore(root);
+  const record: AutoRunRecord = {
+    version: 1,
+    runId: "run_return",
+    specNumber: 12,
+    issueNumbers: [34],
+    currentIssue: 34,
+    phase: "cleanup",
+    branch: "aboard/34-add-retry-backoff",
+    prNumber: 56,
+    reviewMode: false,
+    scope: "spec",
+    returnBranch: "feature/wip",
+    reviewedIssues: [],
+    startedAt: "2026-07-31T09:12:04.221Z",
+  };
+  await store.save(record);
+  assert.equal((await store.load())?.returnBranch, "feature/wip");
 });
 
 // The record is only a resume hint, so anything unusable degrades to "no run to
@@ -76,6 +100,10 @@ test("an unusable auto-run record degrades to nothing to resume", () => {
   }
   // Optional fields legitimately absent, not malformed.
   assert.equal(parseAutoRunRecord({ ...valid, currentIssue: undefined, branch: undefined, prNumber: undefined })?.currentIssue, undefined);
+  // A malformed returnBranch degrades to undefined rather than rejecting the record:
+  // a run that started on a detached HEAD recorded none, and so did older records.
+  assert.equal(parseAutoRunRecord({ ...valid, returnBranch: 42 })?.returnBranch, undefined);
+  assert.equal(parseAutoRunRecord({ ...valid, returnBranch: "feature/wip" })?.returnBranch, "feature/wip");
 });
 
 test("combined bridge handlers stop at the first owned route", async () => {

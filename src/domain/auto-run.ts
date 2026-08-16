@@ -68,6 +68,13 @@ export interface AutoRunRecord {
   readonly reviewMode: boolean;
   readonly scope: AutoRunScope;
   /**
+   * The branch the user was on when the run started, carried so a resumed run
+   * still knows where "home" is after a restart. `undefined` either means a
+   * detached HEAD — nothing safe to return to — or a record written before
+   * this field existed; either way the end-of-run restore is simply skipped.
+   */
+  readonly returnBranch?: string | undefined;
+  /**
    * Issues a pr-doctor has already reviewed. This is the one fact about a run
    * that the repository genuinely cannot answer — a review that found nothing
    * leaves no commit — so it is the one thing the record is authoritative about
@@ -335,4 +342,5 @@ export const autoRunMessage = {
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
   complete: (spec: number, count: number, remainingSpecs: number): string =>
     `auto-run: spec #${spec} complete (${count} issue${count === 1 ? "" : "s"}). ${remainingSpecs} open spec${remainingSpecs === 1 ? " remains" : "s remain"} — run /auto to continue.`,
+  returned: (branch: string): string => `auto-run: back on ${branch}.`,
 } as const;

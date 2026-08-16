@@ -171,6 +171,11 @@ export class AutoRunEngine {
         reason: `spec #${spec.number} has no processable child (open, afk or hitl, not blocked)`,
       };
     }
+    // Where the user was when the run took over. Read here — after the
+    // clean-tree precondition, before the first branch phase moves HEAD — so the
+    // end-of-run restore targets the branch the run actually displaced. A
+    // detached HEAD records `undefined` and the restore is skipped.
+    const returnBranch = await this.options.git.currentBranch();
 
     const record: AutoRunRecord = {
       version: 1,
@@ -183,6 +188,7 @@ export class AutoRunEngine {
       prNumber: undefined,
       reviewMode: settings.review,
       scope: settings.scope,
+      returnBranch,
       reviewedIssues: [],
       startedAt: this.#now().toISOString(),
     };
@@ -256,6 +262,9 @@ export class AutoRunEngine {
   #begin(record: AutoRunRecord, specTitle: string): void {
     const controller = new AbortController();
     this.#controller = controller;
+    // All exits below carry the branch the user was on when the run started, so
+    // however the run ends it leaves the checkout where it found it.
+    const homeBranch = record.returnBranch;
     this.#publish({
       runId: record.runId,
       specNumber: record.specNumber,
@@ -272,8 +281,33 @@ export class AutoRunEngine {
       this.options.notifier.notify(autoRunMessage.stopped(this.#state?.currentIssue, message(error)));
     }).finally(() => {
       this.#controller = undefined;
-      this.#publish(undefined);
+      void this.#restoreOriginalBranch(homeBranch).finally(() => {
+        this.#publish(undefined);
+      });
     });
+  }
+
+  /**
+   * Returns the checkout to the branch the user was on when the run started.
+   * Best-effort and quiet on failure: the run's outcome stands on its own, and
+   * a user who moved HEAD themselves mid-run wins over the restore — the only
+   * guard needed is not checking out over uncommitted work, which switches
+   * silently and strands the user on the wrong branch about it.
+   */
+  async #restoreOriginalBranch(branch: string | undefined): Promise<void> {
+    if (branch === undefined) return;
+    try {
+      const status = await this.options.git.status();
+      if (status.branch === branch) return;
+      if (status.entries.length > 0) {
+        this.options.log?.(`auto-run: not returning to ${branch} — the working tree on ${status.branch ?? "a detached HEAD"} has uncommitted changes (${status.entries.map((entry) => entry.path).slice(0, 10).join(", ")})`);
+        return;
+      }
+      await this.options.git.checkout(branch);
+      this.options.notifier.notify(autoRunMessage.returned(branch));
+    } catch (error) {
+      this.options.log?.(`auto-run: could not return to ${branch}: ${message(error)}`);
+    }
   }
 
   async #run(initial: AutoRunRecord, initialTitle: string, signal: AbortSignal): Promise<void> {
