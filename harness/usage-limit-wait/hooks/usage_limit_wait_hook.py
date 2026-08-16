@@ -7,17 +7,11 @@ request) and `PostToolBatch` (once per batch, immediately before the next
 model request). Both are the last moment before Claude Code talks to the API,
 which is the only useful place to stall.
 
-The script runs in one of two modes, and both are registered on both events:
-
-    --notify   report where usage stands, and never block. Warns as the wall
-               approaches and announces the pause before it starts.
-    --wait     block until an exhausted window resets. This is the default,
-               for an entry that passes no arguments.
-
-They are separate hooks because hooks on one event run in parallel: the
-notifier finishes in milliseconds and says what is about to happen, while the
-waiter is still asleep. One process cannot do both -- a message that arrives
-after a three-hour wait explains nothing.
+Claude Code does not render a hook's output until every hook on the event has
+finished. The process therefore sends a platform-native desktop notification
+itself immediately before sleeping; returning `systemMessage` or
+`terminalSequence` there would leave the announcement buffered until the wait
+was already over.
 
 The waiter blocks -- literally `time.sleep` -- until the window resets,
 re-polling along the way so an early reset, a cancelled subscription, or a ban
@@ -80,18 +74,13 @@ CLI_MIN_POLL_SECONDS = 300.0
 RELAXED_PERCENT = 90.0
 ALERT_CACHE_TTL = 30.0
 
-# An exhausted reading is shared for just long enough that the notifier and the
-# waiter -- which start at the same instant, on the same event -- read usage
-# once and agree about it, instead of fetching twice and possibly disagreeing.
+# An exhausted reading stays briefly reusable so simultaneous Claude Code
+# sessions do not all hit the usage endpoint at once.
 BLOCKED_CACHE_TTL = 15.0
 
 # A notice older than this is forgotten, so the throttle file cannot grow
 # without bound as sessions come and go.
 NOTICE_TTL = 86400.0
-
-# Short waits are the machine catching its breath; nobody needs a desktop
-# notification for those. A wait long enough to walk away from earns one.
-BELL_AFTER_SECONDS = 60.0
 
 DEFAULTS = {
     "THRESHOLD": 98.0,
@@ -672,17 +661,75 @@ def announce_once(key, session_id, now, interval):
     return True
 
 
-def terminal_notice(title, body):
-    """An OSC 777 desktop notification plus a bell, for Claude Code to emit.
+def desktop_notification(title, body):
+    """Ask the host OS to show a notification, independently of Claude Code.
 
-    Hooks have no terminal of their own, so this is handed back in the
-    `terminalSequence` field; Claude Code writes it, and ignores it outside an
-    interactive session. Semicolons would split the sequence, so they go.
+    This call must finish before the wait starts: Claude Code buffers hook
+    output until the process exits, but an OS notification is an immediate
+    side effect. Every backend is best-effort and bounded so a broken desktop
+    notifier can never hold up the session.
     """
-    if _off("BELL"):
-        return None
-    clean = lambda text: re.sub(r"[^\w .,:%()'-]+", " ", text).strip()
-    return "\x1b]777;notify;%s;%s\x07\x07" % (clean(title), clean(body))
+    if _off("OS_NOTIFICATION"):
+        return False
+
+    command = None
+    child_env = None
+    if sys.platform == "darwin":
+        executable = shutil.which("osascript")
+        if executable:
+            command = [
+                executable,
+                "-e", "on run argv",
+                "-e", "display notification (item 2 of argv) with title (item 1 of argv)",
+                "-e", "end run",
+                title, body,
+            ]
+    elif sys.platform == "win32":
+        executable = shutil.which("powershell.exe") or shutil.which("powershell")
+        if executable:
+            # Keep user-controlled text out of the PowerShell program. The
+            # fixed script reads it from the child environment and XML-escapes
+            # it before handing the toast to Windows Runtime.
+            script = (
+                "$ErrorActionPreference='Stop';"
+                "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,"
+                "ContentType=WindowsRuntime]>$null;"
+                "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,"
+                "ContentType=WindowsRuntime]>$null;"
+                "$title=[Security.SecurityElement]::Escape($env:USAGE_LIMIT_WAIT_NOTIFICATION_TITLE);"
+                "$body=[Security.SecurityElement]::Escape($env:USAGE_LIMIT_WAIT_NOTIFICATION_BODY);"
+                "$xml=New-Object Windows.Data.Xml.Dom.XmlDocument;"
+                "$xml.LoadXml(\"<toast><visual><binding template='ToastGeneric'>\"+"
+                "\"<text>$title</text><text>$body</text></binding></visual></toast>\");"
+                "$toast=New-Object Windows.UI.Notifications.ToastNotification $xml;"
+                "$appId=(Get-StartApps|Where-Object {$_.AppID -like "
+                "'*\\WindowsPowerShell\\v1.0\\powershell.exe'}|"
+                "Select-Object -First 1 -ExpandProperty AppID);"
+                "if(-not $appId){$appId='Microsoft.PowerShell'};"
+                "[Windows.UI.Notifications.ToastNotificationManager]::"
+                "CreateToastNotifier($appId).Show($toast)"
+            )
+            command = [executable, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]
+            child_env = dict(
+                os.environ,
+                USAGE_LIMIT_WAIT_NOTIFICATION_TITLE=title,
+                USAGE_LIMIT_WAIT_NOTIFICATION_BODY=body,
+            )
+    else:
+        executable = shutil.which("notify-send")
+        if executable:
+            command = [executable, "--app-name=Claude Code", title, body]
+
+    if command is None:
+        return False
+    try:
+        result = subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=10, env=child_env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
 
 
 # --------------------------------------------------------------------------
@@ -700,52 +747,36 @@ def format_duration(seconds):
     return "%ds" % seconds
 
 
-def run_notify(session_id="", now=None):
-    """The fast half: say where usage stands, block nothing, return quickly."""
+def run(session_id="", now=None):
+    """Report a warning, or notify and wait when a limit is exhausted."""
     now = time.time() if now is None else now
-    notice = assess(read_usage(now=now), now)
+    snapshot = read_usage(now=now)
+    notice = assess(snapshot, now)
     if notice is None:
         return None
-    # A pause is always worth announcing -- it is about to happen. Everything
-    # else is a standing condition, and repeats at most once per interval.
-    interval = 0.0 if notice.state == "waiting" else _number("NOTIFY_EVERY")
-    if not announce_once("%s:%s" % (notice.state, notice.kind or ""), session_id, now, interval):
-        return None
 
-    payload = {"systemMessage": notice_text(notice, now)}
-    if notice.state == "waiting":
-        sequence = terminal_notice(
-            "Claude Code paused",
-            "Usage limit reached. Resuming around %s" % _clock(notice.reset_at),
-        )
-        if sequence:
-            payload["terminalSequence"] = sequence
-    return payload
+    if notice.state != "waiting":
+        key = "%s:%s" % (notice.state, notice.kind or "")
+        if not announce_once(key, session_id, now, _number("NOTIFY_EVERY")):
+            return None
+        return {"systemMessage": notice_text(notice, now)}
 
-
-def run_wait():
-    """The slow half: block until the exhausted window resets."""
-    snapshot = read_usage()
-    verdict = evaluate(snapshot)
-    if not verdict.blocked:
-        return None
-
+    desktop_notification(
+        "Claude Code paused",
+        notice_text(notice, now),
+    )
     waited, kind = wait_for_reset(snapshot)
     if waited < 1:
         return None
     label = WINDOW_LABELS.get(kind, kind or "usage")
-    payload = {
+    duration = format_duration(waited)
+    desktop_notification(
+        "Claude Code resumed", "Waited %s for the %s limit to reset" % (duration, label),
+    )
+    return {
         "systemMessage": "usage-limit-wait: waited %s for the %s limit to reset."
-                         % (format_duration(waited), label),
+                         % (duration, label),
     }
-    if waited >= BELL_AFTER_SECONDS:
-        # The whole point of the wait is that you walked away from it.
-        sequence = terminal_notice(
-            "Claude Code resumed", "Waited %s for the %s limit to reset" % (format_duration(waited), label),
-        )
-        if sequence:
-            payload["terminalSequence"] = sequence
-    return payload
 
 
 def hook_input():
@@ -767,10 +798,13 @@ def main(argv=None):
     try:
         if _on("DISABLE") or third_party_session():
             return 0
+        # Version 1.1.0 briefly installed a parallel notifier entry. Keep an
+        # updated script harmless when somebody replaces it by hand without
+        # also removing that old settings entry; the --wait/default process
+        # performs both jobs now.
         if "--notify" in argv:
-            payload = run_notify(str(event.get("session_id") or ""))
-        else:
-            payload = run_wait()
+            return 0
+        payload = run(str(event.get("session_id") or ""))
     except Exception:
         # A hook that fails must never take the session with it.
         return 0

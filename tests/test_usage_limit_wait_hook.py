@@ -126,8 +126,13 @@ def test_the_kill_switch_stops_both_halves(monkeypatch, capsys, mode):
 
 def test_unreadable_usage_is_not_an_error(monkeypatch):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: None)
-    assert hook.run_wait() is None
-    assert hook.run_notify() is None
+    assert hook.run() is None
+
+
+def test_the_removed_parallel_notifier_entry_is_harmless(monkeypatch, capsys):
+    monkeypatch.setattr(hook, "read_usage", lambda *a, **k: pytest.fail("read usage anyway"))
+    assert hook.main(["--notify"]) == 0
+    assert capsys.readouterr().out == ""
 
 
 # --------------------------------------------------------------------------
@@ -339,7 +344,7 @@ def test_a_stale_reading_is_refetched(monkeypatch):
 
 
 def test_an_exhausted_reading_is_shared_for_a_moment_only():
-    """Just long enough for the notifier and the waiter to agree, no longer."""
+    """Simultaneous sessions share a reading, but not for long."""
     hook.write_cache(snapshot(("session", 100.0, 5_000.0)), now=1_000.0)
     assert hook.read_cache(now=1_000.5) is not None
     assert hook.read_cache(now=1_000.0 + hook.BLOCKED_CACHE_TTL + 1) is None
@@ -472,92 +477,97 @@ def test_polling_slows_down_on_the_cli_fallback(monkeypatch):
 NOW = 1_700_000_000.0
 
 
-def notify(monkeypatch, *windows, session="s1", now=NOW, credits=None):
+def notice(monkeypatch, *windows, session="s1", now=NOW, credits=None):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(*windows, credits=credits))
-    monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: pytest.fail("the notifier waited"))
-    return hook.run_notify(session, now=now)
+    monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: pytest.fail("a notice waited"))
+    monkeypatch.setattr(hook, "desktop_notification", lambda *a, **k: pytest.fail("sent a notification"))
+    return hook.run(session, now=now)
 
 
 def test_a_quiet_window_says_nothing(monkeypatch):
-    assert notify(monkeypatch, ("session", 40.0, NOW + 3600)) is None
+    assert notice(monkeypatch, ("session", 40.0, NOW + 3600)) is None
 
 
 def test_nearing_the_wall_warns_once_with_the_numbers(monkeypatch):
-    payload = notify(monkeypatch, ("session", 94.0, NOW + 3600))
+    payload = notice(monkeypatch, ("session", 94.0, NOW + 3600))
     message = payload["systemMessage"]
     assert "94%" in message and "5-hour" in message and "1h00m" in message
     # A warning is a standing condition, not news: it must not repeat on every
     # prompt and every tool batch.
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is None
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600)) is None
 
 
 def test_the_warning_threshold_is_configurable(monkeypatch):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_WARN", "50")
-    assert notify(monkeypatch, ("session", 60.0, NOW + 3600)) is not None
+    assert notice(monkeypatch, ("session", 60.0, NOW + 3600)) is not None
 
 
 def test_another_session_is_still_told(monkeypatch):
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), session="s2") is not None
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600), session="s2") is not None
 
 
 def test_a_warning_returns_once_the_interval_has_passed(monkeypatch):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_NOTIFY_EVERY", "600")
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), now=NOW + 599) is None
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), now=NOW + 601) is not None
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600), now=NOW + 599) is None
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600), now=NOW + 601) is not None
 
 
-def test_an_exhausted_window_announces_the_pause_every_time(monkeypatch):
-    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600))
-    message = payload["systemMessage"]
-    assert "Pausing until" in message and "1h00m" in message and "Esc" in message
-    # The pause is about to happen: never throttled.
-    assert notify(monkeypatch, ("session", 100.0, NOW + 3600)) is not None
+def test_an_exhausted_window_notifies_before_waiting_and_again_after(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, NOW + 3600))
+    )
+    monkeypatch.setattr(
+        hook, "desktop_notification",
+        lambda title, body: events.append(("notification", title, body)) or True,
+    )
+    monkeypatch.setattr(
+        hook, "wait_for_reset", lambda *a, **k: events.append(("wait",)) or (3600, "session")
+    )
 
+    payload = hook.run("s1", now=NOW)
 
-def test_the_pause_rings_the_terminal(monkeypatch):
-    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600))
-    assert payload["terminalSequence"].startswith("\x1b]777;notify;")
-    assert payload["terminalSequence"].endswith("\x07")
-
-
-def test_the_bell_can_be_silenced(monkeypatch):
-    monkeypatch.setenv("USAGE_LIMIT_WAIT_BELL", "0")
-    assert "terminalSequence" not in notify(monkeypatch, ("session", 100.0, NOW + 3600))
+    assert [event[0] for event in events] == ["notification", "wait", "notification"]
+    assert events[0][1] == "Claude Code paused"
+    assert "5-hour" in events[0][2] and "1h00m" in events[0][2]
+    assert events[2][1] == "Claude Code resumed"
+    assert "waited 1h00m" in payload["systemMessage"]
 
 
 def test_a_reset_past_the_cap_promises_no_pause(monkeypatch):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_MAX_WAIT", "60")
-    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600))
+    payload = notice(monkeypatch, ("session", 100.0, NOW + 3600))
     assert "Not pausing" in payload["systemMessage"]
-    assert "terminalSequence" not in payload
 
 
 def test_an_undatable_limit_promises_no_pause(monkeypatch):
-    payload = notify(monkeypatch, ("session", 100.0, None))
+    payload = notice(monkeypatch, ("session", 100.0, None))
     assert "no reset time" in payload["systemMessage"] and "Not pausing" in payload["systemMessage"]
 
 
 def test_credits_are_reported_as_money_being_spent(monkeypatch):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_USE_CREDITS", "1")
-    payload = notify(monkeypatch, ("session", 100.0, NOW + 3600), credits=LIVE)
+    payload = notice(monkeypatch, ("session", 100.0, NOW + 3600), credits=LIVE)
     assert "pay-as-you-go" in payload["systemMessage"] and "Not pausing" in payload["systemMessage"]
 
 
 def test_an_ignored_window_is_not_worth_a_notice(monkeypatch):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_IGNORE", "weekly_all")
-    assert notify(monkeypatch, ("weekly_all", 100.0, NOW + 3600)) is None
+    assert notice(monkeypatch, ("weekly_all", 100.0, NOW + 3600)) is None
 
 
 def test_the_most_pressing_window_wins(monkeypatch):
-    payload = notify(monkeypatch, ("session", 40.0, NOW + 600), ("weekly_all", 99.0, NOW + 86_400))
-    assert "weekly" in payload["systemMessage"]
+    found = hook.assess(
+        snapshot(("session", 40.0, NOW + 600), ("weekly_all", 99.0, NOW + 86_400)), NOW
+    )
+    assert found.kind == "weekly_all"
 
 
 def test_stale_sessions_are_forgotten(monkeypatch):
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600), session="old") is not None
-    assert notify(monkeypatch, ("session", 94.0, NOW + hook.NOTICE_TTL + 7200),
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600), session="old") is not None
+    assert notice(monkeypatch, ("session", 94.0, NOW + hook.NOTICE_TTL + 7200),
                   session="new", now=NOW + hook.NOTICE_TTL + 1) is not None
     stored = json.loads(hook.notices_path().read_text(encoding="utf-8"))
     assert list(stored["sessions"]) == ["new"]
@@ -566,7 +576,70 @@ def test_stale_sessions_are_forgotten(monkeypatch):
 def test_a_corrupt_notice_file_is_ignored(monkeypatch):
     hook.notices_path().parent.mkdir(parents=True, exist_ok=True)
     hook.notices_path().write_text("[]", encoding="utf-8")
-    assert notify(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
+    assert notice(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
+
+
+# --------------------------------------------------------------------------
+# desktop notifications
+# --------------------------------------------------------------------------
+
+class Completed:
+    returncode = 0
+
+
+def test_linux_notifications_use_notify_send(monkeypatch):
+    calls = []
+    monkeypatch.setattr(hook.sys, "platform", "linux")
+    monkeypatch.setattr(hook.shutil, "which", lambda name: "/usr/bin/notify-send")
+    monkeypatch.setattr(hook.subprocess, "run", lambda *a, **k: calls.append((a, k)) or Completed())
+
+    assert hook.desktop_notification("Claude Code paused", "Back at 12:30") is True
+    assert calls[0][0][0] == [
+        "/usr/bin/notify-send", "--app-name=Claude Code", "Claude Code paused", "Back at 12:30"
+    ]
+
+
+def test_macos_notification_text_is_passed_as_arguments(monkeypatch):
+    calls = []
+    monkeypatch.setattr(hook.sys, "platform", "darwin")
+    monkeypatch.setattr(hook.shutil, "which", lambda name: "/usr/bin/osascript")
+    monkeypatch.setattr(hook.subprocess, "run", lambda *a, **k: calls.append((a, k)) or Completed())
+
+    assert hook.desktop_notification("It's paused", 'Body with "quotes"') is True
+    command = calls[0][0][0]
+    assert command[-2:] == ["It's paused", 'Body with "quotes"']
+    assert "It's paused" not in " ".join(command[:-2])
+
+
+def test_windows_notification_text_is_passed_through_the_environment(monkeypatch):
+    calls = []
+    monkeypatch.setattr(hook.sys, "platform", "win32")
+    monkeypatch.setattr(hook.shutil, "which", lambda name: "powershell.exe")
+    monkeypatch.setattr(hook.subprocess, "run", lambda *a, **k: calls.append((a, k)) or Completed())
+
+    assert hook.desktop_notification("It's paused", '<body & "text">') is True
+    command = calls[0][0][0]
+    child_env = calls[0][1]["env"]
+    assert command[:4] == ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive"]
+    assert "It's paused" not in command[-1]
+    assert "Get-StartApps" in command[-1]
+    assert child_env["USAGE_LIMIT_WAIT_NOTIFICATION_TITLE"] == "It's paused"
+    assert child_env["USAGE_LIMIT_WAIT_NOTIFICATION_BODY"] == '<body & "text">'
+
+
+def test_notifications_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_OS_NOTIFICATION", "0")
+    monkeypatch.setattr(hook.shutil, "which", lambda name: pytest.fail("looked for a notifier"))
+    assert hook.desktop_notification("title", "body") is False
+
+
+def test_a_missing_or_broken_notifier_fails_open(monkeypatch):
+    monkeypatch.setattr(hook.shutil, "which", lambda name: None)
+    assert hook.desktop_notification("title", "body") is False
+
+    monkeypatch.setattr(hook.shutil, "which", lambda name: name)
+    monkeypatch.setattr(hook.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert hook.desktop_notification("title", "body") is False
 
 
 # --------------------------------------------------------------------------
@@ -576,17 +649,19 @@ def test_a_corrupt_notice_file_is_ignored(monkeypatch):
 def test_a_completed_wait_reports_itself_to_the_user_only(monkeypatch, capsys):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, time.time() + 30)))
     monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: (3600 * 3 + 720, "session"))
+    monkeypatch.setattr(hook, "desktop_notification", lambda *a, **k: True)
     assert hook.main(["--wait"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    # `systemMessage` reaches the user, `terminalSequence` reaches the
-    # terminal; nothing here reaches the model.
-    assert set(printed) == {"systemMessage", "terminalSequence"}
+    # The completion message reaches the user, not the model. The immediate
+    # pause announcement bypassed Claude Code through the OS notifier.
+    assert set(printed) == {"systemMessage"}
     assert "3h12m" in printed["systemMessage"] and "5-hour" in printed["systemMessage"]
 
 
-def test_a_short_wait_does_not_ring_the_bell(monkeypatch, capsys):
+def test_a_short_wait_still_reports_completion(monkeypatch, capsys):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, time.time() + 30)))
     monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: (12, "session"))
+    monkeypatch.setattr(hook, "desktop_notification", lambda *a, **k: True)
     assert hook.main(["--wait"]) == 0
     assert list(json.loads(capsys.readouterr().out)) == ["systemMessage"]
 
@@ -595,6 +670,7 @@ def test_no_arguments_still_means_the_waiter(monkeypatch, capsys):
     """An entry installed before the split passes no arguments."""
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, time.time() + 30)))
     monkeypatch.setattr(hook, "wait_for_reset", lambda *a, **k: (300, "session"))
+    monkeypatch.setattr(hook, "desktop_notification", lambda *a, **k: True)
     assert hook.main([]) == 0
     assert "waited" in json.loads(capsys.readouterr().out)["systemMessage"]
 

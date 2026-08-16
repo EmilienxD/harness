@@ -35,44 +35,49 @@ request is about to be sent:
 per tool, so parallel tool calls would spawn several hook processes all sleeping
 through the same reset. `PostToolBatch` fires exactly once per model round trip.
 
-### Two hooks, not one
+### One hook, with an out-of-band notification
 
-On each of those events, two hooks are registered — the same script, in two
-modes. Hooks on one event run in parallel, so the notifier finishes in
-milliseconds and tells you what is about to happen while the waiter is already
-asleep:
+Claude Code waits for every hook on an event to finish before it renders any of
+their output. Splitting notification and waiting into parallel hooks therefore
+does not help: the notifier's `systemMessage` and `terminalSequence` remain
+buffered for as long as the waiter is running.
 
-| Mode | Blocks? | Job |
-|---|---|---|
-| `--notify` | never | Says where usage stands: nothing while there's headroom, a warning near the wall, and an announcement of the pause before it starts |
-| `--wait` | for hours | Sleeps until the window resets, then lets the turn continue |
+Instead, one process does both jobs. When it is about to wait, it asks the host
+OS to show a desktop notification and waits for that command to finish. Only
+then does it enter the polling sleep. The notification is an OS side effect, so
+it is already delivered even though the hook itself remains running for hours.
 
-One process could not do both. A message printed by the waiter arrives when the
-wait is already over, which is the wrong end of a three-hour silence.
+| Platform | Backend |
+|---|---|
+| Windows | Windows Runtime toast, invoked through Windows PowerShell |
+| macOS | Notification Center, invoked through `osascript` |
+| Linux and other Unix desktops | `notify-send`, when installed |
+
+Every backend is best-effort and has a 10-second timeout. A missing, disabled,
+or broken notification service never prevents the wait or breaks the session.
 
 ### What you actually see
 
 Nothing at all below 90% — the common case is a hook that prints nothing.
+Warnings below the blocking threshold return immediately, so Claude Code can
+render them normally:
 
 ```
 Claude usage: the 5-hour window is 94% used and resets at 15:59, in 1h04m.
 The session will pause here by itself if it runs out.
 
-Claude usage limit reached: the 5-hour window is 100% used. Pausing until
-15:59, about 1h04m, then carrying on by itself. Esc interrupts the wait.
-
 usage-limit-wait: waited 1h04m for the 5-hour limit to reset.
 ```
 
 The warning repeats at most once every 10 minutes per session
-(`USAGE_LIMIT_WAIT_NOTIFY_EVERY`); the pause announcement is never throttled,
-because it precedes an actual stop. When the pause is *not* going to happen —
-credits opted into, no reset time reported, a reset past the cap — the notice
-says so instead of promising a wait that never comes.
+(`USAGE_LIMIT_WAIT_NOTIFY_EVERY`). When the pause is *not* going to happen —
+credits opted into, no reset time reported, a reset past the cap — the terminal
+notice says so instead of promising a wait that never comes.
 
-Starting and finishing a wait also emit a terminal bell and an OSC 777 desktop
-notification, so a session you walked away from can tell you it's back.
-`USAGE_LIMIT_WAIT_BELL=0` turns that off.
+At the start of an actual wait, the desktop notification says which limit was
+reached and when Claude Code expects to resume. A second desktop notification
+announces that the wait has finished. `USAGE_LIMIT_WAIT_OS_NOTIFICATION=0`
+turns both off.
 
 ### It fails open, always
 
@@ -88,8 +93,8 @@ silently, changing nothing — the moment anything says otherwise:
 | Reset is more than `MAX_WAIT` (7 days) away | there is no live subscription behind this session |
 
 It never blocks a tool call, never rejects a prompt, and never writes to the
-model's context. All it can print is a `systemMessage` and a `terminalSequence`
-— both shown to you, neither to Claude.
+model's context. Its only hook output is a `systemMessage`, shown to you and not
+to Claude; desktop notifications go directly through the host OS.
 
 ### Pay-as-you-go credits
 
@@ -117,12 +122,10 @@ without it.
 
 Readings are cached in `~/.claude/.usage-limit-wait.cache.json`, shared by every
 session on the machine, with a TTL that tightens as you approach the wall: 5
-minutes below the warning level, 30 seconds from there to the threshold, 15
-seconds once a window is exhausted — just long enough for the notifier and the
-waiter, which start together, to read usage once and agree about it. Failures
-are cached too, so a machine on an API key pays one wasted request every 5
-minutes rather than one per prompt. **Zero model calls** — the hook never talks
-to a model.
+minutes below the warning level, 30 seconds from there to the threshold, and 15
+seconds once a window is exhausted. Failures are cached too, so a machine on an
+API key pays one wasted request every 5 minutes rather than one per prompt.
+**Zero model calls** — the hook never talks to a model.
 
 ## Configuration
 
@@ -136,7 +139,7 @@ block of `.claude/settings.json`.
 | `USAGE_LIMIT_WAIT_THRESHOLD` | `98` | Percent at which a window counts as exhausted. `100` waits only after the wall is hit |
 | `USAGE_LIMIT_WAIT_WARN` | `90` | Percent at which the warning starts. Also where the cache starts refreshing more often |
 | `USAGE_LIMIT_WAIT_NOTIFY_EVERY` | `600` | Seconds before the same warning may repeat in one session |
-| `USAGE_LIMIT_WAIT_BELL` | on | Set to `0` to drop the bell and desktop notification |
+| `USAGE_LIMIT_WAIT_OS_NOTIFICATION` | on | Set to `0` to disable the start and completion desktop notifications |
 | `USAGE_LIMIT_WAIT_MAX_WAIT` | `604800` | Longest wait, in seconds (7 days). A reset beyond this is treated as "no subscription" |
 | `USAGE_LIMIT_WAIT_POLL` | `60` | Seconds between re-checks while waiting |
 | `USAGE_LIMIT_WAIT_CACHE_TTL` | `300` | How long a below-threshold reading stays usable |
@@ -151,13 +154,13 @@ anyway; use `USAGE_LIMIT_WAIT_THRESHOLD=100` if you want every drop.
 
 | File | Purpose |
 |---|---|
-| `.claude/settings.json` | Registers `--notify` and `--wait` on both `UserPromptSubmit` and `PostToolBatch` — four entries, two per event |
+| `.claude/settings.json` | Registers one hook on each of `UserPromptSubmit` and `PostToolBatch` |
 | `.claude/hooks/usage_limit_wait_hook.py` | Reads usage, reports it, and blocks until the reset |
 
-One script serves both events and both modes — it needs nothing
-event-specific — which is why its filename has no `_<Event>_` infix like the
-other hooks in this repo. An entry with no arguments runs the waiter, so an
-installation that predates the split keeps working.
+One script serves both events — it needs nothing event-specific — which is why
+its filename has no `_<Event>_` infix like the other hooks in this repo. The
+obsolete `--notify` entry from version 1.1.0 is accepted as a no-op, so replacing
+the script by hand before cleaning up settings cannot create two waiters.
 
 The `timeout` is the part you cannot omit on the waiter: `UserPromptSubmit`
 hooks default to 30 seconds and other events to 600, either of which would kill
@@ -191,16 +194,9 @@ for `--local` and `uninstall`.
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/usage_limit_wait_hook.py", "--notify"],
-            "timeout": 120,
-            "statusMessage": "Checking Claude usage limits"
-          },
-          {
-            "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/usage_limit_wait_hook.py", "--wait"],
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/usage_limit_wait_hook.py"],
             "timeout": 604800,
-            "statusMessage": "Waiting for the Claude usage limit to reset"
+            "statusMessage": "Checking Claude usage limits — waits here if they are exhausted"
           }
         ]
       }
@@ -211,16 +207,9 @@ for `--local` and `uninstall`.
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/usage_limit_wait_hook.py", "--notify"],
-            "timeout": 120,
-            "statusMessage": "Checking Claude usage limits"
-          },
-          {
-            "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/usage_limit_wait_hook.py", "--wait"],
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/usage_limit_wait_hook.py"],
             "timeout": 604800,
-            "statusMessage": "Waiting for the Claude usage limit to reset"
+            "statusMessage": "Checking Claude usage limits — waits here if they are exhausted"
           }
         ]
       }
@@ -234,8 +223,10 @@ for `--local` and `uninstall`.
 
 </details>
 
-Requires a working Python 3 where the installer runs, and nothing else — the
-hook is pure standard library.
+Requires a working Python 3 where the installer runs. Windows and macOS need no
+additional notification utility; Linux desktop notifications require
+`notify-send` (usually supplied by `libnotify`). The waiting behavior itself is
+pure Python standard library on every platform.
 
 ## Known limits
 
@@ -245,10 +236,14 @@ hook is pure standard library.
 - The usage endpoint is undocumented and unversioned, and the `/usage` text
   layout is not a contract either. Every parse is defensive: if both drift, the
   hook degrades to doing nothing, never to stalling a session wrongly.
-- `statusMessage` is documented but is not always rendered while a hook runs,
-  which is why the notifier exists at all: its `systemMessage` is what actually
-  reaches you. While the waiter sleeps you see the spinner and nothing else.
-  <kbd>Esc</kbd> interrupts it like any other hook.
+- `statusMessage`, `systemMessage`, and `terminalSequence` are all handled by
+  Claude Code, so none can announce the pause before a long-running hook exits.
+  That is why the hook uses the OS directly. While the waiter sleeps you can
+  still see Claude Code's spinner; <kbd>Esc</kbd> interrupts it like any other
+  hook.
+- Desktop notifications may be suppressed by Focus Assist / Do Not Disturb or
+  by OS notification settings. On Linux, the current desktop session also needs
+  a notification service and `notify-send` on `PATH`.
 - Notices are per session, tracked in `~/.claude/.usage-limit-wait.notices.json`.
   Two sessions near the wall each get told once, which is the point, and a
   session that runs for days keeps only a day of history.
