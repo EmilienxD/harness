@@ -93,14 +93,11 @@ Large diffs are trimmed per-file rather than globally truncated, and lock
 files and other generated artefacts are listed but their contents omitted,
 so one `package-lock.json` can't crowd out the actual feature.
 
-**Setup.** `--ai` needs `google-genai` and a Google AI Studio API key
-(the free tier is far more than enough for commit messages):
+**Setup.** `--ai` needs a Google AI Studio API key (the free tier is far more
+than enough for commit messages), but no Python package installation. The hook
+makes the Gemini REST request with Python's standard library.
 
-```bash
-pip install google-genai        # same interpreter Claude Code runs hooks with
-```
-
-Then provide the key one of three ways. Recommended first:
+Provide the key one of three ways. Recommended first:
 
 1. **`env` in `.claude/settings.local.json`** — Claude Code's own mechanism for
    handing environment variables to hooks. `settings.local.json` is
@@ -118,9 +115,8 @@ Then provide the key one of three ways. Recommended first:
 2. **Key file** — a single line in `.claude/commit-ai.key`, either in the repo
    or in `~/.claude/`. Also gitignored by the installer, and needs no restart.
 
-3. **Environment variable** — `GEMINI_API_KEY` or `GOOGLE_API_KEY`. This is
-   what the `google-genai` SDK reads natively, so if you already use Gemini
-   anywhere else there is nothing to do.
+3. **Environment variable** — `GEMINI_API_KEY` or `GOOGLE_API_KEY`. If you
+   already use Gemini anywhere else there is nothing to do.
 
    ```bash
    setx GEMINI_API_KEY "your-key-here"      # Windows, applies to new shells
@@ -140,9 +136,8 @@ key-shaped strings before anything leaves the machine.
 
 Set `COMMIT_AI_MODEL` to override the default `gemini-3.5-flash-lite`.
 
-Everything except `--ai` works with no key, no network, and no extra
-packages — the import is lazy, so a machine without `google-genai` still has
-a fully functioning `/commit`.
+Everything except `--ai` works with no key or network. Neither mode needs
+third-party Python packages.
 
 ### Debugging
 

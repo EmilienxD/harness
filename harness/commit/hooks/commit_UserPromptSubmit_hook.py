@@ -19,6 +19,9 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import namedtuple
 
 COMMIT_PATTERN = re.compile(r"^/commit(?:\s+(.*))?$", re.DOTALL)
@@ -338,12 +341,13 @@ def _rel(path, root):
 # AI commit message generation (--ai)
 #
 # One synchronous call to a small Gemini model. Everything below is inert
-# unless --ai is passed, and the import is deliberately lazy so a machine
-# without google-genai keeps a fully working /commit.
+# unless --ai is passed. The REST call uses only Python's standard library,
+# so generated messages need an API key but no separately installed package.
 # ---------------------------------------------------------------------------
 
 AI_MODEL = os.environ.get("COMMIT_AI_MODEL", "gemini-3.5-flash-lite")
-AI_TIMEOUT_MS = 45000
+AI_TIMEOUT_SECONDS = 45
+GEMINI_API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
 # Character budgets for the prompt. The diff is the ground truth so it gets
 # the lion's share; session narrative is supporting evidence for *why*.
@@ -377,9 +381,9 @@ SECRET_PATTERNS = [
     ),
 ]
 
-# Resolution order for the API key. Live env vars come first because that is
-# what the google-genai SDK itself reads, so anyone who already has Gemini set
-# up needs to do nothing. Then the `env` dict of each settings file -- Claude
+# Resolution order for the API key. Live env vars come first, matching the
+# conventional Gemini setup so anyone who already has a key configured needs
+# to do nothing. Then the `env` dict of each settings file -- Claude
 # Code's own mechanism for handing environment variables to hooks, and where a
 # user would reasonably expect to put this. Then a bare key file, for a secret
 # that outlives shells and is trivially easy to keep out of git.
@@ -890,34 +894,70 @@ def _build_prompt(repo_root, targets, staged, transcript_path, guidance):
     return "\n\n".join(sections), stats
 
 
-def _response_schema(types):
-    return types.Schema(
-        type=types.Type.OBJECT,
-        properties={
+def _response_schema():
+    """Gemini REST `responseSchema` for the generated commit message."""
+    return {
+        "type": "OBJECT",
+        "properties": {
             # Ordered first so the model reasons about the diff before
             # committing to a subject, rather than justifying one after.
-            "reasoning": types.Schema(
-                type=types.Type.STRING,
-                description=(
+            "reasoning": {
+                "type": "STRING",
+                "description": (
                     "Brief: what does this diff actually change, and why? "
                     "Note the commit style used by the recent log."
                 ),
-            ),
-            "subject": types.Schema(
-                type=types.Type.STRING,
-                description="The subject line. Imperative, <=72 chars, no trailing period.",
-            ),
-            "body": types.Schema(
-                type=types.Type.STRING,
-                description=(
+            },
+            "subject": {
+                "type": "STRING",
+                "description": "The subject line. Imperative, <=72 chars, no trailing period.",
+            },
+            "body": {
+                "type": "STRING",
+                "description": (
                     "Body explaining why, wrapped at ~72 columns. "
                     "Empty string for a small self-explanatory change."
                 ),
-            ),
+            },
         },
-        required=["reasoning", "subject"],
-        property_ordering=["reasoning", "subject", "body"],
+        "required": ["reasoning", "subject"],
+        "propertyOrdering": ["reasoning", "subject", "body"],
+    }
+
+
+def _gemini_error_message(exc):
+    """Extract Google's useful message without leaking request credentials."""
+    if isinstance(exc, urllib.error.HTTPError):
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+            payload = json.loads(body)
+            message = payload.get("error", {}).get("message")
+            if message:
+                return f"HTTP {exc.code}: {message}"
+        except (OSError, ValueError, AttributeError):
+            pass
+        return f"HTTP {exc.code}: {exc.reason}"
+    if isinstance(exc, urllib.error.URLError):
+        return str(exc.reason)
+    return str(exc)
+
+
+def _gemini_response_text(response):
+    """Return text from the first candidate, mirroring the SDK's `.text`."""
+    candidates = response.get("candidates") or []
+    if not isinstance(candidates, list) or not candidates:
+        return None, ""
+    if not isinstance(candidates[0], dict):
+        return None, ""
+    candidate = candidates[0]
+    content = candidate.get("content")
+    parts = (content.get("parts") or []) if isinstance(content, dict) else []
+    text = "".join(
+        part.get("text", "")
+        for part in parts
+        if isinstance(part, dict) and isinstance(part.get("text"), str)
     )
+    return text or None, candidate.get("finishReason") or ""
 
 
 def generate_commit_message(repo_root, targets, staged, transcript_path, guidance):
@@ -925,16 +965,6 @@ def generate_commit_message(repo_root, targets, staged, transcript_path, guidanc
     One Gemini call. Raises AiError with something the user can act on;
     the caller must not fall back to a placeholder message.
     """
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError:
-        raise AiError(
-            "--ai needs the google-genai package:\n"
-            "    pip install google-genai\n"
-            "(install it for the same interpreter Claude Code runs hooks with)"
-        )
-
     api_key, _ = find_api_key(repo_root)
     if not api_key:
         raise AiError(key_setup_help(repo_root))
@@ -943,46 +973,65 @@ def generate_commit_message(repo_root, targets, staged, transcript_path, guidanc
         repo_root, targets, staged, transcript_path, guidance
     )
 
-    try:
-        client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(timeout=AI_TIMEOUT_MS),
-        )
-        response = client.models.generate_content(
-            model=AI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                response_mime_type="application/json",
-                response_schema=_response_schema(types),
-                temperature=0.3,
-            ),
-        )
-    except Exception as exc:  # SDK raises a wide range of transport errors
-        raise AiError(f"Gemini call failed ({AI_MODEL}): {exc}")
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": _response_schema(),
+            "temperature": 0.3,
+        },
+    }
+    model = urllib.parse.quote(AI_MODEL, safe="")
+    request = urllib.request.Request(
+        f"{GEMINI_API_ROOT}/models/{model}:generateContent",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
+        method="POST",
+    )
 
-    text = getattr(response, "text", None)
+    try:
+        with urllib.request.urlopen(request, timeout=AI_TIMEOUT_SECONDS) as raw:
+            response = json.loads(raw.read().decode("utf-8"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AiError(
+            f"Gemini call failed ({AI_MODEL}): {_gemini_error_message(exc)}"
+        )
+    except ValueError as exc:
+        raise AiError(f"Gemini returned an invalid response ({AI_MODEL}): {exc}")
+
+    if not isinstance(response, dict):
+        raise AiError(f"Gemini returned an invalid response ({AI_MODEL}).")
+
+    text, finish_reason = _gemini_response_text(response)
     if not text:
-        reason = ""
-        for candidate in getattr(response, "candidates", None) or []:
-            if getattr(candidate, "finish_reason", None):
-                reason = f" (finish_reason={candidate.finish_reason})"
-                break
+        reason = f" (finish_reason={finish_reason})" if finish_reason else ""
         raise AiError(f"Gemini returned no message{reason}.")
 
     try:
         parsed = json.loads(text)
     except ValueError:
         raise AiError(f"Gemini returned unparseable output:\n{text[:400]}")
+    if not isinstance(parsed, dict):
+        raise AiError(f"Gemini returned an unexpected JSON value:\n{text[:400]}")
 
-    subject = _clean_line((parsed.get("subject") or "").strip())
+    subject_value = parsed.get("subject")
+    subject = _clean_line(subject_value) if isinstance(subject_value, str) else ""
     if not subject:
         raise AiError("Gemini returned an empty subject line.")
 
+    body = parsed.get("body") or ""
+    reasoning = parsed.get("reasoning") or ""
+    if not isinstance(body, str) or not isinstance(reasoning, str):
+        raise AiError("Gemini returned invalid commit message fields.")
+
     return AiMessage(
         subject=subject,
-        body=(parsed.get("body") or "").strip(),
-        reasoning=(parsed.get("reasoning") or "").strip(),
+        body=body.strip(),
+        reasoning=reasoning.strip(),
         model=AI_MODEL,
         source=stats,
     )

@@ -10,10 +10,12 @@ refuses, and a real `/commit` whose only write is ignored dies on a spurious
 These run the hook's own helpers against a real throwaway repo, so they need
 git on PATH (declared by the tool's `requires`).
 """
+import io
 import json
 import os
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -152,3 +154,88 @@ def test_only_ignored_writes_stage_nothing(repo):
     result, targets = hook.stage_paths(scan.paths, str(repo))
     assert result is None and targets == []
     assert _git(repo, "status", "--porcelain", "--", ".issues-gateway").strip() == ""
+
+
+def _mock_ai_inputs(monkeypatch):
+    monkeypatch.setattr(hook, "find_api_key", lambda _repo: ("test-secret", "$TEST"))
+    monkeypatch.setattr(
+        hook,
+        "_build_prompt",
+        lambda *_args: ("the prompt", {"diff_chars": 10, "files": 1}),
+    )
+
+
+def test_generate_commit_message_calls_gemini_rest_api(monkeypatch):
+    _mock_ai_inputs(monkeypatch)
+    captured = {}
+    response = {
+        "candidates": [{
+            "content": {"parts": [{"text": json.dumps({
+                "reasoning": "Matches the repository style.",
+                "subject": "add stdlib Gemini transport",
+                "body": "Avoid requiring a separately installed SDK.",
+            })}]},
+            "finishReason": "STOP",
+        }]
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return io.BytesIO(json.dumps(response).encode())
+
+    monkeypatch.setattr(hook.urllib.request, "urlopen", fake_urlopen)
+
+    message = hook.generate_commit_message("repo", [], True, "", "")
+
+    request = captured["request"]
+    payload = json.loads(request.data)
+    assert request.method == "POST"
+    assert request.full_url == (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{hook.AI_MODEL}:generateContent"
+    )
+    assert request.get_header("X-goog-api-key") == "test-secret"
+    assert request.get_header("Content-type") == "application/json"
+    assert captured["timeout"] == 45
+    assert payload["contents"] == [{"parts": [{"text": "the prompt"}]}]
+    assert payload["systemInstruction"]["parts"][0]["text"] == hook.SYSTEM_INSTRUCTION
+    config = payload["generationConfig"]
+    assert config["responseMimeType"] == "application/json"
+    assert config["responseSchema"]["required"] == ["reasoning", "subject"]
+    assert message.subject == "add stdlib Gemini transport"
+    assert message.body == "Avoid requiring a separately installed SDK."
+    assert message.model == hook.AI_MODEL
+
+
+def test_generate_commit_message_surfaces_gemini_http_error(monkeypatch):
+    _mock_ai_inputs(monkeypatch)
+    error_body = io.BytesIO(json.dumps({
+        "error": {"message": "API key not valid. Please pass a valid API key."}
+    }).encode())
+
+    def fake_urlopen(_request, timeout):
+        assert timeout == hook.AI_TIMEOUT_SECONDS
+        raise urllib.error.HTTPError(
+            "https://example.invalid", 400, "Bad Request", {}, error_body
+        )
+
+    monkeypatch.setattr(hook.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(hook.AiError, match="HTTP 400: API key not valid"):
+        hook.generate_commit_message("repo", [], True, "", "")
+
+
+def test_generate_commit_message_reports_finish_reason_without_text(monkeypatch):
+    _mock_ai_inputs(monkeypatch)
+    response = {
+        "candidates": [{"content": {"parts": []}, "finishReason": "SAFETY"}]
+    }
+    monkeypatch.setattr(
+        hook.urllib.request,
+        "urlopen",
+        lambda _request, timeout: io.BytesIO(json.dumps(response).encode()),
+    )
+
+    with pytest.raises(hook.AiError, match=r"finish_reason=SAFETY"):
+        hook.generate_commit_message("repo", [], True, "", "")
