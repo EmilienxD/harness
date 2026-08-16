@@ -32,6 +32,7 @@ export type GitHubErrorCode =
   | "malformed-output"
   | "missing-todo"
   | "unknown-task"
+  | "expectation-mismatch"
   | "invalid-subject"
   | "invalid-finding";
 
@@ -88,10 +89,16 @@ export interface RoadmapSnapshot {
 
 export interface RoadmapWriteResult {
   readonly issue: number;
-  /** Ids of the tasks the call created, in the order their subjects were given. */
-  readonly ids?: readonly string[];
-  /** The edited task's current id, absent when it was deleted. */
-  readonly task?: string | undefined;
+  /** Positions of the tasks the call created, in the order their subjects were given. */
+  readonly positions?: readonly number[];
+  /** The edited task's position after the edit, absent when it was deleted. */
+  readonly task?: number | undefined;
+  /**
+   * The current pending list, present only when the edit renumbered other tasks.
+   * An append or an in-place edit shifts nothing and omits it, which keeps the
+   * common call cheap.
+   */
+  readonly tasks?: readonly string[];
   readonly notices: readonly string[];
 }
 
@@ -290,11 +297,17 @@ export class GitHubClient implements GitHubPromptSource {
     if (chosen === undefined) {
       const edit = this.#applied(createTasks("", input), []);
       const number = await this.#mintRoadmap(edit.body);
-      return { issue: number, ids: edit.value, notices: [`Created issue #${number} and labelled it \`${LABEL_TODO}\`; this repository had no roadmap yet.`, ...this.#boundNotices(edit.body)] };
+      return { issue: number, positions: edit.value.positions, notices: [`Created issue #${number} and labelled it \`${LABEL_TODO}\`; this repository had no roadmap yet.`, ...this.#boundNotices(edit.body)] };
     }
     const edit = this.#applied(createTasks(chosen.body, input), parseRoadmap(chosen.body).tasks);
     await this.gh.run(["issue", "edit", String(chosen.number), "--body", edit.body]);
-    return { issue: chosen.number, ids: edit.value, notices: [...this.#carrierNotices(carriers, chosen.number), ...this.#boundNotices(edit.body)] };
+    const shift = this.#shift(edit.body, edit.value.shifted);
+    return {
+      issue: chosen.number,
+      positions: edit.value.positions,
+      ...shift.result,
+      notices: [...this.#carrierNotices(carriers, chosen.number), ...shift.notices, ...this.#boundNotices(edit.body)],
+    };
   }
 
   public async updateRoadmapTask(input: RoadmapUpdateInput): Promise<RoadmapWriteResult> {
@@ -305,13 +318,34 @@ export class GitHubClient implements GitHubPromptSource {
     }
     const edit = this.#applied(updateTask(chosen.body, input), parseRoadmap(chosen.body).tasks);
     await this.gh.run(["issue", "edit", String(chosen.number), "--body", edit.body]);
-    return { issue: chosen.number, task: edit.value, notices: [...this.#carrierNotices(carriers, chosen.number), ...this.#boundNotices(edit.body)] };
+    const shift = this.#shift(edit.body, edit.value.shifted);
+    return {
+      issue: chosen.number,
+      task: edit.value.position,
+      ...shift.result,
+      notices: [...this.#carrierNotices(carriers, chosen.number), ...shift.notices, ...this.#boundNotices(edit.body)],
+    };
   }
 
   /**
-   * Turns a rejected edit into a typed failure. An unknown id carries the
-   * current numbered list, because that is exactly the data a retry needs and
-   * the situation is rare by construction — the alternative, matching a subject
+   * An edit that renumbered other tasks hands back the current pending list, so
+   * the caller's next address is right the first time rather than after a guard
+   * failure teaches it so. Completed tasks are omitted: they are the bulk of a
+   * mature roadmap and are almost never the target of a follow-up edit.
+   */
+  #shift(body: string, shifted: boolean): { readonly result: { readonly tasks?: readonly string[] }; readonly notices: readonly string[] } {
+    if (!shifted) return { result: {}, notices: [] };
+    const pending = parseRoadmap(body).tasks.filter((task) => !task.completed);
+    return {
+      result: { tasks: numberedTasks(pending) },
+      notices: ["This edit renumbered the tasks after it; `tasks` is the pending list as it now stands, and earlier positions you were holding are stale."],
+    };
+  }
+
+  /**
+   * Turns a rejected edit into a typed failure. Both addressing failures carry
+   * the current list, because that is exactly the data a retry needs and it
+   * costs one already-fetched parse — the alternative, matching a subject
    * fuzzily, writes silently to the wrong task when it guesses wrong.
    */
   #applied<T>(edit: RoadmapEdit<T>, tasks: readonly RoadmapTask[]): { readonly body: string; readonly value: T } {
@@ -319,9 +353,17 @@ export class GitHubClient implements GitHubPromptSource {
     if (edit.failure.reason === "invalid-subject") {
       throw new GitHubBoundaryError("invalid-subject", describeSubjectRejection(edit.failure.rejection), { subject: edit.failure.subject });
     }
+    if (edit.failure.reason === "expectation-mismatch") {
+      throw new GitHubBoundaryError(
+        "expectation-mismatch",
+        `Position ${edit.failure.position} is "${edit.failure.actual}", not "${edit.failure.expected}". Nothing was written. The roadmap changed since you last saw it, so re-read the list below and retry against the position the task holds now.`,
+        { tasks: numberedTasks(tasks) },
+      );
+    }
+    const field = edit.failure.field === "task" ? "No roadmap task is at position" : "No roadmap task is at the `after` position";
     throw new GitHubBoundaryError(
       "unknown-task",
-      `No roadmap task has id ${edit.failure.id}. Ids are derived from the subject text, so editing a subject changes its id; copy one from the list below.`,
+      `${field} ${edit.failure.position}; the roadmap has ${tasks.length} task(s). Nothing was written. Use a position from the list below.`,
       { tasks: numberedTasks(tasks) },
     );
   }

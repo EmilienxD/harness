@@ -1,5 +1,5 @@
 import { MCP_LAUNCHABLE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentId, type AgentType } from "../domain/contracts.js";
-import { ROADMAP_TASK_STATUSES, type RoadmapTaskStatus } from "../domain/roadmap.js";
+import { ROADMAP_TASK_STATUSES, type RoadmapAnchor, type RoadmapTaskStatus } from "../domain/roadmap.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
 import type { ReviewCoordinator } from "../github/review.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
@@ -139,24 +139,32 @@ const TODO_CREATE_DESCRIPTION =
 
   "Placement is explicit: omit after to append, " +
   "use after='top' to make the batch highest priority, " +
-  "or pass a current 4-character task id to place the batch immediately after that task. " +
+  "or pass a current task position to place the batch immediately after that task. " +
   "If no roadmap issue exists, this tool creates the first one. " +
-  "It returns the new derived task ids in subject order and the roadmap issue number; " +
-  "retain those ids for dependent updates. " +
+  "It returns positions, the new tasks' positions in subject order, and the roadmap issue number.\n\n" +
+
+  "Inserting anywhere but the end renumbers every task after the insertion point. " +
+  "When that happens the result also carries tasks, the pending list as it now stands; " +
+  "use it and discard the positions you were holding. " +
+  "A plain append renumbers nothing and omits that list. " +
   "Multiple roadmap carriers are reported but never modified or consolidated automatically.";
 
-const TODO_UPDATE_DESCRIPTION = 
-  "Mutate exactly one existing roadmap task using its current 4-character derived id " +
-  "from the newest roadmap context. " +
+const TODO_UPDATE_DESCRIPTION =
+  "Mutate exactly one existing roadmap task, addressed by its position " +
+  "in the newest roadmap block in your context. " +
   "Use this to retitle a task, change its completion status, reprioritize it, " +
   "delete it on the user's explicit request, or combine those changes atomically. " +
   "At least one of subject, status, or after is required.\n\n" +
 
-  "Task ids are derived from subject text rather than stored. " +
-  "Copy the id from the newest roadmap block and never invent or fuzzy-match one. " +
-  "Retitling changes the id. " +
-  "A stale or unknown id writes nothing " +
-  "and returns the current numbered list so the operation can be retried safely.\n\n" +
+  "Addressing takes two fields and both are required. " +
+  "task is the 1-based position shown against the task. " +
+  "expect is that task's current subject, or at least its first 40 characters, copied not paraphrased. " +
+  "The position says which line to change and expect proves you are looking at the task you mean, " +
+  "so a roadmap the user edited on GitHub in the meantime cannot silently take the write. " +
+  "Positions are absolute over the whole roadmap and identical in the full and pending renderings, " +
+  "so a pending list showing 4, 9, 12 means exactly those numbers. " +
+  "A position that does not exist, or an expect that does not match, " +
+  "writes nothing and returns the current list; retry against that list.\n\n" +
 
   "Status semantics: pending marks remaining work; " +
   "completed changes the checkbox to complete but leaves the task in its current position forever; " +
@@ -164,9 +172,16 @@ const TODO_UPDATE_DESCRIPTION =
   "in_progress is accepted but coerced to pending with a notice " +
   "because live work is already derived from issues, pull requests, and auto-run state.\n\n" +
 
-  "Reprioritize with after='top' or after='<current task id>'; " +
+  "Reprioritize with after='top' or after=<current position>; " +
   "moving is part of this update, not a separate operation. " +
+  "after takes no confirmation of its own: a wrong anchor only misplaces the task in the order, " +
+  "which the next roadmap block shows plainly. " +
+  "A move or a deletion renumbers other tasks, so the result then carries tasks, " +
+  "the pending list as it now stands; use it and discard the positions you were holding. " +
+  "A status or subject change in place renumbers nothing and omits that list.\n\n" +
+
   "A replacement subject follows the same single-line, 200-character, no-leading-markup rules as creation. " +
+  "Retitling does not change the task's position. " +
   "Non-checkbox roadmap text and all unrelated tasks remain untouched.";
 
 const START_AUTO_RUN_DESCRIPTION = 
@@ -216,6 +231,22 @@ const REVIEW_PR_DESCRIPTION =
   "aboard opens a fresh interactive pull-request doctor and reports that fallback. " +
   "If no matching open pull request exists, nothing is launched.";
 
+/**
+ * `after` names either a task position or the top of the list. The two-branch
+ * schema keeps the anchor a real integer rather than a stringly-typed position,
+ * and the string case uses `enum` rather than `const` because more MCP clients
+ * support it. Runtime validation in `parseAfter` remains authoritative.
+ */
+function ANCHOR_SCHEMA(description: string): Readonly<Record<string, unknown>> {
+  return {
+    oneOf: [
+      { type: "integer", minimum: 1 },
+      { type: "string", enum: ["top"] },
+    ],
+    description,
+  };
+}
+
 export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "run_agent",
@@ -243,15 +274,12 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
             "and must not begin with list or heading markup. " +
             "The batch is atomic and inserted in this order.",
         },
-        after: {
-          type: "string",
-          minLength: 1,
-          description:
-            "Optional placement anchor. " +
-            "Omit to append after every current task, use 'top' to insert before the first task, " +
-            "or provide a current 4-character derived task id " +
-            "to insert the whole batch immediately after it.",
-        },
+        after: ANCHOR_SCHEMA(
+          "Optional placement anchor. " +
+          "Omit to append after every current task, use 'top' to insert before the first task, " +
+          "or provide a current 1-based task position " +
+          "to insert the whole batch immediately after that task.",
+        ),
       },
       required: ["subjects"],
       additionalProperties: false,
@@ -264,11 +292,20 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       type: "object",
       properties: {
         task: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Required 1-based position of the task, read from the newest roadmap block in your context. " +
+            "A position that does not exist fails without writing and returns the current task list.",
+        },
+        expect: {
           type: "string",
           minLength: 1,
           description:
-            "Required current 4-character derived id copied from the newest roadmap context. " +
-            "A stale or unknown id fails without writing and returns the current task list.",
+            "Required confirmation that this position still holds the task you mean: " +
+            "its current subject, or at least its first 40 characters, copied exactly. " +
+            "Whitespace is normalized before comparison; a mismatch writes nothing " +
+            "and returns the current task list.",
         },
         subject: {
           type: "string",
@@ -277,7 +314,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
           description:
             "Optional replacement subject: one directional line of at most 200 characters " +
             "with no leading list or heading markup. " +
-            "Retitling changes the task's derived id.",
+            "Retitling leaves the task's position unchanged.",
         },
         status: {
           type: "string",
@@ -288,16 +325,14 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
             "deleted removes it and is allowed only on the user's explicit request; " +
             "in_progress is coerced to pending because live state is derived elsewhere.",
         },
-        after: {
-          type: "string",
-          minLength: 1,
-          description:
-            "Optional reprioritization anchor. " +
-            "Use 'top' to move before the first task or a current 4-character task id " +
-            "to move immediately after it.",
-        },
+        after: ANCHOR_SCHEMA(
+          "Optional reprioritization anchor. " +
+          "Use 'top' to move before the first task, or a current 1-based task position " +
+          "to move immediately after that task. " +
+          "Anchoring to the task's own position is a no-op.",
+        ),
       },
-      required: ["task"],
+      required: ["task", "expect"],
       additionalProperties: false,
     },
   },
@@ -437,10 +472,19 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   };
 }
 
-function parseAfter(value: unknown): { readonly after?: string } {
+function parseAfter(value: unknown): { readonly after?: RoadmapAnchor } {
   if (value === undefined) return {};
-  if (!nonEmptyString(value)) throw new TypeError("after must be a task id or `top`");
-  return { after: value.trim() };
+  if (value === "top") return { after: "top" };
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new TypeError("after must be a 1-based task position or the string `top`");
+  }
+  return { after: value };
+}
+
+/** How a placement anchor reads in the audit line. */
+function describeAnchor(after: RoadmapAnchor | undefined, verb: string): string {
+  if (after === undefined) return "appended";
+  return after === "top" ? `${verb} to the top` : `${verb} after position ${after}`;
 }
 
 function parseStatus(value: unknown): { readonly value?: RoadmapTaskStatus; readonly notices: readonly string[] } {
@@ -493,13 +537,23 @@ async function callTool(
       if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
       const subjects = args.subjects as readonly string[];
       const created = await services.github.createRoadmapTasks({ subjects, ...after });
-      const placed = after.after === undefined ? "appended" : after.after === "top" ? "added at the top" : `added after ${after.after}`;
+      const placed = describeAnchor(after.after, "added");
       services.log?.(`Roadmap #${created.issue}: ${subjects.length} task(s) ${placed} - ${subjects.map((subject) => `"${subject}"`).join(", ")}`);
-      return withNotices({ ids: created.ids ?? [], issue: created.issue }, created.notices);
+      return withNotices(
+        {
+          positions: created.positions ?? [],
+          issue: created.issue,
+          ...(created.tasks === undefined ? {} : { tasks: created.tasks }),
+        },
+        created.notices,
+      );
     }
     case "todo_update": {
-      if (!isRecord(args) || !exactKeys(args, ["task", "subject", "status", "after"])) throw new TypeError("arguments contain an unknown property");
-      if (!nonEmptyString(args.task)) throw new TypeError("task must be a non-empty task id");
+      if (!isRecord(args) || !exactKeys(args, ["task", "expect", "subject", "status", "after"])) throw new TypeError("arguments contain an unknown property");
+      if (typeof args.task !== "number" || !Number.isInteger(args.task) || args.task < 1) {
+        throw new TypeError("task must be a 1-based task position from the newest roadmap block");
+      }
+      if (!nonEmptyString(args.expect)) throw new TypeError("expect must be the task's current subject, or at least its first 40 characters");
       if (args.subject !== undefined && !nonEmptyString(args.subject)) throw new TypeError("subject must be non-empty when provided");
       const status = parseStatus(args.status);
       const after = parseAfter(args.after);
@@ -508,7 +562,8 @@ async function callTool(
       }
       if (services.github === undefined) throw new GitHubBoundaryError("command-failed", "GitHub service is unavailable");
       const updated = await services.github.updateRoadmapTask({
-        task: args.task.trim(),
+        task: args.task,
+        expect: args.expect.trim(),
         ...(args.subject === undefined ? {} : { subject: (args.subject as string).trim() }),
         ...(status.value === undefined ? {} : { status: status.value }),
         ...after,
@@ -516,11 +571,15 @@ async function callTool(
       const changes = [
         ...(args.subject === undefined ? [] : [`retitled to "${(args.subject as string).trim()}"`]),
         ...(status.value === undefined ? [] : [`marked ${status.value}`]),
-        ...(after.after === undefined ? [] : [after.after === "top" ? "moved to the top" : `moved after ${after.after}`]),
+        ...(after.after === undefined ? [] : [describeAnchor(after.after, "moved")]),
       ];
-      services.log?.(`Roadmap #${updated.issue}: task ${args.task.trim()} ${changes.join(", ")}`);
+      services.log?.(`Roadmap #${updated.issue}: task at position ${args.task} ${changes.join(", ")}`);
       return withNotices(
-        { task: updated.task ?? null, issue: updated.issue },
+        {
+          task: updated.task ?? null,
+          issue: updated.issue,
+          ...(updated.tasks === undefined ? {} : { tasks: updated.tasks }),
+        },
         [...status.notices, ...updated.notices],
       );
     }

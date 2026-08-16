@@ -260,8 +260,8 @@ test("the todo verbs pass their arguments through and coerce in_progress with a 
       services: {
         log: (message: string) => logged.push(message),
         github: {
-          createRoadmapTasks: async (input: unknown) => { calls.push(["create", input]); return { issue: 9, ids: ["a3f9", "b2c1"], notices: [] }; },
-          updateRoadmapTask: async (input: unknown) => { calls.push(["update", input]); return { issue: 9, task: "a3f9", notices: ["2 open issues carry `ai:todo`"] }; },
+          createRoadmapTasks: async (input: unknown) => { calls.push(["create", input]); return { issue: 9, positions: [1, 2], tasks: ["1. [ ] First task", "2. [ ] Second task"], notices: [] }; },
+          updateRoadmapTask: async (input: unknown) => { calls.push(["update", input]); return { issue: 9, task: 1, notices: ["2 open issues carry `ai:todo`"] }; },
         } as never,
       },
     },
@@ -270,28 +270,68 @@ test("the todo verbs pass their arguments through and coerce in_progress with a 
 
   const created = await call("todo_create", { subjects: ["First task", "Second task"], after: "top" });
   assert.equal(created.status, 200);
-  // The minimum on success: the new ids, which are what a follow-up update in
-  // the same turn needs. The full list is far too many tokens for the frequency.
-  assert.deepEqual(body(created).result, { ids: ["a3f9", "b2c1"], issue: 9 });
+  // The minimum on success: the new positions, which are what a follow-up update
+  // in the same turn needs, plus the refreshed pending list this insert-at-top
+  // renumbered. An append would carry no list at all.
+  assert.deepEqual(body(created).result, {
+    positions: [1, 2],
+    issue: 9,
+    tasks: ["1. [ ] First task", "2. [ ] Second task"],
+  });
 
   // `in_progress` has exactly one sensible reading here, so it is coerced rather
   // than rejected — and the coerced call must not look clean.
-  const updated = await call("todo_update", { task: "a3f9", status: "in_progress" });
+  const updated = await call("todo_update", { task: 1, expect: "First task", status: "in_progress" });
   assert.equal(updated.status, 200);
   const result = (body(updated).result as Record<string, unknown>);
-  assert.equal(result.task, "a3f9");
+  assert.equal(result.task, 1);
+  // An in-place status change renumbers nothing, so no list is spent on it.
+  assert.equal("tasks" in result, false);
   assert.match(String(result.notice), /recorded as pending/);
   assert.match(String(result.notice), /2 open issues carry `ai:todo`/);
   assert.deepEqual(calls, [
     ["create", { subjects: ["First task", "Second task"], after: "top" }],
-    ["update", { task: "a3f9", status: "pending" }],
+    ["update", { task: 1, expect: "First task", status: "pending" }],
   ]);
   // The user-facing line is derived from the operation, which is what dropping
   // `--reason` bought: a narrated reason could disagree with the edit it named.
   assert.deepEqual(logged, [
-    'Roadmap #9: 2 task(s) added at the top - "First task", "Second task"',
-    "Roadmap #9: task a3f9 marked pending",
+    'Roadmap #9: 2 task(s) added to the top - "First task", "Second task"',
+    "Roadmap #9: task at position 1 marked pending",
   ]);
+});
+
+test("todo_update takes a numeric position and a required expect, and rejects anything looser", async () => {
+  const calls: unknown[] = [];
+  const handler = createMcpHandler(
+    setup().coordinator,
+    {
+      managerAgentId: MANAGER,
+      services: {
+        github: {
+          updateRoadmapTask: async (input: unknown) => { calls.push(input); return { issue: 9, task: 3, notices: [] }; },
+          createRoadmapTasks: async () => ({ issue: 9, positions: [1], notices: [] }),
+        } as never,
+      },
+    },
+  );
+  const call = (name: string, args: unknown) => mcpCall(handler, name, args, MANAGER);
+
+  // `after` is a bare position: it is deliberately unguarded, because a wrong
+  // anchor only misplaces a task where a wrong `task` would rewrite one.
+  const moved = await call("todo_update", { task: 3, expect: "Document the verbs", after: 1 });
+  assert.equal(moved.status, 200);
+  assert.deepEqual(calls, [{ task: 3, expect: "Document the verbs", after: 1 }]);
+
+  assert.equal((await call("todo_update", { task: 3 })).status, 400);
+  assert.equal((await call("todo_update", { task: 3, status: "completed" })).status, 400);
+  // A hash-shaped id is no longer an address, and must not be coerced into one.
+  assert.equal((await call("todo_update", { task: "a3f9", expect: "x", status: "completed" })).status, 400);
+  assert.equal((await call("todo_update", { task: 0, expect: "x", status: "completed" })).status, 400);
+  assert.equal((await call("todo_update", { task: 1.5, expect: "x", status: "completed" })).status, 400);
+  assert.equal((await call("todo_update", { task: 3, expect: "  ", status: "completed" })).status, 400);
+  assert.equal((await call("todo_update", { task: 3, expect: "x", after: "bottom" })).status, 400);
+  assert.equal((await call("todo_create", { subjects: ["A task"], after: "1" })).status, 400);
 });
 
 test("serves exactly the current delegation tools and no duplicate state-fetch surface", async () => {
@@ -324,7 +364,10 @@ test("MCP definitions carry the complete operation guidance", () => {
   assert.match(descriptions.todo_create!, /batch is atomic/i);
   assert.match(descriptions.todo_create!, /after='top'/);
   assert.match(descriptions.todo_create!, /creates the first one/i);
-  assert.match(descriptions.todo_update!, /stale or unknown id writes nothing/i);
+  assert.match(descriptions.todo_update!, /1-based position/i);
+  assert.match(descriptions.todo_update!, /expect[\s\S]*first 40 characters/i);
+  assert.match(descriptions.todo_update!, /does not match, writes nothing/i);
+  assert.match(descriptions.todo_update!, /absolute over the whole roadmap/i);
   assert.match(descriptions.todo_update!, /deleted[\s\S]*user explicitly/i);
   assert.match(descriptions.todo_update!, /in_progress[\s\S]*coerced to pending/i);
   assert.match(descriptions.start_auto_run!, /non-blocking/i);
@@ -372,9 +415,10 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["todo_create", { subjects: ["A task"], reason: "obsolete field" }],
     ["todo_create", { subjects: ["A task"], after: "" }],
     // An update naming no change at all would spend a round trip on nothing.
-    ["todo_update", { task: "a3f9" }],
-    ["todo_update", { task: "", status: "completed" }],
-    ["todo_update", { task: "a3f9", status: "archived" }],
+    ["todo_update", { task: 1, expect: "A task" }],
+    ["todo_update", { expect: "A task", status: "completed" }],
+    ["todo_update", { task: 1, status: "completed" }],
+    ["todo_update", { task: 1, expect: "A task", status: "archived" }],
     ["review_pr", { pr: 0 }],
     ["start_auto_run", { spec: 12 }],
   ] as const) {

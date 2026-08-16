@@ -281,13 +281,13 @@ export class ManagerBriefings {
       return marked("No open issue carries `ai:todo`, so this project has no roadmap yet. That is the normal state of a fresh repository, not a deletion. Recommend `/update-todo` to the user: it surveys the codebase, asks a few questions, and writes the first one.");
     }
     const notes = roadmapNotes(roadmap);
-    const inline = roadmapBlock(roadmap.tasks, "full", `Issue #${roadmap.number} - the whole roadmap follows, so do not fetch it again. Task ids are derived from the subject text: copy one to edit that task, never invent one.`, notes);
+    const inline = roadmapBlock(roadmap.tasks, "full", `Issue #${roadmap.number} - the whole roadmap follows, so do not fetch it again. The leading number is a task's position: pass it as \`task\`, with its subject as \`expect\`, to edit that task.`, notes);
     if (inline.length <= ROADMAP_INLINE_LIMIT || this.files === undefined) return inline;
     // Only the roadmap spills. Today's whole-block spill would demote
     // Repository, Auto-run, Issues, Pull requests, and Fleet to a file
     // reference for a reason that belongs to none of them.
     const path = await this.files.write("roadmap", inline);
-    const heading = `Issue #${roadmap.number} - the full roadmap, completed history included, is pre-rendered with its ids at ${path}; one Read gets it, with no ids left for you to derive.`;
+    const heading = `Issue #${roadmap.number} - the full roadmap, completed history included, is pre-rendered with its positions at ${path}; one Read gets it. The head of the pending list follows inline.`;
     // What stays inline is the head of the pending list: the tasks most likely
     // to matter next, bounded so this section cannot grow past its share again.
     const pending = roadmap.tasks.filter((task) => !task.completed);
@@ -350,7 +350,7 @@ export function renderRoadmapReminder(roadmap: RoadmapBriefing | undefined, at: 
   const pending = renderTasks(roadmap.tasks, "pending");
   const body = pending.length === 0
     ? `every task on issue #${roadmap.number} is complete.`
-    : `pending tasks on issue #${roadmap.number}, with the ids to edit them by. Completed history is unchanged and is not repeated here.\n\n${pending}`;
+    : `pending tasks on issue #${roadmap.number}, with the positions to edit them by. The numbers are absolute over the whole roadmap, so they are not consecutive here. Completed history is unchanged and is not repeated.\n\n${pending}`;
   return marked(`Roadmap as of ${at} - ${body}`);
 }
 

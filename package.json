@@ -309,7 +309,7 @@
           "default": 150000,
           "minimum": 0,
           "maximum": 100000000,
-          "description": "How many transcript bytes may pass with no roadmap injection before the Manager is reminded of the pending tasks and their ids. Measured in bytes rather than turns because turn size varies far too much to pace on. 0 disables the reminder; the session-start and post-compact briefings still carry the full roadmap."
+          "description": "How many transcript bytes may pass with no roadmap injection before the Manager is reminded of the pending tasks and their positions. Measured in bytes rather than turns because turn size varies far too much to pace on. 0 disables the reminder; the session-start and post-compact briefings still carry the full roadmap."
         },
         "aboard.autoRun.review": {
           "type": "boolean",

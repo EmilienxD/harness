@@ -239,7 +239,7 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
       repository: async () => ({ name: "aboard", defaultBranch: "main", checks: [] }),
       git: async () => ({ branch: "main", head: "abc1234", dirty: false }),
       github: async () => ({ issues: [], openPullRequests: [], unreviewedMergeCount: 0 }),
-      roadmap: async () => ({ number: 12, tasks: [{ id: "a3f9", subject: "Ship the bridge", completed: false }], carrierCount: 1, nearBound: false, duplicateSubjects: [] }),
+      roadmap: async () => ({ number: 12, tasks: [{ position: 1, subject: "Ship the bridge", completed: false }], carrierCount: 1, nearBound: false, duplicateSubjects: [] }),
       autoRun: () => undefined,
     },
     fleet, lease,

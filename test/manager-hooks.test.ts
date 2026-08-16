@@ -86,12 +86,12 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
   assert.match(rendered, /#14 Rotate bridge tokens \(hitl\) - waits on #12/);
   assert.match(rendered, /#21 Fix lease recovery \(no review yet\)/);
   assert.match(rendered, /2 pull request\(s\) merged without review/);
-  // The roadmap itself, with its ids, so no tool call is needed to read or
-  // address it — and the completed history included, because session start is
-  // one of the two moments the Manager's context is empty.
+  // The roadmap itself, with the positions that address it, so no tool call is
+  // needed to read or edit it — and the completed history included, because
+  // session start is one of the two moments the Manager's context is empty.
   assert.match(rendered, /## Roadmap\n<aboard-roadmap>\nIssue #9/);
-  assert.match(rendered, /^- \[ \] \[[0-9a-f]{4}\] Ship the bridge$/m);
-  assert.match(rendered, /^- \[x\] \[[0-9a-f]{4}\] Rotate the tokens$/m);
+  assert.match(rendered, /^1\. \[ \] Ship the bridge$/m);
+  assert.match(rendered, /^2\. \[x\] Rotate the tokens$/m);
   assert.match(rendered, /<\/aboard-roadmap>/);
   assert.match(rendered, /PR #21 is hitl and waiting/);
   assert.match(rendered, /default branch main \| verify with npm run check/);
@@ -191,14 +191,16 @@ test("an oversized roadmap spills alone, leaving the rest of the briefing inline
   // Only the roadmap went to a file. Demoting the other sections for a reason
   // that belongs to none of them would be the wrong trade.
   assert.deepEqual(Object.keys(written), ["roadmap"]);
-  assert.match(rendered, /pre-rendered with its ids at C:\\runtime\\brief-roadmap\.txt/);
+  assert.match(rendered, /pre-rendered with its positions at C:\\runtime\\brief-roadmap\.txt/);
   assert.match(rendered, /#12 Rework the fleet tree \(afk\)/);
   assert.match(rendered, /## Repository/);
   assert.doesNotMatch(rendered, /Full briefing:/);
-  // The spilled file carries the whole document, ids already computed, so
-  // reading it costs one Read and no derivation.
+  // The spilled file carries the whole document with its positions, so reading
+  // it costs one Read and leaves nothing to compute.
   assert.ok((written.roadmap as string).length > ROADMAP_INLINE_LIMIT);
-  assert.match(written.roadmap as string, /Roadmap task number 399/);
+  assert.match(written.roadmap as string, /^400\. \[ \] Roadmap task number 399$/m);
+  // Positions in the inline head are absolute, so they agree with the file.
+  assert.match(rendered, /^1\. \[ \] Roadmap task number 0$/m);
 });
 
 test("a small roadmap stays inline and never touches the file store", async () => {
@@ -260,8 +262,10 @@ test("the reminder carries pending tasks only, is self-dating, and leads with th
   assert.ok(context.startsWith(ROADMAP_MARKER));
   assert.match(context, /Roadmap as of 2026-07-30T14:32:00\.000Z/);
   // Pending only: the completed history is still verbatim in the window, and
-  // repeating it would make the reminder grow with the project's age.
-  assert.match(context, /^- \[ \] \[[0-9a-f]{4}\] Pace the reminders$/m);
+  // repeating it would make the reminder grow with the project's age. The
+  // position stays absolute — 2, not 1 — so it names the same task the
+  // session-start briefing did.
+  assert.match(context, /^2\. \[ \] Pace the reminders$/m);
   assert.doesNotMatch(context, /Replace the locator/);
 
   // The transcript is written asynchronously, so a duplicate clusters right

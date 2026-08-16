@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  EXPECT_PREFIX_CHARS,
   ROADMAP_SUBJECT_LIMIT,
   createTasks,
+  expectationMatches,
   numberedTasks,
   parseRoadmap,
   renderTasks,
@@ -21,88 +23,188 @@ const BODY = [
   "Notes the user keeps here.",
 ].join("\n");
 
-function ids(body: string): readonly string[] {
-  return parseRoadmap(body).tasks.map((task) => task.id);
+function subjects(body: string): readonly string[] {
+  return parseRoadmap(body).tasks.map((task) => task.subject);
 }
 
 test("parsing keeps order, completion, and every line the user wrote", () => {
   const parsed = parseRoadmap(BODY);
-  assert.deepEqual(parsed.tasks.map((task) => [task.subject, task.completed]), [
-    ["Replace the locator", true],
-    ["Pace the reminders", false],
-    ["Document the verbs", false],
+  assert.deepEqual(parsed.tasks.map((task) => [task.position, task.subject, task.completed]), [
+    [1, "Replace the locator", true],
+    [2, "Pace the reminders", false],
+    [3, "Document the verbs", false],
   ]);
   assert.deepEqual(parsed.duplicateSubjects, []);
-  assert.equal(parsed.tasks.every((task) => /^[0-9a-f]{4}$/u.test(task.id)), true);
 
   // Round trip: an edit that changes one task leaves the heading, the blank
   // lines, and the trailing note exactly where they were. The user owns this
   // issue, so a note they added must survive a roadmap tool call.
-  const edited = updateTask(BODY, { task: ids(BODY)[1] as string, status: "completed" });
+  const edited = updateTask(BODY, { task: 2, expect: "Pace the reminders", status: "completed" });
   assert.ok(edited.ok);
   assert.equal(edited.body, BODY.replace("- [ ] Pace the reminders", "- [x] Pace the reminders"));
+  // An in-place edit renumbers nothing, so the caller keeps its addresses.
+  assert.deepEqual(edited.value, { position: 2, shifted: false });
 });
 
-test("ids survive reordering and unrelated deletion, and follow the subject when it changes", () => {
-  const before = ids(BODY);
-  // Deleting the first task must not renumber the others: a positional id would
-  // shift every one of them, and a deletion made on a phone is exactly the case.
-  const deleted = updateTask(BODY, { task: before[0] as string, status: "deleted" });
-  assert.ok(deleted.ok);
-  assert.deepEqual(ids(deleted.body), before.slice(1));
+test("positions are absolute over the whole document and never renumbered per view", () => {
+  const tasks = parseRoadmap(BODY).tasks;
+  const pendingPositions = renderTasks(tasks, "pending")
+    .split("\n")
+    .map((line) => Number(line.split(".")[0]));
+  // The completed first task keeps position 1, so the pending view starts at 2
+  // and is deliberately non-contiguous. If it renumbered from 1, the reminder
+  // and the session-start briefing would name different tasks by the same id.
+  assert.deepEqual(pendingPositions, [2, 3]);
+  for (const task of tasks) {
+    assert.match(renderTasks(tasks, "full"), new RegExp(`^${task.position}\\. \\[[ x]\\] ${task.subject}$`, "mu"));
+  }
+});
 
-  const moved = updateTask(BODY, { task: before[2] as string, after: "top" });
-  assert.ok(moved.ok);
-  assert.deepEqual([...ids(moved.body)].sort(), [...before].sort());
-  assert.equal(ids(moved.body)[0], before[2]);
-
-  const renamed = updateTask(BODY, { task: before[1] as string, subject: "Pace reminders on measured growth" });
+test("a subject edit does not move the task, which is the whole point of positional addressing", () => {
+  const renamed = updateTask(BODY, { task: 2, expect: "Pace the reminders", subject: "Pace reminders on measured growth" });
   assert.ok(renamed.ok);
-  assert.notEqual(ids(renamed.body)[1], before[1]);
-  assert.equal(renamed.value, ids(renamed.body)[1]);
+  assert.deepEqual(renamed.value, { position: 2, shifted: false });
+  assert.equal(parseRoadmap(renamed.body).tasks[1]?.subject, "Pace reminders on measured growth");
+  // And the new text addresses the same position immediately afterwards.
+  const again = updateTask(renamed.body, { task: 2, expect: "Pace reminders on measured growth", status: "completed" });
+  assert.ok(again.ok);
 });
 
-test("identical subjects still get distinct ids, and the duplication is reported", () => {
+test("expect is the ETag: a stale subject writes nothing", () => {
+  // The user retitled task 2 on their phone; the Manager still holds the old text.
+  const drifted = BODY.replace("- [ ] Pace the reminders", "- [ ] Something else entirely");
+  const failed = updateTask(drifted, { task: 2, expect: "Pace the reminders", status: "completed" });
+  assert.equal(failed.ok, false);
+  assert.deepEqual(failed.ok ? undefined : failed.failure, {
+    reason: "expectation-mismatch",
+    position: 2,
+    expected: "Pace the reminders",
+    actual: "Something else entirely",
+  });
+});
+
+test("expect takes the whole subject or exactly its first 40 characters, and nothing shorter", () => {
+  const long = `- [ ] ${"a".repeat(60)}`;
+  const stored = "a".repeat(60);
+  assert.equal(expectationMatches(stored, stored), true);
+  assert.equal(expectationMatches(stored, "a".repeat(EXPECT_PREFIX_CHARS)), true);
+  // One character short of the floor is not a match: comparing fixed-length
+  // truncations is what stops the guard degrading into "any prefix will do".
+  assert.equal(expectationMatches(stored, "a".repeat(EXPECT_PREFIX_CHARS - 1)), false);
+  assert.equal(updateTask(long, { task: 1, expect: "a".repeat(EXPECT_PREFIX_CHARS), status: "completed" }).ok, true);
+  assert.equal(updateTask(long, { task: 1, expect: "a", status: "completed" }).ok, false);
+
+  // A short subject must be reproduced in full.
+  assert.equal(expectationMatches("Short one", "Short one"), true);
+  assert.equal(expectationMatches("Short one", "Short"), false);
+
+  // Whitespace is noise from a phone keyboard or GitHub's editor, not an edit.
+  assert.equal(expectationMatches("Pace  the\treminders", "Pace the reminders"), true);
+  // Case is a real edit and is not normalized away.
+  assert.equal(expectationMatches("Pace the reminders", "pace the reminders"), false);
+});
+
+test("an out-of-range position fails and writes nothing, with the current list available to attach", () => {
+  const failed = updateTask(BODY, { task: 9, expect: "Anything", status: "completed" });
+  assert.equal(failed.ok, false);
+  assert.deepEqual(failed.ok ? undefined : failed.failure, { reason: "unknown-position", field: "task", position: 9 });
+  assert.deepEqual(numberedTasks(parseRoadmap(BODY).tasks), [
+    "1. [x] Replace the locator",
+    "2. [ ] Pace the reminders",
+    "3. [ ] Document the verbs",
+  ]);
+});
+
+test("a move reports the new position and that other tasks shifted", () => {
+  const toTop = updateTask(BODY, { task: 3, expect: "Document the verbs", after: "top" });
+  assert.ok(toTop.ok);
+  assert.deepEqual(toTop.value, { position: 1, shifted: true });
+  assert.deepEqual(subjects(toTop.body), ["Document the verbs", "Replace the locator", "Pace the reminders"]);
+
+  // Moving to the very end must work: the anchor resolves against the document
+  // the caller was looking at, before the moved task is lifted out of it.
+  const toEnd = updateTask(BODY, { task: 1, expect: "Replace the locator", after: 3 });
+  assert.ok(toEnd.ok);
+  assert.deepEqual(toEnd.value, { position: 3, shifted: true });
+  assert.deepEqual(subjects(toEnd.body), ["Pace the reminders", "Document the verbs", "Replace the locator"]);
+
+  const backwards = updateTask(BODY, { task: 3, expect: "Document the verbs", after: 1 });
+  assert.ok(backwards.ok);
+  assert.deepEqual(subjects(backwards.body), ["Replace the locator", "Document the verbs", "Pace the reminders"]);
+
+  // Anchoring to a task's own position is a no-op rather than a slot forward.
+  const still = updateTask(BODY, { task: 2, expect: "Pace the reminders", after: 2 });
+  assert.ok(still.ok);
+  assert.deepEqual(still.value, { position: 2, shifted: false });
+  assert.deepEqual(subjects(still.body), subjects(BODY));
+
+  const nowhere = updateTask(BODY, { task: 2, expect: "Pace the reminders", after: 9 });
+  assert.equal(nowhere.ok, false);
+  assert.deepEqual(nowhere.ok ? undefined : nowhere.failure, { reason: "unknown-position", field: "after", position: 9 });
+});
+
+test("a move carries the subject edit with it, in one write", () => {
+  const both = updateTask(BODY, { task: 3, expect: "Document the verbs", subject: "Document the two todo tools", after: "top" });
+  assert.ok(both.ok);
+  assert.deepEqual(subjects(both.body), ["Document the two todo tools", "Replace the locator", "Pace the reminders"]);
+});
+
+test("deletion shifts only when something followed the deleted task", () => {
+  const first = updateTask(BODY, { task: 1, expect: "Replace the locator", status: "deleted" });
+  assert.ok(first.ok);
+  assert.deepEqual(first.value, { shifted: true });
+  assert.deepEqual(subjects(first.body), ["Pace the reminders", "Document the verbs"]);
+
+  const last = updateTask(BODY, { task: 3, expect: "Document the verbs", status: "deleted" });
+  assert.ok(last.ok);
+  assert.deepEqual(last.value, { shifted: false });
+});
+
+test("identical subjects are addressed by position and the duplication is reported", () => {
   const body = "- [ ] Same task\n- [ ] Same task";
   const parsed = parseRoadmap(body);
-  assert.equal(parsed.tasks[0]?.id === parsed.tasks[1]?.id, false);
+  assert.deepEqual(parsed.tasks.map((task) => task.position), [1, 2]);
   assert.deepEqual(parsed.duplicateSubjects, ["Same task"]);
-  // Each id addresses its own line, so completing one leaves the other pending.
-  const edited = updateTask(body, { task: parsed.tasks[1]?.id as string, status: "completed" });
+  // Position disambiguates what text alone cannot, so completing one leaves the
+  // other pending — duplicates are a defect in the document, not in addressing.
+  const edited = updateTask(body, { task: 2, expect: "Same task", status: "completed" });
   assert.ok(edited.ok);
   assert.equal(edited.body, "- [ ] Same task\n- [x] Same task");
 });
 
-test("an unknown id fails and writes nothing, with the current list available to attach", () => {
-  const failed = updateTask(BODY, { task: "zzzz", status: "completed" });
-  assert.equal(failed.ok, false);
-  assert.deepEqual(failed.ok ? undefined : failed.failure, { reason: "unknown-task", id: "zzzz" });
-  assert.match(numberedTasks(parseRoadmap(BODY).tasks)[0] as string, /^1\. \[[0-9a-f]{4}\] completed - Replace the locator$/);
-});
-
-test("create appends by default, honours --after, and returns ids in subject order", () => {
+test("create appends by default, honours after, and returns positions in subject order", () => {
   const appended = createTasks(BODY, { subjects: ["Third thing"] });
   assert.ok(appended.ok);
   // After the last task, not after the trailing note.
   assert.match(appended.body, /- \[ \] Document the verbs\n- \[ \] Third thing\n\nNotes/u);
-  assert.deepEqual(appended.value, [ids(appended.body)[3]]);
+  // A plain append renumbers nothing, so no fresh list is owed to the caller.
+  assert.deepEqual(appended.value, { positions: [4], shifted: false });
 
   const top = createTasks(BODY, { subjects: ["Urgent one", "Urgent two"], after: "top" });
   assert.ok(top.ok);
-  assert.deepEqual(parseRoadmap(top.body).tasks.slice(0, 2).map((task) => task.subject), ["Urgent one", "Urgent two"]);
-  assert.deepEqual(top.value, ids(top.body).slice(0, 2));
+  assert.deepEqual(top.value, { positions: [1, 2], shifted: true });
+  assert.deepEqual(subjects(top.body).slice(0, 2), ["Urgent one", "Urgent two"]);
 
-  const after = createTasks(BODY, { subjects: ["Between"], after: ids(BODY)[0] as string });
-  assert.ok(after.ok);
-  assert.equal(parseRoadmap(after.body).tasks[1]?.subject, "Between");
+  const between = createTasks(BODY, { subjects: ["Between"], after: 1 });
+  assert.ok(between.ok);
+  assert.deepEqual(between.value, { positions: [2], shifted: true });
+  assert.equal(parseRoadmap(between.body).tasks[1]?.subject, "Between");
 
-  assert.equal(createTasks(BODY, { subjects: ["Nowhere"], after: "zzzz" }).ok, false);
+  // Anchoring to the last task is an append by another name, and shifts nothing.
+  const atEnd = createTasks(BODY, { subjects: ["Tail"], after: 3 });
+  assert.ok(atEnd.ok);
+  assert.deepEqual(atEnd.value, { positions: [4], shifted: false });
+
+  const nowhere = createTasks(BODY, { subjects: ["Nowhere"], after: 9 });
+  assert.equal(nowhere.ok, false);
+  assert.deepEqual(nowhere.ok ? undefined : nowhere.failure, { reason: "unknown-position", field: "after", position: 9 });
 });
 
 test("an empty roadmap takes its first tasks and the whole batch fails together", () => {
   const first = createTasks("", { subjects: ["One", "Two"] });
   assert.ok(first.ok);
   assert.equal(first.body, "- [ ] One\n- [ ] Two");
+  assert.deepEqual(first.value, { positions: [1, 2], shifted: false });
   // A blank body is an empty document, not a document of blank lines.
   const blank = createTasks("\n  \n", { subjects: ["One"] });
   assert.ok(blank.ok);
@@ -128,13 +230,16 @@ test("subject validation is structural, not stylistic", () => {
   assert.equal(validateSubject("Render the `- [ ]` prefix ourselves"), undefined);
 });
 
-test("rendering carries ids inline, and the reminder mode drops completed history", () => {
+test("rendering leads with the position, and the reminder mode drops completed history", () => {
   const tasks = parseRoadmap(BODY).tasks;
   const full = renderTasks(tasks, "full");
   assert.equal(full.split("\n").length, 3);
-  assert.match(full, /^- \[x\] \[[0-9a-f]{4}\] Replace the locator$/mu);
+  assert.equal(full.split("\n")[0], "1. [x] Replace the locator");
 
   const pending = renderTasks(tasks, "pending");
   assert.equal(pending.split("\n").length, 2);
   assert.doesNotMatch(pending, /Replace the locator/u);
+  // The failure list and the briefing render the same lines, so the data a
+  // retry reads looks exactly like the data the call was written against.
+  assert.deepEqual(numberedTasks(tasks), full.split("\n"));
 });

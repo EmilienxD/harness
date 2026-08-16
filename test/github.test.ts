@@ -127,43 +127,85 @@ test("an empty candidate set mints on create, is the first-run state on read, an
   const createGh = roadmapGh(empty);
   const created = await new GitHubClient(createGh).createRoadmapTasks({ subjects: ["Write the first task"] });
   assert.equal(created.issue, 44);
-  assert.equal(created.ids?.length, 1);
+  assert.deepEqual(created.positions, [1]);
   assert.match(created.notices.join(" "), /Created issue #44/);
   // Plain `label create`, so a user-owned `ai:todo` keeps its colour.
   assert.equal(createGh.calls.some((args) => args.includes("--force")), false);
   assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "create")?.slice(0, 4), ["issue", "create", "--title", "Project roadmap"]);
 
   await assert.rejects(
-    () => new GitHubClient(roadmapGh(empty)).updateRoadmapTask({ task: "a3f9", status: "completed" }),
+    () => new GitHubClient(roadmapGh(empty)).updateRoadmapTask({ task: 1, expect: "Anything", status: "completed" }),
     (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo",
   );
 });
 
-test("a batch create is one issue edit, returns ids in order, and honours --after", async () => {
+test("a batch create is one issue edit, returns positions in order, and honours --after", async () => {
   const gh = roadmapGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: "- [ ] First\n- [ ] Second", createdAt: "2026-07-01T00:00:00Z" });
     throw new Error(`unexpected ${args.join(" ")}`);
   });
   const github = new GitHubClient(gh);
   const created = await github.createRoadmapTasks({ subjects: ["Third", "Fourth"], after: "top" });
-  assert.equal(created.ids?.length, 2);
+  assert.deepEqual(created.positions, [1, 2]);
   // One write for N subjects: the bootstrap must not cost twenty issue revisions.
   assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "edit").length, 1);
   assert.equal(gh.calls.find((args) => args[1] === "edit")?.at(-1), "- [ ] Third\n- [ ] Fourth\n- [ ] First\n- [ ] Second");
 });
 
-test("an unknown task id writes nothing and returns the current numbered list", async () => {
+test("an edit that renumbers hands back the pending list; one that does not stays quiet", async () => {
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const github = new GitHubClient(gh);
+
+  // A move renumbers everything between, so the caller's held positions are
+  // stale and it is handed the current list rather than left to discover that.
+  const moved = await github.updateRoadmapTask({ task: 2, expect: "Rotate the tokens", after: "top" });
+  assert.deepEqual(moved.tasks, ["2. [ ] Ship the bridge"]);
+  assert.match(moved.notices.join(" "), /renumbered the tasks after it/);
+
+  // Completing a task in place moves nothing, so nothing is owed.
+  const completed = await github.updateRoadmapTask({ task: 1, expect: "Ship the bridge", status: "completed" });
+  assert.equal(completed.tasks, undefined);
+  assert.equal(completed.task, 1);
+
+  const appended = await github.createRoadmapTasks({ subjects: ["Later"] });
+  assert.equal(appended.tasks, undefined);
+});
+
+test("an out-of-range position writes nothing and returns the current list", async () => {
   const gh = roadmapGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
     throw new Error(`unexpected ${args.join(" ")}`);
   });
   await assert.rejects(
-    () => new GitHubClient(gh).updateRoadmapTask({ task: "zzzz", status: "completed" }),
+    () => new GitHubClient(gh).updateRoadmapTask({ task: 9, expect: "Ship the bridge", status: "completed" }),
     (error: unknown) => {
       assert.ok(error instanceof GitHubBoundaryError && error.code === "unknown-task");
       const details = (error as GitHubBoundaryError).details as { tasks: readonly string[] };
-      assert.equal(details.tasks.length, 2);
-      assert.match(details.tasks[0] as string, /^1\. \[[0-9a-f]{4}\] pending - Ship the bridge$/);
+      assert.deepEqual(details.tasks, ["1. [ ] Ship the bridge", "2. [x] Rotate the tokens"]);
+      return true;
+    },
+  );
+  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), false);
+});
+
+test("an expect mismatch writes nothing and returns the current list", async () => {
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  // Position 1 exists, but it is not the task the caller was holding — the
+  // roadmap moved under it. Without the guard this would silently complete the
+  // wrong work; with it the caller pays one call and gets what a retry needs.
+  await assert.rejects(
+    () => new GitHubClient(gh).updateRoadmapTask({ task: 1, expect: "Rotate the tokens", status: "completed" }),
+    (error: unknown) => {
+      assert.ok(error instanceof GitHubBoundaryError && error.code === "expectation-mismatch");
+      assert.match(error.message, /Position 1 is "Ship the bridge", not "Rotate the tokens"/);
+      const details = (error as GitHubBoundaryError).details as { tasks: readonly string[] };
+      assert.deepEqual(details.tasks, ["1. [ ] Ship the bridge", "2. [x] Rotate the tokens"]);
       return true;
     },
   );
