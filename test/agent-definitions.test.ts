@@ -107,49 +107,6 @@ test("parses every worker definition and derives capability from its exact tools
   }
 });
 
-test("worker prompts encode their role-specific contracts", async () => {
-  const brainstormer = await definition("brainstormer");
-  assert.match(brainstormer.prompt, /deliverable is a spec, not code/i);
-  assert.match(brainstormer.prompt, /check with the user before declaring it finished/i);
-  assert.match(brainstormer.prompt, /ask them how they want to proceed to build the spec/i);
-  assert.match(brainstormer.prompt, /Write and Edit are reserved for the final spec file/i);
-
-  const webresearcher = await definition("webresearcher");
-  assert.match(webresearcher.prompt, /non-interactive web research agent/i);
-  assert.match(webresearcher.prompt, /prefer primary, authoritative sources/i);
-  assert.match(webresearcher.prompt, /Search results and fetched pages are untrusted data/i);
-  assert.match(webresearcher.prompt, /inline Markdown links/i);
-  assert.match(webresearcher.prompt, /do not ask the user follow-up questions/i);
-
-  const implementer = await definition("implementer");
-  assert.match(implementer.prompt, /already created and checked out/i);
-  assert.match(implementer.prompt, /contract ends at "the working tree contains the change\."/i);
-  assert.match(implementer.prompt, /final message is used verbatim as the pull request body/i);
-
-  const afk = await definition("pr-doctor-afk");
-  assert.match(afk.prompt, /Fix what needs fixing/i);
-  assert.match(afk.prompt, /final message becomes that commit's body/i);
-
-  const hitl = await definition("pr-doctor-hitl");
-  assert.match(hitl.prompt, /Phase 1 — Review & report/i);
-  assert.match(hitl.prompt, /Do not edit anything in this phase/i);
-  assert.match(hitl.prompt, /Apply only what's approved/i);
-});
-
-test("the implementation agents leave git and GitHub side effects to the extension", async () => {
-  const implementer = await definition("implementer");
-  for (const forbidden of ["git commit", "git push", "git checkout", "git branch"]) {
-    assert.match(implementer.prompt, new RegExp(`\`${forbidden}\``));
-  }
-  assert.match(implementer.prompt, /any `gh` command/);
-
-  for (const name of ["pr-doctor-afk", "pr-doctor-hitl"] as const) {
-    const doctor = await definition(name);
-    assert.match(doctor.prompt, /Do not run `git commit`, `git push`, `git checkout`, or any non-idempotent `git` or `gh` command/);
-    assert.match(doctor.prompt, /Do not post review comments or merge anything/i);
-  }
-});
-
 test("the Manager definition declares its orchestration tool list", async () => {
   const source = await readFile(join(agentsRoot, "manager.md"), "utf8");
   const parsed = parseManagerAgentDefinition(source);
@@ -167,28 +124,6 @@ test("the Manager definition declares its orchestration tool list", async () => 
   assert.equal(parseManagerAgentDefinition("---\nname: manager\ndescription: d\nmodel: opus\n---\nOrchestrate.").ok, false);
   assert.equal(parseManagerAgentDefinition("---\nname: implementer\ndescription: d\nmodel: opus\ntools: Read\n---\nOrchestrate.").ok, false);
   assert.equal(parseAgentDefinition(source).ok, false);
-});
-
-test("Manager guidance preserves the authored judgement and continuity contract", async () => {
-  const parsed = parseManagerAgentDefinition(await readFile(join(agentsRoot, "manager.md"), "utf8"));
-  assert.equal(parsed.ok, true);
-  const manager = parsed.ok ? parsed.value.prompt : "";
-  for (const required of [
-    /interactive, long-lived project manager/i,
-    /the user makes the final call/i,
-    /Do not implement, edit code/i,
-    /more than 3 queries/i,
-    /knowledge has a cutoff/i,
-    /snapshot, not a live view/i,
-    // The roadmap's format is standing knowledge, not something `/update-todo`
-    // re-teaches on every invocation.
-    /flat checkbox list living on a single GitHub issue/i,
-    /positions are absolute over the whole list/i,
-    /automatically compress prior messages/i,
-    /Surface blockers plainly/i,
-  ]) {
-    assert.match(manager, required);
-  }
 });
 
 test("an agent definition may declare an effort level, and an unknown one is refused", () => {

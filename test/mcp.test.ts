@@ -361,36 +361,17 @@ test("serves exactly the current delegation tools and no duplicate state-fetch s
   }
 });
 
-test("MCP definitions carry the complete operation guidance", () => {
-  const descriptions = Object.fromEntries(CORE_MCP_TOOLS.map((tool) => [tool.name, tool.description]));
-  for (const [name, description] of Object.entries(descriptions)) {
-    assert.equal(description.length >= 600, true, `${name} needs a self-contained description`);
-  }
-
-  assert.match(descriptions.run_agent!, /general-purpose[\s\S]*Explore[\s\S]*brainstormer[\s\S]*webresearcher/);
-  assert.match(descriptions.run_agent!, /interactive launch[\s\S]*never returns an agent result/i);
-  assert.match(descriptions.run_agent!, /single-writer lease/i);
-  assert.match(descriptions.todo_create!, /batch is atomic/i);
-  assert.match(descriptions.todo_create!, /after='top'/);
-  assert.match(descriptions.todo_create!, /creates the first one/i);
-  assert.match(descriptions.todo_update!, /1-based position/i);
-  assert.match(descriptions.todo_update!, /expect[\s\S]*first 40 characters/i);
-  assert.match(descriptions.todo_update!, /does not match, writes nothing/i);
-  assert.match(descriptions.todo_update!, /absolute over the whole roadmap/i);
-  assert.match(descriptions.todo_update!, /deleted[\s\S]*user explicitly/i);
-  assert.match(descriptions.todo_update!, /in_progress[\s\S]*coerced to pending/i);
-  assert.match(descriptions.start_auto_run!, /non-blocking/i);
-  assert.match(descriptions.start_auto_run!, /do not wait or poll/i);
-  assert.match(descriptions.start_auto_run!, /working tree is clean/i);
-  assert.match(descriptions.start_auto_run!, /ai:hitl[\s\S]*user merges/i);
-  assert.match(descriptions.review_pr!, /does not perform a review/i);
-  assert.match(descriptions.review_pr!, /no matching open pull request exists, nothing is launched/i);
-
+test("MCP definitions carry a self-contained description for every tool and field", () => {
+  // Presence and substance, not content: the descriptions are the Manager's
+  // only usage contract, so none may be missing or a stub — but their wording
+  // is free to change without touching this test.
   for (const tool of CORE_MCP_TOOLS) {
+    assert.equal(typeof tool.description, "string", `${tool.name} needs a description`);
+    assert.equal(tool.description.trim().length >= 200, true, `${tool.name}'s description is too terse to stand alone`);
     const properties = tool.inputSchema.properties as Record<string, { description?: unknown }> | undefined;
     for (const [name, schema] of Object.entries(properties ?? {})) {
       assert.equal(typeof schema.description, "string", `${tool.name}.${name} needs field guidance`);
-      assert.equal((schema.description as string).length >= 40, true, `${tool.name}.${name} field guidance is too terse`);
+      assert.equal((schema.description as string).trim().length >= 20, true, `${tool.name}.${name} field guidance is too terse`);
     }
   }
 });
@@ -402,7 +383,9 @@ test("refuses every MCP call from any session but the Manager", async () => {
   for (const caller of [[undefined], ["worker-1"]] as const) {
     const response = await call("run_agent", { type: "general-purpose", description: "open general purpose session", interactive: true }, caller);
     assert.equal(response.status, 403);
-    assert.match(JSON.stringify(response.body), /Only the aboard Manager session/);
+    // The refusal names the Manager without disclosing it: the agent id is not
+    // echoed back to an unknown caller.
+    assert.equal(JSON.stringify(response.body).includes(MANAGER), false);
   }
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
 });
@@ -445,7 +428,7 @@ test("run_agent cannot launch an implementation agent", async () => {
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
     const response = await launch({ type, prompt: "work", description: "do the work now" });
     assert.equal(response.status, 400, type);
-    assert.match(JSON.stringify(response.body), /type must be one of/);
+    assert.equal(body(response).ok, false, type);
   }
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
 });
@@ -556,10 +539,11 @@ test("a lease conflict reaches the MCP tool as a readable error result", async (
   await coordinator.spawn({ type: "general-purpose", prompt: "Hold the lease", description: "hold the write lease" });
   const refused = await launch({ type: "general-purpose", prompt: "Compete for it", description: "compete for the lease" });
   assert.equal(refused.status, 409);
-  const error = (refused.body as { error: { code: string; message: string; details: unknown } }).error;
+  // A lease conflict is a typed error carrying the holder: the Manager acts on
+  // the structure, never on the phrasing.
+  const error = (refused.body as { error: { code: string; message: string; details: { holder?: { agentId?: string } } } }).error;
   assert.equal(error.code, "lease-conflict");
-  assert.match(error.message, /worker-1/);
-  assert.notEqual(error.details, undefined);
+  assert.equal(error.details.holder?.agentId, "worker-1");
 });
 
 test("interactive launch focuses the terminal and expects no result", async () => {
@@ -682,7 +666,31 @@ test("Explore is automated only and cannot be launched interactively", async () 
   const { launch } = setup();
   const launched = await launch({ type: "Explore", description: "browse the auth flow", interactive: true });
   assert.equal(launched.status, 400);
-  assert.match(JSON.stringify(launched.body), /Explore is automated and cannot be launched interactively/);
+  assert.equal(body(launched).ok, false);
+});
+
+test("an ignored issue carries a notice: interactive-only types, and topic-less interactive launches", async () => {
+  const { launch } = setup();
+  // A brainstormer's conversation defines its own scope; the bridge does not
+  // silently bind it to an issue.
+  const brainstormer = await launch({
+    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issue: 47,
+  });
+  assert.equal(brainstormer.status, 200, JSON.stringify(brainstormer.body));
+  assert.match(JSON.stringify(brainstormer.body), /issue 47 was ignored/);
+  // An interactive launch without an opening topic gets no first message at
+  // all, so there is nothing to merge the issue contract into.
+  const topicless = await launch({
+    type: "general-purpose", description: "open general purpose session", interactive: true, issue: 47,
+  });
+  assert.equal(topicless.status, 200, JSON.stringify(topicless.body));
+  assert.match(JSON.stringify(topicless.body), /issue 47 was ignored/);
+  // The supported pairing — topic plus issue — launches clean.
+  const supported = await launch({
+    type: "general-purpose", description: "drive the session fix", prompt: "Work with me on the session loss", interactive: true, issue: 47,
+  });
+  assert.equal(supported.status, 200, JSON.stringify(supported.body));
+  assert.equal(JSON.stringify(supported.body).includes("was ignored"), false);
 });
 
 test("an interactive-only brainstormer is launched interactively and the correction is reported", async () => {

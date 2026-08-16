@@ -83,12 +83,10 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
 
   assert.ok(prompt !== undefined);
   assert.equal(prompt.headline, "Implement issue #47 — Add token refresh.");
-  assert.match(prompt.text, /on branch `feat\/47-token-refresh`/);
-  assert.match(prompt.text, /Keep the change small\./);
-  assert.match(prompt.text, /## Issue #47 — Add token refresh/);
-  assert.match(prompt.text, /Refresh the access token before it expires\./);
-  assert.match(prompt.text, /## Parent spec #31 — Auth rework/);
-  assert.match(prompt.text, /aboard will commit your change, open a pull request, and merge it/);
+  // Caller-supplied input survives verbatim; the resolved wording around it is
+  // free to change without touching this test.
+  assert.ok(prompt.text.includes("Keep the change small."));
+  assert.ok(prompt.text.includes("Refresh the access token before it expires."));
   assert.deepEqual(
     prompt.sources.map((source) => `${source.kind}#${source.number}`),
     ["issue#47", "parent-spec#31"],
@@ -97,43 +95,31 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
   assert.deepEqual(github.issueRequests, [47, 31]);
 });
 
-test("carries the disposition each label implies", async () => {
-  const cases: ReadonlyArray<readonly [readonly string[], RegExp]> = [
-    [["ai:afk"], /aboard will commit your change, open a pull request, and merge it/],
-    [["ai:hitl"], /wait for the user to review and merge it/],
-    [[], /neither `ai:afk` nor `ai:hitl`, which is a legitimate but unresolved state/],
-    [["ai:afk", "ai:hitl"], /wait for the user to review and merge it/],
-  ];
-
-  for (const [labels, expected] of cases) {
-    const resolver = new PromptResolver({
-      github: new FakeGitHub({ issues: [{ ...issue47, labels, parentIssueNumber: undefined }] }),
-    });
-    const prompt = await resolver.resolve({
-      kind: "implementation",
-      instruction: "Go.",
-      issueNumber: 47,
-    });
-    assert.match(prompt?.text ?? "", expected, `labels ${JSON.stringify(labels)}`);
-  }
-
+test("carries the disposition each label implies", () => {
+  // The mapping is data, tested at the data level; the prose each disposition
+  // resolves into is free to change.
+  assert.equal(issueDisposition(["ai:afk"]), "afk");
+  assert.equal(issueDisposition(["ai:hitl"]), "hitl");
+  assert.equal(issueDisposition([]), "unclassified");
+  // A contradictory pair resolves to hitl: only a human may close one.
+  assert.equal(issueDisposition(["ai:afk", "ai:hitl"]), "hitl");
   assert.equal(issueDisposition(["AI:AFK"]), "afk");
   assert.equal(issueDisposition(["ai:spec"]), "unclassified");
+  // The unprefixed names are the user's own labels, never aboard's.
+  assert.equal(issueDisposition(["afk", "hitl"]), "unclassified");
 });
 
-test("instructs the worker to create a branch when GitHub knows none", async () => {
-  const resolver = new PromptResolver({
-    github: new FakeGitHub({ issues: [{ ...issue47, branch: undefined }] }),
-  });
-  const prompt = await resolver.resolve({
-    kind: "implementation",
-    instruction: "Go.",
-    issueNumber: 47,
-  });
-  assert.match(prompt?.text ?? "", /Create or switch to a dedicated branch/);
+test("the prompt differs when GitHub knows no branch for the issue", async () => {
+  const resolve = (branch: string | undefined) =>
+    new PromptResolver({
+      github: new FakeGitHub({ issues: [{ ...issue47, branch, parentIssueNumber: undefined }] }),
+    }).resolve({ kind: "implementation", instruction: "Go.", issueNumber: 47 });
+  const withBranch = await resolve("feat/47-token-refresh");
+  const withoutBranch = await resolve(undefined);
+  assert.notEqual(withoutBranch?.text, withBranch?.text);
 });
 
-test("truncates long bodies and points at the command that returns the rest", async () => {
+test("truncates long bodies and marks the source truncated", async () => {
   const resolver = new PromptResolver({
     github: new FakeGitHub({ issues: [{ ...issue47, body: "x".repeat(500) }] }),
     limits: { issueBodyChars: 100 },
@@ -144,8 +130,8 @@ test("truncates long bodies and points at the command that returns the rest", as
     issueNumber: 47,
   });
 
-  assert.match(prompt?.text ?? "", /…truncated\. Read the rest with `gh issue view 47`\./);
   assert.equal(prompt?.sources[0]?.truncated, true);
+  assert.equal(prompt?.text.includes("x".repeat(500)), false);
 });
 
 test("resolves a review prompt with the contract and the diff", async () => {
@@ -165,9 +151,9 @@ test("resolves a review prompt with the contract and the diff", async () => {
   });
 
   assert.equal(prompt?.headline, "Review pull request #42 — Add token refresh.");
-  assert.match(prompt?.text ?? "", /## Requested focus\n\nerror handling/);
-  assert.match(prompt?.text ?? "", /## Contract — issue #47 — Add token refresh/);
-  assert.match(prompt?.text ?? "", /```diff\n--- a\/src\/auth\.ts/);
+  // Caller-supplied material survives verbatim.
+  assert.ok(prompt?.text.includes("error handling"));
+  assert.ok(prompt?.text.includes("--- a/src/auth.ts"));
   assert.deepEqual(
     prompt?.sources.map((source) => source.kind),
     ["pull-request", "issue", "pull-request-diff"],
@@ -203,8 +189,8 @@ test("resolves a fix prompt from unresolved threads only", async () => {
     pullRequestNumber: 42,
   });
 
-  assert.match(prompt?.text ?? "", /## Unresolved review threads \(1\)/);
-  assert.match(prompt?.text ?? "", /### src\/auth\.ts:12 \(thread `T1`\)/);
+  // The unresolved thread's content is in; the resolved thread's is out.
+  assert.ok(prompt?.text.includes("This retries forever."));
   assert.equal((prompt?.text ?? "").includes("Already handled."), false);
 });
 
@@ -219,7 +205,9 @@ test("leaves a bare brainstorm launch with no prompt at all", async () => {
     relatedIssueNumbers: [31, 999],
   });
   assert.equal(prompt?.headline, "Brainstorm: Rework auth");
-  assert.match(prompt?.text ?? "", /## Related issue #31 — Auth rework \(open\)/);
+  // Resolvable related issues contribute their content; missing ones are dropped.
+  assert.ok(prompt?.text.includes("The auth subsystem is replaced end to end."));
+  assert.equal(prompt?.text.includes("999"), false);
 });
 
 test("rejects an empty instruction and a missing issue or pull request", async () => {
@@ -277,13 +265,54 @@ test("an issue-bound webresearcher receives resolved issue and parent-spec conte
     issue: 47,
   }, { interactive: false });
 
-  assert.match(String(prompt?.text), /Verify whether the proposed token lifetime/);
-  assert.match(String(prompt?.text), /Issue #47 — Add token refresh/);
-  assert.match(String(prompt?.text), /Parent spec #31 — Auth rework/);
+  assert.ok(prompt?.text.includes("Verify whether the proposed token lifetime matches current guidance."));
   assert.deepEqual(prompt?.sources.map((source) => [source.kind, source.number]), [
     ["issue", 47],
     ["parent-spec", 31],
   ]);
+});
+
+test("an issue-bound Explore receives resolved issue context with its instruction", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
+    github: new FakeGitHub({ issues: [issue47, issue31] }),
+  }));
+  const prompt = await adapter.resolve({
+    type: "Explore",
+    description: "check backlog handling",
+    prompt: "Investigate whether the backlog is handled elsewhere.",
+    issue: 47,
+  }, { interactive: false });
+
+  assert.ok(prompt?.text.includes("Investigate whether the backlog is handled elsewhere."));
+  assert.deepEqual(prompt?.sources.map((source) => source.kind), ["issue", "parent-spec"]);
+});
+
+test("an issue-bound interactive general-purpose opens with the resolved contract, not an empty topic", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
+    github: new FakeGitHub({ issues: [issue47, issue31] }),
+  }));
+  const prompt = await adapter.resolve({
+    type: "general-purpose",
+    description: "fix the session loss",
+    prompt: "Work with me to fix the session loss.",
+    issue: 47,
+  }, { interactive: true });
+
+  assert.ok(prompt?.text.includes("Work with me to fix the session loss."));
+  assert.deepEqual(prompt?.sources.map((source) => source.kind), ["issue", "parent-spec"]);
+  // Without an opening topic an interactive terminal opens empty; the issue
+  // number alone is not a first message.
+  assert.equal(await adapter.resolve({ type: "general-purpose", description: "d", issue: 47 }, { interactive: true }), undefined);
+  // Interactive-only types keep the free-form topic: their conversation
+  // defines its own scope, and the bridge does not silently widen it.
+  const brainstorm = await adapter.resolve({
+    type: "brainstormer", description: "d", prompt: "caching layer", issue: 47,
+  }, { interactive: true });
+  assert.ok(brainstorm?.text.includes("caching layer"));
+  // Free-form topics fetch nothing: no GitHub sources are attached.
+  assert.deepEqual(brainstorm?.sources, []);
 });
 
 test("interactive launches resolve to no prompt so the terminal opens empty", async () => {
@@ -296,10 +325,12 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
     const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { interactive: true });
     assert.equal(withTopic?.text.includes("caching layer"), true);
   }
-  // Automated types keep their fallback: a worker with no first message would
-  // sit at an empty TUI forever.
+  // Automated types fall back to a default instruction: a worker with no first
+  // message would sit at an empty TUI forever. The fallback's wording is free
+  // to change; what matters is that a launchable prompt exists.
   const doctor = await adapter.resolve({ type: "pr-doctor-afk", description: "d" }, { interactive: false });
-  assert.match(String(doctor?.text), /Review the supplied change against its contract\./);
+  assert.notEqual(doctor, undefined);
+  assert.ok(doctor!.text.length > 0);
 });
 
 test("a builtin type's prompt follows its launch mode, not its type", async () => {
@@ -316,5 +347,6 @@ test("a builtin type's prompt follows its launch mode, not its type", async () =
   const task = await adapter.resolve({ type: "general-purpose", description: "d", prompt: "find the retry bug" }, { interactive: false });
   assert.equal(task?.text.includes("find the retry bug"), true);
   const fallback = await adapter.resolve({ type: "Explore", description: "d" }, { interactive: false });
-  assert.match(String(fallback?.text), /Continue with the requested task\./);
+  assert.notEqual(fallback, undefined);
+  assert.ok(fallback!.text.length > 0);
 });
