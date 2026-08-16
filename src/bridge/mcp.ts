@@ -161,16 +161,6 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       additionalProperties: false,
     },
   },
-  {
-    name: "release_lease",
-    description: RELEASE_LEASE_DESCRIPTION,
-    inputSchema: {
-      type: "object",
-      properties: { reason: { type: "string", minLength: 1, description: "Required concise audit explanation of why the current lease holder is stale, dead, irrecoverably blocked, or being overridden by the user's explicit decision." } },
-      required: ["reason"],
-      additionalProperties: false,
-    },
-  },
 ];
 
 export interface AutoRunTrigger {
@@ -186,7 +176,7 @@ export interface McpServices {
 }
 
 export type McpCoordinator = Pick<DelegationCoordinator,
-  "run" | "spawn" | "spawnInteractive" | "releaseLease">;
+  "run" | "spawn" | "spawnInteractive">;
 
 export interface McpHandlerOptions {
   readonly managerAgentId: AgentId;
@@ -372,11 +362,6 @@ async function callTool(
         ...(args.focus === undefined ? {} : { focus: (args.focus as string).trim() }),
       });
     }
-    case "release_lease": {
-      if (!isRecord(args) || !exactKeys(args, ["reason"])) throw new TypeError("arguments contain an unknown property");
-      if (!nonEmptyString(args.reason)) throw new TypeError("reason must be a non-empty string");
-      return coordinator.releaseLease(args.reason.trim());
-    }
     default:
       throw new TypeError(`Unknown MCP tool ${name}`);
   }
@@ -411,7 +396,7 @@ export function createMcpHandler(
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "aboard", version: "0.0.0" },
-          instructions: "Use aboard tools to launch visible Claude Code terminals, evolve the roadmap, start auto-runs, reopen pull-request sessions, and recover the write lease.",
+          instructions: "Use aboard tools to launch visible Claude Code terminals, evolve the roadmap, start auto-runs, and reopen pull-request sessions.",
         });
       case "notifications/initialized":
         return { status: 202 };

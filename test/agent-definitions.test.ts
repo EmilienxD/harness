@@ -157,7 +157,7 @@ test("Manager guidance stays focused on judgement and continuity", async () => {
   assert.equal(manager.length < 5_000, true, "the Manager prompt must stay compact");
   assert.doesNotMatch(
     manager,
-    /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr|release_lease|MCP tool/i,
+    /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr|MCP tool/i,
     "MCP operation guidance belongs in tool definitions, not the system prompt",
   );
 });
@@ -200,7 +200,7 @@ test("only the Manager's definition admits the aboard MCP tools", async () => {
   const parsedManager = parseManagerAgentDefinition(manager);
   assert.equal(parsedManager.ok, true);
   assert.equal(parsedManager.ok && parsedManager.value.tools.includes(ABOARD_MCP_TOOLS), true);
-  assert.doesNotMatch(parsedManager.ok ? parsedManager.value.prompt : "", /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr|release_lease/i);
+  assert.doesNotMatch(parsedManager.ok ? parsedManager.value.prompt : "", /mcp__aboard__|run_agent|todo_create|todo_update|start_auto_run|review_pr/i);
 
   for (const name of WORKER_AGENT_NAMES) {
     const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");

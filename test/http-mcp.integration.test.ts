@@ -40,7 +40,6 @@ test("serves the MCP protocol over authenticated loopback HTTP to the Manager on
       run: async () => ({ result: "done" }),
       spawn: async () => ({ status: "running" }),
       spawnInteractive: async () => ({ handoff: "open" }),
-      releaseLease: (reason) => ({ released: true, reason }),
     }, { managerAgentId }),
   });
   context.after(() => bridge.stop());
@@ -52,16 +51,16 @@ test("serves the MCP protocol over authenticated loopback HTTP to the Manager on
   const listed = await rpc(bridge.port, bridge.token, managerAgentId, "tools/list", {});
   assert.deepEqual(
     (listed.body as { result?: { tools?: Array<{ name: string }> } }).result?.tools?.map((tool) => tool.name),
-    ["run_agent", "todo_create", "todo_update", "start_auto_run", "review_pr", "release_lease"],
+    ["run_agent", "todo_create", "todo_update", "start_auto_run", "review_pr"],
   );
 
   const called = await rpc(bridge.port, bridge.token, managerAgentId, "tools/call", {
-    name: "release_lease",
-    arguments: { reason: "operator recovery" },
+    name: "run_agent",
+    arguments: { type: "brainstormer", description: "brainstorm the caching design", interactive: true },
   });
   assert.deepEqual(
     (called.body as { result?: { structuredContent?: unknown } }).result?.structuredContent,
-    { released: true, reason: "operator recovery" },
+    { handoff: "open" },
   );
 
   assert.equal((await rpc(bridge.port, bridge.token, "worker-1", "tools/list", {})).status, 403);

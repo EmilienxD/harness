@@ -15,7 +15,14 @@ import {
   type WorkerResult,
 } from "../domain/contracts.js";
 import { FleetRegistry } from "../domain/fleet.js";
-import { WriteLease, leaseRequired, type LaunchOrigin, type WriteLeaseHolder } from "../domain/lease.js";
+import {
+  WriteLease,
+  leaseRequired,
+  type LaunchOrigin,
+  type LeaseHolderObservation,
+  type SessionObservation,
+  type WriteLeaseHolder,
+} from "../domain/lease.js";
 import type { SessionWrapperLayout } from "../claude/launch.js";
 import { sessionIsResumable } from "../claude/sessions.js";
 
@@ -69,6 +76,17 @@ export interface DelegationCoordinatorOptions {
   readonly fleet: FleetRegistry;
   readonly lease: WriteLease;
   readonly terminals: TerminalController;
+  /**
+   * Marker-file liveness for the write lease's stale check. Omitted, the
+   * session half of the observation is unknown and no lease is ever reclaimed,
+   * so a caller that leaves it out gets today's refuse-always behavior.
+   */
+  readonly sessions?: { observe(agentId: AgentId): SessionObservation };
+  /**
+   * Reclaiming a lease is a coordination fact the user should see: the fleet
+   * showed an agent holding the lock and the next launch took it anyway.
+   */
+  readonly onStaleLeaseRecovered?: (holder: WriteLeaseHolder, observation: LeaseHolderObservation) => void;
   readonly configurations: DelegationConfigurationSource;
   readonly prompts: DelegationPromptResolver;
   readonly spills: PromptSpillStore;
@@ -252,12 +270,6 @@ export class DelegationCoordinator {
     };
   }
 
-  public releaseLease(reason: string): unknown {
-    const holder = this.options.lease.current();
-    const released = this.options.lease.forceRelease(this.#timestamp(), reason);
-    return { released, holder: holder ?? null, reason };
-  }
-
   /** Called by the worker result boundary after lifecycle classification. */
   public complete(agentId: AgentId, result: WorkerResult): boolean {
     const session = this.#requireAgent(agentId);
@@ -367,13 +379,46 @@ export class DelegationCoordinator {
 
   #acquire(capability: WriteCapability, agentId: AgentId, sessionId: SessionId, occurredAt: IsoTimestamp, reason: string): void {
     const acquisition = this.options.lease.acquire(capability, { agentId, sessionId }, occurredAt, reason);
-    if (!acquisition.acquired) {
-      throw new DelegationError(
-        "lease-conflict",
-        `Write lease is held by ${acquisition.holder.agentId} since ${acquisition.holder.acquiredAt}`,
-        { holder: acquisition.holder, ageMs: acquisition.ageMs },
-      );
+    if (acquisition.acquired) return;
+    // The holder may be a ghost. Every ordinary exit releases the lease, but a
+    // release that never ran — a marker watch that missed its deletion, a
+    // terminal handle dropped over a host restart — leaves a lock with nothing
+    // behind it, and the next writer is refused by a dead agent forever. This
+    // is the recovery: reclaim only when both observable sources agree the
+    // holder is gone, then retry the acquisition once.
+    if (this.#recoverStaleLease(acquisition.holder, occurredAt)) {
+      const retried = this.options.lease.acquire(capability, { agentId, sessionId }, occurredAt, reason);
+      if (retried.acquired) return;
     }
+    throw new DelegationError(
+      "lease-conflict",
+      `Write lease is held by ${acquisition.holder.agentId} since ${acquisition.holder.acquiredAt}`,
+      { holder: acquisition.holder, ageMs: acquisition.ageMs },
+    );
+  }
+
+  /**
+   * `isStaleLease` is the whole decision and it is deliberately conservative:
+   * an open terminal *or* a live session marker keeps the lease. Uncertainty
+   * resolves to "not stale" — a false reclaim hands a second writer the tree
+   * the first one is still editing, which is exactly the corruption the lease
+   * exists to prevent, while a false refusal costs one palette command.
+   */
+  #recoverStaleLease(holder: WriteLeaseHolder, occurredAt: IsoTimestamp): boolean {
+    const observation: LeaseHolderObservation = {
+      terminal: this.options.terminals.liveTerminalForAgent(holder.agentId) === undefined ? "closed" : "open",
+      // No observer wired means liveness is unobservable, not absent.
+      session: this.options.sessions?.observe(holder.agentId) ?? "live",
+    };
+    const recovered = this.options.lease.recoverStale(
+      observation,
+      occurredAt,
+      `holder ${holder.agentId} is gone (terminal ${observation.terminal}, session ${observation.session})`,
+    );
+    if (recovered) {
+      this.options.onStaleLeaseRecovered?.(holder, observation);
+    }
+    return recovered;
   }
 
   #waitForResult(agentId: AgentId, signal?: AbortSignal): Promise<WorkerResult> {

@@ -35,8 +35,8 @@ export type LaunchOrigin = "manager" | "auto-run" | "user";
  * flight — which is exactly the collision the lease exists to prevent.
  *
  * Restores, resumes, and anything the user starts or types by hand take no
- * lease. The status bar, the fleet row, and `aboard release-lease` remain the
- * controls there.
+ * lease. The status bar, the fleet row, and the `aboard.forceReleaseLease`
+ * palette command remain the controls there.
  *
  * Capability is still derived, never declared: this decides only *whether* a
  * launch competes for the lease, and a read-only agent takes none either way.
@@ -104,6 +104,12 @@ export class WriteLease {
     return true;
   }
 
+  /**
+   * The human override, reachable only from `aboard.forceReleaseLease` behind a
+   * confirmation. No agent can call this: releasing the lock without stopping
+   * the writer is a risk only the user may accept, and the agent that would
+   * want it most is the one a lease conflict just blocked.
+   */
   public forceRelease(occurredAt: IsoTimestamp, reason: string): boolean {
     if (this.#holder === undefined) return false;
     this.recordRelease("force-released", occurredAt, reason);

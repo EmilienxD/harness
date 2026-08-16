@@ -17,7 +17,7 @@ import { TerminalController, type TerminalCreationOptions, type TerminalHandle, 
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import { MCP_LAUNCHABLE_AGENT_TYPES, isNamedBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
-import { WriteLease } from "../src/domain/lease.js";
+import { WriteLease, type SessionObservation } from "../src/domain/lease.js";
 
 class FakeTerminal implements TerminalHandle {
   public processId = Promise.resolve(1);
@@ -95,12 +95,18 @@ function setup() {
     "c15badb6-d6c8-45a6-a59f-e931cd364332",
     "d8d40e7e-c465-44de-9896-5a86165cd58f",
   ];
+  // Marker-file liveness as the lease's stale check sees it. Agents are live
+  // until a test says otherwise, which is what a running fleet looks like.
+  const sessionLiveness = new Map<AgentId, SessionObservation>();
+  const reclaimed: AgentId[] = [];
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
     isResumable: async () => true,
     fleet,
     lease,
     terminals,
+    sessions: { observe: (agentId) => sessionLiveness.get(agentId) ?? "live" },
+    onStaleLeaseRecovered: (holder) => { reclaimed.push(holder.agentId); },
     managerAgentId: MANAGER,
     shell: "powershell",
     permissionMode: "default",
@@ -128,7 +134,7 @@ function setup() {
   const call = (name: string, args: unknown = {}, caller: readonly [string | undefined] = [MANAGER]) =>
     mcpCall(handler, name, args, caller[0]);
   const launch = (args: unknown = {}) => call("run_agent", args);
-  return { fleet, lease, host, terminals, coordinator, handler, call, launch };
+  return { fleet, lease, host, terminals, coordinator, handler, call, launch, sessionLiveness, reclaimed };
 }
 
 async function mcpCall(
@@ -295,11 +301,13 @@ test("serves exactly the current delegation tools and no duplicate state-fetch s
     "todo_update",
     "start_auto_run",
     "review_pr",
-    "release_lease",
   ]);
   // Roadmap and fleet state arrive through hooks, so there is deliberately no
-  // read/list/focus tool and no full-body todo replacement tool.
-  for (const absent of ["get_todo", "update_todo", "list_agents", "focus_agent", "send_to_agent"]) {
+  // read/list/focus tool and no full-body todo replacement tool. release_lease
+  // is absent for a different reason: the Manager is the party a lease conflict
+  // blocks, cannot observe staleness, and has a strictly better remedy for a
+  // live holder (kill it). Recovery is structural, plus a palette command.
+  for (const absent of ["get_todo", "update_todo", "list_agents", "focus_agent", "send_to_agent", "release_lease"]) {
     assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === absent), false);
   }
 });
@@ -325,8 +333,6 @@ test("MCP definitions carry the complete operation guidance", () => {
   assert.match(descriptions.start_auto_run!, /ai:hitl[\s\S]*user merges/i);
   assert.match(descriptions.review_pr!, /does not perform a review/i);
   assert.match(descriptions.review_pr!, /no matching open pull request exists, nothing is launched/i);
-  assert.match(descriptions.release_lease!, /does not stop the holder/i);
-  assert.match(descriptions.release_lease!, /concurrent edits and repository corruption/i);
 
   for (const tool of CORE_MCP_TOOLS) {
     const properties = tool.inputSchema.properties as Record<string, { description?: unknown }> | undefined;
@@ -371,7 +377,6 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["todo_update", { task: "a3f9", status: "archived" }],
     ["review_pr", { pr: 0 }],
     ["start_auto_run", { spec: 12 }],
-    ["release_lease", { reason: "" }],
   ] as const) {
     const response = await call(name, args);
     assert.equal(response.status, 400, `${name} ${JSON.stringify(args)}`);
@@ -409,7 +414,6 @@ test("foreground delegation blocks until a result lands, background returns at o
 
   const background = await coordinator.spawn({ type: "implementer", prompt: "Implement issue ten", description: "implement issue ten", issue: 10 });
   assert.match(JSON.stringify(background), /running/);
-  assert.match(JSON.stringify(result(await call("release_lease", { reason: "user intervention" }))), /released/);
 });
 
 test("lease conflicts fail immediately with holder details", async () => {
@@ -423,6 +427,75 @@ test("lease conflicts fail immediately with holder details", async () => {
       return true;
     },
   );
+});
+
+// The lease is reclaimed by the next writer's acquisition, not by an agent
+// asking for it: there is no release_lease tool, and this is what replaces it.
+test("reclaims a lease whose holder left no terminal and no live session", async () => {
+  const { coordinator, host, lease, sessionLiveness, reclaimed } = setup();
+  await coordinator.spawn({ type: "implementer", prompt: "Implement first task", description: "implement first task" });
+  const ghost = lease.current()!.agentId;
+  // The holder is gone but nothing settled it — the terminal closed with no
+  // lifecycle listener attached and the marker vanished unobserved. That is
+  // precisely the ghost lease that used to block every later writer forever.
+  host.close(0);
+  sessionLiveness.set(ghost, "missing");
+
+  await coordinator.spawn({ type: "pr-doctor-afk", prompt: "Fix second task", description: "fix second task now" });
+  assert.notEqual(lease.current()?.agentId, undefined);
+  assert.notEqual(lease.current()?.agentId, ghost);
+  assert.deepEqual(reclaimed, [ghost]);
+  assert.deepEqual(
+    lease.events().filter((event) => event.type === "stale-released").map((event) => event.holder.agentId),
+    [ghost],
+  );
+});
+
+test("never reclaims a lease while either the terminal or the session is alive", async () => {
+  for (const scenario of ["terminal-open", "session-live"] as const) {
+    const { coordinator, host, lease, sessionLiveness, reclaimed } = setup();
+    await coordinator.spawn({ type: "implementer", prompt: "Implement first task", description: "implement first task" });
+    const holder = lease.current()!.agentId;
+    if (scenario === "terminal-open") sessionLiveness.set(holder, "missing");
+    else host.close(0);
+
+    await assert.rejects(
+      coordinator.spawn({ type: "pr-doctor-afk", prompt: "Fix second task", description: "fix second task now" }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "lease-conflict", scenario);
+        assert.match(String((error as Error).message), new RegExp(holder), scenario);
+        return true;
+      },
+    );
+    assert.equal(lease.current()?.agentId, holder, scenario);
+    assert.deepEqual(reclaimed, [], scenario);
+  }
+});
+
+test("an unobservable session is not a gone one: no liveness source never reclaims", async () => {
+  const context = setup();
+  await context.coordinator.spawn({ type: "implementer", prompt: "Implement first task", description: "implement first task" });
+  const holder = context.lease.current()!.agentId;
+  context.host.close(0);
+  // With no `sessions` observer the session half of the observation is unknown,
+  // and unknown must resolve to "still holding": a false reclaim puts two
+  // writers in one tree, where a false refusal costs one palette command.
+  const unobserved = new DelegationCoordinator({
+    workspaceRoot: "C:\\repo",
+    fleet: context.fleet, lease: context.lease, terminals: context.terminals,
+    managerAgentId: MANAGER, shell: "powershell", permissionMode: "default",
+    agentIdFactory: () => agent("worker-unobserved"),
+    sessionIdFactory: () => session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
+    configurations: { get: async () => definitionFor("pr-doctor-afk", ["Read", "Edit"]) },
+    prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
+    spills: { write: async (spill) => spill.relativePath },
+  });
+  await assert.rejects(
+    unobserved.spawn({ type: "pr-doctor-afk", prompt: "Fix second task", description: "fix second task now" }),
+    (error: unknown) => (error as { code?: string }).code === "lease-conflict",
+  );
+  assert.equal(context.lease.current()?.agentId, holder);
+  assert.deepEqual(context.lease.events().filter((event) => event.type === "stale-released"), []);
 });
 
 test("a lease conflict reaches the MCP tool as a readable error result", async () => {
