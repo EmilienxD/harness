@@ -4,6 +4,11 @@ A `PostToolUse` hook that reminds Claude to read the files *you* consider
 essential — a glossary, conventions doc, architecture notes — the moment it
 reads a path that makes them relevant, defined by gitignore-style patterns.
 
+Two siblings key off *edits* instead of reads, with the same rules-file
+format: [`on-edit-reminder`](../on-edit-reminder/README.md) lets the edit land
+and then requires the reading, and [`on-edit-block`](../on-edit-block/README.md)
+denies the edit until the reading has happened.
+
 ## Problem
 
 Some files matter before touching whole areas of a codebase: read

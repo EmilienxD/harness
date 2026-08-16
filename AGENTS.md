@@ -42,6 +42,9 @@ uninstall.
 - `harness/on-edit-block/` — PreToolUse hook denying Write/Edit/MultiEdit on paths matching
   gitignore-style patterns until user-picked files have been read that session. Same rules-file UX as
   `on-read-reminder`. See `README.md`.
+- `harness/on-edit-reminder/` — PostToolUse hook that lets the edit land, then makes the agent read
+  the user-picked files and fix what already violates them. Same rules-file UX as `on-edit-block`,
+  weaker and cheaper. See `README.md`.
 - `harness/on-read-reminder/` — PostToolUse hook reminding the agent to read user-picked files when it
   reads paths matching gitignore-style patterns. See `README.md`.
 - `harness/prefer-read-tool/` — PostToolUse hook reminding the agent to use Read instead of cat/sed.

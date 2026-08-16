@@ -4,8 +4,11 @@ A `PreToolUse` hook that **denies** a `Write`/`Edit`/`MultiEdit` on files you
 protect until the agent has read the file(s) you require first — a style
 guide, conventions doc, architecture notes — during the current session.
 
-The sibling tool [`on-read-reminder`](../on-read-reminder/README.md) only
-reminds; this one blocks. Same rules-file format, opposite strength.
+Its siblings are weaker by design and share the rules-file format:
+[`on-edit-reminder`](../on-edit-reminder/README.md) lets the edit land and
+makes the agent read the guide and fix what broke it afterwards — cheaper,
+since a denial throws away a whole `Write`. [`on-read-reminder`](../on-read-reminder/README.md)
+only nudges, and on reads rather than edits.
 
 ## Problem
 

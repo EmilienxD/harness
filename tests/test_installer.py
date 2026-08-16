@@ -221,31 +221,25 @@ def test_install_overwrites_a_stale_copy(target):
     assert path.read_text(encoding="utf-8") != "old version"
 
 
-def test_rules_files_are_never_overwritten(target):
+@pytest.mark.parametrize(
+    "tool, custom",
+    [
+        ("on-edit-block", "# My custom rules\nserver/** -> docs/STYLE.md\n"),
+        ("on-edit-reminder", "# My custom rules\nserver/** -> docs/STYLE.md\n"),
+        ("on-read-reminder", "# My custom reminders\n**/models/** -> docs/GLOSSARY.md\n"),
+    ],
+)
+def test_rules_files_are_never_overwritten(target, tool, custom):
     """User-customized .rules files should be preserved on reinstall."""
-    # Test on-edit-block
-    install("on-edit-block", target)
-    edit_rules = target.claude_dir / "on-edit-block.rules"
-    custom_edit = "# My custom rules\nserver/** -> docs/STYLE.md\n"
-    edit_rules.write_text(custom_edit, encoding="utf-8")
+    install(tool, target)
+    rules = target.claude_dir / f"{tool}.rules"
+    rules.write_text(custom, encoding="utf-8")
 
-    plan = plan_install(TOOLS["on-edit-block"], target)
+    plan = plan_install(TOOLS[tool], target)
     statuses = {f.dest: f.status for f in plan.files}
-    assert statuses["on-edit-block.rules"] == "unchanged"
+    assert statuses[f"{tool}.rules"] == "unchanged"
     apply_install(plan)
-    assert edit_rules.read_text(encoding="utf-8") == custom_edit
-
-    # Test on-read-reminder
-    install("on-read-reminder", target)
-    read_rules = target.claude_dir / "on-read-reminder.rules"
-    custom_read = "# My custom reminders\n**/models/** -> docs/GLOSSARY.md\n"
-    read_rules.write_text(custom_read, encoding="utf-8")
-
-    plan = plan_install(TOOLS["on-read-reminder"], target)
-    statuses = {f.dest: f.status for f in plan.files}
-    assert statuses["on-read-reminder.rules"] == "unchanged"
-    apply_install(plan)
-    assert read_rules.read_text(encoding="utf-8") == custom_read
+    assert rules.read_text(encoding="utf-8") == custom
 
 
 def test_legacy_artifacts_are_swept(target):
