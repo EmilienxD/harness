@@ -189,6 +189,8 @@ export interface AgentSession {
   readonly lifecycle: AgentLifecycle;
   readonly resultDelivery: ResultDelivery;
   readonly telemetry: AgentTelemetry;
+  /** The launch explicitly enabled Claude in Chrome; absence means disabled. */
+  readonly chromeEnabled?: true;
   /** Every issue this agent's launch prompt resolved, in the order it was given them. */
   readonly issueNumbers?: readonly number[];
   /**

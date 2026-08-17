@@ -46,8 +46,9 @@ Then try one of these in the Manager terminal:
 | You type | What happens |
 | :-- | :-- |
 | `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
-| `/raw` | Plain Claude Code, no workflow, tracked by the fleet. You are never worse off for having installed aboard |
+| `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet. Add `--chrome` when this session needs visible browser debugging |
 | `/auto` | The extension walks a `spec` issue's children: branch, implement, commit, PR, merge — one issue at a time |
+| `/auto --chrome` | The same run, with Claude in Chrome enabled for every implementer in this run |
 | *"Implement issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
 
 ## The auto-run, honestly
@@ -59,6 +60,7 @@ Then try one of these in the Manager terminal:
 - **Labels decide how far it goes.** `afk` means an issue may be merged unattended. `hitl` means the run opens the PR and stops — your merge *is* the approval. Four labels, no hidden state: `spec`, `todo`, `afk`, `hitl`.
 - **Every phase is idempotent.** Close your laptop mid-run. Resume re-derives state from git and GitHub rather than trusting a file.
 - **Review is opt-in.** LLM tokens are your money, not ours.
+- **Chrome is opt-in per run.** Browser tool definitions and signed-in browser access are loaded only when you type `/auto --chrome`, call `start_auto_run` with `chrome: true`, or use the dedicated palette command.
 
 ## Why you can leave it running
 

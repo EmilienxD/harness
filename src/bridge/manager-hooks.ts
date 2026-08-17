@@ -112,6 +112,7 @@ export interface AutoRunBriefing {
   readonly phase: string;
   readonly currentIssue: number | undefined;
   readonly completedCount: number;
+  readonly chromeEnabled?: boolean;
   /** The pull request a `hitl` issue is parked on, when the run is waiting. */
   readonly waitingOnPullRequest?: number | undefined;
 }
@@ -247,7 +248,7 @@ export class ManagerBriefings {
     const run = this.sources.autoRun();
     if (run === undefined) return "No run is active. `/auto` starts one on the oldest open spec.";
     const lines = [
-      `Running spec #${run.specNumber} "${run.specTitle}" - phase ${run.phase}, ${run.completedCount} issue(s) done.`,
+      `Running spec #${run.specNumber} "${run.specTitle}" - phase ${run.phase}, ${run.completedCount} issue(s) done, Chrome ${run.chromeEnabled ? "on" : "off"}.`,
     ];
     if (run.currentIssue !== undefined) lines.push(`Current issue: #${run.currentIssue}.`);
     if (run.waitingOnPullRequest !== undefined) {
@@ -471,7 +472,7 @@ export interface InvokingTerminalKiller {
 
 /** The extension-owned actions `/auto` and `/review-pr` trigger. */
 export interface ManagerCommandActions {
-  startAutoRun(): Promise<unknown>;
+  startAutoRun(options?: { readonly chrome?: boolean }): Promise<unknown>;
   /** `focus` is the user's trailing text: what they want the session to look at. */
   reviewPullRequest(focus?: string): Promise<unknown>;
 }
@@ -526,11 +527,14 @@ export class ManagerPromptService {
       return lines.length === 0 ? {} : { additionalContext: lines.join("\n") };
     }
 
+    if (command.invalidArguments) {
+      return { intercepted: true, message: "/general-purpose accepts only the optional --chrome flag." };
+    }
     const launched = await this.launcher.spawnInteractive(command.input) as Record<string, unknown>;
     const occurredAt = this.#now().toISOString() as IsoTimestamp;
     const launchedAgentId = typeof launched.agentId === "string" ? launched.agentId : "unknown";
     const event = command.type === "general-purpose"
-      ? `you started a general-purpose session (agent ${launchedAgentId}).`
+      ? `you started a general-purpose session${command.input.chrome === true ? " with Chrome" : ""} (agent ${launchedAgentId}).`
       : `you started a brainstormer (agent ${launchedAgentId}).`;
     this.fleet.enqueueNotification(agentId, event, occurredAt);
     const opened = command.type === "general-purpose" ? "General-purpose session launched and focused." : "Brainstorm session launched and focused.";
@@ -538,7 +542,7 @@ export class ManagerPromptService {
       intercepted: true,
       message: command.ignoredArguments
         ? `${opened} It takes no arguments, so the text you typed after /${command.command} was not sent; type it in the new terminal.`
-        : opened,
+        : command.input.chrome === true ? `${opened} Claude in Chrome is enabled.` : opened,
     };
   }
 
@@ -570,10 +574,13 @@ export class ManagerPromptService {
     if (this.actions === undefined) {
       return { intercepted: true, message: `aboard cannot handle /${action.command} right now: the extension action is unavailable.` };
     }
+    if (action.invalidArguments) {
+      return { intercepted: true, message: `/${action.command} accepts only the optional --chrome flag.` };
+    }
     let outcome: unknown;
     try {
       outcome = action.type === "auto"
-        ? await this.actions.startAutoRun()
+        ? await this.actions.startAutoRun(action.chrome ? { chrome: true } : {})
         : await this.actions.reviewPullRequest(action.focus);
     } catch (error) {
       return { intercepted: true, message: `aboard could not run /${action.command}: ${error instanceof Error ? error.message : "the action failed"}.` };
@@ -583,9 +590,7 @@ export class ManagerPromptService {
     this.fleet.enqueueNotification(agentId, `you ran /${action.command}: ${summary}`, occurredAt);
     return {
       intercepted: true,
-      message: action.ignoredArguments
-        ? `${summary} /${action.command} takes no arguments, so the text you typed after it was not sent.`
-        : summary,
+      message: summary,
     };
   }
 }
@@ -599,7 +604,7 @@ function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unkno
     if (value.started === false) return `auto-run did not start: ${typeof value.reason === "string" ? value.reason : "no reason given"}.`;
     const spec = value.spec as { number?: unknown; title?: unknown } | undefined;
     const issues = Array.isArray(value.issues) ? value.issues.length : 0;
-    return `auto-run started on spec #${String(spec?.number ?? "?")} with ${issues} issue${issues === 1 ? "" : "s"}.`;
+    return `auto-run started on spec #${String(spec?.number ?? "?")} with ${issues} issue${issues === 1 ? "" : "s"}, Chrome ${value.chromeEnabled === true ? "on" : "off"}.`;
   }
   switch (value.action) {
     case "none": return "No pull request is open, so nothing was launched.";
@@ -624,7 +629,8 @@ function unusedFocusNote(focus: unknown): string {
 interface ParsedActionCommand {
   readonly type: "auto" | "review-pr";
   readonly command: string;
-  readonly ignoredArguments: boolean;
+  readonly invalidArguments: boolean;
+  readonly chrome: boolean;
   /** `/review-pr` only: the trailing text, forwarded as the review focus. */
   readonly focus?: string;
 }
@@ -640,12 +646,10 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
 }
 
 /**
- * Like `/brainstorm` and `/general-purpose`, `/auto` takes no arguments, so trailing text
- * is matched and dropped rather than forwarded: leaking `/auto now please` into
- * the Manager's context is worse than declining to pass it on. `/review-pr` is
- * the exception, because the action behind it has a real parameter — its
- * trailing text becomes `focus`, which steers a fallback doctor's first pass
- * over the diff.
+ * `/auto` accepts only the explicit `--chrome` launch choice. Unknown trailing
+ * text is intercepted but rejected, so a typo cannot silently start a run with
+ * the wrong capability. `/review-pr` is the exception: its trailing text is a
+ * real `focus` parameter for a fallback doctor's first pass over the diff.
  */
 function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   const match = /^\s*\/(auto|review-pr)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
@@ -653,31 +657,37 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   const command = match[1] as "auto" | "review-pr";
   const trailing = match[2]?.trim() ?? "";
   if (command === "review-pr") {
-    return { type: command, command, ignoredArguments: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
+    return { type: command, command, invalidArguments: false, chrome: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
   }
-  return { type: command, command, ignoredArguments: trailing.length > 0 };
+  return { type: command, command, invalidArguments: trailing !== "" && trailing !== "--chrome", chrome: trailing === "--chrome" };
 }
 
 /**
- * `/brainstorm` and `/general-purpose` take no arguments: they open a terminal the user then
- * drives directly, so an opening message would only spend a turn before the
- * conversation starts. Trailing text is still matched rather than passed
- * through, because leaking `/brainstorm foo` into the Manager's context is worse
- * than declining to forward it.
+ * `/general-purpose` accepts only `--chrome`; `/brainstorm` keeps its existing
+ * argumentless handoff and reports that trailing text was ignored. They open a
+ * terminal the user drives directly, so an opening message would only spend a
+ * turn before the conversation starts. Nothing leaks into Manager context.
  */
 function parseInteractiveCommand(prompt: string): {
   readonly type: "brainstormer" | "general-purpose";
   readonly command: string;
+  readonly invalidArguments: boolean;
   readonly ignoredArguments: boolean;
   readonly input: DelegationLaunchInput;
 } | undefined {
   const match = /^\s*\/(brainstorm|general-purpose)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
   const command = match[1] as "brainstorm" | "general-purpose";
-  const ignoredArguments = (match[2]?.trim() ?? "").length > 0;
+  const trailing = match[2]?.trim() ?? "";
   return command === "general-purpose"
-    ? { type: "general-purpose", command, ignoredArguments, input: { type: "general-purpose", description: "general purpose interactive session" } }
-    : { type: "brainstormer", command, ignoredArguments, input: { type: "brainstormer", description: "interactive brainstorm session" } };
+    ? {
+        type: "general-purpose",
+        command,
+        invalidArguments: trailing !== "" && trailing !== "--chrome",
+        ignoredArguments: false,
+        input: { type: "general-purpose", description: "general purpose interactive session", ...(trailing === "--chrome" ? { chrome: true } : {}) },
+      }
+    : { type: "brainstormer", command, invalidArguments: false, ignoredArguments: trailing.length > 0, input: { type: "brainstormer", description: "interactive brainstorm session" } };
 }
 
 export function createManagerHookRoutes(

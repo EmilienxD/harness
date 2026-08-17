@@ -1,6 +1,7 @@
 ---
 name: general-purpose
-description: Open a visible aboard session using Claude Code's unmodified default agent. Takes no arguments. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
+description: Open a visible aboard session using Claude Code's unmodified default agent. Accepts optional --chrome. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
+argument-hint: "[--chrome]"
 disable-model-invocation: true
 ---
 

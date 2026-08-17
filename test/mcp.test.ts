@@ -176,11 +176,13 @@ test("restores a persisted worker with --resume, no new prompt, no focus, and no
     lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
     resultDelivery: { mode: "tool-result" },
     telemetry,
+    chromeEnabled: true,
     issueNumbers: [19],
   }, at("2026-07-30T10:00:00.000Z"));
   fleet.transition(workerId, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
   await coordinator.resumePersisted(fleet.get(workerId)!);
   assert.match(host.created[0]!.terminal.sent[0] ?? "", /--resume c15badb6/);
+  assert.match(host.created[0]!.terminal.sent[0] ?? "", /--chrome/);
   assert.deepEqual(host.created[0]!.terminal.shown, []);
   assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
   assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
@@ -445,6 +447,8 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     // An automated launch without a prompt is rejected.
     ["run_agent", { type: "Explore", description: "map the auth flow" }],
     ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", interactive: true }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", chrome: true }],
+    ["run_agent", { type: "general-purpose", description: "open browser debugging session", interactive: true, chrome: "yes" }],
     ["run_agent", { type: "webresearcher", description: "research current API pricing" }],
     ["run_agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
     // `issues` is a list of positive integers or absent; nothing else resolves.
@@ -465,11 +469,25 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["todo_update", { task: 1, expect: "A task", status: "archived" }],
     ["review_pr", { pr: 0 }],
     ["start_auto_run", { spec: 12 }],
+    ["start_auto_run", { chrome: "yes" }],
   ] as const) {
     const response = await call(name, args);
     assert.equal(response.status, 400, `${name} ${JSON.stringify(args)}`);
     assert.equal(body(response).ok, false);
   }
+});
+
+test("start_auto_run forwards one explicit Chrome choice", async () => {
+  const { coordinator } = setup();
+  const starts: unknown[] = [];
+  const handler = createMcpHandler(coordinator, {
+    managerAgentId: MANAGER,
+    services: { autoRun: { start: async (options) => { starts.push(options); return { started: true, chromeEnabled: options?.chrome === true }; } } },
+  });
+  const response = await mcpCall(handler, "start_auto_run", { chrome: true }, MANAGER);
+  assert.equal(response.status, 200);
+  assert.deepEqual(starts, [{ chrome: true }]);
+  assert.match(JSON.stringify(response.body), /chromeEnabled.*true/);
 });
 
 // `general-purpose` is the only catch-all in the launchable set, so an omitted
@@ -728,6 +746,7 @@ test("general-purpose runs interactively: focused, hook-silent, prompt optional"
   // The default shape: no `--agent`, no system-prompt flag.
   const bare = host.created.at(-1)!.terminal.sent.at(-1)!;
   assert.doesNotMatch(bare, /--agent|--system-prompt(?:-file)?/);
+  assert.match(bare, /--no-chrome/);
 
   // The same shape with an opening topic, which names the conversation rather
   // than delivering a task.
@@ -739,6 +758,14 @@ test("general-purpose runs interactively: focused, hook-silent, prompt optional"
   assert.doesNotMatch(command, /--agent|--system-prompt(?:-file)?/);
   assert.match(command, /start from src\/auth\.ts/);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+
+  const withChrome = await launch({
+    type: "general-purpose", description: "debug interface in browser", interactive: true, chrome: true,
+  });
+  assert.equal(withChrome.status, 200, JSON.stringify(withChrome.body));
+  const chromeCommand = host.created.at(-1)!.terminal.sent.at(-1)!;
+  assert.match(chromeCommand, /--chrome/);
+  assert.doesNotMatch(chromeCommand, /--no-chrome/);
 });
 
 test("Explore is automated only and cannot be launched interactively", async () => {

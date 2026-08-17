@@ -520,6 +520,12 @@ interface CommonPlanRequest {
   readonly model?: string | undefined;
   readonly effort?: EffortLevel | undefined;
   readonly command?: readonly string[] | undefined;
+  /**
+   * Per-session Claude in Chrome intent. Only general-purpose sessions and
+   * auto-run implementers may carry it; `false` is explicit so a Claude-level
+   * "enabled by default" preference cannot silently widen an aboard launch.
+   */
+  readonly chrome?: boolean | undefined;
   readonly maxInlinePromptChars?: number | undefined;
   readonly runtimeDirectory?: string | undefined;
   /**
@@ -647,6 +653,17 @@ function effortArguments(effort: EffortLevel | undefined): readonly string[] {
  */
 function slashCommandArguments(attended: boolean): readonly string[] {
   return attended ? [] : ["--disable-slash-commands"];
+}
+
+function chromeArguments(agentType: AgentType, enabled: boolean | undefined): readonly string[] {
+  if (enabled === undefined) return [];
+  if (agentType !== "general-purpose" && agentType !== "implementer") {
+    throw new LaunchPlanError(
+      "shape-not-allowed",
+      `Claude in Chrome is available only to general-purpose sessions and auto-run implementers: ${agentType}`,
+    );
+  }
+  return [enabled ? "--chrome" : "--no-chrome"];
 }
 
 function normalizePrompt(
@@ -936,6 +953,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
+    ...chromeArguments(agentType, request.chrome),
     ...permissionArguments(permissionMode),
     ...slashCommandArguments(attended),
   ];
@@ -1070,6 +1088,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
+    ...chromeArguments(request.agentType, request.chrome),
     ...permissionArguments(permissionMode),
     ...slashCommandArguments(attended),
   ];

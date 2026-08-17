@@ -34,6 +34,8 @@ export interface DelegationLaunchInput {
   readonly issues?: readonly number[];
   readonly pullRequest?: number;
   readonly focus?: string;
+  /** Explicit launch intent; supported for general-purpose and implementer only. */
+  readonly chrome?: boolean;
   /**
    * Set only by the auto-run engine. It records that this agent's contract ends
    * at "the working tree contains the change", so a dirty tree at Stop is
@@ -216,6 +218,9 @@ export class DelegationCoordinator {
       // Restoration hands the worker to the user whatever it was: the extension
       // host that waited on its result is gone, so the terminal is theirs.
       attended: true,
+      ...((session.identity.type === "general-purpose" || session.identity.type === "implementer")
+        ? { chrome: session.chromeEnabled === true }
+        : {}),
       configuration,
       disallowedTools: this.options.disallowedTools,
       ...this.#effort(),
@@ -324,6 +329,9 @@ export class DelegationCoordinator {
       shell: this.options.shell,
       permissionMode: this.options.permissionMode,
       attended: interactive,
+      ...((input.type === "general-purpose" || input.type === "implementer")
+        ? { chrome: input.chrome === true }
+        : {}),
       configuration,
       prompt,
       disallowedTools: this.options.disallowedTools,
@@ -369,6 +377,7 @@ export class DelegationCoordinator {
         lifecycle: { status: "starting", startedAt: occurredAt },
         resultDelivery,
         telemetry: EMPTY_TELEMETRY,
+        ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
       }, occurredAt);

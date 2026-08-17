@@ -33,6 +33,12 @@ Changes apply live. An unknown key or an invalid value is reported in Output →
 
 The full list, with descriptions, is in VS Code Settings under **aboard**.
 
+## Claude in Chrome
+
+Chrome access is a per-launch choice rather than a persistent setting. Use `/general-purpose --chrome`, set `chrome: true` on `run_agent`, use `/auto --chrome`, set `chrome: true` on `start_auto_run`, or run **Aboard: Start Auto Run with Chrome** from the command palette. The ordinary forms explicitly pass `--no-chrome`; the Chrome forms pass `--chrome`. Auto-run chooses once for the entire run and passes the choice only to implementers, including after recovery. General-purpose fleet restoration likewise replays the session's original choice.
+
+Enabling the integration exposes browser tools and the signed-in Chrome session to Claude. aboard does not auto-approve those tools: Claude's permissions and `aboard.workers.permissionMode` still decide whether calls run or prompt. Missing extensions, unsupported providers, or a disconnected browser remain visible in the Claude terminal rather than silently falling back.
+
 ## Agent tool sets are not settings
 
 Every aboard-defined agent takes its capability set from the `tools:` field of its `.aboard/agents/<name>.md` definition — including the Manager. The Manager alone admits `mcp__aboard__*`; non-Manager launches additionally receive that namespace as an infrastructure-level denial because the project-scoped MCP registration is visible to every Claude Code session in the workspace. To widen or narrow an agent's ordinary capabilities, edit its definition; the change applies on its next launch.

@@ -70,6 +70,8 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     branch: typeof record.branch === "string" && record.branch.length > 0 ? record.branch : undefined,
     prNumber: positiveInteger(record.prNumber),
     reviewMode: record.reviewMode,
+    // Records written before Chrome launch intent existed resume safely off.
+    chromeEnabled: record.chromeEnabled === true,
     scope,
     // Optional: records written before this field existed degrade to "no safe
     // branch to return to", and a run that started on a detached HEAD stored

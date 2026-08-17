@@ -217,6 +217,30 @@ test("plans general-purpose as Claude Code's unmodified default session", () => 
   assert.equal(plan.requiresWriteLease, true);
 });
 
+test("Chrome intent is explicit for eligible launches and is replayed on resume", () => {
+  const generalPurpose = {
+    agentId,
+    sessionId,
+    agentType: "general-purpose" as const,
+    shell: "powershell" as const,
+    permissionMode: "default" as const,
+    configuration: resolveLaunchConfiguration({}),
+    attended: true,
+  };
+  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: true }).args, ["--session-id", sessionId, "--chrome"]);
+  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: false }).args, ["--session-id", sessionId, "--no-chrome"]);
+  assert.deepEqual(planSessionResume({ ...generalPurpose, chrome: true }).args, ["--resume", sessionId, "--chrome"]);
+
+  const implementer = planLaunch(request({ chrome: true }));
+  assert.equal(implementer.args.includes("--chrome"), true);
+  assert.equal(implementer.args.indexOf("--chrome") < implementer.args.indexOf("--dangerously-skip-permissions"), true);
+
+  assert.throws(
+    () => planLaunch(request({ agentType: "Explore", configuration: resolveLaunchConfiguration({ agentName: "Explore" }), chrome: true })),
+    (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",
+  );
+});
+
 test("the builtin types carry Claude Code's own capabilities and Explore accepts policy-only overrides", () => {
   // No aboard-owned tool list exists to derive from: general-purpose is Claude
   // Code's full-tool agent, and Explore is its read-only search agent — the

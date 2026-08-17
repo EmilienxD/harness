@@ -393,6 +393,11 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     issues,
   );
   const telemetry = parseTelemetry(record.telemetry, "session.telemetry", issues);
+  let chromeEnabled: true | undefined;
+  if (record.chromeEnabled !== undefined) {
+    if (record.chromeEnabled === true) chromeEnabled = true;
+    else issues.push("session.chromeEnabled must be true when present");
+  }
   const issueNumbers = record.issueNumbers === undefined ? undefined : Array.isArray(record.issueNumbers)
     ? record.issueNumbers.map((value, index) => readNonNegativeInteger(value, `session.issueNumbers[${index}]`, issues))
     : (issues.push("session.issueNumbers must be an array"), undefined);
@@ -410,6 +415,9 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     : (issues.push("session.compactSummaries must be an array"), undefined);
 
   if (identity !== undefined && resultDelivery !== undefined) {
+    if (chromeEnabled === true && identity.type !== "general-purpose" && identity.type !== "implementer") {
+      issues.push("session.chromeEnabled is only legal for general-purpose and implementer agents");
+    }
     if (
       (identity.type === "manager" ||
         INTERACTIVE_TYPES.has(identity.type)) &&
@@ -464,6 +472,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     lifecycle,
     resultDelivery,
     telemetry,
+    ...(chromeEnabled === undefined ? {} : { chromeEnabled }),
     ...(lastResult === undefined ? {} : { lastResult }),
     // An empty array carries no attribution, so it round trips as absence
     // rather than as a session bound to nothing.

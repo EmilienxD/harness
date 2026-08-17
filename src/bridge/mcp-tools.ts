@@ -64,6 +64,9 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "Implementation agents and pull-request doctors are not available through this tool.\n\n" +
 
       "## Usage notes\n\n" +
+      "- `chrome: true` explicitly enables Claude in Chrome for a `general-purpose` session. " +
+        "Set it only when the user has chosen browser access for this launch; do not infer consent from a UI-related task. " +
+        "It is rejected for narrower roles and defaults to false.\n" +
       "- `interactive: true` opens the session as a real terminal handed to the user to drive, " +
         "and it returns no result at all — nothing comes back to you, ever. " +
         "Use it when the work is a conversation the user should be having, not a task you need an answer from, " +
@@ -191,6 +194,10 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         run_in_background: {
           type: "boolean",
           description: "Whether an automated launch returns immediately instead of waiting for the result; false by default.",
+        },
+        chrome: {
+          type: "boolean",
+          description: "Explicitly enable Claude in Chrome for this general-purpose session; false by default.",
         },
       },
       required: ["description"],
@@ -334,7 +341,8 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "the extension, not an agent, owns branch creation, commits, pushes, " +
       "pull requests, optional review launches, merges, and cleanup.\n\n" +
 
-      "The call is non-blocking and takes no inputs. " +
+      "The call is non-blocking. Its optional `chrome` boolean applies one explicit user choice " +
+      "to every implementer in this run and defaults to false. Do not infer consent from issue content. " +
       "It validates that no run is active, the repository and GitHub authentication are usable, " +
       "the working tree is clean, an open specification exists, " +
       "and that specification has at least one processable child. " +
@@ -353,7 +361,16 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "that merge is the approval and normally resumes the run. " +
       "A failure stops the run rather than skipping to siblings, " +
       "leaving visible work in place for inspection.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        chrome: {
+          type: "boolean",
+          description: "Enable Claude in Chrome for every implementer in this auto-run; false by default.",
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "review_pr",

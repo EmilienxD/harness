@@ -58,6 +58,10 @@
         "title": "Aboard: Start Auto Run"
       },
       {
+        "command": "aboard.startAutoRunWithChrome",
+        "title": "Aboard: Start Auto Run with Chrome"
+      },
+      {
         "command": "aboard.stopAutoRun",
         "title": "Aboard: Stop Auto Run"
       },
@@ -187,6 +191,10 @@
         },
         {
           "command": "aboard.startAutoRun",
+          "when": "aboard.initialized && !aboard.autoRunActive"
+        },
+        {
+          "command": "aboard.startAutoRunWithChrome",
           "when": "aboard.initialized && !aboard.autoRunActive"
         },
         {

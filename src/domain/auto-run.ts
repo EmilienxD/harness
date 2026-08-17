@@ -66,6 +66,8 @@ export interface AutoRunRecord {
   readonly branch: string | undefined;
   readonly prNumber: number | undefined;
   readonly reviewMode: boolean;
+  /** One explicit choice made when the run starts; replayed by every implementer. */
+  readonly chromeEnabled?: boolean;
   readonly scope: AutoRunScope;
   /**
    * The branch the user was on when the run started, carried so a resumed run
@@ -327,8 +329,8 @@ function classify(labels: readonly string[]): IssueDisposition | undefined {
 
 /** Notification lines. Kept terse on purpose; they are read in bulk. */
 export const autoRunMessage = {
-  started: (spec: number, title: string, afk: number, hitl: number, review: boolean): string =>
-    `auto-run: started spec #${spec} "${title}" — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}.`,
+  started: (spec: number, title: string, afk: number, hitl: number, review: boolean, chrome: boolean): string =>
+    `auto-run: started spec #${spec} "${title}" — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}, Chrome ${chrome ? "on" : "off"}.`,
   implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} implemented on ${branch}.`,
   committed: (issue: number, sha: string, pr: number): string => `auto-run: issue #${issue} committed (${sha}) and opened PR #${pr}.`,
   reviewed: (issue: number, paths: readonly string[]): string =>

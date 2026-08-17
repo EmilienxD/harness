@@ -45,6 +45,7 @@ test("the auto-run record round-trips, carries no prompt text, and clears on dis
     branch: "aboard/35-migrate-the-queue",
     prNumber: 57,
     reviewMode: false,
+    chromeEnabled: true,
     scope: "spec",
     reviewedIssues: [],
     startedAt: "2026-07-31T09:12:04.221Z",
@@ -55,6 +56,7 @@ test("the auto-run record round-trips, carries no prompt text, and clears on dis
   assert.deepEqual(await store.load(), { ...record, returnBranch: undefined });
   const raw = await readFile(join(root, ".aboard", "runtime", "auto-run.json"), "utf8");
   assert.doesNotMatch(raw, /prompt/i);
+  assert.match(raw, /"chromeEnabled": true/);
   await store.clear();
   assert.equal(await store.load(), undefined);
 });
@@ -86,6 +88,7 @@ test("an auto-run record preserves the branch to return to at end-of-run", async
 test("an unusable auto-run record degrades to nothing to resume", () => {
   const valid = { version: 1, runId: "r", specNumber: 12, issueNumbers: [34], currentIssue: 34, phase: "commit", branch: "b", prNumber: 1, reviewMode: true, scope: "all", startedAt: "2026-07-31T09:12:04.221Z" };
   assert.ok(parseAutoRunRecord(valid));
+  assert.equal(parseAutoRunRecord(valid)?.chromeEnabled, false);
   for (const broken of [
     undefined, null, [], "run",
     { ...valid, version: 2 },

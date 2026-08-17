@@ -456,7 +456,7 @@ test("/done closes the invoking Manager terminal without waking the model", asyn
   assert.match(String((await prompts.handle(managerId, "/done trailing text")).message), /text you typed after it was not sent/);
 });
 
-test("interactive commands take no arguments and say so rather than silently dropping text", async () => {
+test("interactive commands preserve brainstorm topics as terminal handoff and reject mistyped Chrome options", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const launches: unknown[] = [];
   const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input) => {
@@ -469,6 +469,16 @@ test("interactive commands take no arguments and say so rather than silently dro
   // Still intercepted: leaking "/brainstorm caching layer" into the Manager's
   // context is worse than declining to forward the topic.
   assert.deepEqual(launches, [{ type: "brainstormer", description: "interactive brainstorm session" }]);
+
+  const chrome = await prompts.handle(managerId, "/general-purpose --chrome");
+  assert.match(String(chrome.message), /Chrome is enabled/);
+  assert.deepEqual(launches, [
+    { type: "brainstormer", description: "interactive brainstorm session" },
+    { type: "general-purpose", description: "general purpose interactive session", chrome: true },
+  ]);
+  const typo = await prompts.handle(managerId, "/general-purpose --chrom");
+  assert.match(String(typo.message), /accepts only the optional --chrome flag/);
+  assert.equal(launches.length, 2);
 });
 
 test("/auto and /review-pr are performed by the extension, reported to the user, and queued for the Manager", async () => {
@@ -485,7 +495,7 @@ test("/auto and /review-pr are performed by the extension, reported to the user,
   );
   const auto = await prompts.handle(managerId, "/auto");
   assert.equal(auto.intercepted, true);
-  assert.equal(auto.message, "auto-run started on spec #12 with 2 issues.");
+  assert.equal(auto.message, "auto-run started on spec #12 with 2 issues, Chrome off.");
   const review = await prompts.handle(managerId, "/review-pr");
   assert.equal(review.message, "Focused the implementer terminal for PR #56.");
   assert.deepEqual(started, ["auto", "review"]);
@@ -529,7 +539,7 @@ test("/review-pr forwards its trailing text as the review focus, and reports it 
   assert.equal(bare.message, "Launched a fresh doctor for PR #56.");
 });
 
-test("an extension action reports a refusal verbatim and drops trailing arguments", async () => {
+test("an extension action reports a refusal verbatim and rejects unknown trailing arguments", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const prompts = new ManagerPromptService(
     fleet,
@@ -540,9 +550,27 @@ test("an extension action reports a refusal verbatim and drops trailing argument
       reviewPullRequest: async () => ({ action: "none" }),
     },
   );
-  const refused = await prompts.handle(managerId, "/auto now please");
+  const refused = await prompts.handle(managerId, "/auto");
   assert.match(String(refused.message), /auto-run did not start: the working tree is not clean: src\/a\.ts/);
-  assert.match(String(refused.message), /takes no arguments/);
+  const invalid = await prompts.handle(managerId, "/auto now please");
+  assert.match(String(invalid.message), /accepts only the optional --chrome flag/);
+});
+
+test("/auto --chrome passes one explicit Chrome choice to the run", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const starts: unknown[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async (options) => { starts.push(options); return { started: true, spec: { number: 12 }, issues: [{ number: 34 }], chromeEnabled: true }; },
+      reviewPullRequest: async () => ({ action: "none" }),
+    },
+  );
+  const result = await prompts.handle(managerId, "/auto --chrome");
+  assert.deepEqual(starts, [{ chrome: true }]);
+  assert.equal(result.message, "auto-run started on spec #12 with 1 issue, Chrome on.");
 });
 
 test("an unavailable extension action is reported instead of falling through to the Manager", async () => {
@@ -598,10 +626,9 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
   for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
-    // These commands are argumentless, and hinting otherwise invites a topic the
-    // launch deliberately does not forward. `/review-pr` is the exception: its
-    // trailing text is forwarded as the review focus, so it must advertise one.
-    if (name === "review-pr") assert.match(skill, /argument-hint:/);
+    // Only the two launch commands advertise the explicit Chrome option;
+    // `/review-pr` advertises its forwarded focus. The other shims take none.
+    if (["general-purpose", "auto", "review-pr"].includes(name)) assert.match(skill, /argument-hint:/);
     else assert.doesNotMatch(skill, /argument-hint:/);
     // The body is reachable only when the hook failed to intercept, so it must
     // read as an error notice: an empty body leaves the model to invent a

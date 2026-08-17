@@ -1,6 +1,7 @@
 ---
 name: auto
-description: Start aboard's automatic implementation run for the oldest open spec issue. Takes no arguments. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
+description: Start aboard's automatic implementation run for the oldest open spec issue. Accepts optional --chrome for every implementer in this run. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
+argument-hint: "[--chrome]"
 disable-model-invocation: true
 ---
 

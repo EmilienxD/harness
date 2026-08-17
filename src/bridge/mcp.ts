@@ -19,7 +19,7 @@ const AGENT_ID_HEADER = "x-aboard-agent-id";
 type JsonRpcId = string | number | null;
 
 export interface AutoRunTrigger {
-  start(): Promise<unknown>;
+  start(options?: { readonly chrome?: boolean }): Promise<unknown>;
 }
 
 export interface McpServices {
@@ -136,13 +136,15 @@ function normalizeDescription(raw: string, prompt: string | undefined, type: str
 
 function parseLaunch(value: unknown): ParsedLaunch | string {
   if (!isRecord(value)) return "arguments must be an object";
-  if (!exactKeys(value, ["type", "prompt", "description", "issues", "interactive", "run_in_background"])) {
+  if (!exactKeys(value, ["type", "prompt", "description", "issues", "interactive", "run_in_background", "chrome"])) {
     return "arguments contain an unknown property";
   }
   if (value.type !== undefined && (!nonEmptyString(value.type) || !MCP_LAUNCHABLE_AGENT_TYPES.includes(value.type as AgentType))) {
     return `type must be one of: ${MCP_LAUNCHABLE_AGENT_TYPES.join(", ")}`;
   }
   const type = value.type === undefined ? MCP_DEFAULT_AGENT_TYPE : value.type as AgentType;
+  if (value.chrome !== undefined && typeof value.chrome !== "boolean") return "chrome must be a boolean";
+  if (value.chrome === true && type !== "general-purpose") return "chrome is supported only for general-purpose sessions";
   if (value.interactive !== undefined && typeof value.interactive !== "boolean") return "interactive must be a boolean";
   if (value.interactive === true && isAutomatedAgentType(type)) return `${type} is automated and cannot be launched interactively`;
   if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
@@ -174,6 +176,7 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
       description: label.description,
       ...(value.prompt === undefined ? {} : { prompt: (value.prompt as string).trim() }),
       ...(parsedIssues === undefined ? {} : { issues: parsedIssues.issues }),
+      ...(value.chrome === true ? { chrome: true } : {}),
     },
     interactive,
     background,
@@ -283,9 +286,10 @@ async function callTool(
       );
     }
     case "start_auto_run": {
-      if (!isRecord(args) || !exactKeys(args, [])) throw new TypeError("start_auto_run takes no arguments");
+      if (!isRecord(args) || !exactKeys(args, ["chrome"])) throw new TypeError("start_auto_run accepts only the optional chrome property");
+      if (args.chrome !== undefined && typeof args.chrome !== "boolean") throw new TypeError("chrome must be a boolean");
       if (services.autoRun === undefined) throw new GitHubBoundaryError("command-failed", "The auto-run engine is unavailable");
-      return services.autoRun.start();
+      return services.autoRun.start(args.chrome === true ? { chrome: true } : {});
     }
     case "review_pr": {
       if (!isRecord(args) || !exactKeys(args, ["pr", "focus"])) throw new TypeError("arguments contain an unknown property");

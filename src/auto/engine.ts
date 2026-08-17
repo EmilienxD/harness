@@ -101,6 +101,7 @@ export interface AutoRunState {
   readonly completedCount: number;
   readonly totalCount: number;
   readonly waiting: boolean;
+  readonly chromeEnabled: boolean;
   /**
    * The pull request the current issue is parked on. Published so a Manager
    * that joins mid-run can name what the user has to merge without asking
@@ -115,6 +116,7 @@ export type AutoRunStartResult =
       readonly runId: string;
       readonly spec: { readonly number: number; readonly title: string };
       readonly reviewMode: boolean;
+      readonly chromeEnabled: boolean;
       readonly scope: AutoRunSettings["scope"];
       readonly issues: readonly PlannedIssue[];
       readonly skipped: readonly SkippedIssue[];
@@ -153,7 +155,7 @@ export class AutoRunEngine {
    * routinely outlasts any single command, and the run must outlive the
    * Manager that triggered it.
    */
-  public async start(): Promise<AutoRunStartResult> {
+  public async start(options: { readonly chrome?: boolean } = {}): Promise<AutoRunStartResult> {
     if (this.#state !== undefined) {
       return { started: false, reason: "a run is already active", active: this.#state };
     }
@@ -187,6 +189,7 @@ export class AutoRunEngine {
       branch: selection.issues[0]?.branch,
       prNumber: undefined,
       reviewMode: settings.review,
+      chromeEnabled: options.chrome === true,
       scope: settings.scope,
       returnBranch,
       reviewedIssues: [],
@@ -194,7 +197,7 @@ export class AutoRunEngine {
     };
     await this.options.store.save(record);
     const afk = selection.issues.filter((issue) => issue.disposition === "afk").length;
-    this.options.notifier.notify(autoRunMessage.started(spec.number, spec.title, afk, selection.issues.length - afk, settings.review));
+    this.options.notifier.notify(autoRunMessage.started(spec.number, spec.title, afk, selection.issues.length - afk, settings.review, record.chromeEnabled === true));
     for (const skipped of selection.skipped) {
       this.options.notifier.notify(`auto-run: issue #${skipped.number} skipped (${skipped.reason}).`);
     }
@@ -205,6 +208,7 @@ export class AutoRunEngine {
       runId: record.runId,
       spec: { number: spec.number, title: spec.title },
       reviewMode: settings.review,
+      chromeEnabled: record.chromeEnabled === true,
       scope: settings.scope,
       issues: selection.issues,
       skipped: selection.skipped,
@@ -232,6 +236,7 @@ export class AutoRunEngine {
       runId: record.runId,
       spec: { number: record.specNumber, title: spec?.title ?? `#${record.specNumber}` },
       reviewMode: record.reviewMode,
+      chromeEnabled: record.chromeEnabled === true,
       scope: record.scope,
       issues: selection.issues,
       skipped: selection.skipped,
@@ -274,6 +279,7 @@ export class AutoRunEngine {
       completedCount: 0,
       totalCount: record.issueNumbers.length,
       waiting: false,
+      chromeEnabled: record.chromeEnabled === true,
       currentPullRequest: record.prNumber,
     });
     this.#loop = this.#run(record, specTitle, controller.signal).catch((error: unknown) => {
@@ -427,6 +433,7 @@ export class AutoRunEngine {
         completedCount,
         totalCount: Math.max(record.issueNumbers.length, completedCount + 1),
         waiting: step.action === "await-approval",
+        chromeEnabled: record.chromeEnabled === true,
         currentPullRequest: prNumber,
       });
       await this.options.store.save({ ...record, currentIssue: issue.number, phase, branch: issue.branch, prNumber, reviewedIssues: [...reviewed] });
@@ -437,7 +444,7 @@ export class AutoRunEngine {
             await this.#branch(step.branch, step.base);
             break;
           case "implement": {
-            implementationSummary = await this.#implement(issue, signal);
+            implementationSummary = await this.#implement(issue, record.chromeEnabled === true, signal);
             // The implement phase's postcondition is "tree dirty on the right
             // branch". It is checked here rather than in the reducer because an
             // unmet one is indistinguishable from "not started yet" in the
@@ -554,11 +561,12 @@ export class AutoRunEngine {
     else await this.options.git.createBranch(branch, base);
   }
 
-  async #implement(issue: PlannedIssue, signal: AbortSignal): Promise<string> {
+  async #implement(issue: PlannedIssue, chrome: boolean, signal: AbortSignal): Promise<string> {
     const outcome = await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
       description: `implement issue ${issue.number}`,
+      chrome,
       prompt: `Implement issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Do not run git commit, git push, or gh.`,
       expectsUncommittedTree: true,
     }, signal);

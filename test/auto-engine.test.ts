@@ -238,6 +238,20 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(context.state.cleared, true);
 });
 
+test("one Chrome choice is persisted for the run and reaches implementers only", async () => {
+  const context = harness({ settings: { review: true } });
+  const result = await context.engine.start({ chrome: true });
+  assert.equal(result.started && result.chromeEnabled, true);
+  await context.engine.settle();
+
+  assert.equal(context.launches[0]?.type, "implementer");
+  assert.equal(context.launches[0]?.chrome, true);
+  assert.equal(context.launches[1]?.type, "pr-doctor-afk");
+  assert.equal(context.launches[1]?.chrome, undefined);
+  assert.equal(context.saved.every((record) => record.chromeEnabled === true), true);
+  assert.match(context.notifications[0] ?? "", /Chrome on/);
+});
+
 test("a run started off the default branch returns there when it ends", async () => {
   const context = harness({ startBranch: "feature/wip" });
   assert.equal((await context.engine.start()).started, true);

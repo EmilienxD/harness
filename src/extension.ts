@@ -196,6 +196,7 @@ function briefingSources(
         phase: state.phase,
         currentIssue: state.currentIssue,
         completedCount: state.completedCount,
+        chromeEnabled: state.chromeEnabled,
         ...(state.waiting && state.currentPullRequest !== undefined
           ? { waitingOnPullRequest: state.currentPullRequest }
           : {}),
@@ -566,7 +567,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // an edit the user made on their phone.
   const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
-    startAutoRun: () => autoRun.start(),
+    startAutoRun: (options) => autoRun.start(options),
     reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
   }, terminals, roadmapReminders);
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
@@ -598,8 +599,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     } else {
       autoRunStatus.text = `$(sync~spin) Auto-run: spec #${state.specNumber} (${state.completedCount + 1}/${state.totalCount})`;
       autoRunStatus.tooltip = state.waiting
-        ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Click to stop the run.`
-        : `${state.phase} — issue #${state.currentIssue ?? "?"}. Click to stop the run.`;
+        ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Chrome ${state.chromeEnabled ? "on" : "off"}. Click to stop the run.`
+        : `${state.phase} — issue #${state.currentIssue ?? "?"}. Chrome ${state.chromeEnabled ? "on" : "off"}. Click to stop the run.`;
       autoRunStatus.show();
     }
     await commands.executeCommand("setContext", "aboard.autoRunActive", state !== undefined);
@@ -784,6 +785,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
     finally { await publishScaffoldState(); }
   };
+  const startAutoRun = async (chrome: boolean): Promise<void> => {
+    if (!requireInitialized()) return;
+    try {
+      const result = await autoRun.start(chrome ? { chrome: true } : {});
+      if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
+      else void window.showInformationMessage(`Auto-run started on spec #${result.spec.number} — ${result.issues.length} issue(s), review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
+    } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
+  };
   context.subscriptions.push(
     commands.registerCommand("aboard.initializeProject", scaffold),
     commands.registerCommand("aboard.updateProject", async () => {
@@ -802,14 +811,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     commands.registerCommand("aboard.newManager", () => launch("new")),
     commands.registerCommand("aboard.restoreFleet", restoreFleet),
     registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
-    commands.registerCommand("aboard.startAutoRun", async () => {
-      if (!requireInitialized()) return;
-      try {
-        const result = await autoRun.start();
-        if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
-        else void window.showInformationMessage(`Auto-run started on spec #${result.spec.number} — ${result.issues.length} issue(s), review ${result.reviewMode ? "on" : "off"}.`);
-      } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
-    }),
+    commands.registerCommand("aboard.startAutoRun", () => startAutoRun(false)),
+    commands.registerCommand("aboard.startAutoRunWithChrome", () => startAutoRun(true)),
     commands.registerCommand("aboard.stopAutoRun", () => autoRun.stop()),
     commands.registerCommand("aboard.continueAutoRun", () => autoRun.continueNow()),
     // A wait outstanding when the window regains focus is polled immediately,

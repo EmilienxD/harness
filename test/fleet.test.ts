@@ -147,8 +147,9 @@ test("drains deferred notifications in order with an explicit large-queue summar
 
 test("round-trips fleet persistence through unknown boundary validation", () => {
   const fleet = new FleetRegistry();
+  const worker = createSession("worker-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "tool-result" });
   fleet.register(
-    createSession("worker-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "tool-result" }),
+    { ...worker, chromeEnabled: true },
     startedAt,
   );
   const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
