@@ -1,9 +1,8 @@
 {
   "Explore": {
-    "profile": "kiro",
+    "profile": "myprofile",
     "model": "claude-haiku-4-5",
     "effort": "low",
-    "system_prompt": "You are a file search specialist. Search files thoroughly, then report concise findings with file paths. Do not write or modify code.",
     "disabled": true
   }
 }
