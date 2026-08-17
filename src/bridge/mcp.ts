@@ -548,16 +548,6 @@ function describeAnchor(after: RoadmapAnchor | undefined, verb: string): string 
 
 function parseStatus(value: unknown): { readonly value?: RoadmapTaskStatus; readonly notices: readonly string[] } {
   if (value === undefined) return { notices: [] };
-  if (value === "in_progress") {
-    return {
-      value: "pending",
-      notices: [
-        "status in_progress was recorded as pending: the roadmap tracks what is left to do, " +
-        "and what is in flight is already in the issues, pull requests, " +
-        "and auto-run state your briefing carries.",
-      ],
-    };
-  }
   if (!nonEmptyString(value) || !ROADMAP_TASK_STATUSES.includes(value as RoadmapTaskStatus)) {
     throw new TypeError(`status must be one of: ${ROADMAP_TASK_STATUSES.join(", ")}`);
   }

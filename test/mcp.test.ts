@@ -303,7 +303,7 @@ test("keeps a transcript-less persisted worker paused", async () => {
   assert.equal(context.fleet.get(workerId)?.terminal.terminalId, "old-terminal");
 });
 
-test("the todo verbs pass their arguments through and coerce in_progress with a notice", async () => {
+test("the todo verbs pass their arguments through and reject an unknown status", async () => {
   const calls: unknown[] = [];
   const logged: string[] = [];
   const handler = createMcpHandler(
@@ -332,26 +332,27 @@ test("the todo verbs pass their arguments through and coerce in_progress with a 
     tasks: ["1. [ ] First task", "2. [ ] Second task"],
   });
 
-  // `in_progress` has exactly one sensible reading here, so it is coerced rather
-  // than rejected — and the coerced call must not look clean.
-  const updated = await call("todo_update", { task: 1, expect: "First task", status: "in_progress" });
+  // There is no in-progress status — live work is derived from issues, pull
+  // requests, and auto-run state — so the enum is the strict authority and an
+  // out-of-enum value is rejected rather than guessed at.
+  const updated = await call("todo_update", { task: 1, expect: "First task", status: "completed" });
   assert.equal(updated.status, 200);
   const result = (body(updated).result as Record<string, unknown>);
   assert.equal(result.task, 1);
   // An in-place status change renumbers nothing, so no list is spent on it.
   assert.equal("tasks" in result, false);
-  assert.match(String(result.notice), /recorded as pending/);
   assert.match(String(result.notice), /2 open issues carry `ai:todo`/);
   assert.deepEqual(calls, [
     ["create", { subjects: ["First task", "Second task"], after: "top" }],
-    ["update", { task: 1, expect: "First task", status: "pending" }],
+    ["update", { task: 1, expect: "First task", status: "completed" }],
   ]);
   // The user-facing line is derived from the operation, which is what dropping
   // `--reason` bought: a narrated reason could disagree with the edit it named.
   assert.deepEqual(logged, [
     'Roadmap #9: 2 task(s) added to the top - "First task", "Second task"',
-    "Roadmap #9: task at position 1 marked pending",
+    "Roadmap #9: task at position 1 marked completed",
   ]);
+  assert.equal((await call("todo_update", { task: 1, expect: "First task", status: "in_progress" })).status, 400);
 });
 
 test("todo_update takes a numeric position and a required expect, and rejects anything looser", async () => {
