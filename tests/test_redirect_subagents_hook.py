@@ -37,12 +37,12 @@ def clean_env(monkeypatch, tmp_path):
     return tmp_path
 
 
-def run_hook(module, payload, argv=None):
+def run_hook(module, payload):
     """Invoke a hook main() with stdin payload, returning (exit_code, parsed stdout)."""
     import io
 
     old_stdin, old_stdout, old_argv = sys.stdin, sys.stdout, sys.argv
-    sys.argv = [str(HOOK_DIR / f"{module.__name__}.py")] + list(argv or [])
+    sys.argv = [str(HOOK_DIR / f"{module.__name__}.py")]
 
     class Cap(io.StringIO):
         @property
@@ -89,9 +89,11 @@ def write_project_config(tmp_path, data):
     return path
 
 
-def make_finished_job(tmp_path, job_id, session_id, text):
+def make_finished_job(tmp_path, job_id, session_id, text, existing=False):
+    """Write a job's on-disk state as a finished one. `existing` marks a job
+    directory that is already there (a running job crossing the line)."""
     d = tmp_path / rs_io.JOBS_REL / job_id
-    d.mkdir(parents=True)
+    d.mkdir(parents=True, exist_ok=existing)
     (d / "stdout.log").write_bytes(text.encode("utf-8"))
     (d / "exit_code").write_text("0", encoding="utf-8")
     (d / "done").touch()
@@ -124,6 +126,28 @@ def test_build_cmd_unset_fields_drop():
     """A field the entry leaves out takes its flag with it."""
     cmd = rs_io.build_cmd({"profile": "kiro"}, "p")
     assert cmd == ["clauder", "run", "kiro", "p"]
+
+
+def test_build_cmd_unset_field_before_inline_prompt_drops_its_flag():
+    """The template's own {prompt} must not shield a flag whose value is
+    unset — that flag would swallow the prompt as its operand."""
+    cmd = rs_io.build_cmd({"command": "kiro-cli;chat;--model;{model};{prompt}"}, "find it")
+    assert cmd == ["kiro-cli", "chat", "find it"]
+
+
+def test_build_cmd_consecutive_unset_fields_before_inline_prompt():
+    cmd = rs_io.build_cmd(
+        {"command": "cli;--model;{model};--effort;{effort};{prompt}"}, "go"
+    )
+    assert cmd == ["cli", "go"]
+
+
+def test_build_cmd_valueless_flag_survives_a_dropped_prompt():
+    """`-p` takes no operand, so it is never the orphan of a dropped value."""
+    cmd = rs_io.build_cmd(
+        {"command": "claude;-p;{prompt}", "_append_prompt": False}, "secret"
+    )
+    assert cmd == ["claude", "-p"]
 
 
 def test_build_cmd_string_shorthand_is_self_backend():
@@ -364,27 +388,36 @@ def test_wait_timeout_allows_stop(tmp_path, monkeypatch):
     assert code == 0 and out is None  # stop allowed, nothing claimed
 
 
-def test_wait_proxy_runs_original_hook(tmp_path, monkeypatch):
-    """`-s <argv>` defers to the original Stop hook once the wait allows."""
-    import subprocess
+def test_wait_stops_polling_once_jobs_are_delivered_elsewhere(tmp_path, monkeypatch):
+    """Stop hooks run in parallel, so two waiters can race for one report.
+    The loser must not keep polling to the deadline over finished work."""
+    d = tmp_path / rs_io.JOBS_REL / "abc123"
+    d.mkdir(parents=True)
+    (d / "meta.json").write_text(json.dumps({
+        "job_id": "abc123", "session_id": "s1", "agent": "Explore",
+        "pid": 1, "started_at": time.time(), "finished_at": None,
+        "delivered": False, "cmd": ["fake"],
+    }), encoding="utf-8")
 
-    captured = {}
+    monkeypatch.setattr(wait_hook, "WAIT_TIMEOUT_S", 30)  # never reached
+    monkeypatch.setattr(wait_hook, "POLL_INTERVAL_S", 0)
 
-    class FakeResult:
-        returncode = 0
+    polls = []
 
-    def fake_run(cmd, input=None, **kwargs):
-        captured["cmd"] = cmd
-        captured["input"] = input
-        return FakeResult()
+    def finish_then_deliver(*args, **kwargs):
+        """Stand in for the winning waiter: the job lands, someone else takes it."""
+        polls.append(1)
+        if len(polls) == 2:
+            make_finished_job(tmp_path, "abc123", "s1", "claimed by a sibling hook",
+                              existing=True)
+            rs_io.deliver_report(rs_io.open_job_ids("s1", done=True))
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(wait_hook.time, "sleep", finish_then_deliver)
 
-    payload = {"session_id": "s1"}
-    code, out = run_hook(wait_hook, payload, argv=["-s", "orig-hook", "--flag"])
-    assert code == 0
-    assert captured["cmd"] == ["orig-hook", "--flag"]
-    assert json.loads(captured["input"].decode("utf-8")) == payload
+    started = time.monotonic()
+    code, out = run_hook(wait_hook, {"session_id": "s1"})
+    assert code == 0 and out is None  # nothing left to claim, stop allowed
+    assert time.monotonic() - started < 5  # returned on the poll, not the deadline
 
 
 # --- delivery stays in the main conversation -------------------------------

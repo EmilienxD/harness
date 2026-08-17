@@ -2,18 +2,9 @@
 """Stop/SubagentStop hook: waits for running background subagents at the end
 of a turn, then hands their results back to the agent.
 
-Two modes, distinguished by argv:
-
-- Bare (`redirect_subagents_wait_hook.py`): the wait-then-report behavior
-  below, then exit 0 (allow the stop).
-- Proxy (`redirect_subagents_wait_hook.py -s <original hook argv...>`): the
-  same wait, then — only if the wait allowed the stop — the original hook is
-  run with the same stdin, its stdout/stderr streaming straight through.
-  The settings fragment marks this entry with the harness-owned `stopHook:
-  true` key, which the installer reads as "every other Stop/SubagentStop
-  command hook in scope proxies through this script": such entries are
-  rewritten to point here with `-s` and their original argv (recorded under
-  the harness-owned `_proxied` key, so uninstall can restore them).
+Claude Code runs every matching Stop hook in parallel, so this one waits
+alongside whatever else you have wired to the event rather than sequencing
+itself in front of it.
 
 On a timeout the turn is allowed to end *without* blocking: the jobs keep
 running and the next turn's PreToolUse/PostToolUse hook delivers them.
@@ -37,7 +28,7 @@ POLL_INTERVAL_S = 2
 WAITING_MSG = (
     "One or more background subagents redirected away from your Claude "
     "subscription are still running. Waiting for them to finish before "
-    "stopping (timeout {timeout}s)…"
+    "stopping (timeout {timeout}s)..."
 )
 
 
@@ -47,22 +38,8 @@ def block(reason: str) -> None:
     sys.exit(0)
 
 
-def proxy(original_argv: list[str], stdin_text: str) -> None:
-    """Re-run a rewired Stop hook, transparently, now that the wait ran."""
-    import subprocess
-
-    logger.info("Proxying to the original stop hook: %s", original_argv)
-    result = subprocess.run(original_argv, input=stdin_text.encode("utf-8"))
-    sys.exit(result.returncode)
-
-
 def main() -> None:
     logger.debug("stop-wait hook triggered")
-
-    proxied = None
-    argv = sys.argv[1:]
-    if argv[:1] == ["-s"]:
-        proxied = argv[1:]
 
     try:
         stdin_text = sys.stdin.buffer.read().decode("utf-8")
@@ -82,17 +59,12 @@ def main() -> None:
         # Inside a subagent (SubagentStop or a frontmatter Stop): the main
         # session's jobs belong to the main session's own Stop hook. Waiting
         # here would hold this subagent hostage to work it didn't start.
-        if proxied is not None:
-            proxy(proxied, stdin_text)
         sys.exit(0)
 
     outcome = _wait(session_id)
-    if outcome is not None:  # deliver or block: the proxied hook never runs
+    if outcome is not None:
         block(outcome)
         return
-
-    if proxied is not None:
-        proxy(proxied, stdin_text)
     sys.exit(0)
 
 
@@ -114,6 +86,14 @@ def _wait(session_id: str | None) -> str | None:
         time.sleep(POLL_INTERVAL_S)
         if report := deliver_report(open_job_ids(session_id, done=True)):
             return report
+        if not open_job_ids(session_id, done=False):
+            # Nothing left to wait for: the jobs finished and something else
+            # — a sibling Stop hook running in parallel, or the PostToolUse
+            # hook mid-turn — already claimed their reports. Polling on to
+            # the deadline would stall the turn for nine minutes over work
+            # that is done and delivered.
+            logger.debug("Running subagents finished and were delivered elsewhere.")
+            return None
 
     # Letting the stop proceed without a report: the jobs keep running, and
     # the next turn's PreToolUse/PostToolUse hook picks them up when they

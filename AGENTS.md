@@ -22,10 +22,17 @@ the target `.claude/`). Settings go in a sibling `settings.fragment.json` — pl
 with `${PYTHON}` and `${CLAUDE_DIR}` resolved at install time. `${PYTHON}` becomes `uv run --no-project`
 when `uv` is installed (which it is if you used `uvx`), otherwise falls back to the first working
 interpreter among `python3`, `python`, `py` (the Windows Store alias passes `which` without being a
-real interpreter, so actual execution is tested). A tool without a manifest is invisible to the
+real interpreter, so actual execution is tested). A file the user is meant to edit after install —
+config templates, like the `.rules` files — declares `starter = true` on its `[[files]]` entry: it is
+copied when absent and never overwritten afterwards. A tool without a manifest is invisible to the
 installer, so add one in the same change that adds the tool, and bump `version` whenever its files or
 fragment change. Run `uv run pytest` — the suite installs every manifest for real and round-trips
 uninstall.
+
+A fragment is merged as written: the installer adds the entries a tool declares and removes them
+again on uninstall, and it does not rewrite hook entries belonging to anyone else. Keys that Claude
+Code's settings schema doesn't define don't belong in a fragment either — project settings are
+validated strictly, and a file that fails validation is rejected whole.
 
 ## Tools
 

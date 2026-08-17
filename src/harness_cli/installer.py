@@ -8,6 +8,7 @@ there is no reason to write a second copy of it into the user's repo.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -198,83 +199,34 @@ def substitute(value, target: "Target | None" = None, python_info=None):
     return value
 
 
-STOP_EVENTS = ("Stop", "SubagentStop")
+def restore_proxied_hooks(settings: dict) -> None:
+    """Undo the retired `stopHook` proxy convention, in place.
 
-
-def _hook_identity(entry) -> bool:
-    return isinstance(entry, dict) and entry.get("type", "command") == "command" and "command" in entry
-
-
-def proxy_stop_hooks(merged: dict) -> None:
-    """Apply the `stopHook` convention to an already-merged settings dict, in place.
-
-    A fragment entry on Stop/SubagentStop carrying `"stopHook": true` (a
-    harness-owned key, stripped before the fragment is applied) declares a
-    wait-until-done replacement hook. Every *other* command hook on those two
-    events is then rewritten into a proxy through that host — the host's argv
-    followed by `-s` and the original argv — so the replacement runs first and
-    the original hook still fires. The original argv is also recorded under
-    the harness-owned `"_proxied"` key, which uninstall uses to restore it.
-
-    Entries that arrive proxied by identity (same host argv at the front) are
-    left alone, so reinstalling is a no-op.
+    One version of redirect-subagents rewrote every other Stop/SubagentStop
+    hook to run through its wait script, recording the argv it replaced under
+    a harness-owned `_proxied` key. Nothing writes that shape any more:
+    rewriting hooks the user wrote themselves was never ours to do, and
+    Claude Code validates project settings strictly enough that inventing
+    keys inside a hook entry is a bad bet. Any entry still carrying
+    `_proxied` is restored to the argv it records, so a settings file left
+    behind by that version heals on the next install or uninstall.
     """
-    hooks = merged.get("hooks")
-    if not isinstance(hooks, dict):
-        return
-    for event in STOP_EVENTS:
-        groups = hooks.get(event)
-        if not isinstance(groups, list):
-            continue
-        host: dict | None = None
-        for group in groups:
-            if not isinstance(group, dict):
-                continue
-            for entry in group.get("hooks", []):
-                if isinstance(entry, dict) and entry.pop("stopHook", None) is True:
-                    host = entry
-        if host is None:
-            continue
-        host_argv = [host.get("command", "")] + list(host.get("args", []))
-        for group in groups:
-            if not isinstance(group, dict):
-                continue
-            proxied = []
-            for entry in group.get("hooks", []):
-                if entry is host or not _hook_identity(entry):
-                    proxied.append(entry)
-                    continue
-                orig = [entry.get("command", "")] + list(entry.get("args", []))
-                if orig[: len(host_argv)] == host_argv:
-                    proxied.append(entry)  # already proxied through this host
-                    continue
-                proxied.append({
-                    **{k: v for k, v in entry.items() if k not in ("command", "args")},
-                    "command": host.get("command", ""),
-                    "args": host_argv[1:] + ["-s"] + orig,
-                    "_proxied": orig,
-                })
-            group["hooks"] = proxied
-
-
-def unproxy_stop_hooks(settings: dict) -> None:
-    """Reverse `proxy_stop_hooks`, in place: restore every entry's `_proxied` argv."""
     hooks = settings.get("hooks")
     if not isinstance(hooks, dict):
         return
-    for event in STOP_EVENTS:
-        groups = hooks.get(event)
+    for groups in hooks.values():
         if not isinstance(groups, list):
             continue
         for group in groups:
-            if not isinstance(group, dict):
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
                 continue
             restored = []
-            for entry in group.get("hooks", []):
-                if isinstance(entry, dict) and "_proxied" in entry:
+            for entry in group["hooks"]:
+                if isinstance(entry, dict) and isinstance(entry.get("_proxied"), list):
                     orig = entry.pop("_proxied")
                     entry = {k: v for k, v in entry.items() if k not in ("command", "args")}
-                    entry["command"], entry["args"] = orig[0], orig[1:]
+                    if orig:
+                        entry["command"], entry["args"] = orig[0], orig[1:]
                 restored.append(entry)
             group["hooks"] = restored
 
@@ -351,11 +303,11 @@ def plan_install(
     fallback_info = (FALLBACK_PYTHON, []) if needs_python else None
     fragment = substitute(tool.fragment, target, python_info or fallback_info)
     before = target.read_settings() if settings_override is None else settings_override
-    after = settings_merge.merge(before, fragment) if fragment else before
-    if fragment:
-        # A fragment that declares a stopHook replacement host rewrites the
-        # other Stop/SubagentStop entries to proxy through it.
-        proxy_stop_hooks(after)
+    # The heal below rewrites entries, so it works on a copy: `before` stays
+    # the file as found, and a plan that only heals still reads as a change.
+    base = copy.deepcopy(before)
+    restore_proxied_hooks(base)  # settings left behind by the retired stopHook convention
+    after = settings_merge.merge(base, fragment) if fragment else base
 
     ignore_before = (
         target.read_gitignore() if gitignore_override is None else gitignore_override
@@ -454,8 +406,9 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
     fragment = substitute(tool.fragment, target)
     if fragment:
         before = target.read_settings()
-        unproxy_stop_hooks(before)  # restore entries a stopHook host rewrote
-        after = settings_merge.unmerge(before, fragment)
+        healed = copy.deepcopy(before)
+        restore_proxied_hooks(healed)  # settings left by the retired stopHook convention
+        after = settings_merge.unmerge(healed, fragment)
         if after != before:
             removed_any = True
             if after:

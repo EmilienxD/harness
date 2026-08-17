@@ -106,7 +106,10 @@ The installer only writes the project file; this one is yours to edit.
    allowed to end anyway — the job keeps running and the next turn's hooks
    deliver it. (Blocking again would re-fire this hook after the next
    message with the same jobs running, and Claude Code overrides a Stop hook
-   after 8 consecutive blocks regardless.)
+   after 8 consecutive blocks regardless.) Claude Code runs matching Stop
+   hooks in parallel, so this one waits alongside any Stop hooks of your own
+   rather than in front of them; whichever waiter sees a finished job first
+   delivers it, and the rest stop waiting.
 
 ### Deferred fallback: the next turn, not this one
 
@@ -117,17 +120,6 @@ PostToolUse hook re-runs the job through `claude -p` (prompt on stdin) and
 delivers the result immediately. Only `clauder` entries defer — an explicit
 `command` was your choice of backend, and failing it loudly is more honest
 than rerouting it.
-
-### The `stopHook` convention (installer behavior)
-
-The settings fragment marks the Stop/SubagentStop entries with a
-harness-owned `"stopHook": true` key. On install, every *other* command hook
-on those two events is rewritten to proxy through the wait script — its argv
-followed by `-s` and the original argv — so the wait runs first and your
-hooks still fire afterward. The original argv is recorded on the entry under
-`_proxied`; uninstall reads it back and restores your hooks exactly. The
-`_proxied` key and `stopHook` are harness internals — Claude Code ignores
-both.
 
 ### Session anchoring
 
@@ -145,8 +137,14 @@ installer.
 harness uninstall redirect-subagents
 ```
 
-Removes the hooks and their settings entries, restores proxied Stop hooks,
-and drops the gitignore block. A `subagents.json` you modified is kept.
+Removes the hooks and their settings entries and drops the gitignore block,
+leaving hooks you wrote yourself untouched. A `subagents.json` you modified
+is kept; an untouched one goes with the tool.
+
+> Version 1.0.0 briefly rewrote every other Stop/SubagentStop hook to run
+> through this tool's wait script, recording the argv it replaced under a
+> `_proxied` key. That is gone. Any `harness install` or `harness uninstall`
+> restores such an entry to what it was.
 
 ## Development
 

@@ -32,8 +32,7 @@
             "command": "${PYTHON}",
             "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_wait_hook.py"],
             "timeout": 600,
-            "statusMessage": "Waiting for redirected background subagents",
-            "stopHook": true
+            "statusMessage": "Waiting for redirected background subagents"
           }
         ]
       }
@@ -46,8 +45,7 @@
             "command": "${PYTHON}",
             "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_wait_hook.py"],
             "timeout": 600,
-            "statusMessage": "Waiting for redirected background subagents",
-            "stopHook": true
+            "statusMessage": "Waiting for redirected background subagents"
           }
         ]
       }

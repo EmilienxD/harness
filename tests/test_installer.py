@@ -353,10 +353,10 @@ def test_user_install_gitignores_inside_claude_dir(tmp_path, monkeypatch):
     assert ".claude/" not in text
 
 
-# --- stop-hook override (redirect-subagents) ------------------------------
+# --- Stop hooks (redirect-subagents) --------------------------------------
 
 
-HOST_ARGV_TAIL = ("hooks/redirect_subagents_wait_hook.py", "600")
+USER_STOP_HOOK = {"type": "command", "command": "python", "args": ["user_stop.py"]}
 
 
 def _stop_entries(settings_dict):
@@ -367,58 +367,92 @@ def _stop_entries(settings_dict):
     ]
 
 
-def test_stop_hook_override_rewrites_sibling_entry(target):
-    """Installing redirect-subagents over an existing Stop hook rewires the
-    older hook to proxy through the wait script (-s + original argv)."""
-    target.claude_dir.mkdir(parents=True)
-    target.settings_path.write_text(json.dumps({
-        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "python",
-                                       "args": ["user_stop.py"]}]}]}
-    }), encoding="utf-8")
+def _write_settings(target, data):
+    target.claude_dir.mkdir(parents=True, exist_ok=True)
+    target.settings_path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_stop_hook_leaves_sibling_entries_alone(target):
+    """A Stop hook the user wrote is not ours to rewrite: installing a tool
+    with its own Stop hook adds one entry and touches nothing else."""
+    _write_settings(target, {"hooks": {"Stop": [{"hooks": [dict(USER_STOP_HOOK)]}]}})
     install("redirect-subagents", target)
     entries = _stop_entries(settings(target))
-    host = next(e for e in entries if "redirect_subagents_wait_hook.py" in str(e.get("args"))
-                and "_proxied" not in e)
-    proxied = next(e for e in entries if e.get("_proxied"))
-    assert proxied["args"][: len(host["args"])] == host["args"]
-    assert proxied["args"][len(host["args"])] == "-s"
-    assert proxied["_proxied"] == ["python", "user_stop.py"]
+    assert USER_STOP_HOOK in entries
+    assert not any("_proxied" in e for e in entries)
+    host = next(e for e in entries if "redirect_subagents_wait_hook.py" in str(e.get("args")))
+    assert host["timeout"] == 600
+    assert host["statusMessage"] == "Waiting for redirected background subagents"
     assert "stopHook" not in host
 
 
-def test_stop_hook_override_reinstall_is_idempotent(target):
+def test_stop_hook_reinstall_is_idempotent(target):
     install("redirect-subagents", target)
     first = settings(target)
     install("redirect-subagents", target)
     assert settings(target) == first
 
 
-def test_stop_hook_override_uninstall_restores_sibling(target):
-    original = {
-        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "python",
-                                       "args": ["user_stop.py"]}]}]}
-    }
-    target.claude_dir.mkdir(parents=True)
-    target.settings_path.write_text(json.dumps(original), encoding="utf-8")
+def test_stop_hook_uninstall_leaves_sibling_untouched(target):
+    original = {"hooks": {"Stop": [{"hooks": [dict(USER_STOP_HOOK)]}]}}
+    _write_settings(target, original)
     install("redirect-subagents", target)
     uninstall(TOOLS["redirect-subagents"], target)
-    restored = settings(target)
-    assert restored == original, f"expected {original}, got {restored}"
+    assert settings(target) == original
 
 
-def test_stop_hook_override_uninstall_alone_leaves_no_settings(target):
+def test_stop_hook_uninstall_alone_leaves_no_settings(target):
     install("redirect-subagents", target)
     uninstall(TOOLS["redirect-subagents"], target)
     # Nothing else in the file: uninstall removes it entirely.
     assert not target.settings_path.exists()
 
 
-def test_stop_hook_override_host_keeps_timeout_and_statusmessage(target):
+# --- healing settings written by the retired stopHook convention -----------
+
+
+def _proxied_settings():
+    """What one version of redirect-subagents used to write: the user's hook
+    rewritten to run through the wait script, its argv kept under `_proxied`."""
+    return {
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "uv",
+                            "args": ["run", "wait_hook.py", "-s", "python", "user_stop.py"],
+                            "_proxied": ["python", "user_stop.py"],
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+
+def test_install_restores_proxied_hooks(target):
+    _write_settings(target, _proxied_settings())
+    install("caveman", target)  # any tool: the heal is not one tool's business
+    assert _stop_entries(settings(target)) == [USER_STOP_HOOK]
+
+
+def test_install_restores_proxied_hooks_when_that_is_the_only_change(target):
+    """A heal with nothing else to do still reaches disk — the plan compares
+    against the file as found, not against the healed copy."""
+    _write_settings(target, _proxied_settings())
+    plan = install("caveman", target)
+    assert plan.settings_changed
+    assert _stop_entries(settings(target)) == [USER_STOP_HOOK]
+
+
+def test_uninstall_restores_proxied_hooks(target):
+    settings_data = _proxied_settings()
+    _write_settings(target, settings_data)
     install("redirect-subagents", target)
-    host = next(e for e in _stop_entries(settings(target))
-                if "_proxied" not in e and "_proxied" not in str(e))
-    assert host["timeout"] == 600
-    assert host["statusMessage"] == "Waiting for redirected background subagents"
+    uninstall(TOOLS["redirect-subagents"], target)
+    assert _stop_entries(settings(target)) == [USER_STOP_HOOK]
 
 
 def test_starter_files_are_never_overwritten(target):

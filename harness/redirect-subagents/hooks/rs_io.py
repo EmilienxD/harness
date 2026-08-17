@@ -178,13 +178,25 @@ def build_cmd(cfg: dict, prompt: str) -> list[str]:
     {system_prompt} and every other key of the config entry, so a custom
     backend can name whatever flags its own CLI takes. A word left holding an
     unsubstantiated {placeholder} — the entry never set that key — is dropped,
-    and the cleanup below takes the flag whose value disappeared with it.
+    and the flag it was the value for drops with it.
     """
     fields = {k: v for k, v in cfg.items() if not k.startswith("_") and k != "command"}
 
     template = cfg.get("command") or command_template()
     _append_prompt = cfg.get("_append_prompt", True)
-    parts = []
+    parts: list[str] = []
+
+    def drop_flag_for(missing: str) -> None:
+        """Take the flag whose value just disappeared ("--model" once
+        "{model}" resolved to nothing) — otherwise the next word, up to and
+        including the prompt itself, is silently consumed as its value.
+        Flags in _VALUELESS_FLAGS are complete statements on their own
+        (`claude -p` takes no operand), so they are never the orphan.
+        """
+        if parts and parts[-1].startswith("-") and parts[-1] not in _VALUELESS_FLAGS:
+            logger.debug("Dropping %s: its value %s is unset", parts[-1], missing)
+            parts.pop()
+
     for word in template.split(";"):
         for w in word.split():
             for key, value in fields.items():
@@ -195,41 +207,25 @@ def build_cmd(cfg: dict, prompt: str) -> list[str]:
                 else:
                     # Same rule as an unset config field: {prompt} with the
                     # field off means nothing for that flag to carry.
+                    drop_flag_for("{prompt}")
                     continue
             if "{" in w or "}" in w:
                 # A {placeholder} with no matching config key stayed: the entry
                 # left that field unset, so anything it was part of goes.
+                drop_flag_for(w)
                 continue
             if w:
                 parts.append(w)
 
-    # A flag whose value disappeared above ("--model" once "{model}" emptied
-    # out) goes with it — otherwise the next word is silently consumed as its
-    # value. A run of consecutive broken flags collapses recursively, and a
-    # dangling flag at the end drops too. Flags in _VALUELESS_FLAGS are
-    # complete statements on their own (`claude -p` takes no operand), so the
-    # flag after them is never mistaken for their missing value.
-    cleaned = []
-    for part in parts:
-        cleaned.append(part)
-        while (len(cleaned) >= 2
-               and cleaned[-2].startswith("-")
-               and cleaned[-2] not in _VALUELESS_FLAGS
-               and cleaned[-1].startswith("-")):
-            cleaned.pop(-2)
-            # Re-check: one removal can expose another orphaned flag pair.
-    if (len(cleaned) >= 2
-            and cleaned[-1].startswith("-")
-            and cleaned[-1] not in _VALUELESS_FLAGS):
-        cleaned.pop()
-    # The prompt goes last, after dangling-flag cleanup, so an appended prompt
-    # is never mistaken for a missing flag value.
+    # No {prompt} anywhere in the template: the prompt is the trailing
+    # operand, appended after every drop above so it can never be mistaken
+    # for a missing flag's value.
     if "{prompt}" not in template and _append_prompt:
-        cleaned.append(prompt)
+        parts.append(prompt)
     # A "clauder" executable segment is resolved through REDIRECT_SUBAGENTS_CLAUDER_BIN.
-    if cleaned and cleaned[0] == "clauder":
-        cleaned = [*clauder_command(), *cleaned[1:]]
-    return cleaned
+    if parts and parts[0] == "clauder":
+        parts = [*clauder_command(), *parts[1:]]
+    return parts
 
 
 # Flags that take no value of their own, so the *next* flag is never mistaken
