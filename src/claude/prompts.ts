@@ -7,6 +7,7 @@
  * layer stays testable without a repository or the `gh` CLI.
  */
 
+import { describeIssueNumbers } from "../shared/issues.js";
 import { issueDisposition } from "../shared/labels.js";
 
 export { issueDisposition };
@@ -86,14 +87,21 @@ export type PromptResolutionRequest =
   | {
       readonly kind: "implementation";
       readonly instruction: string;
-      readonly issueNumber: number;
+      /**
+       * The first issue is the primary one: it supplies the branch, the
+       * disposition, and the headline. The auto-run engine is this arm's only
+       * caller and always passes exactly one, so the array exists to spare the
+       * adapter a lossy narrowing rather than to invite multi-issue
+       * implementers (`AGENTS.md`: one implementation agent per child issue).
+       */
+      readonly issueNumbers: readonly number[];
       /** Overrides the branch GitHub reports, when the caller knows better. */
       readonly branch?: string | undefined;
     }
   | {
       readonly kind: "issue-context";
       readonly instruction: string;
-      readonly issueNumber: number;
+      readonly issueNumbers: readonly number[];
     }
   | {
       readonly kind: "review";
@@ -132,7 +140,8 @@ export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
 export type PromptResolutionErrorCode =
   | "issue-not-found"
   | "pull-request-not-found"
-  | "empty-instruction";
+  | "empty-instruction"
+  | "no-issue";
 
 export class PromptResolutionError extends Error {
   public constructor(
@@ -290,72 +299,113 @@ export class PromptResolver {
     return pullRequest;
   }
 
+  /**
+   * Every requested issue, deduped, in the caller's order. The tuple return
+   * types the non-emptiness the callers rely on for the primary issue, so no
+   * arm needs a cast or a second guard.
+   */
+  async #fetchIssues(issueNumbers: readonly number[]): Promise<readonly [IssueSnapshot, ...IssueSnapshot[]]> {
+    const [first, ...rest] = [...new Set(issueNumbers)];
+    if (first === undefined) {
+      throw new PromptResolutionError("no-issue", "An issue-bound prompt needs at least one issue number");
+    }
+    const primary = await this.#requireIssue(first);
+    const others: IssueSnapshot[] = [];
+    for (const number of rest) others.push(await this.#requireIssue(number));
+    return [primary, ...others];
+  }
+
+  /**
+   * Renders one section per issue, then one per distinct parent spec.
+   *
+   * `pointers` keeps the existing split: automated paths tell the worker how to
+   * read the rest of a truncated body, while a context launch says to work from
+   * what it was given. A spec shared by several siblings is fetched once, and a
+   * spec the caller listed among the issues themselves is never rendered twice.
+   */
+  async #issueSections(
+    builder: PromptBuilder,
+    issues: readonly IssueSnapshot[],
+    pointers: boolean,
+  ): Promise<void> {
+    for (const issue of issues) {
+      const body = excerpt(
+        issue.body,
+        this.#limits.issueBodyChars,
+        pointers ? `gh issue view ${issue.number}` : undefined,
+      );
+      builder.section(`Issue #${issue.number} — ${issue.title}`, body.text);
+      builder.source("issue", issue.number, body);
+    }
+
+    const rendered = new Set(issues.map((issue) => issue.number));
+    const parentNumbers = new Set(
+      issues
+        .map((issue) => issue.parentIssueNumber)
+        .filter((number): number is number => number !== undefined && !rendered.has(number)),
+    );
+    for (const number of parentNumbers) {
+      const parent = await this.#github.getIssue(number);
+      // A parent GitHub reports but cannot return is skipped silently: the child
+      // issue is still a complete contract without it.
+      if (parent === undefined) continue;
+      const parentBody = excerpt(
+        parent.body,
+        this.#limits.parentSpecChars,
+        pointers ? `gh issue view ${parent.number}` : undefined,
+      );
+      builder.section(`Parent spec #${parent.number} — ${parent.title}`, parentBody.text);
+      builder.source("parent-spec", parent.number, parentBody);
+    }
+  }
+
   async #resolveImplementation(
     request: Extract<PromptResolutionRequest, { kind: "implementation" }>,
   ): Promise<ResolvedPrompt> {
     const instruction = requireInstruction(request.instruction);
-    const issue = await this.#requireIssue(request.issueNumber);
+    const issues = await this.#fetchIssues(request.issueNumbers);
+    const [primary] = issues;
     const builder = new PromptBuilder();
 
-    const branch = request.branch ?? issue.branch;
+    const named = describeIssueNumbers(issues.map((issue) => issue.number));
+    const branch = request.branch ?? primary.branch;
     builder.section(
       undefined,
       branch === undefined
-        ? `You are implementing issue #${issue.number}. Create or switch to a dedicated branch for it before making changes.`
-        : `You are implementing issue #${issue.number} on branch \`${branch}\`.`,
+        ? `You are implementing ${named}. Create or switch to a dedicated branch before making changes.`
+        : `You are implementing ${named} on branch \`${branch}\`.`,
     );
     builder.section(undefined, instruction);
 
-    const body = excerpt(
-      issue.body,
-      this.#limits.issueBodyChars,
-      `gh issue view ${issue.number}`,
-    );
-    builder.section(`Issue #${issue.number} — ${issue.title}`, body.text);
-    builder.source("issue", issue.number, body);
-
-    if (issue.parentIssueNumber !== undefined) {
-      const parent = await this.#github.getIssue(issue.parentIssueNumber);
-      if (parent !== undefined) {
-        const parentBody = excerpt(
-          parent.body,
-          this.#limits.parentSpecChars,
-          `gh issue view ${parent.number}`,
-        );
-        builder.section(
-          `Parent spec #${parent.number} — ${parent.title}`,
-          parentBody.text,
-        );
-        builder.source("parent-spec", parent.number, parentBody);
-      }
-    }
-
-    builder.section("Disposition", dispositionGuidance(issueDisposition(issue.labels)));
-    return builder.build(`Implement issue #${issue.number} — ${issue.title}.`);
+    await this.#issueSections(builder, issues, true);
+    // The disposition is the primary issue's: it decides what happens to the
+    // change, and the engine launches one implementer per issue.
+    builder.section("Disposition", dispositionGuidance(issueDisposition(primary.labels)));
+    return builder.build(`Implement issue #${primary.number} — ${primary.title}.`);
   }
 
   async #resolveIssueContext(
     request: Extract<PromptResolutionRequest, { kind: "issue-context" }>,
   ): Promise<ResolvedPrompt> {
     const instruction = requireInstruction(request.instruction);
-    const issue = await this.#requireIssue(request.issueNumber);
+    const issues = await this.#fetchIssues(request.issueNumbers);
+    const [primary] = issues;
+    const named = describeIssueNumbers(issues.map((issue) => issue.number));
     const builder = new PromptBuilder();
+    // Named up front only when there are several, so a worker cannot read the
+    // first section and treat the rest as background. One issue needs no such
+    // line: its single heading already says what it is.
+    if (issues.length > 1) builder.section(undefined, `You have the resolved context for ${named}.`);
     builder.section(undefined, instruction);
 
-    const body = excerpt(issue.body, this.#limits.issueBodyChars);
-    builder.section(`Issue #${issue.number} — ${issue.title}`, body.text);
-    builder.source("issue", issue.number, body);
-
-    if (issue.parentIssueNumber !== undefined) {
-      const parent = await this.#github.getIssue(issue.parentIssueNumber);
-      if (parent !== undefined) {
-        const parentBody = excerpt(parent.body, this.#limits.parentSpecChars);
-        builder.section(`Parent spec #${parent.number} — ${parent.title}`, parentBody.text);
-        builder.source("parent-spec", parent.number, parentBody);
-      }
-    }
-
-    return builder.build(`Use the resolved context for issue #${issue.number} — ${issue.title}.`);
+    await this.#issueSections(builder, issues, false);
+    // A single issue keeps its title in the headline; several would overrun the
+    // one line that also serves as the spill stub.
+    return builder.build(
+      issues.length === 1
+        ? `Use the resolved context for issue #${primary.number} — ${primary.title}.`
+        : `Use the resolved context for ${named}.`,
+    );
   }
 
   async #resolveReview(

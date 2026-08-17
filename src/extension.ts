@@ -522,7 +522,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         agentId: owner.agentId,
         sessionId: owner.sessionId,
         agentType: owner.type,
-        issueNumber: owner.issueNumber,
+        issueNumbers: [owner.issueNumber],
         name: `aboard: resume pull request ${owner.prNumber}`,
         initialCommand: plan.commandLine,
         startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS,
@@ -822,7 +822,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const offerAutoRunResume = async (): Promise<void> => {
     const record = await new FileAutoRunStore(workspaceRoot).load().catch(() => undefined);
     if (record === undefined) { autoRunResumeDeferred = false; return; }
-    if (pausedPersistedSessions().some((session) => session.issueNumber === record.currentIssue && session.identity.type !== "manager")) {
+    const currentIssue = record.currentIssue;
+    if (currentIssue !== undefined && pausedPersistedSessions().some((session) => session.identity.type !== "manager" && session.issueNumbers?.includes(currentIssue) === true)) {
       autoRunResumeDeferred = true;
       output.appendLine(`Auto-run resume for issue #${record.currentIssue ?? "?"} is deferred until its paused fleet session is restored or closed.`);
       return;

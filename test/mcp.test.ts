@@ -176,7 +176,7 @@ test("restores a persisted worker with --resume, no new prompt, no focus, and no
     lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
     resultDelivery: { mode: "tool-result" },
     telemetry,
-    issueNumber: 19,
+    issueNumbers: [19],
   }, at("2026-07-30T10:00:00.000Z"));
   fleet.transition(workerId, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
   await coordinator.resumePersisted(fleet.get(workerId)!);
@@ -447,6 +447,14 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", interactive: true }],
     ["run_agent", { type: "webresearcher", description: "research current API pricing" }],
     ["run_agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
+    // `issues` is a list of positive integers or absent; nothing else resolves.
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: 47 }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [] }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [0] }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [-3] }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [1.5] }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: ["47"] }],
+    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issue: 47 }],
     ["todo_create", { subjects: [] }],
     ["todo_create", { subjects: ["A task"], reason: "obsolete field" }],
     ["todo_create", { subjects: ["A task"], after: "" }],
@@ -492,7 +500,7 @@ test("foreground delegation blocks until a result lands, background returns at o
   coordinator.complete(worker.identity.agentId, success);
   assert.match(JSON.stringify(await foreground), /finished/);
 
-  const background = await coordinator.spawn({ type: "implementer", prompt: "Implement issue ten", description: "implement issue ten", issue: 10 });
+  const background = await coordinator.spawn({ type: "implementer", prompt: "Implement issue ten", description: "implement issue ten", issues: [10] });
   assert.match(JSON.stringify(background), /running/);
 });
 
@@ -718,23 +726,49 @@ test("an ignored issue carries a notice: interactive-only types, and topic-less 
   // A brainstormer's conversation defines its own scope; the bridge does not
   // silently bind it to an issue.
   const brainstormer = await launch({
-    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issue: 47,
+    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47],
   });
   assert.equal(brainstormer.status, 200, JSON.stringify(brainstormer.body));
-  assert.match(JSON.stringify(brainstormer.body), /issue 47 was ignored/);
+  assert.match(JSON.stringify(brainstormer.body), /issue #47 was ignored/);
   // An interactive launch without an opening topic gets no first message at
   // all, so there is nothing to merge the issue contract into.
   const topicless = await launch({
-    type: "general-purpose", description: "open general purpose session", interactive: true, issue: 47,
+    type: "general-purpose", description: "open general purpose session", interactive: true, issues: [47],
   });
   assert.equal(topicless.status, 200, JSON.stringify(topicless.body));
-  assert.match(JSON.stringify(topicless.body), /issue 47 was ignored/);
+  assert.match(JSON.stringify(topicless.body), /issue #47 was ignored/);
   // The supported pairing — topic plus issue — launches clean.
   const supported = await launch({
-    type: "general-purpose", description: "drive the session fix", prompt: "Work with me on the session loss", interactive: true, issue: 47,
+    type: "general-purpose", description: "drive the session fix", prompt: "Work with me on the session loss", interactive: true, issues: [47],
   });
   assert.equal(supported.status, 200, JSON.stringify(supported.body));
   assert.equal(JSON.stringify(supported.body).includes("was ignored"), false);
+  // Several ignored issues are all named, and the notice agrees in number.
+  const many = await launch({
+    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47, 52],
+  });
+  assert.equal(many.status, 200, JSON.stringify(many.body));
+  assert.match(JSON.stringify(many.body), /issues #47, #52 were ignored/);
+});
+
+test("run_agent carries several issues into one launch and resolves a repeat once", async () => {
+  const { launch, fleet } = setup();
+  const launched = await launch({
+    type: "Explore", prompt: "Compare how both issues describe the retry backlog", description: "compare retry backlog issues", issues: [47, 52], run_in_background: true,
+  });
+  assert.equal(launched.status, 200, JSON.stringify(launched.body));
+  const session = fleet.list().find((entry) => entry.identity.type === "Explore");
+  assert.deepEqual(session?.issueNumbers, [47, 52]);
+
+  // A repeated number is unambiguous, so it is deduped with a notice rather
+  // than refused — and the order the caller gave survives.
+  const repeated = await launch({
+    type: "Explore", prompt: "Compare how both issues describe the retry backlog", description: "compare retry backlog again", issues: [52, 47, 52], run_in_background: true,
+  });
+  assert.equal(repeated.status, 200, JSON.stringify(repeated.body));
+  assert.match(JSON.stringify(repeated.body), /repeated numbers/);
+  const deduped = fleet.list().filter((entry) => entry.identity.type === "Explore").at(-1);
+  assert.deepEqual(deduped?.issueNumbers, [52, 47]);
 });
 
 test("an interactive-only brainstormer is launched interactively and the correction is reported", async () => {

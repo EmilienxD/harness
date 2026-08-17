@@ -34,23 +34,23 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
       const instruction = input.prompt?.trim();
       if (instruction === undefined || instruction.length === 0) return undefined;
       // Exception: a dual-mode interactive launch may name an opening topic
-      // *against an issue*. The bridge resolves the contract into the first
-      // prompt once; the user steers from there. Interactive-only types keep
+      // *against one or more issues*. The bridge resolves each contract into the
+      // first prompt once; the user steers from there. Interactive-only types keep
       // the free-form topic — their conversation defines its own scope.
-      if (input.issue !== undefined && !isInteractiveAgentType(input.type)) {
-        return this.prompts.resolve({ kind: "issue-context", instruction, issueNumber: input.issue });
+      if (input.issues !== undefined && !isInteractiveAgentType(input.type)) {
+        return this.prompts.resolve({ kind: "issue-context", instruction, issueNumbers: input.issues });
       }
       return this.prompts.resolve({ kind: "free-form", instruction });
     }
-    if (input.type === "implementer" && input.issue !== undefined) {
-      return this.prompts.resolve({ kind: "implementation", instruction: input.prompt ?? "Implement the issue.", issueNumber: input.issue });
+    if (input.type === "implementer" && input.issues !== undefined) {
+      return this.prompts.resolve({ kind: "implementation", instruction: input.prompt ?? "Implement the issue.", issueNumbers: input.issues });
     }
-    if (input.issue !== undefined) {
-      // The resolved issue and parent spec lead; the Manager's wording scopes
-      // the task within them. No `??` fallback — for automated launches the MCP
-      // boundary already requires `prompt`, and a bare `issue` must fail loudly
-      // rather than guess the task.
-      return this.prompts.resolve({ kind: "issue-context", instruction: input.prompt ?? "Address the work described in this issue.", issueNumber: input.issue });
+    if (input.issues !== undefined) {
+      // The resolved issues and their parent specs lead; the Manager's wording
+      // scopes the task within them. No `??` fallback — for automated launches
+      // the MCP boundary already requires `prompt`, and bare `issues` must fail
+      // loudly rather than guess the task.
+      return this.prompts.resolve({ kind: "issue-context", instruction: input.prompt ?? "Address the work described in these issues.", issueNumbers: input.issues });
     }
     return this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Continue with the requested task." });
   }

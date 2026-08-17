@@ -20,11 +20,13 @@ function invalid(message: string): BridgeResponse {
 
 function parseCreate(body: unknown): CreateAboardTerminalRequest | BridgeResponse {
   if (!isRecord(body)) return invalid("Request body must be an object");
-  const { agentId, sessionId, agentType, issueNumber, name, shellPath, shellArgs, initialCommand } = body;
+  const { agentId, sessionId, agentType, issueNumbers, name, shellPath, shellArgs, initialCommand } = body;
   if (typeof agentId !== "string" || agentId.trim() === "") return invalid("agentId must be a non-empty string");
   if (typeof sessionId !== "string" || !UUID.test(sessionId)) return invalid("sessionId must be a UUID");
   if (typeof agentType !== "string" || !AGENT_TYPES.includes(agentType as AgentType)) return invalid("agentType is not supported");
-  if (issueNumber !== undefined && (!Number.isInteger(issueNumber) || (issueNumber as number) <= 0)) return invalid("issueNumber must be a positive integer");
+  if (issueNumbers !== undefined && (!Array.isArray(issueNumbers) || issueNumbers.some((value) => !Number.isInteger(value) || (value as number) <= 0))) {
+    return invalid("issueNumbers must be an array of positive integers");
+  }
   for (const [field, value] of [["name", name], ["shellPath", shellPath], ["initialCommand", initialCommand]] as const) {
     if (value !== undefined && (typeof value !== "string" || value.trim() === "")) return invalid(`${field} must be a non-empty string`);
   }
@@ -35,7 +37,7 @@ function parseCreate(body: unknown): CreateAboardTerminalRequest | BridgeRespons
     agentId: agentId as AgentId,
     sessionId: sessionId as SessionId,
     agentType: agentType as AgentType,
-    ...(issueNumber === undefined ? {} : { issueNumber: issueNumber as number }),
+    ...(issueNumbers === undefined ? {} : { issueNumbers: issueNumbers as number[] }),
     ...(name === undefined ? {} : { name: name as string }),
     ...(shellPath === undefined ? {} : { shellPath: shellPath as string }),
     ...(shellArgs === undefined ? {} : { shellArgs: shellArgs as string[] }),

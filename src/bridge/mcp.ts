@@ -2,6 +2,7 @@ import { MCP_LAUNCHABLE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentTyp
 import { ROADMAP_TASK_STATUSES, type RoadmapAnchor, type RoadmapTaskStatus } from "../domain/roadmap.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
 import type { ReviewCoordinator } from "../github/review.js";
+import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
 import { CORE_MCP_TOOLS } from "./mcp-tools.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
@@ -72,6 +73,27 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+/**
+ * `issues` is validated here rather than left to the JSON Schema, which the
+ * caller is free to ignore. Duplicates are deduped rather than refused: a
+ * repeated number is wrong, not ambiguous, and the caller's intent is
+ * unmistakable (`AGENTS.md`).
+ */
+function parseIssues(value: unknown): { readonly issues: readonly number[]; readonly notices: readonly string[] } | string {
+  if (!Array.isArray(value)) return "issues must be an array of positive integers";
+  if (value.length === 0) return "issues must contain at least one issue number";
+  for (const entry of value) {
+    if (!Number.isInteger(entry) || (entry as number) <= 0) return "every entry of issues must be a positive integer";
+  }
+  const issues = [...new Set(value as readonly number[])];
+  return {
+    issues,
+    notices: issues.length === value.length
+      ? []
+      : [`issues contained repeated numbers, which were resolved once each: ${formatIssueNumbers(issues)}.`],
+  };
+}
+
 interface ParsedLaunch {
   readonly input: DelegationLaunchInput;
   readonly interactive: boolean;
@@ -114,7 +136,7 @@ function normalizeDescription(raw: string, prompt: string | undefined, type: str
 
 function parseLaunch(value: unknown): ParsedLaunch | string {
   if (!isRecord(value)) return "arguments must be an object";
-  if (!exactKeys(value, ["type", "prompt", "description", "issue", "interactive", "run_in_background"])) {
+  if (!exactKeys(value, ["type", "prompt", "description", "issues", "interactive", "run_in_background"])) {
     return "arguments contain an unknown property";
   }
   if (!nonEmptyString(value.type) || !MCP_LAUNCHABLE_AGENT_TYPES.includes(value.type as AgentType)) {
@@ -126,9 +148,10 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
   if (!nonEmptyString(value.description)) return "description must be a non-empty string";
   if (value.prompt !== undefined && !nonEmptyString(value.prompt)) return "prompt must be non-empty when provided";
-  if (value.issue !== undefined && (!Number.isInteger(value.issue) || (value.issue as number) <= 0)) return "issue must be a positive integer";
+  const parsedIssues = value.issues === undefined ? undefined : parseIssues(value.issues);
+  if (typeof parsedIssues === "string") return parsedIssues;
 
-  const notices: string[] = [];
+  const notices: string[] = [...(parsedIssues?.notices ?? [])];
   const label = normalizeDescription(value.description, value.prompt === undefined ? undefined : value.prompt as string, type);
   if (label.notice !== undefined) notices.push(label.notice);
   let interactive = value.interactive === true;
@@ -136,8 +159,9 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
     interactive = true;
     notices.push(`${type} is an interactive type and was launched interactively; no result will be delivered, so continue with the user instead of waiting.`);
   }
-  if (interactive && value.issue !== undefined && (isInteractiveAgentType(type) || !nonEmptyString(value.prompt))) {
-    notices.push(`issue ${value.issue} was ignored: an interactive session opens with only the opening topic. To hand the session an issue's context, pass it in \`prompt\`.`);
+  if (interactive && parsedIssues !== undefined && (isInteractiveAgentType(type) || !nonEmptyString(value.prompt))) {
+    const ignored = parsedIssues.issues.length === 1 ? "was ignored" : "were ignored";
+    notices.push(`${describeIssueNumbers(parsedIssues.issues)} ${ignored}: an interactive session opens with only the opening topic. To hand the session an issue's context, pass it in \`prompt\`.`);
   }
   if (!interactive && !nonEmptyString(value.prompt)) return "prompt is required unless interactive is true";
   const background = !interactive && value.run_in_background === true;
@@ -149,7 +173,7 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
       type: type as DelegationLaunchInput["type"],
       description: label.description,
       ...(value.prompt === undefined ? {} : { prompt: (value.prompt as string).trim() }),
-      ...(value.issue === undefined ? {} : { issue: value.issue as number }),
+      ...(parsedIssues === undefined ? {} : { issues: parsedIssues.issues }),
     },
     interactive,
     background,

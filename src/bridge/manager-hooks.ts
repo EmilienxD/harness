@@ -2,6 +2,7 @@ import type { AgentId, AgentSession, IsoTimestamp, WorkerResult } from "../domai
 import { renderTasks, type RoadmapTask } from "../domain/roadmap.js";
 import type { FleetRegistry, MailboxEntry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
+import { describeIssueNumbers } from "../shared/issues.js";
 import type { DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 
@@ -258,7 +259,7 @@ export class ManagerBriefings {
   #fleet(): string {
     const holder = this.lease.current();
     const agents = this.fleet.list().filter(active).map((entry) => {
-      const issue = entry.issueNumber === undefined ? "" : `, issue #${entry.issueNumber}`;
+      const issue = entry.issueNumbers === undefined ? "" : `, ${describeIssueNumbers(entry.issueNumbers)}`;
       const lease = holder?.agentId === entry.identity.agentId ? ", holds the write lease" : "";
       // The description is what the user sees in the fleet tree, so it is what
       // makes this list legible when the Manager relays it back to them.

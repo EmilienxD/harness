@@ -181,7 +181,8 @@ export interface AgentSession {
   readonly lifecycle: AgentLifecycle;
   readonly resultDelivery: ResultDelivery;
   readonly telemetry: AgentTelemetry;
-  readonly issueNumber?: number;
+  /** Every issue this agent's launch prompt resolved, in the order it was given them. */
+  readonly issueNumbers?: readonly number[];
   /**
    * Set only by the auto-run engine. For an agent whose contract ends at "the
    * working tree contains the change", a dirty tree at Stop is the expected

@@ -78,7 +78,7 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
   const prompt = await resolver.resolve({
     kind: "implementation",
     instruction: "Keep the change small.",
-    issueNumber: 47,
+    issueNumbers: [47],
   });
 
   assert.ok(prompt !== undefined);
@@ -113,7 +113,7 @@ test("the prompt differs when GitHub knows no branch for the issue", async () =>
   const resolve = (branch: string | undefined) =>
     new PromptResolver({
       github: new FakeGitHub({ issues: [{ ...issue47, branch, parentIssueNumber: undefined }] }),
-    }).resolve({ kind: "implementation", instruction: "Go.", issueNumber: 47 });
+    }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47] });
   const withBranch = await resolve("feat/47-token-refresh");
   const withoutBranch = await resolve(undefined);
   assert.notEqual(withoutBranch?.text, withBranch?.text);
@@ -127,7 +127,7 @@ test("truncates long bodies and marks the source truncated", async () => {
   const prompt = await resolver.resolve({
     kind: "implementation",
     instruction: "Go.",
-    issueNumber: 47,
+    issueNumbers: [47],
   });
 
   assert.equal(prompt?.sources[0]?.truncated, true);
@@ -214,12 +214,12 @@ test("rejects an empty instruction and a missing issue or pull request", async (
   const resolver = new PromptResolver({ github: new FakeGitHub({}) });
 
   await assert.rejects(
-    () => resolver.resolve({ kind: "implementation", instruction: "  ", issueNumber: 47 }),
+    () => resolver.resolve({ kind: "implementation", instruction: "  ", issueNumbers: [47] }),
     (error: unknown) =>
       error instanceof PromptResolutionError && error.code === "empty-instruction",
   );
   await assert.rejects(
-    () => resolver.resolve({ kind: "implementation", instruction: "Go.", issueNumber: 47 }),
+    () => resolver.resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47] }),
     (error: unknown) =>
       error instanceof PromptResolutionError && error.code === "issue-not-found",
   );
@@ -227,6 +227,59 @@ test("rejects an empty instruction and a missing issue or pull request", async (
     () => resolver.resolve({ kind: "review", instruction: "Go.", pullRequestNumber: 42 }),
     (error: unknown) =>
       error instanceof PromptResolutionError && error.code === "pull-request-not-found",
+  );
+});
+
+test("several issues each resolve in the caller's order and share one parent spec", async () => {
+  const issue52: IssueSnapshot = {
+    number: 52, title: "Cache the refreshed token", body: "Keep the refreshed token warm.",
+    labels: ["ai:afk"], state: "open", parentIssueNumber: 31,
+  };
+  const github = new FakeGitHub({ issues: [issue47, issue52, issue31] });
+  const prompt = await new PromptResolver({ github }).resolve({
+    kind: "issue-context",
+    instruction: "Reconcile how these two describe the token lifetime.",
+    issueNumbers: [52, 47],
+  });
+
+  assert.ok(prompt !== undefined);
+  assert.ok(prompt.text.includes("Reconcile how these two describe the token lifetime."));
+  assert.ok(prompt.text.includes("Keep the refreshed token warm."));
+  assert.ok(prompt.text.includes("Refresh the access token before it expires."));
+  // One section per issue in the caller's order, then the spec both share — once.
+  assert.deepEqual(prompt.sources.map((source) => `${source.kind}#${source.number}`), ["issue#52", "issue#47", "parent-spec#31"]);
+  assert.deepEqual(github.issueRequests, [52, 47, 31]);
+  assert.equal(prompt.headline, "Use the resolved context for issues #52, #47.");
+});
+
+test("a repeated issue resolves once and a parent named among the issues is not resolved twice", async () => {
+  const github = new FakeGitHub({ issues: [issue47, issue31] });
+  const prompt = await new PromptResolver({ github }).resolve({
+    kind: "issue-context",
+    instruction: "Read the spec alongside its child.",
+    // 31 is 47's parent spec, and 47 is repeated.
+    issueNumbers: [47, 31, 47],
+  });
+
+  assert.deepEqual(prompt?.sources.map((source) => `${source.kind}#${source.number}`), ["issue#47", "issue#31"]);
+  assert.deepEqual(github.issueRequests, [47, 31]);
+});
+
+test("a single issue keeps today's headline and one bad number in the batch fails the whole prompt", async () => {
+  const github = new FakeGitHub({ issues: [issue47, issue31] });
+  const resolver = new PromptResolver({ github });
+  const one = await resolver.resolve({ kind: "issue-context", instruction: "Go.", issueNumbers: [47] });
+  assert.equal(one?.headline, "Use the resolved context for issue #47 — Add token refresh.");
+
+  await assert.rejects(
+    () => resolver.resolve({ kind: "issue-context", instruction: "Go.", issueNumbers: [47, 999] }),
+    (error: unknown) => error instanceof PromptResolutionError && error.code === "issue-not-found",
+  );
+  // An issue-bound prompt with nothing to bind to is a typed refusal, not an
+  // empty section list.
+  await assert.rejects(
+    () => resolver.resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [] }),
+    (error: unknown) => error instanceof PromptResolutionError && error.code === "no-issue",
   );
 });
 
@@ -244,7 +297,7 @@ test("summarizes a prompt without repeating its content", async () => {
   const prompt = await resolver.resolve({
     kind: "implementation",
     instruction: "Go.",
-    issueNumber: 47,
+    issueNumbers: [47],
   });
 
   const description = describeResolvedPrompt(prompt);
@@ -262,7 +315,7 @@ test("an issue-bound webresearcher receives resolved issue and parent-spec conte
     type: "webresearcher",
     description: "research current auth guidance",
     prompt: "Verify whether the proposed token lifetime matches current guidance.",
-    issue: 47,
+    issues: [47],
   }, { interactive: false });
 
   assert.ok(prompt?.text.includes("Verify whether the proposed token lifetime matches current guidance."));
@@ -281,7 +334,7 @@ test("an issue-bound Explore receives resolved issue context with its instructio
     type: "Explore",
     description: "check backlog handling",
     prompt: "Investigate whether the backlog is handled elsewhere.",
-    issue: 47,
+    issues: [47],
   }, { interactive: false });
 
   assert.ok(prompt?.text.includes("Investigate whether the backlog is handled elsewhere."));
@@ -297,18 +350,18 @@ test("an issue-bound interactive general-purpose opens with the resolved contrac
     type: "general-purpose",
     description: "fix the session loss",
     prompt: "Work with me to fix the session loss.",
-    issue: 47,
+    issues: [47],
   }, { interactive: true });
 
   assert.ok(prompt?.text.includes("Work with me to fix the session loss."));
   assert.deepEqual(prompt?.sources.map((source) => source.kind), ["issue", "parent-spec"]);
   // Without an opening topic an interactive terminal opens empty; the issue
   // number alone is not a first message.
-  assert.equal(await adapter.resolve({ type: "general-purpose", description: "d", issue: 47 }, { interactive: true }), undefined);
+  assert.equal(await adapter.resolve({ type: "general-purpose", description: "d", issues: [47] }, { interactive: true }), undefined);
   // Interactive-only types keep the free-form topic: their conversation
   // defines its own scope, and the bridge does not silently widen it.
   const brainstorm = await adapter.resolve({
-    type: "brainstormer", description: "d", prompt: "caching layer", issue: 47,
+    type: "brainstormer", description: "d", prompt: "caching layer", issues: [47],
   }, { interactive: true });
   assert.ok(brainstorm?.text.includes("caching layer"));
   // Free-form topics fetch nothing: no GitHub sources are attached.

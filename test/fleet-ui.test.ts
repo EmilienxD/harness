@@ -11,7 +11,7 @@ const agent = (value: string) => value as AgentId;
 const session = (value: string) => value as SessionId;
 const terminal = (value: string) => value as TerminalId;
 const startedAt = at("2026-07-30T10:00:00.000Z");
-const worker: AgentSession = { identity: { agentId: agent("worker-1"), type: "implementer" }, sessionId: session("session-1"), terminal: { terminalId: terminal("terminal-1"), name: "worker" }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "tool-result" }, telemetry: { totalTokens: 1200, totalDurationMs: 3000, totalToolUseCount: 4, compactionCount: 1 }, issueNumber: 19 };
+const worker: AgentSession = { identity: { agentId: agent("worker-1"), type: "implementer" }, sessionId: session("session-1"), terminal: { terminalId: terminal("terminal-1"), name: "worker" }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "tool-result" }, telemetry: { totalTokens: 1200, totalDurationMs: 3000, totalToolUseCount: 4, compactionCount: 1 }, issueNumbers: [19] };
 
 test("tree mapping is hierarchical and shows status, elapsed time, and lease but no telemetry", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease(); let refreshes = 0;
@@ -26,6 +26,14 @@ test("tree mapping is hierarchical and shows status, elapsed time, and lease but
   assert.equal(child !== undefined && model.item(child).description, "running");
   assert.equal(child !== undefined && model.item(child).tooltip, "Type: Explore\nStatus: running");
   assert.ok(refreshes >= 4); model.dispose();
+});
+
+test("a row names every issue its launch was bound to", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease();
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:00:05.000Z"));
+  fleet.register({ ...worker, identity: { agentId: agent("worker-2"), type: "general-purpose" }, issueNumbers: [12, 14] }, startedAt);
+  assert.equal(model.item(model.roots()[0]!).label, "general-purpose #12, #14");
+  model.dispose();
 });
 
 test("one section lists the Manager and its workers, with the Manager pinned first", () => {

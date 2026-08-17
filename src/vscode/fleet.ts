@@ -1,6 +1,7 @@
 import { isInteractiveAgentType, type AgentId, type AgentSession, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
+import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
 
 export type FleetTreeNode =
   | { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean }
@@ -55,7 +56,7 @@ export class FleetTreeModel {
       return { label: node.child.type, description: node.child.status, tooltip: childTooltip(node.child), icon: "symbol-method", contextValue: "aboard.child", collapsible: false };
     }
     const { session } = node;
-    const goal = session.issueNumber === undefined ? "" : ` #${session.issueNumber}`;
+    const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
     const terminalOpen = this.isTerminalOpen(session.terminal.terminalId);
     const elapsed = formatElapsed(session.lifecycle.startedAt, this.now());
     const markers = [terminalOpen ? session.lifecycle.status : "paused", node.leaseHolder ? "lease holder" : "", elapsed].filter(Boolean);
@@ -160,7 +161,7 @@ function notify(event: FleetEvent, fleet: FleetRegistry, host: FleetNotification
   // The Manager is the user's own console: its ending is something they did, not
   // a background result worth a toast.
   if (session?.identity.type === "manager") return;
-  if (session?.lifecycle.status === "completed") host.information(`${session.identity.type} completed${session.issueNumber === undefined ? "" : ` issue #${session.issueNumber}`}.`);
+  if (session?.lifecycle.status === "completed") host.information(`${session.identity.type} completed${session.issueNumbers === undefined ? "" : ` ${describeIssueNumbers(session.issueNumbers)}`}.`);
   else if (session?.lifecycle.status === "failed") host.error(`${session.identity.type} failed: ${failureLabel(session.lifecycle.failure.type)}.`);
 }
 function failureLabel(type: WorkerFailureType): string { return type.replaceAll("-", " "); }

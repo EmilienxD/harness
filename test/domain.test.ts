@@ -26,7 +26,7 @@ const validSession = {
     compactionCount: 0,
     resolvedModel: "claude-opus",
   },
-  issueNumber: 2,
+  issueNumbers: [2],
 } as const;
 
 function describeLifecycle(lifecycle: AgentLifecycle): string {
@@ -71,6 +71,21 @@ test("parses a valid domain session from unknown input", () => {
   if (result.ok) {
     assert.equal(result.value.identity.type, "implementer");
     assert.equal(describeLifecycle(result.value.lifecycle), "running");
+    assert.deepEqual(result.value.issueNumbers, [2]);
+  }
+});
+
+test("a session's bound issues round trip as a list, and a malformed one fails the session", () => {
+  const withIssues = (issueNumbers: unknown) => parseAgentSession({ ...structuredClone(validSession), issueNumbers });
+  const several = withIssues([2, 7]);
+  assert.equal(several.ok, true);
+  if (several.ok) assert.deepEqual(several.value.issueNumbers, [2, 7]);
+  // An empty list carries no attribution, so it round trips as absence.
+  const none = withIssues([]);
+  assert.equal(none.ok, true);
+  if (none.ok) assert.equal("issueNumbers" in none.value, false);
+  for (const malformed of [2, "2", [2, "x"], [2, -1], [2, null]]) {
+    assert.equal(withIssues(malformed).ok, false, JSON.stringify(malformed));
   }
 });
 

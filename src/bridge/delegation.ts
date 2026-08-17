@@ -30,7 +30,8 @@ export interface DelegationLaunchInput {
   readonly type: Exclude<AgentType, "manager">;
   readonly prompt?: string;
   readonly description: string;
-  readonly issue?: number;
+  /** Every issue whose resolved contract belongs in the opening prompt, in the caller's order. */
+  readonly issues?: readonly number[];
   readonly pullRequest?: number;
   readonly focus?: string;
   /**
@@ -235,7 +236,7 @@ export class DelegationCoordinator {
       agentId: session.identity.agentId,
       sessionId: session.sessionId,
       agentType: session.identity.type,
-      ...(session.issueNumber === undefined ? {} : { issueNumber: session.issueNumber }),
+      ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       name: session.terminal.name,
       initialCommand: plan.commandLine,
       // The extension-host waiter that owned an automated result is gone.
@@ -351,7 +352,7 @@ export class DelegationCoordinator {
         agentId,
         sessionId,
         agentType: input.type,
-        ...(input.issue === undefined ? {} : { issueNumber: input.issue }),
+        ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         name: `aboard: ${input.description}`,
         initialCommand: plan.commandLine,
         // Hooks and focus both key on this: a result-delivering session reports
@@ -368,7 +369,7 @@ export class DelegationCoordinator {
         lifecycle: { status: "starting", startedAt: occurredAt },
         resultDelivery,
         telemetry: EMPTY_TELEMETRY,
-        ...(input.issue === undefined ? {} : { issueNumber: input.issue }),
+        ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
       }, occurredAt);
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);

@@ -27,7 +27,7 @@ function fleetWithWorker(): FleetRegistry {
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId,
     terminal: { terminalId: "worker-terminal" as TerminalId, name: "worker" },
     lifecycle: { status: "starting", startedAt: timestamp }, resultDelivery: { mode: "tool-result" },
-    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 }, issueNumber: 15,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 }, issueNumbers: [15],
   };
   fleet.register(worker, timestamp); fleet.transition(parentId, { status: "running", startedAt: timestamp }, timestamp);
   return fleet;
@@ -62,6 +62,26 @@ test("records compact summaries, repeat count, and precise re-grounding", async 
   assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, implementing issue #15 on branch feat/issue-15. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.");
   const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
   assert.equal((await import("../src/domain/validation.js")).parseFleetPersistenceDto(serialized).ok, true);
+});
+
+test("re-grounding names every bound issue and refuses a worker bound to none", async () => {
+  const branches = { current: async () => "feat/issue-15" };
+  const bound = (agentId: string, issueNumbers: readonly number[]): AgentSession => ({
+    identity: { agentId: agentId as AgentId, type: "implementer" },
+    sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId,
+    terminal: { terminalId: `${agentId}-terminal` as TerminalId, name: agentId },
+    lifecycle: { status: "starting", startedAt: timestamp }, resultDelivery: { mode: "tool-result" },
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+    issueNumbers,
+  });
+  const many = fleetWithWorker();
+  many.register(bound("worker-16", [15, 18]), timestamp);
+  const service = new WorkerHookService(many, branches, () => new Date(timestamp));
+  assert.match(await service.reground("worker-16" as AgentId, "C:\\repo"), /implementing issues #15, #18 on branch feat\/issue-15/);
+
+  const unbound = fleetWithWorker();
+  unbound.register(bound("worker-17", []), timestamp);
+  await assert.rejects(() => new WorkerHookService(unbound, branches, () => new Date(timestamp)).reground("worker-17" as AgentId, "C:\\repo"));
 });
 
 test("worker Python hook is silent for non-aboard and wrong-role sessions", () => {

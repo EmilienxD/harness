@@ -557,7 +557,7 @@ export class AutoRunEngine {
   async #implement(issue: PlannedIssue, signal: AbortSignal): Promise<string> {
     const outcome = await this.options.launcher.runAutomated({
       type: "implementer",
-      issue: issue.number,
+      issues: [issue.number],
       description: `implement issue ${issue.number}`,
       prompt: `Implement issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Do not run git commit, git push, or gh.`,
       expectsUncommittedTree: true,
@@ -614,7 +614,7 @@ export class AutoRunEngine {
       // branch, so a second writer here is the collision the lease exists for.
       const handles = await this.options.launcher.launchInteractive({
         type: "pr-doctor-hitl",
-        issue: issue.number,
+        issues: [issue.number],
         pullRequest: prNumber,
         description: `review pull request ${prNumber}`,
       }, "auto-run");
@@ -624,7 +624,7 @@ export class AutoRunEngine {
     }
     const outcome = await this.options.launcher.runAutomated({
       type: "pr-doctor-afk",
-      issue: issue.number,
+      issues: [issue.number],
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
       expectsUncommittedTree: true,

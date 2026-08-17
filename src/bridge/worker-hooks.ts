@@ -1,6 +1,7 @@
 import type { AgentId, AgentTelemetry, AgentTokenUsage, IsoTimestamp } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import { ProcessGitClient, type GitClient } from "../git/client.js";
+import { describeIssueNumbers } from "../shared/issues.js";
 import type { BridgeRequestHandler } from "./protocol.js";
 import { protocolError } from "./protocol.js";
 
@@ -50,9 +51,12 @@ export class WorkerHookService {
 
   public async reground(parentAgentId: AgentId, cwd: string): Promise<string> {
     const worker = this.fleet.get(parentAgentId);
-    if (worker === undefined || worker.identity.type === "manager" || worker.issueNumber === undefined) throw new Error("Compaction re-grounding requires a registered issue-bound worker");
+    if (worker === undefined || worker.identity.type === "manager" || worker.issueNumbers === undefined || worker.issueNumbers.length === 0) {
+      throw new Error("Compaction re-grounding requires a registered issue-bound worker");
+    }
     const branch = await this.branches.current(cwd);
-    return `You are aboard worker ${parentAgentId}, implementing issue #${worker.issueNumber} on branch ${branch}. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.`;
+    const contract = worker.issueNumbers.length === 1 ? "resolved issue and spec" : "resolved issues and specs";
+    return `You are aboard worker ${parentAgentId}, implementing ${describeIssueNumbers(worker.issueNumbers)} on branch ${branch}. Continue from the ${contract} supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.`;
   }
 
   private timestamp(): IsoTimestamp { return this.now().toISOString() as IsoTimestamp; }

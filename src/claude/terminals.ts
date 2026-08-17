@@ -95,7 +95,7 @@ export interface CreateAboardTerminalRequest {
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
-  readonly issueNumber?: number;
+  readonly issueNumbers?: readonly number[];
   readonly name?: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
@@ -142,7 +142,7 @@ export interface TerminalSnapshot {
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
-  readonly issueNumber?: number;
+  readonly issueNumbers?: readonly number[];
   readonly name: string;
   readonly cwd: string;
   /**
@@ -275,7 +275,9 @@ export class TerminalController {
       ABOARD_AGENT_TYPE: request.agentType,
       ABOARD_WORKSPACE_ROOT: environment.workspaceRoot,
     };
-    if (request.issueNumber !== undefined) env.ABOARD_ISSUE_NUMBER = String(request.issueNumber);
+    if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
+      env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");
+    }
     if (request.deliversResult === true) env.ABOARD_DELIVERS_RESULT = "1";
     if (request.agentType === "manager") {
       env.MCP_TOOL_TIMEOUT = String(environment.managerMcpTimeoutMs);
@@ -300,7 +302,7 @@ export class TerminalController {
       agentId: request.agentId,
       sessionId: request.sessionId,
       agentType: request.agentType,
-      ...(request.issueNumber === undefined ? {} : { issueNumber: request.issueNumber }),
+      ...(request.issueNumbers === undefined ? {} : { issueNumbers: request.issueNumbers }),
       name,
       cwd: environment.workspaceRoot,
       status: "open",

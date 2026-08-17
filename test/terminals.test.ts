@@ -80,7 +80,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
     agentId: agent("agent-6"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     agentType: "implementer",
-    issueNumber: 6,
+    issueNumbers: [6],
     initialCommand: "claude --agent implementer --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"Implement issue 6\"",
   });
 
@@ -93,7 +93,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
     ABOARD_SESSION_ID: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
     ABOARD_AGENT_TYPE: "implementer",
     ABOARD_WORKSPACE_ROOT: "C:\\work\\aboard",
-    ABOARD_ISSUE_NUMBER: "6",
+    ABOARD_ISSUE_NUMBERS: "6",
   });
   assert.deepEqual(host.created[0]?.terminal.sent, [{
     text: "claude --agent implementer --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"Implement issue 6\"",
@@ -167,10 +167,20 @@ test("releasing is idempotent and never resurrects a closed terminal", () => {
   assert.equal(controller.get(created.terminalId).status, "closed");
 });
 
+test("several bound issues reach the session as one comma-separated variable, and none as no variable", () => {
+  const { controller, host } = setup();
+  controller.create({ agentId: agent("agent-7"), sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "Explore", issueNumbers: [6, 9] });
+  assert.equal(host.created[0]?.options.env?.ABOARD_ISSUE_NUMBERS, "6,9");
+  // An empty list is no attribution, not an empty string a hook would have to
+  // tell apart from a real value.
+  controller.create({ agentId: agent("agent-8"), sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"), agentType: "Explore", issueNumbers: [] });
+  assert.equal("ABOARD_ISSUE_NUMBERS" in (host.created[1]?.options.env ?? {}), false);
+});
+
 test("the terminal keeps its default shell name; the aboard label stays on the record", () => {
   // A tab named "aboard: manager" outlives the agent and then lies about it.
   const { controller, host } = setup();
-  const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "implementer", issueNumber: 6 });
+  const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "implementer", issueNumbers: [6] });
   assert.equal("name" in (host.created[0]?.options ?? {}), false);
   assert.equal(created.name, "aboard: implementer");
 });
@@ -306,7 +316,7 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
     agentId: "worker",
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
     agentType: "implementer",
-    issueNumber: 6,
+    issueNumbers: [6],
   }));
   assert.equal(created.status, 201);
   assert.equal(JSON.stringify(created.body).includes("secret"), false);

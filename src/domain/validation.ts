@@ -393,10 +393,9 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     issues,
   );
   const telemetry = parseTelemetry(record.telemetry, "session.telemetry", issues);
-  const issueNumber =
-    record.issueNumber === undefined
-      ? undefined
-      : readNonNegativeInteger(record.issueNumber, "session.issueNumber", issues);
+  const issueNumbers = record.issueNumbers === undefined ? undefined : Array.isArray(record.issueNumbers)
+    ? record.issueNumbers.map((value, index) => readNonNegativeInteger(value, `session.issueNumbers[${index}]`, issues))
+    : (issues.push("session.issueNumbers must be an array"), undefined);
   const lastResult =
     record.lastResult === undefined
       ? undefined
@@ -450,7 +449,8 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     lifecycle === undefined ||
     resultDelivery === undefined ||
     telemetry === undefined ||
-    (record.issueNumber !== undefined && issueNumber === undefined)
+    (record.issueNumbers !== undefined && issueNumbers === undefined)
+    || issueNumbers?.some((value) => value === undefined)
     || (record.lastResult !== undefined && lastResult === undefined)
     || compactSummaries?.some((value) => value === undefined)
   ) {
@@ -465,7 +465,9 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     resultDelivery,
     telemetry,
     ...(lastResult === undefined ? {} : { lastResult }),
-    ...(issueNumber === undefined ? {} : { issueNumber }),
+    // An empty array carries no attribution, so it round trips as absence
+    // rather than as a session bound to nothing.
+    ...(issueNumbers === undefined || issueNumbers.length === 0 ? {} : { issueNumbers: issueNumbers as number[] }),
     ...(expectsUncommittedTree === undefined ? {} : { expectsUncommittedTree }),
     ...(compactSummaries === undefined ? {} : { compactSummaries: compactSummaries as string[] }),
   };

@@ -36,7 +36,7 @@ function worker(fleet: FleetRegistry, managerAgentId: AgentId, status: AgentSess
     : { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "done" };
   fleet.register({ identity: { agentId: id, type: "implementer" }, sessionId: session(`4db0ed4c-5d9e-4ab5-a493-2b8575ab19e${fleet.list().length}`),
     terminal: { terminalId: terminal(`${id}-terminal`), name: id }, lifecycle: { status: "starting", startedAt: timestamp },
-    resultDelivery: { mode: "mailbox", managerAgentId }, telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 }, issueNumber: 12 }, timestamp);
+    resultDelivery: { mode: "mailbox", managerAgentId }, telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 }, issueNumbers: [12] }, timestamp);
   fleet.transition(id, lifecycle, timestamp);
   return id;
 }
@@ -95,6 +95,25 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
   assert.match(rendered, /<\/aboard-roadmap>/);
   assert.match(rendered, /PR #21 is hitl and waiting/);
   assert.match(rendered, /default branch main \| verify with npm run check/);
+});
+
+test("the fleet section names every issue an agent is bound to", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  worker(fleet, managerId);
+  fleet.register({
+    identity: { agentId: agent("worker-many"), type: "general-purpose" },
+    sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("worker-many-terminal"), name: "worker-many" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" },
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+    issueNumbers: [12, 14],
+  }, timestamp);
+  fleet.transition(agent("worker-many"), { status: "running", startedAt: timestamp }, timestamp);
+  const rendered = await new ManagerBriefings(sources(), fleet, new WriteLease()).render(new AbortController().signal);
+
+  assert.match(rendered, /issue #12(?!,)/);
+  assert.match(rendered, /issues #12, #14/);
 });
 
 test("hook output stays ASCII-only so the Claude TUI renders it cleanly", async () => {
