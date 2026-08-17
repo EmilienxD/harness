@@ -345,20 +345,78 @@ def _rel(path, root):
 # so generated messages need an API key but no separately installed package.
 # ---------------------------------------------------------------------------
 
-AI_MODEL = os.environ.get("COMMIT_AI_MODEL", "gemini-3.5-flash-lite")
+AI_MODEL_DEFAULT = "gemini-3.5-flash-lite"
+AI_MODEL = os.environ.get("COMMIT_AI_MODEL", AI_MODEL_DEFAULT)
 AI_TIMEOUT_SECONDS = 45
-DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
 GEMINI_BASE_URL = (
     os.environ.get("COMMIT_AI_BASE_URL") or DEFAULT_GEMINI_BASE_URL
 ).rstrip("/")
 
 # Character budgets for the prompt. The diff is the ground truth so it gets
 # the lion's share; session narrative is supporting evidence for *why*.
+# These are the *preferred* sizes; token_budget() below shrinks them when the
+# model's per-minute token limit is tighter than they are.
 DIFF_BUDGET = 40000
 PER_FILE_FLOOR = 800
 CONTEXT_BUDGET = 12000
 NEW_FILE_BUDGET = 4000
 LOG_SAMPLE = 15
+
+# --- Per-minute input-token limits -----------------------------------------
+#
+# The free Gemini tier caps tokens *per minute*, not just requests per minute.
+# Request rate is a non-issue here (one call per commit), but the TPM cap is
+# effectively a context limit: models advertise a 1M-token context while the
+# free tier will reject a single request that exceeds ~200k tokens in a
+# minute. So the prompt is sized against the TPM number, not the context
+# window.
+#
+# Keys are Gemini model ids; values are input tokens per minute on the free
+# tier, from the limits page in Google AI Studio
+# (https://ai.google.dev/gemini-api/docs/rate-limits). An unlisted model falls
+# back to DEFAULT_TPM_LIMIT. A 0 entry marks a model with NO free-tier quota
+# at all (0 RPM / 0 TPM / 0 RPD -- paid tiers only): generate_commit_message
+# refuses outright and points the user at a free-tier model, so nobody burns
+# an API round-trip on a request Google is guaranteed to reject.
+MODEL_TPM_LIMITS = {
+    "gemini-2.5-flash-lite": 250_000,
+    "gemini-2.5-pro": 0,
+    "gemini-3-flash": 250_000,
+    "gemini-3.1-pro": 0,
+    "gemini-3.1-flash-lite": 250_000,
+    "gemini-3.5-flash": 250_000,
+    "gemini-3.5-flash-lite": 250_000,
+    "gemini-3.6-flash": 250_000,
+    "gemini-3.7-flash": 250_000,
+}
+DEFAULT_TPM_LIMIT = 200_000
+
+# Chars per token, deliberately pessimistic. Real Gemini tokenisation of code
+# and diffs lands near 3.5-4 chars/token; assuming fewer chars per token makes
+# the estimate over-count tokens, which is the safe direction to be wrong in.
+CHARS_PER_TOKEN = 3.0
+
+# Tokens the request costs beyond the user prompt: system instruction, the
+# response schema, and the completion itself (which counts against the same
+# per-minute budget).
+OVERHEAD_TOKENS = 2000
+
+# Fraction of the limit left unused, absorbing tokenisation estimate error and
+# any other call that happened to land in the same minute.
+TPM_SAFETY_FRACTION = 0.20
+
+# Floors: below these the prompt stops being worth sending at all, so a
+# misconfigured tiny limit still leaves a prompt worth sending; the hard cap
+# in _build_prompt is what guarantees the ceiling if even these don't fit.
+MIN_DIFF_BUDGET = 4000
+MIN_CONTEXT_BUDGET = 1000
+
+# Chars the prompt spends on everything that is neither diff nor narrative:
+# branch line, commit-log sample, file summary, section headers, guidance.
+FIXED_SECTION_CHARS = 6000
+
+PromptBudget = namedtuple("PromptBudget", "total diff context tpm model")
 
 # Generated files: huge diffs, zero signal. Listed in the file summary so the
 # model knows they changed, but their bodies never reach the prompt.
@@ -665,7 +723,7 @@ def _truncate(text, limit):
     return text if len(text) <= limit else text[:limit] + " ..."
 
 
-def collect_session_context(transcript_path, repo_root):
+def collect_session_context(transcript_path, repo_root, budget=CONTEXT_BUDGET):
     """
     A chronological narrative of the session: what the user asked for and
     what was done, in the order it happened. The diff says *what* changed;
@@ -764,12 +822,12 @@ def collect_session_context(transcript_path, repo_root):
             collapsed.append([event, 1])
     lines = [e if n == 1 else f"{e}  (x{n})" for e, n in collapsed]
 
-    return redact(_budget_events(lines))
+    return redact(_budget_events(lines, budget))
 
 
-def _budget_events(lines):
+def _budget_events(lines, budget=CONTEXT_BUDGET):
     """
-    Fit the narrative into CONTEXT_BUDGET, keeping the highest-signal lines.
+    Fit the narrative into `budget` chars, keeping the highest-signal lines.
 
     A plain tail is the wrong trade here: user prompts are the only source
     of *intent*, they are small, and they cluster at the START of a session --
@@ -789,7 +847,7 @@ def _budget_events(lines):
 
     # Intent alone can overflow on a very long session; drop oldest prompts.
     for i, line in enumerate(lines):
-        if used <= CONTEXT_BUDGET:
+        if used <= budget:
             break
         if kept[i] is not None:
             kept[i] = None
@@ -798,7 +856,7 @@ def _budget_events(lines):
     for i in range(len(lines) - 1, -1, -1):
         if kept[i] is not None:
             continue
-        if used + len(lines[i]) + 1 > CONTEXT_BUDGET:
+        if used + len(lines[i]) + 1 > budget:
             continue
         kept[i] = lines[i]
         used += len(lines[i]) + 1
@@ -854,8 +912,78 @@ Output plain text only: no markdown fences, no headings, no quotes around \
 the subject."""
 
 
+def _listed_tpm_limit(name):
+    """Normalise the model id and resolve its entry in MODEL_TPM_LIMITS.
+
+    Model ids carry dated and preview suffixes (`gemini-2.5-flash-preview-05-20`)
+    that share the base model's limit, so an unlisted id falls back to the
+    longest listed id it starts with before falling back to the default.
+    """
+    name = name.strip().lower()
+    if name.startswith("models/"):
+        name = name[len("models/"):]
+    if name in MODEL_TPM_LIMITS:
+        return MODEL_TPM_LIMITS[name]
+
+    best = ""
+    for known in MODEL_TPM_LIMITS:
+        if name.startswith(known) and len(known) > len(best):
+            best = known
+    return MODEL_TPM_LIMITS[best] if best else DEFAULT_TPM_LIMIT
+
+
+def model_tpm_limit(model=None):
+    """
+    Input tokens-per-minute allowed for `model`, which this hook treats as a
+    hard per-request context limit (see MODEL_TPM_LIMITS).
+
+    `COMMIT_AI_TPM_LIMIT` overrides everything -- paid tiers have far higher
+    limits, and nobody should have to edit the hook to use one.
+    """
+    override = (os.environ.get("COMMIT_AI_TPM_LIMIT") or "").strip()
+    if override:
+        try:
+            value = int(override)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+
+    return _listed_tpm_limit(model or AI_MODEL)
+
+
+def prompt_budget(model=None):
+    """
+    Character budgets sized so one request cannot breach the model's
+    per-minute token limit.
+
+    Tokens are estimated from character counts rather than counted for real:
+    Gemini's countTokens endpoint would mean a second network round-trip per
+    commit, and it charges against the very budget being measured. A
+    pessimistic chars-per-token ratio plus a safety fraction buys the same
+    guarantee for free.
+    """
+    tpm = model_tpm_limit(model)
+    usable_tokens = int(tpm * (1.0 - TPM_SAFETY_FRACTION)) - OVERHEAD_TOKENS
+    total = max(0, int(usable_tokens * CHARS_PER_TOKEN))
+
+    diff, context = DIFF_BUDGET, CONTEXT_BUDGET
+    if diff + context + FIXED_SECTION_CHARS > total:
+        room = max(0, total - FIXED_SECTION_CHARS)
+        share = DIFF_BUDGET + CONTEXT_BUDGET
+        # Shrink both proportionally: a tight budget still needs *some*
+        # narrative, or the message can say what changed but never why.
+        diff = max(MIN_DIFF_BUDGET, room * DIFF_BUDGET // share)
+        context = max(MIN_CONTEXT_BUDGET, room * CONTEXT_BUDGET // share)
+
+    return PromptBudget(
+        total=total, diff=diff, context=context, tpm=tpm, model=model or AI_MODEL
+    )
+
+
 def _build_prompt(repo_root, targets, staged, transcript_path, guidance):
     """Assemble the user-content half of the request; returns (text, stats)."""
+    budget = prompt_budget()
     branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo_root).stdout.strip()
     log_result = run(
         ["git", "log", f"-n{LOG_SAMPLE}", "--format=%s", "--no-merges"], repo_root
@@ -868,8 +996,8 @@ def _build_prompt(repo_root, targets, staged, transcript_path, guidance):
 
     summary = collect_file_summary(repo_root, targets, staged)
     raw_diff = collect_diff(repo_root, targets, staged)
-    diff = trim_diff(raw_diff)
-    context = collect_session_context(transcript_path, repo_root)
+    diff = trim_diff(raw_diff, budget.diff)
+    context = collect_session_context(transcript_path, repo_root, budget.context)
 
     sections = []
     if guidance:
@@ -888,13 +1016,33 @@ def _build_prompt(repo_root, targets, staged, transcript_path, guidance):
     )
     sections.append("DIFF TO BE COMMITTED:\n" + (diff or "  (empty)"))
 
+    text = "\n\n".join(sections)
+
+    # Last resort. The per-section budgets have floors and the fixed sections
+    # (a long commit-log sample, a hundred-file summary) are estimates, so the
+    # ceiling is only a guarantee if it is also enforced on the whole string.
+    truncated = 0
+    if budget.total and len(text) > budget.total:
+        truncated = len(text) - budget.total
+        marker = f"\n\n... [{truncated} chars omitted to fit the token limit] ..."
+        text = text[: max(0, budget.total - len(marker))] + marker
+
     stats = {
         "diff_chars": len(raw_diff),
         "diff_sent": len(diff),
         "context_chars": len(context),
         "files": len([r for r in summary.splitlines() if r.strip()]),
+        "prompt_chars": len(text),
+        "prompt_tokens_est": estimate_tokens(text) + OVERHEAD_TOKENS,
+        "tpm_limit": budget.tpm,
+        "hard_truncated": truncated,
     }
-    return "\n\n".join(sections), stats
+    return text, stats
+
+
+def estimate_tokens(text):
+    """Pessimistic token count for `text` -- see CHARS_PER_TOKEN."""
+    return int(len(text) / CHARS_PER_TOKEN) + 1
 
 
 def _response_schema():
@@ -971,6 +1119,25 @@ def generate_commit_message(repo_root, targets, staged, transcript_path, guidanc
     api_key, _ = find_api_key(repo_root)
     if not api_key:
         raise AiError(key_setup_help(repo_root))
+
+    # Refuse before building the prompt: Google will reject this call in a
+    # second anyway, with a far less helpful message. COMMIT_AI_TPM_LIMIT
+    # skipped on purpose -- with a paid key the listed quota is 0 anyway, so
+    # the override is also how the prompt gets sized correctly. The map
+    # lookup itself respects suffix matches, so "gemini-2.5-pro-exp" is
+    # refused like "gemini-2.5-pro".
+    free_models = sorted(m for m, tpm in MODEL_TPM_LIMITS.items() if tpm > 0)
+    if _listed_tpm_limit(AI_MODEL) <= 0:
+        raise AiError(
+            f"'{AI_MODEL}' has no Google free-tier quota (0 requests per day) "
+            f"-- only a paid-tier API key can use it.\n"
+            f"Switch to a free-tier model, e.g.:\n"
+            f"    setx COMMIT_AI_MODEL \"{AI_MODEL_DEFAULT}\"   (Windows, new shells only)\n"
+            f"    export COMMIT_AI_MODEL={AI_MODEL_DEFAULT}     (bash/zsh)\n"
+            f"All free-tier models: {', '.join(free_models)}\n"
+            f"(On a paid key, also set COMMIT_AI_TPM_LIMIT to your tier's "
+            f"limit so the prompt is sized for it.)"
+        )
 
     prompt, stats = _build_prompt(
         repo_root, targets, staged, transcript_path, guidance
@@ -1163,6 +1330,15 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
         out.append("")
         out.append(str(exc))
         return "\n".join(out)
+
+    stats = ai.source
+    out.append("")
+    out.append(
+        f"Prompt sent to {ai.model}: ~{stats['prompt_tokens_est']} tokens "
+        f"(limit {stats['tpm_limit']}/min), {stats['diff_sent']} of "
+        f"{stats['diff_chars']} diff chars"
+        + (", hard-truncated" if stats["hard_truncated"] else "")
+    )
 
     if ai.reasoning:
         out.append("")

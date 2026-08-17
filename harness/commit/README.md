@@ -135,6 +135,22 @@ from your own prompts, the hook also runs a redaction pass over it for
 key-shaped strings before anything leaves the machine.
 
 Set `COMMIT_AI_MODEL` to override the default `gemini-3.5-flash-lite`.
+
+The free Gemini tier caps **tokens per minute**, not just requests, and that
+cap is well below the model's advertised context window — a single oversized
+request gets rejected outright. So the hook sizes the prompt against the TPM
+number: `MODEL_TPM_LIMITS` in the hook maps each model id to its per-minute
+input-token limit (dated and preview suffixes inherit the base model's entry),
+and the diff and session-narrative budgets shrink proportionally when that
+limit is tighter than they are, with a hard cap on the assembled prompt as a
+backstop. Token counts are estimated from character length at a pessimistic
+3 chars/token, with 20% of the limit left unspent — no `countTokens` round-trip,
+which would cost a request and charge against the very budget it measures.
+
+Set `COMMIT_AI_TPM_LIMIT` to a token count to override the map entirely; paid
+tiers have far higher limits and shouldn't require editing the hook. `/commit
+--dry --ai` prints the estimated prompt size and the limit it was sized against.
+
 Set `COMMIT_AI_BASE_URL` to override the Gemini API root, which defaults to
 `https://generativelanguage.googleapis.com/v1beta`. A trailing slash is
 optional. This is useful for a Gemini-compatible proxy or gateway; the hook
