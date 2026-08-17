@@ -236,7 +236,7 @@ export class DelegationCoordinator {
     // after a window reload, and it hands every worker back to them (see
     // below). A run that still needs the lease relaunches through the auto-run
     // engine, whose launches are leased.
-    if (plan.systemPrompt !== undefined) await this.options.spills.write(plan.systemPrompt);
+    if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition);
     const terminal = this.options.terminals.create({
       agentId: session.identity.agentId,
       sessionId: session.sessionId,
@@ -354,7 +354,7 @@ export class DelegationCoordinator {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
     }
     try {
-      if (plan.systemPrompt !== undefined) await this.options.spills.write(plan.systemPrompt);
+      if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition);
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill);
       const terminal = this.options.terminals.create({
         agentId,

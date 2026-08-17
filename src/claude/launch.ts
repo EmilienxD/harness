@@ -7,22 +7,27 @@
  *
  * Two invariants shape the whole module:
  *
- * - An agent's tool set lives in the `tools:` field of its
- *   `.aboard/agents/<name>.md` definition, and every flag that carries it comes
- *   from that one file (5.1.1). aboard's own agents are not registered as
- *   Claude Code subagents at all: a definition under `.claude/agents/` is
- *   discovered by *every* session in the workspace, including a user's own
- *   `claude`, which then sees `implementer` and the pr-doctors as spawnable
- *   types — outside the bridge and outside the write lease. So the definition
- *   lives where nothing discovers it, and the launch carries its body as
- *   `--system-prompt-file` and its tools as `--tools`. One file, two flags, no
- *   second authority: nothing can widen an agent past what it declares, which
- *   is what the write-lease derivation depends on.
+ * - An agent's persona and tool set live in one `.aboard/agents/<name>.md`
+ *   definition, and the launch carries that whole document (5.1.1). aboard
+ *   definitions are never placed on a session-discovered path: a file under
+ *   `.claude/agents/` is a registered subagent type seen by *every* session in
+ *   the workspace, including a user's own `claude`, which would then see
+ *   `implementer` and the pr-doctors as spawnable types — outside the bridge and
+ *   outside the write lease.
  *
- *   `--agent` therefore survives only for Claude Code's named `Explore` type.
- *   Its metadata-only aboard profile may select the command, model, and effort,
- *   but its system prompt and tool set belong to Claude Code, so aboard neither
- *   reconstructs them nor adds a competing `--tools` flag.
+ *   So each launch rewrites its definition into a private runtime directory and
+ *   points at it with `--add-dir`: the agent is registered inside exactly that
+ *   one session, under a per-launch name, and discoverable by nothing else. The
+ *   session runs as that agent through `--agent`, which replaces Claude Code's
+ *   default system prompt entirely and applies the file's `tools:` — one file,
+ *   one authority, and the write-lease derivation reads the same list the file
+ *   grants. It also restores the native session UI the flag pair could not: the
+ *   `@<name>` banner and the agent's color.
+ *
+ *   `--agent` names Claude Code's own `Explore` type as well. Its metadata-only
+ *   aboard profile may select the command, model, and effort, but its system
+ *   prompt and tool set belong to Claude Code, so aboard writes no definition
+ *   for it and adds no competing `--tools` flag.
  * - The first message and every later message travel as CLI arguments (5.1.2,
  *   5.1.3). aboard never types into a running TUI, so a message that cannot be
  *   represented on a command line spills to a file and is `@`-referenced.
@@ -198,20 +203,51 @@ export function isEffortLevel(value: unknown): value is EffortLevel {
   return typeof value === "string" && EFFORT_LEVEL_SET.has(value);
 }
 
+/**
+ * The display colors Claude Code renders for a subagent
+ * (`docs/CLAUDE-REFERENCES/subagents.md`). This is the set aboard's own
+ * `AGENT_COLOR_BY_NAME` is type-checked against, not a runtime gate: a value
+ * outside it falls back to grey in the session UI, so refusing the launch over
+ * one would trade a cosmetic default for a dead terminal.
+ */
+export const AGENT_COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"] as const;
+
+export type AgentColor = (typeof AGENT_COLORS)[number];
+
 export type LaunchConfiguration =
   /**
-   * An aboard agent definition (`.aboard/agents/<name>.md`), carried onto the
-   * command line in full: the body as `--system-prompt-file` and `tools:` as
-   * `--tools`. The file is not under `.claude/agents/`, so no session in the
-   * workspace can discover the agent or spawn it — see the module header.
+   * An aboard agent definition (`.aboard/agents/<name>.md`), rewritten into a
+   * per-launch runtime directory and launched from it with `--add-dir` plus
+   * `--agent`. Nothing lands on a path another session scans — see the module
+   * header.
    */
   | {
       readonly shape: "agent-defined";
       readonly agentName: string;
-      /** The definition body, written to the runtime file the launch points at. */
+      /** The definition body, written as the rewritten file's markdown body. */
       readonly systemPrompt: string;
-      /** `tools:` read from the same definition. Never empty. */
+      /**
+       * `tools:` read from the same definition, after `sanitizeAgentDefinition`
+       * has narrowed a bare `Agent` allowance. Never empty. This list is both
+       * what the rewritten file grants and what capability is derived from, so
+       * there is no gap between the two to keep in sync.
+       */
       readonly declaredTools: readonly string[];
+      /** `description:` from the same definition; a required frontmatter field. */
+      readonly declaredDescription?: string;
+      /**
+       * The role's display color, assigned by `AGENT_COLOR_BY_NAME` rather than
+       * read from the definition — it is fleet-wide identity, not per-file
+       * taste. Absent emits no `color:`; a value Claude Code does not recognize
+       * renders grey rather than failing the launch, so it is passed through.
+       */
+      readonly declaredColor?: string;
+      /**
+       * Frontmatter lines for keys aboard does not resolve, copied into the
+       * rewritten file verbatim. The user owns these files; an unknown key is
+       * theirs to add, and Claude Code skips one it does not recognize.
+       */
+      readonly extraFrontmatter?: readonly string[];
       /**
        * `model:` and `effort:` read from the same definition, carried onto the
        * command line because no flag short of these two applies them.
@@ -257,6 +293,9 @@ export interface LaunchConfigurationInput {
   /** Present only for a complete aboard-owned agent definition. */
   readonly systemPrompt?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
+  readonly declaredDescription?: string | undefined;
+  readonly declaredColor?: string | undefined;
+  readonly extraFrontmatter?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
   readonly declaredCommand?: readonly string[] | undefined;
@@ -273,6 +312,8 @@ export type LaunchPlanErrorCode =
   | "invalid-tool-rule"
   | "invalid-model"
   | "invalid-effort"
+  | "invalid-color"
+  | "invalid-frontmatter"
   | "invalid-session-id"
   | "unsafe-agent-id"
   | "unsafe-spill-path"
@@ -346,6 +387,19 @@ export function resolveLaunchConfiguration(
           `The ${input.agentName} builtin profile must not declare tools`,
         );
       }
+      // aboard writes no definition file for a builtin, so there is nothing for
+      // a color, a description, or carried-through frontmatter to be written
+      // into. Accepting them would silently drop them.
+      if (
+        input.declaredColor !== undefined ||
+        input.declaredDescription !== undefined ||
+        input.extraFrontmatter !== undefined
+      ) {
+        throw new LaunchPlanError(
+          "conflicting-launch-shape",
+          `The ${input.agentName} builtin profile is launch policy only; Claude Code owns its definition`,
+        );
+      }
       return {
         shape: "builtin",
         agentName: input.agentName,
@@ -381,11 +435,42 @@ export function resolveLaunchConfiguration(
         `The ${input.agentName} agent definition declares no tools`,
       );
     }
+    // A color Claude Code does not know renders grey; only a value that cannot
+    // be written as one frontmatter line is refused, for the same reason the
+    // carried-through lines below are checked. Everything else passes through.
+    const declaredColor =
+      input.declaredColor === undefined || input.declaredColor.trim().length === 0
+        ? undefined
+        : input.declaredColor.trim();
+    if (declaredColor !== undefined && /[\n\r]/.test(declaredColor)) {
+      throw new LaunchPlanError(
+        "invalid-color",
+        `Agent color must be a single line: ${JSON.stringify(input.declaredColor)}`,
+      );
+    }
+    // Carried-through frontmatter is emitted verbatim inside the generated
+    // document's `---` fence, so the only thing checked is that a line cannot
+    // close that fence or forge a second one. A key aboard does not understand
+    // is the author's business and Claude Code skips it; a fence in the middle
+    // would silently move the rest of the frontmatter into the system prompt.
+    for (const line of input.extraFrontmatter ?? []) {
+      if (line.includes("\n") || line.includes("\r") || /^\s*(?:---|\.\.\.)\s*$/.test(line)) {
+        throw new LaunchPlanError(
+          "invalid-frontmatter",
+          `Agent frontmatter line cannot be carried through: ${JSON.stringify(line)}`,
+        );
+      }
+    }
     return {
       shape: "agent-defined",
       agentName: input.agentName,
       systemPrompt: input.systemPrompt,
       declaredTools: input.declaredTools,
+      ...(input.declaredDescription === undefined ? {} : { declaredDescription: input.declaredDescription }),
+      ...(declaredColor === undefined ? {} : { declaredColor }),
+      ...(input.extraFrontmatter === undefined || input.extraFrontmatter.length === 0
+        ? {}
+        : { extraFrontmatter: input.extraFrontmatter }),
       ...(declaredModel === undefined ? {} : { declaredModel }),
       ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
       ...(declaredCommand === undefined ? {} : { declaredCommand }),
@@ -395,6 +480,9 @@ export function resolveLaunchConfiguration(
   if (
     input.systemPrompt !== undefined ||
     input.declaredTools !== undefined ||
+    input.declaredDescription !== undefined ||
+    input.declaredColor !== undefined ||
+    input.extraFrontmatter !== undefined ||
     input.declaredModel !== undefined ||
     input.declaredEffort !== undefined ||
     input.declaredCommand !== undefined
@@ -462,13 +550,14 @@ export interface RuntimeFile {
 export type PromptSpillFile = RuntimeFile;
 
 /**
- * The definition body, written where `--system-prompt-file` points. It is
- * derived data under the gitignored runtime directory rather than the
- * definition itself, because the file the flag reads must hold the body alone:
- * pointing at `.aboard/agents/<name>.md` would put its YAML frontmatter into
- * the agent's system prompt.
+ * The rewritten definition, written under the gitignored runtime directory at
+ * `<runtime>/agents/<agentId>/.claude/agents/aboard-<type>-<agentId>.md`. That
+ * shape is load-bearing in three ways: the `.claude/agents/` suffix is what
+ * Claude Code scans inside an `--add-dir` directory, the `<agentId>` segment is
+ * what keeps one launch's directory from containing another's definition, and
+ * the whole path is somewhere no session reaches without the flag.
  */
-export type SystemPromptFile = RuntimeFile;
+export type AgentDefinitionFile = RuntimeFile;
 
 export type PromptDelivery = "none" | "inline" | "spilled";
 
@@ -492,11 +581,13 @@ export interface LaunchPlan {
   readonly promptDelivery: PromptDelivery;
   readonly spill?: PromptSpillFile;
   /**
-   * Present for every agent-defined launch *and resume*: unlike `--agent`, a
-   * system prompt passed by flag is not restored by `--resume`, so the file has
-   * to exist again each time the command line is run.
+   * Present for every agent-defined launch *and resume*. Claude Code restores
+   * an `--agent` selection with the conversation, but only by name: if the
+   * definition is gone at resume time the session silently continues on the
+   * default persona and the full default tool set. So the file is re-emitted
+   * and `--add-dir`/`--agent` re-passed on every command line.
    */
-  readonly systemPrompt?: SystemPromptFile;
+  readonly agentDefinition?: AgentDefinitionFile;
 }
 
 interface CommonPlanRequest {
@@ -689,35 +780,87 @@ function spillRelativePath(runtimeDirectory: string, stem: string): string {
 }
 
 /**
- * Unlike a spill reference this is an ordinary argument rather than `@path`
+ * Unlike a spill reference these are ordinary arguments rather than `@path`
  * text, so the shell quoting handles whitespace and only the separators need
  * normalizing.
  */
-function systemPromptRelativePath(runtimeDirectory: string, agentName: string): string {
+function agentRuntimeDirectory(runtimeDirectory: string, agentId: AgentId): string {
   const directory = runtimeDirectory.replaceAll("\\", "/").replace(/\/+$/, "");
-  return `${directory}/agents/${agentName}.md`;
+  return `${directory}/agents/${agentId}`;
 }
 
 /**
- * The flags that carry an aboard definition, and the file one of them reads.
- * Emitted identically by `planLaunch` and by both resume planners: a resumed
- * session keeps neither the system prompt nor the tool restriction, so leaving
- * them off a resume would silently reopen a read-only agent with the full
- * default tool set (verified against Claude Code 2.1.229).
+ * The name the rewritten definition is registered under, and the name the
+ * session banner shows. It carries the agent id because the directory holding
+ * it is per-launch: a role-named file would still be unique inside its own
+ * directory, but the id makes the banner say *which* implementer this terminal
+ * is, and makes a clash with a project or user subagent of the same role name
+ * impossible rather than merely unlikely.
  */
-function definitionArguments(
+export function runtimeAgentName(agentName: string, agentId: AgentId): string {
+  return `aboard-${agentName}-${agentId}`;
+}
+
+/** One `key: value` line, or nothing when the value is absent. */
+function frontmatterLine(key: string, value: string | undefined): readonly string[] {
+  return value === undefined ? [] : [`${key}: ${value}`];
+}
+
+/**
+ * The rewritten definition: aboard's resolved fields first, every key aboard
+ * does not resolve copied through verbatim after them, then the body.
+ *
+ * `tools:` is emitted as the documented comma-separated scalar. `model:` and
+ * `effort:` are emitted even though the command line also carries them — the
+ * two always agree because both come from this same parse, and a file that
+ * describes the agent completely is the one that survives `--resume`.
+ */
+function renderAgentDefinition(
+  configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
+  name: string,
+): string {
+  const frontmatter = [
+    `name: ${name}`,
+    // Required by Claude Code. The fallback is never the interesting case — both
+    // launch sites read a definition that must declare one — but an agent file
+    // missing it is refused, and refusing the launch over a cosmetic field the
+    // main-session agent never uses for delegation would be the worse trade.
+    `description: ${configuration.declaredDescription ?? `aboard ${configuration.agentName} agent`}`,
+    `tools: ${configuration.declaredTools.join(", ")}`,
+    ...frontmatterLine("model", configuration.declaredModel),
+    ...frontmatterLine("effort", configuration.declaredEffort),
+    ...frontmatterLine("color", configuration.declaredColor),
+    ...(configuration.extraFrontmatter ?? []),
+  ];
+  return `---\n${frontmatter.join("\n")}\n---\n\n${configuration.systemPrompt.trim()}\n`;
+}
+
+/**
+ * The flags that carry an aboard definition, and the file they point at.
+ * Emitted identically by `planLaunch` and by both resume planners, because a
+ * definition Claude Code cannot find at resume time drops the session back to
+ * the default persona and the full default tool set — silently widening a
+ * read-only agent past the lease it was granted under.
+ *
+ * `--add-dir` and `--agent` stay adjacent and never end the line: `--add-dir`
+ * takes a list, and a variadic option consumes every following argument up to
+ * the next one starting with `-`, which is how `--tools` used to swallow the
+ * positional prompt.
+ */
+function agentRuntimeArguments(
   configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
   agentId: AgentId,
   runtimeDirectory: string,
-): { readonly args: readonly string[]; readonly file: SystemPromptFile } {
-  const relativePath = systemPromptRelativePath(runtimeDirectory, configuration.agentName);
+): { readonly args: readonly string[]; readonly file: AgentDefinitionFile } {
+  const directory = agentRuntimeDirectory(runtimeDirectory, agentId);
+  const name = runtimeAgentName(configuration.agentName, agentId);
   return {
-    args: [
-      "--system-prompt-file",
-      relativePath,
-      ...toolListArguments("--tools", configuration.declaredTools),
-    ],
-    file: { agentId, relativePath, contents: `${configuration.systemPrompt.trim()}\n` },
+    args: ["--add-dir", directory, "--agent", name],
+    file: {
+      agentId,
+      relativePath: `${directory}/.claude/agents/${name}.md`,
+      contents: renderAgentDefinition(configuration, name),
+    },
   };
 }
 
@@ -776,7 +919,7 @@ function planPrompt(
  * `effort:` do: it is the agent's own declaration, and the setting is the
  * fleet-wide default for the launches that declare nothing. `--resume` reads no
  * definition, so a resumed session gets the override re-applied here exactly as
- * it gets `--system-prompt-file` and `--tools` re-passed.
+ * it gets `--add-dir` and `--agent` re-passed.
  */
 function effectiveCommand(
   configuration: LaunchConfiguration,
@@ -923,12 +1066,12 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const shapeArguments: string[] = [];
-  let systemPrompt: SystemPromptFile | undefined;
+  let agentDefinition: AgentDefinitionFile | undefined;
   switch (configuration.shape) {
     case "agent-defined": {
-      const definition = definitionArguments(configuration, request.agentId, runtimeDirectory);
+      const definition = agentRuntimeArguments(configuration, request.agentId, runtimeDirectory);
       shapeArguments.push(...definition.args);
-      systemPrompt = definition.file;
+      agentDefinition = definition.file;
       break;
     }
     case "builtin":
@@ -985,7 +1128,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   if (built.commandLine.length > limit) {
     throw new LaunchPlanError(
       "command-line-too-long",
-      `Launch command line is ${built.commandLine.length} characters, over the ${limit} the ${request.shell} shell accepts, even with the prompt spilled to a file. Shorten the agent's tool list.`,
+      `Launch command line is ${built.commandLine.length} characters, over the ${limit} the ${request.shell} shell accepts, even with the prompt spilled to a file. Shorten the deny-tool list or the launch command.`,
     );
   }
   const { plan: promptPlan, args } = built;
@@ -1004,7 +1147,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     requiresWriteLease: requiresWriteLease(agentType, capability),
     promptDelivery: promptPlan.delivery,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
-    ...(systemPrompt === undefined ? {} : { systemPrompt }),
+    ...(agentDefinition === undefined ? {} : { agentDefinition }),
   };
 }
 
@@ -1014,11 +1157,13 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
  * automated message.
  *
  * Every flag that shaped the original launch is passed again. `--resume`
- * restores the conversation and nothing else: permission mode is documented as
- * never carried over (`docs/CLAUDE-REFERENCES/hooks.md`), and a session started
- * from `--system-prompt-file`/`--tools` comes back with Claude Code's default
- * persona and its *full* default tool set unless both flags are repeated. For
- * the Manager that would mean resuming an orchestrator that can implement.
+ * restores the conversation and nothing else it is not told about: permission
+ * mode is documented as never carried over
+ * (`docs/CLAUDE-REFERENCES/hooks.md`), and while an `--agent` selection *is*
+ * restored, it is restored by name — a session whose definition is no longer
+ * discoverable continues on Claude Code's default persona and its full default
+ * tool set. For the Manager that would mean resuming an orchestrator that can
+ * implement, so the runtime definition is re-emitted and re-pointed at.
  */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
   const { command, wrapper, runtimeDirectory, permissionMode, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
@@ -1031,7 +1176,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
       "The Manager resumes from .aboard/agents/manager.md",
     );
   }
-  const definition = definitionArguments(request.configuration, request.agentId, runtimeDirectory);
+  const definition = agentRuntimeArguments(request.configuration, request.agentId, runtimeDirectory);
   const args = [
     "--resume",
     request.sessionId,
@@ -1055,16 +1200,17 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     writeCapability: "read-only",
     requiresWriteLease: false,
     promptDelivery: "none",
-    systemPrompt: definition.file,
+    agentDefinition: definition.file,
   };
 }
 
 /**
  * Reopens a worker's recorded session (`AGENTS.md`),
  * re-passing the same flags as the Manager's resume and for the same reason:
- * `--resume` restores the conversation, not the configuration. A read-only
- * worker resumed without `--tools` comes back holding `Edit`, `Write`, and an
- * unrestricted `Bash`, which the lease it was granted at launch does not cover.
+ * `--resume` restores the conversation, not a definition it can no longer find.
+ * A read-only worker resumed without its runtime definition comes back holding
+ * `Edit`, `Write`, and an unrestricted `Bash`, which the lease it was granted at
+ * launch does not cover.
  *
  * Capability is therefore derived here from the configuration rather than
  * accepted from the caller: it must describe the session this command line
@@ -1074,7 +1220,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
   const { command, wrapper, runtimeDirectory, permissionMode, attended } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const definition = configuration.shape === "agent-defined"
-    ? definitionArguments(configuration, request.agentId, runtimeDirectory)
+    ? agentRuntimeArguments(configuration, request.agentId, runtimeDirectory)
     : undefined;
   // Claude Code restores a builtin's `--agent` selection with the conversation.
   const shapeArguments = definition?.args ?? [];
@@ -1106,7 +1252,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     writeCapability: capability,
     requiresWriteLease: requiresWriteLease(request.agentType, capability),
     promptDelivery: "none",
-    ...(definition === undefined ? {} : { systemPrompt: definition.file }),
+    ...(definition === undefined ? {} : { agentDefinition: definition.file }),
   };
 }
 

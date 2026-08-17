@@ -5,7 +5,7 @@ import { CORE_MCP_TOOLS, createMcpHandler } from "../src/bridge/mcp.js";
 import { DelegationCoordinator } from "../src/bridge/delegation.js";
 import { resolveLaunchConfiguration } from "../src/claude/launch.js";
 
-/** An aboard definition: body plus tool list, both carried as launch flags. */
+/** An aboard definition: body plus tool list, rewritten per launch under `--add-dir`. */
 const definitionFor = (agentName: string, declaredTools: readonly string[]) =>
   resolveLaunchConfiguration({
     agentName,
@@ -656,7 +656,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent[0]!, /^& clauder run kiro -- --session-id .* --system-prompt-file \.aboard\/runtime\/agents\/implementer\.md /);
+  assert.match(host.created[0]!.terminal.sent[0]!, /^& clauder run kiro -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-implementer-worker-1 /);
 });
 
 test("an auto-run launch marks the tree it is expected to leave dirty", async () => {
@@ -675,7 +675,7 @@ test("interactive mode makes the prompt optional", async () => {
   const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true });
   assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file \.aboard\/runtime\/agents\/brainstormer\.md --tools 'Read,Grep' --disallowedTools 'mcp__aboard__\*'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-brainstormer-worker-1 --disallowedTools 'mcp__aboard__\*'\s*$/);
 
   const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
@@ -696,7 +696,7 @@ test("webresearcher runs unattended, reports a result, and takes no lease", asyn
   assert.equal(researcher.resultDelivery.mode, "mailbox");
   assert.equal(lease.current(), undefined);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--system-prompt-file \.aboard\/runtime\/agents\/webresearcher\.md/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-webresearcher-worker-1/);
   assert.deepEqual(host.created.at(-1)!.terminal.shown, []);
 });
 

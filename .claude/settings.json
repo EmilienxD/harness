@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": [
+              "run",
+              "--no-project",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_UserPromptSubmit_hook.py"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -5,28 +5,34 @@ import test from "node:test";
 
 import {
   ABOARD_MCP_TOOLS,
+  AGENT_COLORS,
+  AGENT_COLOR_BY_NAME,
   AGENT_DEFINITION_DIRECTORY,
   BUILTIN_AGENT_NAMES,
+  NATIVE_SUBAGENT_TYPES,
   SCAFFOLDED_AGENT_NAMES,
   WORKER_AGENT_NAMES,
   parseAgentDefinition,
   parseBuiltinAgentProfile,
   parseManagerAgentDefinition,
+  rewriteAgentTools,
+  sanitizeAgentDefinition,
   type WorkerAgentName,
 } from "../src/scaffold/agent-definition.js";
 
 // Deliberately not under `.claude/agents/`: a definition there is a registered
 // subagent type that every session in the workspace can see and spawn — the
 // user's own `claude` included — which would put aboard agents outside the
-// bridge and outside the write lease. aboard launches these by flag instead, so
-// nothing discovers them.
+// bridge and outside the write lease. Each launch rewrites the one it needs
+// into its own runtime directory instead, reachable only through that launch's
+// `--add-dir`.
 const agentsRoot = join(process.cwd(), "assets", "scaffold", ".aboard", "agents");
 const taskTools = ["TaskCreate", "TaskGet", "TaskList", "TaskStop", "TaskUpdate", "TodoWrite"] as const;
 
 const expected = {
   brainstormer: {
     capability: "write-capable",
-    effort: undefined,
+    effort: "high",
     tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Agent", "Skill"],
   },
   webresearcher: {
@@ -151,6 +157,104 @@ test("an agent definition may declare an effort level, and an unknown one is ref
     parseManagerAgentDefinition("---\nname: manager\ndescription: d\ntools: Read\nmodel: opus\neffort: highest\n---\nOrchestrate.").ok,
     false,
   );
+});
+
+test("the rewrite narrows a bare Agent allowance to Claude Code's native types", () => {
+  // A rewritten definition is a registered project subagent *inside its own
+  // session*, so a bare `Agent` would let the agent spawn itself — and any
+  // subagent the user's repository happens to define. Each type is its own rule
+  // rather than one rule listing both, so no reader has to split on commas
+  // inside parentheses to get the allowlist right.
+  assert.deepEqual(rewriteAgentTools(["Read", "Agent", "Skill"]), [
+    "Read",
+    ...NATIVE_SUBAGENT_TYPES.map((type) => `Agent(${type})`),
+    "Skill",
+  ]);
+  // Read-the-repository and a fresh full-tool context are the two a worker
+  // delegates. The configuration assistants are not granted on spec.
+  assert.deepEqual(NATIVE_SUBAGENT_TYPES, ["Explore", "general-purpose"]);
+  for (const excluded of ["Plan", "claude-code-guide", "statusline-setup"]) {
+    assert.equal(NATIVE_SUBAGENT_TYPES.includes(excluded as never), false, excluded);
+  }
+  for (const aboardType of [...WORKER_AGENT_NAMES, "manager"]) {
+    assert.equal(NATIVE_SUBAGENT_TYPES.includes(aboardType as never), false, `${aboardType} must not be spawnable`);
+  }
+  // An already-scoped rule is the author's, and a list without `Agent` is
+  // untouched.
+  assert.deepEqual(rewriteAgentTools(["Agent(Explore)"]), ["Agent(Explore)"]);
+  assert.deepEqual(rewriteAgentTools(["WebSearch", "WebFetch"]), ["WebSearch", "WebFetch"]);
+});
+
+test("the rewrite copies unresolved frontmatter verbatim and assigns the role's color", async () => {
+  // aboard resolves six keys. Everything else is the author's: Claude Code
+  // silently skips a key it does not know, so copying an unrecognized one
+  // through costs nothing and refusing it would make the definition files less
+  // editable than they are meant to be.
+  const source = [
+    "---",
+    "name: implementer",
+    "description: Implement one issue.",
+    "tools: Read, Agent",
+    "model: opus",
+    "effort: high",
+    "command: clauder run kiro --",
+    "color: pink",
+    "maxTurns: 40",
+    "hooks:",
+    "  PreToolUse:",
+    "    - matcher: Bash",
+    "---",
+    "Implement it.",
+  ].join("\n");
+  const parsed = parseAgentDefinition(source);
+  assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
+  assert.deepEqual(parsed.ok && parsed.value.extraFrontmatter, [
+    "maxTurns: 40",
+    "hooks:",
+    "  PreToolUse:",
+    "    - matcher: Bash",
+  ]);
+
+  const sanitized = sanitizeAgentDefinition(parsed.ok ? parsed.value : ({} as never));
+  assert.deepEqual(sanitized.tools, ["Read", ...NATIVE_SUBAGENT_TYPES.map((type) => `Agent(${type})`)]);
+  // The source's own `color:` loses: the color is fleet-wide role identity, not
+  // a per-file field, so it is assigned rather than read.
+  assert.equal(sanitized.color, "green");
+  assert.equal(sanitized.description, "Implement one issue.");
+  assert.equal(sanitized.model, "opus");
+  assert.equal(sanitized.effort, "high");
+  assert.deepEqual(sanitized.command, ["clauder", "run", "kiro", "--"]);
+  // Capability is derived from the rewritten list, so the tools the launch
+  // grants and the tools the lease reasons about cannot drift apart.
+  assert.equal(sanitized.writeCapability, "read-only");
+
+  // Every shipped definition survives the round trip with its capability intact.
+  for (const name of WORKER_AGENT_NAMES) {
+    const agent = await definition(name);
+    assert.equal(sanitizeAgentDefinition(agent).writeCapability, agent.writeCapability, name);
+    assert.deepEqual(sanitizeAgentDefinition(agent).extraFrontmatter, []);
+  }
+});
+
+test("every aboard role has a distinct, supported color", () => {
+  assert.deepEqual(AGENT_COLOR_BY_NAME, {
+    manager: "purple",
+    brainstormer: "yellow",
+    webresearcher: "cyan",
+    implementer: "green",
+    "pr-doctor-afk": "orange",
+    "pr-doctor-hitl": "red",
+  });
+  const assigned = Object.values(AGENT_COLOR_BY_NAME);
+  for (const color of assigned) assert.equal(AGENT_COLORS.includes(color), true, color);
+  // Color is identity in the session UI; two roles sharing one would make the
+  // banner ambiguous exactly where it is meant to disambiguate.
+  assert.equal(new Set(assigned).size, assigned.length);
+  // Explore has no entry: it launches as Claude Code's builtin, and aboard
+  // writes no definition it could color.
+  for (const builtin of BUILTIN_AGENT_NAMES) {
+    assert.equal(builtin in AGENT_COLOR_BY_NAME, false);
+  }
 });
 
 test("rejects definitions outside the aboard catalogue or without required frontmatter", () => {

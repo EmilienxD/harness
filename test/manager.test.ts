@@ -13,12 +13,17 @@ const sessionId = "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId;
 const agentId = "manager-1" as AgentId;
 
 const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
-/** The quoted PowerShell form of the two flags every Manager command line carries. */
-const DEFINITION_FLAGS = `--system-prompt-file .aboard/runtime/agents/manager.md --tools '${MANAGER_TOOLS.join(",")}'`;
+/** The runtime definition every Manager command line points at. */
+const RUNTIME_DIRECTORY = `.aboard/runtime/agents/${agentId}`;
+const RUNTIME_AGENT = `aboard-manager-${agentId}`;
+const RUNTIME_PATH = `${RUNTIME_DIRECTORY}/.claude/agents/${RUNTIME_AGENT}.md`;
+/** The two flags every Manager command line carries, in their shell form. */
+const DEFINITION_FLAGS = `--add-dir ${RUNTIME_DIRECTORY} --agent ${RUNTIME_AGENT}`;
 
 /**
- * The Manager definition, which now carries the persona and the tool list onto
- * every command line rather than naming a discoverable `--agent manager`.
+ * The Manager definition, rewritten per launch into a directory only that
+ * launch's `--add-dir` reaches, rather than a workspace-discoverable
+ * `--agent manager`.
  */
 function managerDefinition(
   extra: { readonly declaredModel?: string; readonly declaredEffort?: "low" | "medium" | "high" | "xhigh" | "max" } = {},
@@ -33,7 +38,7 @@ function managerDefinition(
   return configuration;
 }
 
-/** Records the system prompt file each launch and resume writes before starting. */
+/** Records the runtime definition each launch and resume writes before starting. */
 function recordingFiles() {
   const written: string[] = [];
   return { written, store: { write: async (file: { relativePath: string }) => { written.push(file.relativePath); return file.relativePath; } } };
@@ -48,11 +53,13 @@ test("plans a promptless Manager resume with only the recorded UUID", () => {
   assert.deepEqual(plan.args, [
     "--resume",
     sessionId,
-    "--system-prompt-file",
-    ".aboard/runtime/agents/manager.md",
-    "--tools",
-    MANAGER_TOOLS.join(","),
+    "--add-dir",
+    RUNTIME_DIRECTORY,
+    "--agent",
+    RUNTIME_AGENT,
   ]);
+  assert.equal(plan.agentDefinition?.relativePath, RUNTIME_PATH);
+  assert.equal(plan.agentDefinition?.contents.includes(`tools: ${MANAGER_TOOLS.join(", ")}`), true);
   assert.equal(plan.promptDelivery, "none");
   assert.equal(plan.requiresWriteLease, false);
 });
@@ -89,7 +96,7 @@ test("resume keeps the recorded identity and new replaces the session", async ()
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return terminal("resumed-terminal"); },
   } as unknown as TerminalController;
   const files = recordingFiles();
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: files.store, definition, disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), isResumable: async () => true });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: files.store, definition, disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), isResumable: async () => true, agentIdFactory: () => "manager-2" as AgentId });
   await lifecycle.start("resume");
   assert.match((records[0] as any).request.initialCommand, /--resume 4db0ed4c/);
   // A wrapper starts the Manager too, resume included, and its arguments stay
@@ -99,13 +106,17 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
   // The Manager's tool set still lives in manager.md, but it now reaches Claude
-  // Code as flags: nothing is registered under .claude/agents/, so no other
-  // session in the workspace can discover or spawn the Manager.
-  assert.doesNotMatch((records[1] as any).request.initialCommand, /--agent/);
-  assert.ok((records[1] as any).request.initialCommand.includes(DEFINITION_FLAGS));
+  // Code through a definition rewritten under this launch's own `--add-dir`:
+  // nothing is registered on a path another session scans, so no other session
+  // in the workspace can discover or spawn the Manager.
+  // A new Manager is a new agent id, so it gets its own runtime directory and
+  // its own agent name: one launch's definition is never visible to another's.
+  assert.ok((records[1] as any).request.initialCommand.includes(
+    "--add-dir .aboard/runtime/agents/manager-2 --agent aboard-manager-manager-2",
+  ));
   assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
-  // Both the resume and the fresh start write the file the flag reads.
-  assert.deepEqual(files.written, [".aboard/runtime/agents/manager.md", ".aboard/runtime/agents/manager.md"]);
+  // Both the resume and the fresh start write the file `--agent` resolves.
+  assert.deepEqual(files.written, [RUNTIME_PATH, ".aboard/runtime/agents/manager-2/.claude/agents/aboard-manager-manager-2.md"]);
 });
 
 test("the lifecycle drops bypass for the attended Manager, on start and resume", async () => {
@@ -204,7 +215,7 @@ test("an unresumable recorded session starts afresh under a new id, keeping the 
   assert.match(records[0].request.initialCommand, /--session-id 9f1d6e57-0000-4000-8000-000000000001/);
   assert.doesNotMatch(records[0].request.initialCommand, new RegExp(sessionId));
   assert.doesNotMatch(records[0].request.initialCommand, /--resume/);
-  assert.match(records[0].request.initialCommand, /--system-prompt-file \.aboard\/runtime\/agents\/manager\.md/);
+  assert.ok(records[0].request.initialCommand.includes(DEFINITION_FLAGS));
   // Manager identity is the agent id, which survives; the new conversation id
   // is recorded so the next resume targets it.
   assert.equal(records[0].request.agentId, agentId);

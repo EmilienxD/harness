@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestamp } from "../domain/contracts.js";
 import { parseManagerPersistenceDto } from "../domain/validation.js";
 import { MANAGER_AGENT_NAME, resolveLaunchConfiguration, type EffortLevel, type LaunchConfiguration, type SessionWrapperLayout, type WorkerPermissionMode, planLaunch, planManagerResume } from "./launch.js";
-import { AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, parseManagerAgentDefinition } from "../scaffold/agent-definition.js";
+import { AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, parseManagerAgentDefinition, sanitizeAgentDefinition } from "../scaffold/agent-definition.js";
 import { sessionIsResumable } from "./sessions.js";
 import type { PromptSpillStore } from "./spill.js";
 import type { ShellKind } from "./shell.js";
@@ -28,10 +28,10 @@ export class FileManagerStore implements ManagerStore {
 }
 
 /**
- * The `model:` and `effort:` the Manager definition declares. Claude Code honors
- * neither on a main-thread launch — `--agent` applies only a subset of the
- * frontmatter, and `--resume` reads no definition at all — so aboard parses them
- * itself and passes `--model`/`--effort` (see `LaunchConfiguration`).
+ * The rewritten Manager definition, plus the `model:` and `effort:` it declares.
+ * Those two are also passed as `--model`/`--effort`, because `--resume` reads no
+ * definition of its own and a resumed session must not silently fall back to the
+ * session defaults (see `LaunchConfiguration`).
  */
 export type ManagerLaunchDefinition = Extract<LaunchConfiguration, { shape: "agent-defined" }>;
 
@@ -52,13 +52,19 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
   catch { throw new Error(`Cannot read the Manager definition at ${AGENT_DEFINITION_DIRECTORY}/${MANAGER_AGENT_NAME}.md. Run the aboard scaffold to restore it.`); }
   const parsed = parseManagerAgentDefinition(contents);
   if (!parsed.ok) throw new Error(`Invalid Manager agent definition: ${parsed.reason}`);
+  // The rewrite is what the launch actually runs: same document, tool list
+  // narrowed, role color assigned, unresolved keys copied through.
+  const sanitized = sanitizeAgentDefinition(parsed.value);
   const configuration = resolveLaunchConfiguration({
     agentName: MANAGER_AGENT_NAME,
-    systemPrompt: parsed.value.prompt,
-    declaredTools: parsed.value.tools,
-    declaredModel: parsed.value.model,
-    declaredEffort: parsed.value.effort,
-    declaredCommand: parsed.value.command,
+    systemPrompt: sanitized.prompt,
+    declaredTools: sanitized.tools,
+    declaredDescription: sanitized.description,
+    declaredColor: sanitized.color,
+    extraFrontmatter: sanitized.extraFrontmatter,
+    declaredModel: sanitized.model,
+    declaredEffort: sanitized.effort,
+    declaredCommand: sanitized.command,
   });
   if (configuration.shape !== "agent-defined") throw new Error("The Manager definition must resolve to an aboard agent definition");
   return configuration;
@@ -107,9 +113,9 @@ export class ManagerLifecycle {
     // than the setting because manager.md may declare its own `command:`, and
     // planning is pure — nothing has been created yet.
     await this.options.preflight?.(plan.command);
-    // The command line names this file; a missing one is a refused launch
-    // rather than a Manager on Claude Code's default persona.
-    if (plan.systemPrompt !== undefined) await this.options.files.write(plan.systemPrompt);
+    // `--agent` names this file; a missing one is a refused launch rather than a
+    // Manager on Claude Code's default persona.
+    if (plan.agentDefinition !== undefined) await this.options.files.write(plan.agentDefinition);
     const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine, startupTimeoutMs: MANAGER_STARTUP_PROOF_TIMEOUT_MS });
     const updatedAt = this.#now().toISOString() as IsoTimestamp;
     await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt });

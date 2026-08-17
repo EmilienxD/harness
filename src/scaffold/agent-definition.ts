@@ -9,23 +9,92 @@ import {
   EFFORT_LEVELS,
   isEffortLevel,
   parseClaudeCommand,
+  type AgentColor,
   type EffortLevel,
 } from "../claude/launch.js";
+
+export { AGENT_COLORS, type AgentColor } from "../claude/launch.js";
 
 /** The Manager runs as the main session agent. */
 export const MANAGER_AGENT_NAME = "manager";
 
 /**
- * Where aboard keeps its agent definitions — deliberately *not*
+ * Where aboard keeps its authored agent definitions — deliberately *not*
  * `.claude/agents/`, which Claude Code scans from every session that runs
  * anywhere under the workspace. A definition there is a registered subagent
- * type: the user's own `claude` sees `implementer` and the pr-doctors in its
- * Agent tool and can spawn them outside the bridge and outside the write lease.
- * aboard's agents are launched, never spawned, so their definitions live
- * somewhere nothing discovers them and reach Claude Code as launch flags
- * instead.
+ * type: the user's own `claude` would see `implementer` and the pr-doctors in
+ * its Agent tool and could spawn them outside the bridge and outside the write
+ * lease.
+ *
+ * These files are authored source, never launched directly. Each launch
+ * rewrites the one it needs into a per-agent runtime directory that only that
+ * launch's `--add-dir` points at (see `sanitizeAgentDefinition` and
+ * `agentRuntimeArguments` in `src/claude/launch.ts`), so the definition is a
+ * registered subagent inside exactly one session and discoverable by no other.
  */
 export const AGENT_DEFINITION_DIRECTORY = ".aboard/agents";
+
+/**
+ * One color per aboard role, assigned here rather than read from the definition
+ * or a setting. The color is identity in the session UI, so it has to mean the
+ * same thing in every workspace: a user who saw red on a `pr-doctor-hitl` once
+ * must not meet a red implementer in the next project. Making it a field would
+ * turn a fleet-wide convention into six independently editable files.
+ *
+ * `Explore` has no entry: it launches as Claude Code's own builtin, and aboard
+ * writes no definition it could color.
+ */
+export const AGENT_COLOR_BY_NAME: Readonly<Record<typeof MANAGER_AGENT_NAME | WorkerAgentName, AgentColor>> = {
+  manager: "purple",
+  brainstormer: "yellow",
+  webresearcher: "cyan",
+  implementer: "green",
+  "pr-doctor-afk": "orange",
+  "pr-doctor-hitl": "red",
+};
+
+/**
+ * The subagent types a rewritten aboard agent may spawn through its `Agent`
+ * tool. A rewritten definition is a registered project subagent *inside its own
+ * session*, which makes a bare `Agent` allowance self-spawning — and would also
+ * expose any subagent the user's repository defines. The bare rule is therefore
+ * narrowed, so `Agent` keeps meaning "delegate to a stock Claude agent" and
+ * never "start another aboard worker outside the bridge".
+ *
+ * The two are the only ones a worker has a use for: `Explore` to read the
+ * repository without paying for the files in its own context, and
+ * `general-purpose` for work it wants done in a fresh full-tool context. `Plan`,
+ * `claude-code-guide`, and `statusline-setup` answer questions no aboard worker
+ * is delegating — the last two are configuration assistants — so they are left
+ * out rather than granted on the chance one is wanted.
+ *
+ * aboard's own `general-purpose` mode is the exception, and needs no entry here:
+ * it launches as Claude Code's unmodified default session with no rewritten
+ * definition at all, so it keeps the whole built-in roster by construction.
+ *
+ * Each type is its own `Agent(<type>)` rule rather than one rule listing both:
+ * `tools:` is a comma-separated scalar, and a rule carrying commas inside its
+ * parentheses depends on the reader splitting on commas at paren depth zero.
+ * Separate rules mean the same allowlist under any comma-splitting parser.
+ */
+export const NATIVE_SUBAGENT_TYPES = ["Explore", "general-purpose"] as const;
+
+/**
+ * Frontmatter keys aboard resolves itself. Everything else in a definition is
+ * copied into the rewritten file verbatim: the user owns these files, an
+ * unrecognized key is theirs to add, and Claude Code silently skips a key it
+ * does not know. Only broken YAML fails a launch, which is a defect the author
+ * sees immediately.
+ */
+const ABOARD_FRONTMATTER_KEYS: ReadonlySet<string> = new Set([
+  "name",
+  "description",
+  "tools",
+  "model",
+  "effort",
+  "color",
+  "command",
+]);
 
 /** Claude Code's namespaced rule for every tool served by the aboard MCP. */
 export const ABOARD_MCP_TOOLS = "mcp__aboard__*";
@@ -77,6 +146,8 @@ export interface AgentDefinition {
   readonly tools: readonly string[];
   readonly prompt: string;
   readonly writeCapability: WriteCapability;
+  /** Lines for keys aboard does not resolve, carried into the rewrite verbatim. */
+  readonly extraFrontmatter: readonly string[];
 }
 
 /**
@@ -93,6 +164,7 @@ export interface ManagerAgentDefinition {
   readonly tools: readonly string[];
   readonly prompt: string;
   readonly writeCapability: WriteCapability;
+  readonly extraFrontmatter: readonly string[];
 }
 
 /**
@@ -126,6 +198,31 @@ function scalarField(lines: readonly string[], field: string): string | undefine
   const line = lines.find((candidate) => candidate.startsWith(prefix));
   const value = line?.slice(prefix.length).trim();
   return value === undefined || value.length === 0 ? undefined : value;
+}
+
+const TOP_LEVEL_KEY = /^([A-Za-z0-9_.-]+)\s*:/;
+
+/**
+ * The frontmatter lines belonging to keys aboard does not resolve, in source
+ * order and byte for byte.
+ *
+ * Ownership is tracked rather than matched per line, because a key's value may
+ * span lines — a `hooks:` mapping, a block scalar, a YAML sequence — and those
+ * continuation lines carry no key of their own. A line at column zero that
+ * looks like `key:` opens a new key; anything else, blank lines included,
+ * continues the key above it.
+ */
+function extraFrontmatter(frontmatter: readonly string[]): readonly string[] {
+  const extra: string[] = [];
+  let owned = true;
+  for (const line of frontmatter) {
+    const key = /^\s/.test(line) ? null : TOP_LEVEL_KEY.exec(line);
+    if (key !== null) owned = ABOARD_FRONTMATTER_KEYS.has(key[1]!);
+    if (!owned) extra.push(line);
+  }
+  // Trailing blank lines belong to the last unowned key only by adjacency.
+  while (extra.length > 0 && extra.at(-1)!.trim().length === 0) extra.pop();
+  return extra;
 }
 
 interface ParsedDocument {
@@ -227,6 +324,7 @@ export function parseAgentDefinition(definition: unknown): AgentDefinitionResult
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),
+      extraFrontmatter: extraFrontmatter(frontmatter),
     },
   };
 }
@@ -258,7 +356,61 @@ export function parseManagerAgentDefinition(
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),
+      extraFrontmatter: extraFrontmatter(frontmatter),
     },
+  };
+}
+
+/**
+ * Narrows a bare `Agent` allowance to Claude Code's native subagent types, and
+ * leaves every other rule — including an `Agent(...)` the definition already
+ * scoped for itself — exactly as written. See `NATIVE_SUBAGENT_TYPES`.
+ */
+export function rewriteAgentTools(tools: readonly string[]): readonly string[] {
+  return tools.flatMap((rule) =>
+    rule.trim() === "Agent" ? NATIVE_SUBAGENT_TYPES.map((type) => `Agent(${type})`) : [rule],
+  );
+}
+
+/**
+ * The definition as it is written into the per-launch runtime directory: the
+ * same document with its tool list narrowed, its color assigned by role, and
+ * every key aboard does not resolve copied through untouched.
+ *
+ * It carries no name, because the name is per-launch — `aboard-<type>-<agentId>`,
+ * minted by the planner that also owns the `--add-dir` the file sits under. A
+ * unique name is what makes a collision with a project or user subagent of the
+ * same role name structurally impossible.
+ *
+ * Capability is derived from the *rewritten* list, so the tools the launch
+ * really grants are the tools the lease reasons about.
+ */
+export interface SanitizedAgentDefinition {
+  readonly description: string;
+  readonly tools: readonly string[];
+  readonly color: AgentColor;
+  readonly model: AgentModel;
+  readonly effort?: AgentEffort;
+  readonly command?: readonly string[];
+  readonly prompt: string;
+  readonly extraFrontmatter: readonly string[];
+  readonly writeCapability: WriteCapability;
+}
+
+export function sanitizeAgentDefinition(
+  definition: AgentDefinition | ManagerAgentDefinition,
+): SanitizedAgentDefinition {
+  const tools = rewriteAgentTools(definition.tools);
+  return {
+    description: definition.description,
+    tools,
+    color: AGENT_COLOR_BY_NAME[definition.name],
+    model: definition.model,
+    ...(definition.effort === undefined ? {} : { effort: definition.effort }),
+    ...(definition.command === undefined ? {} : { command: definition.command }),
+    prompt: definition.prompt,
+    extraFrontmatter: definition.extraFrontmatter,
+    writeCapability: deriveWriteCapability(tools),
   };
 }
 

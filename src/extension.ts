@@ -61,7 +61,7 @@ import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessi
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
-import { agentDefinitionPath, parseAgentDefinition, parseBuiltinAgentProfile } from "./scaffold/agent-definition.js";
+import { agentDefinitionPath, parseAgentDefinition, parseBuiltinAgentProfile, sanitizeAgentDefinition } from "./scaffold/agent-definition.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
@@ -232,18 +232,23 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
     }
     const result = parseAgentDefinition(await readFile(agentDefinitionPath(workspaceRoot, type), "utf8"));
     if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
-    // The whole definition is carried onto the command line: the body as
-    // `--system-prompt-file`, `tools:` as `--tools`, and `model:`/`effort:` as
-    // their own flags. One file, no second authority (see `LaunchConfiguration`).
-    // `command:` is the one field that shapes the line's *program* rather than
-    // its flags, replacing `aboard.launch.claudeCommand` for this agent alone.
+    // The whole definition is carried into the launch: sanitized here, rewritten
+    // by the planner into the per-launch runtime directory `--add-dir` points
+    // at, and selected with `--agent`. One file, no second authority (see
+    // `LaunchConfiguration`). `command:` is the one field that shapes the line's
+    // *program* rather than its flags, replacing `aboard.launch.claudeCommand`
+    // for this agent alone.
+    const sanitized = sanitizeAgentDefinition(result.value);
     return resolveLaunchConfiguration({
       agentName: type,
-      systemPrompt: result.value.prompt,
-      declaredTools: result.value.tools,
-      declaredModel: result.value.model,
-      declaredEffort: result.value.effort,
-      declaredCommand: result.value.command,
+      systemPrompt: sanitized.prompt,
+      declaredTools: sanitized.tools,
+      declaredDescription: sanitized.description,
+      declaredColor: sanitized.color,
+      extraFrontmatter: sanitized.extraFrontmatter,
+      declaredModel: sanitized.model,
+      declaredEffort: sanitized.effort,
+      declaredCommand: sanitized.command,
     });
   } };
 }
@@ -513,7 +518,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
         wrapper: wrapperLayout,
       });
-      if (plan.systemPrompt !== undefined) await runtimeFiles.write(plan.systemPrompt);
+      if (plan.agentDefinition !== undefined) await runtimeFiles.write(plan.agentDefinition);
       const at = new Date().toISOString() as IsoTimestamp;
       // No lease: `review_pr` reopens the session for the user to drive, with
       // no first message sent into it. Whatever the run held it released when
