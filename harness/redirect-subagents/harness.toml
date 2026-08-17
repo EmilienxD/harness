@@ -1,0 +1,37 @@
+name = "redirect-subagents"
+version = "1.0.0"
+description = "Redirect Claude Code's built-in Agent tool subagents to alternate providers, avoiding Claude subscription usage"
+requires = []
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/redirect-subagents/README.md"
+
+# Background-job state is machine-local; keep it out of the repo.
+gitignore = ["harness-redirect-subagents/"]
+
+[[files]]
+src = "hooks/rs_io.py"
+dest = "hooks/rs_io.py"
+
+[[files]]
+src = "hooks/redirect_subagents_deny_PreToolUse_hook.py"
+dest = "hooks/redirect_subagents_deny_PreToolUse_hook.py"
+executable = true
+
+[[files]]
+src = "hooks/redirect_subagents_notify_PostToolUse_hook.py"
+dest = "hooks/redirect_subagents_notify_PostToolUse_hook.py"
+executable = true
+
+[[files]]
+src = "hooks/redirect_subagents_wait_hook.py"
+dest = "hooks/redirect_subagents_wait_hook.py"
+executable = true
+
+# Example config, copied to .claude/harness/subagents.json only if the user
+# doesn't already have one — the installer never overwrites this file.
+# Example subagent config, installed as .claude/harness/subagents.json.
+# `starter` means: copied when absent, never overwritten afterwards — the
+# hooks read this file after the user edits it into real entries.
+[[files]]
+src = "subagents.example.json"
+dest = "harness/subagents.json"
+starter = true

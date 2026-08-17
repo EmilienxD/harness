@@ -14,11 +14,17 @@ class ManifestError(Exception):
 
 @dataclass(frozen=True)
 class FileSpec:
-    """One src -> dest copy instruction. `dest` is relative to the target `.claude/`."""
+    """One src -> dest copy instruction. `dest` is relative to the target `.claude/`.
+
+    `starter` marks a file users are meant to edit after install (config
+    templates, like the `.rules` files): it is copied when absent but never
+    overwritten afterwards.
+    """
 
     src: str
     dest: str
     executable: bool = False
+    starter: bool = False
 
 
 @dataclass(frozen=True)
@@ -36,13 +42,13 @@ class Tool:
     def resolve(self, spec: FileSpec) -> Path:
         return self.root / spec.src
 
-    def expand(self) -> list[tuple[Path, str, bool]]:
-        """Flatten every FileSpec into concrete (source_file, dest_relpath, executable).
+    def expand(self) -> list[tuple[Path, str, bool, bool]]:
+        """Flatten every FileSpec into concrete (source_file, dest_relpath, executable, starter).
 
         Directory sources are walked recursively; the dest keeps the relative
         structure below the source directory.
         """
-        out: list[tuple[Path, str, bool]] = []
+        out: list[tuple[Path, str, bool, bool]] = []
         for spec in self.files:
             src = self.resolve(spec)
             if not src.exists():
@@ -50,9 +56,9 @@ class Tool:
             if src.is_dir():
                 for child in sorted(p for p in src.rglob("*") if p.is_file()):
                     rel = child.relative_to(src).as_posix()
-                    out.append((child, f"{spec.dest}/{rel}", spec.executable))
+                    out.append((child, f"{spec.dest}/{rel}", spec.executable, spec.starter))
             else:
-                out.append((src, spec.dest, spec.executable))
+                out.append((src, spec.dest, spec.executable, spec.starter))
         return out
 
 
@@ -96,7 +102,12 @@ def load_tool(directory: Path) -> Tool:
         dest = entry["dest"].replace("\\", "/").strip("/")
         if not dest or dest.startswith("../") or "/../" in dest:
             raise ManifestError(f"{manifest_path}: unsafe dest '{entry['dest']}'")
-        files.append(FileSpec(src=entry["src"], dest=dest, executable=bool(entry.get("executable"))))
+        files.append(FileSpec(
+            src=entry["src"],
+            dest=dest,
+            executable=bool(entry.get("executable")),
+            starter=bool(entry.get("starter")),
+        ))
 
     fragment: dict = {}
     fragment_name = data.get("settings", "settings.fragment.json")

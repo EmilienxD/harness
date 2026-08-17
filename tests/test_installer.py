@@ -351,3 +351,82 @@ def test_user_install_gitignores_inside_claude_dir(tmp_path, monkeypatch):
     text = (target.claude_dir / ".gitignore").read_text(encoding="utf-8")
     assert "commit-ai.key" in text
     assert ".claude/" not in text
+
+
+# --- stop-hook override (redirect-subagents) ------------------------------
+
+
+HOST_ARGV_TAIL = ("hooks/redirect_subagents_wait_hook.py", "600")
+
+
+def _stop_entries(settings_dict):
+    return [
+        entry
+        for group in settings_dict.get("hooks", {}).get("Stop", [])
+        for entry in group.get("hooks", [])
+    ]
+
+
+def test_stop_hook_override_rewrites_sibling_entry(target):
+    """Installing redirect-subagents over an existing Stop hook rewires the
+    older hook to proxy through the wait script (-s + original argv)."""
+    target.claude_dir.mkdir(parents=True)
+    target.settings_path.write_text(json.dumps({
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "python",
+                                       "args": ["user_stop.py"]}]}]}
+    }), encoding="utf-8")
+    install("redirect-subagents", target)
+    entries = _stop_entries(settings(target))
+    host = next(e for e in entries if "redirect_subagents_wait_hook.py" in str(e.get("args"))
+                and "_proxied" not in e)
+    proxied = next(e for e in entries if e.get("_proxied"))
+    assert proxied["args"][: len(host["args"])] == host["args"]
+    assert proxied["args"][len(host["args"])] == "-s"
+    assert proxied["_proxied"] == ["python", "user_stop.py"]
+    assert "stopHook" not in host
+
+
+def test_stop_hook_override_reinstall_is_idempotent(target):
+    install("redirect-subagents", target)
+    first = settings(target)
+    install("redirect-subagents", target)
+    assert settings(target) == first
+
+
+def test_stop_hook_override_uninstall_restores_sibling(target):
+    original = {
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "python",
+                                       "args": ["user_stop.py"]}]}]}
+    }
+    target.claude_dir.mkdir(parents=True)
+    target.settings_path.write_text(json.dumps(original), encoding="utf-8")
+    install("redirect-subagents", target)
+    uninstall(TOOLS["redirect-subagents"], target)
+    restored = settings(target)
+    assert restored == original, f"expected {original}, got {restored}"
+
+
+def test_stop_hook_override_uninstall_alone_leaves_no_settings(target):
+    install("redirect-subagents", target)
+    uninstall(TOOLS["redirect-subagents"], target)
+    # Nothing else in the file: uninstall removes it entirely.
+    assert not target.settings_path.exists()
+
+
+def test_stop_hook_override_host_keeps_timeout_and_statusmessage(target):
+    install("redirect-subagents", target)
+    host = next(e for e in _stop_entries(settings(target))
+                if "_proxied" not in e and "_proxied" not in str(e))
+    assert host["timeout"] == 600
+    assert host["statusMessage"] == "Waiting for redirected background subagents"
+
+
+def test_starter_files_are_never_overwritten(target):
+    """subagents.json is edited by the user after install; reinstall/upgrade
+    must leave it alone, exactly like the .rules templates."""
+    install("redirect-subagents", target)
+    config = target.claude_dir / "harness" / "subagents.json"
+    config.write_text(json.dumps({"Explore": "auto"}), encoding="utf-8")
+    plan = plan_install(TOOLS["redirect-subagents"], target)
+    apply_install(plan)
+    assert json.loads(config.read_text(encoding="utf-8")) == {"Explore": "auto"}

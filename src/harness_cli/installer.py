@@ -198,6 +198,87 @@ def substitute(value, target: "Target | None" = None, python_info=None):
     return value
 
 
+STOP_EVENTS = ("Stop", "SubagentStop")
+
+
+def _hook_identity(entry) -> bool:
+    return isinstance(entry, dict) and entry.get("type", "command") == "command" and "command" in entry
+
+
+def proxy_stop_hooks(merged: dict) -> None:
+    """Apply the `stopHook` convention to an already-merged settings dict, in place.
+
+    A fragment entry on Stop/SubagentStop carrying `"stopHook": true` (a
+    harness-owned key, stripped before the fragment is applied) declares a
+    wait-until-done replacement hook. Every *other* command hook on those two
+    events is then rewritten into a proxy through that host — the host's argv
+    followed by `-s` and the original argv — so the replacement runs first and
+    the original hook still fires. The original argv is also recorded under
+    the harness-owned `"_proxied"` key, which uninstall uses to restore it.
+
+    Entries that arrive proxied by identity (same host argv at the front) are
+    left alone, so reinstalling is a no-op.
+    """
+    hooks = merged.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event in STOP_EVENTS:
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
+            continue
+        host: dict | None = None
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for entry in group.get("hooks", []):
+                if isinstance(entry, dict) and entry.pop("stopHook", None) is True:
+                    host = entry
+        if host is None:
+            continue
+        host_argv = [host.get("command", "")] + list(host.get("args", []))
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            proxied = []
+            for entry in group.get("hooks", []):
+                if entry is host or not _hook_identity(entry):
+                    proxied.append(entry)
+                    continue
+                orig = [entry.get("command", "")] + list(entry.get("args", []))
+                if orig[: len(host_argv)] == host_argv:
+                    proxied.append(entry)  # already proxied through this host
+                    continue
+                proxied.append({
+                    **{k: v for k, v in entry.items() if k not in ("command", "args")},
+                    "command": host.get("command", ""),
+                    "args": host_argv[1:] + ["-s"] + orig,
+                    "_proxied": orig,
+                })
+            group["hooks"] = proxied
+
+
+def unproxy_stop_hooks(settings: dict) -> None:
+    """Reverse `proxy_stop_hooks`, in place: restore every entry's `_proxied` argv."""
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event in STOP_EVENTS:
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
+            continue
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            restored = []
+            for entry in group.get("hooks", []):
+                if isinstance(entry, dict) and "_proxied" in entry:
+                    orig = entry.pop("_proxied")
+                    entry = {k: v for k, v in entry.items() if k not in ("command", "args")}
+                    entry["command"], entry["args"] = orig[0], orig[1:]
+                restored.append(entry)
+            group["hooks"] = restored
+
+
 @dataclass
 class FileAction:
     dest: str
@@ -234,7 +315,7 @@ def is_installed(tool: Tool, target: Target) -> bool:
     and therefore nothing that can disagree with what is actually on disk.
     """
     expanded = tool.expand()
-    return bool(expanded) and all((target.claude_dir / dest).is_file() for _, dest, _ in expanded)
+    return bool(expanded) and all((target.claude_dir / dest).is_file() for _, dest, _, _ in expanded)
 
 
 def plan_install(
@@ -250,15 +331,16 @@ def plan_install(
     changes instead of each one merging onto the same original file.
     """
     actions: list[FileAction] = []
-    for source, dest, executable in tool.expand():
+    for source, dest, executable, starter in tool.expand():
         path = target.claude_dir / dest
         if not path.exists():
             status = "new"
         elif sha256(path) == sha256(source):
             status = "unchanged"
-        elif dest.endswith(".rules"):
-            # Never overwrite user-edited .rules files — they're starter templates
+        elif dest.endswith(".rules") or starter:
+            # Never overwrite user-edited starter files — they're templates
             # meant to be customized, not versioned config we maintain.
+            # (.rules predates the manifest flag and stays accepted.)
             status = "unchanged"
         else:
             status = "overwrite"
@@ -270,6 +352,10 @@ def plan_install(
     fragment = substitute(tool.fragment, target, python_info or fallback_info)
     before = target.read_settings() if settings_override is None else settings_override
     after = settings_merge.merge(before, fragment) if fragment else before
+    if fragment:
+        # A fragment that declares a stopHook replacement host rewrites the
+        # other Stop/SubagentStop entries to proxy through it.
+        proxy_stop_hooks(after)
 
     ignore_before = (
         target.read_gitignore() if gitignore_override is None else gitignore_override
@@ -354,7 +440,7 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
     notes: list[str] = []
     removed_any = False
 
-    for source, dest, _ in tool.expand():
+    for source, dest, _, _ in tool.expand():
         path = target.claude_dir / dest
         if not path.is_file():
             continue
@@ -368,6 +454,7 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
     fragment = substitute(tool.fragment, target)
     if fragment:
         before = target.read_settings()
+        unproxy_stop_hooks(before)  # restore entries a stopHook host rewrote
         after = settings_merge.unmerge(before, fragment)
         if after != before:
             removed_any = True

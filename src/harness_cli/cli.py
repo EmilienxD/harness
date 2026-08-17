@@ -107,7 +107,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     if tool.requires:
         print(f"Requires: {', '.join(tool.requires)}")
     print("Files:")
-    for _, dest, executable in tool.expand():
+    for _, dest, executable, _ in tool.expand():
         print(f"  .claude/{dest}{'  (executable)' if executable else ''}")
     if tool.gitignore:
         print("\nAdded to .gitignore:")

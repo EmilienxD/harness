@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_deny_PreToolUse_hook.py"]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_notify_PostToolUse_hook.py"],
+            "statusMessage": "Checking redirected background subagents"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_wait_hook.py"],
+            "timeout": 600,
+            "statusMessage": "Waiting for redirected background subagents",
+            "stopHook": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_wait_hook.py"],
+            "timeout": 600,
+            "statusMessage": "Waiting for redirected background subagents",
+            "stopHook": true
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -76,6 +76,7 @@ Restart Claude Code after installing so it picks up new hooks and skills.
 | [`on-edit-reminder`](harness/on-edit-reminder/README.md) | Lets edits land, then makes Claude read the required files and fix what breaks them |
 | [`on-read-reminder`](harness/on-read-reminder/README.md) | Reminds Claude to read your key files when it reads matching paths |
 | [`prefer-read-tool`](harness/prefer-read-tool/README.md) | Nudges Claude to use Read instead of `cat`/`sed` |
+| [`redirect-subagents`](harness/redirect-subagents/README.md) | Redirects Agent subagents to alternate providers, sparing subscription usage |
 | [`senior-advisor`](harness/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
 | [`usage-limit-wait`](harness/usage-limit-wait/README.md) | Warns as a subscription usage limit fills, then waits it out instead of failing the turn |
 | [`zoom-out`](harness/zoom-out/SKILL.md) | Higher-level map of a codebase area |

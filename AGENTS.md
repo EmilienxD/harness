@@ -49,6 +49,9 @@ uninstall.
   reads paths matching gitignore-style patterns. See `README.md`.
 - `harness/prefer-read-tool/` — PostToolUse hook reminding the agent to use Read instead of cat/sed.
   See `README.md`.
+- `harness/redirect-subagents/` — PreToolUse/PostToolUse/Stop hooks redirecting Agent subagents
+  to alternate providers (clauder, `claude -p`, custom CLIs) instead of consuming the Claude
+  subscription. Config in `.claude/harness/subagents.json`. See `README.md`.
 - `harness/senior-advisor/` — read-only senior-developer advisory mode. See `SKILL.md`.
 - `harness/usage-limit-wait/` — `UserPromptSubmit` + `PostToolBatch` hook that warns as a Claude
   subscription usage window fills and blocks the session until it resets. See `README.md`.
