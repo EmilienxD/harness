@@ -26,10 +26,10 @@ const LAUNCH_PROPERTIES = {
     enum: MCP_LAUNCHABLE_AGENT_TYPES,
     description:
       "Agent role. " +
-      "Use general-purpose for direct full-tool work, Explore for read-only repository search, " +
-      "brainstormer for a user-driven product or architecture conversation, " +
-      "and webresearcher for current external facts with citations. " +
-      "Implementation roles are intentionally unavailable here; use start_auto_run for issue implementation.",
+      "Use `general-purpose` for direct full-tool work, `Explore` for read-only repository search, " +
+      "`brainstormer` for a user-driven product or architecture conversation, " +
+      "and `webresearcher` for up to date facts and documentation. " +
+      "Implementation roles are intentionally unavailable here; use `start_auto_run` for issue implementation.",
   },
   prompt: {
     type: "string",
@@ -46,25 +46,35 @@ const LAUNCH_PROPERTIES = {
     description:
       "Required concise 3-6 word label shown to the user in the fleet tree. " +
       "Describe the concrete purpose, such as 'Audit retry logic centralization', " +
-      "rather than a generic label such as 'Investigate code'.",
+      "rather than a generic label such as 'Investigate code'. " +
+      "Length is best-effort, never a failure: a label outside 3-6 words is normalized " +
+      "to fit (truncated or extended from the prompt) and applied with a notice.",
   },
   issue: {
     type: "integer",
     minimum: 1,
     description:
       "Optional positive GitHub issue number. " +
-      "When present, aboard resolves the issue and parent specification " +
+      "When present, Aboard resolves the issue and parent specification " +
       "and merges that contract into the opening prompt; " +
-      "do not spend an agent turn fetching launch-contract material again.",
+      "do not spend an agent turn fetching launch-contract material again. " +
+      "Examples: automated exploration against an issue, " +
+      "`{ type: 'Explore', prompt: 'Investigate how the retry backlog in #52 is handled today and report where it lives', issue: 52 }`; " +
+      "or a fast change the user will drive, " +
+      "`{ type: 'general-purpose', interactive: true, prompt: 'Work with me on the session loss reported in #47', issue: 47 }`. " +
+      "Always pair it with `prompt` naming what the agent does with the issue; " +
+      "an interactive launch without `prompt` opens with no first message and the issue goes unused, with a notice.",
   },
   interactive: {
     type: "boolean",
     description:
       "Defaults to false. " +
       "Set true only when the user should drive the terminal directly. " +
-      "The terminal is focused and no result is delivered back to the caller, " +
-      "so continue with the user and never wait, poll, or promise a later summary. " +
-      "brainstormer is always interactive; webresearcher and Explore cannot be interactive.",
+      "The terminal is focused and no result is delivered back to you, " +
+      "and never wait, poll, or promise a later summary. " +
+      "It becomes the user's responsibility. " +
+      "Key constraints: `brainstormer` is always interactive, `webresearcher` and `Explore` cannot be interactive." +
+      "Other agents can be interactive or not. Not respecting this will immedialty fail.",
   },
   run_in_background: {
     type: "boolean",
@@ -73,40 +83,43 @@ const LAUNCH_PROPERTIES = {
       "Defaults to false, which blocks until the final result is needed for the current decision. " +
       "Set true only for independent work that may finish later; " +
       "the call returns immediately and completion is delivered as a later notification. " +
-      "Ignored with a notice when interactive is true.",
+      "Ignored with a notice when `interactive` is true.",
   },
 } as const;
 
 const RUN_AGENT_DESCRIPTION = 
-  "Launch one visible, independent Claude Code session in a real terminal created by aboard. " +
+  "Launch one visible, independent Claude Code session in a real terminal created by Aboard. " +
   "Use this when a coherent unit of work should be delegated " +
   "and the user should be able to watch, interrupt, or take over. " +
   "Do not use it for one known-file read, one targeted symbol lookup, " +
   "or to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n\n" +
 
   "Choose the role deliberately:\n" +
-  "- general-purpose: Claude Code's unmodified default full-tool session, " +
-  "for direct work that may mix investigation and editing. " +
+  "- `general-purpose`: Claude Code's unmodified default full-tool session, " +
+  "for direct coding that may mix investigation and editing. " +
+  "This is the path for a fast change or a critical fix too small to deserve a spec; " +
+  "complex or planned implementation goes through `start_auto_run` instead, " +
+  "which owns branches, commits, and pull requests. " +
   "It can be automated or handed to the user.\n" +
-  "- Explore: Claude Code's built-in read-only repository search role. " +
+  "- `Explore`: Claude Code's built-in read-only repository search role. " +
   "Use for locating files, references, patterns, or answering where code lives. " +
   "State quick, medium, or very thorough breadth in the prompt. " +
   "It is automated only.\n" +
-  "- brainstormer: a user-driven conversation that resolves a vague product or architecture idea " +
+  "- `brainstormer`: a user-driven conversation that resolves a vague product or architecture idea " +
   "into an implementation-ready durable specification. " +
   "It is interactive only.\n" +
-  "- webresearcher: automated, read-only research for cutoff-sensitive external facts. " +
+  "- `webresearcher`: automated, read-only research for cutoff-sensitive external facts. " +
   "Use for current documentation, versions, pricing, standards, advisories, " +
   "or vendor behavior that may have changed; it returns cited current evidence.\n" +
   "Implementation agents and pull-request doctors are not available through this tool. " +
-  "Use start_auto_run for approved issue implementation " +
-  "and review_pr to hand an existing pull-request session back to the user.\n\n" +
+  "Use `start_auto_run` for approved issue implementation " +
+  "and `review_pr` to hand an existing pull-request session back to the user.\n\n" +
 
   "Mode and delivery are separate decisions. " +
   "An interactive launch focuses the terminal for the user and never returns an agent result. " +
   "An automated foreground launch waits for the final result " +
   "when that answer is required before making the next recommendation. " +
-  "run_in_background returns immediately and should be used only when the work is independent; " +
+  "`run_in_background` returns immediately and should be used only when the work is independent; " +
   "its eventual result arrives through a later notification. " +
   "Every launch starts a fresh conversation with no knowledge of the Manager's conversation.\n\n" +
 
@@ -174,8 +187,8 @@ const TODO_UPDATE_DESCRIPTION =
   "Status semantics: pending marks remaining work; " +
   "completed changes the checkbox to complete but leaves the task in its current position forever; " +
   "deleted removes the task and must be used only when the user explicitly asks for deletion. " +
-  "in_progress is accepted but coerced to pending with a notice " +
-  "because live work is already derived from issues, pull requests, and auto-run state.\n\n" +
+  "There is no in-progress status: live work is already derived from issues, pull requests, " +
+  "and auto-run state, and any value outside the status enum is rejected.\n\n" +
 
   "Reprioritize with after='top' or after=<current position>; " +
   "moving is part of this update, not a separate operation. " +
@@ -195,10 +208,10 @@ const TODO_UPDATE_DESCRIPTION =
   "Send them one at a time, each addressed against the result of the last.";
 
 const START_AUTO_RUN_DESCRIPTION = 
-  "Start aboard's automatic implementation workflow for the oldest open ai:spec issue. " +
+  "Start Aboard's automatic implementation workflow for the oldest open ai:spec issue. " +
   "Use this only after the user has approved implementation " +
   "and the specification and child issues are ready. " +
-  "Do not use run_agent to bypass this workflow: " +
+  "Do not use `run_agent` to bypass this workflow: " +
   "the extension, not an agent, owns branch creation, commits, pushes, " +
   "pull requests, optional review launches, merges, and cleanup.\n\n" +
 
@@ -223,7 +236,7 @@ const START_AUTO_RUN_DESCRIPTION =
   "leaving visible work in place for inspection.";
 
 const REVIEW_PR_DESCRIPTION = 
-  "Hand an existing open pull request's owning aboard session back to the user " +
+  "Hand an existing open pull request's owning Aboard session back to the user " +
   "for interactive inspection or follow-up. " +
   "Use this when the user asks to review, inspect, discuss, or continue work on a pull request. " +
   "This does not perform a review, launch an automated reviewer, post comments, " +
@@ -232,13 +245,13 @@ const REVIEW_PR_DESCRIPTION =
   "Omit pr to select the latest open pull request, " +
   "or provide a positive pull-request number to target one explicitly. " +
   "The optional focus text names what the user wants to inspect. " +
-  "It steers the first pass only when aboard must create a fallback session; " +
+  "It steers the first pass only when Aboard must create a fallback session; " +
   "an existing session is already loaded and cannot be steered, " +
   "so the focus is returned as unusedFocus instead of being applied. " +
   "If the owning implementer or pull-request doctor is live, its terminal is focused; " +
   "if its recorded session is closed, it is resumed with its original restrictions. " +
   "If ownership is unavailable after a restart, " +
-  "aboard opens a fresh interactive pull-request doctor and reports that fallback. " +
+  "Aboard opens a fresh interactive pull-request doctor and reports that fallback. " +
   "If no matching open pull request exists, nothing is launched.";
 
 /**
@@ -328,12 +341,12 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         },
         status: {
           type: "string",
-          enum: [...ROADMAP_TASK_STATUSES, "in_progress"],
+          enum: [...ROADMAP_TASK_STATUSES],
           description:
             "Optional status. " +
             "pending reopens remaining work; completed checks the task in place permanently; " +
-            "deleted removes it and is allowed only on the user's explicit request; " +
-            "in_progress is coerced to pending because live state is derived elsewhere.",
+            "deleted removes it and is allowed only on the user's explicit request. " +
+            "There is no in-progress status; live state is derived elsewhere.",
         },
         after: ANCHOR_SCHEMA(
           "Optional reprioritization anchor. " +
@@ -369,7 +382,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
           minLength: 1,
           description:
             "Optional concise topic naming what the user wants to inspect or discuss. " +
-            "Used as the opening handoff context when aboard must create a fallback interactive session; " +
+            "Used as the opening handoff context when Aboard must create a fallback interactive session; " +
             "otherwise it is returned as unusedFocus and the user retypes it in the terminal.",
         },
       },
@@ -440,6 +453,39 @@ interface ParsedLaunch {
   readonly notices: readonly string[];
 }
 
+const MIN_DESCRIPTION_WORDS = 3;
+const MAX_DESCRIPTION_WORDS = 6;
+
+/**
+ * Coerces the user-facing label into the 3-6 word range. A malformed label is a
+ * cosmetic problem, not a launch-blocking one, so overlong labels are truncated
+ * and short ones are extended from the prompt, with the type as the last-resort
+ * filler. Returns the label plus a notice when it had to be adjusted.
+ */
+function normalizeDescription(raw: string, prompt: string | undefined, type: string): { description: string; notice?: string } {
+  const words = raw.trim().split(/\s+/);
+  if (words.length >= MIN_DESCRIPTION_WORDS && words.length <= MAX_DESCRIPTION_WORDS) {
+    return { description: words.join(" ") };
+  }
+  if (words.length > MAX_DESCRIPTION_WORDS) {
+    return {
+      description: words.slice(0, MAX_DESCRIPTION_WORDS).join(" "),
+      notice: `description exceeded ${MAX_DESCRIPTION_WORDS} words and was truncated to "${words.slice(0, MAX_DESCRIPTION_WORDS).join(" ")}".`,
+    };
+  }
+  const padded = [...words];
+  const promptWords = prompt === undefined ? [] : prompt.trim().split(/\s+/).slice(0, 12);
+  for (const word of promptWords) {
+    if (padded.length >= MIN_DESCRIPTION_WORDS) break;
+    padded.push(word.replace(/[^\p{L}\p{N}'-]/gu, ""));
+  }
+  while (padded.length < MIN_DESCRIPTION_WORDS) padded.push(type);
+  return {
+    description: padded.join(" "),
+    notice: `description was shorter than ${MIN_DESCRIPTION_WORDS} words and was extended to "${padded.join(" ")}".`,
+  };
+}
+
 function parseLaunch(value: unknown): ParsedLaunch | string {
   if (!isRecord(value)) return "arguments must be an object";
   if (!exactKeys(value, ["type", "prompt", "description", "issue", "interactive", "run_in_background"])) {
@@ -453,16 +499,19 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   if (value.interactive === true && isAutomatedAgentType(type)) return `${type} is automated and cannot be launched interactively`;
   if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
   if (!nonEmptyString(value.description)) return "description must be a non-empty string";
-  const words = value.description.trim().split(/\s+/).length;
-  if (words < 3 || words > 6) return "description must contain 3-6 words";
   if (value.prompt !== undefined && !nonEmptyString(value.prompt)) return "prompt must be non-empty when provided";
   if (value.issue !== undefined && (!Number.isInteger(value.issue) || (value.issue as number) <= 0)) return "issue must be a positive integer";
 
   const notices: string[] = [];
+  const label = normalizeDescription(value.description, value.prompt === undefined ? undefined : value.prompt as string, type);
+  if (label.notice !== undefined) notices.push(label.notice);
   let interactive = value.interactive === true;
   if (!interactive && isInteractiveAgentType(type)) {
     interactive = true;
     notices.push(`${type} is an interactive type and was launched interactively; no result will be delivered, so continue with the user instead of waiting.`);
+  }
+  if (interactive && value.issue !== undefined && (isInteractiveAgentType(type) || !nonEmptyString(value.prompt))) {
+    notices.push(`issue ${value.issue} was ignored: an interactive session opens with only the opening topic. To hand the session an issue's context, pass it in \`prompt\`.`);
   }
   if (!interactive && !nonEmptyString(value.prompt)) return "prompt is required unless interactive is true";
   const background = !interactive && value.run_in_background === true;
@@ -472,7 +521,7 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   return {
     input: {
       type: type as DelegationLaunchInput["type"],
-      description: value.description.trim(),
+      description: label.description,
       ...(value.prompt === undefined ? {} : { prompt: (value.prompt as string).trim() }),
       ...(value.issue === undefined ? {} : { issue: value.issue as number }),
     },
@@ -625,7 +674,7 @@ export function createMcpHandler(
 
     const caller = request.headers[AGENT_ID_HEADER];
     if (caller !== options.managerAgentId) {
-      return refusal(403, "not-the-manager", "This MCP server is the Manager's. Only the aboard Manager session may orchestrate the fleet.");
+      return refusal(403, "not-the-manager", "This MCP server is the Manager's. Only the Aboard Manager session may orchestrate the fleet.");
     }
 
     if (!isRecord(request.body) || request.body.jsonrpc !== "2.0" || typeof request.body.method !== "string") {
@@ -642,7 +691,7 @@ export function createMcpHandler(
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "aboard", version: "0.0.0" },
-          instructions: "Use aboard tools to launch visible Claude Code terminals, evolve the roadmap, start auto-runs, and reopen pull-request sessions.",
+          instructions: "Use Aboard tools to launch visible Claude Code terminals, evolve the roadmap, start auto-runs, and reopen pull-request sessions.",
         });
       case "notifications/initialized":
         return { status: 202 };

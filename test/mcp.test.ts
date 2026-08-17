@@ -207,6 +207,50 @@ test("a terminal handed to the user takes no lease and runs beside the holder", 
   assert.equal(lease.current()?.agentId, holder);
 });
 
+// The 3-6 word label is cosmetic guidance, not a launch gate: an out-of-range
+// description is coerced into range and reported as a notice, never refused.
+test("an out-of-range description is coerced, not refused", async () => {
+  const { launch } = setup();
+  const notice = (response: { readonly body?: unknown }) =>
+    String((body(response).result as { notice?: unknown }).notice ?? "");
+
+  const long = await launch({
+    type: "general-purpose",
+    description: "investigate the retry logic centralization across the whole messaging layer",
+    interactive: true,
+  });
+  assert.equal(long.status, 200, JSON.stringify(long.body));
+  assert.match(notice(long), /truncated to "investigate the retry logic centralization across"/);
+
+  const short = await launch({
+    type: "general-purpose",
+    description: "fix it",
+    prompt: "Fix the flaky OAuth login retry",
+    interactive: true,
+  });
+  assert.equal(short.status, 200, JSON.stringify(short.body));
+  assert.match(notice(short), /extended to "fix it Fix"/);
+
+  // A one-word label can also be padded from the prompt.
+  const minimal = await launch({
+    type: "webresearcher",
+    description: "pricing",
+    prompt: "Find the current API pricing tiers",
+    run_in_background: true,
+  });
+  assert.equal(minimal.status, 200, JSON.stringify(minimal.body));
+  assert.match(notice(minimal), /extended to "pricing Find the"/);
+
+  // With no prompt to draw from, the type itself is the fallback filler.
+  const fallback = await launch({
+    type: "general-purpose",
+    description: "chat",
+    interactive: true,
+  });
+  assert.equal(fallback.status, 200, JSON.stringify(fallback.body));
+  assert.match(notice(fallback), /extended to "chat general-purpose general-purpose"/);
+});
+
 test("keeps the automated-only research types paused after their result caller is gone", async () => {
   // Neither has a user conversation to hand off, so restoration would open a
   // terminal nobody can use. Explore belongs here for the same reason as
@@ -396,7 +440,6 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["run_agent", { type: "general-purpose", prompt: "", description: "do the work" }],
     ["run_agent", { type: "bogus", prompt: "work", description: "do the work" }],
     ["run_agent", { type: "manager", prompt: "work", description: "launch a second manager" }],
-    ["run_agent", { type: "general-purpose", description: "too short", interactive: true }],
     ["run_agent", { type: "brainstormer", description: "brainstorm the caching design", interactive: "yes" }],
     // An automated launch without a prompt is rejected.
     ["run_agent", { type: "Explore", description: "map the auth flow" }],
