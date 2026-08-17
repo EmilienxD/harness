@@ -211,7 +211,7 @@ def test_generate_commit_message_calls_gemini_rest_api(monkeypatch):
 
 def test_generate_commit_message_uses_configured_base_url(monkeypatch):
     _mock_ai_inputs(monkeypatch)
-    monkeypatch.setattr(hook, "GEMINI_BASE_URL", "https://gateway.example/v1beta")
+    monkeypatch.setattr(hook, "GEMINI_BASE_URL", "https://gateway.example")
     captured = {}
     response = {
         "candidates": [{"content": {"parts": [{"text": json.dumps({
