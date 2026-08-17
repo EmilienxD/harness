@@ -464,3 +464,17 @@ def test_starter_files_are_never_overwritten(target):
     plan = plan_install(TOOLS["redirect-subagents"], target)
     apply_install(plan)
     assert json.loads(config.read_text(encoding="utf-8")) == {"Explore": "auto"}
+
+
+def test_force_overwrites_edited_starter_files(target):
+    """--force is the user's way to get a pristine copy back of a file they
+    customised — mirroring uninstall --force for modified files."""
+    install("redirect-subagents", target)
+    config = target.claude_dir / "harness" / "subagents.json"
+    config.write_text(json.dumps({"Explore": "auto"}), encoding="utf-8")
+    plan = plan_install(TOOLS["redirect-subagents"], target, force=True)
+    statuses = {a.dest: a.status for a in plan.files}
+    assert statuses["harness/subagents.json"] == "overwrite"
+    apply_install(plan)
+    source = TOOLS["redirect-subagents"].root / "subagents.example.json"
+    assert config.read_bytes() == source.read_bytes()

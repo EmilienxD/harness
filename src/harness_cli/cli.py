@@ -133,7 +133,11 @@ def cmd_install(args: argparse.Namespace) -> int:
     pending_ignore: str | None = None
     for tool in tools:
         plan = plan_install(
-            tool, target, settings_override=pending, gitignore_override=pending_ignore
+            tool,
+            target,
+            settings_override=pending,
+            gitignore_override=pending_ignore,
+            force=getattr(args, "force", False),
         )
         _print_plan(plan)
         if args.dry:
@@ -209,6 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_install.add_argument("tools", nargs="+")
     _add_target_flags(p_install)
     p_install.add_argument("--dry", action="store_true", help="show what would change")
+    p_install.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite starter files you edited instead of keeping them",
+    )
     p_install.set_defaults(func=cmd_install)
 
     p_remove = sub.add_parser("uninstall", help="remove installed tools (or 'all')")

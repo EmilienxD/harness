@@ -275,12 +275,16 @@ def plan_install(
     target: Target,
     settings_override: dict | None = None,
     gitignore_override: str | None = None,
+    force: bool = False,
 ) -> Plan:
     """Compute what installing `tool` would change.
 
     `settings_override` and `gitignore_override` let a caller thread the result
     of a previous plan through, so a batch install of several tools stacks their
     changes instead of each one merging onto the same original file.
+
+    `force` overwrites user-edited starter files instead of keeping them —
+    mirroring `uninstall --force` for files modified since install.
     """
     actions: list[FileAction] = []
     for source, dest, executable, starter in tool.expand():
@@ -289,7 +293,7 @@ def plan_install(
             status = "new"
         elif sha256(path) == sha256(source):
             status = "unchanged"
-        elif dest.endswith(".rules") or starter:
+        elif (dest.endswith(".rules") or starter) and not force:
             # Never overwrite user-edited starter files — they're templates
             # meant to be customized, not versioned config we maintain.
             # (.rules predates the manifest flag and stays accepted.)
