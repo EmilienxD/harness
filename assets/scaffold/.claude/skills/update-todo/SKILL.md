@@ -12,7 +12,7 @@ Write the project roadmap if it does not exist yet, otherwise apply the user's a
 Write the first one, in three steps, with no confirmation gate.
 
 1. **Delegate the survey.** Run an `Explore` agent over the repository, at very thorough breadth, and ask it to report in under 400 words: what the project is and does, its main components and what each is for, work that is visibly unfinished (TODO/FIXME comments, stubbed functions, empty test files, disabled code paths), and anything that looks broken, missing, or half-migrated — what is there, not a proposed plan. Delegate this rather than reading the repository yourself: a project-wide survey is the largest read you would ever perform, and it would land in the longest-lived context in the system and be lost at the first compaction.
-2. **Ask what the code cannot tell you.** One `AskUserQuestion` round, three or four questions, then stop asking: what matters most next, what is deliberately unbuilt, what they consider done that the code makes look unfinished.
+2. **Ask what the code cannot tell you.** ask questions: what matters most next, what is deliberately unbuilt, what they consider done that the code makes look unfinished, stop asking once you have everything you need.
 3. **Write it in one `todo_create` call.** Ten to twenty tasks, most important first, as a single batch.
 
 ## If the roadmap is already in your context

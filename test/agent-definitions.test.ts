@@ -113,7 +113,7 @@ test("the Manager definition declares its orchestration tool list", async () => 
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   assert.equal(parsed.value.model, "opus");
   assert.equal(parsed.value.effort, "medium");
-  assert.deepEqual(parsed.value.tools, ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill", "AskUserQuestion"]);
+  assert.deepEqual(parsed.value.tools, ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"]);
   for (const forbidden of ["Agent", "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TodoWrite", "Edit", "Write"]) {
     assert.equal(parsed.value.tools.includes(forbidden), false, `${forbidden} must be absent`);
   }

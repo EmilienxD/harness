@@ -169,8 +169,8 @@ test("the reminder is registered on PostToolUse with no matcher, alongside the A
   };
   const reminder = parsed.PostToolUse.find((entry) => entry.hooks.some((hook) => hook.args.at(-1) === "manager-roadmap"));
   assert.ok(reminder !== undefined, "PostToolUse must register the roadmap reminder");
-  // No matcher: restricting it to the Manager's tool list would skip only Skill
-  // and AskUserQuestion, in exchange for a regex that must stay in sync with it.
+  // No matcher: restricting it to the Manager's tool list would skip only Skill,
+  // in exchange for a regex that must stay in sync with it.
   assert.equal(reminder.matcher, undefined);
   assert.equal(reminder.hooks[0]?.timeout, 60);
   assert.equal(parsed.PostToolUse.some((entry) => entry.matcher === "Agent"), true);
