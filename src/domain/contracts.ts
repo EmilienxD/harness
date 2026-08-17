@@ -29,6 +29,14 @@ export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT
 );
 
 /**
+ * The type `run_agent` assumes when the caller names none. `general-purpose` is
+ * the only catch-all in the set — every other launchable type is a narrowed
+ * role — so an omitted type is the caller declining to narrow, not an unknown
+ * one to reject.
+ */
+export const MCP_DEFAULT_AGENT_TYPE: AgentType = "general-purpose";
+
+/**
  * Agent types that perform a task and return a result rather than being handed
  * to the user. They are never typed into, so their first prompt is mandatory
  * (spec section 5.3).

@@ -15,7 +15,7 @@ const definitionFor = (agentName: string, declaredTools: readonly string[]) =>
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
-import { MCP_LAUNCHABLE_AGENT_TYPES, isNamedBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
+import { MCP_DEFAULT_AGENT_TYPE, MCP_LAUNCHABLE_AGENT_TYPES, isNamedBuiltinAgentType, type AgentId, type AgentSession, type IsoTimestamp, type SessionId, type TerminalId, type WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease, type SessionObservation } from "../src/domain/lease.js";
 
@@ -469,6 +469,33 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     const response = await call(name, args);
     assert.equal(response.status, 400, `${name} ${JSON.stringify(args)}`);
     assert.equal(body(response).ok, false);
+  }
+});
+
+// `general-purpose` is the only catch-all in the launchable set, so an omitted
+// type is the caller declining to narrow rather than an unknown one to reject.
+test("an omitted type launches general-purpose, and a named one still wins", async () => {
+  const { launch, fleet } = setup();
+  assert.equal(MCP_DEFAULT_AGENT_TYPE, "general-purpose");
+  assert.equal(
+    (CORE_MCP_TOOLS.find((tool) => tool.name === "run_agent")!.inputSchema as { required?: readonly string[] }).required
+      ?.includes("type"),
+    false,
+  );
+
+  const defaulted = await launch({ prompt: "Audit the retry paths", description: "audit the retry paths", run_in_background: true });
+  assert.equal(defaulted.status, 200, JSON.stringify(defaulted.body));
+  const named = await launch({ type: "Explore", prompt: "Map the auth flow", description: "map the auth flow", run_in_background: true });
+  assert.equal(named.status, 200, JSON.stringify(named.body));
+
+  assert.deepEqual(
+    fleet.list().filter((entry) => entry.identity.type !== "manager").map((entry) => entry.identity.type),
+    ["general-purpose", "Explore"],
+  );
+  // Only omission defaults: a type that is present but unlaunchable is still an
+  // error, never quietly rewritten into the default.
+  for (const type of [null, "", "bogus", "manager", 3]) {
+    assert.equal((await launch({ type, prompt: "work", description: "do the work now" })).status, 400, String(type));
   }
 });
 

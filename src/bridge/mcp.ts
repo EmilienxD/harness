@@ -1,4 +1,4 @@
-import { MCP_LAUNCHABLE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentId, type AgentType } from "../domain/contracts.js";
+import { MCP_DEFAULT_AGENT_TYPE, MCP_LAUNCHABLE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentId, type AgentType } from "../domain/contracts.js";
 import { ROADMAP_TASK_STATUSES, type RoadmapAnchor, type RoadmapTaskStatus } from "../domain/roadmap.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
 import type { ReviewCoordinator } from "../github/review.js";
@@ -139,10 +139,10 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   if (!exactKeys(value, ["type", "prompt", "description", "issues", "interactive", "run_in_background"])) {
     return "arguments contain an unknown property";
   }
-  if (!nonEmptyString(value.type) || !MCP_LAUNCHABLE_AGENT_TYPES.includes(value.type as AgentType)) {
+  if (value.type !== undefined && (!nonEmptyString(value.type) || !MCP_LAUNCHABLE_AGENT_TYPES.includes(value.type as AgentType))) {
     return `type must be one of: ${MCP_LAUNCHABLE_AGENT_TYPES.join(", ")}`;
   }
-  const type = value.type as AgentType;
+  const type = value.type === undefined ? MCP_DEFAULT_AGENT_TYPE : value.type as AgentType;
   if (value.interactive !== undefined && typeof value.interactive !== "boolean") return "interactive must be a boolean";
   if (value.interactive === true && isAutomatedAgentType(type)) return `${type} is automated and cannot be launched interactively`;
   if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";

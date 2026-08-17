@@ -1,4 +1,4 @@
-import { MCP_LAUNCHABLE_AGENT_TYPES } from "../domain/contracts.js";
+import { MCP_DEFAULT_AGENT_TYPE, MCP_LAUNCHABLE_AGENT_TYPES } from "../domain/contracts.js";
 import { ROADMAP_TASK_STATUSES } from "../domain/roadmap.js";
 
 
@@ -30,11 +30,24 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     description:
       "Launch one visible, independent, single-use agent session in a real terminal created by Aboard. " +
       "Use this when a coherent unit of work should be delegated " +
-      "and the user should be able to watch, interrupt, or take over. " +
-      "Do not use it for one known-file read, one targeted symbol lookup, " +
-      "or to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n\n" +
+      "and the user should be able to watch, interrupt, or take over.\n\n" +
 
-      "Choose the role deliberately:\n" +
+      "## When not to use\n\n" +
+      "If the target is already known, use the direct tool: Read for a known path, " +
+      "Grep for a specific symbol or string. " +
+      "Reserve this tool for open-ended questions that span the codebase, " +
+      "or tasks that match an available agent type. " +
+      "Do not use it to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n\n" +
+
+      "## Choosing the agent type\n\n" +
+      "`type` is optional and defaults to `general-purpose`, so omit it when no narrower role fits.\n" +
+      "- `general-purpose` (default): General-purpose agent for researching complex and specific questions, " +
+        "searching for code and executing multi-step tasks, " +
+        "for direct coding that may mix investigation and editing. " +
+        "This is the path for a fast change, critical fix or any unplanned modification; " +
+        "complex or planned implementation goes through `start_auto_run` instead, " +
+        "which owns branches, commits, and pull requests. " +
+        "It can be automated or handed to the user.\n" +
       "- `Explore`: Fast read-only search agent for locating code. " +
         "Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), " +
         "or answer \"where is X defined / which files reference Y.\" " +
@@ -45,33 +58,101 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "- `webresearcher`: automated, read-only research for cutoff-sensitive external facts. " +
         "Use for current documentation, versions, pricing, standards, advisories, " +
         "or vendor behavior that may have changed; it returns cited current evidence.\n" +
-        "Implementation agents and pull-request doctors are not available through this tool. " +
       "- `brainstormer`: a user-driven conversation that resolves a vague product or architecture idea " +
         "into an implementation-ready durable specification. " +
-        "It is interactive only.\n" +
-      "- `general-purpose`: General-purpose agent for researching complex and specific questions, searching for code and executing multi-step tasks, " +
-        "for direct coding that may mix investigation and editing. " +
-        "This is the path for a fast change, critical fix or any unplanned modification; " +
-        "complex or planned implementation goes through `start_auto_run` instead, " +
-        "which owns branches, commits, and pull requests. " +
-        "It can be automated or handed to the user.\n" +
+        "It is interactive only.\n\n" +
+      "Implementation agents and pull-request doctors are not available through this tool.\n\n" +
 
-      "Mode and delivery are separate decisions. " +
-      "An interactive launch focuses the terminal for the user and never returns an agent result. " +
-      "An automated foreground launch waits for the final result " +
-      "when that answer is required before making the next recommendation. " +
-      "`run_in_background` returns immediately and should be used only when the work is independent; " +
-      "its eventual result arrives through a later notification. " +
-      "`brainstormer` is interactive only; `webresearcher` and `Explore` are automated only and reject `interactive`. " +
-      "Every launch starts a fresh conversation with no knowledge of the Manager's conversation.\n\n" +
+      "## Usage notes\n\n" +
+      "- `interactive: true` opens the session as a real terminal handed to the user to drive, " +
+        "and it returns no result at all — nothing comes back to you, ever. " +
+        "Use it when the work is a conversation the user should be having, not a task you need an answer from, " +
+        "and then continue with the user instead of waiting. " +
+        "`prompt` there is only the opening topic and may be omitted. " +
+        "`brainstormer` is interactive only; `webresearcher` and `Explore` are automated only and reject `interactive`.\n" +
+      "- Mode and delivery are separate decisions: `interactive` decides whether a result exists at all, " +
+        "`run_in_background` only decides when an automated result arrives.\n" +
+      "- Foreground (the default) blocks until the agent's final result lands. " +
+        "Use it when you need that answer before you can proceed — " +
+        "research whose findings inform your next recommendation. " +
+        "`run_in_background: true` returns immediately and is for genuinely independent work; " +
+        "you are notified automatically when the agent completes, so do NOT sleep, poll, " +
+        "or proactively check on its progress. Continue with other work or respond to the user instead.\n" +
+      "- Always include a short `description` summarizing what the agent will do: " +
+        "3-6 words, specific enough to tell two launches apart in the fleet tree — " +
+        "\"Audit retry logic centralization\", not \"Investigate code\". " +
+        "An out-of-range label is normalized to fit rather than rejected.\n" +
+      "- When you launch multiple agents for independent work, send them in a single message " +
+        "with multiple tool uses so they run concurrently. " +
+        "If the user asks for agents \"in parallel\", you MUST send one message with several `run_agent` calls in it.\n" +
+      "- An automated agent returns a single message back to you when it is done. " +
+        "That result is not visible to the user, so send a text message summarizing it concisely.\n" +
+      "- Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. " +
+        "When an agent writes or edits code, check the actual changes before reporting the work as done.\n" +
+      "- Every launch starts a fresh conversation with no knowledge of the Manager's conversation.\n\n" +
 
-      "Write an automated prompt as a self-sufficient briefing for a capable colleague entering cold: " +
-      "state the goal and why it matters, relevant files and constraints, " +
-      "known facts and rejected approaches, the exact question or bounded task, " +
-      "and what output or validation proves completion. " +
-      'Do not delegate synthesis with vague instructions such as "investigate and do the right thing." ' +
-      "Ask for a concise result when appropriate.\n\n" +
+      "## Writing the prompt\n\n" +
+      "`prompt` is the agent's opening message. It is required for an automated launch; " +
+      "for an interactive one, omit it unless the user gave an explicit opening topic.\n\n" +
+      "Brief the agent like a smart colleague who just walked into the room — " +
+      "it has not seen this conversation, does not know what you have tried, does not understand why this task matters.\n" +
+      "- Explain what you are trying to accomplish and why.\n" +
+      "- Describe what you have already learned or ruled out, including rejected approaches.\n" +
+      "- Give enough context about the surrounding problem that the agent can make judgment calls " +
+        "rather than just following a narrow instruction.\n" +
+      "- Name the exact question or bounded task, and what output or validation proves completion.\n" +
+      "- If you need a short response, say so (\"report in under 200 words\").\n" +
+      "- Lookups: hand over the exact command. Investigations: hand over the question — " +
+        "prescribed steps become dead weight when the premise is wrong.\n\n" +
+      "Terse command-style prompts produce shallow, generic work. " +
+      "Never delegate understanding: do not write \"based on your findings, fix the bug\" " +
+      "or \"based on the research, implement it.\" " +
+      "Those phrases push synthesis onto the agent instead of doing it yourself. " +
+      "Write prompts that prove you understood — what specifically to change.\n\n" +
 
+      "## Attaching issues\n\n" +
+      "`issues` names GitHub issues whose contract the agent needs. " +
+      "Aboard merges each one and its parent spec into the opening prompt, " +
+      "so do not spend a turn re-fetching that material. " +
+      "Pass every issue the agent needs and no more: each arrives in full, " +
+      "so a batch larger than one agent can hold and finish spends its context before it starts — " +
+      "split unrelated or heavy issues into separate launches. " +
+      "Always pair `issues` with `prompt`, or they go unused.\n\n" +
+
+      "<example>\n" +
+      "user: \"What's left on this branch before we can ship?\"\n" +
+      "assistant: A survey question across git state, tests, and config. " +
+      "Delegate it and ask for a short report so the raw command output stays out of the Manager's context.\n" +
+      "run_agent({\n" +
+      "  description: \"Audit branch ship readiness\",\n" +
+      "  prompt: \"Audit what's left before this branch can ship. Check: uncommitted changes, commits ahead of main, " +
+        "whether tests exist, whether the GrowthBook gate is wired up, whether CI-relevant files changed. " +
+        "Report a punch list — done vs. missing. Under 200 words.\"\n" +
+      "})\n" +
+      "The prompt is self-contained: it states the goal, lists what to check, and caps the response length. " +
+      "`type` is omitted, so this runs as `general-purpose`. " +
+      "The agent's report comes back as the tool result; relay the findings to the user.\n" +
+      "</example>\n\n" +
+
+      "<example>\n" +
+      "user: \"Is the pricing in our billing doc still current?\"\n" +
+      "assistant: A cutoff-sensitive external fact, so launch a webresearcher for cited current evidence.\n" +
+      "run_agent({\n" +
+      "  type: \"webresearcher\",\n" +
+      "  description: \"Verify vendor pricing is current\",\n" +
+      "  prompt: \"Check whether the per-seat and usage prices for <vendor>'s Team plan are still what our billing doc claims: " +
+        "$X per seat per month and $Y per 1M units. Context: the doc was written months ago and we are about to quote these " +
+        "numbers to a customer, so a stale figure is expensive. Report the current published figures with source links and " +
+        "effective dates, and say plainly whether each of our two numbers is still correct. Under 200 words.\",\n" +
+      "  run_in_background: true\n" +
+      "})\n" +
+      "The agent starts with no context from this conversation, so the prompt briefs it: " +
+      "what to verify, why it matters, and what form the answer should take. " +
+      "It runs in the background because the conversation can continue without the answer; " +
+      "the result arrives as a notification.\n" +
+      "</example>\n\n" +
+
+      "## Lease\n\n" +
       "Automated write-capable launches participate in the single-writer lease. " +
       "If another writer holds it, the call fails immediately with holder details; " +
       "surface that conflict instead of retrying or queueing. " +
@@ -83,50 +164,36 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         type: {
           type: "string",
           enum: MCP_LAUNCHABLE_AGENT_TYPES,
-          description: "Agent role to launch. See this tool's description for what each role does and when to use it.",
+          default: MCP_DEFAULT_AGENT_TYPE,
+          description: `One of the agent roles above; defaults to \`${MCP_DEFAULT_AGENT_TYPE}\` when omitted.`,
         },
         prompt: {
           type: "string",
           minLength: 1,
-          description:
-            "The agent's opening message. Required for automated launches. " +
-            "For interactive launches, omit unless the user gave an explicit opening topic.",
+          description: "The agent's opening message, as free text.",
         },
         description: {
           type: "string",
           minLength: 1,
-          description:
-            "Short (3-6 word) label for the fleet tree, e.g. 'Audit retry logic centralization', not 'Investigate code'. " +
-            "Out-of-range labels are normalized to fit rather than rejected.",
+          description: "A 3-6 word label for the fleet tree, e.g. 'Audit retry logic centralization'.",
         },
         issues: {
           type: "array",
           minItems: 1,
           uniqueItems: true,
           items: { type: "integer", minimum: 1 },
-          description:
-            "Optional GitHub issue numbers. Aboard merges each issue and its parent spec into the opening prompt, " +
-            "so do not spend a turn re-fetching that material. " +
-            "Pass every issue whose contract the agent needs and no more: each one arrives in full, " +
-            "so a batch larger than one agent can hold and finish spends its context before it starts — " +
-            "split unrelated or heavy issues into separate launches. " +
-            "Always pair with `prompt`, or the issues go unused.",
+          description: "Optional GitHub issue numbers for the opening prompt if provided.",
         },
         interactive: {
           type: "boolean",
-          description:
-            "Set to true to hands the terminal to the user and returns no result; " +
-            "false (default) runs automated with a result delivered back.",
+          description: "Whether to hand the session to the user instead of running it automated; false by default.",
         },
         run_in_background: {
           type: "boolean",
-          description:
-            "Automated launches only. Set to true to run this agent in the background. " +
-            "You will be notified when it completes. " +
-            "false (default) blocks until the final result is delivered.",
+          description: "Whether an automated launch returns immediately instead of waiting for the result; false by default.",
         },
       },
-      required: ["type", "description"],
+      required: ["description"],
       additionalProperties: false,
     },
   },
