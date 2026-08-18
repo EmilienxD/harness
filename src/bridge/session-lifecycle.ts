@@ -9,9 +9,9 @@ import { protocolError, type BridgeRequestHandler } from "./protocol.js";
  * left a zombie fleet entry holding the write lease. Every launch now goes
  * through aboard's wrapper, which owns a lock-marker file for exactly the
  * Claude child's lifetime, and this monitor polls the marker's existence.
- * Marker removal and terminal-close settle identically; `/clear` fires
- * SessionEnd while the process (and marker) stay alive, so it is handled as a
- * graceful conversation end instead.
+ * Marker removal and terminal-close settle identically; `/clear` and an
+ * interactive `/resume` switch fire SessionEnd while the process (and marker)
+ * stay alive, so they are handled as graceful conversation ends instead.
  */
 export type LockMarkerProbe = (lockFile: string) => boolean;
 
@@ -199,11 +199,12 @@ export class SessionProcessMonitor {
 
 export interface SessionEndSettlement {
   /**
-   * Settle a conversation that ended while its process and terminal live on
-   * (`/clear`). Releases the lease and removes the agent from the fleet; the
+   * Settle a conversation that ended while its process and terminal live on:
+   * `/clear`, or an interactive `/resume` that switched the TUI to a different
+   * conversation. Releases the lease and removes the agent from the fleet; the
    * terminal itself is left to the user, who deliberately kept it.
    */
-  settleCleared(agentId: AgentId): void;
+  settleConversationEnded(agentId: AgentId, reason: SessionEndReason): void;
 }
 
 export interface SessionLifecycleServiceOptions {
@@ -213,13 +214,38 @@ export interface SessionLifecycleServiceOptions {
   /** The wrapper's marker path for an agent — launch-time state the hook knows nothing about. */
   readonly lockPathFor: (agentId: AgentId) => string;
   readonly onSessionStarted?: (observation: SessionStartObservation) => void;
+  /** Injected timers keep the `/resume` grace window deterministic in tests. */
+  readonly setTimeout?: (callback: () => void, delayMs: number) => unknown;
+  readonly clearTimeout?: (handle: unknown) => void;
+  readonly resumeGraceMs?: number;
 }
 
+/**
+ * Grace window between SessionEnd(`resume`) and the SessionStart that follows
+ * it inside the same process. Interactive `/resume` usually switches the TUI to
+ * another conversation — aboard's session is over even though the process and
+ * marker live on — but the picker may also land back on the session aboard
+ * launched, which never ended. Only the following SessionStart's id tells the
+ * two apart, so the settlement waits for it. Short, because the agent still
+ * holds the write lease until it elapses.
+ */
+const RESUME_GRACE_MS = 3_000;
+
 export class SessionLifecycleService {
+  readonly #pendingResume = new Map<AgentId, { readonly sessionId: SessionId; readonly timer: unknown }>();
+
   public constructor(private readonly options: SessionLifecycleServiceOptions) {}
 
   /** SessionStart = proof-of-life: registers the wrapper's marker for polling. */
   public sessionStarted(observation: SessionStartObservation): boolean {
+    const pending = this.#pendingResume.get(observation.agentId);
+    if (pending !== undefined) {
+      this.#cancelPendingResume(observation.agentId);
+      // A different id proves the TUI switched conversations, so settle now
+      // instead of waiting out the rest of the window. The same id means the
+      // picker returned to aboard's own session and nothing ended.
+      if (pending.sessionId !== observation.sessionId) this.#settle(observation.agentId, pending.sessionId, "resume");
+    }
     const session = this.options.fleet.get(observation.agentId);
     if (session === undefined || session.sessionId !== observation.sessionId) return false;
     this.options.monitor.track({
@@ -233,24 +259,67 @@ export class SessionLifecycleService {
 
   /**
    * SessionEnd is a conversation-level event with a 1.5s hook budget, so this
-   * must stay cheap. Only `clear` settles here: the process demonstrably lives
-   * on (it fired the hook inside a kept-alive TUI), so PID polling will never
-   * settle this conversation. Process-exit reasons (`prompt_input_exit`,
+   * must stay cheap. Only conversation-level reasons settle here: the process
+   * demonstrably lives on (it fired the hook inside a kept-alive TUI), so
+   * marker polling will never settle these. `clear` settles immediately;
+   * `resume` waits for the next SessionStart to say whether the TUI actually
+   * moved to another session. Process-exit reasons (`prompt_input_exit`,
    * `logout`, ...) still belong to the marker, which is authoritative — the
    * hook runs inside the process it is announcing the death of — but they are
    * an early warning, so they kick off a short confirmation ladder instead of
    * waiting for the next interval sweep.
    */
   public sessionEnded(observation: SessionEndObservation): boolean {
+    if (observation.reason === "resume") return this.#scheduleResumeSettlement(observation);
     if (observation.reason !== "clear") {
       if (this.options.monitor.isTracked(observation.agentId)) this.options.monitor.pollSoon();
       return false;
     }
-    const session = this.options.fleet.get(observation.agentId);
-    if (session === undefined || session.sessionId !== observation.sessionId) return false;
-    if (session.lifecycle.status === "completed" || session.lifecycle.status === "failed") return false;
-    this.options.monitor.untrack(observation.agentId);
-    this.options.settlement.settleCleared(observation.agentId);
+    return this.#settle(observation.agentId, observation.sessionId, "clear");
+  }
+
+  /** Drop pending grace timers so deactivation leaves nothing scheduled. */
+  public dispose(): void {
+    for (const agentId of [...this.#pendingResume.keys()]) this.#cancelPendingResume(agentId);
+  }
+
+  #scheduleResumeSettlement(observation: SessionEndObservation): boolean {
+    if (!this.#settleable(observation.agentId, observation.sessionId)) return false;
+    this.#cancelPendingResume(observation.agentId);
+    const schedule = this.options.setTimeout ?? ((callback: () => void, ms: number) => setTimeout(callback, ms));
+    let timer: unknown;
+    timer = schedule(() => {
+      // Only the window still on record may settle: a cancelled or superseded
+      // one must stay inert even if its timer somehow fires.
+      if (this.#pendingResume.get(observation.agentId)?.timer !== timer) return;
+      this.#pendingResume.delete(observation.agentId);
+      this.#settle(observation.agentId, observation.sessionId, "resume");
+    }, this.options.resumeGraceMs ?? RESUME_GRACE_MS);
+    if (typeof timer === "object" && timer !== null && "unref" in timer) {
+      (timer as { unref(): void }).unref();
+    }
+    this.#pendingResume.set(observation.agentId, { sessionId: observation.sessionId, timer });
+    return true;
+  }
+
+  #cancelPendingResume(agentId: AgentId): void {
+    const pending = this.#pendingResume.get(agentId);
+    if (pending === undefined) return;
+    this.#pendingResume.delete(agentId);
+    const clear = this.options.clearTimeout ?? ((handle: unknown) => clearTimeout(handle as NodeJS.Timeout));
+    clear(pending.timer);
+  }
+
+  #settleable(agentId: AgentId, sessionId: SessionId): boolean {
+    const session = this.options.fleet.get(agentId);
+    if (session === undefined || session.sessionId !== sessionId) return false;
+    return session.lifecycle.status !== "completed" && session.lifecycle.status !== "failed";
+  }
+
+  #settle(agentId: AgentId, sessionId: SessionId, reason: SessionEndReason): boolean {
+    if (!this.#settleable(agentId, sessionId)) return false;
+    this.options.monitor.untrack(agentId);
+    this.options.settlement.settleConversationEnded(agentId, reason);
     return true;
   }
 }

@@ -297,7 +297,7 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
       service: new SessionLifecycleService({
         fleet,
         monitor: new SessionProcessMonitor({ probe: () => true }),
-        settlement: { settleCleared: () => undefined },
+        settlement: { settleConversationEnded: () => undefined },
         lockPathFor: () => "x.lock",
       }),
     }),

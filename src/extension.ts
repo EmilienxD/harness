@@ -57,6 +57,7 @@ import {
   SessionProcessMonitor,
   SessionStartupProofs,
   createSessionLifecycleRoutes,
+  type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
 import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
@@ -468,21 +469,23 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         .catch((error: unknown) => output.appendLine(`Process-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
     },
   });
-  const settleCleared = (agentId: AgentId): void => {
+  const settleConversationEnded = (agentId: AgentId, reason: SessionEndReason): void => {
     const session = fleet.get(agentId);
     if (session === undefined) return;
     const at = new Date().toISOString() as IsoTimestamp;
-    // `/clear` ends the conversation while the TUI and terminal keep running.
-    // The agent record is spent history; the user deliberately kept the TUI.
+    output.appendLine(`Conversation for agent ${agentId} ended (${reason}); the terminal stays open`);
+    // `/clear` ends the conversation and an interactive `/resume` switches the
+    // TUI to a different one, both while the terminal keeps running. Either way
+    // the agent record is spent history; the user deliberately kept the TUI.
       if (!reportsResult(session)) {
-        lease.releaseForTerminalOutcome(agentId, at, "agent session cleared");
+        lease.releaseForTerminalOutcome(agentId, at, `agent session ended (${reason})`);
         fleet.remove(agentId, at);
         releaseAbandonedTerminal(agentId);
         return;
       }
       // Result-delivering sessions settle with a graceful completed outcome: the
       // conversation ended on the user's terms, and any pending run completes
-      // rather than hangs waiting for a Stop hook that a cleared TUI cannot fire.
+      // rather than hangs waiting for a Stop hook the departed TUI cannot fire.
       void lifecycle?.processEnded({ agentId, sessionId: session.sessionId })
         .then(() => releaseAbandonedTerminal(agentId))
         .catch((error: unknown) => output.appendLine(`Session-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
@@ -490,12 +493,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   sessionLifecycle = new SessionLifecycleService({
     fleet,
     monitor: sessionMonitor,
-    settlement: { settleCleared },
+    settlement: { settleConversationEnded },
     lockPathFor: wrapperLayout.lockPathFor,
     onSessionStarted: (observation) => {
       output.appendLine(`Session ${observation.sessionId} for agent ${observation.agentId} started`);
     },
   });
+  context.subscriptions.push({ dispose: () => sessionLifecycle?.dispose() });
   // The watch is the fast path — a marker deletion settles the agent within
   // milliseconds — and the interval only covers filesystems where watching is
   // unreliable, so it can stay coarse.

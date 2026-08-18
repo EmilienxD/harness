@@ -7,6 +7,7 @@ import {
   SessionStartTimeoutError,
   SessionStartupProofs,
   createSessionLifecycleRoutes,
+  type SessionEndReason,
   type SessionStartObservation,
 } from "../src/bridge/session-lifecycle.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
@@ -36,8 +37,9 @@ function setup(probe: (lockFile: string) => boolean) {
   const fleet = new FleetRegistry();
   const lease = new WriteLease();
   const ended: string[] = [];
-  const settled: AgentId[] = [];
+  const settled: Array<{ readonly agentId: AgentId; readonly reason: SessionEndReason }> = [];
   const confirmations: Array<{ readonly delayMs: number; readonly run: () => void }> = [];
+  const graceTimers: Array<{ readonly delayMs: number; readonly run: () => void; cancelled: boolean }> = [];
   const monitor = new SessionProcessMonitor({
     probe,
     setTimeout: (callback, delayMs) => { confirmations.push({ delayMs, run: callback }); return confirmations.length; },
@@ -46,10 +48,12 @@ function setup(probe: (lockFile: string) => boolean) {
   const service = new SessionLifecycleService({
     fleet,
     monitor,
-    settlement: { settleCleared: (agentId) => settled.push(agentId) },
+    settlement: { settleConversationEnded: (agentId, reason) => settled.push({ agentId, reason }) },
     lockPathFor: () => LOCK,
+    setTimeout: (callback, delayMs) => { graceTimers.push({ delayMs, run: callback, cancelled: false }); return graceTimers.length; },
+    clearTimeout: (handle) => { graceTimers[(handle as number) - 1]!.cancelled = true; },
   });
-  return { fleet, lease, monitor, service, ended, settled, confirmations };
+  return { fleet, lease, monitor, service, ended, settled, confirmations, graceTimers };
 }
 
 const start: SessionStartObservation = { agentId: agent("a1"), sessionId: session("s1"), source: "startup" };
@@ -174,9 +178,57 @@ test("session-end with reason clear settles gracefully and untracks", () => {
   service.sessionStarted(start);
   const accepted = service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "clear" });
   assert.equal(accepted, true);
-  assert.deepEqual(settled, [agent("a1")]);
+  assert.deepEqual(settled, [{ agentId: agent("a1"), reason: "clear" }]);
   monitor.poll();
   assert.deepEqual(ended, []);
+});
+
+test("an interactive /resume switch settles the agent when the next session identifies itself", () => {
+  // Same process, same marker: only the new session id proves the TUI moved.
+  const { fleet, monitor, service, settled, graceTimers } = setup(() => true);
+  registerAgent(fleet, agent("a1"), session("s1"));
+  service.sessionStarted(start);
+  assert.equal(service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "resume" }), true);
+  assert.deepEqual(settled, [], "nothing settles until the switch is confirmed");
+  assert.equal(service.sessionStarted({ agentId: agent("a1"), sessionId: session("s2"), source: "resume" }), false);
+  assert.deepEqual(settled, [{ agentId: agent("a1"), reason: "resume" }]);
+  assert.equal(monitor.isTracked(agent("a1")), false);
+  assert.equal(graceTimers[0]!.cancelled, true, "the grace window is cancelled once the answer arrives");
+});
+
+test("a /resume landing back on aboard's own session leaves the agent alone", () => {
+  const { fleet, monitor, service, settled, graceTimers } = setup(() => true);
+  registerAgent(fleet, agent("a1"), session("s1"));
+  service.sessionStarted(start);
+  service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "resume" });
+  assert.equal(service.sessionStarted({ agentId: agent("a1"), sessionId: session("s1"), source: "resume" }), true);
+  assert.deepEqual(settled, []);
+  assert.equal(monitor.isTracked(agent("a1")), true);
+  assert.equal(graceTimers[0]!.cancelled, true);
+  graceTimers[0]!.run();
+  assert.deepEqual(settled, [], "a cancelled window cannot settle a live session");
+});
+
+test("a /resume whose session-start never arrives settles when the grace window elapses", () => {
+  const { fleet, monitor, service, settled, graceTimers } = setup(() => true);
+  registerAgent(fleet, agent("a1"), session("s1"));
+  service.sessionStarted(start);
+  service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "resume" });
+  assert.equal(graceTimers.length, 1);
+  graceTimers[0]!.run();
+  assert.deepEqual(settled, [{ agentId: agent("a1"), reason: "resume" }]);
+  assert.equal(monitor.isTracked(agent("a1")), false);
+});
+
+test("dispose drops a pending /resume window so deactivation settles nothing", () => {
+  const { fleet, service, settled, graceTimers } = setup(() => true);
+  registerAgent(fleet, agent("a1"), session("s1"));
+  service.sessionStarted(start);
+  service.sessionEnded({ agentId: agent("a1"), sessionId: session("s1"), reason: "resume" });
+  service.dispose();
+  assert.equal(graceTimers[0]!.cancelled, true);
+  graceTimers[0]!.run();
+  assert.deepEqual(settled, []);
 });
 
 test("session-end process-exit reasons are left to the marker, still present while the hook runs", () => {
