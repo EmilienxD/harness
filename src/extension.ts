@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import {
   FileBridgeDiscoveryPersistence,
 } from "./bridge/discovery.js";
+import { FileManagerMcpConfig } from "./bridge/mcp-config.js";
 import {
   DEFAULT_BRIDGE_PORT,
   startBridge,
@@ -606,6 +607,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
   }, terminals, roadmapReminders);
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
+  // Beside `bridge.json` and for the same reason: it carries a resolved bearer
+  // token, which does not belong in the user's tree.
+  const managerMcpConfig = new FileManagerMcpConfig(storageRoot);
+  // The token it holds dies with this activation, so the file outlives its
+  // usefulness the moment the bridge stops.
+  context.subscriptions.push({ dispose: () => void managerMcpConfig.clear() });
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
     handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
@@ -666,6 +673,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     isResumable: sessionIsResumable,
     restoreTranscript: (sessionId) => transcripts.restore(sessionId),
     wrapper: wrapperLayout,
+    // The aboard MCP server is registered per Manager launch and nowhere in the
+    // project, so no worker and no hand-started `claude` connects it.
+    mcpConfig: () => managerMcpConfig.write({ port: bridge!.port, token: bridge!.token, agentId: managerAgentId }),
   });
   // The UI offers resume and new as separate actions, so the launch path never
   // has to interrupt with a "which did you mean?" prompt.

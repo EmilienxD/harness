@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestamp } from "../domain/contracts.js";
 import { parseManagerPersistenceDto } from "../domain/validation.js";
 import { MANAGER_AGENT_NAME, resolveLaunchConfiguration, type EffortLevel, type LaunchConfiguration, type SessionWrapperLayout, planLaunch, planManagerResume } from "./launch.js";
-import { AGENT_DEFINITION_DIRECTORY, aboardMcpServerFrontmatter, agentDefinitionPath, parseManagerAgentDefinition, sanitizeAgentDefinition } from "../scaffold/agent-definition.js";
+import { AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, parseManagerAgentDefinition, sanitizeAgentDefinition } from "../scaffold/agent-definition.js";
 import { sessionIsResumable } from "./sessions.js";
 import type { PromptSpillStore } from "./spill.js";
 import type { ShellKind } from "./shell.js";
@@ -61,10 +61,6 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
     declaredTools: sanitized.tools,
     declaredDescription: sanitized.description,
     extraFrontmatter: sanitized.extraFrontmatter,
-    // The delegation surface is registered here and nowhere else, so it exists
-    // for this session only — no project-scoped `.mcp.json` entry, and so no
-    // worker or hand-started session paying for tool descriptions it may not use.
-    declaredMcpServers: aboardMcpServerFrontmatter(),
     declaredModel: sanitized.model,
     declaredEffort: sanitized.effort,
     declaredCommand: sanitized.command,
@@ -74,7 +70,16 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
 }
 
 /** `command` and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout;
+  /**
+   * Writes the per-launch aboard MCP registration and returns the path
+   * `--mcp-config` names. It runs on every start and resume so the port and
+   * token are the live bridge's, and it is a callback because the bridge is not
+   * listening when this lifecycle is constructed. Absent — as in tests — simply
+   * launches a Manager with no aboard server, which is visible immediately
+   * rather than silently wrong.
+   */
+  readonly mcpConfig?: () => Promise<string>; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
   public constructor(private readonly options: ManagerLifecycleOptions) { this.#now = options.now ?? (() => new Date()); }
@@ -114,7 +119,12 @@ export class ManagerLifecycle {
     const level = this.options.effort?.();
     const effort = level === undefined ? {} : { effort: level };
     const wrapper = this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper };
-    const shared = { agentId, sessionId, shell: this.options.shell, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper };
+    // Written before planning, because the plan carries the path on the command
+    // line and a launch pointing at a file that does not exist would start a
+    // Manager whose whole delegation surface is missing.
+    const mcpConfigPath = await this.options.mcpConfig?.();
+    const mcpConfig = mcpConfigPath === undefined ? {} : { mcpConfigPath };
+    const shared = { agentId, sessionId, shell: this.options.shell, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper, ...mcpConfig };
     const plan = resumable ? planManagerResume(shared) : planLaunch({ ...shared, agentType: "manager" });
     // Refuse a launch aboard already knows cannot run, rather than opening a
     // terminal that will only ever show a shell error. The plan is probed rather

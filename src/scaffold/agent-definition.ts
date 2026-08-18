@@ -81,44 +81,8 @@ const ABOARD_FRONTMATTER_KEYS: ReadonlySet<string> = new Set([
   "command",
 ]);
 
-/** Keys aboard resolves on the Manager definition only. See `aboardMcpServerFrontmatter`. */
-const MANAGER_OWNED_FRONTMATTER_KEYS: ReadonlySet<string> = new Set(["mcpServers"]);
-
 /** Claude Code's namespaced rule for every tool served by the aboard MCP. */
 export const ABOARD_MCP_TOOLS = "mcp__aboard__*";
-
-/** The server name the Manager's `mcp__aboard__*` tool rules are namespaced by. */
-export const ABOARD_MCP_SERVER_NAME = "aboard";
-
-/**
- * The `mcpServers:` block written into the Manager's rewritten definition.
- *
- * This is the whole isolation mechanism. A `.mcp.json` registration is
- * project-scoped: every session under the workspace connects it and pays for its
- * tool descriptions, including workers the bridge refuses anyway and the user's
- * own hand-started `claude`. An inline `mcpServers` entry in an agent definition
- * connects when that agent starts and is visible nowhere else, so the delegation
- * surface reaches exactly one session — structurally, not by a denial rule.
- *
- * The values stay as `${VAR}` references rather than the resolved port and
- * token: the bridge injects both into the terminal it creates, and a bearer
- * token written into a file under the workspace is exactly what putting
- * `bridge.json` outside the workspace was meant to avoid.
- */
-export function aboardMcpServerFrontmatter(): readonly string[] {
-  return [
-    "mcpServers:",
-    `  - ${ABOARD_MCP_SERVER_NAME}:`,
-    "      type: http",
-    "      url: http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
-    // `alwaysLoad` keeps the aboard tools out of Claude Code's tool search, so
-    // the Manager never has to discover the very surface it orchestrates through.
-    "      alwaysLoad: true",
-    "      headers:",
-    '        Authorization: "Bearer ${ABOARD_BRIDGE_TOKEN}"',
-    '        X-Aboard-Agent-Id: "${ABOARD_AGENT_ID}"',
-  ];
-}
 
 export function declaresAboardMcpTools(tools: readonly string[]): boolean {
   return tools.some((rule) => rule.trim().startsWith("mcp__aboard__"));
@@ -233,15 +197,12 @@ const TOP_LEVEL_KEY = /^([A-Za-z0-9_.-]+)\s*:/;
  * looks like `key:` opens a new key; anything else, blank lines included,
  * continues the key above it.
  */
-function extraFrontmatter(
-  frontmatter: readonly string[],
-  alsoOwned: ReadonlySet<string> = new Set(),
-): readonly string[] {
+function extraFrontmatter(frontmatter: readonly string[]): readonly string[] {
   const extra: string[] = [];
   let owned = true;
   for (const line of frontmatter) {
     const key = /^\s/.test(line) ? null : TOP_LEVEL_KEY.exec(line);
-    if (key !== null) owned = ABOARD_FRONTMATTER_KEYS.has(key[1]!) || alsoOwned.has(key[1]!);
+    if (key !== null) owned = ABOARD_FRONTMATTER_KEYS.has(key[1]!);
     if (!owned) extra.push(line);
   }
   // Trailing blank lines belong to the last unowned key only by adjacency.
@@ -380,10 +341,7 @@ export function parseManagerAgentDefinition(
       tools: parsedTools.tools,
       prompt,
       writeCapability: deriveWriteCapability(parsedTools.tools),
-      // `mcpServers` is aboard's on the Manager alone: the launcher writes the
-      // aboard server into that block, and carrying an authored one through
-      // would emit the key twice in one mapping.
-      extraFrontmatter: extraFrontmatter(frontmatter, MANAGER_OWNED_FRONTMATTER_KEYS),
+      extraFrontmatter: extraFrontmatter(frontmatter),
     },
   };
 }
