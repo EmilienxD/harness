@@ -30,7 +30,9 @@ fragment change. Run `uv run pytest` — the suite installs every manifest for r
 uninstall.
 
 A fragment is merged as written: the installer adds the entries a tool declares and removes them
-again on uninstall, and it does not rewrite hook entries belonging to anyone else. Keys that Claude
+again on uninstall, and it does not rewrite hook entries belonging to anyone else. Changing a hook's
+`matcher` is safe — hook groups merge by matcher, so the installer moves an existing install's entry
+out of the old group rather than leaving both firing. Keys that Claude
 Code's settings schema doesn't define don't belong in a fragment either — project settings are
 validated strictly, and a file that fails validation is rejected whole.
 
@@ -54,6 +56,9 @@ validated strictly, and a file that fails validation is rejected whole.
   weaker and cheaper. See `README.md`.
 - `harness/on-read-reminder/` — PostToolUse hook reminding the agent to read user-picked files when it
   reads paths matching gitignore-style patterns. See `README.md`.
+- `harness/prefer-edit-tool/` — PostToolUse/PostToolUseFailure hook reminding the agent to use
+  Write/Edit instead of heredocs, `>` redirects, `sed -i`, inline python `open(...)` and PowerShell
+  `Set-Content`. Write-side counterpart to `prefer-read-tool`. See `README.md`.
 - `harness/prefer-read-tool/` — PostToolUse hook reminding the agent to use Read instead of cat/sed.
   See `README.md`.
 - `harness/redirect-subagents/` — PreToolUse/PostToolUse/Stop hooks redirecting Agent subagents
