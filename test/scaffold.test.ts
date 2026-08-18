@@ -97,7 +97,7 @@ test("rerun is idempotent and settings merges preserve unrelated configuration",
   assert.match(JSON.stringify(settings), /custom-hook/);
 });
 
-test("owned assets upgrade only when unchanged and warn rather than clobber local edits", async () => {
+test("owned assets upgrade only when unchanged and quietly preserve local edits", async () => {
   const root = await project();
   await scaffoldProject({ projectRoot: root, assetRoot: assets });
   const target = join(root, ".aboard", "agents", "implementer.md");
@@ -105,6 +105,9 @@ test("owned assets upgrade only when unchanged and warn rather than clobber loca
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets, autoCompactEnabled: false });
   assert.equal(await readFile(target, "utf8"), "local edit\n");
   assert.ok(report.preserved.includes(".aboard/agents/implementer.md"));
+  // Preserving a local edit is non-destructive and needs no user action, so it
+  // is not a warning; the autoCompact check remains the only warning here.
+  assert.deepEqual(report.warnings.filter((warning) => warning.toLowerCase().includes("preserved")), []);
   assert.ok(report.warnings.some((warning) => warning.includes("autoCompact")));
 });
 
@@ -124,7 +127,7 @@ test("retires an asset aboard no longer ships unless the user edited it", async 
   assert.deepEqual(report.removed, ["CLAUDE.md"]);
   assert.equal(await readFile(join(root, "retired.md"), "utf8"), "the user made this theirs");
   assert.ok(report.preserved.includes("retired.md"));
-  assert.ok(report.warnings.some((warning) => warning.includes("no longer ships: retired.md")));
+  assert.deepEqual(report.warnings.filter((warning) => warning.toLowerCase().includes("preserved")), []);
 
   // The retirement is recorded, so a third run has nothing left to report.
   const third = await scaffoldProject({ projectRoot: root, assetRoot: source });

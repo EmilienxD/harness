@@ -253,7 +253,10 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
       } else if (previousAsset !== undefined && hash(current) === previousAsset.sourceHash) {
         await writeFile(destination, content, "utf8"); updated.push(path);
       } else {
-        preserved.push(path); warnings.push(`Preserved locally edited aboard asset: ${path}`);
+        // Preserving a local edit needs no warning: nothing is overwritten and
+        // no action is required. The info message counts preserved files, and
+        // the upgrade's modal already promises local edits are kept.
+        preserved.push(path);
       }
     }
     next[path] = { sourceHash };
@@ -274,7 +277,7 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
     if (hash(await readFile(destination, "utf8")) === asset.sourceHash) {
       await rm(destination, { force: true }); removed.push(path);
     } else {
-      preserved.push(path); warnings.push(`Preserved locally edited asset aboard no longer ships: ${path}`);
+      preserved.push(path);
     }
   }
 
