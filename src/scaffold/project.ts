@@ -83,6 +83,9 @@ const MCP_SERVER_NAME = "aboard";
 const MCP_REGISTRATION = {
   type: "http",
   url: "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
+  // `alwaysLoad` keeps the aboard tools out of Claude Code's tool search, so
+  // the Manager never has to discover the very surface it orchestrates through.
+  alwaysLoad: true,
   headers: {
     Authorization: "Bearer ${ABOARD_BRIDGE_TOKEN}",
     "X-Aboard-Agent-Id": "${ABOARD_AGENT_ID}",

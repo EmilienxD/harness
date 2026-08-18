@@ -22,6 +22,7 @@ test("fresh scaffold installs assets, hooks, and the authenticated aboard MCP re
       aboard: {
         type: "http",
         url: "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
+        alwaysLoad: true,
         headers: {
           Authorization: "Bearer ${ABOARD_BRIDGE_TOKEN}",
           "X-Aboard-Agent-Id": "${ABOARD_AGENT_ID}",
