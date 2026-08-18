@@ -356,7 +356,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const managerStore = new FileManagerStore(workspaceRoot);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const recordedManager = await managerStore.load();
-  const managerAgentId = recordedManager?.agentId ?? randomUUID() as AgentId;
+  // A recorded Manager keeps its id across restarts (identity stability). A
+  // first-ever Manager falls back to the numeric counter so new projects
+  // number their Manager too; a pre-upgrade recorded Manager keeps its UUID
+  // until the user starts a new Manager.
+  const managerAgentId = recordedManager?.agentId ?? agentIdCounter.next();
   const launchConfigurations = workerConfigurations(workspaceRoot);
   // Every command line that reads a file — a spilled prompt, an agent's system
   // prompt — gets it from here, so all of them land under `.aboard/runtime/`.
