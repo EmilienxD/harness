@@ -6,6 +6,8 @@ Installed into .claude/hooks/ by `harness install redirect-subagents`;
 configuration lives in .claude/harness/subagents.json, runtime state in
 .claude/harness-redirect-subagents/ — see README.md.
 """
+from __future__ import annotations
+
 import json
 import os
 import subprocess
@@ -97,13 +99,22 @@ finally:
         open(config['done'], 'w').close()
 """
 
-    kwargs = {"stdin": subprocess.PIPE, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
-        kwargs["creationflags"] = 0x08000000
+        proc = subprocess.Popen(
+            [sys.executable, "-c", launcher_script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,
+        )
     else:
-        kwargs["start_new_session"] = True
-
-    proc = subprocess.Popen([sys.executable, "-c", launcher_script], **kwargs)
+        proc = subprocess.Popen(
+            [sys.executable, "-c", launcher_script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     config_payload = {
         "cmd": cmd,
         "cwd": cwd,
@@ -112,8 +123,9 @@ finally:
         "exit_code": str(job_dir / "exit_code"),
         "done": str(job_dir / "done"),
     }
-    proc.stdin.write(json.dumps(config_payload).encode("utf-8"))
-    proc.stdin.close()
+    if proc.stdin:
+        proc.stdin.write(json.dumps(config_payload).encode("utf-8"))
+        proc.stdin.close()
     logger.debug("Launched detached process, PID: %s", proc.pid)
 
     (job_dir / "meta.json").write_text(json.dumps({
@@ -149,14 +161,18 @@ def main() -> None:
     tool_input = payload.get("tool_input", {}) or {}
     session_id = payload.get("session_id")
     subagent_type = tool_input.get("subagent_type")
+    if not isinstance(subagent_type, str) or not subagent_type:
+        sys.exit(0)
 
-    subagents = load_subagents()
-    cfg = subagents.get(subagent_type) if tool_name == "Agent" else None
-    if cfg is not None and cfg.get("disabled", False):
-        cfg = None
-    if cfg is None:
-        if not payload.get("agent_id") and (finished := open_job_ids(session_id, done=True)):
-            # Not a redirected call, but a finished background job's report is
+    cfg = load_subagents().get(subagent_type)
+    if not cfg or cfg.get("disabled", False):
+        # Before letting an unknown/disabled subagent through to Claude Code,
+        # see if any background job already finished. Delivering the report
+        # now saves a whole turn of Claude waiting for it.
+        finished = open_job_ids(session_id, done=True)
+        if finished:
+            # The user asked for a subagent that is unredirected, but we have
+            # completed work from an earlier redirected one. That result is
             # worth more than this tool call: deny so the report lands now.
             # (Inside a subagent, this session's jobs belong to the main
             # conversation's own hooks, not to a delegate's context.)
@@ -165,7 +181,7 @@ def main() -> None:
         sys.exit(0)
 
     prompt = tool_input.get("prompt")
-    if not prompt:
+    if not isinstance(prompt, str) or not prompt:
         logger.debug("No prompt provided, passing through.")
         sys.exit(0)
 
@@ -187,12 +203,12 @@ def main() -> None:
             return
 
     if run_in_background:
-        job_id = start_background_job(subagent_type, build_cmd(cfg, prompt), session_id,
-                                      cwd=cfg.get("_cwd"))
-        logger.info("Started background subagent %s", job_id)
+        job_id_str = start_background_job(subagent_type, build_cmd(cfg, prompt), session_id,
+                                          cwd=cfg.get("_cwd"))
+        logger.info("Started background subagent %s", job_id_str)
         deny(
             f"The {subagent_type} subagent is disabled in this session to avoid consuming Claude "
-            f"subscription usage. Instead, it has been started in the background (subagent {job_id}) "
+            f"subscription usage. Instead, it has been started in the background (subagent {job_id_str}) "
             "using a different Claude provider. You will be notified automatically when it finishes "
             "via a PreToolUse or PostToolUse hook. Do NOT sleep, poll, proactively check its progress, "
             "or run any command yourself to do so. Continue with other work or respond to the user "

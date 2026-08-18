@@ -13,6 +13,8 @@ The detection is deliberately generous. A shell write that slips through
 unnoticed is expensive (a bad edit the interface never rendered as a diff); a
 false positive costs one ignored sentence.
 """
+from __future__ import annotations
+
 import json
 import re
 import sys
@@ -137,9 +139,9 @@ REMINDER = (
 )
 
 
-def redirect_targets(command):
+def redirect_targets(command: str) -> list[str]:
     """File-looking targets of `>`/`>>` in the command, in order."""
-    out = []
+    out: list[str] = []
     for match in REDIRECT.finditer(command):
         target = match.group("target").strip("\"'")
         low = target.lower()
@@ -152,9 +154,9 @@ def redirect_targets(command):
     return out
 
 
-def detect(command):
+def detect(command: str) -> list[str]:
     """Labels for every write signal found in the command, deduped, in order."""
-    signals = []
+    signals: list[str] = []
     targets = redirect_targets(command)
     if targets:
         head = targets[0]
@@ -169,7 +171,7 @@ def detect(command):
     return signals
 
 
-def main():
+def main() -> int:
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:

@@ -28,6 +28,8 @@ is no subscription behind this session).
 
 Configuration is environment-only; see the README for the full table.
 """
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -35,9 +37,9 @@ import shutil
 import subprocess
 import sys
 import time
-from collections import namedtuple
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable, NamedTuple
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
@@ -99,44 +101,53 @@ WINDOW_LABELS = {
     "weekly_sonnet": "weekly Sonnet",
 }
 
-Verdict = namedtuple("Verdict", "blocked reset_at kind")
+
+class Verdict(NamedTuple):
+    blocked: bool
+    reset_at: float | None
+    kind: str | None
+
 
 # What the user is told about, and why. `waiting` is the only state that
 # precedes an actual pause; the rest exist so the notice never promises a wait
 # the waiter is not going to perform.
-Notice = namedtuple("Notice", "state kind percent reset_at")
+class Notice(NamedTuple):
+    state: str
+    kind: str | None
+    percent: float
+    reset_at: float | None
 
 
 # --------------------------------------------------------------------------
 # configuration
 # --------------------------------------------------------------------------
 
-def _env(name, default=""):
+def _env(name: str, default: str = "") -> str:
     return os.environ.get("USAGE_LIMIT_WAIT_" + name, default)
 
 
-def _on(name):
+def _on(name: str) -> bool:
     """An opt-in flag: off unless explicitly turned on."""
     return _env(name).strip().lower() not in FALSEY
 
 
-def _off(name):
+def _off(name: str) -> bool:
     """An opt-out flag: on unless explicitly turned off."""
     return _env(name).strip().lower() in FALSEY[1:]
 
 
-def _number(name):
+def _number(name: str) -> float:
     try:
         return float(_env(name).strip())
     except (TypeError, ValueError):
         return DEFAULTS[name]
 
 
-def _ignored_kinds():
+def _ignored_kinds() -> set[str]:
     return {part.strip().lower() for part in _env("IGNORE").split(",") if part.strip()}
 
 
-def third_party_session():
+def third_party_session() -> bool:
     """True when this session is billed to anything other than a subscription.
 
     An API key or auth token counts whenever it is set to a non-empty value;
@@ -148,7 +159,7 @@ def third_party_session():
     return any(os.environ.get(name, "").strip().lower() not in FALSEY for name in PROVIDER_ENV)
 
 
-def claude_dir():
+def claude_dir() -> Path:
     configured = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
     return Path(configured) if configured else Path.home() / ".claude"
 
@@ -157,7 +168,7 @@ def claude_dir():
 # credentials
 # --------------------------------------------------------------------------
 
-def _read_json(path):
+def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -166,7 +177,7 @@ def _read_json(path):
     return data if isinstance(data, dict) else None
 
 
-def access_token():
+def access_token() -> str | None:
     """The subscription's OAuth access token, or None if there isn't one.
 
     Read fresh on every call: Claude Code rotates this file, and a wait can
@@ -181,7 +192,7 @@ def access_token():
     return _keychain_token()
 
 
-def _keychain_token():
+def _keychain_token() -> str | None:
     """macOS keeps the credentials in the Keychain, not in a file."""
     if sys.platform != "darwin":
         return None
@@ -207,7 +218,7 @@ def _keychain_token():
 # reading usage: the API, then the CLI
 # --------------------------------------------------------------------------
 
-def fetch_usage(token):
+def fetch_usage(token: str) -> dict[str, Any] | None:
     """The raw usage payload, or None on any failure at all."""
     headers = dict(USAGE_HEADERS, Authorization="Bearer " + token)
     try:
@@ -220,13 +231,13 @@ def fetch_usage(token):
     return payload if isinstance(payload, dict) else None
 
 
-def _percent(value):
+def _percent(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
 
 
-def _iso_to_epoch(value):
+def _iso_to_epoch(value: Any) -> float | None:
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -235,7 +246,7 @@ def _iso_to_epoch(value):
         return None
 
 
-def snapshot_from_api(payload):
+def snapshot_from_api(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Normalize a usage payload into the shape the rest of the hook speaks.
 
     `limits[]` is the modern list and covers every window the account has;
@@ -267,7 +278,7 @@ def snapshot_from_api(payload):
     return {"source": "api", "windows": windows, "credits": _credits_from_api(payload)}
 
 
-def _credits_from_api(payload):
+def _credits_from_api(payload: dict[str, Any]) -> dict[str, bool] | None:
     """Pay-as-you-go state, or None when the payload doesn't say."""
     extra = payload.get("extra_usage")
     if not isinstance(extra, dict):
@@ -292,7 +303,7 @@ CLI_WINDOW = re.compile(
 CLI_KINDS = {"session": "session", "week": "weekly_all"}
 
 
-def _cli_reset_epoch(month, day, hour, minute, meridiem, now):
+def _cli_reset_epoch(month: str, day: str, hour: str, minute: str | None, meridiem: str, now: float) -> float | None:
     """`Aug 16, 3:59am` -> epoch.
 
     The CLI prints the user's local time and omits the year, so the year is
@@ -311,7 +322,7 @@ def _cli_reset_epoch(month, day, hour, minute, meridiem, now):
     return None
 
 
-def snapshot_from_cli(text, now=None):
+def snapshot_from_cli(text: str, now: float | None = None) -> dict[str, Any] | None:
     """Parse `claude -p /usage` output, or None if it isn't a subscription."""
     now = time.time() if now is None else now
     if not text or not CLI_SUBSCRIPTION.search(text):
@@ -333,7 +344,7 @@ def snapshot_from_cli(text, now=None):
     return {"source": "cli", "windows": windows, "credits": None}
 
 
-def read_usage_via_cli(now=None):
+def read_usage_via_cli(now: float | None = None) -> dict[str, Any] | None:
     """Ask the CLI itself, for when the undocumented endpoint stops answering.
 
     The nested session fires `UserPromptSubmit` hooks -- this very hook -- so
@@ -368,7 +379,7 @@ def read_usage_via_cli(now=None):
     return snapshot_from_cli(result.stdout, now=now)
 
 
-def read_usage(force=False, now=None):
+def read_usage(force: bool = False, now: float | None = None) -> dict[str, Any] | None:
     """The current snapshot, from cache when it is fresh enough.
 
     Returns None when usage can't be read at all, which the caller treats as
@@ -397,13 +408,13 @@ def read_usage(force=False, now=None):
 # cache
 # --------------------------------------------------------------------------
 
-def cache_path():
+def cache_path() -> Path:
     # Usage is per-account, not per-project, so the cache is global even when
     # the hook itself was installed into one project's .claude/.
     return claude_dir() / ".usage-limit-wait.cache.json"
 
 
-def cache_ttl(snapshot):
+def cache_ttl(snapshot: dict[str, Any] | None) -> float:
     """How long a reading stays usable, scaled by how close the wall is.
 
     A failed reading is cached too: a session on an API key or a logged-out
@@ -421,7 +432,7 @@ def cache_ttl(snapshot):
     return base
 
 
-def read_cache(now):
+def read_cache(now: float) -> dict[str, Any] | None:
     entry = _read_json(cache_path())
     if entry is None:
         return None
@@ -437,7 +448,7 @@ def read_cache(now):
     return entry
 
 
-def _looks_like_snapshot(value):
+def _looks_like_snapshot(value: Any) -> bool:
     if not isinstance(value, dict) or not isinstance(value.get("windows"), list):
         return False
     return all(
@@ -448,11 +459,11 @@ def _looks_like_snapshot(value):
     )
 
 
-def write_cache(snapshot, now):
+def write_cache(snapshot: dict[str, Any] | None, now: float) -> None:
     _write_json(cache_path(), {"fetched_at": now, "snapshot": snapshot})
 
 
-def _write_json(path, data):
+def _write_json(path: Path, data: Any) -> None:
     temporary = path.with_suffix(".tmp.%d" % os.getpid())
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -471,7 +482,7 @@ def _write_json(path, data):
 # decision
 # --------------------------------------------------------------------------
 
-def evaluate(snapshot):
+def evaluate(snapshot: dict[str, Any] | None) -> Verdict:
     """Is the account blocked right now, and when does that end?
 
     `reset_at` is the *earliest* reset among the exhausted windows. When more
@@ -506,7 +517,7 @@ def evaluate(snapshot):
     return Verdict(True, soonest["resets_at"], soonest.get("kind"))
 
 
-def poll_interval(snapshot):
+def poll_interval(snapshot: dict[str, Any] | None) -> float:
     """How long to go between re-checks while waiting.
 
     Never below `MIN_SLEEP_SECONDS`, whatever the configuration says: a poll
@@ -518,7 +529,12 @@ def poll_interval(snapshot):
     return poll
 
 
-def wait_for_reset(snapshot, now=time.time, sleep=time.sleep, refresh=None):
+def wait_for_reset(
+    snapshot: dict[str, Any] | None,
+    now: Callable[[], float] = time.time,
+    sleep: Callable[[float], None] = time.sleep,
+    refresh: Callable[[], dict[str, Any] | None] | None = None,
+) -> tuple[float, str | None]:
     """Block until the exhausted window resets. Returns (seconds, kind).
 
     Stops early -- and always exits 0 -- on anything unexpected: a reset
@@ -557,7 +573,7 @@ def wait_for_reset(snapshot, now=time.time, sleep=time.sleep, refresh=None):
 # telling the user
 # --------------------------------------------------------------------------
 
-def assess(snapshot, now):
+def assess(snapshot: dict[str, Any] | None, now: float) -> Notice | None:
     """What the user should be told right now, or None for "nothing".
 
     This deliberately re-derives the waiter's decision through `evaluate` so a
@@ -593,15 +609,14 @@ def assess(snapshot, now):
     return Notice("waiting", verdict.kind, window["percent"], verdict.reset_at)
 
 
-def _clock(epoch):
+def _clock(epoch: float) -> str:
     return time.strftime("%H:%M", time.localtime(epoch))
 
 
-def notice_text(notice, now):
+def notice_text(notice: Notice, now: float) -> str:
     """The one line the user sees, in their own terms: window, wall, clock."""
-    window = "%s window is %d%% used" % (
-        WINDOW_LABELS.get(notice.kind, notice.kind or "usage"), round(notice.percent),
-    )
+    kind_label = WINDOW_LABELS.get(notice.kind, notice.kind) if notice.kind else "usage"
+    window = "%s window is %d%% used" % (kind_label, round(notice.percent))
     if notice.state == "warn":
         if notice.reset_at is None:
             return "Claude usage: the %s. The session will pause here by itself if it runs out." % window
@@ -611,6 +626,8 @@ def notice_text(notice, now):
                                                 format_duration(notice.reset_at - now))
         )
     if notice.state == "waiting":
+        if notice.reset_at is None:
+            return "Claude usage limit reached: the %s. Pausing until reset. Esc interrupts the wait." % window
         return (
             "Claude usage limit reached: the %s. Pausing until %s, about %s, then "
             "carrying on by itself. Esc interrupts the wait."
@@ -622,10 +639,11 @@ def notice_text(notice, now):
             "is set, so this session keeps going on pay-as-you-go credits." % window
         )
     if notice.state == "too-far":
+        reset_duration = format_duration(notice.reset_at - now) if notice.reset_at is not None else "a long time"
         return (
             "Claude usage limit reached: the %s and does not reset for %s, which is longer "
             "than USAGE_LIMIT_WAIT_MAX_WAIT. Not pausing."
-            % (window, format_duration(notice.reset_at - now))
+            % (window, reset_duration)
         )
     return (
         "Claude usage limit reached: the %s, and no reset time came back with it. "
@@ -633,11 +651,11 @@ def notice_text(notice, now):
     )
 
 
-def notices_path():
+def notices_path() -> Path:
     return claude_dir() / ".usage-limit-wait.notices.json"
 
 
-def announce_once(key, session_id, now, interval):
+def announce_once(key: str, session_id: str, now: float, interval: float) -> bool:
     """True when this notice has not been shown recently in this session.
 
     Without this the warning would reappear after every prompt and every tool
@@ -661,7 +679,7 @@ def announce_once(key, session_id, now, interval):
     return True
 
 
-def desktop_notification(title, body):
+def desktop_notification(title: str, body: str) -> bool:
     """Ask the host OS to show a notification, independently of Claude Code.
 
     This call must finish before the wait starts: Claude Code buffers hook
@@ -736,7 +754,7 @@ def desktop_notification(title, body):
 # entry point
 # --------------------------------------------------------------------------
 
-def format_duration(seconds):
+def format_duration(seconds: float | int) -> str:
     seconds = int(seconds)
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -747,7 +765,7 @@ def format_duration(seconds):
     return "%ds" % seconds
 
 
-def run(session_id="", now=None):
+def run(session_id: str = "", now: float | None = None) -> dict[str, str] | None:
     """Report a warning, or notify and wait when a limit is exhausted."""
     now = time.time() if now is None else now
     snapshot = read_usage(now=now)
@@ -768,7 +786,7 @@ def run(session_id="", now=None):
     waited, kind = wait_for_reset(snapshot)
     if waited < 1:
         return None
-    label = WINDOW_LABELS.get(kind, kind or "usage")
+    label = WINDOW_LABELS.get(kind, kind) if kind else "usage"
     duration = format_duration(waited)
     desktop_notification(
         "Claude Code resumed", "Waited %s for the %s limit to reset" % (duration, label),
@@ -779,7 +797,7 @@ def run(session_id="", now=None):
     }
 
 
-def hook_input():
+def hook_input() -> dict[str, Any]:
     """The event payload, or an empty one -- it is never worth failing over."""
     try:
         raw = sys.stdin.read()
@@ -792,7 +810,7 @@ def hook_input():
     return data if isinstance(data, dict) else {}
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     event = hook_input()
     try:

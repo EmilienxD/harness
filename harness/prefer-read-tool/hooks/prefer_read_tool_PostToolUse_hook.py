@@ -8,6 +8,8 @@ Claude to prefer the built-in Read tool for file reads. It never blocks --
 PostToolUse fires after the command already executed, so there's nothing to
 undo. It only adds context via additionalContext.
 """
+from __future__ import annotations
+
 import json
 import re
 import sys
@@ -37,7 +39,7 @@ REMINDER = (
 )
 
 
-def main():
+def main() -> int:
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:

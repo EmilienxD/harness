@@ -28,12 +28,16 @@ Two rules locations are read, in order (later rules can override earlier
 ones): the hooks install directory (so a `--user` install can hold global
 rules), then `$CLAUDE_PROJECT_DIR/.claude/` (project rules win).
 """
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
 import tempfile
+from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import Any
 
 RULES_NAME = "on-edit-block.rules"
 
@@ -56,7 +60,7 @@ TOKEN = re.compile(r'"([^"]+)"|\'([^\']+)\'|(\S+)')
 class Rule:
     __slots__ = ("negated", "pattern", "files")
 
-    def __init__(self, negated, pattern, files):
+    def __init__(self, negated: bool, pattern: re.Pattern[str], files: tuple[str, ...]) -> None:
         self.negated = negated        # True for `!<pattern>` lines
         self.pattern = pattern        # compiled regex over a project-relative path
         self.files = files            # tuple of required files (empty for negations)
@@ -64,7 +68,7 @@ class Rule:
 
 # --- rules parsing: identical to harness/on-read-reminder -----------------
 
-def compile_pattern(pattern):
+def compile_pattern(pattern: str) -> re.Pattern[str] | None:
     """Compile one gitignore-style pattern to a regex, or None if unusable.
 
     Supported: `*` (within a segment), `?` (one char in a segment), `**`
@@ -114,9 +118,10 @@ def compile_pattern(pattern):
     return re.compile("^(?:[^/]+/)*" + body + "$")
 
 
-def parse_rules(path):
+def parse_rules(path: Path) -> tuple[list[Rule], list[int]]:
     """Parse a rules file into (rules, invalid_line_numbers)."""
-    rules, invalid = [], []
+    rules: list[Rule] = []
+    invalid: list[int] = []
     try:
         # utf-8-sig: tolerate a BOM left by Windows editors
         text = path.read_text(encoding="utf-8-sig")
@@ -151,13 +156,14 @@ def parse_rules(path):
     return rules, invalid
 
 
-def matching_files(rules, rel_path):
+def matching_files(rules: list[Rule], rel_path: str) -> list[str]:
     """Required files for *rel_path*, honouring rule order and `!` lines.
 
     A matching `->` rule adds its files; a matching `!` rule clears
     everything matched so far, and later rules can add again.
     """
-    found, seen = [], set()
+    found: list[str] = []
+    seen: set[str] = set()
     for rule in rules:
         if not rule.pattern.match(rel_path):
             continue
@@ -173,13 +179,13 @@ def matching_files(rules, rel_path):
 
 # --- paths -----------------------------------------------------------------
 
-def project_root():
+def project_root() -> Path:
     """The project being worked on: CLAUDE_PROJECT_DIR, else the cwd."""
     root = os.environ.get("CLAUDE_PROJECT_DIR")
     return Path(root) if root else Path.cwd()
 
 
-def normalise(path_text, root):
+def normalise(path_text: str, root: Path) -> str | None:
     """Project-relative, forward-slash form of *path_text*.
 
     Returns None for absolute paths outside the project: rules are written
@@ -196,7 +202,7 @@ def normalise(path_text, root):
     return raw or None
 
 
-def display_path(path, root):
+def display_path(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix()
     except ValueError:
@@ -205,7 +211,7 @@ def display_path(path, root):
 
 # --- transcript scan --------------------------------------------------------
 
-def _iter_tool_use_blocks(obj):
+def _iter_tool_use_blocks(obj: object) -> Iterator[dict[str, Any]]:
     """Yield every {"type": "tool_use", "name": ...} dict nested in *obj*.
 
     Transcript entries nest tool calls (message.content[...]), so walk
@@ -221,7 +227,7 @@ def _iter_tool_use_blocks(obj):
             yield from _iter_tool_use_blocks(item)
 
 
-def _read_candidates(tool_use):
+def _read_candidates(tool_use: dict[str, Any]) -> list[str]:
     """Raw path strings a tool_use block read, best-effort."""
     name = tool_use.get("name")
     tool_input = tool_use.get("input") or {}
@@ -245,14 +251,14 @@ def _read_candidates(tool_use):
     return []
 
 
-def transcript_reads(transcript_path, needed, root):
+def transcript_reads(transcript_path: str, needed: Iterable[str], root: Path) -> set[str]:
     """Which of *needed* (project-relative paths) were read this session.
 
     Scans the JSONL transcript for prior Read/Bash-cat calls. Stops early
     once everything needed is accounted for; any parse problem just means
     "not confirmed read", never a crash.
     """
-    found = set()
+    found: set[str] = set()
     remaining = set(needed)
     if not transcript_path or not remaining:
         return found
@@ -284,7 +290,7 @@ def transcript_reads(transcript_path, needed, root):
 
 # --- session marker ---------------------------------------------------------
 
-def marker_path(payload):
+def marker_path(payload: dict[str, Any]) -> Path | None:
     """Per-session marker in the temp dir; None when the session can't be
     identified (hook then simply can't remember deliveries)."""
     session_id = payload.get("session_id") or ""
@@ -294,7 +300,7 @@ def marker_path(payload):
     return Path(tempfile.gettempdir()) / f"claude_on_edit_block_{safe}.marker"
 
 
-def load_delivered(marker):
+def load_delivered(marker: Path | None) -> set[str]:
     if marker is None:
         return set()
     try:
@@ -303,7 +309,7 @@ def load_delivered(marker):
         return set()
 
 
-def mark_delivered(marker, files):
+def mark_delivered(marker: Path | None, files: Iterable[str]) -> None:
     if marker is None or not files:
         return
     try:
@@ -315,18 +321,18 @@ def mark_delivered(marker, files):
 
 # --- output -----------------------------------------------------------------
 
-def emit(output):
+def emit(output: dict[str, Any]) -> None:
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", **output}}))
 
 
-def build_deny_message(rel_path, missing):
+def build_deny_message(rel_path: str, missing: list[tuple[str, str]]) -> str:
     """Denial reason for the unread *missing* files [(path, content), ...].
 
     Contents are inlined in model order while the message stays under the
     hook output cap; files that don't fit are listed with an instruction to
     read them instead -- never a truncated dump.
     """
-    def render(injected, not_injected):
+    def render(injected: list[tuple[str, str]], not_injected: list[tuple[str, str]]) -> str:
         lines = [f"Editing `{rel_path}` blocked: read the required file(s) first (see `{RULES_NAME}`)."]
         for path, _ in injected:
             lines.append(f"- `{path}` (content injected below)")
@@ -349,7 +355,7 @@ def build_deny_message(rel_path, missing):
     return render([], missing)
 
 
-def main():
+def main() -> int:
     try:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):

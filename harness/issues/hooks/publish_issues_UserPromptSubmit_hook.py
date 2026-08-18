@@ -348,6 +348,8 @@ def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, i
                 continue
 
             m = FILENAME_PATTERN.match(path.name)
+            if not m:
+                continue
             i = m.group(1)
             key = f"{batch_dir.name}/{i}"
 

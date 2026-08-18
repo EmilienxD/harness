@@ -23,11 +23,14 @@ install both are the same file.
 It never blocks: PostToolUse runs after the tool call already happened, so
 the hook only adds context and always exits 0.
 """
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 RULES_NAME = "on-read-reminder.rules"
 
@@ -43,13 +46,13 @@ TOKEN = re.compile(r'"([^"]+)"|\'([^\']+)\'|(\S+)')
 class Rule:
     __slots__ = ("negated", "pattern", "files")
 
-    def __init__(self, negated, pattern, files):
+    def __init__(self, negated: bool, pattern: re.Pattern[str], files: tuple[str, ...]) -> None:
         self.negated = negated        # True for `!<pattern>` lines
         self.pattern = pattern        # compiled regex over a project-relative path
         self.files = files            # tuple of reminder files (empty for negations)
 
 
-def compile_pattern(pattern):
+def compile_pattern(pattern: str) -> re.Pattern[str] | None:
     """Compile one gitignore-style pattern to a regex, or None if unusable.
 
     Supported: `*` (within a segment), `?` (one char in a segment), `**`
@@ -99,9 +102,10 @@ def compile_pattern(pattern):
     return re.compile("^(?:[^/]+/)*" + body + "$")
 
 
-def parse_rules(path):
+def parse_rules(path: Path) -> tuple[list[Rule], list[int]]:
     """Parse a rules file into (rules, invalid_line_numbers)."""
-    rules, invalid = [], []
+    rules: list[Rule] = []
+    invalid: list[int] = []
     try:
         # utf-8-sig: tolerate a BOM left by Windows editors
         text = path.read_text(encoding="utf-8-sig")
@@ -136,13 +140,13 @@ def parse_rules(path):
     return rules, invalid
 
 
-def project_root():
+def project_root() -> Path:
     """The project being worked on: CLAUDE_PROJECT_DIR, else the cwd."""
     root = os.environ.get("CLAUDE_PROJECT_DIR")
     return Path(root) if root else Path.cwd()
 
 
-def normalise(path_text, root):
+def normalise(path_text: str, root: Path) -> str | None:
     """Project-relative, forward-slash form of *path_text*.
 
     Returns None for absolute paths outside the project: rules are written
@@ -160,7 +164,7 @@ def normalise(path_text, root):
     return raw or None
 
 
-def candidate_paths(tool_name, tool_input):
+def candidate_paths(tool_name: str, tool_input: dict[str, Any]) -> list[str]:
     """Paths the tool call is reading, as written by the agent."""
     if tool_name == "Read":
         file_path = tool_input.get("file_path")
@@ -169,7 +173,7 @@ def candidate_paths(tool_name, tool_input):
         command = tool_input.get("command")
         if not isinstance(command, str) or not READ_COMMANDS.search(command):
             return []
-        paths = []
+        paths: list[str] = []
         for match in TOKEN.finditer(command):
             token = match.group(1) or match.group(2) or match.group(3) or ""
             if token and not token.startswith("-"):
@@ -178,13 +182,14 @@ def candidate_paths(tool_name, tool_input):
     return []
 
 
-def matching_reminders(rules, rel_path):
+def matching_reminders(rules: list[Rule], rel_path: str) -> list[str]:
     """Reminder files for *rel_path*, honouring rule order and `!` lines.
 
     A matching `->` rule adds its files; a matching `!` rule clears
     everything matched so far, and later rules can add again.
     """
-    found, seen = [], set()
+    found: list[str] = []
+    seen: set[str] = set()
     for rule in rules:
         if not rule.pattern.match(rel_path):
             continue
@@ -198,14 +203,14 @@ def matching_reminders(rules, rel_path):
     return found
 
 
-def display_path(path, root):
+def display_path(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix()
     except ValueError:
         return str(path)
 
 
-def emit(message):
+def emit(message: str) -> None:
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
@@ -214,7 +219,7 @@ def emit(message):
     }))
 
 
-def main():
+def main() -> int:
     try:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
@@ -230,7 +235,8 @@ def main():
     # Global rules first (the file next to the hook, in the install's
     # .claude/), then project rules, so project rules have the last word.
     # For a project install both resolve to the same file; load it once.
-    sources, seen_paths = [], set()
+    sources: list[Path] = []
+    seen_paths: set[Path] = set()
     hook_adjacent = Path(__file__).resolve().parent.parent / RULES_NAME
     for candidate in (hook_adjacent, root / ".claude" / RULES_NAME):
         try:
@@ -242,7 +248,8 @@ def main():
         seen_paths.add(key)
         sources.append(candidate)
 
-    all_rules, invalid = [], []
+    all_rules: list[Rule] = []
+    invalid: list[str] = []
     for source in sources:
         rules, bad_lines = parse_rules(source)
         all_rules.extend(rules)
@@ -254,8 +261,9 @@ def main():
                 f"'<pattern> -> <file>' or '!<pattern>' format and were ignored"
             )
 
-    triggers, reminders = [], []
-    seen_reminders = set()
+    triggers: list[str] = []
+    reminders: list[str] = []
+    seen_reminders: set[str] = set()
     for raw_path in candidate_paths(tool_name, tool_input):
         rel_path = normalise(raw_path, root)
         if rel_path is None:

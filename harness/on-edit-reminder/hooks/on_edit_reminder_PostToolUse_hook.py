@@ -35,13 +35,17 @@ rules), then `$CLAUDE_PROJECT_DIR/.claude/` (project rules win).
 It never blocks: PostToolUse runs after the edit already happened, so the hook
 only adds context and always exits 0.
 """
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
 import tempfile
 import time
+from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import Any
 
 RULES_NAME = "on-edit-reminder.rules"
 
@@ -73,7 +77,7 @@ TOKEN = re.compile(r'"([^"]+)"|\'([^\']+)\'|(\S+)')
 class Rule:
     __slots__ = ("negated", "pattern", "files")
 
-    def __init__(self, negated, pattern, files):
+    def __init__(self, negated: bool, pattern: re.Pattern[str], files: tuple[str, ...]) -> None:
         self.negated = negated        # True for `!<pattern>` lines
         self.pattern = pattern        # compiled regex over a project-relative path
         self.files = files            # tuple of required files (empty for negations)
@@ -81,7 +85,7 @@ class Rule:
 
 # --- rules parsing: identical to harness/on-edit-block --------------------
 
-def compile_pattern(pattern):
+def compile_pattern(pattern: str) -> re.Pattern[str] | None:
     """Compile one gitignore-style pattern to a regex, or None if unusable.
 
     Supported: `*` (within a segment), `?` (one char in a segment), `**`
@@ -131,9 +135,10 @@ def compile_pattern(pattern):
     return re.compile("^(?:[^/]+/)*" + body + "$")
 
 
-def parse_rules(path):
+def parse_rules(path: Path) -> tuple[list[Rule], list[int]]:
     """Parse a rules file into (rules, invalid_line_numbers)."""
-    rules, invalid = [], []
+    rules: list[Rule] = []
+    invalid: list[int] = []
     try:
         # utf-8-sig: tolerate a BOM left by Windows editors
         text = path.read_text(encoding="utf-8-sig")
@@ -168,13 +173,14 @@ def parse_rules(path):
     return rules, invalid
 
 
-def matching_files(rules, rel_path):
+def matching_files(rules: list[Rule], rel_path: str) -> list[str]:
     """Required files for *rel_path*, honouring rule order and `!` lines.
 
     A matching `->` rule adds its files; a matching `!` rule clears
     everything matched so far, and later rules can add again.
     """
-    found, seen = [], set()
+    found: list[str] = []
+    seen: set[str] = set()
     for rule in rules:
         if not rule.pattern.match(rel_path):
             continue
@@ -190,13 +196,13 @@ def matching_files(rules, rel_path):
 
 # --- paths -----------------------------------------------------------------
 
-def project_root():
+def project_root() -> Path:
     """The project being worked on: CLAUDE_PROJECT_DIR, else the cwd."""
     root = os.environ.get("CLAUDE_PROJECT_DIR")
     return Path(root) if root else Path.cwd()
 
 
-def normalise(path_text, root):
+def normalise(path_text: str, root: Path) -> str | None:
     """Project-relative, forward-slash form of *path_text*.
 
     Returns None for absolute paths outside the project: rules are written
@@ -213,7 +219,7 @@ def normalise(path_text, root):
     return raw or None
 
 
-def display_path(path, root):
+def display_path(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix()
     except ValueError:
@@ -222,7 +228,7 @@ def display_path(path, root):
 
 # --- transcript scan --------------------------------------------------------
 
-def _iter_tool_use_blocks(obj):
+def _iter_tool_use_blocks(obj: object) -> Iterator[dict[str, Any]]:
     """Yield every {"type": "tool_use", "name": ...} dict nested in *obj*.
 
     Transcript entries nest tool calls (message.content[...]), so walk
@@ -238,7 +244,7 @@ def _iter_tool_use_blocks(obj):
             yield from _iter_tool_use_blocks(item)
 
 
-def _read_candidates(tool_use):
+def _read_candidates(tool_use: dict[str, Any]) -> list[str]:
     """Raw path strings a tool_use block read, best-effort."""
     name = tool_use.get("name")
     tool_input = tool_use.get("input") or {}
@@ -262,14 +268,14 @@ def _read_candidates(tool_use):
     return []
 
 
-def transcript_reads(transcript_path, needed, root):
+def transcript_reads(transcript_path: str, needed: Iterable[str], root: Path) -> set[str]:
     """Which of *needed* (project-relative paths) were read this session.
 
     Scans the JSONL transcript for prior Read/Bash-cat calls. Stops early
     once everything needed is accounted for; any parse problem just means
     "not confirmed read", never a crash.
     """
-    found = set()
+    found: set[str] = set()
     remaining = set(needed)
     if not transcript_path or not remaining:
         return found
@@ -301,7 +307,7 @@ def transcript_reads(transcript_path, needed, root):
 
 # --- session marker ---------------------------------------------------------
 
-def marker_path(payload):
+def marker_path(payload: dict[str, Any]) -> Path | None:
     """Per-session marker in the temp dir; None when the session can't be
     identified (the hook then simply can't remember deliveries)."""
     session_id = payload.get("session_id") or ""
@@ -311,11 +317,11 @@ def marker_path(payload):
     return Path(tempfile.gettempdir()) / f"claude_on_edit_reminder_{safe}.marker"
 
 
-def load_reminded(marker):
+def load_reminded(marker: Path | None) -> dict[str, float]:
     """{key: last delivery epoch} from the marker; {} when unreadable."""
     if marker is None:
         return {}
-    out = {}
+    out: dict[str, float] = {}
     try:
         text = marker.read_text(encoding="utf-8")
     except OSError:
@@ -331,7 +337,7 @@ def load_reminded(marker):
     return out
 
 
-def mark_reminded(marker, reminded, keys, now):
+def mark_reminded(marker: Path | None, reminded: dict[str, float], keys: Iterable[str], now: float) -> None:
     if marker is None or not keys:
         return
     updated = dict(reminded)
@@ -346,7 +352,7 @@ def mark_reminded(marker, reminded, keys, now):
         pass  # best-effort; worst case the same reminder repeats sooner
 
 
-def due(reminded, key, now, interval=REMIND_INTERVAL_SECONDS):
+def due(reminded: dict[str, float], key: str, now: float, interval: float | None = REMIND_INTERVAL_SECONDS) -> bool:
     """True when *key* is worth emitting again.
 
     *interval* None means once per session and never again -- right for
@@ -361,7 +367,7 @@ def due(reminded, key, now, interval=REMIND_INTERVAL_SECONDS):
 
 # --- output -----------------------------------------------------------------
 
-def emit(message):
+def emit(message: str) -> None:
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
@@ -370,7 +376,7 @@ def emit(message):
     }))
 
 
-def listing(files):
+def listing(files: list[str]) -> str:
     """`a`, `b` and 2 more -- bounded so the message stays small."""
     shown = [f"`{f}`" for f in files[:MAX_LISTED]]
     extra = len(files) - len(shown)
@@ -381,7 +387,7 @@ def listing(files):
     return ", ".join(shown[:-1]) + " and " + shown[-1]
 
 
-def build_message(rel_path, missing):
+def build_message(rel_path: str, missing: list[str]) -> str:
     """The reminder for required files *missing* after editing *rel_path*."""
     them = "it" if len(missing) == 1 else "them"
     files = listing(missing)
@@ -397,7 +403,7 @@ def build_message(rel_path, missing):
     )
 
 
-def main():
+def main() -> int:
     try:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
@@ -420,7 +426,8 @@ def main():
     # Global rules first (next to the hook, in the install's .claude/), then
     # project rules, so project rules have the last word. For a project
     # install both resolve to the same file; load it once.
-    sources, seen_paths = [], set()
+    sources: list[Path] = []
+    seen_paths: set[Path] = set()
     hook_adjacent = Path(__file__).resolve().parent.parent / RULES_NAME
     for candidate in (hook_adjacent, root / ".claude" / RULES_NAME):
         try:
@@ -434,7 +441,8 @@ def main():
 
     # Diagnostics are collected as (marker key, text) so they can be reported
     # once per session rather than on every edit of a long one.
-    all_rules, diagnostics = [], []
+    all_rules: list[Rule] = []
+    diagnostics: list[tuple[str | None, str]] = []
     for source in sources:
         rules, bad_lines = parse_rules(source)
         all_rules.extend(rules)
@@ -451,7 +459,8 @@ def main():
 
     # A required file that isn't on disk can never be read: reporting the
     # broken rule beats telling the agent to read something that isn't there.
-    existing, unreadable = [], []
+    existing: list[str] = []
+    unreadable: list[str] = []
     for required_file in required:
         if (root / required_file).is_file():
             existing.append(required_file)

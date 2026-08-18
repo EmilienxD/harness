@@ -14,6 +14,8 @@ so the session history is never re-sent.
 
 Any other prompt is let through untouched.
 """
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -23,7 +25,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import namedtuple
+from collections.abc import Iterator, Sequence
+from typing import Any, NamedTuple
 
 COMMIT_PATTERN = re.compile(r"^/commit(?:\s+(.*))?$", re.DOTALL)
 
@@ -31,7 +34,11 @@ COMMIT_PATTERN = re.compile(r"^/commit(?:\s+(.*))?$", re.DOTALL)
 DRY_FLAGS = {"--dry", "-n"}
 AI_FLAGS = {"--ai"}
 
-Flags = namedtuple("Flags", "dry use_ai")
+
+class Flags(NamedTuple):
+    dry: bool
+    use_ai: bool
+
 
 # Tools whose invocation means "this file was modified on disk".
 # Read/Grep/Glob are excluded: they touch nothing.
@@ -40,13 +47,17 @@ WRITE_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit", "Update"}
 # Result of reading a transcript. Everything the dry run needs to explain
 # itself, including the paths that were deliberately discarded -- those are
 # the silent filters, and silent filters are what make a hook baffling.
-WriteScan = namedtuple(
-    "WriteScan",
-    "paths outside failed_paths ignored records write_calls unresolved",
-)
+class WriteScan(NamedTuple):
+    paths: list[str]
+    outside: list[str]
+    failed_paths: list[str]
+    ignored: list[str]
+    records: int
+    write_calls: int
+    unresolved: list[str]
 
 
-def split_flags(rest: str):
+def split_flags(rest: str) -> tuple[Flags, str]:
     """
     Peel recognised flags off the front of `/commit ...`, returning
     (Flags, message). Flags must precede the message, otherwise a message
@@ -72,7 +83,7 @@ def split_flags(rest: str):
     return Flags(dry, use_ai), rest.strip()
 
 
-def _iter_transcript(transcript_path: str):
+def _iter_transcript(transcript_path: str) -> Iterator[dict[str, Any]]:
     """
     Yield parsed records from a JSONL transcript, skipping anything
     unparseable. Transcripts are appended to live, so the final line can
@@ -91,7 +102,7 @@ def _iter_transcript(transcript_path: str):
                 yield record
 
 
-def _content_blocks(record: dict):
+def _content_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
     """Tool blocks live under message.content, which is a list or a bare string."""
     message = record.get("message")
     if not isinstance(message, dict):
@@ -214,7 +225,7 @@ def _strip_heredocs(command: str) -> str:
     return "\n".join(kept)
 
 
-def _tokenize(segment: str):
+def _tokenize(segment: str) -> list[str]:
     """Shell-ish tokens. posix=False keeps Windows backslashes intact."""
     try:
         tokens = shlex.split(segment, posix=False)
@@ -223,11 +234,11 @@ def _tokenize(segment: str):
     return [_clean_token(t) for t in tokens if t.strip()]
 
 
-def _bare_operands(args):
+def _bare_operands(args: Sequence[str]) -> list[str]:
     return [a for a in args if not a.startswith("-")]
 
 
-def _in_place(args) -> bool:
+def _in_place(args: Sequence[str]) -> bool:
     """An -i flag anywhere: `-i`, `-i.bak`, `perl -pi -e`, `awk -i inplace`."""
     return any(
         arg == "--in-place" or arg == "inplace"
@@ -236,7 +247,7 @@ def _in_place(args) -> bool:
     )
 
 
-def _editor_operands(name, args):
+def _editor_operands(name: str, args: Sequence[str]) -> list[str]:
     """File operands of an in-place sed/perl/awk, script and flag values dropped."""
     value_flags = set(VALUE_FLAGS) | ({"-i", "-v"} if name in ("awk", "gawk") else set())
     operands, skip = [], False
@@ -254,7 +265,7 @@ def _editor_operands(name, args):
     return operands
 
 
-def _ps_operands(args):
+def _ps_operands(args: Sequence[str]) -> list[str]:
     """The file a PowerShell write cmdlet targets: -Path, else the first
     operand shaped like one (`-Encoding utf8` must not read as a path)."""
     named, take_next = [], False
@@ -272,7 +283,7 @@ def _ps_operands(args):
     return []
 
 
-def _operand_targets(shell):
+def _operand_targets(shell: str) -> tuple[list[str], bool]:
     """(paths, unreadable) for commands that name their target as an operand."""
     paths, unreadable = [], False
     for segment in SEGMENT_SPLIT.split(shell):
@@ -303,7 +314,7 @@ def _operand_targets(shell):
     return paths, unreadable
 
 
-def shell_write_targets(command):
+def shell_write_targets(command: Any) -> tuple[list[str], bool]:
     """
     (paths, resolved) for one shell command, paths exactly as written.
 
@@ -359,7 +370,7 @@ def shell_write_targets(command):
     return paths, True
 
 
-def _scan_writes(transcript_path: str, repo_root: str):
+def _scan_writes(transcript_path: str, repo_root: str) -> WriteScan | None:
     """
     Parse the session transcript for file-writing tool_use entries and
     return a WriteScan describing what was found and what was discarded.
@@ -385,9 +396,9 @@ def _scan_writes(transcript_path: str, repo_root: str):
     if not transcript_path or not os.path.isfile(transcript_path):
         return None
 
-    calls = []  # (tool_use_id, abs path) in transcript order
-    unresolved = []  # (tool_use_id, command) for shell writes with no readable target
-    failed_ids = set()
+    calls: list[tuple[str, str]] = []  # (tool_use_id, abs path) in transcript order
+    unresolved: list[tuple[str, Any]] = []  # (tool_use_id, command) for shell writes with no readable target
+    failed_ids: set[str] = set()
     records = 0
 
     try:
@@ -439,8 +450,8 @@ def _scan_writes(transcript_path: str, repo_root: str):
         return None
 
     # Keep only writes that actually succeeded, deduped, order preserved.
-    succeeded = []
-    seen = set()
+    succeeded: list[str] = []
+    seen: set[str] = set()
     for tool_use_id, path in calls:
         if tool_use_id in failed_ids or path in seen:
             continue
@@ -449,7 +460,7 @@ def _scan_writes(transcript_path: str, repo_root: str):
 
     # A path is only reported as failed if *no* call against it worked;
     # one bad Edit followed by a good one is not a dropped file.
-    failed_paths = []
+    failed_paths: list[str] = []
     for tool_use_id, path in calls:
         if tool_use_id in failed_ids and path not in seen and path not in failed_paths:
             failed_paths.append(path)
@@ -457,7 +468,8 @@ def _scan_writes(transcript_path: str, repo_root: str):
     # Drop anything outside the repo. Claude may well have edited
     # ~/.claude/settings.json mid-session, and a single out-of-tree
     # pathspec makes `git add` fail and takes the whole commit with it.
-    inside, outside = [], []
+    inside: list[str] = []
+    outside: list[str] = []
     for path in succeeded:
         (inside if _is_within(path, repo_root) else outside).append(path)
 
@@ -466,7 +478,7 @@ def _scan_writes(transcript_path: str, repo_root: str):
     paths, ignored = filter_ignored(inside, repo_root)
 
     # A command that failed wrote nothing, so it is not an unreadable write.
-    unreadable = []
+    unreadable: list[str] = []
     for tool_use_id, command in unresolved:
         text = " ".join(str(command).split())
         if tool_use_id not in failed_ids and text and text not in unreadable:
@@ -491,7 +503,7 @@ def _abs(path: str, cwd: str) -> str:
     return os.path.normpath(path)
 
 
-def changed_paths(scan):
+def changed_paths(scan: WriteScan | None) -> list[str] | None:
     """
     The paths a scan says to stage, or None for "no usable list" -- which
     tells the caller to stage everything instead. None covers an unreadable
@@ -504,7 +516,7 @@ def changed_paths(scan):
     return scan.paths or None
 
 
-def get_changed_paths(transcript_path: str, repo_root: str):
+def get_changed_paths(transcript_path: str, repo_root: str) -> list[str] | None:
     """
     Absolute paths Claude wrote to this session, so we only stage what it
     actually changed rather than every dirty file in the repo.
@@ -520,11 +532,11 @@ def _is_within(path: str, root: str) -> bool:
         return False
 
 
-def run(cmd, cwd, input=None):
+def run(cmd: list[str], cwd: str, input: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=cwd, input=input, capture_output=True, text=True)
 
 
-def finish(message: str):
+def finish(message: str) -> None:
     """
     Reject the prompt either way (success or failure) so it never reaches
     the model. `message` is what the user sees in place of a response.
@@ -535,12 +547,12 @@ def finish(message: str):
     sys.exit(2)
 
 
-def allow():
+def allow() -> None:
     """Let the prompt through unchanged; a normal model turn follows."""
     sys.exit(0)
 
 
-def resolve_stage_set(paths, cwd):
+def resolve_stage_set(paths: Sequence[str], cwd: str) -> tuple[list[str], list[str], list[str]]:
     """
     Split the paths into what git can actually be handed, returning
     (present, deletions, unmatched). Existence matters because git treats
@@ -567,7 +579,7 @@ def resolve_stage_set(paths, cwd):
     return present, deletions, unmatched
 
 
-def filter_ignored(paths, cwd):
+def filter_ignored(paths: Sequence[str], cwd: str) -> tuple[list[str], list[str]]:
     """
     Split `paths` into (kept, ignored), where `ignored` matches a gitignore
     rule -- `.issues-gateway/` scratch, build output, and the like, which
@@ -581,18 +593,18 @@ def filter_ignored(paths, cwd):
     every path, which degrades to the pre-filter behaviour.
     """
     if not paths:
-        return paths, []
+        return list(paths), []
     result = run(["git", "check-ignore", "--stdin", "-z"], cwd, input="\0".join(paths))
     if result.returncode == 1:
-        return paths, []
+        return list(paths), []
     if result.returncode != 0:
-        return paths, []
+        return list(paths), []
     ignored = {os.path.normpath(p) for p in result.stdout.split("\0") if p.strip()}
     kept = [p for p in paths if os.path.normpath(p) not in ignored]
     return kept, [p for p in paths if os.path.normpath(p) in ignored]
 
 
-def stage_paths(paths, cwd):
+def stage_paths(paths: Sequence[str], cwd: str) -> tuple[subprocess.CompletedProcess[str] | None, list[str]]:
     """
     Stage `paths`, returning (result, targets). The targets matter to the
     caller: every later git step must be scoped to them, or it silently
@@ -605,7 +617,7 @@ def stage_paths(paths, cwd):
     return run(["git", "add", "-A", "--", *targets], cwd), targets
 
 
-def staged_elsewhere(targets, repo_root):
+def staged_elsewhere(targets: Sequence[str], repo_root: str) -> list[str]:
     """
     Paths sitting in the index that we did NOT stage -- typically staged by
     hand before /commit ran. A pathspec-scoped commit leaves them alone.
@@ -620,7 +632,7 @@ def staged_elsewhere(targets, repo_root):
     ]
 
 
-def in_merge(repo_root):
+def in_merge(repo_root: str) -> bool:
     """
     git refuses a partial (pathspec) commit mid-merge: 'cannot do a partial
     commit during a merge'. There the whole index is the commit, by design.
@@ -628,14 +640,14 @@ def in_merge(repo_root):
     return run(["git", "rev-parse", "--verify", "-q", "MERGE_HEAD"], repo_root).returncode == 0
 
 
-def _rel(path, root):
+def _rel(path: str, root: str) -> str:
     try:
         return os.path.relpath(path, root)
     except ValueError:
         return path
 
 
-def _shorten(text, limit=90):
+def _shorten(text: Any, limit: int = 90) -> str:
     """One line of a command, for reports where the point is which command."""
     text = " ".join(str(text).split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -720,7 +732,14 @@ MIN_CONTEXT_BUDGET = 1000
 # branch line, commit-log sample, file summary, section headers, guidance.
 FIXED_SECTION_CHARS = 6000
 
-PromptBudget = namedtuple("PromptBudget", "total diff context tpm model")
+
+class PromptBudget(NamedTuple):
+    total: int
+    diff: int
+    context: int
+    tpm: int
+    model: str
+
 
 # Generated files: huge diffs, zero signal. Listed in the file summary so the
 # model knows they changed, but their bodies never reach the prompt.
@@ -758,7 +777,7 @@ KEY_FILE_NAME = "commit-ai.key"
 SETTINGS_NAMES = ("settings.local.json", "settings.json")
 
 
-def _claude_dirs(repo_root):
+def _claude_dirs(repo_root: str | None) -> list[str]:
     """Every `.claude` directory that could hold a key, nearest scope first.
 
     `CLAUDE_PROJECT_DIR` is set by Claude Code itself and is authoritative when
@@ -781,7 +800,7 @@ def _claude_dirs(repo_root):
     return out
 
 
-def _settings_env(path):
+def _settings_env(path: str) -> dict[str, Any]:
     """The `env` dict from a settings file, or {} if unreadable or absent.
 
     A malformed settings file is not this hook's problem to report: Claude Code
@@ -796,7 +815,7 @@ def _settings_env(path):
     return env if isinstance(env, dict) else {}
 
 
-def _read_key_file(path):
+def _read_key_file(path: str) -> str | None:
     try:
         with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
             for line in fh:
@@ -808,7 +827,7 @@ def _read_key_file(path):
     return None
 
 
-def key_setup_help(repo_root):
+def key_setup_help(repo_root: str | None) -> str:
     """Setup instructions with this project's real paths filled in."""
     local = os.path.join(repo_root or ".", ".claude", "settings.local.json")
     key_file = os.path.join(os.path.expanduser("~"), ".claude", KEY_FILE_NAME)
@@ -840,10 +859,15 @@ class AiError(Exception):
     """A user-facing failure that must abort the commit rather than guess."""
 
 
-AiMessage = namedtuple("AiMessage", "subject body reasoning model source")
+class AiMessage(NamedTuple):
+    subject: str
+    body: str
+    reasoning: str
+    model: str
+    source: dict[str, Any]
 
 
-def find_api_key(repo_root=None):
+def find_api_key(repo_root: str | None = None) -> tuple[str | None, str | None]:
     """Return (key, where_it_came_from), or (None, None)."""
     for var in KEY_ENV_VARS:
         value = (os.environ.get(var) or "").strip()
@@ -862,9 +886,9 @@ def find_api_key(repo_root=None):
 
     for directory in dirs:
         path = os.path.join(directory, KEY_FILE_NAME)
-        value = _read_key_file(path)
-        if value:
-            return value, path
+        file_val = _read_key_file(path)
+        if file_val:
+            return file_val, path
 
     return None, None
 
@@ -880,11 +904,11 @@ def _is_noisy(rel_path: str) -> bool:
     return name in NOISY_NAMES or rel_path.endswith(NOISY_SUFFIXES)
 
 
-def _diff_scope(targets):
+def _diff_scope(targets: Sequence[str]) -> list[str]:
     return ["--", *targets] if targets else []
 
 
-def _untracked(repo_root, targets):
+def _untracked(repo_root: str, targets: Sequence[str]) -> list[str]:
     """
     Untracked paths within scope. Needed only for the dry run: nothing is
     staged there, and `git diff HEAD` cannot see a file git doesn't know.
@@ -901,7 +925,7 @@ def _untracked(repo_root, targets):
     return found
 
 
-def _synth_new_file(path, repo_root):
+def _synth_new_file(path: str, repo_root: str) -> str:
     """
     A unified-diff-shaped block for an untracked file, so the dry run shows
     the model the same thing a real staged diff would.
@@ -927,7 +951,7 @@ def _synth_new_file(path, repo_root):
     return out + ("+... [truncated]\n" if truncated else "")
 
 
-def collect_file_summary(repo_root, targets, staged):
+def collect_file_summary(repo_root: str, targets: Sequence[str], staged: bool) -> str:
     """Compact `+added -deleted  path` list -- complete even when the diff isn't."""
     scope = _diff_scope(targets)
     base = ["git", "diff", "--numstat", "--no-color", "-M"]
@@ -950,7 +974,7 @@ def collect_file_summary(repo_root, targets, staged):
     return "\n".join(rows)
 
 
-def collect_diff(repo_root, targets, staged):
+def collect_diff(repo_root: str, targets: Sequence[str], staged: bool) -> str:
     """
     The change about to be committed, as a unified diff.
 
@@ -971,7 +995,7 @@ def collect_diff(repo_root, targets, staged):
     return text
 
 
-def trim_diff(text, budget=DIFF_BUDGET):
+def trim_diff(text: str, budget: int = DIFF_BUDGET) -> str:
     """
     Fit the diff into `budget` chars without letting one enormous file
     swallow the whole allowance -- a global tail would show the model an
@@ -1013,7 +1037,7 @@ def trim_diff(text, budget=DIFF_BUDGET):
     return joined if len(joined) <= hard else joined[:hard] + "\n... [truncated] ...\n"
 
 
-def _clean_prompt_text(text):
+def _clean_prompt_text(text: str) -> str:
     """Strip the machinery Claude Code injects into user records."""
     text = re.sub(r"(?s)<system-reminder>.*?</system-reminder>", "", text)
     text = re.sub(r"(?s)<local-command-[a-z]+>.*?</local-command-[a-z]+>", "", text)
@@ -1022,12 +1046,12 @@ def _clean_prompt_text(text):
     return text.strip()
 
 
-def _truncate(text, limit):
+def _truncate(text: str, limit: int) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[:limit] + " ..."
 
 
-def collect_session_context(transcript_path, repo_root, budget=CONTEXT_BUDGET):
+def collect_session_context(transcript_path: str, repo_root: str, budget: int = CONTEXT_BUDGET) -> str:
     """
     A chronological narrative of the session: what the user asked for and
     what was done, in the order it happened. The diff says *what* changed;
@@ -1044,7 +1068,7 @@ def collect_session_context(transcript_path, repo_root, budget=CONTEXT_BUDGET):
     if not transcript_path or not os.path.isfile(transcript_path):
         return ""
 
-    events = []
+    events: list[str] = []
     try:
         for record in _iter_transcript(transcript_path):
             rtype = record.get("type")
@@ -1118,7 +1142,7 @@ def collect_session_context(transcript_path, repo_root, budget=CONTEXT_BUDGET):
         return ""
 
     # Collapse runs of the same action; ten edits to one file is one fact.
-    collapsed = []
+    collapsed: list[list[Any]] = []
     for event in events:
         if collapsed and collapsed[-1][0] == event:
             collapsed[-1][1] += 1
@@ -1129,7 +1153,7 @@ def collect_session_context(transcript_path, repo_root, budget=CONTEXT_BUDGET):
     return redact(_budget_events(lines, budget))
 
 
-def _budget_events(lines, budget=CONTEXT_BUDGET):
+def _budget_events(lines: list[str], budget: int = CONTEXT_BUDGET) -> str:
     """
     Fit the narrative into `budget` chars, keeping the highest-signal lines.
 
@@ -1138,10 +1162,10 @@ def _budget_events(lines, budget=CONTEXT_BUDGET):
     exactly what a tail discards. So prompts and commit markers are admitted
     unconditionally, and tool events fill whatever is left, newest first.
     """
-    def is_intent(line):
+    def is_intent(line: str) -> bool:
         return line.startswith("USER:") or line.startswith("===")
 
-    kept = [None] * len(lines)
+    kept: list[str | None] = [None] * len(lines)
     used = 0
 
     for i, line in enumerate(lines):
@@ -1165,15 +1189,16 @@ def _budget_events(lines, budget=CONTEXT_BUDGET):
         kept[i] = lines[i]
         used += len(lines[i]) + 1
 
-    out, gap = [], 0
-    for line in kept:
-        if line is None:
+    out: list[str] = []
+    gap = 0
+    for item in kept:
+        if item is None:
             gap += 1
             continue
         if gap:
             out.append(f"...[{gap} event(s) omitted]...")
             gap = 0
-        out.append(line)
+        out.append(item)
     if gap:
         out.append(f"...[{gap} event(s) omitted]...")
     return "\n".join(out)
@@ -1216,7 +1241,7 @@ Output plain text only: no markdown fences, no headings, no quotes around \
 the subject."""
 
 
-def _listed_tpm_limit(name):
+def _listed_tpm_limit(name: str) -> int:
     """Normalise the model id and resolve its entry in MODEL_TPM_LIMITS.
 
     Model ids carry dated and preview suffixes (`gemini-2.5-flash-preview-05-20`)
@@ -1236,7 +1261,7 @@ def _listed_tpm_limit(name):
     return MODEL_TPM_LIMITS[best] if best else DEFAULT_TPM_LIMIT
 
 
-def model_tpm_limit(model=None):
+def model_tpm_limit(model: str | None = None) -> int:
     """
     Input tokens-per-minute allowed for `model`, which this hook treats as a
     hard per-request context limit (see MODEL_TPM_LIMITS).
@@ -1256,7 +1281,7 @@ def model_tpm_limit(model=None):
     return _listed_tpm_limit(model or AI_MODEL)
 
 
-def prompt_budget(model=None):
+def prompt_budget(model: str | None = None) -> PromptBudget:
     """
     Character budgets sized so one request cannot breach the model's
     per-minute token limit.
@@ -1285,7 +1310,13 @@ def prompt_budget(model=None):
     )
 
 
-def _build_prompt(repo_root, targets, staged, transcript_path, guidance):
+def _build_prompt(
+    repo_root: str,
+    targets: Sequence[str],
+    staged: bool,
+    transcript_path: str,
+    guidance: str,
+) -> tuple[str, dict[str, Any]]:
     """Assemble the user-content half of the request; returns (text, stats)."""
     budget = prompt_budget()
     branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo_root).stdout.strip()
@@ -1344,12 +1375,12 @@ def _build_prompt(repo_root, targets, staged, transcript_path, guidance):
     return text, stats
 
 
-def estimate_tokens(text):
+def estimate_tokens(text: str) -> int:
     """Pessimistic token count for `text` -- see CHARS_PER_TOKEN."""
     return int(len(text) / CHARS_PER_TOKEN) + 1
 
 
-def _response_schema():
+def _response_schema() -> dict[str, Any]:
     """Gemini REST `responseSchema` for the generated commit message."""
     return {
         "type": "OBJECT",
@@ -1380,7 +1411,7 @@ def _response_schema():
     }
 
 
-def _gemini_error_message(exc):
+def _gemini_error_message(exc: Exception) -> str:
     """Extract Google's useful message without leaking request credentials."""
     if isinstance(exc, urllib.error.HTTPError):
         try:
@@ -1397,7 +1428,7 @@ def _gemini_error_message(exc):
     return str(exc)
 
 
-def _gemini_response_text(response):
+def _gemini_response_text(response: dict[str, Any]) -> tuple[str | None, str]:
     """Return text from the first candidate, mirroring the SDK's `.text`."""
     candidates = response.get("candidates") or []
     if not isinstance(candidates, list) or not candidates:
@@ -1415,7 +1446,13 @@ def _gemini_response_text(response):
     return text or None, candidate.get("finishReason") or ""
 
 
-def generate_commit_message(repo_root, targets, staged, transcript_path, guidance):
+def generate_commit_message(
+    repo_root: str,
+    targets: Sequence[str],
+    staged: bool,
+    transcript_path: str,
+    guidance: str,
+) -> AiMessage:
     """
     One Gemini call. Raises AiError with something the user can act on;
     the caller must not fall back to a placeholder message.
@@ -1511,7 +1548,7 @@ def generate_commit_message(repo_root, targets, staged, transcript_path, guidanc
     )
 
 
-def _clean_line(subject):
+def _clean_line(subject: str) -> str:
     """Belt-and-braces against fences/quotes slipping through the schema."""
     subject = subject.strip().strip("`").strip()
     subject = re.sub(r"^(?:subject|commit message)\s*:\s*", "", subject, flags=re.I)
@@ -1520,7 +1557,14 @@ def _clean_line(subject):
     return subject.splitlines()[0].strip() if subject else ""
 
 
-def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, flags):
+def build_dry_run_report(
+    message: str,
+    session_id: str,
+    transcript_path: str,
+    repo_root: str,
+    scan: WriteScan | None,
+    flags: Flags,
+) -> str:
     """
     Describe exactly what a real `/commit` would do, running every
     read-only step for real (transcript parse, out-of-repo filter,
@@ -1537,7 +1581,7 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
 
     # targets stays empty in the fall-back branches, which is exactly the
     # pathspec scope a real run would use there: none, i.e. the whole repo.
-    targets = []
+    targets: list[str] = []
     fallback = False
 
     if scan is None:
@@ -1680,7 +1724,7 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
     return "\n".join(out)
 
 
-def cli_main(argv):
+def cli_main(argv: list[str]) -> None:
     """
     Debug entry point, bypassing the hook protocol entirely:
 
@@ -1725,20 +1769,22 @@ def cli_main(argv):
     sys.exit(0)
 
 
-def _force_utf8_output():
+def _force_utf8_output() -> None:
     """
     Hook output is non-ASCII (em dashes) and Windows consoles default to
     cp1252, which mangles it and can raise UnicodeEncodeError mid-write.
     Reconfigure both streams; no-op on Python < 3.7 or odd stream types.
     """
     for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError, OSError):
-            pass
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError, OSError):
+                pass
 
 
-def main():
+def main() -> None:
     _force_utf8_output()
 
     # Any argv at all means someone is debugging from a shell, not Claude
