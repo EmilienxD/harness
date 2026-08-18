@@ -4,7 +4,9 @@ description: Draft a single GitHub issue to a markdown file in .issues-gateway/ 
 disable-model-invocation: true
 ---
 
-This skill is step 1/2 of a single-issue publishing system: drafting, then publishing. It turns what the user wants — from the conversation, or from the argument passed to this skill — into a markdown file. Do not run `gh` or publish anything — that only happens in the next step (publishing).
+This skill handles ONLY drafting in an issue publishing system: drafting, then publishing. It turns what the user wants — from the conversation, or from the argument passed to this skill — into a markdown file.
+
+Publishing happens separately in the later publishing step. Do not run `gh` or publish anything.
 
 ## Process
 

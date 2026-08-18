@@ -44,7 +44,7 @@ validated strictly, and a file that fails validation is rejected whole.
 - `harness/improve-codebase-architecture/` — finds architectural friction and proposes refactors. See
   `SKILL.md`.
 - `harness/issues/` — one bundle for the whole issue workflow: `/draft-issue`, `/publish-issue`,
-  `/map-issues`, `/draft-issues`, `/publish-issues`, `/to-spec`, `/to-spec-draft-issue`, plus the
+  `/draft-issues`, `/publish-issues`, `/to-spec`, `/to-spec-draft-issue`, plus the
   publishing hook. See `README.md`.
 - `harness/on-edit-block/` — PreToolUse hook denying Write/Edit/MultiEdit on paths matching
   gitignore-style patterns until user-picked files have been read that session. Same rules-file UX as

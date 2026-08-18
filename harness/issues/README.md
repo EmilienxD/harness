@@ -4,7 +4,7 @@ Everything for getting work out of a conversation and onto the GitHub tracker: o
 reviewed issue, a whole plan → a dependency-linked batch, or the current conversation → a spec
 (in chat, or as an issue). Nothing reaches the tracker before a human has looked at it.
 
-One install ships all six skills and one publishing hook:
+One install ships all five skills and one publishing hook:
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness harness install issues
@@ -38,7 +38,7 @@ size irrelevant to the Windows command-length limit.
 | Flow | Skills | Cost |
 |---|---|---|
 | One issue | `/draft-issue` → `/publish-issues` | 2 API calls |
-| A plan, as a batch | `/map-issues` → `/draft-issues` → `/publish-issues` | 3 API calls |
+| A plan, as a batch | `/draft-issues` → `/publish-issues` | 3 API calls |
 | This conversation, as a spec | `/to-spec`, or `/to-spec-draft-issue` → `/publish-issues` | 1–2 API calls |
 
 **Single issue.** `/draft-issue` pins down scope, difficulty, and mode with you in chat, then writes
@@ -47,12 +47,12 @@ index (pending drafts and already-published files in that session are scanned au
 `/publish-issues` publishes every draft in that folder and moves each published file aside so a
 rerun never re-creates it.
 
-**Batch.** `/map-issues` proposes a breakdown in chat — no files, no tracker calls — and iterates
-until granularity, dependencies, difficulty, and mode look right. `/draft-issues` writes one file per
-issue under `.issues-gateway/{session-id}/`, tagged with a shared session id so dependent issues can
-reference each other before any of them exist. `/publish-issues` creates them in dependency order and
-rewrites each `{session-id}/{i}` reference into the real number as soon as that issue exists — a
-whole dependency graph published without a single model call driving it.
+**Batch.** `/draft-issues` first proposes a breakdown in chat and iterates until granularity,
+dependencies, difficulty, and mode look right. Once you approve the mapping, it proceeds directly to
+writing one file per issue under `.issues-gateway/{session-id}/`, tagged with a shared session id so
+dependent issues can reference each other before any of them exist. `/publish-issues` creates them in
+dependency order and rewrites each `{session-id}/{i}` reference into the real number as soon as that
+issue exists — a whole dependency graph published without a single model call driving it.
 
 **Spec.** `/to-spec` synthesizes what you've already discussed into a spec and delivers it in chat —
 no interview, no files. `/to-spec-draft-issue` does the same synthesis but writes it to
@@ -65,9 +65,9 @@ A batch of N interdependent issues normally costs at least N model calls if each
 created (and its real number read back) before the next one that depends on it can be written. Here
 the entire batch — any number of issues, any dependency graph — costs a fixed:
 
-- **1 call** for `/map-issues` to produce the breakdown.
-- **1 call** for `/draft-issues` to batch-write every issue file in a single tool-use turn (all N
-  files requested together, not one file per round trip).
+- **1 call** for `/draft-issues` to produce the breakdown.
+- **1 call** after you approve the mapping to batch-write every issue file in a single tool-use turn
+  (all N files requested together, not one file per round trip).
 - **1 call** for the wrap-up message that follows, confirming the files and handing off for review.
 
 `/publish-issues` — the step that resolves the dependency graph and hits the tracker — costs **0
@@ -80,8 +80,7 @@ additional API calls**.
 ├── settings.json                       # registers the UserPromptSubmit hook
 ├── skills/
 │   ├── draft-issue/SKILL.md            # writes .issues-gateway/{session-id}/issue-{n}.md
-│   ├── map-issues/SKILL.md             # chat-only, proposes the breakdown
-│   ├── draft-issues/SKILL.md           # writes .issues-gateway/{session-id}/issue-{i}.md
+│   ├── draft-issues/SKILL.md           # maps, gets approval, then writes the issue batch
 │   ├── publish-issues/SKILL.md         # user-invocable, empty body (hook does the work)
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
 │   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
@@ -141,7 +140,7 @@ At runtime the drafting skills create a gateway folder at the project root — `
 uvx --from git+https://github.com/EmilienxD/harness harness install issues
 ```
 
-That copies the seven skills and the hook into `.claude/` and merges the hook registration below
+That copies the five skills and the hook into `.claude/` and merges the hook registration below
 into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry` first to
 see the exact file list and settings diff. See the [repo README](../../README.md) for `--user`,
 `--local`, and `uninstall`.
@@ -205,11 +204,9 @@ see the exact file list and settings diff. See the [repo README](../../README.md
     moves published files to .issues-gateway/{session-id}/.published/
   (also accepts /publish-issue alias — same hook, same behavior)
 
-/map-issues [optional: issue number, URL, or path to a plan]
-  → propose a breakdown in chat, iterate until it looks right
-
-/draft-issues
-  → writes .issues-gateway/{session-id}/issue-{i}.md, one per approved issue
+/draft-issues [optional: issue number, URL, or path to a plan]
+  → proposes a breakdown in chat and iterates until it looks right
+  → after approval, writes .issues-gateway/{session-id}/issue-{i}.md, one per issue
 
 /to-spec
   → synthesizes the conversation into a spec, in chat only

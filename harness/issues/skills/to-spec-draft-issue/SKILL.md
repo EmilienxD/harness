@@ -4,9 +4,9 @@ description: Turn the current conversation into a spec, as a draft issue — no 
 disable-model-invocation: true
 ---
 
-This skill is step 1/2 of a single-issue publishing system: drafting, then publishing. It takes the current conversation context and codebase understanding and produces a spec as a markdown file. Do NOT interview the user — just synthesize what you already know. Do not run `gh` or publish anything — that only happens in the next step (publishing).
+This skill handles ONLY spec drafting in an issue publishing system: drafting, then publishing. It takes the current conversation context and codebase understanding and produces a spec as a markdown file. Do NOT interview the user — just synthesize what you already know.
 
-It takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user — just synthesize what you already know.
+Publishing happens separately in the later publishing step. Do not run `gh` or publish anything.
 
 ## Process
 
