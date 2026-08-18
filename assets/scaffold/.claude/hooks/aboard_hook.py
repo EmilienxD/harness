@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
 import time
+from typing import Any
 import urllib.error
 import urllib.request
 
@@ -13,7 +16,7 @@ import urllib.request
 # silently exits 0. The scaffold registers these hooks in exec form so no shell
 # is involved, and these names stay path-free so a hand-edited shell-form
 # registration cannot resurrect the same failure.
-ROUTES = {
+ROUTES: dict[str, str] = {
     "manager-prompt": "/hooks/manager/prompt",
     "manager-stop": "/hooks/manager/stop",
     "manager-brief": "/hooks/manager/brief",
@@ -31,7 +34,7 @@ ROUTES = {
 
 # The only route whose event (`UserPromptSubmit`) can be blocked. Exit 2 on any
 # other route would be read as "refuse to stop" or "refuse to compact".
-BLOCKING_ROUTE = "manager-prompt"
+BLOCKING_ROUTE: str = "manager-prompt"
 
 # Roles that always run as automated, result-reporting workers. Interactive
 # roles (brainstormer, pr-doctor-hitl) never report a result, so worker
@@ -40,27 +43,27 @@ BLOCKING_ROUTE = "manager-prompt"
 # completion. general-purpose reports per launch rather than per role: the
 # extension sets ABOARD_DELIVERS_RESULT=1 only for result-delivering sessions,
 # so an interactive one stays silent here.
-WORKER_AGENT_TYPES = frozenset({"webresearcher", "implementer", "pr-doctor-afk", "Explore"})
+WORKER_AGENT_TYPES: frozenset[str] = frozenset({"webresearcher", "implementer", "pr-doctor-afk", "Explore"})
 
 # Commands the bridge handles itself. `/done` is available in every aboard
 # terminal; the remaining commands belong only to the Manager. These expressions
 # match the bridge-side parsers.
-MANAGER_INTERCEPTED_COMMAND = re.compile(r"^\s*/(brainstorm|general-purpose|done|auto|review-pr)(?:\s[\s\S]*)?$")
-DONE_COMMAND = re.compile(r"^\s*/done(?:\s[\s\S]*)?$")
+MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|done|auto|review-pr)(?:\s[\s\S]*)?$")
+DONE_COMMAND: re.Pattern[str] = re.compile(r"^\s*/done(?:\s[\s\S]*)?$")
 
 # Leads every roadmap injection the bridge emits, on the session-start briefing
 # and on the periodic reminder alike. Plain ASCII with no quotes, backslashes, or
 # newlines, so it matches identically inside the JSON-escaped `stdout` string and
 # the unescaped `content` array that the transcript records for a hook.
-ROADMAP_MARKER = b"<aboard-roadmap>"
+ROADMAP_MARKER: bytes = b"<aboard-roadmap>"
 
 # How many transcript bytes may pass with no roadmap injection before one is due.
 # Set from `aboard.manager.roadmapReminderBytes` into the Manager's terminal
 # alone; absent or zero disables the reminder entirely.
-ROADMAP_SPAN_VARIABLE = "ABOARD_ROADMAP_REMINDER_BYTES"
+ROADMAP_SPAN_VARIABLE: str = "ABOARD_ROADMAP_REMINDER_BYTES"
 
 
-def roadmap_reminder_due(payload):
+def roadmap_reminder_due(payload: dict[str, Any]) -> bool:
     """Is there no roadmap injection within the transcript's last `span` bytes?
 
     Stateless by construction. The question is not "where was the last
@@ -91,7 +94,7 @@ def roadmap_reminder_due(payload):
     return ROADMAP_MARKER not in tail
 
 
-def finish(message):
+def finish(message: str) -> int:
     """Erase the prompt and show `message` to the user in place of a response.
 
     This is the success path as much as the failure path. `/brainstorm` and
@@ -105,31 +108,30 @@ def finish(message):
     return 2
 
 
-def intercepted_prompt(prompt, agent_type):
+def intercepted_prompt(prompt: Any, agent_type: str | None) -> bool:
     if not isinstance(prompt, str):
         return False
     command = MANAGER_INTERCEPTED_COMMAND if agent_type == "manager" else DONE_COMMAND
     return command.match(prompt) is not None
 
 
-def main():
+def main() -> int:
     if len(sys.argv) >= 2 and sys.argv[1] == "--routes":
         json.dump(ROUTES, sys.stdout)
         return 0
     agent_id = os.environ.get("ABOARD_AGENT_ID")
-    route = sys.argv[1] if len(sys.argv) >= 2 else None
-    endpoint = ROUTES.get(route)
+    route: str | None = sys.argv[1] if len(sys.argv) >= 2 else None
+    endpoint = ROUTES.get(route) if route else None
     if not agent_id or endpoint is None:
         return 0
     agent_type = os.environ.get("ABOARD_AGENT_TYPE")
     delivers_result = os.environ.get("ABOARD_DELIVERS_RESULT") == "1"
-    expected_manager = route.startswith("manager-")
+    expected_manager = route.startswith("manager-") if route else False
     try:
-        payload = json.load(sys.stdin)
+        payload_raw: Any = json.load(sys.stdin)
     except (ValueError, OSError):
         return 0
-    if not isinstance(payload, dict):
-        payload = {}
+    payload: dict[str, Any] = payload_raw if isinstance(payload_raw, dict) else {}
     prompt = payload.get("prompt", "")
     # The shared UserPromptSubmit registration reaches every aboard terminal.
     # Only `/done` is meaningful outside the Manager; skip the bridge entirely
@@ -164,6 +166,7 @@ def main():
         return finish("Aboard could not handle that command because bridge discovery is unavailable.") if is_intercepted else 0
     event = payload.get("hook_event_name")
     session_id = os.environ.get("ABOARD_SESSION_ID") or payload.get("session_id")
+    body: dict[str, Any]
     if endpoint == "/hooks/session-start":
         # Proof-of-life only: the liveness signal itself is the wrapper's lock
         # file (`.aboard/runtime/locks/<agentId>.lock`), owned by
@@ -196,14 +199,15 @@ def main():
         # A worker reporting its own completion. `last_assistant_message` is
         # required by the bridge and is the documented way to read the final
         # message; transcript_path may still lag at Stop time.
+        last_assistant_message = payload.get("last_assistant_message")
+        if not isinstance(last_assistant_message, str) or not last_assistant_message.strip():
+            return 0
         body = {
             "agentId": agent_id,
             "sessionId": session_id,
             "cwd": payload.get("cwd"),
-            "lastAssistantMessage": payload.get("last_assistant_message"),
+            "lastAssistantMessage": last_assistant_message,
         }
-        if not isinstance(body["lastAssistantMessage"], str) or not body["lastAssistantMessage"].strip():
-            return 0
     elif endpoint == "/hooks/stop-failure":
         body = {
             "agentId": agent_id,
@@ -223,33 +227,35 @@ def main():
                 body["roadmapDue"] = True
         if endpoint == "/hooks/manager/stop":
             body["stopHookActive"] = bool(payload.get("stop_hook_active", False))
-    body = {key: value for key, value in body.items() if value is not None}
+    filtered_body = {key: value for key, value in body.items() if value is not None}
+    result_raw: Any = None
     while True:
         request = urllib.request.Request(
             f"http://127.0.0.1:{port}{endpoint}",
-            data=json.dumps(body).encode("utf-8"),
+            data=json.dumps(filtered_body).encode("utf-8"),
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             method="POST",
         )
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
-                result = json.load(response)
+                result_raw = json.load(response)
         except (urllib.error.HTTPError, urllib.error.URLError, ConnectionError, TimeoutError, ValueError) as error:
             if is_intercepted:
                 return finish(f"Aboard did not launch the requested session: {error}.")
             return 0
-        if not isinstance(result, dict) or result.get("state") != "running":
+        if not isinstance(result_raw, dict) or result_raw.get("state") != "running":
             break
         time.sleep(1)
-    if not isinstance(result, dict):
+    if not isinstance(result_raw, dict):
         return 0
+    result: dict[str, Any] = result_raw
     if blocking and result.get("intercepted"):
         return finish(str(result.get("message", "Aboard handled the command.")))
     # Only events that support context injection may print. Stop and
     # UserPromptSubmit do; the worker result routes deliberately do not.
     if endpoint == "/hooks/manager/stop":
         if result.get("state") == "results":
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": result["additionalContext"]}}))
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": result.get("additionalContext")}}))
     elif "additionalContext" in result and event in ("SessionStart", "UserPromptSubmit", "PostToolUse"):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": result["additionalContext"]}}))
     return 0

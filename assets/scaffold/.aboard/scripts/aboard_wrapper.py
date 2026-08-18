@@ -24,26 +24,29 @@ binary, unresumable session id — reports through this file, since it never
 reaches the point of firing a SessionStart hook.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess
 import sys
 import time
+from typing import Any
 
 
-def main():
-    args = sys.argv[1:]
+def main() -> int:
+    args: list[str] = sys.argv[1:]
     if len(args) < 3 or args[1] != "--":
         return 2
-    lock_path = args[0]
-    command = args[2:]
+    lock_path: str = args[0]
+    command: list[str] = args[2:]
 
     os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
-    started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    started_at: str = time.strftime("%Y-%m-%dT%H:%M:%S")
 
     # The marker exists before the child: a poll racing the spawn must find the
     # session already alive.
-    def write_marker(child_pid):
+    def write_marker(child_pid: int | None) -> None:
         with open(lock_path, "w", encoding="utf-8") as handle:
             json.dump(
                 {
@@ -56,10 +59,10 @@ def main():
                 handle,
             )
 
-    exit_path = os.path.splitext(lock_path)[0] + ".exit"
+    exit_path: str = os.path.splitext(lock_path)[0] + ".exit"
 
-    def write_exit(exit_code, error=None):
-        record = {
+    def write_exit(exit_code: int | None, error: str | None = None) -> None:
+        record: dict[str, Any] = {
             "agentId": os.environ.get("ABOARD_AGENT_ID"),
             "sessionId": os.environ.get("ABOARD_SESSION_ID"),
             "exitCode": exit_code,
@@ -75,8 +78,8 @@ def main():
             pass
 
     write_marker(None)
-    exit_code = None
-    spawn_error = None
+    exit_code: int | None = None
+    spawn_error: str | None = None
     try:
         try:
             child = subprocess.Popen(command)
