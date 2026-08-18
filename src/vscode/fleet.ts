@@ -29,7 +29,6 @@ export class FleetTreeModel {
     private readonly fleet: FleetRegistry,
     private readonly lease: WriteLease,
     host: FleetTreeHost,
-    private readonly now: () => Date = () => new Date(),
     private readonly isTerminalOpen: (terminalId: TerminalId) => boolean = () => true,
   ) {
     this.#fleetRegistration = fleet.onDidChange(() => host.refresh());
@@ -58,11 +57,13 @@ export class FleetTreeModel {
     const { session } = node;
     const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
     const terminalOpen = this.isTerminalOpen(session.terminal.terminalId);
-    const elapsed = formatElapsed(session.lifecycle.startedAt, this.now());
-    const markers = [terminalOpen ? session.lifecycle.status : "paused", node.leaseHolder ? "lease holder" : "", elapsed].filter(Boolean);
+    const markers = [terminalOpen ? session.lifecycle.status : "paused", node.leaseHolder ? "lease holder" : ""].filter(Boolean);
     const active = ["starting", "running", "awaiting-user"].includes(session.lifecycle.status);
     return {
-      label: `${session.identity.type === "manager" ? "Manager" : session.identity.type}${goal}`,
+      // The label matches the per-launch Claude session name — aboard-<type>-<id>,
+      // the `@<name>` banner in the terminal head — so a row in the tree is
+      // greppable straight back to the running session and its definition file.
+      label: `${agentLabel(session)}${goal}`,
       description: markers.join(" · "),
       tooltip: agentTooltip(session, node.leaseHolder, terminalOpen),
       icon: agentIcon(session),
@@ -137,7 +138,18 @@ function agentIcon(session: AgentSession): string {
 
 function managerRank(node: FleetTreeNode): number { return node.kind === "agent" && node.session.identity.type === "manager" ? 0 : 1; }
 function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "agent" }> { return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "agent"; }
-function formatElapsed(startedAt: IsoTimestamp, now: Date): string { const seconds = Math.max(0, Math.floor((now.getTime() - Date.parse(startedAt)) / 1000)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }
+/**
+ * The fleet row names a session the way the running terminal names it: the
+ * rewritten definition aboard launches under — `aboard-<type>-<id>` — is the
+ * `@<name>` banner and the `--agent` argument the launch passed, so the row is
+ * greppable straight back to the session and its definition file. A pre-numeric
+ * UUID id renders in full; truncating it would invent a name no terminal shows.
+ * The Manager keeps one fixed name per workspace, so its row is just "Manager".
+ */
+function agentLabel(session: AgentSession): string {
+  if (session.identity.type === "manager") return "Manager";
+  return `aboard-${session.identity.type}-${session.identity.agentId}`;
+}
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
 function agentTooltip(session: AgentSession, leaseHolder: boolean, terminalOpen: boolean): string { return [`Session: ${session.sessionId}`, `Status: ${terminalOpen ? session.lifecycle.status : "paused after VS Code restart"}`, terminalOpen ? "" : "Use Restore Fleet to reopen this Claude conversation", leaseHolder ? "Holds the write lease" : ""].filter(Boolean).join("\n"); }

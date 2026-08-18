@@ -11,16 +11,16 @@ const agent = (value: string) => value as AgentId;
 const session = (value: string) => value as SessionId;
 const terminal = (value: string) => value as TerminalId;
 const startedAt = at("2026-07-30T10:00:00.000Z");
-const worker: AgentSession = { identity: { agentId: agent("worker-1"), type: "implementer" }, sessionId: session("session-1"), terminal: { terminalId: terminal("terminal-1"), name: "worker" }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "tool-result" }, telemetry: { totalTokens: 1200, totalDurationMs: 3000, totalToolUseCount: 4, compactionCount: 1 }, issueNumbers: [19] };
+const worker: AgentSession = { identity: { agentId: agent("4"), type: "implementer" }, sessionId: session("session-1"), terminal: { terminalId: terminal("terminal-1"), name: "worker" }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "tool-result" }, telemetry: { totalTokens: 1200, totalDurationMs: 3000, totalToolUseCount: 4, compactionCount: 1 }, issueNumbers: [19] };
 
-test("tree mapping is hierarchical and shows status, elapsed time, and lease but no telemetry", () => {
+test("tree mapping is hierarchical and shows status and lease but no telemetry", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease(); let refreshes = 0;
-  const model = new FleetTreeModel(fleet, lease, { refresh: () => refreshes++ }, () => new Date("2026-07-30T10:02:05.000Z"));
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => refreshes++ });
   fleet.register(worker, startedAt); fleet.transition(worker.identity.agentId, { status: "running", startedAt }, startedAt);
   fleet.startChild({ agentId: "child-1", parentAgentId: worker.identity.agentId, type: "Explore", status: "running", startedAt, telemetry: { totalTokens: 400, totalDurationMs: 1, totalToolUseCount: 2, compactionCount: 0 } }, startedAt);
   lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, startedAt, "test");
   const root = model.roots()[0]!; const item = model.item(root);
-  assert.equal(item.label, "implementer #19"); assert.equal(item.description, "running · lease holder · 2:05");
+  assert.equal(item.label, "aboard-implementer-4 #19"); assert.equal(item.description, "running · lease holder");
   assert.equal(item.tooltip, "Session: session-1\nStatus: running\nHolds the write lease");
   const [child] = model.children(root);
   assert.equal(child !== undefined && model.item(child).description, "running");
@@ -28,17 +28,40 @@ test("tree mapping is hierarchical and shows status, elapsed time, and lease but
   assert.ok(refreshes >= 4); model.dispose();
 });
 
+test("the row is named the running session's aboard-<type>-<id>, not the bare type", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease();
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });
+  // Three workers of one type stay distinguishable by the number the terminal's
+  // `@aboard-implementer-N` banner shows; a pre-numeric UUID id is shown as-is.
+  fleet.register({ ...worker, identity: { agentId: agent("4"), type: "implementer" }, sessionId: session("s-4") }, startedAt);
+  fleet.register({ ...worker, identity: { agentId: agent("5"), type: "implementer" }, sessionId: session("s-5") }, startedAt);
+  fleet.register({ ...worker, identity: { agentId: agent("9f2c1d3a-0000-4000-8000-000000000000"), type: "implementer" }, sessionId: session("s-uuid") }, startedAt);
+  fleet.register({ ...worker, identity: { agentId: agent("7"), type: "webresearcher" }, sessionId: session("s-7") }, startedAt);
+  fleet.register({ ...worker, identity: { agentId: agent("1"), type: "manager" }, sessionId: session("s-m"), resultDelivery: { mode: "none" } }, startedAt);
+  const labels = model.roots().map((node) => model.item(node).label);
+  // The spreads carry the worker's issue numbers onto every row; the assertion
+  // is the session-name prefix, not which issues each happens to inherit.
+  assert.deepEqual(labels, [
+    "Manager #19",
+    "aboard-implementer-4 #19",
+    "aboard-implementer-5 #19",
+    "aboard-implementer-9f2c1d3a-0000-4000-8000-000000000000 #19",
+    "aboard-webresearcher-7 #19",
+  ]);
+  model.dispose();
+});
+
 test("a row names every issue its launch was bound to", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
-  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:00:05.000Z"));
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });
   fleet.register({ ...worker, identity: { agentId: agent("worker-2"), type: "general-purpose" }, issueNumbers: [12, 14] }, startedAt);
-  assert.equal(model.item(model.roots()[0]!).label, "general-purpose #12, #14");
+  assert.equal(model.item(model.roots()[0]!).label, "aboard-general-purpose-worker-2 #12, #14");
   model.dispose();
 });
 
 test("one section lists the Manager and its workers, with the Manager pinned first", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
-  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:02:05.000Z"));
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });
   assert.deepEqual(model.roots(), []);
   // Workers with no Manager are a valid state, so the section is not empty then
   // and its welcome actions are unavailable — the view title menu carries them.
@@ -52,7 +75,7 @@ test("one section lists the Manager and its workers, with the Manager pinned fir
 
 test("icons separate the Manager, interactive agents, and automated workers, never the lease", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
-  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:02:05.000Z"));
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });
   const icon = (type: AgentSession["identity"]["type"], id: string, sessionId: string) => {
     fleet.register({ ...worker, identity: { agentId: agent(id), type }, sessionId: session(sessionId) }, startedAt);
     return model.item({ kind: "agent", session: fleet.get(agent(id))!, leaseHolder: true }).icon;
@@ -86,7 +109,7 @@ test("commands route focus and kill, and force release stays available as a reco
 
 test("paused rows explain restoration instead of controlling a missing terminal", async () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease(); fleet.register(worker, startedAt);
-  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => new Date("2026-07-30T10:02:05.000Z"), () => false);
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => false);
   const item = model.item(model.roots()[0]!);
   assert.match(item.description, /^paused/);
   assert.match(item.tooltip, /Restore Fleet/);
@@ -103,8 +126,8 @@ test("status and typed notifications render domain state without sensitive conte
   const fleet = new FleetRegistry(); const lease = new WriteLease(); const info: string[] = []; const errors: string[] = [];
   const notifications = new FleetNotifications(fleet, { information: (message) => info.push(message), warning: () => {}, error: (message) => errors.push(message) });
   fleet.register(worker, startedAt); fleet.transition(worker.identity.agentId, { status: "running", startedAt }, startedAt); lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, startedAt, "test");
-  assert.deepEqual(renderFleetStatus(4823, fleet, lease), { text: "$(organization) 1 · :4823 · $(lock) worker-1", tooltip: "aboard bridge: 127.0.0.1:4823\nLive agents: 1\nWrite lease: worker-1", liveAgentCount: 1 });
-  assert.match(saveLeaseWarning(lease) ?? "", /saved.*worker-1.*may conflict/);
+  assert.deepEqual(renderFleetStatus(4823, fleet, lease), { text: "$(organization) 1 · :4823 · $(lock) 4", tooltip: "aboard bridge: 127.0.0.1:4823\nLive agents: 1\nWrite lease: 4", liveAgentCount: 1 });
+  assert.match(saveLeaseWarning(lease) ?? "", /saved.*4.*may conflict/);
   const finishedAt = at("2026-07-30T10:05:00.000Z"); fleet.transition(worker.identity.agentId, { status: "failed", startedAt, finishedAt, failure: { type: "timeout", exitCode: null, lastAssistantMessage: "secret prompt" } }, finishedAt);
   assert.deepEqual(errors, ["implementer failed: timeout."]); assert.equal(info.length, 0); notifications.dispose();
 });

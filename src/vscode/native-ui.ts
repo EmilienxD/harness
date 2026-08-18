@@ -17,7 +17,6 @@ export function registerNativeFleetUi(context: ExtensionContext, port: number, f
     fleet,
     lease,
     { refresh: () => changes.fire(undefined) },
-    () => new Date(),
     (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"),
   );
   const provider = (roots: () => readonly FleetTreeNode[]): TreeDataProvider<FleetTreeNode> => ({
