@@ -275,7 +275,7 @@ function commonFields(frontmatter: readonly string[]): CommonFieldsResult {
     return { ok: false, reason: `Unsupported agent effort: ${effort}. Expected one of ${EFFORT_LEVELS.join(", ")}` };
   }
   // `command:` overrides `aboard.launch.claudeCommand` for this agent alone —
-  // one agent behind a provider wrapper (`clauder run kiro --`) while the rest
+  // one agent behind a provider wrapper (`wrapper run MyProfile --`) while the rest
   // of the fleet keeps the configured default. It is read here rather than at
   // launch time so a command line that cannot be built is a parse failure the
   // user sees, not a terminal running the wrong program. An absent field means

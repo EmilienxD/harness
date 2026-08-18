@@ -24,9 +24,9 @@ function probe(outcomes: readonly (CommandExecution | Error)[]) {
 
 test("the probe asks the configured command for its version, wrapper arguments included", async () => {
   const { instance, calls } = probe([{ code: 0, stdout: "2.1.199 (Claude Code)\n", stderr: "" }]);
-  const result = await instance.verify(["clauder", "run", "kiro", "--"]);
+  const result = await instance.verify(["wrapper", "run", "MyProfile", "--"]);
   assert.deepEqual(result, { ok: true, version: "2.1.199 (Claude Code)" });
-  assert.deepEqual(calls, [{ program: "clauder", args: ["run", "kiro", "--", "--version"] }]);
+  assert.deepEqual(calls, [{ program: "wrapper", args: ["run", "MyProfile", "--", "--version"] }]);
 });
 
 test("a command that cannot be started is refused with its reason", async () => {
@@ -55,16 +55,16 @@ test("a Python traceback reports its actual error line, not the banner", async (
   const stderr = [
     "Traceback (most recent call last):",
     "  File \"<frozen runpy>\", line 198, in _run_module_as_main",
-    "  File \".../clauder.exe/__main__.py\", line 4, in <module>",
-    "    from clauder.cli import main",
-    "ModuleNotFoundError: No module named 'clauder'",
+    "  File \".../wrapper.exe/__main__.py\", line 4, in <module>",
+    "    from wrapper.cli import main",
+    "ModuleNotFoundError: No module named 'wrapper'",
     "",
   ].join("\r\n");
   const { instance } = probe([{ code: 1, stdout: "", stderr }]);
-  const result = await instance.verify(["clauder", "run", "kiro", "--"]);
+  const result = await instance.verify(["wrapper", "run", "MyProfile", "--"]);
   assert.equal(result.ok, false);
   const reason = result.ok ? "" : result.reason;
-  assert.match(reason, /code 1 \(ModuleNotFoundError: No module named 'clauder'\)/);
+  assert.match(reason, /code 1 \(ModuleNotFoundError: No module named 'wrapper'\)/);
   assert.doesNotMatch(reason, /Traceback/);
 });
 
@@ -81,7 +81,7 @@ test("a good answer is cached per command, a bad one is retried", async () => {
   await working.instance.verify(["claude"]);
   assert.equal(working.callCount(), 1);
   // A different command is a different question.
-  await working.instance.verify(["clauder", "run"]);
+  await working.instance.verify(["wrapper", "run"]);
   assert.equal(working.callCount(), 2);
   working.instance.invalidate();
   await working.instance.verify(["claude"]);

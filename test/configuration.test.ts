@@ -150,8 +150,8 @@ test("the claude command setting accepts a wrapper, and a broken one falls back 
   const read = (value: unknown) => readAboardConfiguration({ get: (key) => key === "aboard.launch.claudeCommand" ? value : undefined });
   assert.deepEqual(read(undefined).value.claudeCommand, ["claude"]);
   assert.deepEqual(read("openclaude").value.claudeCommand, ["openclaude"]);
-  assert.deepEqual(read("clauder run kiro --").value.claudeCommand, ["clauder", "run", "kiro", "--"]);
-  assert.deepEqual(read(["clauder", "run", "kiro", "--"]).value.claudeCommand, ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(read("wrapper run MyProfile --").value.claudeCommand, ["wrapper", "run", "MyProfile", "--"]);
+  assert.deepEqual(read(["wrapper", "run", "MyProfile", "--"]).value.claudeCommand, ["wrapper", "run", "MyProfile", "--"]);
   const broken = read('"unterminated');
   assert.deepEqual(broken.value.claudeCommand, ["claude"]);
   assert.deepEqual(broken.diagnostics.map((item) => item.setting), ["aboard.launch.claudeCommand"]);

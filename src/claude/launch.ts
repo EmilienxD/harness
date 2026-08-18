@@ -52,7 +52,7 @@ import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
 /**
  * `aboard.launch.claudeCommand`. The launch command is a token list rather than
  * a single executable so a wrapper can carry its own fixed arguments — a
- * profile switcher launches as `clauder run kiro --`, where everything after
+ * profile switcher launches as `wrapper run MyProfile --`, where everything after
  * `--` is Claude Code's. aboard appends its flags to these tokens and changes
  * nothing else about how they are passed.
  */
@@ -226,7 +226,7 @@ export type LaunchConfiguration =
        * `command:` read from the same definition, in the same token form as
        * `aboard.launch.claudeCommand`. It replaces the configured launch command
        * for this agent alone, so one agent can run through a wrapper — a
-       * provider switcher such as `clauder run kiro --` — while the rest of the
+       * provider switcher such as `wrapper run MyProfile --` — while the rest of the
        * fleet keeps the configured default. Absent means "use the setting",
        * which is the only reason it is optional rather than resolved here: the
        * setting is read per launch, and baking it in would freeze it.
@@ -613,7 +613,7 @@ export interface SessionResumePlanRequest extends CommonPlanRequest {
 /**
  * A leading `-` normally means the value was mistaken for a flag and would be
  * parsed as one. A launch command's tokens are the exception: `--` is how a
- * wrapper separates its own arguments from Claude Code's (`clauder run kiro --`),
+ * wrapper separates its own arguments from Claude Code's (`wrapper run MyProfile --`),
  * so there the check is emptiness alone.
  */
 function assertFlagValue(

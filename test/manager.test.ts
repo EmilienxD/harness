@@ -86,12 +86,12 @@ test("resume keeps the recorded identity and new replaces the session", async ()
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return terminal("resumed-terminal"); },
   } as unknown as TerminalController;
   const files = recordingFiles();
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: files.store, definition, disallowedTools: ["Bash(git push*)"], command: () => ["clauder", "run", "kiro", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), isResumable: async () => true, agentIdFactory: () => "manager-2" as AgentId });
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async (value) => { recorded = value; saved.push(value); } }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: files.store, definition, disallowedTools: ["Bash(git push*)"], command: () => ["wrapper", "run", "MyProfile", "--"], now: () => new Date("2026-07-30T10:00:00.000Z"), isResumable: async () => true, agentIdFactory: () => "manager-2" as AgentId });
   await lifecycle.start("resume");
   assert.match((records[0] as any).request.initialCommand, /--resume 4db0ed4c/);
   // A wrapper starts the Manager too, resume included, and its arguments stay
   // ahead of every aboard flag.
-  assert.match((records[0] as any).request.initialCommand, /^& clauder run kiro -- --resume /);
+  assert.match((records[0] as any).request.initialCommand, /^& wrapper run MyProfile -- --resume /);
   assert.equal(saved[0].sessionId, sessionId);
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
@@ -199,9 +199,9 @@ test("a failed preflight refuses the launch before a terminal exists", async () 
     store: { load: async () => undefined, save: async (value) => { saved.push(value); } },
     terminals, workspaceRoot: "C:\\work", shell: "powershell",
     files: recordingFiles().store, definition,
-    command: () => ["clauder", "run", "kiro", "--"],
+    command: () => ["wrapper", "run", "MyProfile", "--"],
     isResumable: async () => false,
-    preflight: async () => { throw new Error("The configured Claude command cannot be run: clauder exited with code 1 (ModuleNotFoundError: No module named 'clauder'). Check aboard.launch.claudeCommand."); },
+    preflight: async () => { throw new Error("The configured Claude command cannot be run: wrapper exited with code 1 (ModuleNotFoundError: No module named 'wrapper'). Check aboard.launch.claudeCommand."); },
   });
   await assert.rejects(() => lifecycle.start("new"), /cannot be run/);
   assert.equal(created.length, 0);

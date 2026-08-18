@@ -87,10 +87,10 @@ test("the Explore profile configures launch policy without copying Claude's prom
   assert.equal(source.replace(/^---\n[\s\S]*?\n---\s*/u, ""), "");
 
   const configured = parseBuiltinAgentProfile(
-    "---\nname: Explore\ndescription: d\nmodel: haiku\neffort: high\ncommand: clauder run kiro --\n---\n",
+    "---\nname: Explore\ndescription: d\nmodel: haiku\neffort: high\ncommand: wrapper run MyProfile --\n---\n",
   );
   assert.deepEqual(configured.ok && configured.value, {
-    name: "Explore", description: "d", model: "haiku", effort: "high", command: ["clauder", "run", "kiro", "--"],
+    name: "Explore", description: "d", model: "haiku", effort: "high", command: ["wrapper", "run", "MyProfile", "--"],
   });
 
   for (const invalid of [
@@ -197,7 +197,7 @@ test("the rewrite copies unresolved frontmatter verbatim and assigns the role's 
     "tools: Read, Agent",
     "model: opus",
     "effort: high",
-    "command: clauder run kiro --",
+    "command: wrapper run MyProfile --",
     "color: pink",
     "maxTurns: 40",
     "hooks:",
@@ -223,7 +223,7 @@ test("the rewrite copies unresolved frontmatter verbatim and assigns the role's 
   assert.equal(sanitized.description, "Implement one issue.");
   assert.equal(sanitized.model, "opus");
   assert.equal(sanitized.effort, "high");
-  assert.deepEqual(sanitized.command, ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(sanitized.command, ["wrapper", "run", "MyProfile", "--"]);
   // Capability is derived from the rewritten list, so the tools the launch
   // grants and the tools the lease reasons about cannot drift apart.
   assert.equal(sanitized.writeCapability, "read-only");

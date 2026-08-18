@@ -111,7 +111,7 @@ function setup() {
     shell: "powershell",
     disallowedTools: ["mcp__aboard__*"],
     // aboard.launch.claudeCommand: a wrapper that takes its own arguments.
-    command: () => ["clauder", "run", "kiro", "--"],
+    command: () => ["wrapper", "run", "MyProfile", "--"],
     agentIdFactory: () => agent(`worker-${++agentId}`),
     sessionIdFactory: () => session(ids[sessionId++]!),
     configurations: {
@@ -655,7 +655,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent[0]!, /^& clauder run kiro -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-implementer-worker-1 /);
+  assert.match(host.created[0]!.terminal.sent[0]!, /^& wrapper run MyProfile -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-implementer-worker-1 /);
 });
 
 test("an auto-run launch marks the tree it is expected to leave dirty", async () => {

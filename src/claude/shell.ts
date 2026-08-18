@@ -69,7 +69,7 @@ export function quoteArgument(shell: ShellKind, value: string): string {
 
 /**
  * `command` is the launch command as tokens: the program followed by any fixed
- * arguments it takes before Claude Code's own (`clauder run kiro --`). Every
+ * arguments it takes before Claude Code's own (`wrapper run MyProfile --`). Every
  * token is quoted individually, so a wrapper's arguments cannot turn into shell
  * operators and a program path may contain spaces.
  */

@@ -256,7 +256,7 @@
             }
           ],
           "default": "claude",
-          "markdownDescription": "Command that starts Claude Code. Defaults to `claude`; use it to point aboard at another binary or a wrapper, for example `openclaude` or `clauder run kiro --`. aboard appends its own flags to this command unchanged.\n\nWritten as a string it is split on spaces, with `\"...\"` or `'...'` around a token that contains spaces (`\"C:\\tools\\my claude.exe\" run --`); an array of strings is used verbatim. It is a program and its arguments, not a shell expression: every token is quoted, so `&&` or `|` would be passed as literal text. Applies to the next launch; a running Manager keeps its command."
+          "markdownDescription": "Command that starts Claude Code. Defaults to `claude`; use it to point aboard at another binary or a wrapper, for example `openclaude` or `wrapper run MyProfile --`. aboard appends its own flags to this command unchanged.\n\nWritten as a string it is split on spaces, with `\"...\"` or `'...'` around a token that contains spaces (`\"C:\\tools\\my claude.exe\" run --`); an array of strings is used verbatim. It is a program and its arguments, not a shell expression: every token is quoted, so `&&` or `|` would be passed as literal text. Applies to the next launch; a running Manager keeps its command."
         },
         "aboard.launch.maxInlinePromptChars": {
           "type": "integer",

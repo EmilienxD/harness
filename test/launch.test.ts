@@ -262,14 +262,14 @@ test("the builtin types carry Claude Code's own capabilities and Explore accepts
     agentName: "Explore",
     declaredModel: "haiku",
     declaredEffort: "high",
-    declaredCommand: ["clauder", "run", "kiro", "--"],
+    declaredCommand: ["wrapper", "run", "MyProfile", "--"],
   });
   const configured = planLaunch(request({
     agentType: "Explore",
     configuration: profiled,
     prompt: "Map the auth flow.",
   }));
-  assert.deepEqual(configured.command, ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(configured.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.deepEqual(configured.args, [
     "--session-id", sessionId, "--agent", "Explore", "--model", "haiku", "--effort", "high", "--disable-slash-commands", "Map the auth flow.",
   ]);
@@ -455,9 +455,9 @@ test("rejects every tool override beside a builtin --agent but accepts launch po
   }
 
   assert.deepEqual(resolveLaunchConfiguration({
-    agentName: "Explore", declaredModel: "opus", declaredEffort: "high", declaredCommand: ["clauder"],
+    agentName: "Explore", declaredModel: "opus", declaredEffort: "high", declaredCommand: ["wrapper"],
   }), {
-    shape: "builtin", agentName: "Explore", declaredModel: "opus", declaredEffort: "high", declaredCommand: ["clauder"],
+    shape: "builtin", agentName: "Explore", declaredModel: "opus", declaredEffort: "high", declaredCommand: ["wrapper"],
   });
 
   assert.throws(
@@ -732,10 +732,10 @@ test("a resume re-passes every flag that shaped the launch", () => {
   const resumedExplore = planSessionResume({
     agentId, sessionId, agentType: "Explore", shell: "powershell",
     configuration: resolveLaunchConfiguration({
-      agentName: "Explore", declaredModel: "haiku", declaredEffort: "high", declaredCommand: ["clauder", "run", "kiro", "--"],
+      agentName: "Explore", declaredModel: "haiku", declaredEffort: "high", declaredCommand: ["wrapper", "run", "MyProfile", "--"],
     }),
   });
-  assert.deepEqual(resumedExplore.command, ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(resumedExplore.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.deepEqual(resumedExplore.args, ["--resume", sessionId, "--model", "haiku", "--effort", "high", "--disable-slash-commands"]);
   assert.equal(resumedExplore.args.includes("--tools"), false);
   assert.equal(resumedExplore.agentDefinition, undefined);
@@ -840,14 +840,14 @@ test("uses a launch executable path with spaces without breaking the plan", () =
 });
 
 test("a wrapper command keeps its own arguments ahead of every aboard flag", () => {
-  // `clauder run kiro --` starts Claude Code on a named profile, where the
+  // `wrapper run MyProfile --` starts Claude Code on a named profile, where the
   // tokens before `--` are the wrapper's. aboard appends to them and changes
   // nothing about how its own flags are passed.
-  const plan = planLaunch(request({ command: ["clauder", "run", "kiro", "--"], prompt: "Go." }));
-  assert.deepEqual(plan.command, ["clauder", "run", "kiro", "--"]);
+  const plan = planLaunch(request({ command: ["wrapper", "run", "MyProfile", "--"], prompt: "Go." }));
+  assert.deepEqual(plan.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.equal(
     plan.commandLine,
-    `& clauder run kiro -- --session-id ${sessionId} ${definitionFlags("implementer")} --disable-slash-commands Go.`,
+    `& wrapper run MyProfile -- --session-id ${sessionId} ${definitionFlags("implementer")} --disable-slash-commands Go.`,
   );
 });
 
@@ -869,15 +869,15 @@ test("a definition's command replaces the configured launch command for that age
   // arguments come first and aboard's flags are appended unchanged, exactly as
   // the setting behaves.
   const configuration = definition("implementer", IMPLEMENTER_TOOLS, {
-    declaredCommand: ["clauder", "run", "kiro", "--"],
+    declaredCommand: ["wrapper", "run", "MyProfile", "--"],
   });
   const plan = planLaunch(
     request({ configuration, command: ["claude"], prompt: "Go." }),
   );
-  assert.deepEqual(plan.command, ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(plan.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.equal(
     plan.commandLine,
-    `& clauder run kiro -- --session-id ${sessionId} ${definitionFlags("implementer")} --disable-slash-commands Go.`,
+    `& wrapper run MyProfile -- --session-id ${sessionId} ${definitionFlags("implementer")} --disable-slash-commands Go.`,
   );
   // The flags aboard passes are untouched by the override: only the program
   // in front of them changes.
@@ -896,20 +896,20 @@ test("a definition's command replaces the configured launch command for that age
       agentId, sessionId, agentType: "implementer", shell: "powershell",
       configuration, command: ["claude"],
     }).command,
-    ["clauder", "run", "kiro", "--"],
+    ["wrapper", "run", "MyProfile", "--"],
   );
   const manager = planManagerResume({
     agentId, sessionId, shell: "powershell", command: ["claude"],
-    configuration: definition("manager", MANAGER_TOOLS, { declaredCommand: ["clauder", "run", "kiro", "--"] }),
+    configuration: definition("manager", MANAGER_TOOLS, { declaredCommand: ["wrapper", "run", "MyProfile", "--"] }),
   });
-  assert.match(manager.commandLine, new RegExp(`^& clauder run kiro -- --resume ${sessionId} `));
+  assert.match(manager.commandLine, new RegExp(`^& wrapper run MyProfile -- --resume ${sessionId} `));
 
   // The wrapper still owns the outermost program; the override is what it runs.
   const wrapped = planLaunch(request({
     configuration, prompt: "Go.",
     wrapper: { script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py", lockPathFor: () => "C:\\repo\\lock" },
   }));
-  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' -- clauder run kiro -- --session-id"));
+  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' -- wrapper run MyProfile -- --session-id"));
 });
 
 test("a declared command is validated like the setting, and requires a definition or builtin profile", () => {
@@ -931,11 +931,11 @@ test("a declared command is validated like the setting, and requires a definitio
   assert.equal("declaredCommand" in empty, false);
   assert.deepEqual(planLaunch(request({ configuration: empty, command: ["openclaude"], prompt: "Go." })).command, ["openclaude"]);
 
-  assert.deepEqual(resolveLaunchConfiguration({ agentName: "Explore", declaredCommand: ["clauder"] }), {
-    shape: "builtin", agentName: "Explore", declaredCommand: ["clauder"],
+  assert.deepEqual(resolveLaunchConfiguration({ agentName: "Explore", declaredCommand: ["wrapper"] }), {
+    shape: "builtin", agentName: "Explore", declaredCommand: ["wrapper"],
   });
   assert.throws(
-    () => resolveLaunchConfiguration({ declaredCommand: ["clauder"] }),
+    () => resolveLaunchConfiguration({ declaredCommand: ["wrapper"] }),
     (error: unknown) => error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
   );
 });
@@ -946,8 +946,8 @@ test("parses the launch command setting as tokens, from a string or an array", (
     return parsed.ok ? parsed.value : parsed.reason;
   };
   assert.deepEqual(tokens("claude"), ["claude"]);
-  assert.deepEqual(tokens("  clauder run kiro --  "), ["clauder", "run", "kiro", "--"]);
-  assert.deepEqual(tokens(["clauder", "run", "kiro", "--"]), ["clauder", "run", "kiro", "--"]);
+  assert.deepEqual(tokens("  wrapper run MyProfile --  "), ["wrapper", "run", "MyProfile", "--"]);
+  assert.deepEqual(tokens(["wrapper", "run", "MyProfile", "--"]), ["wrapper", "run", "MyProfile", "--"]);
   // Quotes group a token, so a program path with spaces survives the string form.
   assert.deepEqual(tokens('"C:\\tools\\my claude.exe" run --'), ["C:\\tools\\my claude.exe", "run", "--"]);
   assert.deepEqual(tokens("'my claude' --profile 'a b'"), ["my claude", "--profile", "a b"]);
