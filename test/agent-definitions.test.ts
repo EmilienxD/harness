@@ -79,7 +79,8 @@ test("the Explore profile configures launch policy without copying Claude's prom
   assert.deepEqual(parsed.ok && parsed.value, {
     name: "Explore",
     description: "Claude Code's built-in read-only codebase exploration agent",
-    model: "inherit",
+    model: "haiku",
+    effort: "low",
   });
   assert.doesNotMatch(source, /^tools\s*:/mu);
   assert.equal(source.replace(/^---\n[\s\S]*?\n---\s*/u, ""), "");
