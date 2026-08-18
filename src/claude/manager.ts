@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestamp } from "../domain/contracts.js";
 import { parseManagerPersistenceDto } from "../domain/validation.js";
 import { MANAGER_AGENT_NAME, resolveLaunchConfiguration, type EffortLevel, type LaunchConfiguration, type SessionWrapperLayout, planLaunch, planManagerResume } from "./launch.js";
-import { AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, parseManagerAgentDefinition, sanitizeAgentDefinition } from "../scaffold/agent-definition.js";
+import { AGENT_DEFINITION_DIRECTORY, aboardMcpServerFrontmatter, agentDefinitionPath, parseManagerAgentDefinition, sanitizeAgentDefinition } from "../scaffold/agent-definition.js";
 import { sessionIsResumable } from "./sessions.js";
 import type { PromptSpillStore } from "./spill.js";
 import type { ShellKind } from "./shell.js";
@@ -61,6 +61,10 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
     declaredTools: sanitized.tools,
     declaredDescription: sanitized.description,
     extraFrontmatter: sanitized.extraFrontmatter,
+    // The delegation surface is registered here and nowhere else, so it exists
+    // for this session only — no project-scoped `.mcp.json` entry, and so no
+    // worker or hand-started session paying for tool descriptions it may not use.
+    declaredMcpServers: aboardMcpServerFrontmatter(),
     declaredModel: sanitized.model,
     declaredEffort: sanitized.effort,
     declaredCommand: sanitized.command,

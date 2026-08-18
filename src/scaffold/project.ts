@@ -79,18 +79,12 @@ interface Manifest {
 
 const MANIFEST_PATH = ".aboard/scaffold.json";
 const HOOK_MARKER = ".claude/hooks/aboard_hook.py";
+/**
+ * Only a name here now: the server itself is declared inline in the Manager's
+ * per-launch definition (`aboardMcpServerFrontmatter`). The name survives so an
+ * upgrade can withdraw the project-scoped registration older versions wrote.
+ */
 const MCP_SERVER_NAME = "aboard";
-const MCP_REGISTRATION = {
-  type: "http",
-  url: "http://127.0.0.1:${ABOARD_BRIDGE_PORT}/mcp",
-  // `alwaysLoad` keeps the aboard tools out of Claude Code's tool search, so
-  // the Manager never has to discover the very surface it orchestrates through.
-  alwaysLoad: true,
-  headers: {
-    Authorization: "Bearer ${ABOARD_BRIDGE_TOKEN}",
-    "X-Aboard-Agent-Id": "${ABOARD_AGENT_ID}",
-  },
-};
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -188,13 +182,35 @@ function mergeHooks(settings: Record<string, unknown>, registration: Record<stri
 }
 
 /**
- * Project MCP approval belongs in untracked local settings. Merge aboard into
- * the user's list rather than replacing approvals for their own servers.
+ * Removes the project-scoped registration older aboard versions wrote, from both
+ * `.mcp.json` and the local approval list. Neither file is created and neither
+ * is rewritten when aboard's entry is not in it, so a project that never had one
+ * — or a user who removed it — sees no write at all.
  */
-function mergeEnabledMcpServers(settings: Record<string, unknown>): Record<string, unknown> {
-  const current = Array.isArray(settings.enabledMcpjsonServers) ? settings.enabledMcpjsonServers : [];
-  if (current.includes(MCP_SERVER_NAME)) return settings;
-  return { ...settings, enabledMcpjsonServers: [...current, MCP_SERVER_NAME] };
+async function withdrawProjectMcpRegistration(projectRoot: string): Promise<void> {
+  const mcpPath = join(projectRoot, ".mcp.json");
+  if (await exists(mcpPath)) {
+    const mcp = await readObject(mcpPath);
+    const servers = typeof mcp.mcpServers === "object" && mcp.mcpServers !== null && !Array.isArray(mcp.mcpServers)
+      ? mcp.mcpServers as Record<string, unknown>
+      : undefined;
+    if (servers !== undefined && MCP_SERVER_NAME in servers) {
+      const { [MCP_SERVER_NAME]: _removed, ...rest } = servers;
+      await writeJson(mcpPath, { ...mcp, mcpServers: rest });
+    }
+  }
+
+  const localSettingsPath = join(projectRoot, ".claude", "settings.local.json");
+  if (!await exists(localSettingsPath)) return;
+  const local = await readObject(localSettingsPath);
+  const enabled = local.enabledMcpjsonServers;
+  if (!Array.isArray(enabled) || !enabled.includes(MCP_SERVER_NAME)) return;
+  const kept = enabled.filter((entry) => entry !== MCP_SERVER_NAME);
+  if (kept.length > 0) await writeJson(localSettingsPath, { ...local, enabledMcpjsonServers: kept });
+  else {
+    const { enabledMcpjsonServers: _dropped, ...rest } = local;
+    await writeJson(localSettingsPath, rest);
+  }
 }
 
 /**
@@ -286,15 +302,13 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   const settings = await readObject(settingsPath);
   await writeJson(settingsPath, mergeHooks(settings, { hooks: registration }));
 
-  const localSettingsPath = join(projectRoot, ".claude", "settings.local.json");
-  await writeJson(localSettingsPath, mergeEnabledMcpServers(await readObject(localSettingsPath)));
-
-  const mcpPath = join(projectRoot, ".mcp.json");
-  const mcp = await readObject(mcpPath);
-  const servers = typeof mcp.mcpServers === "object" && mcp.mcpServers !== null && !Array.isArray(mcp.mcpServers)
-    ? mcp.mcpServers as Record<string, unknown>
-    : {};
-  await writeJson(mcpPath, { ...mcp, mcpServers: { ...servers, [MCP_SERVER_NAME]: MCP_REGISTRATION } });
+  // aboard registers its MCP server nowhere in the project: the Manager's
+  // per-launch definition carries it inline, so it exists in that one session.
+  // Earlier versions wrote a project-scoped `.mcp.json` entry, which every
+  // session under the workspace connected and paid tool descriptions for, so an
+  // upgrade withdraws aboard's own entry and its local approval while leaving
+  // every server and setting aboard did not write exactly as it found them.
+  await withdrawProjectMcpRegistration(projectRoot);
 
   // MCP approval is machine-local and must not be committed. Claude Code also
   // writes per-machine permission decisions to this file.

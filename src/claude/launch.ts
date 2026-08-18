@@ -194,6 +194,17 @@ export type LaunchConfiguration =
        */
       readonly extraFrontmatter?: readonly string[];
       /**
+       * Frontmatter lines for an aboard-owned `mcpServers:` block, emitted into
+       * the rewritten file. This is how the aboard MCP server reaches the
+       * Manager and *only* the Manager: an inline `mcpServers` entry in an agent
+       * definition connects when that agent starts and is invisible to every
+       * other session, where a `.mcp.json` registration is project-scoped and
+       * spends its tool descriptions in the context of every worker — and of the
+       * user's own hand-started `claude` — that the bridge would then have to
+       * refuse anyway. Isolation here is structural rather than a denial rule.
+       */
+      readonly declaredMcpServers?: readonly string[];
+      /**
        * `model:` and `effort:` read from the same definition, carried onto the
        * command line because no flag short of these two applies them.
        *
@@ -240,6 +251,7 @@ export interface LaunchConfigurationInput {
   readonly declaredTools?: readonly string[] | undefined;
   readonly declaredDescription?: string | undefined;
   readonly extraFrontmatter?: readonly string[] | undefined;
+  readonly declaredMcpServers?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
   readonly declaredCommand?: readonly string[] | undefined;
@@ -335,7 +347,8 @@ export function resolveLaunchConfiguration(
       // Accepting them would silently drop them.
       if (
         input.declaredDescription !== undefined ||
-        input.extraFrontmatter !== undefined
+        input.extraFrontmatter !== undefined ||
+        input.declaredMcpServers !== undefined
       ) {
         throw new LaunchPlanError(
           "conflicting-launch-shape",
@@ -383,7 +396,7 @@ export function resolveLaunchConfiguration(
     // is the author's business and Claude Code skips it — `color:` travels this
     // path, where an unknown value renders grey — and a fence in the middle
     // would silently move the rest of the frontmatter into the system prompt.
-    for (const line of input.extraFrontmatter ?? []) {
+    for (const line of [...(input.extraFrontmatter ?? []), ...(input.declaredMcpServers ?? [])]) {
       if (line.includes("\n") || line.includes("\r") || /^\s*(?:---|\.\.\.)\s*$/.test(line)) {
         throw new LaunchPlanError(
           "invalid-frontmatter",
@@ -400,6 +413,9 @@ export function resolveLaunchConfiguration(
       ...(input.extraFrontmatter === undefined || input.extraFrontmatter.length === 0
         ? {}
         : { extraFrontmatter: input.extraFrontmatter }),
+      ...(input.declaredMcpServers === undefined || input.declaredMcpServers.length === 0
+        ? {}
+        : { declaredMcpServers: input.declaredMcpServers }),
       ...(declaredModel === undefined ? {} : { declaredModel }),
       ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
       ...(declaredCommand === undefined ? {} : { declaredCommand }),
@@ -411,6 +427,7 @@ export function resolveLaunchConfiguration(
     input.declaredTools !== undefined ||
     input.declaredDescription !== undefined ||
     input.extraFrontmatter !== undefined ||
+    input.declaredMcpServers !== undefined ||
     input.declaredModel !== undefined ||
     input.declaredEffort !== undefined ||
     input.declaredCommand !== undefined
@@ -740,6 +757,9 @@ function renderAgentDefinition(
     `tools: ${configuration.declaredTools.join(", ")}`,
     ...frontmatterLine("model", configuration.declaredModel),
     ...frontmatterLine("effort", configuration.declaredEffort),
+    // Before the carried-through keys, so an aboard-owned block stays adjacent
+    // to the fields aboard resolves rather than buried in the author's.
+    ...(configuration.declaredMcpServers ?? []),
     ...(configuration.extraFrontmatter ?? []),
   ];
   return `---\n${frontmatter.join("\n")}\n---\n\n${configuration.systemPrompt.trim()}\n`;

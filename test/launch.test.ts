@@ -27,6 +27,7 @@ import {
 } from "../src/claude/spill.js";
 import { ShellQuotingError, buildCommandLine, quoteArgument } from "../src/claude/shell.js";
 import { deriveWriteCapability } from "../src/domain/capability.js";
+import { aboardMcpServerFrontmatter } from "../src/scaffold/agent-definition.js";
 import type { AgentId, SessionId } from "../src/domain/contracts.js";
 
 const agentId = "a1b2c3" as AgentId;
@@ -120,6 +121,43 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   // tool list leaves unrestricted Bash in place (spec section 4.3.1).
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, false);
+});
+
+test("the aboard MCP server is declared inline in the Manager's file and nowhere else", () => {
+  const mcpServers = aboardMcpServerFrontmatter();
+  const configuration = definition("manager", MANAGER_TOOLS, {
+    declaredMcpServers: mcpServers,
+    declaredModel: "opus",
+    extraFrontmatter: ["color: purple"],
+  });
+  const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined }));
+  const block = `${mcpServers.join("\n")}\n`;
+
+  // The server reaches this one session through the file `--agent` resolves,
+  // rather than a project-scoped `.mcp.json` entry every session would connect.
+  assert.equal(plan.agentDefinition?.contents.includes(block), true);
+  // Aboard's own resolved fields first, then the block, then the author's keys.
+  assert.equal(
+    plan.agentDefinition?.contents,
+    `---\nname: ${runtimeName("manager")}\ndescription: aboard manager agent\ntools: ${MANAGER_TOOLS.join(", ")}\nmodel: opus\n${block}color: purple\n---\n\nYou are the manager.\n`,
+  );
+  // No flag carries it, so nothing on the command line has to agree with it.
+  assert.equal(plan.args.some((arg) => arg.includes("mcp")), false);
+  // A resume re-emits the identical file: a Manager that resumed without the
+  // block would keep its `mcp__aboard__*` allowlist and have nothing to call.
+  const resumed = planManagerResume({
+    agentId,
+    sessionId,
+    configuration,
+    shell: "powershell",
+    model: "opus",
+  });
+  assert.equal(resumed.agentDefinition?.contents, plan.agentDefinition?.contents);
+
+  // A worker's rewritten definition carries no server at all: the delegation
+  // surface is not merely denied to it, it is absent from its context.
+  const worker = planLaunch(request());
+  assert.equal(worker.agentDefinition?.contents.includes("mcpServers"), false);
 });
 
 test("wrapper layout prefixes the launch and resume lines without reshaping the args", () => {
