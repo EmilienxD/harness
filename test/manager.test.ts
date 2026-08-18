@@ -47,7 +47,7 @@ function recordingFiles() {
 const definition = async (): Promise<ManagerLaunchDefinition> => managerDefinition();
 
 test("plans a promptless Manager resume with only the recorded UUID", () => {
-  const plan = planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "default", configuration: managerDefinition() });
+  const plan = planManagerResume({ agentId, sessionId, shell: "powershell", configuration: managerDefinition() });
   // The recorded UUID plus the definition flags: `--resume` restores the
   // conversation and nothing else, so the persona and tool list travel again.
   assert.deepEqual(plan.args, [
@@ -62,16 +62,6 @@ test("plans a promptless Manager resume with only the recorded UUID", () => {
   assert.equal(plan.agentDefinition?.contents.includes(`tools: ${MANAGER_TOOLS.join(", ")}`), true);
   assert.equal(plan.promptDelivery, "none");
   assert.equal(plan.requiresWriteLease, false);
-});
-
-// The permission mode setting is a launch property, not a worker property — but
-// the Manager is attended by construction (its terminal is the one the user
-// watches the fleet from), so bypass lands as no flag at all there: the user's
-// own Claude Code configuration applies, unoverridden by aboard.
-test("the Manager resume drops bypass to no permission flag", () => {
-  const plan = planManagerResume({ agentId, sessionId, shell: "powershell", permissionMode: "bypass", configuration: managerDefinition() });
-  assert.ok(!plan.args.includes("--dangerously-skip-permissions"));
-  assert.ok(!plan.args.includes("--permission-mode"));
 });
 
 test("manager metadata persists and corrupt metadata recovers as missing", async () => {
@@ -119,7 +109,7 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   assert.deepEqual(files.written, [RUNTIME_PATH, ".aboard/runtime/agents/manager-2/.claude/agents/aboard-manager-manager-2.md"]);
 });
 
-test("the lifecycle drops bypass for the attended Manager, on start and resume", async () => {
+test("the lifecycle never puts a permission flag on a Manager launch, start or resume", async () => {
   const records: any[] = [];
   const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
   const snapshot = (id: string): TerminalSnapshot => ({ terminalId: id as TerminalId, agentId, sessionId, agentType: "manager", name: "aboard: Manager", cwd: "C:\\work", status: "open", createdAt: "2026-07-30T10:00:00.000Z", closedAt: null, exitCode: null });
@@ -127,10 +117,9 @@ test("the lifecycle drops bypass for the attended Manager, on start and resume",
     create: (request: unknown) => { records.push(request); return snapshot("terminal"); },
     resume: (request: unknown) => { records.push(request); return snapshot("terminal"); },
   } as unknown as TerminalController;
-  // Read through a callback, so toggling the setting takes effect on the next
-  // launch rather than at the next window reload.
-  let mode: "bypass" | "default" = "bypass";
-  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: recordingFiles().store, definition, permissionMode: () => mode, isResumable: async () => true });
+  // Permissions are the user's own Claude Code configuration, never aboard's
+  // command line.
+  const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: recordingFiles().store, definition, isResumable: async () => true });
   await lifecycle.start("new");
   assert.doesNotMatch(records[0].initialCommand, /--dangerously-skip-permissions/);
   assert.doesNotMatch(records[0].initialCommand, /--permission-mode/);
@@ -138,9 +127,6 @@ test("the lifecycle drops bypass for the attended Manager, on start and resume",
   assert.doesNotMatch(records[1].initialCommand, /--dangerously-skip-permissions/);
   assert.doesNotMatch(records[1].initialCommand, /--permission-mode/);
   assert.match(records[1].initialCommand, /--resume /);
-  mode = "default";
-  await lifecycle.start("new");
-  assert.doesNotMatch(records[2].initialCommand, /--permission-mode/);
 });
 
 test("the Manager's own model and effort reach the command line on start and on resume", async () => {

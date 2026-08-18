@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ManagerPersistenceDto, AgentId, SessionId, TerminalId, IsoTimestamp } from "../domain/contracts.js";
 import { parseManagerPersistenceDto } from "../domain/validation.js";
-import { MANAGER_AGENT_NAME, resolveLaunchConfiguration, type EffortLevel, type LaunchConfiguration, type SessionWrapperLayout, type WorkerPermissionMode, planLaunch, planManagerResume } from "./launch.js";
+import { MANAGER_AGENT_NAME, resolveLaunchConfiguration, type EffortLevel, type LaunchConfiguration, type SessionWrapperLayout, planLaunch, planManagerResume } from "./launch.js";
 import { AGENT_DEFINITION_DIRECTORY, agentDefinitionPath, parseManagerAgentDefinition, sanitizeAgentDefinition } from "../scaffold/agent-definition.js";
 import { sessionIsResumable } from "./sessions.js";
 import type { PromptSpillStore } from "./spill.js";
@@ -70,8 +70,8 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
   return configuration;
 }
 
-/** `command`, `permissionMode`, and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
+/** `command` and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
   public constructor(private readonly options: ManagerLifecycleOptions) { this.#now = options.now ?? (() => new Date()); }
@@ -103,7 +103,6 @@ export class ManagerLifecycle {
       : (this.options.sessionIdFactory ?? (() => randomUUID() as SessionId))();
     const launched = this.options.command?.();
     const command = launched === undefined ? {} : { command: launched };
-    const permissionMode = this.options.permissionMode?.() ?? "default";
     // The definition is read on both paths: a resume re-passes every flag the
     // launch did, because `--resume` restores the conversation and nothing else.
     const configuration = await (this.options.definition ?? readManagerLaunchDefinition)(this.options.workspaceRoot);
@@ -112,7 +111,7 @@ export class ManagerLifecycle {
     const level = this.options.effort?.();
     const effort = level === undefined ? {} : { effort: level };
     const wrapper = this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper };
-    const shared = { agentId, sessionId, shell: this.options.shell, permissionMode, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper };
+    const shared = { agentId, sessionId, shell: this.options.shell, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper };
     const plan = resumable ? planManagerResume(shared) : planLaunch({ ...shared, agentType: "manager" });
     // Refuse a launch aboard already knows cannot run, rather than opening a
     // terminal that will only ever show a shell error. The plan is probed rather

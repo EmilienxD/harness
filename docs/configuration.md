@@ -10,7 +10,6 @@ aboard settings (`aboard.*`) are edited in VS Code Settings. They resolve throug
 
 ```json
 {
-  "aboard.workers.permissionMode": "bypass",
   "launch": { "maxInlinePromptChars": 4000 },
   "aboard": { "timeouts": { "managerPrompt": 45 } }
 }
@@ -22,7 +21,6 @@ Changes apply live. An unknown key or an invalid value is reported in Output →
 
 | Setting | Default | What it does |
 | :-- | :-- | :-- |
-| `aboard.workers.permissionMode` | `default` | Permission mode for agents aboard launches or resumes. `bypass` reaches only unattended workers: a launch you drive or are handed (the Manager, `brainstormer`, an interactive built-in agent, a resumed pr-doctor) carries no permission flag at all, so your own Claude Code configuration applies rather than being overridden. Applied per process — a running agent keeps the mode it started with. |
 | `aboard.terminals.closeOnSessionEnd` | `false` | Close an agent's terminal when its Claude session ends. Off by default: quitting the session (`exit`, double Ctrl+C) and closing the terminal are separate gestures, so the shell is left for you to reuse. The agent leaves the fleet either way, and the leftover terminal never blocks a relaunch. |
 | `aboard.autoRun.review` | `false` | Launch a pr-doctor after each implementation during an auto-run. Automated review stays opt-in; the explicit review action is always available. |
 | `aboard.launch.claudeCommand` | `claude` | The command aboard launches. Wrapper arguments come first and aboard's flags are appended unchanged. A path with spaces goes in quotes. |
@@ -38,7 +36,7 @@ The full list, with descriptions, is in VS Code Settings under **aboard**.
 
 Chrome access is a per-launch choice rather than a persistent setting. Use `/general-purpose --chrome`, set `chrome: true` on `run_agent`, use `/auto --chrome`, set `chrome: true` on `start_auto_run`, or run **Aboard: Start Auto Run with Chrome** from the command palette. The ordinary forms explicitly pass `--no-chrome`; the Chrome forms pass `--chrome`. Auto-run chooses once for the entire run and passes the choice only to implementers, including after recovery. General-purpose fleet restoration likewise replays the session's original choice.
 
-Enabling the integration exposes browser tools and the signed-in Chrome session to Claude. aboard does not auto-approve those tools: Claude's permissions and `aboard.workers.permissionMode` still decide whether calls run or prompt. Missing extensions, unsupported providers, or a disconnected browser remain visible in the Claude terminal rather than silently falling back.
+Enabling the integration exposes browser tools and the signed-in Chrome session to Claude. aboard does not auto-approve those tools: your own Claude permissions decide whether calls run or prompt. Missing extensions, unsupported providers, or a disconnected browser remain visible in the Claude terminal rather than silently falling back.
 
 ## Agent tool sets are not settings
 

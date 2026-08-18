@@ -1,4 +1,4 @@
-import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, WORKER_PERMISSION_MODES, parseClaudeCommand, type EffortLevel, type WorkerPermissionMode } from "./claude/launch.js";
+import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, parseClaudeCommand, type EffortLevel } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 import { DEFAULT_TRANSCRIPT_BACKUPS } from "./claude/transcript-backup.js";
 import { AUTO_RUN_SCOPES, MERGE_STRATEGIES, type AutoRunScope, type AutoRunSettings, type MergeStrategy } from "./domain/auto-run.js";
@@ -28,7 +28,6 @@ export interface AboardConfiguration {
    * `0` turns both the backup and the restore off.
    */
   readonly managerTranscriptBackups: number;
-  readonly workerPermissionMode: WorkerPermissionMode;
   /**
    * Whether a session's death also closes the terminal it ran in. Off by
    * default: ending the Claude session and closing the shell are two different
@@ -49,7 +48,6 @@ export const ABOARD_SETTINGS = [
   "aboard.launch.claudeCommand",
   "aboard.launch.maxInlinePromptChars",
   "aboard.launch.effort",
-  "aboard.workers.permissionMode",
   "aboard.terminals.closeOnSessionEnd",
   "aboard.manager.disallowedTools",
   "aboard.manager.roadmapReminderBytes",
@@ -200,7 +198,6 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     managerDisallowedTools,
     managerRoadmapReminderBytes: integer(reader, "aboard.manager.roadmapReminderBytes", 150_000, 0, 100_000_000, diagnostics),
     managerTranscriptBackups: integer(reader, "aboard.manager.transcriptBackups", DEFAULT_TRANSCRIPT_BACKUPS, 0, 100, diagnostics),
-    workerPermissionMode: choice(reader, "aboard.workers.permissionMode", WORKER_PERMISSION_MODES, "default", diagnostics),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {
       // Automated review stays opt-in: spec section 7.5's invariant is

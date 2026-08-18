@@ -162,7 +162,6 @@ export class FleetNotifications {
     this.#fleetRegistration = fleet.onDidChange((event) => notify(event, fleet, host));
   }
   public leaseConflict(holder: AgentId, acquiredAt: IsoTimestamp): void { this.host.warning(`Write lease conflict: ${holder} has held the lease since ${acquiredAt}.`); }
-  public permissionRisk(): void { this.host.warning("Unattended workers may stall on permission prompts. For afk work, use bypass permission mode."); }
   public scaffoldConflict(message: string): void { this.host.warning(message); }
   public dispose(): void { this.#fleetRegistration.dispose(); }
 }

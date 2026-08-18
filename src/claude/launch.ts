@@ -142,45 +142,6 @@ export function parseClaudeCommand(value: unknown): ClaudeCommandResult {
 }
 
 /**
- * `aboard.workers.permissionMode` (spec section 8.3). The setting is named for
- * the case it exists to serve — an unattended `afk` worker deadlocks on a
- * permission prompt — so bypass is the value unattended launches get. A launch
- * the user drives or is handed gets no flag at all, so the user's own Claude
- * Code configuration decides; see `resolvePermissionMode`.
- */
-export const WORKER_PERMISSION_MODES = ["bypass", "acceptEdits", "default"] as const;
-
-export type WorkerPermissionMode = (typeof WORKER_PERMISSION_MODES)[number];
-
-/**
- * Adjusts the configured permission mode for a specific launch (spec section
- * 8.3). The setting exists so unattended `afk` work never deadlocks on a
- * permission prompt in a terminal nobody is watching; a launch the user drives
- * or is handed lives under their eye, so bypass there would strip the
- * checkpoint they are the point of.
- *
- * - `attended` launches — the Manager itself, `pr-doctor-hitl`, and every
- *   interactive handoff — keep a human in the loop by construction. aboard puts
- *   no permission flag on their command line at all (`"default"` emits none):
- *   substituting a mode of its own would override the user's own Claude Code
- *   configuration, which is exactly what the setting must not do there.
- * - `brainstormer` is pinned to `default` regardless: its whole contract is a
- *   conversation with a present user (its definition says so), and a user who
- *   set bypass for afk work never meant their brainstorm terminal to stop
- *   asking entirely.
- * - Unattended launches keep the mode unchanged: bypass is exactly what they
- *   are for, and degrading one would recreate the silent deadlock an unattended permission prompt causes.
- */
-export function resolvePermissionMode(
-  mode: WorkerPermissionMode,
-  launch: { readonly attended: boolean; readonly agentType: AgentType },
-): WorkerPermissionMode {
-  if (launch.agentType === "brainstormer") return "default";
-  if (mode === "bypass" && launch.attended) return "default";
-  return mode;
-}
-
-/**
  * `aboard.launch.effort` — the session-wide reasoning effort, the `--effort`
  * levels `claude --help` documents. It is the session floor rather than the last
  * word: an agent definition's `effort:` frontmatter overrides it, and the
@@ -595,12 +556,10 @@ interface CommonPlanRequest {
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
   readonly shell: ShellKind;
-  readonly permissionMode: WorkerPermissionMode;
   /**
    * Whether the launch lives under the user's eye — the Manager itself, a
    * type that can only ever be handed over, or an explicit interactive handoff.
-   * Unattended launches (automated workers left to run) are the case bypass
-   * exists for; see `resolvePermissionMode`. It also gates
+   * It gates
    * `--disable-slash-commands` (see `slashCommandArguments`): an unattended
    * launch's first message is the only one it will ever get and nobody is
    * watching to catch a hijack, while an attended terminal is exactly where the
@@ -649,21 +608,6 @@ export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType"> & {
 export interface SessionResumePlanRequest extends CommonPlanRequest {
   readonly configuration: LaunchConfiguration;
   readonly disallowedTools?: readonly string[] | undefined;
-}
-
-/**
- * aboard never writes a `permissions` block into project settings (4.3.1);
- * permission mode is a per-process launch flag and nothing else.
- */
-function permissionArguments(mode: WorkerPermissionMode): readonly string[] {
-  switch (mode) {
-    case "bypass":
-      return ["--dangerously-skip-permissions"];
-    case "acceptEdits":
-      return ["--permission-mode", "acceptEdits"];
-    case "default":
-      return [];
-  }
 }
 
 /**
@@ -939,7 +883,6 @@ function commonPreconditions(
   readonly threshold: number;
   readonly runtimeDirectory: string;
   readonly wrapper: SessionWrapperLayout | undefined;
-  readonly permissionMode: WorkerPermissionMode;
   readonly attended: boolean;
 } {
   if (!AGENT_ID_PATTERN.test(request.agentId)) {
@@ -997,7 +940,6 @@ function commonPreconditions(
     threshold,
     runtimeDirectory: request.runtimeDirectory ?? DEFAULT_RUNTIME_DIRECTORY,
     wrapper,
-    permissionMode: resolvePermissionMode(request.permissionMode, { attended, agentType: request.agentType }),
     attended,
   };
 }
@@ -1017,7 +959,7 @@ function wrapCommand(
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { command, threshold, runtimeDirectory, wrapper, permissionMode, attended } = commonPreconditions(request, request.configuration);
+  const { command, threshold, runtimeDirectory, wrapper, attended } = commonPreconditions(request, request.configuration);
   const { agentType, configuration } = request;
 
   if (agentType === "manager") {
@@ -1097,7 +1039,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
     ...chromeArguments(agentType, request.chrome),
-    ...permissionArguments(permissionMode),
     ...slashCommandArguments(attended),
   ];
 
@@ -1157,16 +1098,15 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
  * automated message.
  *
  * Every flag that shaped the original launch is passed again. `--resume`
- * restores the conversation and nothing else it is not told about: permission
- * mode is documented as never carried over
- * (`docs/CLAUDE-REFERENCES/hooks.md`), and while an `--agent` selection *is*
+ * restores the conversation and nothing else it is not told about, and while
+ * an `--agent` selection *is*
  * restored, it is restored by name — a session whose definition is no longer
  * discoverable continues on Claude Code's default persona and its full default
  * tool set. For the Manager that would mean resuming an orchestrator that can
  * implement, so the runtime definition is re-emitted and re-pointed at.
  */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, permissionMode, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
+  const { command, wrapper, runtimeDirectory, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
   if (
     request.configuration.shape !== "agent-defined" ||
     request.configuration.agentName !== MANAGER_AGENT_NAME
@@ -1184,7 +1124,6 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(request.configuration.declaredModel ?? request.model),
     ...effortArguments(request.configuration.declaredEffort ?? request.effort),
-    ...permissionArguments(permissionMode),
     ...slashCommandArguments(attended),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
@@ -1217,7 +1156,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
  * actually produces.
  */
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, permissionMode, attended } = commonPreconditions(request, request.configuration);
+  const { command, wrapper, runtimeDirectory, attended } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const definition = configuration.shape === "agent-defined"
     ? agentRuntimeArguments(configuration, request.agentId, runtimeDirectory)
@@ -1235,7 +1174,6 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
     ...chromeArguments(request.agentType, request.chrome),
-    ...permissionArguments(permissionMode),
     ...slashCommandArguments(attended),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);

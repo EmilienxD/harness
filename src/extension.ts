@@ -18,7 +18,6 @@ import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
 import { sessionIsResumable } from "./claude/sessions.js";
 import { TranscriptBackupStore } from "./claude/transcript-backup.js";
 import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
-import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
 import { createVendoredToolInstaller } from "./scaffold/vendored.js";
@@ -393,7 +392,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", permissionMode: currentConfiguration.workerPermissionMode, disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   // A settled session leaves its terminal to be collected: the record the
   // fleet dropped still names an open terminal, and the next launch for the
@@ -541,7 +540,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         sessionId: owner.sessionId,
         agentType: owner.type,
         shell: process.platform === "win32" ? "powershell" : "git-bash",
-        permissionMode: currentConfiguration.workerPermissionMode,
         // `review_pr` exists to hand the session back to the user, so the
         // resumed terminal is driven by them even when it owned an afk worker.
         attended: true,
@@ -664,20 +662,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     disallowedTools: currentConfiguration.managerDisallowedTools,
     preflight: (command) => claudeProbe.require(command),
     command: () => currentConfiguration.claudeCommand,
-    permissionMode: () => currentConfiguration.workerPermissionMode,
     effort: () => currentConfiguration.launchEffort,
     agentIdFactory: () => managerAgentId,
     isResumable: sessionIsResumable,
     restoreTranscript: (sessionId) => transcripts.restore(sessionId),
     wrapper: wrapperLayout,
   });
-  const warnKey = "aboard.manager.permissionWarning";
   // The UI offers resume and new as separate actions, so the launch path never
   // has to interrupt with a "which did you mean?" prompt.
   const launch = async (mode: "resume" | "new") => {
     if (!requireInitialized()) return;
-    const workerMode = currentConfiguration.workerPermissionMode;
-    if (workerMode !== "bypass" && !context.globalState.get(warnKey)) { await window.showWarningMessage("Unattended workers may stall on permission prompts. For afk work, use the bypass permission mode."); await context.globalState.update(warnKey, true); }
     try {
       const terminal = await manager.start(mode);
       // Registration is only ever valid in `starting`; a relaunch of the same

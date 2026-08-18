@@ -9,7 +9,6 @@ test("configuration validates untrusted values and reports actionable fallbacks"
     ["aboard.bridge.port", 70_000],
     ["aboard.launch.maxInlinePromptChars", -1],
     ["aboard.manager.disallowedTools", ["Read", ""]],
-    ["aboard.workers.permissionMode", "unsafe"],
     ["aboard.autoRun.scope", "everything"],
     ["aboard.autoRun.review", "yes"],
     ["aboard.timeouts.managerStop", 0],
@@ -18,10 +17,9 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   assert.equal(result.value.bridgePort, 4823);
   assert.equal(result.value.maxInlinePromptChars, 4000);
   assert.deepEqual(result.value.managerDisallowedTools, []);
-  assert.equal(result.value.workerPermissionMode, "default");
   assert.deepEqual(result.value.autoRun, { review: false, scope: "spec", pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 30 });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
-  assert.equal(result.diagnostics.length, 7);
+  assert.equal(result.diagnostics.length, 6);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
 });
 
@@ -30,7 +28,6 @@ test("configuration accepts every supported launch and review setting", () => {
     "aboard.bridge.port": 0,
     "aboard.launch.maxInlinePromptChars": 12_000,
     "aboard.manager.disallowedTools": ["Bash", "Read(./src/**)"],
-    "aboard.workers.permissionMode": "bypass",
     "aboard.autoRun.review": true,
     "aboard.autoRun.scope": "all",
     "aboard.autoRun.pauseAfterHitl": true,
@@ -49,14 +46,14 @@ test("configuration accepts every supported launch and review setting", () => {
 
 test("project settings accept flat, nested, and unprefixed keys", () => {
   const result = parseProjectSettings(JSON.stringify({
-    "aboard.workers.permissionMode": "bypass",
+    "aboard.launch.maxInlinePromptChars": 6000,
     aboard: { timeouts: { managerPrompt: 45 }, manager: { disallowedTools: ["Bash"] } },
     "autoRun.scope": "all",
     "bridge.port": null,
   }));
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(Object.fromEntries(result.values), {
-    "aboard.workers.permissionMode": "bypass",
+    "aboard.launch.maxInlinePromptChars": 6000,
     "aboard.timeouts.managerPrompt": 45,
     "aboard.manager.disallowedTools": ["Bash"],
     "aboard.autoRun.scope": "all",
@@ -96,7 +93,6 @@ test("project settings override globals, and an explicit vs code workspace value
   assert.equal(result.value.bridgePort, 7000, "an explicit .vscode value wins");
   assert.equal(result.value.autoRun.scope, "spec", "the project file wins over a global");
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash"], "an unoverridden global still applies");
-  assert.equal(result.value.workerPermissionMode, "default", "an unset setting keeps its default");
 });
 
 test("manager launch changes are detected by value for the project settings reload path", () => {

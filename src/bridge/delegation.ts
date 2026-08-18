@@ -1,4 +1,4 @@
-import type { EffortLevel, LaunchConfiguration, WorkerPermissionMode } from "../claude/launch.js";
+import type { EffortLevel, LaunchConfiguration } from "../claude/launch.js";
 import { planLaunch, planSessionResume } from "../claude/launch.js";
 import type { ResolvedPrompt } from "../claude/prompts.js";
 import type { PromptSpillStore } from "../claude/spill.js";
@@ -95,7 +95,6 @@ export interface DelegationCoordinatorOptions {
   readonly spills: PromptSpillStore;
   readonly managerAgentId: AgentId;
   readonly shell: ShellKind;
-  readonly permissionMode: WorkerPermissionMode;
   /** Infrastructure-level denials applied to every delegated launch and resume. */
   readonly disallowedTools?: readonly string[];
   /**
@@ -214,7 +213,6 @@ export class DelegationCoordinator {
       sessionId: session.sessionId,
       agentType: session.identity.type,
       shell: this.options.shell,
-      permissionMode: this.options.permissionMode,
       // Restoration hands the worker to the user whatever it was: the extension
       // host that waited on its result is gone, so the terminal is theirs.
       attended: true,
@@ -315,8 +313,7 @@ export class DelegationCoordinator {
     const sessionId = this.options.sessionIdFactory();
     // Interactive is the launch's delivery mode, derivable from nothing else:
     // `general-purpose` runs in either mode. It also settles who the launch
-    // lives with: a handed-off terminal is driven by the user, so its
-    // permission mode is gated (see `resolvePermissionMode`).
+    // lives with: a handed-off terminal is driven by the user.
     const interactive = resultDelivery.mode === "none";
     const [configuration, prompt] = await Promise.all([
       this.options.configurations.get(input.type),
@@ -327,7 +324,6 @@ export class DelegationCoordinator {
       sessionId,
       agentType: input.type,
       shell: this.options.shell,
-      permissionMode: this.options.permissionMode,
       attended: interactive,
       ...((input.type === "general-purpose" || input.type === "implementer")
         ? { chrome: input.chrome === true }
