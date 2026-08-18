@@ -454,6 +454,74 @@ def test_uninstall_restores_proxied_hooks(target):
     assert _stop_entries(settings(target)) == [USER_STOP_HOOK]
 
 
+# --- healing a hook whose matcher changed between versions -----------------
+
+
+READ_HOOK_SCRIPT = "${CLAUDE_PROJECT_DIR}/.claude/hooks/prefer_read_tool_PostToolUse_hook.py"
+USER_BASH_HOOK = {"type": "command", "command": "python", "args": ["user_bash.py"]}
+
+
+def _old_matcher_settings(matcher="Bash", extra=()):
+    """What prefer-read-tool wrote before it learned about the PowerShell tool:
+    the same script, registered under a narrower matcher, launched by whatever
+    interpreter that machine's installer resolved."""
+    return {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": matcher,
+                    "hooks": [
+                        {"type": "command", "command": "python3", "args": [READ_HOOK_SCRIPT]},
+                        *[dict(e) for e in extra],
+                    ],
+                }
+            ]
+        }
+    }
+
+
+def _post_groups(settings_dict):
+    return settings_dict.get("hooks", {}).get("PostToolUse", [])
+
+
+def test_install_rehomes_a_hook_whose_matcher_widened(target):
+    """Upgrading must move the entry, not leave the old group firing alongside
+    the new one — that runs the same script twice per tool call."""
+    _write_settings(target, _old_matcher_settings())
+    install("prefer-read-tool", target)
+    groups = _post_groups(settings(target))
+    assert [g.get("matcher") for g in groups] == ["Bash|PowerShell"]
+    assert len(groups[0]["hooks"]) == 1
+
+
+def test_rehoming_keeps_the_old_groups_other_hooks(target):
+    """Only our entry moves: a hook the user registered under the old matcher
+    runs a different script and belongs where they put it."""
+    _write_settings(target, _old_matcher_settings(extra=[USER_BASH_HOOK]))
+    install("prefer-read-tool", target)
+    groups = _post_groups(settings(target))
+    by_matcher = {g.get("matcher"): g["hooks"] for g in groups}
+    assert by_matcher["Bash"] == [USER_BASH_HOOK]
+    assert len(by_matcher["Bash|PowerShell"]) == 1
+
+
+def test_uninstall_backs_out_the_old_matcher_too(target):
+    """Uninstall after an upgrade leaves nothing behind under either scope."""
+    _write_settings(target, _old_matcher_settings())
+    install("prefer-read-tool", target)
+    uninstall(TOOLS["prefer-read-tool"], target)
+    assert not target.settings_path.exists()
+
+
+def test_rehoming_is_scoped_to_the_tool_being_installed(target):
+    """Installing something else doesn't touch a stale group: the heal only
+    knows about entries the fragment in hand declares."""
+    original = _old_matcher_settings()
+    _write_settings(target, original)
+    install("caveman", target)
+    assert settings(target) == original
+
+
 def test_starter_files_are_never_overwritten(target):
     """subagents.json is edited by the user after install; reinstall/upgrade
     must leave it alone, exactly like the .rules templates."""

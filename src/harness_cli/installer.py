@@ -231,6 +231,71 @@ def restore_proxied_hooks(settings: dict) -> None:
             group["hooks"] = restored
 
 
+def rehome_moved_hooks(settings: dict, fragment: dict) -> None:
+    """Drop a fragment's own hooks from groups it no longer claims, in place.
+
+    Hook groups merge by matcher scope, so a tool that changes its matcher --
+    `Bash` widening to `Bash|PowerShell` when a hook learns about the PowerShell
+    tool -- would otherwise leave an old install's group sitting next to the new
+    one, running the same script twice on every matching call. Uninstall has the
+    mirror problem: it backs out the scope the fragment names now and leaves the
+    one it named before.
+
+    Only entries the fragment itself declares are touched, identified the same
+    way merge identifies them (by script and arguments, not by interpreter), and
+    only where they sit under a scope the fragment doesn't declare for them. A
+    hook the user registered themselves runs a different script, so it keys
+    differently and stays put — including when it shares a group with ours. A
+    second copy of *our* script the user parked under another matcher does key
+    the same and is treated as the stale registration.
+    """
+    hooks = settings.get("hooks")
+    fragment_hooks = fragment.get("hooks")
+    if not isinstance(hooks, dict) or not isinstance(fragment_hooks, dict):
+        return
+
+    for event, fragment_groups in fragment_hooks.items():
+        groups = hooks.get(event)
+        if not isinstance(groups, list) or not isinstance(fragment_groups, list):
+            continue
+
+        # identity -> the scopes this fragment wants that hook to live under
+        wanted: dict[tuple, set] = {}
+        for group in fragment_groups:
+            if not isinstance(group, dict):
+                continue
+            scope = settings_merge.normalize_scope(group)
+            for entry in group.get("hooks", []):
+                wanted.setdefault(settings_merge.identity(entry), set()).add(scope)
+        if not wanted:
+            continue
+
+        kept = []
+        for group in groups:
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                kept.append(group)
+                continue
+            scope = settings_merge.normalize_scope(group)
+            # `{scope}` as the default keeps anything the fragment never
+            # mentioned exactly where it is.
+            remaining = [
+                entry for entry in group["hooks"]
+                if scope in wanted.get(settings_merge.identity(entry), {scope})
+            ]
+            if remaining == group["hooks"]:
+                kept.append(group)
+            elif remaining:
+                kept.append({**group, "hooks": remaining})
+            # A group emptied of hooks fires nothing; drop it.
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+
+    if not hooks:
+        del settings["hooks"]
+
+
 @dataclass
 class FileAction:
     dest: str
@@ -311,6 +376,7 @@ def plan_install(
     # the file as found, and a plan that only heals still reads as a change.
     base = copy.deepcopy(before)
     restore_proxied_hooks(base)  # settings left behind by the retired stopHook convention
+    rehome_moved_hooks(base, fragment)  # groups under a matcher this tool has since changed
     after = settings_merge.merge(base, fragment) if fragment else base
 
     ignore_before = (
@@ -412,6 +478,7 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
         before = target.read_settings()
         healed = copy.deepcopy(before)
         restore_proxied_hooks(healed)  # settings left by the retired stopHook convention
+        rehome_moved_hooks(healed, fragment)  # groups under a matcher this tool has since changed
         after = settings_merge.unmerge(healed, fragment)
         if after != before:
             removed_any = True
