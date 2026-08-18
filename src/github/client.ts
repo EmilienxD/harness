@@ -233,6 +233,17 @@ function parseIssue(value: unknown, context: string): IssueSnapshot {
   };
 }
 
+interface TodoCarrier {
+  readonly number: number;
+  readonly body: string;
+  readonly createdAt: string;
+}
+
+/** Newest first, ties on the lowest number: the one rule read and write share. */
+function sortedCarriers(carriers: readonly TodoCarrier[]): readonly TodoCarrier[] {
+  return [...carriers].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.number - right.number);
+}
+
 function repositoryFromGraphql(value: unknown): Record<string, unknown> {
   return record(record(record(value, "GraphQL response").data, "data").repository, "data.repository");
 }
@@ -246,6 +257,21 @@ const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repositor
 
 export class GitHubClient implements GitHubPromptSource {
   #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
+
+  /**
+   * The roadmap issue this process minted, if any. `gh issue list --label` reads
+   * an index that lags creation by seconds, so the issue `todo_create` just made
+   * can be absent from the very next resolution — which is how a `todo_create`
+   * followed immediately by `todo_update` failed with `missing-todo` against an
+   * issue that already existed, costing the Manager a wasted call and a retry.
+   *
+   * This is not the rejected number cache: it holds only aboard's own write, it
+   * saves no round trip on the common path, and it is never trusted on its own.
+   * When the label query comes back without it, the issue is read directly by
+   * number — a point lookup is consistent where the list is not — and the seed
+   * is dropped the moment that read says it is closed, unlabelled, or gone.
+   */
+  #minted: number | undefined;
 
   public constructor(private readonly gh: GhExecutor) {}
 
@@ -391,7 +417,12 @@ export class GitHubClient implements GitHubPromptSource {
     const output = (await this.gh.run(["issue", "create", "--title", "Project roadmap", "--body", body, "--label", LABEL_TODO])).trim();
     const match = /\/issues\/(\d+)\/?$/.exec(output);
     if (match === null) throw new GitHubBoundaryError("malformed-output", "gh issue create did not return an issue URL");
-    return integer(Number(match[1]), "created roadmap number");
+    const number = integer(Number(match[1]), "created roadmap number");
+    // Seed the resolver before returning: the caller's next roadmap operation is
+    // typically the immediate follow-up write, which is exactly when the label
+    // index has not caught up with this creation.
+    this.#minted = number;
+    return number;
   }
 
   public async getIssue(number: number): Promise<IssueSnapshot | undefined> {
@@ -592,19 +623,57 @@ export class GitHubClient implements GitHubPromptSource {
    * asynchronously indexed search API, where an issue created seconds ago can be
    * missing — which would mint a duplicate roadmap. The sort is done here.
    */
-  async #scanTodoCarriers(): Promise<readonly { readonly number: number; readonly body: string; readonly createdAt: string }[]> {
+  async #scanTodoCarriers(): Promise<readonly TodoCarrier[]> {
     const output = await this.gh.run(["issue", "list", "--state", "open", "--label", LABEL_TODO, "--limit", "50", "--json", "number,body,createdAt"]);
     const items = array(json(output, "roadmap lookup"), "roadmap lookup");
-    return items
-      .map((value, index) => {
-        const item = record(value, `roadmap issue[${index}]`);
-        return {
-          number: integer(item.number, `roadmap issue[${index}].number`),
-          body: string(item.body ?? "", `roadmap issue[${index}].body`),
-          createdAt: string(item.createdAt, `roadmap issue[${index}].createdAt`),
-        };
-      })
-      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.number - right.number);
+    const listed = items.map((value, index) => {
+      const item = record(value, `roadmap issue[${index}]`);
+      return {
+        number: integer(item.number, `roadmap issue[${index}].number`),
+        body: string(item.body ?? "", `roadmap issue[${index}].body`),
+        createdAt: string(item.createdAt, `roadmap issue[${index}].createdAt`),
+      };
+    });
+    return sortedCarriers(await this.#withMinted(listed));
+  }
+
+  /**
+   * Adds the issue this process minted back to a candidate set the index has
+   * not caught up with yet, at the cost of one point lookup and only while the
+   * lag lasts. The lookup is authoritative in both directions: it supplies the
+   * current body rather than the one aboard wrote (the user may have edited the
+   * issue meanwhile), and a closed, unlabelled, or deleted issue clears the seed
+   * instead of resurrecting a roadmap the repository no longer has.
+   */
+  async #withMinted(listed: readonly TodoCarrier[]): Promise<readonly TodoCarrier[]> {
+    const minted = this.#minted;
+    if (minted === undefined || listed.some((carrier) => carrier.number === minted)) return listed;
+    const carrier = await this.#viewTodoCarrier(minted);
+    if (carrier === undefined) {
+      this.#minted = undefined;
+      return listed;
+    }
+    return [...listed, carrier];
+  }
+
+  /** The minted issue as itself, or `undefined` once it stops being a carrier. */
+  async #viewTodoCarrier(number: number): Promise<TodoCarrier | undefined> {
+    let output: string;
+    try {
+      output = await this.gh.run(["issue", "view", String(number), "--json", "number,body,createdAt,state,labels"]);
+    } catch {
+      // The issue was deleted, or `gh` failed transiently. Either way the label
+      // query stands on its own; a retry costs one more lookup.
+      return undefined;
+    }
+    const item = record(json(output, "roadmap issue lookup"), "roadmap issue lookup");
+    if (state(item.state, "roadmap issue lookup.state") !== "open") return undefined;
+    if (!labels(item.labels, "roadmap issue lookup.labels").includes(LABEL_TODO)) return undefined;
+    return {
+      number: integer(item.number, "roadmap issue lookup.number"),
+      body: string(item.body ?? "", "roadmap issue lookup.body"),
+      createdAt: string(item.createdAt, "roadmap issue lookup.createdAt"),
+    };
   }
 
   /**

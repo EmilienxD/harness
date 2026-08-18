@@ -272,3 +272,83 @@ test("briefing data surfaces only merges with no durable review", async () => {
   ]);
   assert.equal(gh.calls[0]?.includes("merged:>=2026-07-30T00:00:00Z"), true);
 });
+
+/** `gh issue view <n> --json number,body,createdAt,state,labels`. */
+function viewed(issue: { number: number; body: string; createdAt: string; state: string; labels: readonly string[] }): string {
+  return JSON.stringify({ ...issue, labels: issue.labels.map((name) => ({ name })) });
+}
+
+test("an update straight after a mint resolves the new issue the label index has not indexed yet", async () => {
+  let indexed = false;
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") {
+      return indexed ? carriers({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z" }) : "[]";
+    }
+    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
+    if (args[0] === "issue" && args[1] === "view") {
+      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["ai:todo"] });
+    }
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const github = new GitHubClient(gh);
+  assert.equal((await github.createRoadmapTasks({ subjects: ["Write the first task"] })).issue, 44);
+
+  // The label query still comes back empty seconds later; without the seed this
+  // is the `missing-todo` an existing roadmap answered, and the caller's call
+  // was spent for nothing.
+  const updated = await github.updateRoadmapTask({ task: 1, expect: "Write the first task", status: "completed" });
+  assert.equal(updated.issue, 44);
+  assert.deepEqual(gh.calls.find((args) => args[1] === "edit")?.slice(0, 3), ["issue", "edit", "44"]);
+  assert.deepEqual(gh.calls.find((args) => args[1] === "view")?.slice(0, 3), ["issue", "view", "44"]);
+  // The body comes from the lookup, not from what aboard wrote, so an edit the
+  // user made on GitHub in between is not overwritten.
+  assert.equal(gh.calls.find((args) => args[1] === "edit")?.at(-1), "- [x] Write the first task");
+
+  // Once the index catches up the seed costs nothing: no second point lookup.
+  indexed = true;
+  assert.equal((await github.readRoadmap())?.number, 44);
+  assert.equal(gh.calls.filter((args) => args[1] === "view").length, 1);
+});
+
+test("a minted seed never outlives the issue being a carrier", async () => {
+  let carrier = { state: "OPEN", labels: ["ai:todo"] };
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return "[]";
+    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
+    if (args[0] === "issue" && args[1] === "view") {
+      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", ...carrier });
+    }
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const github = new GitHubClient(gh);
+  await github.createRoadmapTasks({ subjects: ["Write the first task"] });
+
+  // The user closed it: the repository has no roadmap again, and the seed must
+  // not resurrect one.
+  carrier = { state: "CLOSED", labels: ["ai:todo"] };
+  assert.equal(await github.readRoadmap(), undefined);
+  // Dropped, not re-checked on every later resolution.
+  assert.equal(await github.readRoadmap(), undefined);
+  assert.equal(gh.calls.filter((args) => args[1] === "view").length, 1);
+});
+
+test("a seeded mint re-enters the candidate set without winning it", async () => {
+  let listed = "[]";
+  const gh = roadmapGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return listed;
+    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const github = new GitHubClient(gh);
+  await github.createRoadmapTasks({ subjects: ["Minted"] });
+
+  // The index caught up, and it also carries a roadmap created after ours. The
+  // resolution rule is unchanged by the seed: newest createdAt, ties on the
+  // lowest number — and a listed seed costs no point lookup.
+  listed = carriers(
+    { number: 44, body: "- [ ] Minted", createdAt: "2026-07-09T00:00:00Z" },
+    { number: 60, body: "- [ ] Newer", createdAt: "2026-07-10T00:00:00Z" },
+  );
+  assert.equal((await github.readRoadmap())?.number, 60);
+  assert.equal(gh.calls.some((args) => args[1] === "view"), false);
+});
