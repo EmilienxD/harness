@@ -1,8 +1,11 @@
 # prefer-read-tool
 
-A `PostToolUse` hook that notices when Claude reads a file with `cat` or `sed`
-in a Bash command and reminds it, once per offending command, to use the
-built-in **Read** tool instead.
+A `PostToolUse` hook that notices when Claude reads a file with `cat`, `sed`, or
+PowerShell's `Get-Content` and reminds it, once per offending command, to use
+the built-in **Read** tool instead.
+
+The write-side counterpart is [`prefer-edit-tool`](../prefer-edit-tool/README.md);
+the two are independent and install cleanly side by side.
 
 ## Problem
 
@@ -14,12 +17,16 @@ a nudge at the moment they happen, not a paragraph in a system prompt.
 
 ## Solution
 
-Register a `PostToolUse` hook with a `Bash` matcher. After every Bash call —
-successful ones only, that's when `PostToolUse` fires — the hook scans the
-command for `cat`/`sed` used as a command word (start of the command, or after
-`;`, `&&`, `|`, `(`, `` ` `` …, so `foo; cat f` and `echo $(cat f)` count but
-`concatenate` doesn't). On a match it returns `additionalContext` explaining
-why Read is preferable, which Claude Code attaches next to the tool result.
+Register a `PostToolUse` hook with a `Bash|PowerShell` matcher — matching
+`Bash` alone misses Windows setups where the PowerShell tool is the primary
+shell, and on Windows without Git Bash the Bash tool isn't registered at all.
+After every shell call — successful ones only, that's when `PostToolUse` fires
+— the hook scans the command for `cat`/`sed`/`Get-Content` (and the `gc`/`type`
+aliases, plus `[IO.File]::ReadAllText`) used as a command word: start of the
+command, or after `;`, `&&`, `|`, `(`, `` ` ``, a newline …, so `foo; cat f`
+and `echo $(cat f)` count but `concatenate` and `rg --type py` don't. On a
+match it returns `additionalContext` explaining why Read is preferable, which
+Claude Code attaches next to the tool result.
 
 The hook **never blocks anything**. `PostToolUse` runs after the command has
 already executed, so there is nothing to undo — it can only add context. A
@@ -34,7 +41,7 @@ stream-editing tasks"* rather than *"never use sed"*.
 
 | File | Purpose |
 |---|---|
-| `.claude/settings.json` | Registers the hook on the `PostToolUse` event with a `Bash` matcher |
+| `.claude/settings.json` | Registers the hook on the `PostToolUse` event with a `Bash\|PowerShell` matcher |
 | `.claude/hooks/prefer_read_tool_PostToolUse_hook.py` | Scans the executed command and emits the reminder |
 
 ## Installation
@@ -61,7 +68,7 @@ file list and settings diff. See the [repo README](../../README.md) for
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
