@@ -1567,11 +1567,21 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
                 f"Shell writes whose target could not be read ({len(scan.unresolved)}):"
             )
             out += [f"  {_shorten(c)}" for c in scan.unresolved]
-            out.append("  Staging everything rather than commit a subset.")
+            out.append("  Staging everything rather than committing a subset.")
 
         if changed_paths(scan) is None:
             out.append("")
             out.append("Would stage all uncommitted changes in the repo.")
+            # Widening does not mean the known tool writes are lost: a real
+            # /commit will add -A over the whole tree, which covers them, and
+            # they are worth listing so the report admits the scan worked.
+            if scan.paths:
+                out.append("")
+                out.append(
+                    f"Tool writes already identified this session ({len(scan.paths)}), "
+                    "will be staged along with the rest:"
+                )
+                out += [f"  {_rel(p, repo_root)}" for p in scan.paths]
             fallback = True
         else:
             present, deletions, unmatched = resolve_stage_set(scan.paths, repo_root)
@@ -1607,7 +1617,10 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
             out += [f"  {p}" for p in others]
 
     # Whether those paths actually differ from HEAD is the other half of
-    # the answer; edited-then-reverted files stage to nothing.
+    # the answer; edited-then-reverted files stage to nothing. Skip the
+    # trailing status block when scan is None: the transcript-unreadable
+    # branch above already dumped a plain `git status` for the whole repo,
+    # printing it twice reads as a bug.
     status_args = ["git", "status", "--porcelain"]
     if targets:
         status_args += ["--", *targets]
@@ -1616,7 +1629,7 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
     pending_raw = run(status_args, repo_root).stdout
     pending = pending_raw.strip()
 
-    if targets:
+    if targets or (fallback and scan is not None):
         out.append("")
         if pending:
             out.append("Changes to commit:")

@@ -312,6 +312,54 @@ def test_dry_run_reports_the_widening(repo):
     assert "Would stage all uncommitted changes in the repo." in report
 
 
+def test_dry_run_widening_still_lists_known_tool_writes(repo):
+    """The false-positive for-loop case: an unparseable shell write in the
+    session is reported as the widen reason, but the Edit/Write paths the
+    session *did* identify must still appear in the report -- otherwise the
+    user sees 'would stage everything' and concludes their edits were lost.
+    """
+    tool_written = repo / "tool.md"
+    tool_written.write_text("x\n")
+
+    # A for-loop whose in-place edit's target is held in a variable. The
+    # hook correctly flags it as a write with an unreadable target.
+    loop_cmd = (
+        'for f in a b c; do\n'
+        '  sed -i s/x/y/ "$f"\n'
+        'done'
+    )
+    transcript = _mixed_transcript(
+        repo, tool_writes=[tool_written], commands=[loop_cmd]
+    )
+    scan = _scan(transcript, repo)
+    assert scan.unresolved  # the trigger
+    assert scan.paths == [os.path.normpath(str(tool_written))]
+
+    report = hook.build_dry_run_report(
+        "msg", "sid", "", str(repo), scan, hook.Flags(dry=True, use_ai=False)
+    )
+    assert "could not be read" in report
+    assert "Would stage all uncommitted changes in the repo." in report
+    # But the known write is *named*, not silently dropped from the report.
+    assert "tool.md" in report
+    assert "Tool writes already identified" in report
+    # And the trailing status block runs (widened case shows the whole tree).
+    assert "Changes to commit:" in report
+
+
+def test_dry_run_transcript_unreadable_does_not_duplicate_status(repo):
+    """When the transcript can't be read at all the fall-back branch already
+    prints the whole-repo status inline; a second 'Changes to commit' block
+    below repeats it verbatim and reads as a bug."""
+    (repo / "TEST.md").write_text("x\n")
+    report = hook.build_dry_run_report(
+        "msg", "sid", "", str(repo), None, hook.Flags(dry=True, use_ai=False)
+    )
+    assert "Would stage all uncommitted changes in the repo:" in report
+    # The inline status block, not the trailing one.
+    assert "Changes to commit:" not in report
+
+
 def _mock_ai_inputs(monkeypatch):
     monkeypatch.setattr(hook, "find_api_key", lambda _repo: ("test-secret", "$TEST"))
     monkeypatch.setattr(
