@@ -157,6 +157,161 @@ def test_only_ignored_writes_stage_nothing(repo):
     assert _git(repo, "status", "--porcelain", "--", ".issues-gateway").strip() == ""
 
 
+# --- files written by shell commands, not by Edit/Write --------------------
+
+
+def _shell_record(command, cwd):
+    return {
+        "type": "assistant",
+        "cwd": str(cwd),
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": f"id-sh-{abs(hash(command))}",
+                    "name": "Bash",
+                    "input": {"command": command},
+                }
+            ]
+        },
+    }
+
+
+def _mixed_transcript(repo, *, tool_writes=(), commands=()):
+    """A session that used Write for some files and the shell for others."""
+    fh, name = __import__("tempfile").mkstemp(suffix=".jsonl")
+    with os.fdopen(fh, "w", encoding="utf-8") as out:
+        for p in tool_writes:
+            out.write(json.dumps(_write_record(Path(p))) + "\n")
+        for command in commands:
+            out.write(json.dumps(_shell_record(command, repo)) + "\n")
+    return name
+
+
+def _scan(transcript, repo):
+    try:
+        return hook._scan_writes(transcript, str(repo))
+    finally:
+        os.unlink(transcript)
+
+
+@pytest.mark.parametrize("command, filename", [
+    ("cat > shell.md <<'EOF'\nwritten by heredoc\nEOF", "shell.md"),
+    ("printf 'x\\n' >> shell.md", "shell.md"),
+    ("sed -i 's/seed/x/' shell.md", "shell.md"),
+    ("python3 - <<'PY'\nopen('shell.md', 'w').write('x')\nPY", "shell.md"),
+    ("node -e \"require('fs').writeFileSync('shell.md','x')\"", "shell.md"),
+    ("Set-Content -Path shell.md -Value 'x'", "shell.md"),
+    ("cat in.txt | tee shell.md", "shell.md"),
+])
+def test_shell_written_files_are_staged(repo, command, filename):
+    """The bug: a file Claude wrote through Bash never reached `git add`, so
+    it silently missed the commit."""
+    (repo / filename).write_text("shell change\n")
+    scan = _scan(_mixed_transcript(repo, commands=[command]), repo)
+    assert scan.paths == [os.path.normpath(str(repo / filename))]
+    assert scan.unresolved == []
+
+
+def test_mixed_session_stages_both_kinds_of_write(repo):
+    """The case the fallback never covered: with at least one Edit/Write in
+    the session there was a path list, so the shell-written file was dropped
+    from it instead of triggering the stage-everything fallback."""
+    tool_written = repo / "tool.md"
+    tool_written.write_text("by Write\n")
+    shell_written = repo / "shell.md"
+    shell_written.write_text("by heredoc\n")
+
+    transcript = _mixed_transcript(
+        repo,
+        tool_writes=[tool_written],
+        commands=["cat > shell.md <<'EOF'\nby heredoc\nEOF"],
+    )
+    scan = _scan(transcript, repo)
+    assert scan.paths == [
+        os.path.normpath(str(tool_written)),
+        os.path.normpath(str(shell_written)),
+    ]
+
+    result, targets = hook.stage_paths(scan.paths, str(repo))
+    assert result.returncode == 0
+    staged = _git(repo, "diff", "--cached", "--name-only").split()
+    assert sorted(staged) == ["shell.md", "tool.md"]
+
+
+def test_shell_deletion_is_staged_as_a_deletion(repo):
+    """`rm` on a tracked file is a change to commit like any other."""
+    (repo / "seed.md").unlink()
+    scan = _scan(_mixed_transcript(repo, commands=["rm seed.md"]), repo)
+    present, deletions, unmatched = hook.resolve_stage_set(scan.paths, str(repo))
+    assert [os.path.basename(p) for p in deletions] == ["seed.md"]
+    assert present == [] and unmatched == []
+
+
+def test_read_only_commands_contribute_nothing(repo):
+    commands = [
+        "cat README.md",
+        "sed -n '1,20p' seed.md",
+        "grep -rn foo . 2>/dev/null",
+        "ls -la > /dev/null",
+        "git log --oneline | head -5",
+    ]
+    scan = _scan(_mixed_transcript(repo, commands=commands), repo)
+    assert scan.paths == [] and scan.unresolved == []
+
+
+@pytest.mark.parametrize("command", [
+    "git apply fix.patch",
+    "python3 - <<'PY'\nimport sys\nopen(sys.argv[1], 'w').write('x')\nPY",
+    "sed -i 's/a/b/' *.md",
+    'echo hi > "$OUT"',
+    "cd sub && sed -i 's/a/b/' f.txt",
+])
+def test_unreadable_shell_write_widens_to_staging_everything(repo, command):
+    """A write we can see but can't name must not quietly commit a subset."""
+    scan = _scan(_mixed_transcript(repo, commands=[command]), repo)
+    assert scan.unresolved, command
+    # Even with a perfectly good path list from other writes, the answer is
+    # None -- which is what makes the caller run a plain `git add -A`.
+    assert hook.changed_paths(scan) is None
+
+
+def test_failed_shell_command_is_not_a_write(repo):
+    """PostToolUse-style is_error records already filter tool writes; a failed
+    heredoc must not widen the commit either."""
+    transcript = _mixed_transcript(repo, commands=["git apply fix.patch"])
+    with open(transcript, "a", encoding="utf-8") as out:
+        out.write(json.dumps({
+            "type": "user",
+            "cwd": str(repo),
+            "message": {"content": [{
+                "type": "tool_result",
+                "tool_use_id": f"id-sh-{abs(hash('git apply fix.patch'))}",
+                "is_error": True,
+            }]},
+        }) + "\n")
+    scan = _scan(transcript, repo)
+    assert scan.unresolved == []
+
+
+def test_heredoc_body_is_not_parsed_as_commands(repo):
+    """A shell snippet inside a heredoc is the file's content, not something
+    the session ran."""
+    command = "cat > script.sh <<'EOF'\nrm -rf build\nmv a.md b.md\nEOF"
+    scan = _scan(_mixed_transcript(repo, commands=[command]), repo)
+    assert scan.paths == [os.path.normpath(str(repo / "script.sh"))]
+
+
+def test_dry_run_reports_the_widening(repo):
+    (repo / "TEST.md").write_text("x\n")
+    scan = _scan(_mixed_transcript(repo, commands=["git apply fix.patch"]), repo)
+    report = hook.build_dry_run_report(
+        "msg", "sid", "", str(repo), scan, hook.Flags(dry=True, use_ai=False)
+    )
+    assert "could not be read" in report
+    assert "Would stage all uncommitted changes in the repo." in report
+
+
 def _mock_ai_inputs(monkeypatch):
     monkeypatch.setattr(hook, "find_api_key", lambda _repo: ("test-secret", "$TEST"))
     monkeypatch.setattr(

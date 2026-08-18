@@ -67,6 +67,22 @@ gitignored paths (an agent-scratch dir like `.issues-gateway/`, build output,
 discard so a "missing" file is never a mystery. A tracked file inside an
 ignored directory still stages, exactly as git itself treats it.
 
+Files Claude wrote **through the shell** count too. Claude does not only use
+the edit tools: a `cat > f <<'EOF'` heredoc, `sed -i`, an inline
+`python - <<'PY'` calling `open(p, "w")`, `node -e` with `writeFileSync`, a
+PowerShell `Set-Content`, or a plain `mv`/`rm`/`touch` all change files that
+belong in the commit. `Bash` and `PowerShell` calls in the transcript are
+parsed for their targets, so a session that mixed both kinds of write stages
+both. (The [`prefer-edit-tool`](../prefer-edit-tool/README.md) hook nudges
+Claude towards Write/Edit in the first place; `/commit` doesn't assume it is
+installed.)
+
+Some shell writes name no target that can be read from the command —
+`git apply`, a path held in a `$VAR`, a glob, or a write after a `cd`. Those
+are reported rather than guessed at, and the hook stages the whole tree
+instead of committing a subset. `--dry` lists the commands responsible, and a
+real run says so in its result line.
+
 The commit is pathspec-scoped, so anything you staged by hand beforehand
 stays staged and is left out. If the transcript can't be read at all, the
 hook falls back to `git add -A`; `--dry` says so loudly when that happens.
