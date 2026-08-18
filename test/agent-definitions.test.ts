@@ -30,26 +30,31 @@ const taskTools = ["TaskCreate", "TaskGet", "TaskList", "TaskStop", "TaskUpdate"
 const expected = {
   brainstormer: {
     capability: "write-capable",
+    model: "opus",
     effort: "high",
     tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Agent", "Skill"],
   },
   webresearcher: {
     capability: "read-only",
-    effort: "high",
+    model: "sonnet",
+    effort: "medium",
     tools: ["WebSearch", "WebFetch"],
   },
   implementer: {
     capability: "write-capable",
+    model: "opus",
     effort: "high",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
   },
   "pr-doctor-afk": {
     capability: "write-capable",
+    model: "opus",
     effort: "high",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
   },
   "pr-doctor-hitl": {
     capability: "write-capable",
+    model: "opus",
     effort: "high",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
   },
@@ -104,7 +109,7 @@ test("parses every worker definition and derives capability from its exact tools
   for (const name of WORKER_AGENT_NAMES) {
     const agent = await definition(name);
     assert.equal(agent.name, name);
-    assert.equal(agent.model, "opus");
+    assert.equal(agent.model, expected[name].model);
     assert.equal(agent.effort, expected[name].effort);
     assert.deepEqual(agent.tools, expected[name].tools);
     assert.equal(agent.writeCapability, expected[name].capability);
