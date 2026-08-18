@@ -42,6 +42,7 @@ import {
   type AgentType,
   type SessionId,
 } from "../domain/contracts.js";
+import { ABOARD_MCP_SERVER_NAME, MANAGER_TOOL_NAMES } from "../bridge/mcp-tools.js";
 import {
   describeResolvedPrompt,
   resolvedPromptFromText,
@@ -194,17 +195,6 @@ export type LaunchConfiguration =
        */
       readonly extraFrontmatter?: readonly string[];
       /**
-       * Frontmatter lines for an aboard-owned `mcpServers:` block, emitted into
-       * the rewritten file. This is how the aboard MCP server reaches the
-       * Manager and *only* the Manager: an inline `mcpServers` entry in an agent
-       * definition connects when that agent starts and is invisible to every
-       * other session, where a `.mcp.json` registration is project-scoped and
-       * spends its tool descriptions in the context of every worker — and of the
-       * user's own hand-started `claude` — that the bridge would then have to
-       * refuse anyway. Isolation here is structural rather than a denial rule.
-       */
-      readonly declaredMcpServers?: readonly string[];
-      /**
        * `model:` and `effort:` read from the same definition, carried onto the
        * command line because no flag short of these two applies them.
        *
@@ -251,7 +241,6 @@ export interface LaunchConfigurationInput {
   readonly declaredTools?: readonly string[] | undefined;
   readonly declaredDescription?: string | undefined;
   readonly extraFrontmatter?: readonly string[] | undefined;
-  readonly declaredMcpServers?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
   readonly declaredCommand?: readonly string[] | undefined;
@@ -274,6 +263,7 @@ export type LaunchPlanErrorCode =
   | "unsafe-spill-path"
   | "invalid-threshold"
   | "invalid-command"
+  | "invalid-mcp-config"
   | "command-line-too-long"
   | "missing-prompt"
   | "shape-not-allowed";
@@ -347,8 +337,7 @@ export function resolveLaunchConfiguration(
       // Accepting them would silently drop them.
       if (
         input.declaredDescription !== undefined ||
-        input.extraFrontmatter !== undefined ||
-        input.declaredMcpServers !== undefined
+        input.extraFrontmatter !== undefined
       ) {
         throw new LaunchPlanError(
           "conflicting-launch-shape",
@@ -396,7 +385,7 @@ export function resolveLaunchConfiguration(
     // is the author's business and Claude Code skips it — `color:` travels this
     // path, where an unknown value renders grey — and a fence in the middle
     // would silently move the rest of the frontmatter into the system prompt.
-    for (const line of [...(input.extraFrontmatter ?? []), ...(input.declaredMcpServers ?? [])]) {
+    for (const line of input.extraFrontmatter ?? []) {
       if (line.includes("\n") || line.includes("\r") || /^\s*(?:---|\.\.\.)\s*$/.test(line)) {
         throw new LaunchPlanError(
           "invalid-frontmatter",
@@ -413,9 +402,6 @@ export function resolveLaunchConfiguration(
       ...(input.extraFrontmatter === undefined || input.extraFrontmatter.length === 0
         ? {}
         : { extraFrontmatter: input.extraFrontmatter }),
-      ...(input.declaredMcpServers === undefined || input.declaredMcpServers.length === 0
-        ? {}
-        : { declaredMcpServers: input.declaredMcpServers }),
       ...(declaredModel === undefined ? {} : { declaredModel }),
       ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
       ...(declaredCommand === undefined ? {} : { declaredCommand }),
@@ -427,7 +413,6 @@ export function resolveLaunchConfiguration(
     input.declaredTools !== undefined ||
     input.declaredDescription !== undefined ||
     input.extraFrontmatter !== undefined ||
-    input.declaredMcpServers !== undefined ||
     input.declaredModel !== undefined ||
     input.declaredEffort !== undefined ||
     input.declaredCommand !== undefined
@@ -555,6 +540,22 @@ interface CommonPlanRequest {
   readonly effort?: EffortLevel | undefined;
   readonly command?: readonly string[] | undefined;
   /**
+   * Absolute path of the per-launch MCP registration, carried as
+   * `--mcp-config`. Set only for the Manager: the aboard delegation surface
+   * belongs to that one session, and a session-scoped flag is what keeps it out
+   * of every worker's context — a `.mcp.json` entry is project-scoped, so every
+   * worker, every `Explore`, and the user's own hand-started `claude` would
+   * connect it and pay for tool descriptions the bridge refuses them anyway.
+   *
+   * The file holds a resolved bearer token, so it lives in the extension's own
+   * storage rather than under the workspace (`FileManagerMcpConfig`). Resolved
+   * rather than `${ABOARD_BRIDGE_*}` references: those expand in
+   * `.mcp.json`-shaped configuration but *not* in agent frontmatter, where an
+   * earlier attempt to declare the same server left Claude Code reading the
+   * literal `${ABOARD_BRIDGE_PORT}` text and reporting an invalid URL.
+   */
+  readonly mcpConfigPath?: string | undefined;
+  /**
    * Per-session Claude in Chrome intent. Only general-purpose sessions and
    * auto-run implementers may carry it; `false` is explicit so a Claude-level
    * "enabled by default" preference cannot silently widen an aboard launch.
@@ -625,6 +626,71 @@ function assertFlagValue(
  * form is `--tools "Bash,Edit,Read"`; the shell quoting layer will quote the
  * value as needed when it builds the command line.
  */
+/**
+ * `--mcp-config` is variadic (`<configs...>`), so it carries the same hazard as
+ * `--add-dir`: it must never end the line, or the positional prompt is read as a
+ * second config path. It is emitted immediately before the `--add-dir`/`--agent`
+ * pair, and the caller-side restriction to an agent-defined shape is what
+ * guarantees a flag always follows it.
+ *
+ * `--strict-mcp-config` is deliberately never emitted with it: that would drop
+ * every MCP server the *user* configured from the Manager's session. aboard's
+ * claim is that its own server reaches no other session, not that the Manager
+ * loses the user's.
+ */
+function assertMcpConfigShape(
+  path: string | undefined,
+  configuration: LaunchConfiguration,
+): string | undefined {
+  if (path !== undefined && configuration.shape !== "agent-defined") {
+    throw new LaunchPlanError(
+      "shape-not-allowed",
+      "An MCP registration is carried only by an aboard agent definition launch",
+    );
+  }
+  return path;
+}
+
+function mcpConfigArguments(path: string | undefined): readonly string[] {
+  if (path === undefined) return [];
+  return ["--mcp-config", assertFlagValue(path, "invalid-mcp-config", "MCP config path")];
+}
+
+/**
+ * Pre-approve the aboard MCP delegation surface on the one command line that
+ * connects it, so the Manager never stalls behind a per-tool approval prompt.
+ *
+ * The user configured "I run aboard"; "I run aboard's own MCP tools" is not a
+ * second decision, and `mcp__aboard__*` in the definition's allowlist decides
+ * reachability, not permission. The allows are permission rules rather than
+ * capability grants — a user deny or ask still outranks them (rules evaluate
+ * deny, then ask, then allow) — and they attach only to the aboard server,
+ * never to the user's tools. So this is the deliberate exception to "aboard
+ * puts no permission flag on any command line", scoped to tools aboard itself
+ * serves and to a session the bridge already names as the sole caller.
+ *
+ * Three load-bearing choices:
+ * - The agent-defined shape, not the agent type, gates the flag — a launch
+ *   carries it when its definition declares the `mcp__<server>__*` rule, which
+ *   is `manager.md` alone among the shipped definitions. No other shape
+ *   launches with an aboard server registration behind it (a `--mcp-config`
+ *   path and the rule could not both reach a worker), so there is no
+ *   type check to keep in sync with the wiring.
+ * - The server name is derived from the definition's rule rather than
+ *   hardcoded, so a rename of the bridge server renames the allow with it;
+ *   a definition that declares no such rule emits no flag.
+ * - The tools are enumerated rather than allowing the `mcp__aboard__*`
+ *   pattern, so a tool the boundary serves but the permission list forgot
+ *   surfaces as a prompt instead of being silently approved.
+ */
+function aboardMcpAllowRules(configuration: LaunchConfiguration): readonly string[] {
+  if (configuration.shape !== "agent-defined") return [];
+  const declaresAboard = configuration.declaredTools.some(
+    (rule) => rule.trim() === `mcp__${ABOARD_MCP_SERVER_NAME}__*`,
+  );
+  return declaresAboard ? MANAGER_TOOL_NAMES : [];
+}
+
 function toolListArguments(
   flag: string,
   rules: readonly string[] | undefined,
@@ -757,9 +823,6 @@ function renderAgentDefinition(
     `tools: ${configuration.declaredTools.join(", ")}`,
     ...frontmatterLine("model", configuration.declaredModel),
     ...frontmatterLine("effort", configuration.declaredEffort),
-    // Before the carried-through keys, so an aboard-owned block stays adjacent
-    // to the fields aboard resolves rather than buried in the author's.
-    ...(configuration.declaredMcpServers ?? []),
     ...(configuration.extraFrontmatter ?? []),
   ];
   return `---\n${frontmatter.join("\n")}\n---\n\n${configuration.systemPrompt.trim()}\n`;
@@ -993,7 +1056,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     );
   }
 
-  const shapeArguments: string[] = [];
+  const shapeArguments: string[] = [...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration))];
   let agentDefinition: AgentDefinitionFile | undefined;
   switch (configuration.shape) {
     case "agent-defined": {
@@ -1021,6 +1084,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--session-id",
     request.sessionId,
     ...shapeArguments,
+    ...toolListArguments("--allowedTools", aboardMcpAllowRules(configuration)),
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(declared.declaredModel ?? request.model),
     ...effortArguments(declared.declaredEffort ?? request.effort),
@@ -1106,7 +1170,15 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
   const args = [
     "--resume",
     request.sessionId,
+    // Re-passed like every other launch flag: a resumed Manager holding
+    // `mcp__aboard__*` in its allowlist with no server behind it has nothing to
+    // delegate through, and the file is rewritten per launch so the port and
+    // token are this activation's rather than the dead one's.
+    ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, request.configuration)),
     ...definition.args,
+    // Re-passed like every other launch flag: a resumed Manager that lost the
+    // pre-approvals would stall behind the same prompts the launch avoided.
+    ...toolListArguments("--allowedTools", aboardMcpAllowRules(request.configuration)),
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(request.configuration.declaredModel ?? request.model),
     ...effortArguments(request.configuration.declaredEffort ?? request.effort),
@@ -1148,7 +1220,10 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ? agentRuntimeArguments(configuration, request.agentId, runtimeDirectory)
     : undefined;
   // Claude Code restores a builtin's `--agent` selection with the conversation.
-  const shapeArguments = definition?.args ?? [];
+  const shapeArguments = [
+    ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration)),
+    ...(definition?.args ?? []),
+  ];
   const declared = configuration.shape !== "default"
     ? configuration
     : { declaredModel: undefined, declaredEffort: undefined };

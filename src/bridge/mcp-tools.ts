@@ -8,6 +8,9 @@ export interface McpTool {
   readonly inputSchema: Readonly<Record<string, unknown>>;
 }
 
+/** The server name the Manager's `mcp__aboard__*` tool rules are namespaced by. */
+export const ABOARD_MCP_SERVER_NAME = "aboard";
+
 /**
  * `after` names either a task position or the top of the list. The two-branch
  * schema keeps the anchor a real integer rather than a stringly-typed position,
@@ -420,3 +423,14 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     },
   },
 ];
+
+/**
+ * The fully namespaced allow rules for every tool the boundary serves, which is
+ * what `--allowedTools` carries on the Manager's command line so the delegation
+ * surface never stalls behind an approval prompt. The names stay enumerated
+ * rather than collapsing to `mcp__aboard__*`: a tool the server serves but
+ * this list forgot surfaces as a prompt instead of silently pre-approving.
+ */
+export const MANAGER_TOOL_NAMES: readonly string[] = CORE_MCP_TOOLS.map(
+  (tool) => `mcp__${ABOARD_MCP_SERVER_NAME}__${tool.name}`,
+);

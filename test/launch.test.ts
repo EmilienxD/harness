@@ -27,7 +27,7 @@ import {
 } from "../src/claude/spill.js";
 import { ShellQuotingError, buildCommandLine, quoteArgument } from "../src/claude/shell.js";
 import { deriveWriteCapability } from "../src/domain/capability.js";
-import { aboardMcpServerFrontmatter } from "../src/scaffold/agent-definition.js";
+import { managerMcpConfigDocument } from "../src/bridge/mcp-config.js";
 import type { AgentId, SessionId } from "../src/domain/contracts.js";
 
 const agentId = "a1b2c3" as AgentId;
@@ -37,6 +37,11 @@ const IMPLEMENTER_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash(gh *)", "Bash(git diff*)", "LSP"];
 const BRAINSTORMER_TOOLS = ["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Agent", "Skill"];
 const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
+/** The pre-approved delegation surface the Manager's command line carries, derived from its definition's `mcp__aboard__*` rule. */
+const ABOARD_ALLOW_ARGS = [
+  "--allowedTools",
+  "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
+];
 
 /**
  * An aboard definition, which the launch rewrites into a per-agent runtime
@@ -99,6 +104,8 @@ test("plans the Manager from its definition rather than a discoverable agent", (
     "--session-id",
     sessionId,
     ...definitionArgs("manager"),
+    "--allowedTools",
+    "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
     "--disallowedTools",
     "Bash(git push*)",
     "--model",
@@ -106,7 +113,7 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   ]);
   assert.equal(
     plan.commandLine,
-    `& claude --session-id ${sessionId} ${definitionFlags("manager")} --disallowedTools 'Bash(git push*)' --model opus`,
+    `& claude --session-id ${sessionId} ${definitionFlags("manager")} --allowedTools 'mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr' --disallowedTools 'Bash(git push*)' --model opus`,
   );
   // The file `--agent` resolves is part of the plan, because a launch that
   // cannot write it is a launch that would silently start on Claude Code's own
@@ -123,41 +130,98 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   assert.equal(plan.requiresWriteLease, false);
 });
 
-test("the aboard MCP server is declared inline in the Manager's file and nowhere else", () => {
-  const mcpServers = aboardMcpServerFrontmatter();
-  const configuration = definition("manager", MANAGER_TOOLS, {
-    declaredMcpServers: mcpServers,
-    declaredModel: "opus",
-    extraFrontmatter: ["color: purple"],
-  });
-  const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined }));
-  const block = `${mcpServers.join("\n")}\n`;
+test("the aboard MCP server is registered per Manager launch and nowhere else", () => {
+  const mcpConfigPath = "C:\\storage\\aboard\\manager-mcp.json";
+  const configuration = definition("manager", MANAGER_TOOLS);
+  const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined, mcpConfigPath }));
 
-  // The server reaches this one session through the file `--agent` resolves,
-  // rather than a project-scoped `.mcp.json` entry every session would connect.
-  assert.equal(plan.agentDefinition?.contents.includes(block), true);
-  // Aboard's own resolved fields first, then the block, then the author's keys.
-  assert.equal(
-    plan.agentDefinition?.contents,
-    `---\nname: ${runtimeName("manager")}\ndescription: aboard manager agent\ntools: ${MANAGER_TOOLS.join(", ")}\nmodel: opus\n${block}color: purple\n---\n\nYou are the manager.\n`,
+  // Session-scoped by construction: the flag belongs to this command line, where
+  // a `.mcp.json` entry is project-scoped and would be connected — and paid for
+  // in tool descriptions — by every worker and the user's own `claude`.
+  assert.deepEqual(plan.args, [
+    "--session-id", sessionId, "--mcp-config", mcpConfigPath, ...definitionArgs("manager"),
+    "--allowedTools",
+    "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
+  ]);
+  // `--mcp-config` is variadic, so like `--add-dir` it must never end the line:
+  // the positional prompt would be read as a second config path.
+  assert.equal(plan.args[plan.args.indexOf("--mcp-config") + 2], "--add-dir");
+  // `--strict-mcp-config` would drop every server the *user* configured.
+  assert.equal(plan.args.includes("--strict-mcp-config"), false);
+  // Nothing about the registration reaches the definition file.
+  assert.equal(plan.agentDefinition?.contents.includes("mcpServers"), false);
+
+  // A resume re-passes it like every other launch flag: the Manager's allowlist
+  // still admits `mcp__aboard__*`, and without the server it has nothing to call.
+  const resumed = planManagerResume({ agentId, sessionId, configuration, shell: "powershell", mcpConfigPath });
+  assert.deepEqual(resumed.args, [
+    "--resume", sessionId, "--mcp-config", mcpConfigPath, ...definitionArgs("manager"),
+    "--allowedTools",
+    "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
+  ]);
+
+  // A worker's launch carries no registration at all: the delegation surface is
+  // not merely denied to it, it is absent from its context.
+  assert.equal(planLaunch(request()).args.includes("--mcp-config"), false);
+  // And it is refused outright for a shape that has no definition to bound it —
+  // a `--mcp-config` with no flag behind it would swallow the prompt.
+  assert.throws(
+    () => planLaunch(request({ configuration: resolveLaunchConfiguration({}), mcpConfigPath })),
+    (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",
   );
-  // No flag carries it, so nothing on the command line has to agree with it.
-  assert.equal(plan.args.some((arg) => arg.includes("mcp")), false);
-  // A resume re-emits the identical file: a Manager that resumed without the
-  // block would keep its `mcp__aboard__*` allowlist and have nothing to call.
-  const resumed = planManagerResume({
-    agentId,
-    sessionId,
-    configuration,
-    shell: "powershell",
-    model: "opus",
-  });
-  assert.equal(resumed.agentDefinition?.contents, plan.agentDefinition?.contents);
+});
 
-  // A worker's rewritten definition carries no server at all: the delegation
-  // surface is not merely denied to it, it is absent from its context.
-  const worker = planLaunch(request());
-  assert.equal(worker.agentDefinition?.contents.includes("mcpServers"), false);
+test("the Manager's command line pre-approves the aboard MCP tools and nothing else", () => {
+  const allowed = "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr";
+  const configuration = definition("manager", MANAGER_TOOLS);
+
+  // aboard's tools are infrastructure aboard itself serves, so they are the one
+  // deliberate exception to "no permission flag on any command line": without
+  // the pre-approval the Manager stalls behind a prompt on its own delegation
+  // surface. The flag is derived from the definition's `mcp__aboard__*` rule —
+  // the same rule that grants the tools — so it cannot be forgotten when the
+  // definition and the serve list agree.
+  const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined }));
+  assert.equal(plan.args[plan.args.indexOf("--allowedTools") + 1], allowed);
+  // A resume re-passes it exactly.
+  const resumed = planManagerResume({ agentId, sessionId, configuration, shell: "powershell" });
+  assert.equal(resumed.args[resumed.args.indexOf("--allowedTools") + 1], allowed);
+
+  // Every aboard tool is enumerated: a wildcard would silently pre-approve a
+  // tool the boundary later adds without a matching permission rule.
+  assert.equal(allowed.includes("*"), false);
+
+  // No other launch shape carries a permission flag: a worker has no aboard
+  // server behind it (its `--mcp-config` is absent), a builtin launches with no
+  // rewritten definition to derive the rule from, and the default session has
+  // no tools list at all. Granting anything there would be a worker-side
+  // permission grant aboard must never make.
+  assert.equal(planLaunch(request()).args.includes("--allowedTools"), false);
+  assert.equal(planLaunch(request({ agentType: "Explore", configuration: { shape: "builtin", agentName: "Explore" } })).args.includes("--allowedTools"), false);
+  assert.equal(planLaunch(request({ agentType: "general-purpose", configuration: resolveLaunchConfiguration({}) })).args.includes("--allowedTools"), false);
+
+  // A definition that does not declare the aboard server — a user-replaced
+  // manager.md, or any other agent-defined launch — gets no permission flag,
+  // because there is no server behind it to pre-approve.
+  const withoutServer = definition("manager", ["Read", "Grep", "Glob", "Bash", "Skill"]);
+  assert.equal(planLaunch(request({ agentType: "manager", configuration: withoutServer, prompt: undefined })).args.includes("--allowedTools"), false);
+});
+
+test("the Manager MCP registration resolves the live port and token", () => {
+  const document = JSON.parse(
+    managerMcpConfigDocument({ port: 51234, token: "t0ken", agentId: "m1" }),
+  ) as { mcpServers: Record<string, { url: string; alwaysLoad: boolean; headers: Record<string, string> }> };
+
+  // Resolved, not `${ABOARD_BRIDGE_*}`: Claude Code expands those in
+  // `.mcp.json`-shaped files, but the earlier attempt to carry the same
+  // references in the Manager's agent frontmatter reached it as literal text and
+  // failed with "'url' is not a valid URL".
+  assert.deepEqual(document.mcpServers.aboard, {
+    type: "http",
+    url: "http://127.0.0.1:51234/mcp",
+    alwaysLoad: true,
+    headers: { Authorization: "Bearer t0ken", "X-Aboard-Agent-Id": "m1" },
+  });
 });
 
 test("wrapper layout prefixes the launch and resume lines without reshaping the args", () => {
@@ -335,7 +399,7 @@ test("passes the session effort level on every launch shape and refuses an unkno
       agentId, sessionId, shell: "powershell", effort: "low",
       configuration: definition("manager", MANAGER_TOOLS),
     }).args,
-    ["--resume", sessionId, ...definitionArgs("manager"), "--effort", "low"],
+    ["--resume", sessionId, ...definitionArgs("manager"), ...ABOARD_ALLOW_ARGS, "--effort", "low"],
   );
   assert.deepEqual(
     planSessionResume({
@@ -441,7 +505,7 @@ test("puts the definition's model and effort on the command line, overriding the
       agentId, sessionId, shell: "powershell", model: "opus",
       configuration: definition("manager", MANAGER_TOOLS),
     }).args,
-    ["--resume", sessionId, ...definitionArgs("manager"), "--model", "opus"],
+    ["--resume", sessionId, ...definitionArgs("manager"), ...ABOARD_ALLOW_ARGS, "--model", "opus"],
   );
 
   for (const invalid of ["", "  ", "--sonnet"]) {
@@ -714,7 +778,11 @@ test("pins each launch shape to the agent types allowed to use it", () => {
     configuration: definition("manager", MANAGER_TOOLS),
     prompt: undefined,
   }));
-  assert.deepEqual(manager.args, ["--session-id", sessionId, ...definitionArgs("manager")]);
+  assert.deepEqual(manager.args, [
+    "--session-id", sessionId, ...definitionArgs("manager"),
+    "--allowedTools",
+    "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
+  ]);
 });
 
 test("a resume re-passes every flag that shaped the launch", () => {

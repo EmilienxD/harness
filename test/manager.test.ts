@@ -19,6 +19,8 @@ const RUNTIME_AGENT = `aboard-manager-${agentId}`;
 const RUNTIME_PATH = `${RUNTIME_DIRECTORY}/.claude/agents/${RUNTIME_AGENT}.md`;
 /** The two flags every Manager command line carries, in their shell form. */
 const DEFINITION_FLAGS = `--add-dir ${RUNTIME_DIRECTORY} --agent ${RUNTIME_AGENT}`;
+/** The pre-approval list the Manager's command line carries. */
+const ABOARD_ALLOW = "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr";
 
 /**
  * The Manager definition, rewritten per launch into a directory only that
@@ -57,6 +59,8 @@ test("plans a promptless Manager resume with only the recorded UUID", () => {
     RUNTIME_DIRECTORY,
     "--agent",
     RUNTIME_AGENT,
+    "--allowedTools",
+    ABOARD_ALLOW,
   ]);
   assert.equal(plan.agentDefinition?.relativePath, RUNTIME_PATH);
   assert.equal(plan.agentDefinition?.contents.includes(`tools: ${MANAGER_TOOLS.join(", ")}`), true);
@@ -118,14 +122,24 @@ test("the lifecycle never puts a permission flag on a Manager launch, start or r
     resume: (request: unknown) => { records.push(request); return snapshot("terminal"); },
   } as unknown as TerminalController;
   // Permissions are the user's own Claude Code configuration, never aboard's
-  // command line.
+  // command line — with one deliberate carve-out: the aboard MCP tools aboard
+  // itself serves are pre-approved so the Manager never stalls behind a prompt
+  // on its own delegation surface. That is not overriding the user's policy:
+  // the user configured "I run aboard", and a user deny or ask still outranks
+  // the allow. What aboard never emits is a flag that widens or skips the
+  // user's permission model itself.
   const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: recordingFiles().store, definition, isResumable: async () => true });
   await lifecycle.start("new");
   assert.doesNotMatch(records[0].initialCommand, /--dangerously-skip-permissions/);
   assert.doesNotMatch(records[0].initialCommand, /--permission-mode/);
+  assert.ok(records[0].initialCommand.includes("--allowedTools"));
+  assert.match(records[0].initialCommand, /mcp__aboard__run_agent/);
   await lifecycle.start("resume");
   assert.doesNotMatch(records[1].initialCommand, /--dangerously-skip-permissions/);
   assert.doesNotMatch(records[1].initialCommand, /--permission-mode/);
+  // Re-passed on resume like every other launch flag.
+  assert.ok(records[1].initialCommand.includes("--allowedTools"));
+  assert.match(records[1].initialCommand, /mcp__aboard__run_agent/);
   assert.match(records[1].initialCommand, /--resume /);
 });
 
