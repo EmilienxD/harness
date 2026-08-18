@@ -73,7 +73,14 @@ export async function sessionIsResumable(
   cwd: string,
   configDirectory?: string,
 ): Promise<boolean> {
-  const path = sessionTranscriptPath(sessionId, cwd, configDirectory);
+  return transcriptHoldsConversation(sessionTranscriptPath(sessionId, cwd, configDirectory));
+}
+
+/**
+ * The same test against an explicit path, so a backup copy can be checked
+ * before it is restored over a transcript Claude Code no longer has.
+ */
+export async function transcriptHoldsConversation(path: string): Promise<boolean> {
   const stream = createReadStream(path, { encoding: "utf8" });
   try {
     const lines = createInterface({ input: stream, crlfDelay: Infinity });

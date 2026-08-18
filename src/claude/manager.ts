@@ -71,7 +71,7 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
 }
 
 /** `command`, `permissionMode`, and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly permissionMode?: () => WorkerPermissionMode; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
   public constructor(private readonly options: ManagerLifecycleOptions) { this.#now = options.now ?? (() => new Date()); }
@@ -81,6 +81,12 @@ export class ManagerLifecycle {
     if (mode === "resume" && !prior) throw new Error("No recorded Manager session exists");
     const agentId = mode === "resume" && prior ? prior.agentId : (this.options.agentIdFactory ?? (() => randomUUID() as AgentId))();
     const recorded = mode === "resume" && prior ? prior.sessionId : undefined;
+    // Claude Code deletes session files older than `cleanupPeriodDays` at
+    // startup and the sweep cannot be disabled, so the recorded transcript may
+    // simply be gone. Put aboard's copy back first; the resumability check
+    // below is what reads it, and a restore that fails or finds nothing just
+    // leaves that check to answer "not resumable" as it always would.
+    if (recorded !== undefined) await this.options.restoreTranscript?.(recorded);
     // --resume fails when the recorded session holds no conversation yet, which
     // a transcript file's existence does not rule out.
     const resumable = recorded !== undefined && await (this.options.isResumable ?? sessionIsResumable)(recorded, this.options.workspaceRoot);

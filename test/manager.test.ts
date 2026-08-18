@@ -168,6 +168,37 @@ test("the Manager's own model and effort reach the command line on start and on 
   assert.match(records[2].initialCommand, /--effort low/);
 });
 
+test("a resume restores the backed-up transcript before asking whether it can be resumed", async () => {
+  // Claude Code deletes session files older than `cleanupPeriodDays` at startup
+  // and offers no way to disable that sweep, so the recorded transcript may be
+  // gone by the time the user resumes. Order is the whole point: a
+  // resumability check that ran first would answer "no" and silently downgrade
+  // a months-old Manager to a fresh conversation under a new id.
+  const order: string[] = [];
+  const records: any[] = [];
+  const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
+  const snapshot = (id: string): TerminalSnapshot => ({ terminalId: id as TerminalId, agentId, sessionId, agentType: "manager", name: "aboard: Manager", cwd: "C:\\work", status: "open", createdAt: "2026-07-30T10:00:00.000Z", closedAt: null, exitCode: null });
+  const terminals = {
+    create: (request: unknown) => { records.push(request); return snapshot("terminal"); },
+    resume: (request: unknown) => { records.push(request); return snapshot("terminal"); },
+  } as unknown as TerminalController;
+  let restored = false;
+  const lifecycle = new ManagerLifecycle({
+    store: { load: async () => recorded, save: async () => undefined },
+    terminals, workspaceRoot: "C:\\work", shell: "powershell", files: recordingFiles().store, definition,
+    restoreTranscript: async (id) => { assert.equal(id, sessionId); order.push("restore"); restored = true; },
+    isResumable: async () => { order.push("resumable"); return restored; },
+  });
+  await lifecycle.start("resume");
+  assert.deepEqual(order, ["restore", "resumable"]);
+  assert.match(records[0].initialCommand, /--resume 4db0ed4c/);
+
+  // A fresh Manager has no recorded session, so there is nothing to restore.
+  order.length = 0;
+  await lifecycle.start("new");
+  assert.deepEqual(order, []);
+});
+
 test("a failed preflight refuses the launch before a terminal exists", async () => {
   // The launch command is typed into a shell aboard cannot read the exit
   // status of, so a command it already knows cannot run must never open a

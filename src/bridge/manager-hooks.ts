@@ -690,11 +690,20 @@ function parseInteractiveCommand(prompt: string): {
     : { type: "brainstormer", command, invalidArguments: false, ignoredArguments: trailing.length > 0, input: { type: "brainstormer", description: "interactive brainstorm session" } };
 }
 
+/**
+ * The Manager's turn just ended, which is the moment its transcript is complete
+ * and quiet — the natural point to bring aboard's backup copy of it up to date.
+ * Fire-and-forget by contract: the long poll below must not wait on a file copy,
+ * and a failed backup must never delay a result the Manager is waiting for.
+ */
+export type ManagerTranscriptCheckpoint = (agentId: AgentId) => void;
+
 export function createManagerHookRoutes(
   briefings: ManagerBriefings,
   stop: ManagerStopService,
   prompts?: ManagerPromptService,
   reminders?: RoadmapReminderService,
+  checkpoint?: ManagerTranscriptCheckpoint,
 ): BridgeRequestHandler {
   return async (request): Promise<BridgeResponse> => {
     if (request.method !== "POST") return protocolError(405, "invalid-request", "Method not allowed");
@@ -706,6 +715,10 @@ export function createManagerHookRoutes(
       if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "" || typeof (body.stopHookActive ?? body.stop_hook_active) !== "boolean") {
         return protocolError(400, "invalid-request", "agentId and stopHookActive are required");
       }
+      // Before the poll, not after: the poll can block for the whole hour the
+      // Stop timeout allows, and the transcript to copy is the one this turn
+      // just finished writing.
+      checkpoint?.(body.agentId as AgentId);
       return { status: 200, body: await stop.poll({ agentId: body.agentId as AgentId, stopHookActive: (body.stopHookActive ?? body.stop_hook_active) as boolean }, request.signal) };
     }
     if (request.url.pathname === "/hooks/manager/roadmap" && reminders !== undefined) {

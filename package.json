@@ -319,6 +319,13 @@
           "maximum": 100000000,
           "description": "How many transcript bytes may pass with no roadmap injection before the Manager is reminded of the pending tasks and their positions. Measured in bytes rather than turns because turn size varies far too much to pace on. 0 disables the reminder; the session-start and post-compact briefings still carry the full roadmap."
         },
+        "aboard.manager.transcriptBackups": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How many Manager session transcripts aboard keeps under .aboard/runtime/transcripts. Claude Code deletes its own session files older than cleanupPeriodDays at startup and offers no way to disable that sweep, so aboard copies the Manager's transcript at every turn boundary and restores it if a resume finds it gone. 0 turns both the backup and the restore off; copies already on disk are left alone."
+        },
         "aboard.autoRun.review": {
           "type": "boolean",
           "default": false,

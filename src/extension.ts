@@ -16,6 +16,7 @@ import { isNamedBuiltinAgentType, type TerminalId } from "./domain/contracts.js"
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
 import { sessionIsResumable } from "./claude/sessions.js";
+import { TranscriptBackupStore } from "./claude/transcript-backup.js";
 import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
 import type { WorkerPermissionMode } from "./claude/launch.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
@@ -361,6 +362,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // number their Manager too; a pre-upgrade recorded Manager keeps its UUID
   // until the user starts a new Manager.
   const managerAgentId = recordedManager?.agentId ?? agentIdCounter.next();
+  // Claude Code sweeps session files older than `cleanupPeriodDays` every time
+  // it starts and offers no way to disable that, so the one session aboard
+  // resumes for the project's whole life needs a copy of its own.
+  const transcripts = new TranscriptBackupStore({
+    workspaceRoot,
+    retain: () => currentConfiguration.managerTranscriptBackups,
+    log: (message) => output.appendLine(message),
+  });
+  // A restart is the other moment the sweep may have run unobserved: back up
+  // whatever the recorded Manager still has before aboard launches anything
+  // that triggers the next one. No `.aboard/` is created behind the user's
+  // back — a recorded Manager means the runtime directory already exists.
+  if (recordedManager !== undefined) void transcripts.checkpoint(recordedManager.sessionId);
   const launchConfigurations = workerConfigurations(workspaceRoot);
   // Every command line that reads a file — a spilled prompt, an agent's system
   // prompt — gets it from here, so all of them land under `.aboard/runtime/`.
@@ -588,7 +602,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
+    handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
+      // The fleet is what knows which session the Manager is currently on, and
+      // an agent it no longer holds (the user deleted `.aboard/`, or this is
+      // not the Manager) gets no copy — which is also what keeps a checkpoint
+      // from recreating the runtime directory behind the user's back.
+      const session = fleet.get(agentId);
+      if (session?.identity.type === "manager") void transcripts.checkpoint(session.sessionId);
+    }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
     persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
@@ -638,6 +659,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     effort: () => currentConfiguration.launchEffort,
     agentIdFactory: () => managerAgentId,
     isResumable: sessionIsResumable,
+    restoreTranscript: (sessionId) => transcripts.restore(sessionId),
     wrapper: wrapperLayout,
   });
   const warnKey = "aboard.manager.permissionWarning";

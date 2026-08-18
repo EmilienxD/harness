@@ -1,5 +1,6 @@
 import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, WORKER_PERMISSION_MODES, parseClaudeCommand, type EffortLevel, type WorkerPermissionMode } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
+import { DEFAULT_TRANSCRIPT_BACKUPS } from "./claude/transcript-backup.js";
 import { AUTO_RUN_SCOPES, MERGE_STRATEGIES, type AutoRunScope, type AutoRunSettings, type MergeStrategy } from "./domain/auto-run.js";
 
 export interface ConfigurationReader { get(section: string): unknown; }
@@ -19,6 +20,14 @@ export interface AboardConfiguration {
    * assistant text appear in no payload and would be systematically undercounted.
    */
   readonly managerRoadmapReminderBytes: number;
+  /**
+   * Manager session transcripts aboard keeps under `.aboard/runtime/transcripts/`.
+   * Claude Code deletes its own session files older than `cleanupPeriodDays` at
+   * startup and offers no way to disable that sweep, so without a copy a
+   * long-lived Manager eventually loses the conversation `--resume` restores.
+   * `0` turns both the backup and the restore off.
+   */
+  readonly managerTranscriptBackups: number;
   readonly workerPermissionMode: WorkerPermissionMode;
   /**
    * Whether a session's death also closes the terminal it ran in. Off by
@@ -44,6 +53,7 @@ export const ABOARD_SETTINGS = [
   "aboard.terminals.closeOnSessionEnd",
   "aboard.manager.disallowedTools",
   "aboard.manager.roadmapReminderBytes",
+  "aboard.manager.transcriptBackups",
   "aboard.autoRun.review",
   "aboard.autoRun.scope",
   "aboard.autoRun.pauseAfterHitl",
@@ -189,6 +199,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     ...(effort === undefined ? {} : { launchEffort: effort }),
     managerDisallowedTools,
     managerRoadmapReminderBytes: integer(reader, "aboard.manager.roadmapReminderBytes", 150_000, 0, 100_000_000, diagnostics),
+    managerTranscriptBackups: integer(reader, "aboard.manager.transcriptBackups", DEFAULT_TRANSCRIPT_BACKUPS, 0, 100, diagnostics),
     workerPermissionMode: choice(reader, "aboard.workers.permissionMode", WORKER_PERMISSION_MODES, "default", diagnostics),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {
