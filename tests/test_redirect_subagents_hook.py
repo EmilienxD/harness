@@ -115,24 +115,24 @@ def make_finished_job(tmp_path, job_id, session_id, text, existing=False):
 
 def test_build_cmd_full_entry():
     cmd = rs_io.build_cmd(
-        {"profile": "kiro", "model": "m", "effort": "low", "system_prompt": "sp"},
+        {"profile": "myprofile", "model": "m", "effort": "low", "system_prompt": "sp"},
         "hello prompt",
     )
-    assert cmd == ["clauder", "run", "kiro", "--model", "m",
+    assert cmd == ["clauder", "run", "myprofile", "--model", "m",
                    "--effort", "low", "--system-prompt", "sp", "hello prompt"]
 
 
 def test_build_cmd_unset_fields_drop():
     """A field the entry leaves out takes its flag with it."""
-    cmd = rs_io.build_cmd({"profile": "kiro"}, "p")
-    assert cmd == ["clauder", "run", "kiro", "p"]
+    cmd = rs_io.build_cmd({"profile": "myprofile"}, "p")
+    assert cmd == ["clauder", "run", "myprofile", "p"]
 
 
 def test_build_cmd_unset_field_before_inline_prompt_drops_its_flag():
     """The template's own {prompt} must not shield a flag whose value is
     unset — that flag would swallow the prompt as its operand."""
-    cmd = rs_io.build_cmd({"command": "kiro-cli;chat;--model;{model};{prompt}"}, "find it")
-    assert cmd == ["kiro-cli", "chat", "find it"]
+    cmd = rs_io.build_cmd({"command": "my-cli;chat;--model;{model};{prompt}"}, "find it")
+    assert cmd == ["my-cli", "chat", "find it"]
 
 
 def test_build_cmd_consecutive_unset_fields_before_inline_prompt():
@@ -165,8 +165,8 @@ def test_build_cmd_append_prompt_off_strips_prompt():
 
 def test_build_cmd_clauder_bin_env_expands_launcher(monkeypatch):
     monkeypatch.setenv("REDIRECT_SUBAGENTS_CLAUDER_BIN", "uvx;--from;clauder;clauder")
-    cmd = rs_io.build_cmd({"profile": "kiro", "model": "m", "effort": "low"}, "x")
-    assert cmd == ["uvx", "--from", "clauder", "clauder", "run", "kiro",
+    cmd = rs_io.build_cmd({"profile": "myprofile", "model": "m", "effort": "low"}, "x")
+    assert cmd == ["uvx", "--from", "clauder", "clauder", "run", "myprofile",
                    "--model", "m", "--effort", "low", "x"]
 
 
@@ -211,7 +211,7 @@ def test_defer_and_pop_roundtrip():
 
 
 def test_deferred_config_falls_back_to_claude_p(tmp_path):
-    write_project_config(tmp_path, {"Explore": {"profile": "kiro", "model": "m", "effort": "low"}})
+    write_project_config(tmp_path, {"Explore": {"profile": "myprofile", "model": "m", "effort": "low"}})
     cfg = rs_io.deferred_config("Explore")
     assert cfg["command"] == "claude;-p;{prompt}"
     assert cfg["_append_prompt"] is False

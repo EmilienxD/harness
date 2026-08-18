@@ -26,9 +26,9 @@ tool might be called with. Three ways to define an entry:
 ```jsonc
 {
   // 1. clauder profile, the original use case. Runs:
-  //    clauder run kiro --model claude-haiku-4-5 --effort low --system-prompt "..." "<prompt>"
+  //    clauder run myprofile --model claude-haiku-4-5 --effort low --system-prompt "..." "<prompt>"
   "Explore": {
-    "profile": "kiro",
+    "profile": "myprofile",
     "model": "claude-haiku-4-5",
     "effort": "low",
     "system_prompt": "You are a file search specialist ...",  // optional
@@ -47,8 +47,8 @@ tool might be called with. Three ways to define an entry:
   //    them) drop out. The prompt is appended positionally wherever
   //    {prompt} appears, else at the end.
   "Explore-custom": {
-    "command": "kiro-cli;chat;--model;{model};{prompt}",
-    "model": "kiro-pro"
+    "command": "my-cli;chat;--model;{model};{prompt}",
+    "model": "my-model"
   }
 }
 ```
@@ -70,7 +70,7 @@ with their cwd set to your home directory:
 {
   "projects": ["C:/dev/my-app", "/home/me/other-app"],
   "agents": {
-    "Explore": {"profile": "kiro", "model": "claude-haiku-4-5", "effort": "low"}
+    "Explore": {"profile": "myprofile", "model": "claude-haiku-4-5", "effort": "low"}
   }
 }
 ```
