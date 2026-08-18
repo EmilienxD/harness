@@ -5,7 +5,7 @@ import { EOL } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ManagerBriefings, ManagerPromptService, ManagerStopService, RoadmapReminderService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT, ROADMAP_INLINE_LIMIT, ROADMAP_MARKER, type BriefingSources, type RoadmapBriefing } from "../src/bridge/manager-hooks.js";
+import { ManagerBriefings, codebaseLine, ManagerPromptService, ManagerStopService, RoadmapReminderService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT, ROADMAP_INLINE_LIMIT, ROADMAP_MARKER, type BriefingSources, type RoadmapBriefing } from "../src/bridge/manager-hooks.js";
 import { parseRoadmap } from "../src/domain/roadmap.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId, WorkerResult } from "../src/domain/contracts.js";
@@ -54,7 +54,7 @@ function roadmapOf(body: string, overrides: Partial<RoadmapBriefing> = {}): Road
 
 function sources(overrides: Partial<BriefingSources> = {}): BriefingSources {
   return {
-    repository: async () => ({ name: "aboard", defaultBranch: "main", checks: ["npm run check"] }),
+    repository: async () => ({ name: "aboard", defaultBranch: "main", checks: ["npm run check"], codebase: { sourceFileCount: 132, languages: ["ts", "py"], commitCount: 87 } }),
     git: async () => ({ branch: "main", head: "abc123", dirty: false }),
     github: async () => EMPTY_GITHUB,
     roadmap: async () => undefined,
@@ -661,4 +661,40 @@ test("Python prompt hook blocks both intercepted commands and never blocks other
     env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: "manager" },
   });
   assert.equal(stop.status, 0); assert.equal(stop.stderr, "");
+});
+
+test("the codebase line states outright when a repository holds no project yet", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    repository: async () => ({ name: "fresh", defaultBranch: "main", checks: [], codebase: { sourceFileCount: 0, languages: [], commitCount: 1 } }),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+
+  // Without this, "no roadmap, no issues, no PRs" reads as a project between
+  // milestones rather than one that has not started.
+  assert.match(rendered, /Codebase: no source files, 1 commit - there is no code in this repository yet\./);
+  assert.match(rendered, /has to come from the user instead/);
+});
+
+test("the codebase line reports composition, and flags a single commit as a possibility only", () => {
+  assert.equal(
+    codebaseLine({ sourceFileCount: 132, languages: ["ts", "py"], commitCount: 87 }),
+    "Codebase: 132 source files (ts, py), 87 commits",
+  );
+  const scaffold = codebaseLine({ sourceFileCount: 24, languages: ["tsx"], commitCount: 1 });
+  assert.match(scaffold, /^Codebase: 24 source files \(tsx\), 1 commit - at most one commit, so this may be an untouched scaffold/);
+  // Files but nothing recorded is the same signal, and phrased the same way.
+  assert.match(codebaseLine({ sourceFileCount: 3, languages: ["py"], commitCount: 0 }), /0 commits - at most one commit/);
+});
+
+test("a survey that could not be taken costs its line, not the Repository section", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    repository: async () => ({ name: "aboard", defaultBranch: "main", checks: ["npm run check"] }),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+
+  assert.match(rendered, /default branch main \| verify with npm run check/);
+  assert.doesNotMatch(rendered, /Codebase:/);
+  assert.doesNotMatch(rendered, /## Repository\nUnavailable/);
 });

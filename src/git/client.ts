@@ -36,12 +36,76 @@ export interface GitStatus {
   readonly entries: readonly GitStatusEntry[];
 }
 
+/**
+ * What the repository contains, for the question every recommendation rests on
+ * and that no other briefing section answers: is there a project here yet?
+ *
+ * A repository with no source file cannot be surveyed, so a roadmap, an
+ * estimate, or a "what's left" answer derived from it is invention. The Manager
+ * would otherwise pay a turn to find that out — and the cheap version of that
+ * turn (`ls`) is also the wrong one, because a README and a licence look like
+ * content while carrying no intent. Counting *source* files is what separates
+ * the two, which is why documentation, configuration, and data extensions are
+ * deliberately not in the set below.
+ */
+export interface CodebaseSurvey {
+  /** Source files present, tracked or not, excluding anything gitignored. */
+  readonly sourceFileCount: number;
+  /** The extensions carrying that count, most files first, at most five. */
+  readonly languages: readonly string[];
+  /** Commits reachable from HEAD. `0` on an unborn branch. */
+  readonly commitCount: number;
+}
+
+/**
+ * Extensions that count as code. The list decides one thing — whether this
+ * repository can be surveyed at all — so it errs towards inclusion for anything
+ * a project is written *in*, and excludes everything a project is described in
+ * (`.md`), configured by (`.json`, `.yml`, `.toml`), or ships as data. A
+ * README-only repository must read as "no code yet", because that is exactly
+ * what it is.
+ */
+export const SOURCE_EXTENSIONS: ReadonlySet<string> = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "svelte", "astro",
+  "py", "rb", "go", "rs", "java", "kt", "kts", "scala", "clj", "cljs", "groovy",
+  "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "m", "mm", "swift", "cs", "fs", "vb",
+  "php", "pl", "pm", "lua", "dart", "ex", "exs", "erl", "hs", "ml", "mli", "nim",
+  "zig", "jl", "r", "sql", "sh", "bash", "zsh", "fish", "ps1", "psm1", "bat", "cmd",
+  "sol", "tf", "gradle", "sbt", "asm", "s", "elm", "purs", "res", "rescript", "odin",
+]);
+
+function extensionOf(path: string): string | undefined {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return undefined;
+  return name.slice(dot + 1).toLowerCase();
+}
+
+/** Split out so the classification can be tested without a repository. */
+export function summarizeSourceFiles(paths: readonly string[]): Omit<CodebaseSurvey, "commitCount"> {
+  const counts = new Map<string, number>();
+  for (const path of paths) {
+    const extension = extensionOf(path);
+    if (extension === undefined || !SOURCE_EXTENSIONS.has(extension)) continue;
+    counts.set(extension, (counts.get(extension) ?? 0) + 1);
+  }
+  const languages = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 5)
+    .map(([extension]) => extension);
+  let sourceFileCount = 0;
+  for (const count of counts.values()) sourceFileCount += count;
+  return { sourceFileCount, languages };
+}
+
 export interface GitClient {
   /** Current branch name, or `undefined` on a detached HEAD. */
   currentBranch(): Promise<string | undefined>;
   /** The remote's default branch (`origin/HEAD`), falling back to a local guess. */
   defaultBranch(): Promise<string>;
   status(): Promise<GitStatus>;
+  /** What the repository contains: source files by language, and its commit count. */
+  codebase(): Promise<CodebaseSurvey>;
   headSha(short?: boolean): Promise<string>;
   branchExists(branch: string): Promise<boolean>;
   fetch(): Promise<void>;
@@ -91,6 +155,25 @@ export class ProcessGitClient implements GitClient {
       return [{ status: line.slice(0, 2).trim(), path: line.slice(3).trim() }];
     });
     return { branch: await this.currentBranch(), entries };
+  }
+
+  /**
+   * One `ls-files` and one `rev-list`. `--cached --others --exclude-standard`
+   * is the right file set for this question: it sees work the user has not
+   * committed yet — a fresh project's normal state — while `--exclude-standard`
+   * drops everything `.gitignore` covers, so a `node_modules` or a build
+   * directory cannot make an empty repository look like a codebase. Both calls
+   * are probes: an unborn branch has no HEAD to count, and neither absence is a
+   * failure worth degrading the section for.
+   */
+  public async codebase(): Promise<CodebaseSurvey> {
+    const listed = await this.tryRun(["ls-files", "--cached", "--others", "--exclude-standard"]) ?? "";
+    const paths = listed.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+    const commits = Number.parseInt(await this.tryRun(["rev-list", "--count", "HEAD"]) ?? "0", 10);
+    return {
+      ...summarizeSourceFiles(paths),
+      commitCount: Number.isFinite(commits) ? commits : 0,
+    };
   }
 
   public async headSha(short = true): Promise<string> {

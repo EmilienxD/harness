@@ -74,6 +74,7 @@ function harness(options: HarnessOptions = {}): Harness {
     currentBranch: async () => currentBranch,
     defaultBranch: async () => "main",
     status: async (): Promise<GitStatus> => ({ branch: currentBranch, entries: dirty ? [{ status: "M", path: "src/a.ts" }] : [] }),
+    codebase: async () => ({ sourceFileCount: 12, languages: ["ts"], commitCount: 40 }),
     headSha: async () => "a1b2c3d",
     branchExists: async (branch) => branches.has(branch),
     fetch: async () => { gitCalls.push("fetch"); },

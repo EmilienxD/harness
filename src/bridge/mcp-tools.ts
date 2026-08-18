@@ -37,7 +37,12 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "Grep for a specific symbol or string. " +
       "Reserve this tool for open-ended questions that span the codebase, " +
       "or tasks that match an available agent type. " +
-      "Do not use it to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n\n" +
+      "Do not use it to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n" +
+      "Everything else belongs here. Direct tools are for orientation only, a few targeted queries at a time; " +
+      "as soon as a question needs several of them, or needs whole files read, it is a launch instead — " +
+      "including when you believe you could answer it from what you already know, " +
+      "which is what a half-remembered codebase feels like from the inside. " +
+      "Answering it yourself spends the one context in the system that has to survive the whole project.\n\n" +
 
       "## Choosing the agent type\n\n" +
       "`type` is optional and defaults to `general-purpose`, so omit it when no narrower role fits.\n" +
@@ -47,12 +52,15 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         "This is the path for a fast change, critical fix or any unplanned modification; " +
         "complex or planned implementation goes through `start_auto_run` instead, " +
         "which owns branches, commits, and pull requests. " +
-        "It can be automated or handed to the user.\n" +
-      "- `Explore`: Fast read-only search agent for locating code. " +
-        "Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), " +
-        "or answer \"where is X defined / which files reference Y.\" " +
-        "Do NOT use it for code review, design-doc auditing, cross-file consistency checks, " +
-        "or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. " +
+        "It can be automated or handed to the user. " +
+        "An instruction addressed to you in the imperative — build this, fix this, change this, try this — " +
+        "asks for this launch. It is neither yours to carry out nor an occasion to explain that you do not implement: " +
+        "carry the user's own instruction through as the opening `prompt`, " +
+        "adding the context they did not have to repeat, " +
+        "and pass `interactive: true` when they will want to iterate on the result themselves.\n" +
+      "- `Explore`: Read-only search agent for code exploration. " +
+        "Use it to get up to date codebase reports. " +
+        "Do NOT use it for code review, design-doc auditing — it is not meant to make judgments, it is impartial and only surfaces facts" +
         "When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, " +
         "or \"very thorough\" to search across multiple locations and naming conventions.\n" +
       "- `webresearcher`: automated, read-only research for cutoff-sensitive external facts. " +

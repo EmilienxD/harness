@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { ProcessGitClient, dirtyPaths, isWorkingTreeClean } from "../src/git/client.js";
+import { ProcessGitClient, dirtyPaths, isWorkingTreeClean, summarizeSourceFiles } from "../src/git/client.js";
 
 const run = promisify(execFile);
 
@@ -68,4 +68,44 @@ test("a failing git command raises a typed boundary error carrying stderr", asyn
     assert.equal((error as { code: string }).code, "command-failed");
     return true;
   });
+});
+
+test("summarizing source files separates code from everything a project is merely described in", () => {
+  const summary = summarizeSourceFiles([
+    "README.md", "LICENSE", "package.json", ".gitignore", "docs/design.md", "data/rows.csv",
+    "src/a.ts", "src/b.ts", "src/c.tsx", "scripts/run.py", "Makefile", "src/no-extension.",
+  ]);
+  // A README, a licence, and a manifest describe a project without being one.
+  assert.equal(summary.sourceFileCount, 4);
+  // Most files first, so the label reads as the project's language.
+  assert.deepEqual(summary.languages, ["ts", "py", "tsx"]);
+  assert.deepEqual(summarizeSourceFiles(["README.md"]), { sourceFileCount: 0, languages: [] });
+});
+
+test("the codebase survey sees uncommitted work, ignores gitignored trees, and counts commits", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+
+  // A README and one commit: the repository exists, the project does not.
+  const bare = await client.codebase();
+  assert.equal(bare.sourceFileCount, 0);
+  assert.equal(bare.commitCount, 1);
+
+  await writeFile(join(root, ".gitignore"), "vendor/\n");
+  await mkdir(join(root, "vendor"), { recursive: true });
+  await writeFile(join(root, "vendor/huge.ts"), "export const vendored = 1;\n");
+  // Never committed, which is exactly what a project's first hours look like.
+  await writeFile(join(root, "app.ts"), "export const a = 1;\n");
+
+  const survey = await client.codebase();
+  assert.equal(survey.sourceFileCount, 1);
+  assert.deepEqual(survey.languages, ["ts"]);
+  assert.equal(survey.commitCount, 1);
+});
+
+test("an unborn branch surveys as no code and no commits rather than failing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-git-"));
+  await run("git", ["init", "--initial-branch", "main"], { cwd: root, windowsHide: true });
+  const survey = await new ProcessGitClient(root).codebase();
+  assert.deepEqual(survey, { sourceFileCount: 0, languages: [], commitCount: 0 });
 });

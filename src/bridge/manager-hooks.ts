@@ -78,6 +78,18 @@ export interface RepositoryBriefing {
   readonly defaultBranch: string;
   /** The project's own baseline commands, in the order a worker should run them. */
   readonly checks: readonly string[];
+  /**
+   * What the repository holds. Absent when the survey could not be taken, which
+   * degrades this one line rather than the Repository section.
+   */
+  readonly codebase?: CodebaseBriefing;
+}
+
+/** Source files and commits — see `CodebaseSurvey` in the git boundary. */
+export interface CodebaseBriefing {
+  readonly sourceFileCount: number;
+  readonly languages: readonly string[];
+  readonly commitCount: number;
 }
 
 export interface GitBriefingState {
@@ -156,6 +168,32 @@ async function section(
   }
 }
 
+/**
+ * The one line that says whether there is a project here yet.
+ *
+ * Two facts, and a reading of them only where the reading is not obvious. No
+ * source file means the repository cannot answer anything, so the line says so
+ * outright: every other section of this briefing describes work, and without
+ * this one the Manager reads "no roadmap, no issues, no PRs" as a project
+ * between milestones rather than one that has not started. A lone commit is the
+ * weaker signal and is phrased as one — it is what an untouched scaffold looks
+ * like, and also what a real project looks like on its first afternoon, so it
+ * is offered as a possibility to check rather than a conclusion.
+ */
+export function codebaseLine(codebase: CodebaseBriefing): string {
+  const commits = codebase.commitCount === 1 ? "1 commit" : `${codebase.commitCount} commits`;
+  if (codebase.sourceFileCount === 0) {
+    return `Codebase: no source files, ${commits} - there is no code in this repository yet. `
+      + "Nothing about the project can be derived from it, so a survey would come back empty and anything you would "
+      + "otherwise learn by reading it has to come from the user instead.";
+  }
+  const languages = codebase.languages.length === 0 ? "" : ` (${codebase.languages.join(", ")})`;
+  const unstarted = codebase.commitCount <= 1
+    ? " - at most one commit, so this may be an untouched scaffold rather than a project in progress; confirm before treating its contents as decisions someone made"
+    : "";
+  return `Codebase: ${codebase.sourceFileCount} source files${languages}, ${commits}${unstarted}`;
+}
+
 function issueLine(issue: BriefingIssue): string {
   const waits = issue.blockedBy.length === 0
     ? ""
@@ -216,6 +254,7 @@ export class ManagerBriefings {
       return [
         `${repository.name} | default branch ${repository.defaultBranch} | ${checks}`,
         `Checked out: ${git.branch} @ ${git.head}, working tree ${git.dirty ? "dirty" : "clean"}`,
+        ...(repository.codebase === undefined ? [] : [codebaseLine(repository.codebase)]),
       ].join("\n");
     });
   }
@@ -280,7 +319,11 @@ export class ManagerBriefings {
   async #roadmap(signal: AbortSignal): Promise<string> {
     const roadmap = await this.sources.roadmap(signal);
     if (roadmap === undefined) {
-      return marked("No open issue carries `ai:todo`, so this project has no roadmap yet. That is the normal state of a fresh repository, not a deletion. Recommend `/update-todo` to the user: it surveys the codebase, asks a few questions, and writes the first one.");
+      // Deliberately silent on how the first roadmap gets written: that branches
+      // on whether the repository holds anything to derive it from, which the
+      // Repository section states and `/update-todo` acts on. Two sections
+      // giving the procedure is two places to disagree.
+      return marked("No open issue carries `ai:todo`, so this project has no roadmap yet. That is the normal state of a fresh repository, not a deletion. Recommend `/update-todo` to the user: it works out what the first roadmap can be derived from, settles the rest with them, and writes it.");
     }
     const notes = roadmapNotes(roadmap);
     const inline = roadmapBlock(roadmap.tasks, "full", `Issue #${roadmap.number} - the whole roadmap follows, so do not fetch it again. The leading number is a task's position: pass it as \`task\`, with its subject as \`expect\`, to edit that task.`, notes);

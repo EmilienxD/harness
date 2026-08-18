@@ -157,11 +157,16 @@ function briefingSources(
   autoRunState: () => AutoRunState | undefined,
 ): BriefingSources {
   return {
-    repository: async () => ({
-      name: basename(workspaceRoot),
-      defaultBranch: await git.defaultBranch(),
-      checks: await repositoryChecks(workspaceRoot),
-    }),
+    repository: async () => {
+      const [defaultBranch, checks, codebase] = await Promise.all([
+        git.defaultBranch(),
+        repositoryChecks(workspaceRoot),
+        // Its own probe: a survey that fails costs its line, not the section
+        // that also carries the default branch and the baseline checks.
+        git.codebase().catch(() => undefined),
+      ]);
+      return { name: basename(workspaceRoot), defaultBranch, checks, ...(codebase === undefined ? {} : { codebase }) };
+    },
     git: async () => {
       const status = await git.status();
       return {
