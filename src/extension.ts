@@ -251,7 +251,6 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
       systemPrompt: sanitized.prompt,
       declaredTools: sanitized.tools,
       declaredDescription: sanitized.description,
-      declaredColor: sanitized.color,
       extraFrontmatter: sanitized.extraFrontmatter,
       declaredModel: sanitized.model,
       declaredEffort: sanitized.effort,

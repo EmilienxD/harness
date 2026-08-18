@@ -5,8 +5,6 @@ import test from "node:test";
 
 import {
   ABOARD_MCP_TOOLS,
-  AGENT_COLORS,
-  AGENT_COLOR_BY_NAME,
   AGENT_DEFINITION_DIRECTORY,
   BUILTIN_AGENT_NAMES,
   NATIVE_SUBAGENT_TYPES,
@@ -185,11 +183,12 @@ test("the rewrite narrows a bare Agent allowance to Claude Code's native types",
   assert.deepEqual(rewriteAgentTools(["WebSearch", "WebFetch"]), ["WebSearch", "WebFetch"]);
 });
 
-test("the rewrite copies unresolved frontmatter verbatim and assigns the role's color", async () => {
+test("the rewrite copies unresolved frontmatter verbatim, including the color", async () => {
   // aboard resolves six keys. Everything else is the author's: Claude Code
   // silently skips a key it does not know, so copying an unrecognized one
   // through costs nothing and refusing it would make the definition files less
-  // editable than they are meant to be.
+  // editable than they are meant to be. `color:` travels the same path — aboard
+  // assigns no color of its own.
   const source = [
     "---",
     "name: implementer",
@@ -209,6 +208,7 @@ test("the rewrite copies unresolved frontmatter verbatim and assigns the role's 
   const parsed = parseAgentDefinition(source);
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   assert.deepEqual(parsed.ok && parsed.value.extraFrontmatter, [
+    "color: pink",
     "maxTurns: 40",
     "hooks:",
     "  PreToolUse:",
@@ -217,9 +217,6 @@ test("the rewrite copies unresolved frontmatter verbatim and assigns the role's 
 
   const sanitized = sanitizeAgentDefinition(parsed.ok ? parsed.value : ({} as never));
   assert.deepEqual(sanitized.tools, ["Read", ...NATIVE_SUBAGENT_TYPES.map((type) => `Agent(${type})`)]);
-  // The source's own `color:` loses: the color is fleet-wide role identity, not
-  // a per-file field, so it is assigned rather than read.
-  assert.equal(sanitized.color, "green");
   assert.equal(sanitized.description, "Implement one issue.");
   assert.equal(sanitized.model, "opus");
   assert.equal(sanitized.effort, "high");
@@ -228,33 +225,54 @@ test("the rewrite copies unresolved frontmatter verbatim and assigns the role's 
   // grants and the tools the lease reasons about cannot drift apart.
   assert.equal(sanitized.writeCapability, "read-only");
 
-  // Every shipped definition survives the round trip with its capability intact.
+  // Every shipped definition survives the round trip with its capability intact,
+  // its color being the only carried-through frontmatter.
   for (const name of WORKER_AGENT_NAMES) {
     const agent = await definition(name);
     assert.equal(sanitizeAgentDefinition(agent).writeCapability, agent.writeCapability, name);
-    assert.deepEqual(sanitizeAgentDefinition(agent).extraFrontmatter, []);
+    assert.deepEqual(sanitizeAgentDefinition(agent).extraFrontmatter.map((line) => /^(\w+):/.exec(line)?.[1]), ["color"]);
   }
 });
 
-test("every aboard role has a distinct, supported color", () => {
-  assert.deepEqual(AGENT_COLOR_BY_NAME, {
-    manager: "purple",
-    brainstormer: "yellow",
-    webresearcher: "cyan",
-    implementer: "green",
-    "pr-doctor-afk": "orange",
-    "pr-doctor-hitl": "red",
-  });
-  const assigned = Object.values(AGENT_COLOR_BY_NAME);
-  for (const color of assigned) assert.equal(AGENT_COLORS.includes(color), true, color);
+test("the authored definitions declare the fleet colors, carried through rather than resolved", async () => {
+  // The color lives in the definition files as ordinary frontmatter, shipped
+  // with one distinct color per role. aboard assigns nothing: a user's edit to
+  // a file changes their fleet, and that is the point.
+  const colors: Record<string, string> = {};
+  for (const name of [...WORKER_AGENT_NAMES, "manager"] as const) {
+    const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");
+    const parsed = name === "manager" ? parseManagerAgentDefinition(source) : parseAgentDefinition(source);
+    assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
+    const lines = parsed.ok ? parsed.value.extraFrontmatter : [];
+    const colorLines = lines.filter((line) => line.startsWith("color:"));
+    assert.equal(colorLines.length, 1, `${name} must declare exactly one color line`);
+    colors[name] = colorLines[0]!.slice("color:".length).trim();
+  }
   // Color is identity in the session UI; two roles sharing one would make the
   // banner ambiguous exactly where it is meant to disambiguate.
-  assert.equal(new Set(assigned).size, assigned.length);
-  // Explore has no entry: it launches as Claude Code's builtin, and aboard
+  const assigned = Object.values(colors);
+  assert.equal(new Set(assigned).size, assigned.length, assigned.join(", "));
+  // Explore specifies no color: it launches as Claude Code's builtin, and aboard
   // writes no definition it could color.
-  for (const builtin of BUILTIN_AGENT_NAMES) {
-    assert.equal(builtin in AGENT_COLOR_BY_NAME, false);
-  }
+  const explore = parseBuiltinAgentProfile(await readFile(join(agentsRoot, "Explore.md"), "utf8"));
+  assert.equal(explore.ok, true, explore.ok ? undefined : explore.reason);
+});
+
+test("a color a user writes travels verbatim, and a blank one stays one line", () => {
+  // An unrecognized color renders grey in the session UI; refusing the launch
+  // over one would trade a cosmetic default for a dead terminal, so the value
+  // travels exactly as written.
+  const parsed = parseAgentDefinition(
+    "---\nname: implementer\ndescription: d\ntools: Read\nmodel: opus\ncolor: chartreuse\n---\nImplement.",
+  );
+  assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
+  assert.deepEqual(parsed.ok && parsed.value.extraFrontmatter, ["color: chartreuse"]);
+
+  const blank = parseAgentDefinition(
+    "---\nname: implementer\ndescription: d\ntools: Read\nmodel: opus\ncolor:\n---\nImplement.",
+  );
+  assert.equal(blank.ok, true, blank.ok ? undefined : blank.reason);
+  assert.deepEqual(blank.ok && blank.value.extraFrontmatter, ["color:"]);
 });
 
 test("rejects definitions outside the aboard catalogue or without required frontmatter", () => {

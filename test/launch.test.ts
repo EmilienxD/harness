@@ -498,10 +498,9 @@ test("refuses a definition that cannot produce a complete command line", () => {
 test("an agent-defined launch registers its definition where only that launch can find it", () => {
   const configuration = definition("implementer", ["Read", "Agent(Explore)"], {
     declaredDescription: "Implement one issue.",
-    declaredColor: "green",
     declaredModel: "opus",
     declaredEffort: "high",
-    extraFrontmatter: ["maxTurns: 40", "hooks:", "  PreToolUse: []"],
+    extraFrontmatter: ["color: green", "maxTurns: 40", "hooks:", "  PreToolUse: []"],
   });
   const plan = planLaunch(request({ configuration, prompt: "Go." }));
 
@@ -529,8 +528,9 @@ test("an agent-defined launch registers its definition where only that launch ca
       "tools: Read, Agent(Explore)",
       "model: opus",
       "effort: high",
+      // Keys aboard does not resolve are the author's and travel untouched —
+      // `color:` among them, exactly where the definition declared it.
       "color: green",
-      // Keys aboard does not resolve are the author's and travel untouched.
       "maxTurns: 40",
       "hooks:",
       "  PreToolUse: []",
@@ -567,7 +567,7 @@ test("model and effort ride the command line as well as the rewritten file, on s
   // launch: the values saved from the previous session can win instead. The
   // flags are unambiguous, so both carry the same value and the flag decides.
   const configuration = definition("implementer", ["Read"], {
-    declaredDescription: "d", declaredColor: "green", declaredModel: "opus", declaredEffort: "high",
+    declaredDescription: "d", declaredModel: "opus", declaredEffort: "high",
   });
   const flags = ["--model", "opus", "--effort", "high"];
   const plan = planLaunch(request({ configuration, prompt: "Go." }));
@@ -608,28 +608,16 @@ test("model and effort ride the command line as well as the rewritten file, on s
   );
 });
 
-test("passes an unrecognized color through and refuses frontmatter that would close the fence", () => {
-  // Claude Code renders an unknown color grey. Refusing the launch over one
-  // would trade a cosmetic default for a dead terminal, so the value travels as
-  // written and only unwritable YAML fails.
-  for (const color of ["chartreuse", "#00ff00"]) {
-    const configuration = definition("implementer", ["Read"], { declaredColor: color });
-    assert.equal(configuration.shape === "agent-defined" && configuration.declaredColor, color);
+test("passes carried-through frontmatter through and refuses a line that would close the fence", () => {
+  // Claude Code reads the keys it knows — `color:` rendering grey when it does
+  // not match its palette — and skips the rest. The value travels exactly as
+  // written; refusing the launch over it would trade a cosmetic default for a
+  // dead terminal, so only unwritable YAML fails.
+  for (const color of ["color: chartreuse", "color: #00ff00"]) {
+    const configuration = definition("implementer", ["Read"], { extraFrontmatter: [color] });
     const plan = planLaunch(request({ configuration, prompt: "Go." }));
-    assert.equal(plan.agentDefinition?.contents.includes(`color: ${color}\n`), true, color);
+    assert.equal(plan.agentDefinition?.contents.includes(`${color}\n`), true, color);
   }
-  // An empty value is an absent one: `color:` with nothing after it says less
-  // than omitting the key.
-  for (const blank of ["", "   "]) {
-    const configuration = definition("implementer", ["Read"], { declaredColor: blank });
-    assert.equal(configuration.shape === "agent-defined" && configuration.declaredColor, undefined);
-    const plan = planLaunch(request({ configuration, prompt: "Go." }));
-    assert.equal(plan.agentDefinition?.contents.includes("color:"), false);
-  }
-  assert.throws(
-    () => definition("implementer", ["Read"], { declaredColor: "green\nname: hijacked" }),
-    (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-color",
-  );
   // A carried-through line that closes the `---` fence would move the rest of
   // the frontmatter into the system prompt without any error.
   for (const line of ["---", "  ...  ", "maxTurns: 40\nname: hijacked"]) {
@@ -640,7 +628,7 @@ test("passes an unrecognized color through and refuses frontmatter that would cl
     );
   }
   // A builtin has no file to write any of it into.
-  for (const extra of [{ declaredColor: "green" }, { declaredDescription: "d" }, { extraFrontmatter: ["maxTurns: 40"] }]) {
+  for (const extra of [{ declaredDescription: "d" }, { extraFrontmatter: ["maxTurns: 40"] }]) {
     assert.throws(
       () => resolveLaunchConfiguration({ agentName: "Explore", ...extra }),
       (error: unknown) => error instanceof LaunchPlanError && error.code === "conflicting-launch-shape",

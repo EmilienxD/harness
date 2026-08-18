@@ -2,6 +2,7 @@
 name: manager
 description: Long-lived Manager. Orchestrates work across visible worker terminals, tracks GitHub and fleet state, and recommends the next action without implementing anything.
 tools: mcp__aboard__*, Read, Grep, Glob, Bash, Skill
+color: purple
 model: opus
 effort: medium
 ---

@@ -9,11 +9,8 @@ import {
   EFFORT_LEVELS,
   isEffortLevel,
   parseClaudeCommand,
-  type AgentColor,
   type EffortLevel,
 } from "../claude/launch.js";
-
-export { AGENT_COLORS, type AgentColor } from "../claude/launch.js";
 
 /** The Manager runs as the main session agent. */
 export const MANAGER_AGENT_NAME = "manager";
@@ -35,23 +32,12 @@ export const MANAGER_AGENT_NAME = "manager";
 export const AGENT_DEFINITION_DIRECTORY = ".aboard/agents";
 
 /**
- * One color per aboard role, assigned here rather than read from the definition
- * or a setting. The color is identity in the session UI, so it has to mean the
- * same thing in every workspace: a user who saw red on a `pr-doctor-hitl` once
- * must not meet a red implementer in the next project. Making it a field would
- * turn a fleet-wide convention into six independently editable files.
- *
- * `Explore` has no entry: it launches as Claude Code's own builtin, and aboard
- * writes no definition it could color.
+ * There is deliberately no per-role color table here. `color:` is a frontmatter
+ * key aboard does not resolve: it is carried through like any other author-owned
+ * key and Claude Code renders it. The scaffolded definitions ship one distinct
+ * color per role so the fleet convention starts coherent in every workspace;
+ * after that the files are the user's to edit.
  */
-export const AGENT_COLOR_BY_NAME: Readonly<Record<typeof MANAGER_AGENT_NAME | WorkerAgentName, AgentColor>> = {
-  manager: "purple",
-  brainstormer: "yellow",
-  webresearcher: "cyan",
-  implementer: "green",
-  "pr-doctor-afk": "orange",
-  "pr-doctor-hitl": "red",
-};
 
 /**
  * The subagent types a rewritten aboard agent may spawn through its `Agent`
@@ -92,7 +78,6 @@ const ABOARD_FRONTMATTER_KEYS: ReadonlySet<string> = new Set([
   "tools",
   "model",
   "effort",
-  "color",
   "command",
 ]);
 
@@ -374,8 +359,8 @@ export function rewriteAgentTools(tools: readonly string[]): readonly string[] {
 
 /**
  * The definition as it is written into the per-launch runtime directory: the
- * same document with its tool list narrowed, its color assigned by role, and
- * every key aboard does not resolve copied through untouched.
+ * same document with its tool list narrowed, and every key aboard does not
+ * resolve copied through untouched.
  *
  * It carries no name, because the name is per-launch — `aboard-<type>-<agentId>`,
  * minted by the planner that also owns the `--add-dir` the file sits under. A
@@ -388,7 +373,6 @@ export function rewriteAgentTools(tools: readonly string[]): readonly string[] {
 export interface SanitizedAgentDefinition {
   readonly description: string;
   readonly tools: readonly string[];
-  readonly color: AgentColor;
   readonly model: AgentModel;
   readonly effort?: AgentEffort;
   readonly command?: readonly string[];
@@ -404,7 +388,6 @@ export function sanitizeAgentDefinition(
   return {
     description: definition.description,
     tools,
-    color: AGENT_COLOR_BY_NAME[definition.name],
     model: definition.model,
     ...(definition.effort === undefined ? {} : { effort: definition.effort }),
     ...(definition.command === undefined ? {} : { command: definition.command }),

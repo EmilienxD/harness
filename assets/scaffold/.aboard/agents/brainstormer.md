@@ -2,6 +2,7 @@
 name: brainstormer
 description: Develop a product or architecture idea with the user and finish with a durable spec.
 tools: Read, Grep, Glob, Bash, Write, Edit, Agent, Skill
+color: yellow
 model: opus
 effort: high
 ---

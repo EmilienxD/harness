@@ -53,14 +53,13 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
   const parsed = parseManagerAgentDefinition(contents);
   if (!parsed.ok) throw new Error(`Invalid Manager agent definition: ${parsed.reason}`);
   // The rewrite is what the launch actually runs: same document, tool list
-  // narrowed, role color assigned, unresolved keys copied through.
+  // narrowed, unresolved keys — `color:` among them — copied through.
   const sanitized = sanitizeAgentDefinition(parsed.value);
   const configuration = resolveLaunchConfiguration({
     agentName: MANAGER_AGENT_NAME,
     systemPrompt: sanitized.prompt,
     declaredTools: sanitized.tools,
     declaredDescription: sanitized.description,
-    declaredColor: sanitized.color,
     extraFrontmatter: sanitized.extraFrontmatter,
     declaredModel: sanitized.model,
     declaredEffort: sanitized.effort,

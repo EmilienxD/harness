@@ -2,6 +2,7 @@
 name: webresearcher
 description: Research current external information from authoritative web sources and return a concise, cited answer.
 tools: WebSearch, WebFetch
+color: cyan
 model: opus
 effort: high
 ---

@@ -164,17 +164,6 @@ export function isEffortLevel(value: unknown): value is EffortLevel {
   return typeof value === "string" && EFFORT_LEVEL_SET.has(value);
 }
 
-/**
- * The display colors Claude Code renders for a subagent
- * (`docs/CLAUDE-REFERENCES/subagents.md`). This is the set aboard's own
- * `AGENT_COLOR_BY_NAME` is type-checked against, not a runtime gate: a value
- * outside it falls back to grey in the session UI, so refusing the launch over
- * one would trade a cosmetic default for a dead terminal.
- */
-export const AGENT_COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"] as const;
-
-export type AgentColor = (typeof AGENT_COLORS)[number];
-
 export type LaunchConfiguration =
   /**
    * An aboard agent definition (`.aboard/agents/<name>.md`), rewritten into a
@@ -197,16 +186,11 @@ export type LaunchConfiguration =
       /** `description:` from the same definition; a required frontmatter field. */
       readonly declaredDescription?: string;
       /**
-       * The role's display color, assigned by `AGENT_COLOR_BY_NAME` rather than
-       * read from the definition — it is fleet-wide identity, not per-file
-       * taste. Absent emits no `color:`; a value Claude Code does not recognize
-       * renders grey rather than failing the launch, so it is passed through.
-       */
-      readonly declaredColor?: string;
-      /**
        * Frontmatter lines for keys aboard does not resolve, copied into the
        * rewritten file verbatim. The user owns these files; an unknown key is
-       * theirs to add, and Claude Code skips one it does not recognize.
+       * theirs to add, and Claude Code skips one it does not recognize. This is
+       * also how `color:` reaches the rewrite: the scaffolded definitions ship
+       * one per role and the launcher never looks at the value.
        */
       readonly extraFrontmatter?: readonly string[];
       /**
@@ -255,7 +239,6 @@ export interface LaunchConfigurationInput {
   readonly systemPrompt?: string | undefined;
   readonly declaredTools?: readonly string[] | undefined;
   readonly declaredDescription?: string | undefined;
-  readonly declaredColor?: string | undefined;
   readonly extraFrontmatter?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
   readonly declaredEffort?: EffortLevel | undefined;
@@ -273,7 +256,6 @@ export type LaunchPlanErrorCode =
   | "invalid-tool-rule"
   | "invalid-model"
   | "invalid-effort"
-  | "invalid-color"
   | "invalid-frontmatter"
   | "invalid-session-id"
   | "unsafe-agent-id"
@@ -349,10 +331,9 @@ export function resolveLaunchConfiguration(
         );
       }
       // aboard writes no definition file for a builtin, so there is nothing for
-      // a color, a description, or carried-through frontmatter to be written
-      // into. Accepting them would silently drop them.
+      // a description or carried-through frontmatter to be written into.
+      // Accepting them would silently drop them.
       if (
-        input.declaredColor !== undefined ||
         input.declaredDescription !== undefined ||
         input.extraFrontmatter !== undefined
       ) {
@@ -396,23 +377,11 @@ export function resolveLaunchConfiguration(
         `The ${input.agentName} agent definition declares no tools`,
       );
     }
-    // A color Claude Code does not know renders grey; only a value that cannot
-    // be written as one frontmatter line is refused, for the same reason the
-    // carried-through lines below are checked. Everything else passes through.
-    const declaredColor =
-      input.declaredColor === undefined || input.declaredColor.trim().length === 0
-        ? undefined
-        : input.declaredColor.trim();
-    if (declaredColor !== undefined && /[\n\r]/.test(declaredColor)) {
-      throw new LaunchPlanError(
-        "invalid-color",
-        `Agent color must be a single line: ${JSON.stringify(input.declaredColor)}`,
-      );
-    }
     // Carried-through frontmatter is emitted verbatim inside the generated
     // document's `---` fence, so the only thing checked is that a line cannot
     // close that fence or forge a second one. A key aboard does not understand
-    // is the author's business and Claude Code skips it; a fence in the middle
+    // is the author's business and Claude Code skips it — `color:` travels this
+    // path, where an unknown value renders grey — and a fence in the middle
     // would silently move the rest of the frontmatter into the system prompt.
     for (const line of input.extraFrontmatter ?? []) {
       if (line.includes("\n") || line.includes("\r") || /^\s*(?:---|\.\.\.)\s*$/.test(line)) {
@@ -428,7 +397,6 @@ export function resolveLaunchConfiguration(
       systemPrompt: input.systemPrompt,
       declaredTools: input.declaredTools,
       ...(input.declaredDescription === undefined ? {} : { declaredDescription: input.declaredDescription }),
-      ...(declaredColor === undefined ? {} : { declaredColor }),
       ...(input.extraFrontmatter === undefined || input.extraFrontmatter.length === 0
         ? {}
         : { extraFrontmatter: input.extraFrontmatter }),
@@ -442,7 +410,6 @@ export function resolveLaunchConfiguration(
     input.systemPrompt !== undefined ||
     input.declaredTools !== undefined ||
     input.declaredDescription !== undefined ||
-    input.declaredColor !== undefined ||
     input.extraFrontmatter !== undefined ||
     input.declaredModel !== undefined ||
     input.declaredEffort !== undefined ||
@@ -773,7 +740,6 @@ function renderAgentDefinition(
     `tools: ${configuration.declaredTools.join(", ")}`,
     ...frontmatterLine("model", configuration.declaredModel),
     ...frontmatterLine("effort", configuration.declaredEffort),
-    ...frontmatterLine("color", configuration.declaredColor),
     ...(configuration.extraFrontmatter ?? []),
   ];
   return `---\n${frontmatter.join("\n")}\n---\n\n${configuration.systemPrompt.trim()}\n`;

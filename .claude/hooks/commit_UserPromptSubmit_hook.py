@@ -17,6 +17,7 @@ Any other prompt is let through untouched.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import urllib.error
@@ -41,7 +42,7 @@ WRITE_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit", "Update"}
 # the silent filters, and silent filters are what make a hook baffling.
 WriteScan = namedtuple(
     "WriteScan",
-    "paths outside failed_paths ignored records write_calls",
+    "paths outside failed_paths ignored records write_calls unresolved",
 )
 
 
@@ -99,6 +100,265 @@ def _content_blocks(record: dict):
     return content if isinstance(content, list) else []
 
 
+# ---------------------------------------------------------------------------
+# Files changed by shell commands
+#
+# Claude edits files without the Edit/Write tools more often than it should: a
+# heredoc redirect, `sed -i`, an inline `python - <<'PY'` calling open(p, "w"),
+# a PowerShell Set-Content. Those changes are as committable as the tool-driven
+# ones, so their targets are read off the command string too. Without this a
+# session that mixed both stages only the tool writes -- the Bash-written files
+# are never handed to `git add` and quietly miss the commit. (`prefer-edit-tool`
+# nudges Claude out of the habit, but /commit cannot assume it is installed.)
+#
+# Where a write is recognisable but its target is not -- `git apply`, a path
+# held in a variable, a glob -- the command is reported as unresolved and the
+# hook widens to staging every change in the repo. Widening is visible and
+# recoverable; dropping a file from the commit is neither.
+# ---------------------------------------------------------------------------
+
+SHELL_TOOLS = {"Bash", "PowerShell"}
+
+# Redirect sinks that discard output instead of naming a file.
+NULL_SINKS = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty",
+              "nul", "null", "$null", "con", "-"}
+
+# `> path` / `>> path`. The operator has to start a word, which is how shell
+# redirects are written and how the things that only look like one are ruled
+# out: `2>` and other fd captures, `&>`, and the `->`, `=>`, `<div>` that turn
+# up inside quoted source code.
+REDIRECT = re.compile(
+    r"(?:^|(?<=\s))>>?\s*(?![&>|])(\"[^\"]*\"|'[^']*'|[^\s;&|)`<>]+)"
+)
+
+# `<<'PY'` ... `PY`: the body is data, so it is dropped before the command
+# itself is parsed. The literal paths inside it are still read (see below) --
+# an inline script writing a file is the whole point.
+HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+
+# Interpreter writes whose target is a literal in the source.
+QUOTED_TARGETS = [
+    # python: open("f", "w"), Path("f").write_text(...)
+    re.compile(r"open\s*\(\s*(['\"])(?P<path>[^'\"]+)\1\s*,\s*['\"][rwaxbt+]*[wax+]"),
+    re.compile(r"Path\s*\(\s*(['\"])(?P<path>[^'\"]+)\1\s*\)\s*\.\s*write_(?:text|bytes)"),
+    # node: fs.writeFileSync("f", ...), Bun.write("f", ...), Deno.writeTextFile("f", ...)
+    re.compile(
+        r"(?:writeFile|appendFile|createWriteStream|outputFile)(?:Sync)?"
+        r"\s*\(\s*(['\"`])(?P<path>[^'\"`]+)\1"
+    ),
+    re.compile(r"(?:Bun\.write|Deno\.write\w*)\s*\(\s*(['\"`])(?P<path>[^'\"`]+)\1"),
+    # powershell / dd
+    re.compile(
+        r"\[(?:System\.)?IO\.File\]::(?:Write|Append)\w*\s*\(\s*(['\"])(?P<path>[^'\"]+)\1",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bof=(?P<path>[^\s;&|)`]+)"),
+]
+
+# "Something here wrote a file", used only to tell a write whose target we
+# failed to read from an ordinary command with no target to read. Kept
+# narrower than a nudge-hook's version would be: a false positive here stages
+# the whole repo, so a bare `.write(` is deliberately not on the list.
+WRITE_SIGNALS = re.compile(
+    r"(?:^|[;&|(`\n{])\s*(?:sudo\s+)?(?:tee|patch|dd|truncate|mv|cp|rm|touch)\b"
+    r"|\bgit\s+apply\b"
+    r"|(?:^|[;&|(`\n{]|\b(?:do|then|else|xargs|exec)\b)\s*(?:sudo\s+)?"
+    r"(?:sed|perl|ruby)\b(?=[^;&|`\n]*(?:\s-[A-Za-z]*i\b|\s--in-place))"
+    r"|(?:g?awk)\b(?=[^;&|`\n]*inplace)"
+    r"|\bopen\s*\([^)]*['\"][rwaxbt+]*[wax+][rwaxbt+]*['\"]"
+    r"|\.write_(?:text|bytes)\s*\(|\.writelines\s*\("
+    r"|\b(?:writeFile|appendFile|createWriteStream|outputFile)(?:Sync)?\s*\("
+    r"|\bBun\.write\s*\(|\bDeno\.write\w*\s*\("
+    r"|\b(?:Set-Content|Add-Content|Out-File|Export-Csv|Export-Clixml)\b",
+    re.IGNORECASE,
+)
+
+SEGMENT_SPLIT = re.compile(r"[;&|\n]+")
+LAUNCHERS = {"sudo", "xargs", "time", "nohup", "env", "command"}
+PS_WRITE_CMDLETS = {"set-content", "add-content", "out-file", "export-csv", "export-clixml"}
+PS_PATH_FLAGS = {"-path", "-filepath", "-literalpath"}
+VALUE_FLAGS = {"-e", "-f", "--expression", "--file"}
+EXPRESSION_FLAG = re.compile(r"^-[A-Za-z]*[ef][A-Za-z]*$|^--(?:expression|file)=")
+# A target we can see but cannot name: $VAR, %VAR%, a glob.
+COMPUTED = re.compile(r"[$*?`]|%\w+%")
+# `cd sub && sed -i ... f`: a relative target in the command is relative to
+# somewhere this hook can't know, so it can't be resolved against the record's
+# cwd the way every other path is.
+CHANGES_DIR = re.compile(r"(?:^|[;&|(`\n{])\s*(?:cd|pushd|popd|Set-Location)\b", re.IGNORECASE)
+NUMERIC = re.compile(r"^[\d.]+$")
+WORD_CHAR = re.compile(r"\w")
+PATHISH = re.compile(r"[./\\]")
+
+
+def _clean_token(token: str) -> str:
+    token = token.strip()
+    if len(token) > 1 and token[0] == token[-1] and token[0] in "\"'":
+        token = token[1:-1]
+    return token.strip()
+
+
+def _strip_heredocs(command: str) -> str:
+    """Drop heredoc bodies, keeping the header lines that carry the redirect."""
+    kept, terminator = [], None
+    for line in command.splitlines():
+        if terminator is not None:
+            if line.strip() == terminator:
+                terminator = None
+            continue
+        kept.append(line)
+        opener = None
+        for opener in HEREDOC_OPEN.finditer(line):
+            pass
+        if opener:
+            terminator = opener.group(2)
+    return "\n".join(kept)
+
+
+def _tokenize(segment: str):
+    """Shell-ish tokens. posix=False keeps Windows backslashes intact."""
+    try:
+        tokens = shlex.split(segment, posix=False)
+    except ValueError:
+        tokens = segment.split()
+    return [_clean_token(t) for t in tokens if t.strip()]
+
+
+def _bare_operands(args):
+    return [a for a in args if not a.startswith("-")]
+
+
+def _in_place(args) -> bool:
+    """An -i flag anywhere: `-i`, `-i.bak`, `perl -pi -e`, `awk -i inplace`."""
+    return any(
+        arg == "--in-place" or arg == "inplace"
+        or (arg.startswith("-") and not arg.startswith("--") and "i" in arg.lstrip("-"))
+        for arg in args
+    )
+
+
+def _editor_operands(name, args):
+    """File operands of an in-place sed/perl/awk, script and flag values dropped."""
+    value_flags = set(VALUE_FLAGS) | ({"-i", "-v"} if name in ("awk", "gawk") else set())
+    operands, skip = [], False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("-"):
+            skip = arg in value_flags
+            continue
+        operands.append(arg)
+    # Without an -e/-f flag the first bare operand is the inline script.
+    if operands and not any(EXPRESSION_FLAG.match(a) for a in args):
+        operands = operands[1:]
+    return operands
+
+
+def _ps_operands(args):
+    """The file a PowerShell write cmdlet targets: -Path, else the first
+    operand shaped like one (`-Encoding utf8` must not read as a path)."""
+    named, take_next = [], False
+    for arg in args:
+        if take_next:
+            named.append(arg)
+            take_next = False
+        elif arg.lower() in PS_PATH_FLAGS:
+            take_next = True
+    if named:
+        return named
+    for arg in _bare_operands(args):
+        if PATHISH.search(arg):
+            return [arg]
+    return []
+
+
+def _operand_targets(shell):
+    """(paths, unreadable) for commands that name their target as an operand."""
+    paths, unreadable = [], False
+    for segment in SEGMENT_SPLIT.split(shell):
+        tokens = _tokenize(segment)
+        while tokens and tokens[0].lower() in LAUNCHERS:
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        name = os.path.basename(tokens[0]).lower()
+        args = tokens[1:]
+
+        if name == "tee":
+            paths += _bare_operands(args)
+        elif name in ("sed", "perl", "ruby", "awk", "gawk"):
+            if _in_place(args):
+                paths += _editor_operands(name, args)
+        elif name in ("mv", "cp", "rm", "touch"):
+            # Both ends of a move matter: the source is a deletion to stage,
+            # the destination a new file.
+            paths += _bare_operands(args)
+        elif name in PS_WRITE_CMDLETS:
+            found = _ps_operands(args)
+            paths += found
+            unreadable = unreadable or not found
+        elif name == "patch" or (name == "git" and args[:1] == ["apply"]):
+            # The paths live inside the diff, not the command line.
+            unreadable = True
+    return paths, unreadable
+
+
+def shell_write_targets(command):
+    """
+    (paths, resolved) for one shell command, paths exactly as written.
+
+    Read off the string: redirect targets, `tee`/`mv`/`cp`/`rm`/`touch`
+    operands, the file operands of an in-place `sed`/`perl`/`awk`, and literal
+    paths inside inline python/node/PowerShell writes.
+
+    `resolved` is False when the command is recognisably a write but nothing
+    usable came out of it -- `git apply`, a target held in a variable, a glob
+    -- which tells the caller to widen instead of committing a subset. A
+    command mixing a literal target with a computed one also reads as
+    unresolved: the literal alone would be a silent partial answer.
+    """
+    if not isinstance(command, str) or not command.strip():
+        return [], True
+
+    shell = _strip_heredocs(command)
+    raw, unreadable = _operand_targets(shell)
+
+    for match in REDIRECT.finditer(shell):
+        raw.append(_clean_token(match.group(1)))
+
+    # The inline-script patterns run against the full command: the write they
+    # are looking for is inside the heredoc body that was just stripped.
+    for pattern in QUOTED_TARGETS:
+        raw += [_clean_token(m.group("path")) for m in pattern.finditer(command)]
+
+    paths, seen = [], set()
+    for path in raw:
+        low = path.lower()
+        if not path or path in seen or low in NULL_SINKS or low.startswith("/dev/"):
+            continue
+        # `x >> 1` and `if a >= 5` from a heredoc'd script that survived.
+        if NUMERIC.match(path) or not WORD_CHAR.search(path):
+            continue
+        if COMPUTED.search(path):
+            unreadable = True
+            continue
+        seen.add(path)
+        paths.append(path)
+
+    # A leading slash counts as absolute whatever the host platform thinks:
+    # these commands ran in a shell, not through ntpath.
+    if paths and CHANGES_DIR.search(shell) and any(
+        not (os.path.isabs(p) or p.startswith(("/", "\\"))) for p in paths
+    ):
+        unreadable = True
+
+    if unreadable:
+        return paths, False
+    if not paths and WRITE_SIGNALS.search(command):
+        return [], False
+    return paths, True
+
+
 def _scan_writes(transcript_path: str, repo_root: str):
     """
     Parse the session transcript for file-writing tool_use entries and
@@ -108,6 +368,9 @@ def _scan_writes(transcript_path: str, repo_root: str):
     Notes on the transcript format, which the parsing below relies on:
 
     - Write tool calls are `tool_use` blocks inside `assistant` records.
+    - Bash/PowerShell blocks are scanned too: a heredoc, `sed -i` or inline
+      python writes real files, and staging only the Edit/Write ones would
+      commit a subset of the session's work.
     - `file_path` is usually absolute but not always, so relative paths
       are resolved against the *record's own* cwd, not the hook's.
     - A tool call that failed is reported later, in a `tool_result` block
@@ -123,6 +386,7 @@ def _scan_writes(transcript_path: str, repo_root: str):
         return None
 
     calls = []  # (tool_use_id, abs path) in transcript order
+    unresolved = []  # (tool_use_id, command) for shell writes with no readable target
     failed_ids = set()
     records = 0
 
@@ -146,22 +410,31 @@ def _scan_writes(transcript_path: str, repo_root: str):
 
                 if block_type != "tool_use":
                     continue
-                if block.get("name") not in WRITE_TOOLS:
+
+                name = block.get("name")
+                if name not in WRITE_TOOLS and name not in SHELL_TOOLS:
                     continue
 
                 tool_input = block.get("input")
                 if not isinstance(tool_input, dict):
                     continue
 
+                tool_use_id = block.get("id") or f"_anon{len(calls)}"
+
+                if name in SHELL_TOOLS:
+                    command = tool_input.get("command")
+                    targets, resolved = shell_write_targets(command)
+                    for target in targets:
+                        calls.append((tool_use_id, _abs(target, record_cwd)))
+                    if not resolved:
+                        unresolved.append((tool_use_id, command))
+                    continue
+
                 raw_path = tool_input.get("file_path") or tool_input.get("notebook_path")
                 if not isinstance(raw_path, str) or not raw_path.strip():
                     continue
 
-                if not os.path.isabs(raw_path):
-                    raw_path = os.path.join(record_cwd, raw_path)
-
-                tool_use_id = block.get("id") or f"_anon{len(calls)}"
-                calls.append((tool_use_id, os.path.normpath(raw_path)))
+                calls.append((tool_use_id, _abs(raw_path, record_cwd)))
     except OSError:
         return None
 
@@ -192,6 +465,13 @@ def _scan_writes(transcript_path: str, repo_root: str):
     # and the like, which Claude touching does not make commit-worthy.
     paths, ignored = filter_ignored(inside, repo_root)
 
+    # A command that failed wrote nothing, so it is not an unreadable write.
+    unreadable = []
+    for tool_use_id, command in unresolved:
+        text = " ".join(str(command).split())
+        if tool_use_id not in failed_ids and text and text not in unreadable:
+            unreadable.append(text)
+
     return WriteScan(
         paths=paths,
         outside=outside,
@@ -199,19 +479,37 @@ def _scan_writes(transcript_path: str, repo_root: str):
         ignored=ignored,
         records=records,
         write_calls=len(calls),
+        unresolved=unreadable,
     )
+
+
+def _abs(path: str, cwd: str) -> str:
+    """A path as written in a tool call, resolved against that call's cwd."""
+    path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        path = os.path.join(cwd, path)
+    return os.path.normpath(path)
+
+
+def changed_paths(scan):
+    """
+    The paths a scan says to stage, or None for "no usable list" -- which
+    tells the caller to stage everything instead. None covers an unreadable
+    transcript, a session with no writes at all, and a shell write whose
+    target could not be read: staging wide is visible in the result, staging
+    a subset of what changed is not.
+    """
+    if scan is None or scan.unresolved:
+        return None
+    return scan.paths or None
 
 
 def get_changed_paths(transcript_path: str, repo_root: str):
     """
     Absolute paths Claude wrote to this session, so we only stage what it
-    actually changed rather than every dirty file in the repo. None means
-    "no usable list", telling the caller to fall back to staging all.
+    actually changed rather than every dirty file in the repo.
     """
-    scan = _scan_writes(transcript_path, repo_root)
-    if scan is None:
-        return None
-    return scan.paths or None
+    return changed_paths(_scan_writes(transcript_path, repo_root))
 
 
 def _is_within(path: str, root: str) -> bool:
@@ -335,6 +633,12 @@ def _rel(path, root):
         return os.path.relpath(path, root)
     except ValueError:
         return path
+
+
+def _shorten(text, limit=90):
+    """One line of a command, for reports where the point is which command."""
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 # ---------------------------------------------------------------------------
@@ -1257,8 +1561,15 @@ def build_dry_run_report(message, session_id, transcript_path, repo_root, scan, 
             out.append("")
             out.append(f"Skipped -- gitignored ({len(scan.ignored)}):")
             out += [f"  {_rel(p, repo_root)}" for p in scan.ignored]
+        if scan.unresolved:
+            out.append("")
+            out.append(
+                f"Shell writes whose target could not be read ({len(scan.unresolved)}):"
+            )
+            out += [f"  {_shorten(c)}" for c in scan.unresolved]
+            out.append("  Staging everything rather than commit a subset.")
 
-        if not scan.paths:
+        if changed_paths(scan) is None:
             out.append("")
             out.append("Would stage all uncommitted changes in the repo.")
             fallback = True
@@ -1460,7 +1771,9 @@ def main():
         )
         return
 
-    changed = get_changed_paths(transcript_path, repo_root)
+    scan = _scan_writes(transcript_path, repo_root)
+    changed = changed_paths(scan)
+    widened = ""
 
     if changed:
         add_result, targets = stage_paths(changed, repo_root)
@@ -1471,9 +1784,15 @@ def main():
             )
             return
     else:
-        # No session-derived list (e.g. transcript unavailable): fall back
-        # to staging everything, matching the previous behaviour.
+        # No usable session-derived list -- an unreadable transcript, or a
+        # shell write whose target the scan could not name. Stage everything
+        # rather than commit a subset, and say which it was.
         add_result, targets = run(["git", "add", "-A"], repo_root), []
+        if scan is not None and scan.unresolved:
+            widened = (
+                f"; staged the whole tree -- {len(scan.unresolved)} shell "
+                "write(s) with an unreadable target"
+            )
 
     if add_result.returncode != 0:
         finish(f"git add failed:\n{add_result.stderr}")
@@ -1521,7 +1840,7 @@ def main():
     count = len(staged.stdout.strip().splitlines())
     held_back = len(staged_elsewhere(targets, repo_root)) if scope else 0
     suffix = f", {held_back} left staged" if held_back else ""
-    finish(f"Committed {sha} ({count} file(s){suffix}): {message}")
+    finish(f"Committed {sha} ({count} file(s){suffix}){widened}: {message}")
 
 
 if __name__ == "__main__":

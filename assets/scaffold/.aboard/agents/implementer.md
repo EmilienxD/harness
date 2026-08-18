@@ -2,6 +2,7 @@
 name: implementer
 description: Implement one resolved GitHub issue on the branch already checked out, leaving the change uncommitted in the working tree.
 tools: Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill, TaskCreate, TaskGet, TaskList, TaskStop, TaskUpdate, TodoWrite
+color: green
 model: opus
 effort: high
 ---
