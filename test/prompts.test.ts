@@ -47,7 +47,7 @@ const issue47: IssueSnapshot = {
   number: 47,
   title: "Add token refresh",
   body: "Refresh the access token before it expires.",
-  labels: ["ai:afk"],
+  labels: ["[AI]-afk"],
   state: "open",
   parentIssueNumber: 31,
   branch: "feat/47-token-refresh",
@@ -57,7 +57,7 @@ const issue31: IssueSnapshot = {
   number: 31,
   title: "Auth rework",
   body: "The auth subsystem is replaced end to end.",
-  labels: ["ai:spec"],
+  labels: ["[AI]-spec"],
   state: "open",
 };
 
@@ -98,13 +98,16 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
 test("carries the disposition each label implies", () => {
   // The mapping is data, tested at the data level; the prose each disposition
   // resolves into is free to change.
-  assert.equal(issueDisposition(["ai:afk"]), "afk");
-  assert.equal(issueDisposition(["ai:hitl"]), "hitl");
+  assert.equal(issueDisposition(["[AI]-afk"]), "afk");
+  assert.equal(issueDisposition(["[AI]-hitl"]), "hitl");
   assert.equal(issueDisposition([]), "unclassified");
   // A contradictory pair resolves to hitl: only a human may close one.
-  assert.equal(issueDisposition(["ai:afk", "ai:hitl"]), "hitl");
-  assert.equal(issueDisposition(["AI:AFK"]), "afk");
-  assert.equal(issueDisposition(["ai:spec"]), "unclassified");
+  assert.equal(issueDisposition(["[AI]-afk", "[AI]-hitl"]), "hitl");
+  assert.equal(issueDisposition(["[ai]-AFK"]), "afk");
+  assert.equal(issueDisposition(["[AI]-spec"]), "unclassified");
+  // The former prefix has no compatibility path: those labels are ordinary
+  // user labels now, just like the unprefixed spellings.
+  assert.equal(issueDisposition(["ai:afk", "ai:hitl", "AI:AFK"]), "unclassified");
   // The unprefixed names are the user's own labels, never aboard's.
   assert.equal(issueDisposition(["afk", "hitl"]), "unclassified");
 });
@@ -233,7 +236,7 @@ test("rejects an empty instruction and a missing issue or pull request", async (
 test("several issues each resolve in the caller's order and share one parent spec", async () => {
   const issue52: IssueSnapshot = {
     number: 52, title: "Cache the refreshed token", body: "Keep the refreshed token warm.",
-    labels: ["ai:afk"], state: "open", parentIssueNumber: 31,
+    labels: ["[AI]-afk"], state: "open", parentIssueNumber: 31,
   };
   const github = new FakeGitHub({ issues: [issue47, issue52, issue31] });
   const prompt = await new PromptResolver({ github }).resolve({
@@ -270,7 +273,7 @@ test("recursive issue context terminates across parent and reference cycles", as
     number: 52,
     title: "Cache the token",
     body: "Uses the auth contract.",
-    labels: ["ai:afk"],
+    labels: ["[AI]-afk"],
     state: "open",
     dependencyIssueNumbers: [31],
   };
@@ -299,7 +302,7 @@ test("recursive issue context has a hard node bound even without a cycle", async
     number: index + 1,
     title: `Linked ${index + 1}`,
     body: `Body ${index + 1}`,
-    labels: ["ai:afk"],
+    labels: ["[AI]-afk"],
     state: "open",
     dependencyIssueNumbers: index === 9 ? [] : [index + 2],
   }));

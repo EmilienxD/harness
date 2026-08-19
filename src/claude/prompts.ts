@@ -194,11 +194,11 @@ function requireInstruction(instruction: string): string {
 function dispositionGuidance(disposition: IssueDisposition): string {
   switch (disposition) {
     case "afk":
-      return "This issue is labelled `ai:afk`: aboard will commit your change, open a pull request, and merge it without further human review. Leave the work in the working tree and make sure the checks you can run pass first.";
+      return "This issue is labelled `[AI]-afk`: aboard will commit your change, open a pull request, and merge it without further human review. Leave the work in the working tree and make sure the checks you can run pass first.";
     case "hitl":
-      return "This issue is labelled `ai:hitl`: aboard will commit your change and open a pull request, then wait for the user to review and merge it. Leave the work in the working tree, and make your final message a clear account of what you changed and why.";
+      return "This issue is labelled `[AI]-hitl`: aboard will commit your change and open a pull request, then wait for the user to review and merge it. Leave the work in the working tree, and make your final message a clear account of what you changed and why.";
     case "unclassified":
-      return "This issue carries neither `ai:afk` nor `ai:hitl`, which is a legitimate but unresolved state. Leave the work in the working tree and say in your final message that the issue is unclassified.";
+      return "This issue carries neither `[AI]-afk` nor `[AI]-hitl`, which is a legitimate but unresolved state. Leave the work in the working tree and say in your final message that the issue is unclassified.";
   }
 }
 

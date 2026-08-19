@@ -44,7 +44,7 @@ test("fresh scaffold installs assets and hooks and registers no project-scoped M
   }
   assert.deepEqual(report.installed, []);
   // The scaffolder reaches no GitHub boundary at all: a repository with no
-  // `ai:todo` carrier is the normal first-run state, and an empty placeholder
+  // `[AI]-todo` carrier is the normal first-run state, and an empty placeholder
   // issue is worse than none because it looks like a roadmap. The briefing
   // reports the absence as work to do, and `/update-todo` writes the first one.
   assert.equal("todo" in report, false);

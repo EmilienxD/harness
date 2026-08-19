@@ -22,7 +22,7 @@ import {
 } from "../domain/roadmap.js";
 import type { CandidateIssue } from "../domain/auto-run.js";
 import { referencedIssueNumbers } from "../shared/issues.js";
-import { LABEL_HITL, LABEL_SPEC, LABEL_TODO, issueDisposition } from "../shared/labels.js";
+import { LABEL_HITL, LABEL_SPEC, LABEL_TODO, hasLabel, issueDisposition } from "../shared/labels.js";
 
 export { ABOARD_LABELS } from "../shared/labels.js";
 export type { AboardLabel } from "../shared/labels.js";
@@ -555,7 +555,7 @@ export class GitHubClient implements GitHubPromptSource {
   }
 
   async #mintRoadmap(body: string): Promise<{ readonly number: number; readonly notices: readonly string[] }> {
-    // Plain create, not `--force`: a user-owned `ai:todo` label keeps its colour
+    // Plain create, not `--force`: a user-owned `[AI]-todo` label keeps its colour
     // and description, and "already exists" is a success for our purposes.
     try { await this.gh.run(["label", "create", LABEL_TODO, "--description", "Project roadmap", "--color", "1D76DB"]); }
     catch { /* the label already exists, which is what we wanted anyway */ }
@@ -600,14 +600,14 @@ export class GitHubClient implements GitHubPromptSource {
   }
 
   /**
-   * The briefing's ready/blocked list. `ai:spec` and `ai:todo` carriers are
+   * The briefing's ready/blocked list. `[AI]-spec` and `[AI]-todo` carriers are
    * dropped: the roadmap is rendered separately and a spec is an umbrella, not
    * a task. Oldest first, which reads as priority.
    */
   public async listRoadmapIssues(): Promise<readonly RoadmapIssue[]> {
     const page = await this.#scanOpenIssues();
     return page.rows.flatMap((row) => {
-      if (row.labels.some((label) => label.toLowerCase() === LABEL_SPEC || label.toLowerCase() === LABEL_TODO)) return [];
+      if (hasLabel(row.labels, LABEL_SPEC) || hasLabel(row.labels, LABEL_TODO)) return [];
       return [{
         number: row.number,
         title: row.title,
@@ -810,7 +810,7 @@ export class GitHubClient implements GitHubPromptSource {
     }
     const item = record(json(output, "roadmap issue lookup"), "roadmap issue lookup");
     if (state(item.state, "roadmap issue lookup.state") !== "open") return undefined;
-    if (!labels(item.labels, "roadmap issue lookup.labels").includes(LABEL_TODO)) return undefined;
+    if (!hasLabel(labels(item.labels, "roadmap issue lookup.labels"), LABEL_TODO)) return undefined;
     return {
       number: integer(item.number, "roadmap issue lookup.number"),
       body: string(item.body ?? "", "roadmap issue lookup.body"),

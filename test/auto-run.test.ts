@@ -22,7 +22,7 @@ import {
 function candidate(overrides: Partial<CandidateIssue> & { readonly number: number }): CandidateIssue {
   return {
     title: `Issue ${overrides.number}`,
-    labels: ["ai:afk"],
+    labels: ["[AI]-afk"],
     state: "open",
     openBlockedByNumbers: [],
     dependencyNumbers: [],
@@ -164,7 +164,7 @@ test("an afk issue has no approval gate", () => {
 test("selection skips unclassified, defers blocked, and orders by creation", () => {
   const selection = selectIssues([
     candidate({ number: 37, title: "Later", openBlockedByNumbers: [35], createdAt: "2026-01-04T00:00:00.000Z" }),
-    candidate({ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], createdAt: "2026-01-02T00:00:00.000Z" }),
+    candidate({ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], createdAt: "2026-01-02T00:00:00.000Z" }),
     candidate({ number: 34, title: "Add retry backoff", createdAt: "2026-01-01T00:00:00.000Z" }),
     candidate({ number: 36, title: "Unlabelled", labels: [], createdAt: "2026-01-03T00:00:00.000Z" }),
     candidate({ number: 38, title: "Already done", state: "closed", createdAt: "2026-01-05T00:00:00.000Z" }),
@@ -172,7 +172,7 @@ test("selection skips unclassified, defers blocked, and orders by creation", () 
   assert.deepEqual(selection.issues.map((entry) => entry.number), [34, 35]);
   assert.deepEqual(selection.issues.map((entry) => entry.disposition), ["afk", "hitl"]);
   assert.deepEqual(selection.skipped, [
-    { number: 36, reason: "unclassified: neither ai:afk nor ai:hitl" },
+    { number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
     { number: 37, reason: "blocked by open #35" },
   ]);
 });
@@ -218,9 +218,9 @@ test("dependency cycles are detected, broken locally, and ordered deterministica
 
 test("an umbrella never enters the queue, silently unless it is classified", () => {
   const selection = selectIssues([
-    candidate({ number: 10, labels: ["ai:spec"], createdAt: "2026-01-01T00:00:00.000Z" }),
+    candidate({ number: 10, labels: ["[AI]-spec"], createdAt: "2026-01-01T00:00:00.000Z" }),
     candidate({ number: 11, labels: [], hasChildren: true, createdAt: "2026-01-02T00:00:00.000Z" }),
-    candidate({ number: 12, labels: ["ai:afk"], hasChildren: true, createdAt: "2026-01-03T00:00:00.000Z" }),
+    candidate({ number: 12, labels: ["[AI]-afk"], hasChildren: true, createdAt: "2026-01-03T00:00:00.000Z" }),
     candidate({ number: 13, createdAt: "2026-01-04T00:00:00.000Z" }),
   ]);
   // The plain spec and the plain parent are dropped without a line — every
@@ -234,10 +234,10 @@ test("an umbrella never enters the queue, silently unless it is classified", () 
 });
 
 test("a spec that is also labelled for implementation is reported as the contradiction it is", () => {
-  const selection = selectIssues([candidate({ number: 10, labels: ["ai:spec", "ai:hitl"] })]);
+  const selection = selectIssues([candidate({ number: 10, labels: ["[AI]-spec", "[AI]-hitl"] })]);
   assert.equal(selection.issues.length, 0);
   assert.deepEqual(selection.skipped, [
-    { number: 10, reason: "umbrella: labelled ai:spec, so its children are the work" },
+    { number: 10, reason: "umbrella: labelled [AI]-spec, so its children are the work" },
   ]);
 });
 
@@ -249,6 +249,6 @@ test("a blocked issue becomes selectable once its dependency closes", () => {
 });
 
 test("hitl wins a contradictory label pair because only a human may close it", () => {
-  const selection = selectIssues([candidate({ number: 40, title: "Both", labels: ["ai:afk", "ai:hitl"] })]);
+  const selection = selectIssues([candidate({ number: 40, title: "Both", labels: ["[AI]-afk", "[AI]-hitl"] })]);
   assert.equal(selection.issues[0]?.disposition, "hitl");
 });

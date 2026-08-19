@@ -284,7 +284,7 @@ export class ManagerBriefings {
 
   #autoRun(): string {
     const run = this.sources.autoRun();
-    if (run === undefined) return "No run is active. `/auto` starts one over every open ai:afk / ai:hitl issue, dependencies first and then oldest first.";
+    if (run === undefined) return "No run is active. `/auto` starts one over every open [AI]-afk / [AI]-hitl issue, dependencies first and then oldest first.";
     const lines = [
       `Running - phase ${run.phase}, ${run.completedCount} issue(s) done, Chrome ${run.chromeEnabled ? "on" : "off"}.`,
     ];
@@ -322,7 +322,7 @@ export class ManagerBriefings {
       // on whether the repository holds anything to derive it from, which the
       // Repository section states and `/update-todo` acts on. Two sections
       // giving the procedure is two places to disagree.
-      return marked("No open issue carries `ai:todo`, so this project has no roadmap yet. That is the normal state of a fresh repository, not a deletion. Recommend `/update-todo` to the user: it works out what the first roadmap can be derived from, settles the rest with them, and writes it.");
+      return marked("No open issue carries `[AI]-todo`, so this project has no roadmap yet. That is the normal state of a fresh repository, not a deletion. Recommend `/update-todo` to the user: it works out what the first roadmap can be derived from, settles the rest with them, and writes it.");
     }
     const notes = roadmapNotes(roadmap);
     const inline = roadmapBlock(roadmap.tasks, "full", `Issue #${roadmap.number} - the whole roadmap follows, so do not fetch it again. The leading number is a task's position: pass it as \`task\`, with its subject as \`expect\`, to edit that task.`, notes);
@@ -365,7 +365,7 @@ function marked(content: string): string {
 /** Facts about the roadmap's condition that the Manager may need to act on. */
 function roadmapNotes(roadmap: RoadmapBriefing): readonly string[] {
   const notes: string[] = [];
-  if (roadmap.carrierCount > 1) notes.push(`${roadmap.carrierCount} issues carry \`ai:todo\`; #${roadmap.number} is in use.`);
+  if (roadmap.carrierCount > 1) notes.push(`${roadmap.carrierCount} issues carry \`[AI]-todo\`; #${roadmap.number} is in use.`);
   if (roadmap.duplicateSubjects.length > 0) notes.push(`Duplicate task text in the roadmap: ${roadmap.duplicateSubjects.map((subject) => `"${subject}"`).join(", ")}. Ask the user whether one should be removed.`);
   if (roadmap.nearBound) notes.push("The roadmap is near its size bound; consider asking the user about pruning completed items.");
   return notes;
@@ -389,7 +389,7 @@ function roadmapBlock(tasks: readonly RoadmapTask[], mode: "full" | "pending", h
  */
 export function renderRoadmapReminder(roadmap: RoadmapBriefing | undefined, at: IsoTimestamp): string {
   if (roadmap === undefined) {
-    return marked(`Roadmap as of ${at}: no open issue carries \`ai:todo\`, so there is still no roadmap. Recommend \`/update-todo\` when the project has a direction worth recording.`);
+    return marked(`Roadmap as of ${at}: no open issue carries \`[AI]-todo\`, so there is still no roadmap. Recommend \`/update-todo\` when the project has a direction worth recording.`);
   }
   const pending = renderTasks(roadmap.tasks, "pending");
   const body = pending.length === 0

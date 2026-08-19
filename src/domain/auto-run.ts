@@ -8,7 +8,7 @@
  * postcondition" and that decision must be testable without fakes.
  */
 
-import { LABEL_SPEC, issueDisposition } from "../shared/labels.js";
+import { LABEL_SPEC, hasLabel, issueDisposition } from "../shared/labels.js";
 
 export const AUTO_RUN_PHASES = [
   "branch",
@@ -301,7 +301,7 @@ export interface Selection {
  * because a later merge can unblock it; the engine re-runs this after every
  * merge.
  *
- * An umbrella — an `ai:spec` issue, or any issue with sub-issues of its own —
+ * An umbrella — an `[AI]-spec` issue, or any issue with sub-issues of its own —
  * never enters the queue: implementing one directly would duplicate its
  * children's work. That exclusion is silent for the ordinary case, because
  * every repository has specs and a skip line per spec on every start is noise,
@@ -323,7 +323,7 @@ export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
       continue;
     }
     if (disposition === undefined) {
-      skipped.push({ number: candidate.number, reason: "unclassified: neither ai:afk nor ai:hitl" });
+      skipped.push({ number: candidate.number, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" });
       continue;
     }
     if (candidate.openBlockedByNumbers.length > 0) {
@@ -467,7 +467,7 @@ function classify(labels: readonly string[]): IssueDisposition | undefined {
 
 /** Why this issue is an umbrella, or `undefined` when it is a leaf. */
 function umbrellaReason(candidate: CandidateIssue): string | undefined {
-  if (candidate.labels.some((label) => label.trim().toLowerCase() === LABEL_SPEC)) {
+  if (hasLabel(candidate.labels, LABEL_SPEC)) {
     return `umbrella: labelled ${LABEL_SPEC}, so its children are the work`;
   }
   return candidate.hasChildren ? "umbrella: has sub-issues, which are the work" : undefined;

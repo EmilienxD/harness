@@ -823,7 +823,7 @@ function message(error: unknown): string {
  * named rather than collapsed into one refusal.
  */
 function emptyQueueReason(skipped: readonly SkippedIssue[]): string {
-  if (skipped.length === 0) return "no open issue is labelled ai:afk or ai:hitl";
+  if (skipped.length === 0) return "no open issue is labelled [AI]-afk or [AI]-hitl";
   const listed = skipped.slice(0, 20).map((entry) => `#${entry.number} (${entry.reason})`).join(", ");
   const rest = skipped.length > 20 ? `, and ${skipped.length - 20} more` : "";
   return `no open issue is ready to implement: ${listed}${rest}`;

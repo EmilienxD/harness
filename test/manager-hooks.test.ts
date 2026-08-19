@@ -169,7 +169,7 @@ test("an idle project renders every section without a failure note", async () =>
   // No carrier is a fact about the repository and the normal first-run state,
   // so it reads as work to do — deliberately not the "Unavailable" that a
   // failed fetch produces.
-  assert.match(rendered, /No open issue carries `ai:todo`, so this project has no roadmap yet/);
+  assert.match(rendered, /No open issue carries `\[AI\]-todo`, so this project has no roadmap yet/);
   assert.match(rendered, /Recommend `\/update-todo`/);
   assert.doesNotMatch(rendered, /Unavailable/);
 });
@@ -234,7 +234,7 @@ test("a small roadmap stays inline and never touches the file store", async () =
   const rendered = await briefings.render(new AbortController().signal);
   assert.equal(writes, 0);
   // Extra carriers and a near-full document are reported, never repaired.
-  assert.match(rendered, /2 issues carry `ai:todo`; #9 is in use\./);
+  assert.match(rendered, /2 issues carry `\[AI\]-todo`; #9 is in use\./);
   assert.match(rendered, /Duplicate task text in the roadmap: "Ship the bridge"/);
   assert.match(rendered, /near its size bound/);
 });
@@ -304,7 +304,7 @@ test("a failed reminder fetch is a non-event, and a missing roadmap still says s
   const empty = new RoadmapReminderService({ roadmap: async () => undefined }, { now: () => new Date("2026-07-30T14:32:00.000Z") });
   const served = String((await empty.serve(agent("manager-1"), new AbortController().signal)).additionalContext);
   assert.ok(served.startsWith(ROADMAP_MARKER));
-  assert.match(served, /no open issue carries `ai:todo`/);
+  assert.match(served, /no open issue carries `\[AI\]-todo`/);
 });
 
 test("a due reminder rides the existing prompt drain rather than opening a second channel", async () => {

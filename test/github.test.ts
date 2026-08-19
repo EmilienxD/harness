@@ -41,7 +41,7 @@ test("authentication preflight is fresh, targets the workspace repository, and p
   assert.equal(gh.calls.filter((args) => args[0] === "api").length, 1);
 });
 
-/** Open issues carrying `ai:todo`, as `gh issue list --json number,body,createdAt` returns them. */
+/** Open issues carrying `[AI]-todo`, as `gh issue list --json number,body,createdAt` returns them. */
 function carriers(...issues: readonly { number: number; body: string; createdAt: string }[]): string {
   return JSON.stringify(issues);
 }
@@ -73,7 +73,7 @@ test("one label query resolves the locator and the document, with no cache and n
   // carrier mints a duplicate roadmap. The sort is done client-side instead.
   const lookup = gh.calls.find((args) => args[0] === "issue" && args[1] === "list");
   assert.equal(lookup?.includes("--search"), false);
-  assert.deepEqual(lookup, ["issue", "list", "--state", "open", "--label", "ai:todo", "--limit", "50", "--json", "number,body,createdAt"]);
+  assert.deepEqual(lookup, ["issue", "list", "--state", "open", "--label", "[AI]-todo", "--limit", "50", "--json", "number,body,createdAt"]);
 
   // A second read re-resolves: the cache it replaced saved nothing, because
   // every use of it had to revalidate at exactly the cost of resolving.
@@ -109,7 +109,7 @@ test("extra carriers are reported, never repaired", async () => {
   assert.equal((await github.readRoadmap())?.carrierCount, 2);
   const written = await github.createRoadmapTasks({ subjects: ["Added"] });
   assert.equal(written.issue, 50);
-  assert.match(written.notices.join(" "), /2 open issues carry `ai:todo`; #50 is in use/);
+  assert.match(written.notices.join(" "), /2 open issues carry `\[AI\]-todo`; #50 is in use/);
   // aboard never modifies an issue it did not create: no relabelling, and no
   // third issue minted to escape the ambiguity.
   assert.equal(gh.calls.some((args) => args.includes("--remove-label")), false);
@@ -131,7 +131,7 @@ test("an empty candidate set mints on create, is the first-run state on read, an
   assert.equal(created.issue, 44);
   assert.deepEqual(created.positions, [1]);
   assert.match(created.notices.join(" "), /Created issue #44/);
-  // Plain `label create`, so a user-owned `ai:todo` keeps its colour.
+  // Plain `label create`, so a user-owned `[AI]-todo` keeps its colour.
   assert.equal(createGh.calls.some((args) => args.includes("--force")), false);
   assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "create")?.slice(0, 4), ["issue", "create", "--title", "Project roadmap"]);
   assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "pin"), ["issue", "pin", "44"]);
@@ -149,7 +149,7 @@ test("roadmap issue pinning is best effort after minting", async () => {
     if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
     if (args[0] === "issue" && args[1] === "pin") throw new GitHubBoundaryError("command-failed", "pin failed");
     if (args[0] === "issue" && args[1] === "view") {
-      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["ai:todo"] });
+      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["[AI]-todo"] });
     }
     if (args[0] === "issue" && args[1] === "edit") return "";
     throw new Error(`unexpected ${args.join(" ")}`);
@@ -253,10 +253,10 @@ test("the size bound accepts the write and warns rather than deadlocking the Man
 /** One page of open issues as the GraphQL query returns it. */
 function openIssues(): string {
   const nodes = [
-    { number: 16, title: "ready hitl", body: "Needs #18 and https://github.com/EmilienxD/aboard/issues/17; ignore https://github.com/other/repo/issues/99 and `#77`.", createdAt: "2026-01-01T00:00:00Z", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, subIssues: { nodes: [], totalCount: 0, pageInfo: endPage }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }], pageInfo: endPage } },
-    { number: 17, title: "blocked afk", createdAt: "2026-01-02T00:00:00Z", labels: { nodes: [{ name: "ai:afk" }], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }], pageInfo: endPage } },
+    { number: 16, title: "ready hitl", body: "Needs #18 and https://github.com/EmilienxD/aboard/issues/17; ignore https://github.com/other/repo/issues/99 and `#77`.", createdAt: "2026-01-01T00:00:00Z", labels: { nodes: [{ name: "[AI]-hitl" }], pageInfo: endPage }, subIssues: { nodes: [], totalCount: 0, pageInfo: endPage }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }], pageInfo: endPage } },
+    { number: 17, title: "blocked afk", createdAt: "2026-01-02T00:00:00Z", labels: { nodes: [{ name: "[AI]-afk" }], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }], pageInfo: endPage } },
     { number: 18, title: "unclassified", createdAt: "2026-01-03T00:00:00Z", labels: { nodes: [], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [], pageInfo: endPage } },
-    { number: 19, title: "umbrella", createdAt: "2026-01-04T00:00:00Z", labels: { nodes: [{ name: "ai:spec" }], pageInfo: endPage }, subIssues: { nodes: [{ number: 16 }], totalCount: 3, pageInfo: endPage }, blockedBy: { nodes: [], pageInfo: endPage } },
+    { number: 19, title: "umbrella", createdAt: "2026-01-04T00:00:00Z", labels: { nodes: [{ name: "[AI]-spec" }], pageInfo: endPage }, subIssues: { nodes: [{ number: 16 }], totalCount: 3, pageInfo: endPage }, blockedBy: { nodes: [], pageInfo: endPage } },
   ];
   return graph({ issues: { nodes, pageInfo: endPage } });
 }
@@ -306,7 +306,7 @@ test("the queue paginates past one hundred permanently unprocessable issues", as
     number: index + 1,
     title: `Spec ${index + 1}`,
     createdAt: new Date(Date.UTC(2025, 0, 1, 0, index)).toISOString(),
-    labels: { nodes: [{ name: "ai:spec" }], pageInfo: endPage },
+    labels: { nodes: [{ name: "[AI]-spec" }], pageInfo: endPage },
     subIssues: { totalCount: 1 },
     blockedBy: { nodes: [], pageInfo: endPage },
   }));
@@ -314,7 +314,7 @@ test("the queue paginates past one hundred permanently unprocessable issues", as
     number: 101,
     title: "Newest work",
     createdAt: "2026-01-01T00:00:00Z",
-    labels: { nodes: [{ name: "ai:afk" }], pageInfo: endPage },
+    labels: { nodes: [{ name: "[AI]-afk" }], pageInfo: endPage },
     subIssues: { totalCount: 0 },
     blockedBy: { nodes: [], pageInfo: endPage },
   };
@@ -344,7 +344,7 @@ test("label and blocker connections are completed before queue classification", 
     if (args[0] === "repo") return repo;
     const query = args.find((arg) => arg.startsWith("query=")) ?? "";
     if (query.includes("labels(first:100,after:$after)")) {
-      return graph({ issue: { labels: { nodes: [{ name: "ai:afk" }], pageInfo: endPage } } });
+      return graph({ issue: { labels: { nodes: [{ name: "[AI]-afk" }], pageInfo: endPage } } });
     }
     if (query.includes("blockedBy(first:100,after:$after)")) {
       return graph({ issue: { blockedBy: { nodes: [{ number: 999, state: "OPEN" }], pageInfo: endPage } } });
@@ -355,7 +355,7 @@ test("label and blocker connections are completed before queue classification", 
     return graph({ issues: { nodes: [initial], pageInfo: endPage } });
   });
   const candidate = (await new GitHubClient(gh).listImplementableIssues()).candidates[0];
-  assert.deepEqual(candidate?.labels, ["enhancement", "ai:afk"]);
+  assert.deepEqual(candidate?.labels, ["enhancement", "[AI]-afk"]);
   assert.deepEqual(candidate?.openBlockedByNumbers, [999]);
   assert.deepEqual(candidate?.dependencyNumbers, [1, 999, 2, 3]);
   assert.equal(gh.calls.some((args) => args.includes("after=labels-100")), true);
@@ -368,7 +368,7 @@ test("an issue prompt receives labels beyond the first connection page", async (
     if (args[0] === "repo") return repo;
     const query = args.find((arg) => arg.startsWith("query=")) ?? "";
     if (query.includes("labels(first:100,after:$after)")) {
-      return graph({ issue: { labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage } } });
+      return graph({ issue: { labels: { nodes: [{ name: "[AI]-hitl" }], pageInfo: endPage } } });
     }
     return graph({ issue: {
       number: 17,
@@ -380,7 +380,7 @@ test("an issue prompt receives labels beyond the first connection page", async (
       closedByPullRequestsReferences: { nodes: [] },
     } });
   });
-  assert.deepEqual((await new GitHubClient(gh).getIssue(17))?.labels, ["enhancement", "ai:hitl"]);
+  assert.deepEqual((await new GitHubClient(gh).getIssue(17))?.labels, ["enhancement", "[AI]-hitl"]);
   assert.equal(gh.calls.some((args) => args.includes("after=labels-100")), true);
 });
 
@@ -392,7 +392,7 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
     const query = args.find((arg) => arg.startsWith("query=")) ?? "";
     if (query.includes("reviewThreads(first:100){nodes{id")) return graph({ pullRequest: { reviewThreads: { nodes: [{ id: "T1", isResolved: false, path: "src/a.ts", line: 7, comments: { nodes: [{ body: "Bug", author: { login: "emb" } }] } }] } } });
     if (query.includes("subIssues(first:100,after:$after)")) return graph({ issue: { subIssues: { nodes: [{ number: 24 }], totalCount: 2, pageInfo: endPage } } });
-    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract depends on #23.", state: "OPEN", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, parent: { number: 9 }, subIssues: { nodes: [{ number: 22 }], totalCount: 2, pageInfo: { hasNextPage: true, endCursor: "children-100" } }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
+    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract depends on #23.", state: "OPEN", labels: { nodes: [{ name: "[AI]-hitl" }], pageInfo: endPage }, parent: { number: 9 }, subIssues: { nodes: [{ number: 22 }], totalCount: 2, pageInfo: { hasNextPage: true, endCursor: "children-100" } }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
     return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
   });
   const github = new GitHubClient(gh);
@@ -434,7 +434,7 @@ test("an update straight after a mint resolves the new issue the label index has
     }
     if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
     if (args[0] === "issue" && args[1] === "view") {
-      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["ai:todo"] });
+      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["[AI]-todo"] });
     }
     throw new Error(`unexpected ${args.join(" ")}`);
   });
@@ -459,7 +459,7 @@ test("an update straight after a mint resolves the new issue the label index has
 });
 
 test("a minted seed never outlives the issue being a carrier", async () => {
-  let carrier = { state: "OPEN", labels: ["ai:todo"] };
+  let carrier = { state: "OPEN", labels: ["[AI]-todo"] };
   const gh = roadmapGh((args) => {
     if (args[0] === "issue" && args[1] === "list") return "[]";
     if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
@@ -473,7 +473,7 @@ test("a minted seed never outlives the issue being a carrier", async () => {
 
   // The user closed it: the repository has no roadmap again, and the seed must
   // not resurrect one.
-  carrier = { state: "CLOSED", labels: ["ai:todo"] };
+  carrier = { state: "CLOSED", labels: ["[AI]-todo"] };
   assert.equal(await github.readRoadmap(), undefined);
   // Dropped, not re-checked on every later resolution.
   assert.equal(await github.readRoadmap(), undefined);

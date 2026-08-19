@@ -46,7 +46,7 @@ export interface VendoredToolInstaller {
 
 /**
  * The scaffolder deliberately creates no roadmap issue. A repository with no
- * `ai:todo` carrier is the normal first-run state, and an empty placeholder
+ * `[AI]-todo` carrier is the normal first-run state, and an empty placeholder
  * issue is worse than none: it looks like a roadmap, so nothing prompts anyone
  * to write one. The Manager's briefing reports the absence as something to do,
  * and `/update-todo` surveys the codebase and writes the first one.

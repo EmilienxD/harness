@@ -219,9 +219,9 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     name: "todo_create",
     description:
       "Add one or more new tasks to the project's durable roadmap, " +
-      "which is a flat checkbox list on the GitHub issue labelled ai:todo. " +
+      "which is a flat checkbox list on the GitHub issue labelled [AI]-todo. " +
       "Use this only to record newly identified project-level work or priorities; " +
-      "implementation detail belongs in an ai:spec issue. " +
+      "implementation detail belongs in an [AI]-spec issue. " +
       "The current roadmap is supplied in context, " +
       "so there is deliberately no roadmap read tool and no full-body replacement operation.\n\n" +
 
@@ -346,9 +346,9 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     name: "start_auto_run",
     description:
       "Start Aboard's automatic implementation workflow. " +
-      "The queue is every open issue labelled ai:afk or ai:hitl, dependencies first, " +
+      "The queue is every open issue labelled [AI]-afk or [AI]-hitl, dependencies first, " +
       "with creation date and issue number breaking ties between ready issues, " +
-      "whether or not the issue belongs to an ai:spec issue. " +
+      "whether or not the issue belongs to an [AI]-spec issue. " +
       "An issue that does belong to one still reaches its implementer with that parent spec as context. " +
       "Use this only after the user has approved implementation and the issues are ready. " +
       "Do not use `run_agent` to bypass this workflow: " +
@@ -373,10 +373,10 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "Issues are processed serially and the dependency graph is re-derived from GitHub at each boundary. " +
       "Native blocked-by links are hard gates; sub-issues and same-repository issue references in bodies " +
       "are best-effort ordering constraints. Cycles are reported and ordered oldest first within the cycle. " +
-      "Umbrella issues never enter the queue: an ai:spec issue, or any issue with sub-issues of its own, " +
+      "Umbrella issues never enter the queue: an [AI]-spec issue, or any issue with sub-issues of its own, " +
       "is represented by its children. " +
-      "ai:afk work may merge automatically. " +
-      "ai:hitl work waits at its pull request until the user merges it; " +
+      "[AI]-afk work may merge automatically. " +
+      "[AI]-hitl work waits at its pull request until the user merges it; " +
       "that merge is the approval and normally resumes the run. " +
       "A failure stops the whole run rather than skipping to the next issue, " +
       "leaving visible work in place for inspection. " +

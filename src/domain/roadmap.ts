@@ -1,6 +1,6 @@
 /**
  * The project roadmap's document model: a flat markdown checkbox list held in
- * the body of the open issue labelled `ai:todo`.
+ * the body of the open issue labelled `[AI]-todo`.
  *
  * The model is pure so that the two places that need it agree by construction.
  * The GitHub boundary parses a body, applies one operation, and serializes it
@@ -109,7 +109,7 @@ export function describeSubjectRejection(rejection: SubjectRejection): string {
   switch (rejection) {
     case "empty": return "--subject must not be empty";
     case "multiline": return "--subject must be a single line; one task is one checkbox";
-    case "too-long": return `--subject must be at most ${ROADMAP_SUBJECT_LIMIT} characters; put the detail in an ai:spec issue`;
+    case "too-long": return `--subject must be at most ${ROADMAP_SUBJECT_LIMIT} characters; put the detail in an [AI]-spec issue`;
     case "markup": return "--subject must not start with list or heading markup; aboard writes the `- [ ]` itself";
   }
 }

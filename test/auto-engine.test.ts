@@ -75,7 +75,7 @@ function harness(options: HarnessOptions = {}): Harness {
   let hitlPolls = 0;
 
   const queue = options.issues ?? [
-    { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open" as const, openBlockedByNumbers: [] },
+    { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open" as const, openBlockedByNumbers: [] },
   ];
   const open = new Set(queue.filter((entry) => entry.state === "open").map((entry) => entry.number));
 
@@ -163,7 +163,7 @@ function harness(options: HarnessOptions = {}): Harness {
     return issueForBranch(branchesByPr.get(number) ?? "");
   }
   function isHitl(number: number): boolean {
-    return queue.find((entry) => entry.number === issueForPr(number))?.labels.includes("ai:hitl") === true;
+    return queue.find((entry) => entry.number === issueForPr(number))?.labels.includes("[AI]-hitl") === true;
   }
 
   const launcher: AutoRunLauncher = {
@@ -329,7 +329,7 @@ test("review mode launches a pr-doctor-afk and commits its fixes as a second com
 
 test("a hitl issue waits at its pull request and continues once the user merges", async () => {
   const context = harness({
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "merged",
   });
   await context.engine.start();
@@ -342,7 +342,7 @@ test("a hitl issue waits at its pull request and continues once the user merges"
 
 test("a hitl pull request closed unmerged stops the run and leaves the branch alone", async () => {
   const context = harness({
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "closed",
   });
   await context.engine.start();
@@ -413,7 +413,7 @@ test("an unauthenticated GitHub CLI refuses resume without rejecting a dirty rec
 
 test("a second start returns the active run instead of starting another", async () => {
   const context = harness({
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
   });
   await context.engine.start();
   const second = await context.engine.start();
@@ -425,7 +425,7 @@ test("a second start returns the active run instead of starting another", async 
 
 test("an active run takes precedence over a dirty working tree without repeating authentication preflight", async () => {
   const context = harness({
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
   });
   assert.equal((await context.engine.start()).started, true);
   context.setDirty();
@@ -444,8 +444,8 @@ test("an active run takes precedence over a dirty working tree without repeating
 test("issues are processed serially and re-derived after every merge", async () => {
   const context = harness({
     issues: [
-      { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
-      { number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 37, title: "Later", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
     ],
   });
   await context.engine.start();
@@ -461,9 +461,9 @@ test("the queue drains a parentless issue and a spec child alike, in creation or
     issues: [
       // The spec itself is an umbrella and never enters the queue, even though
       // it is open and older than everything else.
-      { number: 12, title: "Offline sync", labels: ["ai:spec"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z", hasChildren: true },
-      { number: 40, title: "Fix the parser", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
-      { number: 121, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
+      { number: 12, title: "Offline sync", labels: ["[AI]-spec"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z", hasChildren: true },
+      { number: 40, title: "Fix the parser", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+      { number: 121, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
     ],
   });
   const result = await context.engine.start();
@@ -486,7 +486,7 @@ test("an empty queue refuses the run and names why each candidate was skipped", 
   });
   const refused = await unlabelled.engine.start();
   assert.equal(refused.started, false);
-  assert.match((refused as { reason: string }).reason, /#40 \(unclassified: neither ai:afk nor ai:hitl\)/);
+  assert.match((refused as { reason: string }).reason, /#40 \(unclassified: neither \[AI\]-afk nor \[AI\]-hitl\)/);
   assert.equal(unlabelled.launches.length, 0);
   assert.equal(unlabelled.saved.length, 0);
 
@@ -495,15 +495,15 @@ test("an empty queue refuses the run and names why each candidate was skipped", 
   const empty = harness({ issues: [] });
   const nothing = await empty.engine.start();
   assert.equal(nothing.started, false);
-  assert.equal((nothing as { reason: string }).reason, "no open issue is labelled ai:afk or ai:hitl");
+  assert.equal((nothing as { reason: string }).reason, "no open issue is labelled [AI]-afk or [AI]-hitl");
 });
 
 test("progress expands when an older blocked issue becomes ready", async () => {
   const context = harness({
     issues: [
-      { number: 33, title: "Blocked first", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [34], createdAt: "2026-01-01T00:00:00.000Z" },
-      { number: 34, title: "Unblock it", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
-      { number: 35, title: "Still queued", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
+      { number: 33, title: "Blocked first", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [34], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 34, title: "Unblock it", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+      { number: 35, title: "Still queued", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
     ],
   });
   await context.engine.start();
@@ -517,8 +517,8 @@ test("progress expands when an older blocked issue becomes ready", async () => {
 test("a dependency cycle is visible and drains in deterministic order", async () => {
   const context = harness({
     issues: [
-      { number: 34, title: "Older", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [37], createdAt: "2026-01-01T00:00:00.000Z" },
-      { number: 37, title: "Newer", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [34], createdAt: "2026-01-02T00:00:00.000Z" },
+      { number: 34, title: "Older", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [37], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 37, title: "Newer", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [34], createdAt: "2026-01-02T00:00:00.000Z" },
     ],
   });
   await context.engine.start();
@@ -556,9 +556,9 @@ test("resume re-derives from the repository rather than trusting the record", as
 test("a record an older version wrote against one spec resumes onto the flat queue", async () => {
   const context = harness({
     issues: [
-      { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
       // Unreachable under the old model — no parent spec — and processed now.
-      { number: 40, title: "Fix the parser", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+      { number: 40, title: "Fix the parser", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
     ],
   });
   const legacy = parseAutoRunRecord({
@@ -588,7 +588,7 @@ test("a hitl doctor's approved fixes are committed to the pull request before it
   // changes they just approved, and the work is stranded uncommitted.
   const context = harness({
     settings: { review: true },
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "merged",
     dirtyDuringWait: true,
   });

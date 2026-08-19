@@ -315,7 +315,7 @@ test("the todo verbs pass their arguments through and reject an unknown status",
         log: (message: string) => logged.push(message),
         github: {
           createRoadmapTasks: async (input: unknown) => { calls.push(["create", input]); return { issue: 9, positions: [1, 2], tasks: ["1. [ ] First task", "2. [ ] Second task"], notices: [] }; },
-          updateRoadmapTask: async (input: unknown) => { calls.push(["update", input]); return { issue: 9, task: 1, notices: ["2 open issues carry `ai:todo`"] }; },
+          updateRoadmapTask: async (input: unknown) => { calls.push(["update", input]); return { issue: 9, task: 1, notices: ["2 open issues carry `[AI]-todo`"] }; },
         } as never,
       },
     },
@@ -342,7 +342,7 @@ test("the todo verbs pass their arguments through and reject an unknown status",
   assert.equal(result.task, 1);
   // An in-place status change renumbers nothing, so no list is spent on it.
   assert.equal("tasks" in result, false);
-  assert.match(String(result.notice), /2 open issues carry `ai:todo`/);
+  assert.match(String(result.notice), /2 open issues carry `\[AI\]-todo`/);
   assert.deepEqual(calls, [
     ["create", { subjects: ["First task", "Second task"], after: "top" }],
     ["update", { task: 1, expect: "First task", status: "completed" }],
