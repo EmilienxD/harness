@@ -1,0 +1,8 @@
+name = "audit"
+version = "1.0.0"
+description = "Audits a codebase and reports evidence-backed findings"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/audit/SKILL.md"
+
+[[files]]
+src = "SKILL.md"
+dest = "skills/audit/SKILL.md"

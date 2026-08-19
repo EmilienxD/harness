@@ -38,6 +38,7 @@ validated strictly, and a file that fails validation is rejected whole.
 
 ## Tools
 
+- `harness/audit/` — audits a codebase and reports evidence-backed findings. See `SKILL.md`.
 - `harness/caveman/` — ultra-compressed communication mode skill. See `SKILL.md`.
 - `harness/commit/` — zero-model-call `/commit` hook. See `README.md`.
 - `harness/create-skill/` — guide for authoring new Claude Skills. See `SKILL.md`.

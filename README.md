@@ -65,6 +65,7 @@ Restart Claude Code after installing so it picks up new hooks and skills.
 
 | Tool | What it does |
 |---|---|
+| [`audit`](harness/audit/SKILL.md) | Audits a codebase and reports evidence-backed findings |
 | [`caveman`](harness/caveman/SKILL.md) | Ultra-compressed communication mode |
 | [`commit`](harness/commit/README.md) | `/commit` that stages and commits with zero model calls |
 | [`create-skill`](harness/create-skill/SKILL.md) | Guide for authoring new Claude Skills |
