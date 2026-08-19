@@ -6,6 +6,7 @@ import type { ShellKind } from "../claude/shell.js";
 import type { TerminalController } from "../claude/terminals.js";
 import type { WriteCapability } from "../domain/capability.js";
 import {
+  isNonRestorablePersistedAgentType,
   type AgentId,
   type AgentSession,
   type AgentTelemetry,
@@ -194,7 +195,7 @@ export class DelegationCoordinator {
     }
     // Automated-only research types have no user conversation to hand off, so a
     // restore whose result caller is gone leaves nobody to talk to.
-    if (session.identity.type === "webresearcher" || session.identity.type === "Explore") {
+    if (isNonRestorablePersistedAgentType(session.identity.type)) {
       throw new DelegationError(
         "unresumable-session",
         `The ${session.identity.type} session cannot be restored after its result caller is gone; launch a fresh ${session.identity.type} instead`,

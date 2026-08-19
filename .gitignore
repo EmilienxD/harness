@@ -17,6 +17,11 @@ coverage/
 .DS_Store
 Thumbs.db
 
+.venv/
+.mypy_cache/
+.ruff/
+__pycache__/
+
 # -------------------------------------------------
 
 # Scaffold templates contain a project .claude directory intentionally.
@@ -34,3 +39,4 @@ private-notes/
 # >>> harness:commit >>>
 .claude/commit-ai.key
 # <<< harness:commit <<<
+

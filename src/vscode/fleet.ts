@@ -1,4 +1,4 @@
-import { isInteractiveAgentType, type AgentId, type AgentSession, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
+import { isInteractiveAgentType, isNonRestorablePersistedAgentType, type AgentId, type AgentSession, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
@@ -12,7 +12,7 @@ export interface FleetTreeItem {
   readonly description: string;
   readonly tooltip: string;
   readonly icon: string;
-  readonly contextValue: "aboard.agent.active" | "aboard.agent.paused" | "aboard.agent.finished" | "aboard.child";
+  readonly contextValue: "aboard.agent.active" | "aboard.agent.paused" | "aboard.agent.orphaned" | "aboard.agent.finished" | "aboard.child";
   readonly collapsible: boolean;
   readonly command?: { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
 }
@@ -57,19 +57,20 @@ export class FleetTreeModel {
     const { session } = node;
     const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
     const terminalOpen = this.isTerminalOpen(session.terminal.terminalId);
-    const markers = [terminalOpen ? session.lifecycle.status : "paused", node.leaseHolder ? "lease holder" : ""].filter(Boolean);
     const active = ["starting", "running", "awaiting-user"].includes(session.lifecycle.status);
+    const orphaned = active && !terminalOpen && isNonRestorablePersistedAgentType(session.identity.type);
+    const markers = [terminalOpen ? session.lifecycle.status : orphaned ? "interrupted · result caller gone" : "paused", node.leaseHolder ? "lease holder" : ""].filter(Boolean);
     return {
       // The label matches the per-launch Claude session name — aboard-<type>-<id>,
       // the `@<name>` banner in the terminal head — so a row in the tree is
       // greppable straight back to the running session and its definition file.
       label: `${agentLabel(session)}${goal}`,
       description: markers.join(" · "),
-      tooltip: agentTooltip(session, node.leaseHolder, terminalOpen),
+      tooltip: agentTooltip(session, node.leaseHolder, terminalOpen, orphaned),
       icon: agentIcon(session),
-      contextValue: active ? terminalOpen ? "aboard.agent.active" : "aboard.agent.paused" : "aboard.agent.finished",
+      contextValue: active ? terminalOpen ? "aboard.agent.active" : orphaned ? "aboard.agent.orphaned" : "aboard.agent.paused" : "aboard.agent.finished",
       collapsible: this.fleet.listChildren(session.identity.agentId).length > 0,
-      command: { command: "aboard.focusAgent", title: "Focus Agent", arguments: [node] },
+      ...(terminalOpen ? { command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const } } : {}),
     };
   }
 
@@ -95,23 +96,27 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
     host.register("aboard.focusAgent", (value) => {
       const session = sessionOf(value);
       if (session === undefined) return;
-      if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("This session is paused. Use Restore Fleet to reopen its terminal.");
+      if (terminals.isOpen?.(session.terminal.terminalId) === false) {
+        return host.info(isNonRestorablePersistedAgentType(session.identity.type)
+          ? "This automated session was interrupted after its result caller ended and cannot be restored. Remove it from the fleet."
+          : "This session is paused. Use Restore Fleet to reopen its terminal.");
+      }
       terminals.show(session.terminal.terminalId);
     }),
     host.register("aboard.killAgent", async (value) => {
       const session = sessionOf(value);
       if (session === undefined) return;
-      if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("This session is paused. Restore it before killing the terminal.");
+      if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("This session has no live terminal. Remove it from the fleet instead.");
       if (await host.confirm(`Kill ${session.identity.type}?`, "Kill")) terminals.kill(session.terminal.terminalId);
     }),
     host.register("aboard.removePausedSession", async (value) => {
       const session = sessionOf(value);
       if (session === undefined || terminals.isOpen?.(session.terminal.terminalId) !== false) return;
-      if (!await host.confirm(`Remove the paused ${session.identity.type} session from the fleet? Its Claude transcript will stay on disk.`, "Remove")) return;
+      if (!await host.confirm(`Remove the interrupted ${session.identity.type} session from the fleet? Its Claude transcript will stay on disk.`, "Remove")) return;
       const occurredAt = now().toISOString() as IsoTimestamp;
       lease.release(session.identity.agentId, occurredAt, "paused session removed by user");
       fleet.remove(session.identity.agentId, occurredAt);
-      host.info("Paused session removed from the fleet. Its Claude transcript remains on disk.");
+      host.info("Interrupted session removed from the fleet. Its Claude transcript remains on disk.");
     }),
     // Recovery hatch only, reachable from the Command Palette: a worker that dies
     // without releasing the write lease would otherwise block every later
@@ -152,7 +157,16 @@ function agentLabel(session: AgentSession): string {
 }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
-function agentTooltip(session: AgentSession, leaseHolder: boolean, terminalOpen: boolean): string { return [`Session: ${session.sessionId}`, `Status: ${terminalOpen ? session.lifecycle.status : "paused after VS Code restart"}`, terminalOpen ? "" : "Use Restore Fleet to reopen this Claude conversation", leaseHolder ? "Holds the write lease" : ""].filter(Boolean).join("\n"); }
+function agentTooltip(session: AgentSession, leaseHolder: boolean, terminalOpen: boolean, orphaned: boolean): string {
+  return [
+    `Session: ${session.sessionId}`,
+    `Status: ${terminalOpen ? session.lifecycle.status : orphaned ? "interrupted after VS Code restart" : "paused after VS Code restart"}`,
+    terminalOpen ? "" : orphaned
+      ? "Cannot be restored: this automated task's result caller no longer exists. Use Remove Interrupted Session."
+      : "Use Restore Fleet to reopen this Claude conversation",
+    leaseHolder ? "Holds the write lease" : "",
+  ].filter(Boolean).join("\n");
+}
 function childTooltip(child: ChildAgentNode): string { return [`Type: ${child.type}`, `Status: ${child.status}`].join("\n"); }
 
 export interface FleetNotificationHost { information(message: string): void; warning(message: string): void; error(message: string): void; }
@@ -178,8 +192,8 @@ function notify(event: FleetEvent, fleet: FleetRegistry, host: FleetNotification
 function failureLabel(type: WorkerFailureType): string { return type.replaceAll("-", " "); }
 
 export interface FleetStatusSnapshot { readonly text: string; readonly tooltip: string; readonly liveAgentCount: number; }
-export function renderFleetStatus(port: number, fleet: FleetRegistry, lease: WriteLease): FleetStatusSnapshot {
-  const live = fleet.list().filter((entry) => ["starting", "running", "awaiting-user"].includes(entry.lifecycle.status));
+export function renderFleetStatus(port: number, fleet: FleetRegistry, lease: WriteLease, isTerminalOpen: (terminalId: TerminalId) => boolean = () => true): FleetStatusSnapshot {
+  const live = fleet.list().filter((entry) => ["starting", "running", "awaiting-user"].includes(entry.lifecycle.status) && isTerminalOpen(entry.terminal.terminalId));
   const holder = lease.current()?.agentId;
   return { text: `$(organization) ${live.length} · :${port}${holder === undefined ? "" : ` · $(lock) ${holder}`}`, tooltip: `aboard bridge: 127.0.0.1:${port}\nLive agents: ${live.length}\nWrite lease: ${holder ?? "free"}`, liveAgentCount: live.length };
 }

@@ -5,8 +5,12 @@ import { join } from "node:path";
 
 interface Manifest {
   contributes: {
-    commands: readonly { command: string }[];
-    menus: { commandPalette?: readonly { command: string; when?: string }[] };
+    commands: readonly { command: string; title?: string; icon?: string }[];
+    menus: {
+      commandPalette?: readonly { command: string; when?: string }[];
+      "view/title"?: readonly { command: string; when?: string; group?: string }[];
+      "view/item/context"?: readonly { command: string; when?: string; group?: string }[];
+    };
     views: Record<string, readonly { id: string; when?: string }[]>;
   };
 }
@@ -40,4 +44,16 @@ test("the two activity-bar views are bound to opposite initialization states", a
   const views = new Map((contributes.views["aboard"] ?? []).map((view) => [view.id, view.when]));
   assert.equal(views.get("aboard.welcome"), "!aboard.initialized");
   assert.equal(views.get("aboard.fleet"), "aboard.initialized");
+});
+
+test("fleet recovery actions are visible where the stranded record is shown", async () => {
+  const { contributes } = await manifest();
+  const titleRestore = (contributes.menus["view/title"] ?? []).find((entry) => entry.command === "aboard.restoreFleet");
+  assert.match(titleRestore?.group ?? "", /^navigation@/, "Restore Fleet must be a visible title action, not overflow-only");
+
+  const rowRemove = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.removePausedSession");
+  assert.match(rowRemove?.when ?? "", /paused\|orphaned/, "both recoverable and orphaned disconnected rows need cleanup");
+  assert.match(rowRemove?.group ?? "", /^inline@/, "cleanup must be visible on the row without discovering its context menu");
+  const removeCommand = contributes.commands.find((entry) => entry.command === "aboard.removePausedSession");
+  assert.equal(removeCommand?.icon, "$(trash)");
 });

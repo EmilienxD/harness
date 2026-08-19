@@ -70,7 +70,7 @@ export function registerNativeFleetUi(context: ExtensionContext, port: number, f
   // before the user has asked for a `.aboard/`.
   const render = () => {
     if (!isInitialized()) { status.hide(); return; }
-    const snapshot = renderFleetStatus(port, fleet, lease);
+    const snapshot = renderFleetStatus(port, fleet, lease, (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"));
     status.text = snapshot.text;
     status.tooltip = snapshot.tooltip;
     status.show();

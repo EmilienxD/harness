@@ -79,7 +79,8 @@
       },
       {
         "command": "aboard.removePausedSession",
-        "title": "Aboard: Remove Paused Session"
+        "title": "Aboard: Remove Interrupted Session",
+        "icon": "$(trash)"
       },
       {
         "command": "aboard.forceReleaseLease",
@@ -153,7 +154,7 @@
         {
           "command": "aboard.restoreFleet",
           "when": "view == aboard.fleet && aboard.fleetRestoreAvailable && !aboard.fleetRestoreRunning",
-          "group": "1_manager@3"
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [
@@ -229,7 +230,8 @@
         },
         {
           "command": "aboard.removePausedSession",
-          "when": "viewItem == aboard.agent.paused"
+          "when": "viewItem =~ /aboard.agent.(paused|orphaned)/",
+          "group": "inline@1"
         }
       ]
     },

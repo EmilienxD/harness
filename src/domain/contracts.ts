@@ -80,6 +80,21 @@ export function isNamedBuiltinAgentType(type: AgentType): boolean {
   return (NAMED_BUILTIN_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
+/**
+ * Automated research sessions return to an in-process caller and have no
+ * interactive handoff contract. After the extension host restarts that caller
+ * is gone, so reopening the Claude conversation would create a terminal whose
+ * result nobody can receive and which the user was never meant to drive.
+ *
+ * Keep this policy in the domain vocabulary so restore eligibility, fleet UI,
+ * and the coordinator cannot drift into contradictory answers.
+ */
+export const NON_RESTORABLE_PERSISTED_AGENT_TYPES = ["webresearcher", "Explore"] as const;
+
+export function isNonRestorablePersistedAgentType(type: AgentType): boolean {
+  return (NON_RESTORABLE_PERSISTED_AGENT_TYPES as readonly AgentType[]).includes(type);
+}
+
 export type AgentId = string & { readonly __brand: "AgentId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
 export type TerminalId = string & { readonly __brand: "TerminalId" };

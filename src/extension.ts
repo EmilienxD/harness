@@ -13,7 +13,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { TerminalController } from "./claude/terminals.js";
-import { isNamedBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
+import { isNamedBuiltinAgentType, isNonRestorablePersistedAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
 import { sessionIsResumable } from "./claude/sessions.js";
@@ -709,14 +709,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       ["starting", "running", "awaiting-user"].includes(session.lifecycle.status) && !openTerminalIds.has(session.terminal.terminalId),
     );
   };
+  const restorablePersistedSessions = (): readonly AgentSession[] =>
+    pausedPersistedSessions().filter((session) => !isNonRestorablePersistedAgentType(session.identity.type));
+  const orphanedPersistedSessions = (): readonly AgentSession[] =>
+    pausedPersistedSessions().filter((session) => isNonRestorablePersistedAgentType(session.identity.type));
   const publishFleetRestoreState = async (): Promise<void> => {
-    await commands.executeCommand("setContext", "aboard.fleetRestoreAvailable", !fleetRestoreRunning && pausedPersistedSessions().length > 0);
+    await commands.executeCommand("setContext", "aboard.fleetRestoreAvailable", !fleetRestoreRunning && restorablePersistedSessions().length > 0);
     await commands.executeCommand("setContext", "aboard.fleetRestoreRunning", fleetRestoreRunning);
   };
   const restoreFleet = async (confirm = true): Promise<void> => {
     if (fleetRestoreRunning) return;
     if (!requireInitialized()) return;
-    const sessions = [...pausedPersistedSessions()];
+    const sessions = [...restorablePersistedSessions()];
     if (sessions.length === 0) return;
     if (confirm) {
       const confirmation = await window.showInformationMessage(
@@ -767,11 +771,17 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (autoRunResumeDeferred) void offerAutoRunResume();
   };
   void publishFleetRestoreState();
-  if (pausedPersistedSessions().length > 0) {
+  if (restorablePersistedSessions().length > 0) {
     void window.showInformationMessage(
-      `aboard paused ${pausedPersistedSessions().length} saved session${pausedPersistedSessions().length === 1 ? "" : "s"} when VS Code closed.`,
+      `aboard paused ${restorablePersistedSessions().length} restorable session${restorablePersistedSessions().length === 1 ? "" : "s"} when VS Code closed.`,
       "Restore Fleet",
     ).then((choice) => { if (choice === "Restore Fleet") void restoreFleet(false); });
+  }
+  if (orphanedPersistedSessions().length > 0) {
+    void window.showInformationMessage(
+      `aboard kept ${orphanedPersistedSessions().length} interrupted automated task${orphanedPersistedSessions().length === 1 ? "" : "s"} visible. Their result callers ended with the previous extension host, so they cannot be restored; remove them from the Agents view when you are done inspecting the record.`,
+      "Show Agents",
+    ).then((choice) => { if (choice === "Show Agents") void commands.executeCommand("aboard.fleet.focus"); });
   }
   // `aboard.initialized` drives the welcome view and the Initialize/Update pair.
   // `aboard.managerLive` hides the launch actions while a Manager is running, and
@@ -875,7 +885,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const record = await new FileAutoRunStore(workspaceRoot).load().catch(() => undefined);
     if (record === undefined) { autoRunResumeDeferred = false; return; }
     const currentIssue = record.currentIssue;
-    if (currentIssue !== undefined && pausedPersistedSessions().some((session) => session.identity.type !== "manager" && session.issueNumbers?.includes(currentIssue) === true)) {
+    if (currentIssue !== undefined && restorablePersistedSessions().some((session) => session.identity.type !== "manager" && session.issueNumbers?.includes(currentIssue) === true)) {
       autoRunResumeDeferred = true;
       output.appendLine(`Auto-run resume for issue #${record.currentIssue ?? "?"} is deferred until its paused fleet session is restored or closed.`);
       return;

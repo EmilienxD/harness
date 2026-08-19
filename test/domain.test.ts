@@ -5,6 +5,7 @@ import {
   AGENT_TYPES,
   WORKER_FAILURE_TYPES,
   assertNever,
+  isNonRestorablePersistedAgentType,
   type AgentLifecycle,
   type WorkerFailure,
 } from "../src/domain/contracts.js";
@@ -28,6 +29,10 @@ const validSession = {
   },
   issueNumbers: [2],
 } as const;
+
+test("only automated research roles become orphaned when their result caller is lost", () => {
+  assert.deepEqual(AGENT_TYPES.filter(isNonRestorablePersistedAgentType), ["webresearcher", "Explore"]);
+});
 
 function describeLifecycle(lifecycle: AgentLifecycle): string {
   switch (lifecycle.status) {
