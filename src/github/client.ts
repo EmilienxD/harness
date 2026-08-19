@@ -149,6 +149,28 @@ export interface CreatePullRequestInput {
   readonly base: string;
 }
 
+/**
+ * What auto-run needs about a pull request beyond the prompt-facing snapshot:
+ * whether it can be merged at all, and where to send the user when it cannot.
+ */
+export interface PullRequestMergeFacts {
+  /**
+   * GitHub's own verdict. `unknown` is an answer rather than a parse failure —
+   * mergeability is computed by a background job, so a pull request whose head
+   * was just pushed reports `UNKNOWN` until that job lands.
+   */
+  readonly mergeable: "mergeable" | "conflicting" | "unknown";
+  readonly url: string;
+}
+
+function mergeability(value: unknown): PullRequestMergeFacts["mergeable"] {
+  switch (value) {
+    case "MERGEABLE": return "mergeable";
+    case "CONFLICTING": return "conflicting";
+    default: return "unknown";
+  }
+}
+
 function record(value: unknown, context: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new GitHubBoundaryError("malformed-output", `${context} must be an object`);
@@ -397,7 +419,7 @@ const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){rep
 const ISSUE_LABELS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){labels(first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_BLOCKERS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_SUBISSUES_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100,after:$after){nodes{number} totalCount pageInfo{hasNextPage endCursor}}}}}`;
-const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
+const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged mergeable url headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
 export class GitHubClient implements GitHubPromptSource {
@@ -640,6 +662,15 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
+  /**
+   * Posts a comment on an issue. Used by auto-run to leave the implementer's own
+   * account of the change where the issue's readers are, rather than only on the
+   * pull request that will be squashed away.
+   */
+  public async addIssueComment(number: number, body: string): Promise<void> {
+    await this.gh.run(["issue", "comment", String(number), "--body", body]);
+  }
+
   public async createPullRequest(input: CreatePullRequestInput): Promise<number> {
     const output = (await this.gh.run([
       "pr", "create", "--title", input.title, "--body", input.body, "--head", input.head, "--base", input.base,
@@ -671,7 +702,7 @@ export class GitHubClient implements GitHubPromptSource {
     await this.gh.run(["pr", "merge", String(number), `--${strategy}`, "--delete-branch"]);
   }
 
-  public async getPullRequest(number: number): Promise<PullRequestSnapshot | undefined> {
+  public async getPullRequest(number: number): Promise<(PullRequestSnapshot & PullRequestMergeFacts) | undefined> {
     const data = await this.#graphql(PR_QUERY, { number });
     const pullRequest = repositoryFromGraphql(data).pullRequest;
     if (pullRequest === null) return undefined;
@@ -685,6 +716,8 @@ export class GitHubClient implements GitHubPromptSource {
       headBranch: string(item.headRefName, "pullRequest.headRefName"),
       baseBranch: string(item.baseRefName, "pullRequest.baseRefName"),
       state: parsedState,
+      mergeable: mergeability(item.mergeable),
+      url: string(item.url, "pullRequest.url"),
       ...(closing.length === 0 ? {} : { issueNumber: integer(record(closing[0], "closing issue").number, "closing issue.number") }),
     };
   }

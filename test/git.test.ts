@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -58,6 +58,60 @@ test("createBranch, add, and commit leave the branch carrying the issue's commit
   assert.equal(await client.hasCommitFor(340, "main"), false);
   await client.checkout("main");
   assert.equal(await client.hasCommitFor(34, "main"), false);
+});
+
+/**
+ * A remote-tracking ref without a remote. `git merge origin/main` reads the ref
+ * and nothing else, so the boundary can be exercised against real git without a
+ * network or a second clone.
+ */
+async function trackRemote(root: string, branch: string): Promise<void> {
+  await run("git", ["update-ref", `refs/remotes/origin/${branch}`, branch], { cwd: root, windowsHide: true });
+}
+
+test("mergeFromRemote brings the branch up to date with its base", async () => {
+  const root = await repository();
+  const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
+  const client = new ProcessGitClient(root);
+
+  await client.createBranch("aboard/34-add-retry-backoff", "main");
+  await writeFile(join(root, "src.ts"), "export const a = 1;\n");
+  await client.add();
+  await client.commit("Add retry backoff", "Implements #34.");
+
+  await client.checkout("main");
+  await writeFile(join(root, "NOTES.md"), "moved on\n");
+  await client.add();
+  await client.commit("Move on", "");
+  await trackRemote(root, "main");
+
+  await client.checkout("aboard/34-add-retry-backoff");
+  assert.equal(await client.mergeFromRemote("main"), true);
+  assert.equal(isWorkingTreeClean(await client.status()), true);
+  assert.match((await git("log", "--format=%s")).stdout, /Move on/);
+});
+
+test("a conflicting mergeFromRemote reports false and puts the tree back", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+
+  await client.createBranch("aboard/34-add-retry-backoff", "main");
+  await writeFile(join(root, "README.md"), "branch\n");
+  await client.add();
+  await client.commit("Rewrite the readme", "Implements #34.");
+
+  await client.checkout("main");
+  await writeFile(join(root, "README.md"), "trunk\n");
+  await client.add();
+  await client.commit("Rewrite it differently", "");
+  await trackRemote(root, "main");
+
+  await client.checkout("aboard/34-add-retry-backoff");
+  assert.equal(await client.mergeFromRemote("main"), false);
+  // Aborted, not abandoned half-merged: no conflict markers, nothing staged.
+  assert.equal(isWorkingTreeClean(await client.status()), true);
+  // Trimmed: `core.autocrlf` rewrites the line ending on checkout under Windows.
+  assert.equal((await readFile(join(root, "README.md"), "utf8")).trim(), "branch");
 });
 
 test("a failing git command raises a typed boundary error carrying stderr", async () => {

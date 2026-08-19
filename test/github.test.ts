@@ -393,17 +393,37 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
     if (query.includes("reviewThreads(first:100){nodes{id")) return graph({ pullRequest: { reviewThreads: { nodes: [{ id: "T1", isResolved: false, path: "src/a.ts", line: 7, comments: { nodes: [{ body: "Bug", author: { login: "emb" } }] } }] } } });
     if (query.includes("subIssues(first:100,after:$after)")) return graph({ issue: { subIssues: { nodes: [{ number: 24 }], totalCount: 2, pageInfo: endPage } } });
     if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract depends on #23.", state: "OPEN", labels: { nodes: [{ name: "[AI]-hitl" }], pageInfo: endPage }, parent: { number: 9 }, subIssues: { nodes: [{ number: 22 }], totalCount: 2, pageInfo: { hasNextPage: true, endCursor: "children-100" } }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
-    return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
+    return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, mergeable: "CONFLICTING", url: "https://github.com/acme/app/pull/42", headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
   });
   const github = new GitHubClient(gh);
   assert.equal((await github.getIssue(17))?.parentIssueNumber, 9);
   assert.deepEqual((await github.getIssue(17))?.dependencyIssueNumbers, [22, 23, 24]);
   assert.equal((await github.getPullRequest(42))?.issueNumber, 17);
+  // Mergeability decides whether auto-run parks an issue or stops the run.
+  assert.equal((await github.getPullRequest(42))?.mergeable, "conflicting");
+  assert.equal((await github.getPullRequest(42))?.url, "https://github.com/acme/app/pull/42");
   assert.equal(await github.getPullRequestDiff(42), "diff --git a/a.ts b/a.ts");
   assert.equal((await github.listReviewThreads(42))[0]?.comments[0]?.author, "emb");
   assert.deepEqual(await github.getReviewState(42), { decision: "unreviewed", unresolvedThreadCount: 1 });
   await github.publishReviewFinding(42, { body: "Null crash", path: "src/a.ts", line: 7 });
   assert.equal(gh.calls.some((args) => args.includes("path=src/a.ts") && args.includes("line=7")), true);
+});
+
+test("mergeability GitHub has not computed yet reads as unknown rather than as a failure", async () => {
+  // GitHub computes `mergeable` in a background job, so the answer for a head
+  // pushed seconds ago is `UNKNOWN`. Treating that as a parse failure would
+  // fail the merge phase for every pull request the run has just opened.
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "repo") return repo;
+    return graph({ pullRequest: { number: 42, title: "PR", body: "", state: "OPEN", merged: false, mergeable: "UNKNOWN", url: "https://github.com/acme/app/pull/42", headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [] }, reviewDecision: null, reviewThreads: { nodes: [] } } });
+  });
+  assert.equal((await new GitHubClient(gh).getPullRequest(42))?.mergeable, "unknown");
+});
+
+test("an issue comment is posted with the body it was given", async () => {
+  const gh = new FixtureGh(() => "");
+  await new GitHubClient(gh).addIssueComment(34, "Rewrote the backoff.");
+  assert.deepEqual(gh.calls, [["issue", "comment", "34", "--body", "Rewrote the backoff."]]);
 });
 
 test("malformed gh JSON is a typed boundary failure", async () => {

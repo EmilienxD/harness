@@ -11,9 +11,17 @@ import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
 const SETTINGS: AutoRunSettings = { review: false, pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 1 };
 
+interface FakePullRequest {
+  readonly state: "open" | "closed" | "merged";
+  readonly mergeable?: "mergeable" | "conflicting" | "unknown";
+}
+
 interface Harness {
   readonly engine: AutoRunEngine;
   readonly notifications: string[];
+  /** Messages the engine escalated because they need the user's hands. */
+  readonly alerts: { readonly message: string; readonly url: string | undefined }[];
+  readonly comments: { readonly issue: number; readonly body: string }[];
   readonly launches: DelegationLaunchInput[];
   /** Origins the engine declared for its handed-off launches; they decide the lease. */
   readonly interactiveOrigins: LaunchOrigin[];
@@ -22,7 +30,7 @@ interface Harness {
   readonly saved: AutoRunRecord[];
   readonly states: AutoRunState[];
   readonly state: { cleared: boolean };
-  readonly pullRequests: Map<number, { state: "open" | "closed" | "merged" }>;
+  readonly pullRequests: Map<number, FakePullRequest>;
   readonly setDirty: () => void;
 }
 
@@ -54,10 +62,19 @@ interface HarnessOptions {
   readonly dirtyDuringWait?: boolean;
   /** The branch checked out when the run starts. Defaults to `main`. */
   readonly startBranch?: string;
+  /** Pull requests GitHub reports as conflicting with their base. */
+  readonly conflicting?: boolean;
+  /** Whether merging the base back in resolves that conflict. */
+  readonly reconcilable?: boolean;
+  /** Simulates branch protection: the merge is refused for a non-conflict reason. */
+  readonly mergeRefused?: boolean;
+  readonly commentFails?: boolean;
 }
 
 function harness(options: HarnessOptions = {}): Harness {
   const notifications: string[] = [];
+  const alerts: { message: string; url: string | undefined }[] = [];
+  const comments: { issue: number; body: string }[] = [];
   const launches: DelegationLaunchInput[] = [];
   const interactiveOrigins: LaunchOrigin[] = [];
   const gitCalls: string[] = [];
@@ -65,7 +82,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const saved: AutoRunRecord[] = [];
   const states: AutoRunState[] = [];
   const state = { cleared: false };
-  const pullRequests = new Map<number, { state: "open" | "closed" | "merged" }>();
+  const pullRequests = new Map<number, FakePullRequest>();
   const branches = new Set<string>(["main", "feature/wip"]);
   const commits = new Set<number>();
   const pushed = new Set<string>();
@@ -90,6 +107,14 @@ function harness(options: HarnessOptions = {}): Harness {
     checkout: async (branch) => { gitCalls.push(`checkout ${branch}`); currentBranch = branch; },
     createBranch: async (branch, from) => { gitCalls.push(`createBranch ${branch} ${from}`); branches.add(branch); currentBranch = branch; },
     fastForward: async () => { gitCalls.push("fastForward"); },
+    mergeFromRemote: async (base) => {
+      gitCalls.push(`mergeFromRemote ${base}`);
+      if (options.reconcilable !== true) return false;
+      // A reconciled branch is one GitHub will merge; the fake resolves every
+      // conflicting pull request the same way a real base merge would.
+      for (const [number, pr] of pullRequests) pullRequests.set(number, { ...pr, mergeable: "mergeable" });
+      return true;
+    },
     add: async () => { gitCalls.push("add"); },
     commit: async () => { gitCalls.push("commit"); dirty = false; commits.add(issueForBranch(currentBranch)); pushed.delete(currentBranch); return "a1b2c3d"; },
     push: async (branch, setUpstream) => {
@@ -122,7 +147,15 @@ function harness(options: HarnessOptions = {}): Harness {
       return { candidates };
     },
     getIssue: async (number) => ({ state: open.has(number) ? "open" : "closed" }),
-    createPullRequest: async () => { const number = nextPr++; pullRequests.set(number, { state: "open" }); return number; },
+    addIssueComment: async (number, body) => {
+      if (options.commentFails === true) throw new Error("gh issue comment failed");
+      comments.push({ issue: number, body });
+    },
+    createPullRequest: async () => {
+      const number = nextPr++;
+      pullRequests.set(number, { state: "open", mergeable: options.conflicting === true ? "conflicting" : "mergeable" });
+      return number;
+    },
     findOpenPullRequestForBranch: async (branch) => {
       for (const [number, pr] of pullRequests) {
         if (pr.state === "open" && number === prForBranch(branch)) return number;
@@ -140,12 +173,15 @@ function harness(options: HarnessOptions = {}): Harness {
         hitlPolls += 1;
         // The doctor applies what the user approved once, mid-wait and uncommitted.
         if (options.dirtyDuringWait === true && hitlPolls === 1) dirty = true;
-        if (hitlPolls >= 2 && options.resolveHitl !== undefined) pullRequests.set(number, { state: options.resolveHitl });
+        if (hitlPolls >= 2 && options.resolveHitl !== undefined) pullRequests.set(number, { ...pr, state: options.resolveHitl });
       }
-      return pr;
+      return pr === undefined ? undefined : { ...pr, mergeable: pr.mergeable ?? "mergeable", url: `https://github.com/acme/app/pull/${number}` };
     },
     getReviewState: async () => ({ decision: "unreviewed" }),
     mergePullRequest: async (number) => {
+      const pr = pullRequests.get(number);
+      if (options.mergeRefused === true) throw new Error("Protected branch rules not met");
+      if (pr?.mergeable === "conflicting") throw new Error("Pull request is not mergeable");
       pullRequests.set(number, { state: "merged" });
       open.delete(issueForPr(number));
     },
@@ -213,7 +249,10 @@ function harness(options: HarnessOptions = {}): Harness {
       save: async (record) => { saved.push(record); },
       clear: async () => { state.cleared = true; },
     },
-    notifier: { notify: (message) => notifications.push(message) },
+    notifier: {
+      notify: (message) => notifications.push(message),
+      alert: (message, url) => { notifications.push(message); alerts.push({ message, url }); },
+    },
     settings: () => ({ ...SETTINGS, ...options.settings }),
     runIdFactory: () => "run_test",
     // A macrotask, not an immediately-resolved promise: a microtask-only poll
@@ -225,6 +264,8 @@ function harness(options: HarnessOptions = {}): Harness {
   return {
     engine,
     notifications,
+    alerts,
+    comments,
     launches,
     interactiveOrigins,
     gitCalls,
@@ -314,6 +355,82 @@ test("a stop with uncommitted work does not check out over it", async () => {
 
   assert.match(context.notifications.join("\n"), /implementer failed/);
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
+});
+
+test("the implementer's account of its change is posted on the issue it implemented", async () => {
+  const context = harness();
+  await context.engine.start();
+  await context.engine.settle();
+
+  // Verbatim and on the issue, not only in the pull request body a squash merge
+  // eventually folds away.
+  assert.deepEqual(context.comments, [{ issue: 34, body: "Implemented the change." }]);
+});
+
+test("a comment that cannot be posted does not fail an issue that was implemented", async () => {
+  const context = harness({ commentFails: true });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.comments, []);
+  assert.equal([...context.pullRequests.values()][0]?.state, "merged");
+  assert.match(context.notifications.join("\n"), /issue #34 merged, issue closed/);
+});
+
+test("a conflicting pull request is reconciled with its base and then merged", async () => {
+  const context = harness({ conflicting: true, reconcilable: true });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.gitCalls.includes("mergeFromRemote main"), true);
+  // Pushed without `-u`: the branch already tracks by the time it is merged.
+  assert.equal(context.gitCalls.filter((call) => call === "push aboard/34-add-retry-backoff").length, 1);
+  assert.match(context.notifications.join("\n"), /conflicted with main; merged main into its branch and pushed/);
+  assert.equal([...context.pullRequests.values()][0]?.state, "merged");
+  assert.deepEqual(context.alerts, []);
+});
+
+test("an unresolvable conflict parks its issue, alerts the user, and lets the run continue", async () => {
+  const context = harness({
+    conflicting: true,
+    reconcilable: false,
+    issues: [
+      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 35, title: "Trim the cache", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.match(context.notifications.join("\n"), /issue #34 parked — PR #56 needs you \(it conflicts with main/);
+  // The alert carries the pull request so the warning can offer to open it.
+  assert.deepEqual(context.alerts.map((alert) => alert.url), [
+    "https://github.com/acme/app/pull/56",
+    "https://github.com/acme/app/pull/57",
+  ]);
+  // A conflict is a fact about one branch, so the queue behind it still runs.
+  assert.deepEqual(context.launches.map((launch) => launch.issues), [[34], [35]]);
+  assert.equal([...context.pullRequests.values()].every((pr) => pr.state === "open"), true);
+  assert.match(context.notifications.join("\n"), /queue drained \(0 issues implemented, 2 parked for you\)/);
+  assert.equal(context.state.cleared, true);
+});
+
+test("a merge refused for a reason other than a conflict still stops the whole run", async () => {
+  const context = harness({
+    mergeRefused: true,
+    issues: [
+      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 35, title: "Trim the cache", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // Branch protection applies to every pull request this run would open, so it
+  // is not something to retry an issue at a time.
+  assert.deepEqual(context.launches.map((launch) => launch.issues), [[34]]);
+  assert.match(context.alerts[0]?.message ?? "", /auto-run cannot approve its own pull request/);
+  assert.equal(context.state.cleared, false);
 });
 
 test("review mode launches a pr-doctor-afk and commits its fixes as a second commit", async () => {

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   branchName,
   commitSubject,
+  issueCommentBody,
   nextStep,
   pullRequestBody,
   selectIssues,
@@ -87,6 +88,12 @@ test("commit subject and pull request body are bounded and carry the closing tra
   assert.equal(pullRequestBody("Did the thing.", 34), "Did the thing.\n\nCloses #34");
   assert.equal(pullRequestBody("   ", 34), "Closes #34");
   assert.ok(pullRequestBody("y".repeat(5_000), 34).length <= 4_000 + "\n\nCloses #34".length);
+});
+
+test("an issue comment is the agent's own text, bounded, and absent when there is none", () => {
+  assert.equal(issueCommentBody("  Rewrote the backoff.  "), "Rewrote the backoff.");
+  assert.equal(issueCommentBody("   "), undefined);
+  assert.ok((issueCommentBody("z".repeat(70_000)) ?? "").length <= 65_536);
 });
 
 test("the reducer walks the phases in order from a clean start", () => {

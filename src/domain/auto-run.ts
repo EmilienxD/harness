@@ -268,6 +268,25 @@ export function pullRequestBody(summary: string, issueNumber: number): string {
   return bounded.length === 0 ? `Closes #${issueNumber}` : `${bounded}\n\nCloses #${issueNumber}`;
 }
 
+/**
+ * GitHub rejects a comment body over 65536 characters outright, so the bound is
+ * the API's and not a judgement about length.
+ */
+export const ISSUE_COMMENT_MAX_CHARS = 65_536;
+
+/**
+ * The implementer's account of its own change, as it is posted on the issue.
+ * Verbatim: the agent wrote it for a reader, and an extension that reformats it
+ * is guessing at what that reader wants. `undefined` means there is nothing
+ * worth posting, which is not a failure — an agent that ended silently has
+ * simply said nothing.
+ */
+export function issueCommentBody(summary: string): string | undefined {
+  const trimmed = summary.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.length <= ISSUE_COMMENT_MAX_CHARS ? trimmed : `${trimmed.slice(0, ISSUE_COMMENT_MAX_CHARS - 1).trimEnd()}…`;
+}
+
 /** A candidate issue as GitHub reports it, before selection filters it. */
 export interface CandidateIssue {
   readonly number: number;
@@ -484,11 +503,15 @@ export const autoRunMessage = {
   captured: (issue: number, pr: number, paths: readonly string[]): string =>
     `auto-run: committed ${paths.length} changed path(s) from issue #${issue}'s open terminals to PR #${pr}: ${paths.slice(0, 10).join(", ")}.`,
   merged: (issue: number): string => `auto-run: issue #${issue} merged, issue closed.`,
+  reconciled: (issue: number, pr: number, base: string): string =>
+    `auto-run: issue #${issue} conflicted with ${base}; merged ${base} into its branch and pushed before retrying PR #${pr}.`,
+  parked: (issue: number, pr: number, reason: string): string =>
+    `auto-run: issue #${issue} parked — PR #${pr} needs you (${reason}). Its branch, terminals, and pull request are left in place; the run continues with the next issue.`,
   waiting: (issue: number, pr: number): string => `auto-run: issue #${issue} is hitl — PR #${pr} is open and waiting for you. The run is paused.`,
   resolved: (pr: number): string => `auto-run: PR #${pr} merged by you; continuing.`,
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
-  complete: (count: number): string =>
-    `auto-run: queue drained (${count} issue${count === 1 ? "" : "s"} implemented). Run /auto again once more work is labelled.`,
+  complete: (count: number, parked: number): string =>
+    `auto-run: queue drained (${count} issue${count === 1 ? "" : "s"} implemented${parked === 0 ? "" : `, ${parked} parked for you`}). Run /auto again once more work is labelled.`,
   returned: (branch: string): string => `auto-run: back on ${branch}.`,
 } as const;

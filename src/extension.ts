@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { ProgressLocation, RelativePattern, commands, window, workspace } from "vscode";
+import { ProgressLocation, RelativePattern, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -553,7 +553,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     launcher: coordinator,
     terminals: { close: (terminalId) => terminals.kill(terminalId) },
     store: new FileAutoRunStore(workspaceRoot),
-    notifier: { notify: (message) => enqueueManagerNotification(message) },
+    notifier: {
+      notify: (message) => enqueueManagerNotification(message),
+      alert: (message, pullRequestUrl) => { alertAboutAutoRun(message, pullRequestUrl); },
+    },
     settings: () => currentConfiguration.autoRun,
     log: (message) => output.appendLine(message),
     onStateChange: (state) => void publishAutoRunState(state),
@@ -689,6 +692,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (fleet.get(managerAgentId)?.identity.type !== "manager") return;
     try { fleet.enqueueNotification(managerAgentId, message, new Date().toISOString() as IsoTimestamp); }
     catch (error) { output.appendLine(`Unable to queue auto-run notification: ${error instanceof Error ? error.message : "unknown error"}`); }
+  };
+  /**
+   * A run that parked or stopped needs the user, and by then it owns no status
+   * bar item to say so. The queue still gets the line — the Manager has to know
+   * too — but the user is told now rather than on their next Manager message.
+   */
+  const alertAboutAutoRun = (message: string, pullRequestUrl?: string): void => {
+    enqueueManagerNotification(message);
+    const actions = pullRequestUrl === undefined ? ["Show Log"] : ["Open Pull Request", "Show Log"];
+    void window.showWarningMessage(message, ...actions).then((choice) => {
+      if (choice === "Open Pull Request" && pullRequestUrl !== undefined) void env.openExternal(Uri.parse(pullRequestUrl));
+      else if (choice === "Show Log") output.show(true);
+    });
   };
   const autoRunStatus = window.createStatusBarItem(undefined, 99);
   autoRunStatus.command = "aboard.stopAutoRun";

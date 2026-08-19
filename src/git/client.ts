@@ -113,6 +113,13 @@ export interface GitClient {
   createBranch(branch: string, from: string): Promise<void>;
   /** Fast-forwards `branch`, which must be checked out, to its upstream. */
   fastForward(branch: string): Promise<void>;
+  /**
+   * Merges `origin/<base>` into the checked-out branch. Returns `false` when the
+   * merge conflicts, having first put the tree back exactly as it was: a
+   * reconciliation attempt that could strand the user in a half-merged checkout
+   * is not an attempt worth making automatically.
+   */
+  mergeFromRemote(base: string): Promise<boolean>;
   add(): Promise<void>;
   commit(subject: string, body: string): Promise<string>;
   push(branch: string, setUpstream: boolean): Promise<void>;
@@ -198,6 +205,19 @@ export class ProcessGitClient implements GitClient {
 
   public async fastForward(branch: string): Promise<void> {
     await this.run(["merge", "--ff-only", `origin/${branch}`]);
+  }
+
+  public async mergeFromRemote(base: string): Promise<boolean> {
+    try {
+      await this.run(["merge", "--no-edit", `origin/${base}`]);
+      return true;
+    } catch {
+      // A conflicted merge leaves markers in the tree and `MERGE_HEAD` behind.
+      // Aborting is what makes the attempt free; it is a probe, so a failure to
+      // abort is reported by the caller's next status read rather than here.
+      await this.tryRun(["merge", "--abort"]);
+      return false;
+    }
   }
 
   public async add(): Promise<void> {

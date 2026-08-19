@@ -133,6 +133,7 @@ flowchart TD
   GH -->|read| SELECT["Extension selects the next ready leaf<br/>dependencies first, then oldest"]
   SELECT -->|one issue at a time| BRANCH["Extension + local Git<br/>fetch default branch and checkout/create aboard branch"]
   BRANCH --> IMPLEMENTER["Visible implementer terminal"]
+  IMPLEMENTER -->|final message| COMMENT["Extension + GitHub<br/>post the implementer's summary on the issue"]
   IMPLEMENTER -->|uncommitted working-tree edits only| COMMIT["Extension + local Git<br/>stage, commit, and push"]
   COMMIT --> PR["Extension + GitHub<br/>open PR with Closes issue"]
   PR --> DISPOSITION{"Issue disposition"}
@@ -149,14 +150,22 @@ flowchart TD
   CAPTURE --> WAIT
   WAIT -->|user merged| CLEANUP["Extension + local Git<br/>checkout default branch and clean up terminals"]
   WAIT -->|approved by another account| MERGE
-  MERGE --> CLEANUP
+  MERGE -->|merged| CLEANUP
+  MERGE -->|conflicts with the base| RECONCILE["Extension + local Git<br/>merge the base back in and push"]
+  RECONCILE -->|reconciled, retried once| MERGE
+  RECONCILE -->|the conflict needs a human| PARK["Extension parks the issue and alerts the user<br/>PR, branch, and terminals left in place"]
+  MERGE -->|refused for any other reason| STOP["Extension alerts the user<br/>and stops the whole run"]
+  PARK -->|re-read GitHub| SELECT
   CLEANUP -->|re-read GitHub| SELECT
   SELECT -->|no ready issues remain| DONE["Restore the user's original branch<br/>and end the run"]
 ```
 
-- The extension owns every automatic git and GitHub side effect: branch, commit, push, pull request, and merge. Implementers and pr-doctors leave edits uncommitted and never run `gh` or mutating git workflow commands.
+- The extension owns every automatic git and GitHub side effect: branch, commit, push, issue comment, pull request, and merge. Implementers and pr-doctors leave edits uncommitted and never run `gh` or mutating git workflow commands.
+- An agent's final message is content, never a side effect. The extension is what publishes it: as the commit body, as the pull request body, and as a comment on the issue the implementer resolved. Publishing it is best-effort and carries no postcondition.
 - Auto-run re-observes git and GitHub before each phase and after every issue. The persisted record is only a resume hint; every phase is idempotent and skips an already-satisfied postcondition.
 - Review stays opt-in. An AFK pull request may be merged directly; a HITL pull request requires the user's merge or another account's approval. The extension never attempts self-approval.
+- A merge conflict is a fact about one branch, so it parks that issue and the run continues. Anything else that refuses a merge — branch protection above all — is a fact about the repository, so it stops the run. Parking never closes or abandons anything: the pull request, branch, and terminals stay as they are for the user.
+- A run that needs the user's hands says so immediately rather than only queueing a line for the Manager, because a parked or stopped run no longer owns any visible progress indicator.
 
 ### Scaffold and State Ownership
 

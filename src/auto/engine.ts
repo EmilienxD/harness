@@ -12,6 +12,7 @@ import {
   autoRunMessage,
   branchName,
   commitSubject,
+  issueCommentBody,
   nextStep,
   pullRequestBody,
   selectIssues,
@@ -28,6 +29,17 @@ import type { LaunchOrigin } from "../domain/lease.js";
 import type { GitClient } from "../git/client.js";
 import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles } from "../bridge/delegation.js";
 
+/**
+ * A pull request as the run observes it. `mergeable` is carried because a merge
+ * that fails has many causes and only one of them — a conflict — is something
+ * the run can act on rather than surrender to.
+ */
+export interface PullRequestObservation {
+  readonly state: "open" | "closed" | "merged";
+  readonly mergeable: "mergeable" | "conflicting" | "unknown";
+  readonly url: string;
+}
+
 /** The GitHub surface the engine needs, narrowed so tests can fake it whole. */
 export interface AutoRunGitHub {
   /** Proves that gh can authenticate to and resolve the workspace repository. */
@@ -40,9 +52,10 @@ export interface AutoRunGitHub {
     readonly candidates: readonly CandidateIssue[];
   }>;
   getIssue(number: number): Promise<{ readonly state: "open" | "closed" } | undefined>;
+  addIssueComment(number: number, body: string): Promise<void>;
   createPullRequest(input: { readonly title: string; readonly body: string; readonly head: string; readonly base: string }): Promise<number>;
   findOpenPullRequestForBranch(branch: string): Promise<number | undefined>;
-  getPullRequest(number: number): Promise<{ readonly state: "open" | "closed" | "merged" } | undefined>;
+  getPullRequest(number: number): Promise<PullRequestObservation | undefined>;
   getReviewState(number: number): Promise<{ readonly decision: "approved" | "changes-requested" | "reviewed" | "unreviewed" }>;
   mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase"): Promise<void>;
 }
@@ -65,6 +78,13 @@ export interface AutoRunStore {
 /** One bounded line per phase transition, drained on the user's next message. */
 export interface AutoRunNotifier {
   notify(message: string): void;
+  /**
+   * Something is waiting on the user's hands. Queued progress reaches whoever
+   * next talks to the Manager, which is the wrong channel for a run that has
+   * stopped or parked: the user may not be talking to the Manager at all, and
+   * the status bar the run owned is gone. An alert is shown immediately.
+   */
+  alert(message: string, pullRequestUrl?: string): void;
 }
 
 /** Who owns an open pull request, so `review_pr` can reopen that session. */
@@ -271,7 +291,7 @@ export class AutoRunEngine {
     });
     this.#loop = this.#run(record, controller.signal).catch((error: unknown) => {
       this.options.log?.(`auto-run failed: ${message(error)}`);
-      this.options.notifier.notify(autoRunMessage.stopped(this.#state?.currentIssue, message(error)));
+      this.options.notifier.alert(autoRunMessage.stopped(this.#state?.currentIssue, message(error)));
     }).finally(() => {
       this.#controller = undefined;
       void this.#restoreOriginalBranch(homeBranch).finally(() => {
@@ -306,6 +326,7 @@ export class AutoRunEngine {
   async #run(initial: AutoRunRecord, signal: AbortSignal): Promise<void> {
     let record = initial;
     let completed = 0;
+    let parked = 0;
     // Review mode is decided when a run starts and belongs to that run: a
     // setting changed mid-run must not silently retarget a run already in
     // flight, and a resumed run must behave as the run it is resuming. The rest
@@ -326,7 +347,7 @@ export class AutoRunEngine {
         for (const skipped of selection.skipped) {
           this.options.notifier.notify(`auto-run: issue #${skipped.number} left unprocessed (${skipped.reason}).`);
         }
-        this.options.notifier.notify(autoRunMessage.complete(completed));
+        this.options.notifier.notify(autoRunMessage.complete(completed, parked));
         await this.options.store.clear();
         return;
       }
@@ -347,13 +368,30 @@ export class AutoRunEngine {
         signal,
       );
       if (outcome.kind === "stopped") {
-        this.options.notifier.notify(autoRunMessage.stopped(issue.number, outcome.reason));
+        this.options.notifier.alert(autoRunMessage.stopped(issue.number, outcome.reason));
         // The record survives a stop so an explicit resume can re-enter at the
         // failed phase; nothing created before the failure is rolled back.
         await this.options.store.save({ ...record, currentIssue: issue.number, phase: outcome.phase, branch: issue.branch, prNumber: outcome.prNumber });
         return;
       }
       if (outcome.kind === "aborted") return;
+      if (outcome.kind === "parked") {
+        // Unlike a stop, this is not evidence that the queue behind it shares a
+        // bad premise: a pull request that will not merge is a fact about one
+        // branch. The issue is set aside for the user and the run moves on; its
+        // dependents stay blocked on their own, because it is still open.
+        this.options.notifier.alert(autoRunMessage.parked(issue.number, outcome.prNumber, outcome.reason), outcome.pullRequestUrl);
+        // Dropped rather than closed: the user is being asked to resolve this
+        // issue's conflict, and its terminals are where they will look first.
+        // The set only ever holds the current issue's terminals, because every
+        // issue boundary — cleanup or park — empties it.
+        this.#openTerminals.clear();
+        processed.add(issue.number);
+        parked += 1;
+        record = { ...record, currentIssue: undefined, phase: "branch", branch: undefined, prNumber: undefined };
+        await this.options.store.save(record);
+        continue;
+      }
 
       processed.add(issue.number);
       completed += 1;
@@ -381,6 +419,7 @@ export class AutoRunEngine {
     | { readonly kind: "done" }
     | { readonly kind: "aborted" }
     | { readonly kind: "stopped"; readonly reason: string; readonly phase: AutoRunPhase; readonly prNumber: number | undefined }
+    | { readonly kind: "parked"; readonly reason: string; readonly prNumber: number; readonly pullRequestUrl: string | undefined }
   > {
     // No phase is carried between iterations: the reducer re-derives it from the
     // observed repository every time, so an interrupted run and a fresh one take
@@ -469,9 +508,11 @@ export class AutoRunEngine {
             }
             break;
           }
-          case "merge":
-            await this.#merge(issue, step.prNumber, settings);
+          case "merge": {
+            const merged = await this.#merge(issue, step.prNumber, defaultBranch, settings);
+            if (merged !== "merged") return { kind: "parked", ...merged, prNumber: step.prNumber };
             break;
+          }
           case "cleanup":
             await this.#cleanup(defaultBranch);
             return { kind: "done" };
@@ -555,7 +596,27 @@ export class AutoRunEngine {
       throw new Error(`implementer failed: ${outcome.result.failure.type}`);
     }
     this.#remember(issue, outcome, "implementer");
+    await this.#comment(issue.number, outcome.result.lastAssistantMessage);
     return outcome.result.lastAssistantMessage;
+  }
+
+  /**
+   * Posts the implementer's own account of the change on the issue it resolved,
+   * where the issue's readers are — the pull request body carries the same text,
+   * but a squashed pull request is not where anyone looks a month later.
+   *
+   * Best-effort by design: the change is already in the working tree, and no
+   * phase's postcondition depends on a comment, so a failed comment is logged
+   * rather than allowed to fail an issue that was implemented correctly.
+   */
+  async #comment(issueNumber: number, summary: string): Promise<void> {
+    const body = issueCommentBody(summary);
+    if (body === undefined) return;
+    try {
+      await this.options.github.addIssueComment(issueNumber, body);
+    } catch (error) {
+      this.options.log?.(`auto-run could not comment on issue #${issueNumber}: ${message(error)}`);
+    }
   }
 
   async #commit(issue: PlannedIssue, summary: string): Promise<string> {
@@ -690,21 +751,67 @@ export class AutoRunEngine {
     this.options.notifier.notify(autoRunMessage.captured(issue.number, prNumber, paths));
   }
 
-  async #merge(issue: PlannedIssue, prNumber: number, settings: AutoRunSettings): Promise<void> {
+  /**
+   * Merges the pull request, or reports why the user has to. A conflict is the
+   * one failure worth attempting to repair here, because the run creates it: a
+   * branch is cut from a fresh base, so the only way it falls behind is a push
+   * to the base while this issue was in flight — routinely the user's own merge
+   * during a hitl wait.
+   */
+  async #merge(
+    issue: PlannedIssue,
+    prNumber: number,
+    defaultBranch: string,
+    settings: AutoRunSettings,
+  ): Promise<"merged" | { readonly reason: string; readonly pullRequestUrl: string | undefined }> {
     const snapshot = await this.options.github.getPullRequest(prNumber);
     if (snapshot?.state !== "merged") {
+      // A known conflict is repaired before the merge is attempted; an `unknown`
+      // verdict — the normal answer for a head pushed seconds ago — is left to
+      // the attempt itself rather than waited on.
+      if (snapshot?.mergeable === "conflicting" && !await this.#reconcile(issue, prNumber, defaultBranch)) {
+        return { reason: `it conflicts with ${defaultBranch} and the conflict is not one aboard can resolve`, pullRequestUrl: snapshot.url };
+      }
       try {
         await this.options.github.mergePullRequest(prNumber, settings.mergeStrategy);
       } catch (error) {
-        // Branch protection that requires a review cannot be satisfied without a
-        // second identity, and saying so beats appearing stuck.
-        throw new Error(
-          `merging PR #${prNumber} failed (${message(error)}). If the branch requires a review, auto-run cannot approve its own pull request — merge it yourself and re-run /auto.`,
-        );
+        // Re-read rather than guess: by now GitHub has computed a verdict the
+        // pre-merge read may not have had, and a conflict and a protected
+        // branch need opposite things from the user.
+        const after = await this.options.github.getPullRequest(prNumber);
+        if (after?.state === "merged") {
+          this.options.log?.(`auto-run: PR #${prNumber} was already merged when the merge failed (${message(error)})`);
+        } else if (after?.mergeable === "conflicting") {
+          return { reason: `it conflicts with ${defaultBranch}`, pullRequestUrl: after.url };
+        } else {
+          // Not a fact about this branch. Branch protection that requires a
+          // review applies to every pull request the run will open, so unlike a
+          // conflict this stops the run rather than parking one issue.
+          throw new Error(
+            `merging PR #${prNumber} failed (${message(error)}). If the branch requires a review, auto-run cannot approve its own pull request — merge it yourself and re-run /auto.`,
+          );
+        }
       }
     }
     this.options.notifier.notify(autoRunMessage.merged(issue.number));
     this.#owners.delete(prNumber);
+    return "merged";
+  }
+
+  /**
+   * Brings the issue branch up to date with its base and pushes the result.
+   * Refuses on anything it did not put there: merging over uncommitted work, or
+   * from the wrong branch, would strand changes nobody is reviewing in a tree
+   * the user did not ask to have merged.
+   */
+  async #reconcile(issue: PlannedIssue, prNumber: number, base: string): Promise<boolean> {
+    const status = await this.options.git.status();
+    if (status.branch !== issue.branch || status.entries.length > 0) return false;
+    await this.options.git.fetch();
+    if (!await this.options.git.mergeFromRemote(base)) return false;
+    await this.options.git.push(issue.branch, false);
+    this.options.notifier.notify(autoRunMessage.reconciled(issue.number, prNumber, base));
+    return true;
   }
 
   async #cleanup(defaultBranch: string): Promise<void> {
