@@ -25,6 +25,7 @@ function candidate(overrides: Partial<CandidateIssue> & { readonly number: numbe
     labels: ["ai:afk"],
     state: "open",
     openBlockedByNumbers: [],
+    dependencyNumbers: [],
     createdAt: `2026-01-${String(overrides.number % 28 + 1).padStart(2, "0")}T00:00:00.000Z`,
     hasChildren: false,
     ...overrides,
@@ -186,6 +187,33 @@ test("the queue is ordered by creation date, not by number, with ties on the low
     candidate({ number: 39, createdAt: "2026-02-01T00:00:00.000Z" }),
   ]);
   assert.deepEqual(selection.issues.map((entry) => entry.number), [91, 39, 40, 12]);
+});
+
+test("dependency order wins over age while unrelated ready work stays oldest first", () => {
+  const selection = selectIssues([
+    candidate({ number: 10, createdAt: "2026-01-01T00:00:00.000Z", dependencyNumbers: [30] }),
+    candidate({ number: 20, createdAt: "2026-01-02T00:00:00.000Z" }),
+    candidate({ number: 30, createdAt: "2026-01-03T00:00:00.000Z" }),
+    candidate({ number: 40, createdAt: "2026-01-04T00:00:00.000Z", dependencyNumbers: [10] }),
+  ]);
+
+  // #10 is oldest but waits for #30. Of the initially ready issues #20 is
+  // older than #30; once #30 releases #10, #10 goes before unrelated #40.
+  assert.deepEqual(selection.issues.map((entry) => entry.number), [20, 30, 10, 40]);
+  assert.deepEqual(selection.dependencyCycles, []);
+});
+
+test("dependency cycles are detected, broken locally, and ordered deterministically", () => {
+  const selection = selectIssues([
+    candidate({ number: 10, createdAt: "2026-01-01T00:00:00.000Z", dependencyNumbers: [20, 30] }),
+    candidate({ number: 20, createdAt: "2026-01-02T00:00:00.000Z", dependencyNumbers: [10, 30] }),
+    candidate({ number: 30, createdAt: "2026-01-03T00:00:00.000Z" }),
+  ]);
+
+  // The external edge to #30 survives cycle breaking. Only #10 <-> #20 is
+  // relaxed, then age is the tie-breaker inside that component.
+  assert.deepEqual(selection.issues.map((entry) => entry.number), [30, 10, 20]);
+  assert.deepEqual(selection.dependencyCycles, [[10, 20]]);
 });
 
 test("an umbrella never enters the queue, silently unless it is classified", () => {

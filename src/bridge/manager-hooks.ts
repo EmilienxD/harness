@@ -284,7 +284,7 @@ export class ManagerBriefings {
 
   #autoRun(): string {
     const run = this.sources.autoRun();
-    if (run === undefined) return "No run is active. `/auto` starts one over every open ai:afk / ai:hitl issue, oldest first.";
+    if (run === undefined) return "No run is active. `/auto` starts one over every open ai:afk / ai:hitl issue, dependencies first and then oldest first.";
     const lines = [
       `Running - phase ${run.phase}, ${run.completedCount} issue(s) done, Chrome ${run.chromeEnabled ? "on" : "off"}.`,
     ];
@@ -659,7 +659,8 @@ function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unkno
   if (type === "auto") {
     if (value.started === false) return `auto-run did not start: ${typeof value.reason === "string" ? value.reason : "no reason given"}.`;
     const issues = Array.isArray(value.issues) ? value.issues.length : 0;
-    return `auto-run started with ${issues} issue${issues === 1 ? "" : "s"} queued, Chrome ${value.chromeEnabled === true ? "on" : "off"}.`;
+    const cycles = Array.isArray(value.dependencyCycles) ? value.dependencyCycles.length : 0;
+    return `auto-run started with ${issues} issue${issues === 1 ? "" : "s"} queued${cycles === 0 ? "" : `; ${cycles} dependency cycle${cycles === 1 ? "" : "s"} detected and safely relaxed`}, Chrome ${value.chromeEnabled === true ? "on" : "off"}.`;
   }
   switch (value.action) {
     case "none": return "No pull request is open, so nothing was launched.";

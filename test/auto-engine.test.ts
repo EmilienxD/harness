@@ -32,6 +32,7 @@ interface QueueIssue {
   readonly labels: string[];
   readonly state: "open" | "closed";
   readonly openBlockedByNumbers: number[];
+  readonly dependencyNumbers?: readonly number[];
   /** Defaults to the issue number's own order when a test does not care. */
   readonly createdAt?: string;
   readonly hasChildren?: boolean;
@@ -113,6 +114,8 @@ function harness(options: HarnessOptions = {}): Harness {
         labels: entry.labels,
         state: "open" as const,
         openBlockedByNumbers: entry.openBlockedByNumbers.filter((number) => open.has(number)),
+        dependencyNumbers: (entry.dependencyNumbers ?? entry.openBlockedByNumbers)
+          .filter((number) => open.has(number)),
         createdAt: entry.createdAt ?? `2026-01-${String(entry.number % 28 + 1).padStart(2, "0")}T00:00:00.000Z`,
         hasChildren: entry.hasChildren === true,
       }));
@@ -509,6 +512,23 @@ test("progress expands when an older blocked issue becomes ready", async () => {
   assert.deepEqual(context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]), [34, 33, 35]);
   assert.equal(context.states.some((state) => state.currentIssue === 33 && state.completedCount === 1 && state.totalCount === 3), true);
   assert.equal(context.states.some((state) => state.currentIssue === 35 && state.completedCount === 2 && state.totalCount === 3), true);
+});
+
+test("a dependency cycle is visible and drains in deterministic order", async () => {
+  const context = harness({
+    issues: [
+      { number: 34, title: "Older", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [37], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 37, title: "Newer", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [34], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(
+    context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]),
+    [34, 37],
+  );
+  assert.equal(context.notifications.some((entry) => entry.includes("dependency cycle") && entry.includes("#34, #37")), true);
 });
 
 test("resume re-derives from the repository rather than trusting the record", async () => {

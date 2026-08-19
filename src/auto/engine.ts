@@ -33,8 +33,8 @@ export interface AutoRunGitHub {
   /** Proves that gh can authenticate to and resolve the workspace repository. */
   checkAuthentication(): Promise<void>;
   /**
-   * Every open issue, oldest first — the complete queue this run drains,
-   * regardless of which spec (if any) an issue belongs to.
+   * Every open issue and its inferred dependencies — the complete graph this
+   * run drains, regardless of which spec (if any) an issue belongs to.
    */
   listImplementableIssues(): Promise<{
     readonly candidates: readonly CandidateIssue[];
@@ -116,6 +116,7 @@ export type AutoRunStartResult =
       readonly chromeEnabled: boolean;
       readonly issues: readonly PlannedIssue[];
       readonly skipped: readonly SkippedIssue[];
+      readonly dependencyCycles: readonly (readonly number[])[];
     }
   | { readonly started: false; readonly reason: string; readonly active?: AutoRunState };
 
@@ -185,6 +186,11 @@ export class AutoRunEngine {
     await this.options.store.save(record);
     const afk = selection.issues.filter((issue) => issue.disposition === "afk").length;
     this.options.notifier.notify(autoRunMessage.started(afk, selection.issues.length - afk, settings.review, record.chromeEnabled === true));
+    for (const cycle of selection.dependencyCycles) {
+      this.options.notifier.notify(
+        `auto-run: dependency cycle detected among ${cycle.map((number) => `#${number}`).join(", ")}; ordering those issues oldest first.`,
+      );
+    }
     for (const skipped of selection.skipped) {
       this.options.notifier.notify(`auto-run: issue #${skipped.number} skipped (${skipped.reason}).`);
     }
@@ -197,6 +203,7 @@ export class AutoRunEngine {
       chromeEnabled: record.chromeEnabled === true,
       issues: selection.issues,
       skipped: selection.skipped,
+      dependencyCycles: selection.dependencyCycles,
     };
   }
 
@@ -221,6 +228,7 @@ export class AutoRunEngine {
       chromeEnabled: record.chromeEnabled === true,
       issues: selection.issues,
       skipped: selection.skipped,
+      dependencyCycles: selection.dependencyCycles,
     };
   }
 

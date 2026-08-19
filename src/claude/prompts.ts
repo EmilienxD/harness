@@ -21,6 +21,8 @@ export interface IssueSnapshot {
   readonly state: "open" | "closed";
   /** The umbrella `spec` issue this issue implements, when there is one. */
   readonly parentIssueNumber?: number | undefined;
+  /** Sub-issues and same-repository issue references inferred from the body. */
+  readonly dependencyIssueNumbers?: readonly number[] | undefined;
   /** A branch GitHub already associates with the issue, when there is one. */
   readonly branch?: string | undefined;
 }
@@ -127,6 +129,8 @@ export interface PromptResolutionLimits {
   readonly relatedIssueChars: number;
   readonly diffChars: number;
   readonly reviewThreadChars: number;
+  /** Hard bound on recursively resolved parents/dependencies. */
+  readonly relatedIssueCount: number;
 }
 
 export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
@@ -135,6 +139,7 @@ export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
   relatedIssueChars: 1_500,
   diffChars: 40_000,
   reviewThreadChars: 12_000,
+  relatedIssueCount: 50,
 };
 
 export type PromptResolutionErrorCode =
@@ -338,24 +343,43 @@ export class PromptResolver {
       builder.source("issue", issue.number, body);
     }
 
-    const rendered = new Set(issues.map((issue) => issue.number));
-    const parentNumbers = new Set(
-      issues
-        .map((issue) => issue.parentIssueNumber)
-        .filter((number): number is number => number !== undefined && !rendered.has(number)),
-    );
-    for (const number of parentNumbers) {
-      const parent = await this.#github.getIssue(number);
-      // A parent GitHub reports but cannot return is skipped silently: the child
-      // issue is still a complete contract without it.
-      if (parent === undefined) continue;
-      const parentBody = excerpt(
-        parent.body,
-        this.#limits.parentSpecChars,
-        pointers ? `gh issue view ${parent.number}` : undefined,
+    const visited = new Set(issues.map((issue) => issue.number));
+    const pending: { readonly number: number; readonly kind: "parent-spec" | "related-issue" }[] = [];
+    const enqueue = (number: number | undefined, kind: "parent-spec" | "related-issue"): void => {
+      if (number === undefined || visited.has(number)) return;
+      // Mark on enqueue, not after the read: siblings can point at each other
+      // (or themselves through a parent) and must still cost one fetch.
+      visited.add(number);
+      pending.push({ number, kind });
+    };
+    for (const issue of issues) enqueue(issue.parentIssueNumber, "parent-spec");
+    for (const issue of issues) {
+      for (const number of issue.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
+    }
+
+    let attempted = 0;
+    while (pending.length > 0 && attempted < this.#limits.relatedIssueCount) {
+      const next = pending.shift()!;
+      attempted += 1;
+      const related = await this.#github.getIssue(next.number);
+      // A missing link may name a pull request or deleted issue. It stays in
+      // `visited`, so a cycle through it still cannot trigger repeated reads.
+      if (related === undefined) continue;
+      const limit = next.kind === "parent-spec"
+        ? this.#limits.parentSpecChars
+        : this.#limits.relatedIssueChars;
+      const relatedBody = excerpt(
+        related.body,
+        limit,
+        pointers ? `gh issue view ${related.number}` : undefined,
       );
-      builder.section(`Parent spec #${parent.number} — ${parent.title}`, parentBody.text);
-      builder.source("parent-spec", parent.number, parentBody);
+      builder.section(
+        `${next.kind === "parent-spec" ? "Parent spec" : "Dependency"} #${related.number} — ${related.title}`,
+        relatedBody.text,
+      );
+      builder.source(next.kind, related.number, relatedBody);
+      enqueue(related.parentIssueNumber, "parent-spec");
+      for (const number of related.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
     }
   }
 

@@ -275,7 +275,9 @@ export interface CandidateIssue {
   readonly labels: readonly string[];
   readonly state: "open" | "closed";
   readonly openBlockedByNumbers: readonly number[];
-  /** Creation time, which is the queue's order. */
+  /** Native blockers, sub-issues, and issue-body references used for ordering. */
+  readonly dependencyNumbers: readonly number[];
+  /** Creation time, which breaks ties between dependency-ready issues. */
   readonly createdAt: string;
   /** Whether the issue has sub-issues of its own, which makes it an umbrella. */
   readonly hasChildren: boolean;
@@ -284,12 +286,14 @@ export interface CandidateIssue {
 export interface Selection {
   readonly issues: readonly PlannedIssue[];
   readonly skipped: readonly SkippedIssue[];
+  /** Cycles whose internal edges were ignored, in deterministic queue order. */
+  readonly dependencyCycles: readonly (readonly number[])[];
 }
 
 /**
- * Selection over the whole open issue queue, oldest first. "Oldest" is by
- * `createdAt` and not by `updatedAt` — an issue being edited is not an issue
- * being deprioritized — with ties on the lower number, so the order is total.
+ * Selection over the whole open issue graph. Dependencies run first; among
+ * issues that are ready together, "oldest" is by `createdAt` and not by
+ * `updatedAt`, with ties on the lower number so the order is total.
  *
  * Unclassified is skipped and reported, never guessed at — `AGENTS.md` is
  * explicit that unclassified is a legitimate third state and that the system
@@ -307,8 +311,8 @@ export interface Selection {
 export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
   const issues: PlannedIssue[] = [];
   const skipped: SkippedIssue[] = [];
-  const ordered = [...candidates].sort(
-    (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.number - right.number,
+  const { ordered, cycles: dependencyCycles } = orderByDependencies(
+    candidates.filter((candidate) => candidate.state === "open"),
   );
   for (const candidate of ordered) {
     if (candidate.state !== "open") continue;
@@ -336,7 +340,124 @@ export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
       branch: branchName(candidate.number, candidate.title),
     });
   }
-  return { issues, skipped };
+  return { issues, skipped, dependencyCycles };
+}
+
+function compareCandidates(left: CandidateIssue, right: CandidateIssue): number {
+  return Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.number - right.number;
+}
+
+/**
+ * Stable Kahn sort with surgical cycle breaking. When no node is ready, a DFS
+ * identifies one actual directed cycle. Removing only the edges within that
+ * cycle keeps every acyclic constraint around it intact. Both walks carry
+ * explicit visited state and therefore terminate for every finite input graph.
+ */
+function orderByDependencies(candidates: readonly CandidateIssue[]): {
+  readonly ordered: readonly CandidateIssue[];
+  readonly cycles: readonly (readonly number[])[];
+} {
+  const byNumber = new Map(candidates.map((candidate) => [candidate.number, candidate]));
+  const dependencies = new Map<number, Set<number>>();
+  const dependents = new Map<number, Set<number>>();
+  for (const candidate of candidates) {
+    const local = new Set(
+      candidate.dependencyNumbers.filter((number) => byNumber.has(number)),
+    );
+    dependencies.set(candidate.number, local);
+    for (const dependency of local) {
+      const consumers = dependents.get(dependency) ?? new Set<number>();
+      consumers.add(candidate.number);
+      dependents.set(dependency, consumers);
+    }
+  }
+
+  const remaining = new Set(byNumber.keys());
+  const ordered: CandidateIssue[] = [];
+  const cycles: number[][] = [];
+  while (remaining.size > 0) {
+    const ready = [...remaining]
+      .filter((number) => dependencies.get(number)?.size === 0)
+      .map((number) => byNumber.get(number)!)
+      .sort(compareCandidates);
+    if (ready.length === 0) {
+      const cycle = findDependencyCycle(remaining, dependencies, byNumber);
+      // A finite graph with no ready node contains a cycle. The fallback is a
+      // defensive escape hatch if that invariant is broken by a future edit.
+      if (cycle.length === 0) {
+        dependencies.get([...remaining]
+          .map((number) => byNumber.get(number)!)
+          .sort(compareCandidates)[0]!.number)?.clear();
+        continue;
+      }
+      const members = new Set(cycle);
+      cycles.push(cycle
+        .map((number) => byNumber.get(number)!)
+        .sort(compareCandidates)
+        .map((candidate) => candidate.number));
+      for (const member of members) {
+        const own = dependencies.get(member)!;
+        for (const dependency of [...own]) {
+          if (members.has(dependency)) own.delete(dependency);
+        }
+      }
+      continue;
+    }
+
+    const candidate = ready[0]!;
+    remaining.delete(candidate.number);
+    ordered.push(candidate);
+    for (const dependent of dependents.get(candidate.number) ?? []) {
+      dependencies.get(dependent)?.delete(candidate.number);
+    }
+  }
+  return { ordered, cycles };
+}
+
+function findDependencyCycle(
+  remaining: ReadonlySet<number>,
+  dependencies: ReadonlyMap<number, ReadonlySet<number>>,
+  byNumber: ReadonlyMap<number, CandidateIssue>,
+): readonly number[] {
+  const visited = new Set<number>();
+  const visiting = new Set<number>();
+  const path: number[] = [];
+  const pathPositions = new Map<number, number>();
+  const starts = [...remaining]
+    .map((number) => byNumber.get(number)!)
+    .sort(compareCandidates);
+
+  for (const start of starts) {
+    if (visited.has(start.number)) continue;
+    const stack: { readonly number: number; readonly next: readonly number[]; index: number }[] = [];
+    const push = (number: number): void => {
+      visiting.add(number);
+      pathPositions.set(number, path.length);
+      path.push(number);
+      const next = [...(dependencies.get(number) ?? [])]
+        .filter((dependency) => remaining.has(dependency))
+        .map((dependency) => byNumber.get(dependency)!)
+        .sort(compareCandidates)
+        .map((candidate) => candidate.number);
+      stack.push({ number, next, index: 0 });
+    };
+    push(start.number);
+    while (stack.length > 0) {
+      const frame = stack.at(-1)!;
+      const next = frame.next[frame.index++];
+      if (next !== undefined) {
+        if (visiting.has(next)) return path.slice(pathPositions.get(next));
+        if (!visited.has(next)) push(next);
+        continue;
+      }
+      stack.pop();
+      visiting.delete(frame.number);
+      visited.add(frame.number);
+      pathPositions.delete(frame.number);
+      path.pop();
+    }
+  }
+  return [];
 }
 
 function classify(labels: readonly string[]): IssueDisposition | undefined {

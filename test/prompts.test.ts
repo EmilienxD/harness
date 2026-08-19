@@ -265,6 +265,55 @@ test("a repeated issue resolves once and a parent named among the issues is not 
   assert.deepEqual(github.issueRequests, [47, 31]);
 });
 
+test("recursive issue context terminates across parent and reference cycles", async () => {
+  const issue52: IssueSnapshot = {
+    number: 52,
+    title: "Cache the token",
+    body: "Uses the auth contract.",
+    labels: ["ai:afk"],
+    state: "open",
+    dependencyIssueNumbers: [31],
+  };
+  const github = new FakeGitHub({
+    issues: [
+      { ...issue47, dependencyIssueNumbers: [31] },
+      { ...issue31, dependencyIssueNumbers: [47, 52] },
+      issue52,
+    ],
+  });
+  const prompt = await new PromptResolver({ github }).resolve({
+    kind: "implementation",
+    instruction: "Go.",
+    issueNumbers: [47],
+  });
+
+  assert.deepEqual(github.issueRequests, [47, 31, 52]);
+  assert.deepEqual(
+    prompt?.sources.map((source) => `${source.kind}#${source.number}`),
+    ["issue#47", "parent-spec#31", "related-issue#52"],
+  );
+});
+
+test("recursive issue context has a hard node bound even without a cycle", async () => {
+  const issues = Array.from({ length: 10 }, (_, index): IssueSnapshot => ({
+    number: index + 1,
+    title: `Linked ${index + 1}`,
+    body: `Body ${index + 1}`,
+    labels: ["ai:afk"],
+    state: "open",
+    dependencyIssueNumbers: index === 9 ? [] : [index + 2],
+  }));
+  const github = new FakeGitHub({ issues });
+  const prompt = await new PromptResolver({ github, limits: { relatedIssueCount: 3 } }).resolve({
+    kind: "implementation",
+    instruction: "Go.",
+    issueNumbers: [1],
+  });
+
+  assert.deepEqual(github.issueRequests, [1, 2, 3, 4]);
+  assert.equal(prompt?.sources.length, 4);
+});
+
 test("a single issue keeps today's headline and one bad number in the batch fails the whole prompt", async () => {
   const github = new FakeGitHub({ issues: [issue47, issue31] });
   const resolver = new PromptResolver({ github });

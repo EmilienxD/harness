@@ -21,6 +21,7 @@ import {
   type RoadmapUpdateInput,
 } from "../domain/roadmap.js";
 import type { CandidateIssue } from "../domain/auto-run.js";
+import { referencedIssueNumbers } from "../shared/issues.js";
 import { LABEL_HITL, LABEL_SPEC, LABEL_TODO, issueDisposition } from "../shared/labels.js";
 
 export { ABOARD_LABELS } from "../shared/labels.js";
@@ -238,6 +239,28 @@ interface DependencyPage extends PageInfo {
   readonly dependencies: readonly Dependency[];
 }
 
+interface IssueNumberPage extends PageInfo {
+  readonly numbers: readonly number[];
+  readonly totalCount: number;
+}
+
+function parseIssueNumberPage(value: unknown, context: string): IssueNumberPage {
+  if (value === undefined || value === null) {
+    return { numbers: [], totalCount: 0, nextCursor: undefined };
+  }
+  const connection = record(value, context);
+  const nodes = connection.nodes === undefined ? [] : array(connection.nodes, `${context}.nodes`);
+  const numbers = nodes.map((node, index) =>
+    integer(record(node, `${context}.nodes[${index}]`).number, `${context}.nodes[${index}].number`));
+  const totalCount = Number.isInteger(connection.totalCount) && (connection.totalCount as number) >= 0
+    ? connection.totalCount as number
+    : numbers.length;
+  const paging = connection.pageInfo === undefined
+    ? { nextCursor: undefined }
+    : pageInfo(connection.pageInfo, `${context}.pageInfo`);
+  return { numbers, totalCount, nextCursor: paging.nextCursor };
+}
+
 function parseDependencyPage(value: unknown, context: string): DependencyPage {
   const connection = record(value, context);
   const dependencies = array(connection.nodes, `${context}.nodes`).map((dependency, index) => {
@@ -253,11 +276,17 @@ function parseDependencyPage(value: unknown, context: string): DependencyPage {
 interface ParsedIssue {
   readonly snapshot: IssueSnapshot;
   readonly nextLabelCursor: string | undefined;
+  readonly nextSubIssueCursor: string | undefined;
 }
 
-function parseIssue(value: unknown, context: string): ParsedIssue {
+function parseIssue(
+  value: unknown,
+  context: string,
+  repository: { readonly owner: string; readonly repo: string },
+): ParsedIssue {
   const item = record(value, context);
   const labelPage = parseLabelPage(item.labels, `${context}.labels`);
+  const subIssuePage = parseIssueNumberPage(item.subIssues, `${context}.subIssues`);
   const parent = item.parent === null || item.parent === undefined
     ? undefined
     : integer(record(item.parent, `${context}.parent`).number, `${context}.parent.number`);
@@ -267,17 +296,23 @@ function parseIssue(value: unknown, context: string): ParsedIssue {
   const branch = branches.length === 0
     ? undefined
     : string(record(branches[0], `${context}.closedByPullRequestsReferences.nodes[0]`).headRefName, `${context}.closedByPullRequestsReferences.nodes[0].headRefName`);
+  const body = string(item.body ?? "", `${context}.body`);
   return {
     snapshot: {
       number: integer(item.number, `${context}.number`),
       title: string(item.title, `${context}.title`),
-      body: string(item.body ?? "", `${context}.body`),
+      body,
       labels: labelPage.labels,
       state: state(item.state, `${context}.state`),
       ...(parent === undefined ? {} : { parentIssueNumber: parent }),
+      dependencyIssueNumbers: [...new Set([
+        ...subIssuePage.numbers,
+        ...referencedIssueNumbers(body, repository),
+      ])],
       ...(branch === undefined ? {} : { branch }),
     },
     nextLabelCursor: labelPage.nextCursor,
+    nextSubIssueCursor: subIssuePage.nextCursor,
   };
 }
 
@@ -290,37 +325,49 @@ interface OpenIssueRow {
   readonly hasChildren: boolean;
   readonly dependencyNumbers: readonly number[];
   readonly openBlockedByNumbers: readonly number[];
+  readonly orderingDependencyNumbers: readonly number[];
 }
 
 interface ParsedOpenIssue {
   readonly row: OpenIssueRow;
   readonly dependencies: readonly Dependency[];
+  readonly subIssueNumbers: readonly number[];
   readonly nextLabelCursor: string | undefined;
   readonly nextDependencyCursor: string | undefined;
+  readonly nextSubIssueCursor: string | undefined;
 }
 
-function parseOpenIssue(value: unknown, context: string): ParsedOpenIssue {
+function parseOpenIssue(
+  value: unknown,
+  context: string,
+  repository: { readonly owner: string; readonly repo: string },
+): ParsedOpenIssue {
   const item = record(value, context);
   const labelPage = parseLabelPage(item.labels, `${context}.labels`);
   const dependencyPage = parseDependencyPage(item.blockedBy, `${context}.blockedBy`);
-  // `subIssues(first:1){totalCount}` is the umbrella test: one page of one is
-  // enough to answer "does this issue have children" without fetching them.
-  const children = item.subIssues === undefined || item.subIssues === null
-    ? 0
-    : record(item.subIssues, `${context}.subIssues`).totalCount;
+  const subIssuePage = parseIssueNumberPage(item.subIssues, `${context}.subIssues`);
+  const body = string(item.body ?? "", `${context}.body`);
+  const references = referencedIssueNumbers(body, repository);
   return {
     row: {
       number: integer(item.number, `${context}.number`),
       title: string(item.title, `${context}.title`),
       createdAt: string(item.createdAt, `${context}.createdAt`),
       labels: labelPage.labels,
-      hasChildren: Number.isInteger(children) && (children as number) > 0,
+      hasChildren: subIssuePage.totalCount > 0,
       dependencyNumbers: dependencyPage.dependencies.map((dependency) => dependency.number),
       openBlockedByNumbers: dependencyPage.dependencies.flatMap((dependency) => dependency.state === "open" ? [dependency.number] : []),
+      orderingDependencyNumbers: [...new Set([
+        ...dependencyPage.dependencies.map((dependency) => dependency.number),
+        ...subIssuePage.numbers,
+        ...references,
+      ])],
     },
     dependencies: dependencyPage.dependencies,
+    subIssueNumbers: subIssuePage.numbers,
     nextLabelCursor: labelPage.nextCursor,
     nextDependencyCursor: dependencyPage.nextCursor,
+    nextSubIssueCursor: subIssuePage.nextCursor,
   };
 }
 
@@ -339,16 +386,17 @@ function repositoryFromGraphql(value: unknown): Record<string, unknown> {
   return record(record(record(value, "GraphQL response").data, "data").repository, "data.repository");
 }
 
-const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
+const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} totalCount pageInfo{hasNextPage endCursor}} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
 /**
  * Open issues, oldest first, carrying everything both read paths need. Every
  * connection exposes its cursor: the top-level queue is fully paginated, and
  * the normally single-page label/dependency connections are completed by
  * focused follow-up queries when GitHub says another page exists.
  */
-const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){repository(owner:$owner,name:$repo){issues(first:100,after:$after,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title createdAt labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} subIssues(first:1){totalCount} blockedBy(first:100){nodes{number state} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}`;
+const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){repository(owner:$owner,name:$repo){issues(first:100,after:$after,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title body createdAt labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} subIssues(first:100){nodes{number} totalCount pageInfo{hasNextPage endCursor}} blockedBy(first:100){nodes{number state} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}`;
 const ISSUE_LABELS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){labels(first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_BLOCKERS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state} pageInfo{hasNextPage endCursor}}}}}`;
+const ISSUE_SUBISSUES_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100,after:$after){nodes{number} totalCount pageInfo{hasNextPage endCursor}}}}}`;
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
@@ -532,12 +580,23 @@ export class GitHubClient implements GitHubPromptSource {
   }
 
   public async getIssue(number: number): Promise<IssueSnapshot | undefined> {
+    const repository = await this.#ownerRepo();
     const data = await this.#graphql(ISSUE_QUERY, { number });
     const issue = repositoryFromGraphql(data).issue;
     if (issue === null) return undefined;
-    const parsed = parseIssue(issue, "data.repository.issue");
-    const remaining = await this.#remainingLabels(number, parsed.nextLabelCursor);
-    return { ...parsed.snapshot, labels: [...parsed.snapshot.labels, ...remaining] };
+    const parsed = parseIssue(issue, "data.repository.issue", repository);
+    const [remainingLabels, remainingSubIssues] = await Promise.all([
+      this.#remainingLabels(number, parsed.nextLabelCursor),
+      this.#remainingSubIssues(number, parsed.nextSubIssueCursor),
+    ]);
+    return {
+      ...parsed.snapshot,
+      labels: [...parsed.snapshot.labels, ...remainingLabels],
+      dependencyIssueNumbers: [...new Set([
+        ...(parsed.snapshot.dependencyIssueNumbers ?? []),
+        ...remainingSubIssues,
+      ])],
+    };
   }
 
   /**
@@ -560,9 +619,10 @@ export class GitHubClient implements GitHubPromptSource {
   }
 
   /**
-   * The auto-run queue: every open issue, oldest first, projected into the
-   * domain's candidate shape. Selection — dispositions, umbrellas, blocking —
-   * happens in `selectIssues`, so this boundary reports and never judges.
+   * The auto-run graph: every open issue and its inferred ordering edges,
+   * projected into the domain's candidate shape. Selection — dispositions,
+   * umbrellas, blocking, sorting — happens in `selectIssues`, so this boundary
+   * reports and never judges.
    */
   public async listImplementableIssues(): Promise<ImplementableIssues> {
     const page = await this.#scanOpenIssues();
@@ -573,6 +633,7 @@ export class GitHubClient implements GitHubPromptSource {
         labels: row.labels,
         state: "open" as const,
         openBlockedByNumbers: row.openBlockedByNumbers,
+        dependencyNumbers: row.orderingDependencyNumbers,
         createdAt: row.createdAt,
         hasChildren: row.hasChildren,
       })),
@@ -764,12 +825,13 @@ export class GitHubClient implements GitHubPromptSource {
    */
   async #scanOpenIssues(): Promise<{ readonly rows: readonly OpenIssueRow[] }> {
     const rows = new Map<number, OpenIssueRow>();
+    const repository = await this.#ownerRepo();
     let cursor: string | undefined;
     do {
       const data = await this.#graphql(OPEN_ISSUES_QUERY, cursor === undefined ? {} : { after: cursor });
       const issues = record(repositoryFromGraphql(data).issues, "data.repository.issues");
       const nodes = array(issues.nodes, "data.repository.issues.nodes");
-      const parsed = nodes.map((value, index) => parseOpenIssue(value, `issues[${index}]`));
+      const parsed = nodes.map((value, index) => parseOpenIssue(value, `issues[${index}]`, repository));
       for (const issue of await Promise.all(parsed.map((entry) => this.#completeOpenIssue(entry)))) {
         rows.set(issue.number, issue);
       }
@@ -783,19 +845,26 @@ export class GitHubClient implements GitHubPromptSource {
   }
 
   async #completeOpenIssue(parsed: ParsedOpenIssue): Promise<OpenIssueRow> {
-    const [labels, dependencies] = await Promise.all([
+    const [labels, dependencies, subIssues] = await Promise.all([
       this.#remainingLabels(parsed.row.number, parsed.nextLabelCursor),
       this.#remainingDependencies(parsed.row.number, parsed.nextDependencyCursor),
+      this.#remainingSubIssues(parsed.row.number, parsed.nextSubIssueCursor),
     ]);
     const allLabels = [...new Set([...parsed.row.labels, ...labels])];
     const byNumber = new Map(parsed.dependencies.map((dependency) => [dependency.number, dependency]));
     for (const dependency of dependencies) byNumber.set(dependency.number, dependency);
     const allDependencies = [...byNumber.values()];
+    const allSubIssues = [...new Set([...parsed.subIssueNumbers, ...subIssues])];
     return {
       ...parsed.row,
       labels: allLabels,
       dependencyNumbers: allDependencies.map((dependency) => dependency.number),
       openBlockedByNumbers: allDependencies.flatMap((dependency) => dependency.state === "open" ? [dependency.number] : []),
+      orderingDependencyNumbers: [...new Set([
+        ...allDependencies.map((dependency) => dependency.number),
+        ...allSubIssues,
+        ...parsed.row.orderingDependencyNumbers,
+      ])],
     };
   }
 
@@ -827,6 +896,23 @@ export class GitHubClient implements GitHubPromptSource {
       found.push(...page.dependencies);
       if (page.nextCursor !== undefined && page.nextCursor === cursor) {
         throw new GitHubBoundaryError("malformed-output", "data.repository.issue.blockedBy.pageInfo did not advance its cursor");
+      }
+      cursor = page.nextCursor;
+    }
+    return found;
+  }
+
+  async #remainingSubIssues(number: number, initialCursor: string | undefined): Promise<readonly number[]> {
+    const found: number[] = [];
+    let cursor = initialCursor;
+    while (cursor !== undefined) {
+      const data = await this.#graphql(ISSUE_SUBISSUES_QUERY, { number, after: cursor });
+      const issue = repositoryFromGraphql(data).issue;
+      if (issue === null || issue === undefined) break;
+      const page = parseIssueNumberPage(record(issue, "data.repository.issue").subIssues, "data.repository.issue.subIssues");
+      found.push(...page.numbers);
+      if (page.nextCursor !== undefined && page.nextCursor === cursor) {
+        throw new GitHubBoundaryError("malformed-output", "data.repository.issue.subIssues.pageInfo did not advance its cursor");
       }
       cursor = page.nextCursor;
     }

@@ -253,10 +253,10 @@ test("the size bound accepts the write and warns rather than deadlocking the Man
 /** One page of open issues as the GraphQL query returns it. */
 function openIssues(): string {
   const nodes = [
-    { number: 16, title: "ready hitl", createdAt: "2026-01-01T00:00:00Z", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }], pageInfo: endPage } },
+    { number: 16, title: "ready hitl", body: "Needs #18 and https://github.com/EmilienxD/aboard/issues/17; ignore https://github.com/other/repo/issues/99 and `#77`.", createdAt: "2026-01-01T00:00:00Z", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, subIssues: { nodes: [], totalCount: 0, pageInfo: endPage }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }], pageInfo: endPage } },
     { number: 17, title: "blocked afk", createdAt: "2026-01-02T00:00:00Z", labels: { nodes: [{ name: "ai:afk" }], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }], pageInfo: endPage } },
     { number: 18, title: "unclassified", createdAt: "2026-01-03T00:00:00Z", labels: { nodes: [], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [], pageInfo: endPage } },
-    { number: 19, title: "umbrella", createdAt: "2026-01-04T00:00:00Z", labels: { nodes: [{ name: "ai:spec" }], pageInfo: endPage }, subIssues: { totalCount: 3 }, blockedBy: { nodes: [], pageInfo: endPage } },
+    { number: 19, title: "umbrella", createdAt: "2026-01-04T00:00:00Z", labels: { nodes: [{ name: "ai:spec" }], pageInfo: endPage }, subIssues: { nodes: [{ number: 16 }], totalCount: 3, pageInfo: endPage }, blockedBy: { nodes: [], pageInfo: endPage } },
   ];
   return graph({ issues: { nodes, pageInfo: endPage } });
 }
@@ -284,6 +284,8 @@ test("the queue and the briefing are projected from one open-issue read", async 
   ]);
   assert.deepEqual(candidates.find((issue) => issue.number === 17)?.openBlockedByNumbers, [16]);
   assert.deepEqual(candidates.find((issue) => issue.number === 16)?.openBlockedByNumbers, []);
+  assert.deepEqual(candidates.find((issue) => issue.number === 16)?.dependencyNumbers, [15, 18, 17]);
+  assert.deepEqual(candidates.find((issue) => issue.number === 19)?.dependencyNumbers, [16]);
 
   const briefing = await github.listRoadmapIssues();
   for (const issue of briefing) {
@@ -295,7 +297,7 @@ test("the queue and the briefing are projected from one open-issue read", async 
   // Ascending creation order establishes priority before cursor pagination.
   const query = gh.calls.flat().find((arg) => arg.startsWith("query=")) ?? "";
   assert.match(query, /orderBy:\{field:CREATED_AT,direction:ASC\}/);
-  assert.match(query, /subIssues\(first:1\)\{totalCount\}/);
+  assert.match(query, /subIssues\(first:100\)\{nodes\{number\} totalCount pageInfo/);
   assert.match(query, /pageInfo\{hasNextPage endCursor\}/);
 });
 
@@ -335,7 +337,7 @@ test("label and blocker connections are completed before queue classification", 
     title: "Deep connections",
     createdAt: "2026-01-01T00:00:00Z",
     labels: { nodes: [{ name: "enhancement" }], pageInfo: { hasNextPage: true, endCursor: "labels-100" } },
-    subIssues: { totalCount: 0 },
+    subIssues: { nodes: [{ number: 2 }], totalCount: 2, pageInfo: { hasNextPage: true, endCursor: "children-100" } },
     blockedBy: { nodes: [{ number: 1, state: "CLOSED" }], pageInfo: { hasNextPage: true, endCursor: "blocked-100" } },
   };
   const gh = new FixtureGh((args) => {
@@ -347,13 +349,18 @@ test("label and blocker connections are completed before queue classification", 
     if (query.includes("blockedBy(first:100,after:$after)")) {
       return graph({ issue: { blockedBy: { nodes: [{ number: 999, state: "OPEN" }], pageInfo: endPage } } });
     }
+    if (query.includes("subIssues(first:100,after:$after)")) {
+      return graph({ issue: { subIssues: { nodes: [{ number: 3 }], totalCount: 2, pageInfo: endPage } } });
+    }
     return graph({ issues: { nodes: [initial], pageInfo: endPage } });
   });
   const candidate = (await new GitHubClient(gh).listImplementableIssues()).candidates[0];
   assert.deepEqual(candidate?.labels, ["enhancement", "ai:afk"]);
   assert.deepEqual(candidate?.openBlockedByNumbers, [999]);
+  assert.deepEqual(candidate?.dependencyNumbers, [1, 999, 2, 3]);
   assert.equal(gh.calls.some((args) => args.includes("after=labels-100")), true);
   assert.equal(gh.calls.some((args) => args.includes("after=blocked-100")), true);
+  assert.equal(gh.calls.some((args) => args.includes("after=children-100")), true);
 });
 
 test("an issue prompt receives labels beyond the first connection page", async () => {
@@ -384,11 +391,13 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
     if (args[0] === "api" && args[1]?.startsWith("repos/")) return "{}";
     const query = args.find((arg) => arg.startsWith("query=")) ?? "";
     if (query.includes("reviewThreads(first:100){nodes{id")) return graph({ pullRequest: { reviewThreads: { nodes: [{ id: "T1", isResolved: false, path: "src/a.ts", line: 7, comments: { nodes: [{ body: "Bug", author: { login: "emb" } }] } }] } } });
-    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract", state: "OPEN", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, parent: { number: 9 }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
+    if (query.includes("subIssues(first:100,after:$after)")) return graph({ issue: { subIssues: { nodes: [{ number: 24 }], totalCount: 2, pageInfo: endPage } } });
+    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract depends on #23.", state: "OPEN", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, parent: { number: 9 }, subIssues: { nodes: [{ number: 22 }], totalCount: 2, pageInfo: { hasNextPage: true, endCursor: "children-100" } }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
     return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
   });
   const github = new GitHubClient(gh);
   assert.equal((await github.getIssue(17))?.parentIssueNumber, 9);
+  assert.deepEqual((await github.getIssue(17))?.dependencyIssueNumbers, [22, 23, 24]);
   assert.equal((await github.getPullRequest(42))?.issueNumber, 17);
   assert.equal(await github.getPullRequestDiff(42), "diff --git a/a.ts b/a.ts");
   assert.equal((await github.listReviewThreads(42))[0]?.comments[0]?.author, "emb");

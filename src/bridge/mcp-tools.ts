@@ -346,7 +346,8 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     name: "start_auto_run",
     description:
       "Start Aboard's automatic implementation workflow. " +
-      "The queue is every open issue labelled ai:afk or ai:hitl, oldest first by creation date, " +
+      "The queue is every open issue labelled ai:afk or ai:hitl, dependencies first, " +
+      "with creation date and issue number breaking ties between ready issues, " +
       "whether or not the issue belongs to an ai:spec issue. " +
       "An issue that does belong to one still reaches its implementer with that parent spec as context. " +
       "Use this only after the user has approved implementation and the issues are ready. " +
@@ -364,13 +365,14 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "\"nothing is labelled\" from \"everything is unclassified or blocked\".\n\n" +
 
       "On success it immediately returns the run id, forecast issue order, " +
-      "dispositions, branch names, and skips with reasons. " +
+      "dispositions, branch names, detected dependency cycles, and skips with reasons. " +
       "Report that plan and continue the conversation; do not wait or poll. " +
       "Calling again while a run is active returns the current run instead of creating a second one. " +
       "Progress is delivered later through bounded notifications.\n\n" +
 
-      "Issues are processed serially and the queue is re-derived from GitHub at each boundary, " +
-      "so a merge that unblocks an older issue puts it ahead of a newer one. " +
+      "Issues are processed serially and the dependency graph is re-derived from GitHub at each boundary. " +
+      "Native blocked-by links are hard gates; sub-issues and same-repository issue references in bodies " +
+      "are best-effort ordering constraints. Cycles are reported and ordered oldest first within the cycle. " +
       "Umbrella issues never enter the queue: an ai:spec issue, or any issue with sub-issues of its own, " +
       "is represented by its children. " +
       "ai:afk work may merge automatically. " +
