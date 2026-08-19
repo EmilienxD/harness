@@ -4,7 +4,7 @@ The label declaration line (first non-empty line after the title) drives
 which labels an issue is published with. Since difficulty/mode labels were
 made optional and user-requested extra labels allowed, the line can now
 carry any subset of tokens in any order - the hook must map known tokens
-(`difficulty:*`, `mode:*`, `spec`) to their `ai:`-prefixed label names, pass
+(`difficulty:*`, `mode:*`, `spec`) to their `[AI]-` prefixed label names, pass
 extras through,
 and skip cleanly (never publish with a partial label set) when the line is
 missing or malformed.
@@ -53,47 +53,41 @@ def _dry_publish(tmp_path: Path):
 
 def test_both_labels_any_order():
     labels, body = _labels("> difficulty:medium, mode:hitl\n\n## What\n")
-    assert labels == ["ai:medium-difficulty", "ai:hitl"]
+    assert labels == ["[AI]-medium-difficulty", "[AI]-hitl"]
     assert body == "## What"
     labels, _ = _labels("> mode:afk, difficulty:high\n\nbody")
-    assert labels == ["ai:afk", "ai:high-difficulty"]
+    assert labels == ["[AI]-afk", "[AI]-high-difficulty"]
 
 
 def test_only_one_of_each_pair():
     labels, _ = _labels("> difficulty:low\n\nbody")
-    assert labels == ["ai:low-difficulty"]
+    assert labels == ["[AI]-low-difficulty"]
     labels, _ = _labels("> mode:afk\n\nbody")
-    assert labels == ["ai:afk"]
+    assert labels == ["[AI]-afk"]
 
 
 def test_extra_labels_pass_through_asis():
     labels, _ = _labels("> ci\n\nbody")
     assert labels == ["ci"]
     labels, _ = _labels("> ci, mode:hitl\n\nbody")
-    assert labels == ["ci", "ai:hitl"]
+    assert labels == ["ci", "[AI]-hitl"]
     labels, _ = _labels("> good-first-issue, difficulty:low\n\nbody")
-    assert labels == ["good-first-issue", "ai:low-difficulty"]
+    assert labels == ["good-first-issue", "[AI]-low-difficulty"]
 
 
 def test_spec_line_maps_to_canonical_label():
     labels, body = _labels("> spec\n\n## Problem\n")
-    assert labels == ["ai:spec"]
+    assert labels == ["[AI]-spec"]
     assert body == "## Problem"
-
-
-def test_spec_line_legacy_prefixed_spelling_still_works():
-    labels, _ = _labels("> ai:spec\n\nbody\n")
-    assert labels == ["ai:spec"]
-
 
 def test_whitespace_and_case_tolerance():
     labels, _ = _labels("  > Difficulty:Medium , MODE:hitl \n\nbody")
-    assert labels == ["ai:medium-difficulty", "ai:hitl"]
+    assert labels == ["[AI]-medium-difficulty", "[AI]-hitl"]
 
 
 def test_blank_lines_before_label_line_are_skipped():
     labels, _ = _labels("\n\n> mode:afk\n\nbody")
-    assert labels == ["ai:afk"]
+    assert labels == ["[AI]-afk"]
 
 
 def test_malformed_lines_yield_no_labels_and_keep_body():
@@ -115,12 +109,12 @@ def test_unknown_difficulty_value_is_treated_as_extra_label():
     # "difficulty:extreme" isn't an alias; it passes through verbatim so a
     # dry run shows it and a real publish lets gh be the authority.
     labels, _ = _labels("> difficulty:medium, difficulty:extreme\n\nbody")
-    assert labels == ["ai:medium-difficulty", "difficulty:extreme"]
+    assert labels == ["[AI]-medium-difficulty", "difficulty:extreme"]
 
 
 def test_duplicate_tokens_dedupe():
     labels, _ = _labels("> mode:afk, mode:afk\n\nbody")
-    assert labels == ["ai:afk"]
+    assert labels == ["[AI]-afk"]
 
 
 def test_missing_label_line_means_no_labels():
@@ -139,7 +133,7 @@ def test_ensure_labels_creates_missing_and_leaves_existing_alone(tmp_path, monke
         calls.append(args)
         name = args[3]
         # One label already exists in the repo.
-        if name == "ai:spec":
+        if name == "[AI]-spec":
             return type(
                 "R", (), {"returncode": 1, "stderr": "label already exists", "stdout": ""}
             )()
@@ -180,7 +174,7 @@ def test_publish_uses_exact_parsed_labels(tmp_path, monkeypatch):
     report: list[str] = []
     count, failures = hook.publish_batch(batch, dry=False, report=report)
     assert count == 1 and failures == 0
-    assert created == [("T", "Body with {ref} kept", ["ci", "ai:afk"])]
+    assert created == [("T", "Body with {ref} kept", ["ci", "[AI]-afk"])]
     assert not (batch / "issue-0.md").exists()
     assert not (batch / ".published").exists()
     # The label line is stripped from the body that gets posted.
@@ -217,8 +211,8 @@ def test_dry_run_reports_each_draft_with_labels(tmp_path):
     _draft(tmp_path, "issue-1.md", "# B\n\n> bug, mode:hitl\n\nbody b\n")
     report, count, failures = _dry_publish(tmp_path)
     assert count == 2 and failures == 0
-    assert any('"A" [ai:low-difficulty]' in line for line in report)
-    assert any('"B" [bug, ai:hitl]' in line for line in report)
+    assert any('"A" [[AI]-low-difficulty]' in line for line in report)
+    assert any('"B" [bug, [AI]-hitl]' in line for line in report)
 
 
 def test_prompt_pattern_matches_with_or_without_dry():

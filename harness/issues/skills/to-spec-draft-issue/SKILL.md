@@ -80,7 +80,7 @@ Any further notes about the feature.
 
 </spec-template>
 
-Make sure to respect the `> spec` second non-empty line. The publishing hook maps it to the `ai:spec` label and automatically creates that label in the repo if missing. Do not write the `ai:` prefix in the draft.
+Make sure to respect the `> spec` second non-empty line. The publishing hook maps it to the `[AI]-spec` label and automatically creates that label in the repo if missing. Do not write the `[AI]-` prefix in the draft.
 
 5. Hand off to the user
 

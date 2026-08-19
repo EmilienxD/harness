@@ -31,11 +31,14 @@ Break the plan into issues. Each issue is scoped for exactly **one agent, workin
 Issues are worked one at a time, never in parallel — don't optimize the breakdown for concurrency. Optimize for quality over speed: each issue should be scoped so the agent assigned to it gets it right in one pass.
 
 For each issue, decide:
-
 - **Title**: short descriptive name
 - **Summary**: what this issue covers, in a sentence or two
 - **Blocked by**: which other issues, if any, must complete first
-- **Difficulty** (default, but optional): `low`, `medium`, or `high` — your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Routine, well-understood work is `low`; multi-step work with real design decisions is `medium`; anything needing careful judgment, wide context, or unusual reasoning is `high`.
+- **Difficulty** (default, but optional): your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Select one of:
+  - `routine`: For low reasoning level work such as renaming a variable, cleaning up files/folders, adding missing type hint. 1% usage rate; use this rarely.
+  - `basic`: For easy and small refactoring such as splitting a function into multiple functions, updating a model or signature, adding missing tests, writing or updating documentation. 5% usage rate.
+  - `advanced`: For multi-step work with expected outcomes, low chance of encountering bugs, easy UI design. 34% usage rate.
+  - `expert`: For multi-step complex work, anything needing careful judgment, complex UI design, wide context and bug prone. 60% usage rate.
 - **Mode** (default, but optional): `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
 - **Extra labels** (only if the user asks): any other labels the user explicitly requests.
 

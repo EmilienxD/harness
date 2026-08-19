@@ -18,13 +18,13 @@ Design notes:
   *assumes* that ordering is perfect - see the retry pass below.
 - The first "# " header line in a draft file is the issue title. The first
   non-empty line after that declares labels (see /draft-issues, /draft-issue,
-  /to-spec-draft-issue): either "> spec" (legacy "> ai:spec" also works), or
+  /to-spec-draft-issue): either "> spec", or
   "> " followed by a comma-separated list of label tokens in any order -
   "difficulty:{level}" and "mode:{afk|hitl}" are each optional (the user can
   ask for them to be left off), and extra labels the user asked for may be
   added alongside (e.g. "> ci, difficulty:low"). Aliased tokens map to the
-  workflow's own "ai:"-prefixed label names ("ai:low-difficulty", "ai:afk",
-  "ai:spec", ...) via LABEL_ALIASES, then are stripped from the body that
+  workflow's own "[AI]-" prefixed label names ("[AI]-low-difficulty", "[AI]-afk",
+  "[AI]-spec", ...) via LABEL_ALIASES, then are stripped from the body that
   gets posted, since the labels carry that information from then on. Extra
   (non-aliased) tokens pass through as-is - the drafting skills are
   responsible for checking with `gh label list` that they exist.
@@ -89,22 +89,21 @@ LABEL_LINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# The label declaration line produced by /to-spec-draft-issue ("> spec";
-# prefixed "> ai:spec" from older drafts also still matches).
-SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*(?:ai\s*:\s*)?spec\s*$", re.IGNORECASE)
+# The label declaration line produced by /to-spec-draft-issue ("> spec").
+SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*spec\s*$", re.IGNORECASE)
 
 # Canonical labels this workflow depends on: (color, description). They carry
-# an "ai:" prefix so they can't collide with a repo's own labels, and so the
+# an "[AI]-" prefix so they can't collide with a repo's own labels, and so the
 # same labels can be shared across projects that use this tool as a dependency.
 # They are created at the start of every publish run if missing; existing ones
 # are left alone, so the user's own styling is never overwritten.
 CANONICAL_LABELS = {
-    "ai:low-difficulty": ("0E8A16", "Routine, well-understood work - safe for a lighter model."),
-    "ai:medium-difficulty": ("FBCA04", "Multi-step work with real design decisions."),
-    "ai:high-difficulty": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
-    "ai:afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
-    "ai:hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
-    "ai:spec": ("7057FF", "A product spec synthesized from conversation."),
+    "[AI]-low-difficulty": ("0E8A16", "Routine, well-understood work - safe for a lighter model."),
+    "[AI]-medium-difficulty": ("FBCA04", "Multi-step work with real design decisions."),
+    "[AI]-high-difficulty": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
+    "[AI]-afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
+    "[AI]-hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
+    "[AI]-spec": ("7057FF", "A product spec synthesized from conversation."),
 }
 
 # The declaration line uses "difficulty:{level}" / "mode:{mode}" tokens; the
@@ -112,12 +111,12 @@ CANONICAL_LABELS = {
 # the line is applied as-is (the drafting skills check those exist with
 # `gh label list` before writing them).
 LABEL_ALIASES = {
-    "difficulty:low": "ai:low-difficulty",
-    "difficulty:medium": "ai:medium-difficulty",
-    "difficulty:high": "ai:high-difficulty",
-    "mode:afk": "ai:afk",
-    "mode:hitl": "ai:hitl",
-    "spec": "ai:spec",
+    "difficulty:low": "[AI]-low-difficulty",
+    "difficulty:medium": "[AI]-medium-difficulty",
+    "difficulty:high": "[AI]-high-difficulty",
+    "mode:afk": "[AI]-afk",
+    "mode:hitl": "[AI]-hitl",
+    "spec": "[AI]-spec",
 }
 
 
@@ -174,7 +173,7 @@ def parse_issue_file(path: Path) -> tuple[str, str]:
 def extract_labels(rest: str) -> tuple[list[str], str]:
     """Pull the label declaration line out of the body.
 
-    Accepts either "> spec" (one label; legacy "> ai:spec" works too) or
+    Accepts either "> spec" (one label) or
     "> " followed by a comma-separated
     list of label tokens in any order - "difficulty:*" and "mode:*" are each
     optional, and extra labels pass through as-is. Returns (labels,
