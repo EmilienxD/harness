@@ -3,10 +3,11 @@
 Claude Code PostToolUse hook: fires after a shell command has run (Bash or
 PowerShell).
 
-If the command invoked `cat`, `sed`, or PowerShell's `Get-Content`, it reminds
-Claude to prefer the built-in Read tool for file reads. It never blocks --
-PostToolUse fires after the command already executed, so there's nothing to
-undo. It only adds context via additionalContext.
+If the command invoked a shell file-reading command such as `cat`, `sed`,
+`awk`, `head`, `tail`, `nl`, or PowerShell's `Get-Content`, it reminds Claude to
+prefer the built-in Read tool for file reads. It never blocks -- PostToolUse
+fires after the command already executed, so there's nothing to undo. It only
+adds context via additionalContext.
 """
 from __future__ import annotations
 
@@ -14,28 +15,29 @@ import json
 import re
 import sys
 
-# Match `cat` or `sed` as a standalone command word: at the start of the
+# Match read commands as standalone command words: at the start of the
 # command, or after a shell separator (; & | && ||), a newline, a subshell `(`,
 # or a command substitution ($( or backtick), possibly with leading whitespace.
 # \b keeps this from matching things like `concatenate` or a variable named
 # `catfile`.
-CAT_SED = re.compile(r"(^|[;&|(`\n]+)\s*(cat|sed)\b")
+SHELL_READ_COMMANDS = re.compile(r"(^|[;&|(`\n]+)\s*(cat|sed|awk|gawk|head|tail|nl)\b")
 
 # The PowerShell tool is a separate tool doing the same job, and on Windows it
 # is often the only shell Claude has, so its read cmdlets get the same
-# reminder. Requiring a command-word position keeps `type` from matching
-# `rg --type py`.
-GET_CONTENT = re.compile(
-    r"(^|[;&|(`\n]+)\s*(Get-Content|gc|type)\b"
+# reminder. Requiring a command-word position keeps aliases like `type` from
+# matching `rg --type py`.
+POWERSHELL_READ_COMMANDS = re.compile(
+    r"(^|[;&|(`\n]+)\s*(Get-Content|gc|cat|type|Select-String|sls)\b"
     r"|\[(?:System\.)?IO\.File\]::Read\w*",
     re.IGNORECASE,
 )
 
 REMINDER = (
-    "This command used cat/sed/Get-Content to read a file. For reading file "
-    "contents, prefer the built-in Read tool instead of shelling out -- "
-    "it's faster, avoids shell-quoting/escaping issues, and has built-in "
-    "support for line ranges and large files."
+    "This command used a shell file-read command (cat/sed/awk/head/tail/nl or "
+    "PowerShell's Get-Content/Select-String family). For reading file contents, "
+    "prefer the built-in Read tool instead of shelling out -- it's faster, "
+    "avoids shell-quoting/escaping issues, and has built-in support for line "
+    "ranges and large files."
 )
 
 
@@ -43,6 +45,8 @@ def main() -> int:
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
+        return 0
+    if not isinstance(data, dict):
         return 0
 
     # A missing or non-dict tool_input means there is no command to inspect;
@@ -54,7 +58,7 @@ def main() -> int:
     if not isinstance(command, str) or not command:
         return 0
 
-    if CAT_SED.search(command) or GET_CONTENT.search(command):
+    if SHELL_READ_COMMANDS.search(command) or POWERSHELL_READ_COMMANDS.search(command):
         print(json.dumps({
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
