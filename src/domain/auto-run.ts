@@ -28,6 +28,26 @@ export type IssueDisposition = "afk" | "hitl";
 export const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 export type MergeStrategy = (typeof MERGE_STRATEGIES)[number];
 
+/**
+ * Whether a run works in the user's own checkout or in a private one of its own.
+ *
+ * Off by default: a separate checkout costs a full copy of the tree and whatever
+ * the project's setup command installs into it, which is a price only a user who
+ * wants their own working tree left alone should pay.
+ */
+export interface WorktreeSettings {
+  readonly enabled: boolean;
+  /**
+   * Where the run's checkout is created. Empty means the derived default, a
+   * sibling of the project root — never inside it, or the run would be
+   * implementing issues into a directory the repository itself contains.
+   */
+  readonly root: string;
+  /** Keep the checkout after a run that would otherwise remove it. */
+  readonly keep: boolean;
+  readonly setupTimeoutSeconds: number;
+}
+
 export interface AutoRunSettings {
   readonly review: boolean;
   readonly pauseAfterHitl: boolean;
@@ -40,6 +60,7 @@ export interface AutoRunSettings {
    * of decision the user has to be able to see and refuse.
    */
   readonly mergeRunPullRequest: boolean;
+  readonly worktree: WorktreeSettings;
 }
 
 export interface PlannedIssue {
@@ -572,6 +593,17 @@ export const autoRunMessage = {
     `auto-run: issue #${issue} reviewed; committing ${paths.length === 0 ? "no further changes" : `${paths.length} changed path(s): ${paths.slice(0, 10).join(", ")}`}.`,
   captured: (issue: number, pr: number, paths: readonly string[]): string =>
     `auto-run: committed ${paths.length} changed path(s) from issue #${issue}'s open terminals to PR #${pr}: ${paths.slice(0, 10).join(", ")}.`,
+  workspace: (path: string): string =>
+    `auto-run: working in its own checkout at ${path}; your files stay as they are and nothing this run does touches them.`,
+  workspaceKept: (path: string, reason: "kept-by-setting" | "left-for-the-user" | "removal-failed"): string => {
+    const why = reason === "kept-by-setting"
+      ? "aboard.autoRun.worktree.keep is on"
+      : reason === "removal-failed"
+        ? "it could not be removed, usually because a shell is still open in it"
+        : "the run left terminals and unfinished work in it";
+    return `auto-run: its checkout is still at ${path} (${why}). Remove it with git worktree remove when you are done with it.`;
+  },
+  setup: (command: string): string => `auto-run: running ${command} in the run's checkout.`,
   session: (branch: string, base: string): string =>
     `auto-run: every issue lands on ${branch}; the run opens one pull request into ${base} when it ends.`,
   baseNotOnRemote: (base: string): string =>

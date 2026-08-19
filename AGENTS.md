@@ -130,7 +130,8 @@ The diagram shows ownership, not the reducer's exact phase logic. The current co
 ```mermaid
 flowchart TD
   START["User starts auto mode"] --> PREFLIGHT["Extension preflight<br/>clean local Git tree + authenticated GitHub CLI"]
-  PREFLIGHT --> SESSION["Extension + local Git<br/>cut and push the session branch<br/>from the branch the user was on"]
+  PREFLIGHT --> WORKSPACE["Extension + local Git<br/>opt-in: the run's own checkout beside the project,<br/>set up by the project's own session-setup script"]
+  WORKSPACE --> SESSION["Extension + local Git<br/>cut and push the session branch<br/>from the branch the user was on"]
   SESSION --> GH["GitHub<br/>open issues, labels, dependencies"]
   GH -->|read| SELECT["Extension selects the next ready leaf<br/>dependencies first, then oldest"]
   SELECT -->|one issue at a time| BRANCH["Extension + local Git<br/>fast-forward the session branch and checkout/create aboard branch"]
@@ -178,6 +179,10 @@ flowchart TD
 - Review stays opt-in. An AFK pull request may be merged into the session branch directly; a HITL pull request requires the user's merge or another account's approval. The extension never attempts self-approval.
 - A merge conflict is a fact about one branch, so it parks that issue and the run continues. Anything else that refuses a merge — branch protection above all — is a fact about the repository, so it stops the run. Parking never closes or abandons anything: the pull request, branch, and terminals stay as they are for the user.
 - A run that needs the user's hands says so immediately rather than only queueing a line for the Manager, because a parked or stopped run no longer owns any visible progress indicator.
+- Opt-in, a run works in a checkout of its own instead of the user's: a git worktree created beside the project root, never inside it, with the leaf named after the repository so it reads as an ordinary clone from the inside. Nothing about the path announces what it is. In that mode the run's whole git surface is that checkout, the user's HEAD and working tree are never touched — so the clean-tree precondition and the end-of-run branch restore both fall away — and every agent is launched with it as its working directory. The path is derived from the run id, so it is never stored.
+- That isolation is a convention with a fence, not a sandbox. Launches carry `Read`/`Edit` deny rules covering the project root, which stops the accident; `Bash` reaches the whole filesystem and aboard does not try to police shell commands. Do not present it as a security boundary, and do not add command-level guessing to make it look like one.
+- A second checkout holds only what git tracks, so it requires aboard's hook registration to be committed, and it needs the project's own `.aboard/session-setup.*` to become usable. Both are preconditions checked before any agent starts: a run must never discover a missing hook one dead worker at a time.
+- A checkout the run created is removed when its queue drains and kept whenever the user was sent to look at something in it — a stop, an abort, or a parked issue. Removal is best-effort: a shell still sitting in the directory is the normal reason it fails, and the path is reported rather than the failure escalated.
 
 ### Scaffold and State Ownership
 
@@ -185,7 +190,7 @@ flowchart TD
 - Preserve user settings and unrelated MCP servers. aboard may merge its hook registrations into `.claude/settings.json`, but it never writes `permissions`, `autoCompact`, or a `CLAUDE.md`.
 - The extension owns only files recorded by its scaffold manifest. Upgrade unchanged owned files and warn instead of overwriting locally edited files.
 - User-owned skills and hooks installed from upstream remain upstream-owned. Do not copy, rewrite, or silently replace them inside aboard.
-- Durable project state belongs in GitHub or committed files. Ephemeral fleet, session, auto-run, lock, prompt, agent-rewrite, event, and transcript state belongs under gitignored `.aboard/runtime/`.
+- Durable project state belongs in GitHub or committed files. Ephemeral fleet, session, auto-run, lock, prompt, agent-rewrite, event, and transcript state belongs under gitignored `.aboard/runtime/`. A launch's own runtime files are written under the directory that launch runs in, because its command line references them relatively.
 
 ## Commands
 

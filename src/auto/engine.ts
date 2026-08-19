@@ -32,7 +32,8 @@ import {
 import type { AgentId, SessionId, TerminalId } from "../domain/contracts.js";
 import type { LaunchOrigin } from "../domain/lease.js";
 import type { GitClient } from "../git/client.js";
-import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles } from "../bridge/delegation.js";
+import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles, LaunchIsolation } from "../bridge/delegation.js";
+import type { RunWorkspace, RunWorkspaceOutcome, RunWorkspaceProvider } from "./worktree.js";
 
 /**
  * A pull request as the run observes it. `mergeable` is carried because a merge
@@ -101,10 +102,22 @@ export interface PullRequestOwner {
   readonly terminalId: TerminalId;
   readonly type: "implementer" | "pr-doctor-afk" | "pr-doctor-hitl";
   readonly issueNumber: number;
+  /**
+   * Where the session ran, when the run had a checkout of its own. `review_pr`
+   * resumes the conversation, and Claude Code files a transcript under the
+   * directory its session ran in.
+   */
+  readonly cwd?: string;
 }
 
 export interface AutoRunEngineOptions {
+  /** git in the user's own checkout. Only the workspace provider uses it directly. */
   readonly git: GitClient;
+  /**
+   * Where this run works. Absent means the workspace itself, which is the
+   * historical behavior and what every in-place run still does.
+   */
+  readonly workspaces?: RunWorkspaceProvider;
   readonly github: AutoRunGitHub;
   readonly launcher: AutoRunLauncher;
   readonly terminals: AutoRunTerminals;
@@ -167,6 +180,13 @@ interface RunSession {
 export class AutoRunEngine {
   #controller: AbortController | undefined;
   #state: AutoRunState | undefined;
+  /**
+   * The checkout the current run works in. Held rather than threaded through
+   * every phase because a run is single-flight — `start` refuses a second one —
+   * and because the end-of-run branch restore, which happens after `#run` has
+   * returned, needs to know whether HEAD was ever moved at all.
+   */
+  #workspace: RunWorkspace | undefined;
   #loop: Promise<void> = Promise.resolve();
   #wake: (() => void) | undefined;
   readonly #owners = new Map<number, PullRequestOwner>();
@@ -184,6 +204,28 @@ export class AutoRunEngine {
 
   public state(): AutoRunState | undefined {
     return this.#state;
+  }
+
+  /**
+   * git in the checkout this run works in. Before a workspace is resolved — the
+   * preconditions, and the branch the user was on — it is the user's own, which
+   * is exactly what those two questions are about.
+   */
+  get #git(): GitClient {
+    return this.#workspace?.git ?? this.options.git;
+  }
+
+  /** What an isolated run's launches carry; nothing for a run working in place. */
+  #isolation(): { readonly isolation?: LaunchIsolation } {
+    const workspace = this.#workspace;
+    if (workspace === undefined || !workspace.isolated) return {};
+    return { isolation: { cwd: workspace.root, denyTools: workspace.denyTools } };
+  }
+
+  /** The same directory, recorded against the session so it can be reopened. */
+  #ownerCwd(): { readonly cwd?: string } {
+    const isolation = this.#isolation().isolation;
+    return isolation === undefined ? {} : { cwd: isolation.cwd };
   }
 
   /** The owning agent for an open pull request, or `undefined` if unknown. */
@@ -330,6 +372,9 @@ export class AutoRunEngine {
     }).finally(() => {
       this.#controller = undefined;
       void this.#restoreOriginalBranch(homeBranch).finally(() => {
+        // Cleared only after the restore, which asks whether the run ever moved
+        // the user's HEAD in the first place.
+        this.#workspace = undefined;
         this.#publish(undefined);
       });
     });
@@ -341,9 +386,13 @@ export class AutoRunEngine {
    * a user who moved HEAD themselves mid-run wins over the restore — the only
    * guard needed is not checking out over uncommitted work, which switches
    * silently and strands the user on the wrong branch about it.
+   *
+   * A run with its own checkout has nothing to restore: it never touched the
+   * user's HEAD, and checking it out here would be the one moment such a run
+   * moved a branch the user is standing on.
    */
   async #restoreOriginalBranch(branch: string | undefined): Promise<void> {
-    if (branch === undefined) return;
+    if (branch === undefined || this.#workspace?.isolated === true) return;
     try {
       const status = await this.options.git.status();
       if (status.branch === branch) return;
@@ -367,7 +416,7 @@ export class AutoRunEngine {
     // The user's own branch is the target. A detached HEAD is the only case with
     // no such branch, and only there does the default branch stand in — a run
     // otherwise never merges into it.
-    const base = record.returnBranch ?? await this.options.git.defaultBranch();
+    const base = record.returnBranch ?? await this.#git.defaultBranch();
     return { branch: sessionBranchName(record.runId), base, landed: [] };
   }
 
@@ -375,18 +424,21 @@ export class AutoRunEngine {
    * Creates and publishes the session branch. Idempotent, because a resumed run
    * finds it already there: existence is checked rather than assumed, and the
    * push is what a pull request base and every `fastForward` afterwards need.
+   *
+   * A run with its own checkout arrives here with the branch already created and
+   * checked out — `git worktree add` does both — so only the push is left.
    */
   async #prepareSessionBranch(session: RunSession): Promise<void> {
     this.options.notifier.notify(autoRunMessage.session(session.branch, session.base));
-    await this.options.git.fetch();
-    const baseOnRemote = await this.options.git.remoteBranchExists(session.base);
-    if (!await this.options.git.branchExists(session.branch)) {
+    await this.#git.fetch();
+    const baseOnRemote = await this.#git.remoteBranchExists(session.base);
+    if (!await this.#git.branchExists(session.branch)) {
       // Cut from the remote's copy of the base when there is one: a run must not
       // inherit local commits the user has not published, and must not move the
       // user's own branch to do it.
-      await this.options.git.createBranch(session.branch, baseOnRemote ? `origin/${session.base}` : session.base);
+      await this.#git.createBranch(session.branch, baseOnRemote ? `origin/${session.base}` : session.base);
     }
-    if (!await this.options.git.remoteBranchExists(session.branch)) await this.options.git.push(session.branch, true);
+    if (!await this.#git.remoteBranchExists(session.branch)) await this.#git.push(session.branch, true);
     // Said now rather than at the end, while the user can still act on it: a
     // base that is not on origin cannot be a pull request's target.
     if (!baseOnRemote) this.options.notifier.notify(autoRunMessage.baseNotOnRemote(session.base));
@@ -399,17 +451,47 @@ export class AutoRunEngine {
     // of the settings are read live because they only affect the next action.
     const settings: AutoRunSettings = { ...this.options.settings(), review: initial.reviewMode };
     const session = await this.#resolveSession(initial);
-    await this.#prepareSessionBranch(session);
+    // Before anything else: from here on every git effect belongs to the run's
+    // own checkout, and a failure to prepare one is a refusal to run at all
+    // rather than a silent fall back into the user's tree.
+    const workspace = await this.options.workspaces?.prepare({
+      runId: initial.runId,
+      sessionBranch: session.branch,
+      base: session.base,
+    });
+    this.#workspace = workspace;
+    let outcome: RunWorkspaceOutcome = "interrupted";
     try {
-      await this.#drive(initial, session, settings, signal);
+      // Inside the try: a session branch that cannot be published still leaves a
+      // checkout behind, and the user has to be told where it is.
+      await this.#prepareSessionBranch(session);
+      outcome = await this.#drive(initial, session, settings, signal);
     } finally {
       // However the run ended — drained, stopped, or aborted — anything already
       // merged onto the session branch is invisible until it has a pull request.
       await this.#concludeRun(session, settings, signal);
+      await this.#releaseWorkspace(signal.aborted ? "interrupted" : outcome);
     }
   }
 
-  async #drive(initial: AutoRunRecord, session: RunSession, settings: AutoRunSettings, signal: AbortSignal): Promise<void> {
+  /**
+   * Gives the run's checkout back. Best-effort by contract: the run's outcome
+   * stands whatever happens to a directory, and a checkout that survives is
+   * reported rather than retried, because the usual reason is a shell of the
+   * user's still sitting in it.
+   */
+  async #releaseWorkspace(outcome: RunWorkspaceOutcome): Promise<void> {
+    const workspace = this.#workspace;
+    if (workspace === undefined || this.options.workspaces === undefined) return;
+    try {
+      const kept = await this.options.workspaces.release(workspace, outcome);
+      if (kept !== undefined) this.options.notifier.notify(autoRunMessage.workspaceKept(kept.path, kept.reason));
+    } catch (error) {
+      this.options.log?.(`auto-run could not release its checkout at ${workspace.root}: ${message(error)}`);
+    }
+  }
+
+  async #drive(initial: AutoRunRecord, session: RunSession, settings: AutoRunSettings, signal: AbortSignal): Promise<RunWorkspaceOutcome> {
     let record = initial;
     let completed = 0;
     let parked = 0;
@@ -429,7 +511,9 @@ export class AutoRunEngine {
         }
         this.options.notifier.notify(autoRunMessage.complete(completed, parked));
         await this.options.store.clear();
-        return;
+        // A parked issue is one the user was asked to go and look at, and its
+        // terminals and branch are in the run's checkout.
+        return parked === 0 ? "drained" : "interrupted";
       }
 
       // The persisted pull request seeds only the issue it was recorded against.
@@ -452,9 +536,9 @@ export class AutoRunEngine {
         // The record survives a stop so an explicit resume can re-enter at the
         // failed phase; nothing created before the failure is rolled back.
         await this.options.store.save({ ...record, currentIssue: issue.number, phase: outcome.phase, branch: issue.branch, prNumber: outcome.prNumber });
-        return;
+        return "interrupted";
       }
-      if (outcome.kind === "aborted") return;
+      if (outcome.kind === "aborted") return "interrupted";
       if (outcome.kind === "parked") {
         // Unlike a stop, this is not evidence that the queue behind it shares a
         // bad premise: a pull request that will not merge is a fact about one
@@ -483,9 +567,13 @@ export class AutoRunEngine {
       if (settings.pauseAfterHitl && issue.disposition === "hitl") {
         this.options.notifier.notify(`auto-run: paused after hitl issue #${issue.number} (aboard.autoRun.pauseAfterHitl). Run /auto to continue.`);
         await this.options.store.clear();
-        return;
+        // Everything this run implemented is committed, pushed, and merged onto
+        // the session branch: nothing is left in the checkout to look at, and
+        // continuing means a fresh run with a checkout of its own.
+        return parked === 0 ? "drained" : "interrupted";
       }
     }
+    return "interrupted";
   }
 
   async #processIssue(
@@ -552,7 +640,7 @@ export class AutoRunEngine {
             // branch". It is checked here rather than in the reducer because an
             // unmet one is indistinguishable from "not started yet" in the
             // repository, and relaunching the agent would loop forever.
-            const produced = await this.options.git.status();
+            const produced = await this.#git.status();
             if (produced.entries.length === 0) {
               return { kind: "stopped", reason: "the implementer produced no changes", phase: "implement", prNumber };
             }
@@ -619,10 +707,10 @@ export class AutoRunEngine {
 
   /** Reads the repository, never the record. A record that disagrees loses. */
   async #observe(issue: PlannedIssue, baseBranch: string, knownPullRequest: number | undefined, reviewed: ReadonlySet<number>): Promise<RepositoryFacts> {
-    const status = await this.options.git.status();
-    const branchExists = await this.options.git.branchExists(issue.branch);
+    const status = await this.#git.status();
+    const branchExists = await this.#git.branchExists(issue.branch);
     const onBranch = status.branch === issue.branch;
-    const hasCommit = branchExists && onBranch && await this.options.git.hasCommitFor(issue.number, baseBranch);
+    const hasCommit = branchExists && onBranch && await this.#git.hasCommitFor(issue.number, baseBranch);
     // The branch lookup only finds *open* pull requests, so a merged one would
     // read as "no pull request" and the `pr` phase would open a second. Falling
     // back to the number this run already knows keeps the merged state visible.
@@ -653,7 +741,7 @@ export class AutoRunEngine {
       // Commit and push are two effects that fail independently, so this is a
       // real comparison against the remote tracking ref rather than an alias for
       // `hasCommit`: a push that failed must resume by retrying the push.
-      commitPushed: hasCommit && await this.options.git.isPushed(issue.branch),
+      commitPushed: hasCommit && await this.#git.isPushed(issue.branch),
       pullRequest,
       // The in-memory owner is the live signal; the run record carries it across
       // a restart, where the map is empty and a review left no trace in git.
@@ -663,13 +751,13 @@ export class AutoRunEngine {
   }
 
   async #branch(branch: string, base: string): Promise<void> {
-    await this.options.git.fetch();
-    await this.options.git.checkout(base);
-    await this.options.git.fastForward(base);
+    await this.#git.fetch();
+    await this.#git.checkout(base);
+    await this.#git.fastForward(base);
     // Issue n+1 therefore branches from a session branch that already contains
     // issue n's merge, which is what makes conflicts a non-event.
-    if (await this.options.git.branchExists(branch)) await this.options.git.checkout(branch);
-    else await this.options.git.createBranch(branch, base);
+    if (await this.#git.branchExists(branch)) await this.#git.checkout(branch);
+    else await this.#git.createBranch(branch, base);
   }
 
   async #implement(issue: PlannedIssue, chrome: boolean, signal: AbortSignal): Promise<string> {
@@ -678,8 +766,9 @@ export class AutoRunEngine {
       issues: [issue.number],
       description: `implement issue ${issue.number}`,
       chrome,
-      prompt: `Implement issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Do not run git commit, git push, or gh.`,
+      prompt: `Implement issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Do not run git commit, git push, or gh.`,
       expectsUncommittedTree: true,
+      ...this.#isolation(),
     }, signal);
     this.#openTerminals.add(outcome.terminalId);
     if (outcome.result.outcome === "failed") {
@@ -732,25 +821,25 @@ export class AutoRunEngine {
   async #commit(issue: PlannedIssue, summary: string, base: string): Promise<string> {
     // The implementer is told not to touch git, but it has Bash. A mismatch
     // stops the run rather than committing to the wrong place.
-    const current = await this.options.git.currentBranch();
+    const current = await this.#git.currentBranch();
     if (current !== issue.branch) {
       throw new Error(`the repository is on ${current ?? "a detached HEAD"} but issue #${issue.number} belongs on ${issue.branch}`);
     }
-    const status = await this.options.git.status();
+    const status = await this.#git.status();
     if (status.entries.length > 0) {
-      await this.options.git.add();
-      await this.options.git.commit(
+      await this.#git.add();
+      await this.#git.commit(
         commitSubject(issue.title),
         `Implements #${issue.number}.\n\n${summary.trim().slice(0, 500)}`.trim(),
       );
-    } else if (!await this.options.git.hasCommitFor(issue.number, base)) {
+    } else if (!await this.#git.hasCommitFor(issue.number, base)) {
       throw new Error("the implementer produced no changes");
     }
     // Reached with a clean tree when a previous attempt committed and then failed
     // to push. Pushing is the whole remaining postcondition, and `-u` is
     // idempotent on a branch that already tracks.
-    await this.options.git.push(issue.branch, true);
-    return this.options.git.headSha();
+    await this.#git.push(issue.branch, true);
+    return this.#git.headSha();
   }
 
   async #openPullRequest(issue: PlannedIssue, base: string, summary: string): Promise<number> {
@@ -776,9 +865,12 @@ export class AutoRunEngine {
         issues: [issue.number],
         pullRequest: prNumber,
         description: `review pull request ${prNumber}`,
+        // The doctor's fixes are committed by the run, from the same checkout
+        // the implementer worked in — so it has to be in that checkout.
+        ...this.#isolation(),
       }, "auto-run");
       this.#openTerminals.add(handles.terminalId);
-      this.#owners.set(prNumber, { prNumber, ...handles, type: "pr-doctor-hitl", issueNumber: issue.number });
+      this.#owners.set(prNumber, { prNumber, ...handles, type: "pr-doctor-hitl", issueNumber: issue.number, ...this.#ownerCwd() });
       return;
     }
     const outcome = await this.options.launcher.runAutomated({
@@ -787,6 +879,7 @@ export class AutoRunEngine {
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
       expectsUncommittedTree: true,
+      ...this.#isolation(),
     }, signal);
     this.#openTerminals.add(outcome.terminalId);
     if (outcome.result.outcome === "failed") throw new Error(`pr-doctor-afk failed: ${outcome.result.failure.type}`);
@@ -795,15 +888,15 @@ export class AutoRunEngine {
     // The user may have been typing into the still-open implementation terminal
     // while the doctor worked, so re-read the tree rather than assuming it holds
     // only the doctor's changes, and say what is being committed.
-    const status = await this.options.git.status();
+    const status = await this.#git.status();
     this.options.notifier.notify(autoRunMessage.reviewed(issue.number, status.entries.map((entry) => entry.path)));
     if (status.entries.length === 0) return;
-    await this.options.git.add();
-    await this.options.git.commit(
+    await this.#git.add();
+    await this.#git.commit(
       `Address review findings on #${issue.number}`,
       outcome.result.lastAssistantMessage.trim().slice(0, 500),
     );
-    await this.options.git.push(issue.branch, false);
+    await this.#git.push(issue.branch, false);
   }
 
   async #awaitResolution(
@@ -842,7 +935,7 @@ export class AutoRunEngine {
    * a commit nobody asked for must not be a silent one.
    */
   async #captureOpenWork(issue: PlannedIssue, prNumber: number): Promise<void> {
-    const status = await this.options.git.status();
+    const status = await this.#git.status();
     if (status.entries.length === 0) return;
     if (status.branch !== issue.branch) {
       // Committing from the wrong branch would put the work somewhere nobody is
@@ -852,12 +945,12 @@ export class AutoRunEngine {
       return;
     }
     const paths = status.entries.map((entry) => entry.path);
-    await this.options.git.add();
-    await this.options.git.commit(
+    await this.#git.add();
+    await this.#git.commit(
       `Address review findings on #${issue.number}`,
       `Applied while PR #${prNumber} was open for review.`,
     );
-    await this.options.git.push(issue.branch, false);
+    await this.#git.push(issue.branch, false);
     this.options.notifier.notify(autoRunMessage.captured(issue.number, prNumber, paths));
   }
 
@@ -920,11 +1013,11 @@ export class AutoRunEngine {
    * did not ask to have merged.
    */
   async #reconcile(branch: string, base: string): Promise<boolean> {
-    const status = await this.options.git.status();
+    const status = await this.#git.status();
     if (status.branch !== branch || status.entries.length > 0) return false;
-    await this.options.git.fetch();
-    if (!await this.options.git.mergeFromRemote(base)) return false;
-    await this.options.git.push(branch, false);
+    await this.#git.fetch();
+    if (!await this.#git.mergeFromRemote(base)) return false;
+    await this.#git.push(branch, false);
     return true;
   }
 
@@ -936,7 +1029,7 @@ export class AutoRunEngine {
     try {
       // Back to the session branch, never the default one: the run's work lives
       // there, and the next issue's `branch` phase starts from it anyway.
-      await this.options.git.checkout(sessionBranch);
+      await this.#git.checkout(sessionBranch);
     } catch (error) {
       // Cleanup failure is logged and the run continues: the work is merged and
       // the next issue's `branch` phase checks the branch out anyway.
@@ -957,7 +1050,7 @@ export class AutoRunEngine {
   async #concludeRun(session: RunSession, settings: AutoRunSettings, signal: AbortSignal): Promise<void> {
     if (session.landed.length === 0) return;
     try {
-      if (!await this.options.git.remoteBranchExists(session.base)) {
+      if (!await this.#git.remoteBranchExists(session.base)) {
         this.options.notifier.alert(autoRunMessage.runNotOpened(session.branch, session.base, `${session.base} is not on origin`));
         return;
       }
@@ -1019,11 +1112,11 @@ export class AutoRunEngine {
    */
   async #syncSessionBranch(session: RunSession): Promise<boolean> {
     try {
-      const status = await this.options.git.status();
+      const status = await this.#git.status();
       if (status.entries.length > 0) return false;
-      if (status.branch !== session.branch) await this.options.git.checkout(session.branch);
-      await this.options.git.fetch();
-      await this.options.git.fastForward(session.branch);
+      if (status.branch !== session.branch) await this.#git.checkout(session.branch);
+      await this.#git.fetch();
+      await this.#git.fastForward(session.branch);
       return await this.#reconcile(session.branch, session.base);
     } catch (error) {
       this.options.log?.(`auto-run could not reconcile ${session.branch} with ${session.base}: ${message(error)}`);
@@ -1042,7 +1135,11 @@ export class AutoRunEngine {
     }
     const githubFailure = await this.#checkGitHubAuthentication();
     if (githubFailure !== undefined) return githubFailure;
-    if (status.entries.length > 0) {
+    // A run that works in its own checkout never reads, stages, or moves this
+    // tree, so what is in it is the user's business — leaving them free to keep
+    // working while the run does. The requirement below is about the tree the
+    // run stages from, and in that mode it is not this one.
+    if (status.entries.length > 0 && this.options.workspaces?.isolates() !== true) {
       // Binding: the engine stages with `git add -A`, so a dirty tree would
       // sweep unrelated work into an automated commit. Name the paths rather
       // than guessing which changes belong to whom.
@@ -1084,6 +1181,7 @@ export class AutoRunEngine {
       sessionId: outcome.sessionId,
       terminalId: outcome.terminalId,
       type,
+      ...this.#ownerCwd(),
     });
     this.#attach(issue.number, this.#prForIssue(issue.number));
   }

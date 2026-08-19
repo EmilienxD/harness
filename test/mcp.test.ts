@@ -100,6 +100,8 @@ function setup() {
   // until a test says otherwise, which is what a running fleet looks like.
   const sessionLiveness = new Map<AgentId, SessionObservation>();
   const reclaimed: AgentId[] = [];
+  /** Runtime files a launch wrote, and the directory they were rooted at. */
+  const spills: { path: string; root: string | undefined }[] = [];
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
     isResumable: async () => true,
@@ -127,14 +129,14 @@ function setup() {
           : definitionFor(type, type === "brainstormer" || type === "webresearcher" ? ["Read", "Grep"] : ["Read", "Edit"]),
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
-    spills: { write: async (spill) => spill.relativePath },
+    spills: { write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); return spill.relativePath; } },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
   const handler = createMcpHandler(coordinator, { managerAgentId: MANAGER });
   const call = (name: string, args: unknown = {}, caller: readonly [string | undefined] = [MANAGER]) =>
     mcpCall(handler, name, args, caller[0]);
   const launch = (args: unknown = {}) => call("run_agent", args);
-  return { fleet, lease, host, terminals, coordinator, handler, call, launch, sessionLiveness, reclaimed };
+  return { fleet, lease, host, terminals, coordinator, handler, call, launch, sessionLiveness, reclaimed, spills };
 }
 
 async function mcpCall(
@@ -668,6 +670,30 @@ test("an auto-run launch marks the tree it is expected to leave dirty", async ()
   // the flag is what tells the lifecycle reconciler so.
   assert.equal(worker.expectsUncommittedTree, true);
   assert.equal(worker.resultDelivery.mode, "tool-result");
+});
+
+test("an isolated launch runs in its own directory, writes its runtime files there, and is denied the user's checkout", async () => {
+  const { coordinator, fleet, host, spills } = setup();
+  const CHECKOUT = "C:\\sessions\\run_test\\repo";
+  void coordinator.runAutomated({
+    type: "implementer",
+    prompt: "Implement issue nine",
+    description: "implement issue nine",
+    expectsUncommittedTree: true,
+    isolation: { cwd: CHECKOUT, denyTools: ["Read(//C:/repo/**)", "Edit(//C:/repo/**)"] },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(host.created[0]?.options.cwd, CHECKOUT);
+  // The rewritten agent definition is referenced relatively by `--add-dir`, so
+  // it has to be written under the directory the session actually runs in.
+  assert.deepEqual(spills, [{ path: ".aboard/runtime/agents/worker-1/.claude/agents/aboard-implementer-worker-1.md", root: CHECKOUT }]);
+  // The isolation rules join the infrastructure denial rather than replacing it.
+  const line = host.created[0]!.terminal.sent.at(-1)!;
+  assert.match(line, /--disallowedTools 'mcp__aboard__\*,Read\(\/\/C:\/repo\/\*\*\),Edit\(\/\/C:\/repo\/\*\*\)'/);
+  // Recorded on the session: nothing else remembers where the conversation is,
+  // and reopening it later means resuming it in that directory.
+  assert.equal(fleet.list().find((entry) => entry.identity.type === "implementer")?.cwd, CHECKOUT);
 });
 
 test("interactive mode makes the prompt optional", async () => {

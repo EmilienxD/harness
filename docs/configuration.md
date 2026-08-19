@@ -24,6 +24,7 @@ Changes apply live. An unknown key or an invalid value is reported in Output →
 | `aboard.terminals.closeOnSessionEnd` | `false` | Close an agent's terminal when its Claude session ends. Off by default: quitting the session (`exit`, double Ctrl+C) and closing the terminal are separate gestures, so the shell is left for you to reuse. The agent leaves the fleet either way, and the leftover terminal never blocks a relaunch. |
 | `aboard.autoRun.review` | `false` | Launch a pr-doctor after each implementation during an auto-run. Automated review stays opt-in; the explicit review action is always available. |
 | `aboard.autoRun.mergeRunPullRequest` | `false` | Merge the run's own pull request when the run ends. An auto-run implements each issue on its own branch, merges those into one session branch (`aboard/run/<run id>`), and opens a single pull request from it into the branch you were on when the run started — never into the repository's default branch of its own accord. Off by default: that target is a branch you are working on, a conflict there is likely, and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, merges the target back in and retries if that resolves the conflict, and otherwise leaves the pull request open and tells you. |
+| `aboard.autoRun.worktree.enabled` | `false` | Give an auto-run a checkout of its own instead of working in your files. See [Running in a checkout of its own](#running-in-a-checkout-of-its-own). |
 | `aboard.launch.claudeCommand` | `claude` | The command aboard launches. Wrapper arguments come first and aboard's flags are appended unchanged. A path with spaces goes in quotes. |
 | `aboard.launch.maxInlinePromptChars` | `4000` | Longest prompt passed inline as a command-line argument. Longer prompts spill to `.aboard/runtime/prompts` and are referenced with `@path`. |
 | `aboard.launch.effort` | `inherit` | Reasoning effort (`--effort`) for every session aboard starts or resumes, the Manager included. `inherit` passes no flag, leaving Claude Code's own effort level in charge. Applied per process — a running agent keeps the level it started with. |
@@ -32,6 +33,23 @@ Changes apply live. An unknown key or an invalid value is reported in Output →
 | `aboard.manager.transcriptBackups` | `5` | How many Manager session transcripts aboard keeps under `.aboard/runtime/transcripts`. Claude Code deletes its own session files older than `cleanupPeriodDays` every time it starts, the minimum is one day and there is no way to turn the sweep off, so aboard copies the Manager's transcript at each turn boundary and restores it if a resume finds it gone. The copy is incremental — only the bytes the transcript gained — and a restore never overwrites a session Claude Code still has. `0` turns both the backup and the restore off; copies already on disk are left for you to delete. |
 
 The full list, with descriptions, is in VS Code Settings under **aboard**.
+
+## Running in a checkout of its own
+
+By default an auto-run works in your files: it moves HEAD, needs a clean working tree before it starts, and owns the repository until it finishes. With `aboard.autoRun.worktree.enabled` on, it gets a second checkout of this repository instead — created beside your project directory, never inside it — runs every agent there, and leaves your working tree and your branch exactly as they are. You can keep working while it does, and a dirty tree of yours no longer refuses the run.
+
+| Setting | Default | What it does |
+| :-- | :-- | :-- |
+| `aboard.autoRun.worktree.enabled` | `false` | Turn the whole thing on. Off by default: a separate checkout costs a full copy of the tree plus whatever the setup command installs into it. |
+| `aboard.autoRun.worktree.root` | *(sibling of the project)* | Where those checkouts are created. Must be outside the project directory, or the run would implement issues into a directory the repository itself contains. |
+| `aboard.autoRun.worktree.keep` | `false` | Keep the checkout after the run ends. aboard removes it when the queue drains, and always keeps it — whatever this says — when the run stopped or parked an issue, because its terminals and unfinished work are in there. |
+| `aboard.autoRun.worktree.setupTimeoutSeconds` | `600` | How long the setup command below may take. |
+
+**aboard's hooks must be committed.** A second checkout contains what git tracks and nothing else, so `.claude/settings.json` and `.claude/hooks/aboard_hook.py` have to be in the repository. Without them the agents there report nothing back and the run refuses to start rather than discovering that one worker at a time.
+
+**Setting the checkout up.** A fresh checkout has no `.env`, no `node_modules`, no virtualenv. `.aboard/session-setup.ps1` (Windows) and `.aboard/session-setup.sh` (macOS and Linux) are scaffolded empty for you to fill in; aboard runs the one for the current platform once, immediately after creating the checkout, with the working directory set to it and `ABOARD_PROJECT_ROOT`, `ABOARD_SESSION_PATH`, `ABOARD_SESSION_BRANCH`, and `ABOARD_RUN_ID` in the environment. Your copy is never overwritten by an update. A non-zero exit refuses the run, and so does anything the script leaves untracked and not gitignored — the run stages with `git add -A`, and a copied `.env` must not reach a pull request.
+
+**What this is and is not.** Agents work in a directory that looks like an ordinary clone, and their launches carry `Read`/`Edit` deny rules covering your own checkout. That prevents the accident — an agent editing your branch instead of its own. It is not a sandbox: `Bash` reaches the whole filesystem, and aboard does not try to police shell commands. Note also that the work is outside your VS Code window until its pull request opens; the terminals stay visible, and aboard tells you the path.
 
 ## Claude in Chrome
 

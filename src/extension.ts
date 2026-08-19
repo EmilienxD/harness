@@ -78,6 +78,7 @@ const SESSION_LIVENESS_POLL_MS = 5_000;
 import { registerReviewCommand } from "./vscode/review.js";
 import { ProcessGitClient, type GitClient } from "./git/client.js";
 import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
+import { WorktreeRunWorkspaces } from "./auto/worktree.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
 import { planSessionResume, resolveLaunchConfiguration, type LaunchConfiguration } from "./claude/launch.js";
 import { deriveWriteCapability } from "./domain/capability.js";
@@ -550,6 +551,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const git: GitClient = new ProcessGitClient(workspaceRoot);
   const autoRun = new AutoRunEngine({
     git,
+    // Where a run works. In its own checkout beside the project when the user
+    // asked for one, in their files otherwise.
+    workspaces: new WorktreeRunWorkspaces({
+      workspaceRoot,
+      git,
+      gitFor: (cwd) => new ProcessGitClient(cwd),
+      settings: () => currentConfiguration.autoRun.worktree,
+      notify: (message) => enqueueManagerNotification(message),
+      log: (message) => output.appendLine(message),
+    }),
     github,
     launcher: coordinator,
     terminals: { close: (terminalId) => terminals.kill(terminalId) },
@@ -589,7 +600,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
         wrapper: wrapperLayout,
       });
-      if (plan.agentDefinition !== undefined) await runtimeFiles.write(plan.agentDefinition);
+      // Written and reopened where the session ran: a run with its own checkout
+      // left both its runtime files and its transcript under that directory.
+      if (plan.agentDefinition !== undefined) await runtimeFiles.write(plan.agentDefinition, owner.cwd);
       const at = new Date().toISOString() as IsoTimestamp;
       // No lease: `review_pr` reopens the session for the user to drive, with
       // no first message sent into it. Whatever the run held it released when
@@ -601,6 +614,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         agentType: owner.type,
         issueNumbers: [owner.issueNumber],
         name: `aboard: resume pull request ${owner.prNumber}`,
+        ...(owner.cwd === undefined ? {} : { cwd: owner.cwd }),
         initialCommand: plan.commandLine,
         startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS,
       });
@@ -627,7 +641,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       show: (terminalId) => terminals.show(terminalId),
     },
     launcher: coordinator,
-    isResumable: (sessionId) => sessionIsResumable(sessionId, workspaceRoot),
+    // A session that ran in an auto-run's own checkout filed its transcript
+    // under that directory, so the workspace is the fallback rather than the
+    // answer.
+    isResumable: (sessionId, cwd) => sessionIsResumable(sessionId, cwd ?? workspaceRoot),
   });
   const briefings = new ManagerBriefings(
     briefingSources(git, github, workspaceRoot, () => recordedManager?.updatedAt, () => autoRun.state()),

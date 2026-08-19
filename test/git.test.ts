@@ -182,3 +182,37 @@ test("an unborn branch surveys as no code and no commits rather than failing", a
   const survey = await new ProcessGitClient(root).codebase();
   assert.deepEqual(survey, { sourceFileCount: 0, languages: [], commitCount: 0 });
 });
+
+test("the git boundary creates, lists, and removes a checkout beside the repository", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  const checkout = join(await mkdtemp(join(tmpdir(), "aboard-sessions-")), "repo");
+
+  await client.addWorktree(checkout, "aboard/run/test", "main");
+  const listed = await client.worktrees();
+  assert.equal(listed.length, 2, JSON.stringify(listed));
+  // Git prints its own spelling of the path, so a caller compares resolved
+  // paths rather than strings; what matters here is the branch it reports.
+  assert.equal(listed.some((worktree) => worktree.branch === "aboard/run/test"), true, JSON.stringify(listed));
+  // The branch is real and the checkout works on its own: a client bound there
+  // sees it as the current branch while the repository stays on main.
+  assert.equal(await client.branchExists("aboard/run/test"), true);
+  assert.equal(await new ProcessGitClient(checkout).currentBranch(), "aboard/run/test");
+  assert.equal(await client.currentBranch(), "main");
+
+  await client.removeWorktree(checkout, true);
+  assert.equal((await client.worktrees()).length, 1);
+});
+
+test("tracked paths answer what a second checkout would contain", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  await mkdir(join(root, ".claude"), { recursive: true });
+  await writeFile(join(root, ".claude", "settings.json"), "{}\n");
+  // Written but never committed, which is exactly the state that would give a
+  // second checkout no aboard hooks at all.
+  assert.deepEqual(await client.trackedPaths([".claude/settings.json", "README.md"]), ["README.md"]);
+  await run("git", ["add", "-A"], { cwd: root, windowsHide: true });
+  await run("git", ["commit", "-m", "hooks"], { cwd: root, windowsHide: true });
+  assert.deepEqual(await client.trackedPaths([".claude/settings.json", "README.md"]), [".claude/settings.json", "README.md"]);
+});

@@ -359,6 +359,28 @@
           "maximum": 3600,
           "description": "How often auto-run checks a hitl pull request for resolution while waiting. Window focus and the Continue action poll immediately regardless."
         },
+        "aboard.autoRun.worktree.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout of this repository beside the project directory, runs every agent in it, and leaves your working tree and your branch exactly as they are — so you can keep working while the run does. Off by default: a separate checkout costs a full copy of the tree plus whatever .aboard/session-setup.ps1 or .aboard/session-setup.sh installs into it. It needs aboard's hooks committed, because a second checkout only contains what is in git."
+        },
+        "aboard.autoRun.worktree.root": {
+          "type": "string",
+          "default": "",
+          "description": "Where a run's own checkout is created. Empty uses a sibling of the project directory. The path must be outside the project, or the run would implement issues into a directory the repository itself contains."
+        },
+        "aboard.autoRun.worktree.keep": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep a run's own checkout after the run ends. Off by default, in which case aboard removes it once the queue drains — but always keeps it when the run stopped or parked an issue, because its terminals and unfinished work are in there."
+        },
+        "aboard.autoRun.worktree.setupTimeoutSeconds": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "How long .aboard/session-setup.ps1 or .aboard/session-setup.sh may take in a fresh checkout. Those files ship empty; put your own installation steps in them (copying an .env, npm install, uv sync) and aboard runs the one for this platform once, right after creating the checkout. A failure refuses the run rather than starting agents in a half-installed tree."
+        },
         "aboard.timeouts.managerStop": {
           "type": "integer",
           "default": 3600,

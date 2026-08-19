@@ -19,6 +19,10 @@ const required = [
   "assets/scaffold/.aboard/agents/manager.md",
   "assets/scaffold/.aboard/agents/implementer.md",
   "assets/scaffold/.aboard/agents/Explore.md",
+  // Both ship: the project is cloned on every platform, and the file for the
+  // one aboard is not running on is still the user's to edit.
+  "assets/scaffold/.aboard/session-setup.ps1",
+  "assets/scaffold/.aboard/session-setup.sh",
   "assets/scaffold/.claude/skills/update-todo/SKILL.md",
   "assets/scaffold/.claude/skills/brainstorm/SKILL.md",
   "assets/scaffold/.claude/skills/general-purpose/SKILL.md",

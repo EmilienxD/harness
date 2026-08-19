@@ -6,10 +6,12 @@ import type { AutoRunRecord, AutoRunSettings } from "../src/domain/auto-run.js";
 import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
 import type { LaunchOrigin } from "../src/domain/lease.js";
 import type { GitClient, GitStatus } from "../src/git/client.js";
+import type { RunWorkspaceOutcome, RunWorkspaceProvider } from "../src/auto/worktree.js";
 import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
-const SETTINGS: AutoRunSettings = { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1 };
+const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
+const SETTINGS: AutoRunSettings = { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "aboard/run/test";
@@ -40,6 +42,12 @@ interface Harness {
   readonly state: { cleared: boolean };
   readonly pullRequests: Map<number, FakePullRequest>;
   readonly setDirty: () => void;
+  /** git methods called against the user's own checkout, in worktree mode. */
+  readonly userGitCalls: string[];
+  /** git methods called against the run's own checkout. */
+  readonly workspaceGitCalls: string[];
+  readonly released: RunWorkspaceOutcome[];
+  readonly isolatedRoot: string;
 }
 
 interface QueueIssue {
@@ -80,6 +88,8 @@ interface HarnessOptions {
   readonly closeFails?: boolean;
   /** The run's target branch exists only locally, so no pull request can target it. */
   readonly baseNotOnRemote?: boolean;
+  /** Runs with a checkout of its own instead of the user's working tree. */
+  readonly worktree?: boolean;
 }
 
 function harness(options: HarnessOptions = {}): Harness {
@@ -102,6 +112,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const remoteBranches = new Set<string>(options.baseNotOnRemote === true ? ["main"] : ["main", "feature/wip"]);
   const commits = new Set<number>();
   const pushed = new Set<string>();
+  const worktrees: { path: string; branch: string | undefined }[] = [];
   let currentBranch = options.startBranch ?? "main";
   let dirty = options.startDirty === true;
   let nextPr = 56;
@@ -144,6 +155,18 @@ function harness(options: HarnessOptions = {}): Harness {
     },
     hasCommitFor: async (issueNumber) => commits.has(issueNumber),
     isPushed: async (branch) => pushed.has(branch),
+    trackedPaths: async (paths) => [...paths],
+    worktrees: async () => [...worktrees],
+    addWorktree: async (path, branch, startPoint) => {
+      gitCalls.push(`addWorktree ${path} ${branch}${startPoint === undefined ? "" : ` ${startPoint}`}`);
+      branches.add(branch);
+      worktrees.push({ path, branch });
+    },
+    removeWorktree: async (path, force) => {
+      gitCalls.push(`removeWorktree ${path}${force ? " --force" : ""}`);
+      const index = worktrees.findIndex((worktree) => worktree.path === path);
+      if (index >= 0) worktrees.splice(index, 1);
+    },
   };
 
   const github: AutoRunGitHub = {
@@ -269,8 +292,37 @@ function harness(options: HarnessOptions = {}): Harness {
     },
   };
 
+  // Worktree mode as the engine sees it: the run's git effects go to a client
+  // bound elsewhere, and the user's own client must be left alone. Both wrap the
+  // same repository fake, so the two recorders are what tell them apart.
+  const userGitCalls: string[] = [];
+  const workspaceGitCalls: string[] = [];
+  const released: RunWorkspaceOutcome[] = [];
+  const trace = (client: GitClient, into: string[]): GitClient => new Proxy(client, {
+    get: (target, property, receiver) => {
+      const value = Reflect.get(target, property, receiver) as unknown;
+      if (typeof value !== "function") return value;
+      return (...args: readonly unknown[]) => {
+        into.push(String(property));
+        return (value as (...rest: readonly unknown[]) => unknown).call(target, ...args);
+      };
+    },
+  });
+  const isolatedRoot = "C:/checkouts/run_test/aboard";
+  const workspaces: RunWorkspaceProvider = {
+    isolates: () => true,
+    prepare: async () => ({
+      root: isolatedRoot,
+      git: trace(git, workspaceGitCalls),
+      denyTools: [`Read(//C:/work/aboard/**)`],
+      isolated: true,
+    }),
+    release: async (_workspace, outcome) => { released.push(outcome); return undefined; },
+  };
+
   const engine = new AutoRunEngine({
-    git,
+    git: options.worktree === true ? trace(git, userGitCalls) : git,
+    ...(options.worktree === true ? { workspaces } : {}),
     github: wrappedGithub,
     launcher,
     terminals: { close: () => undefined },
@@ -308,6 +360,10 @@ function harness(options: HarnessOptions = {}): Harness {
     state,
     pullRequests,
     setDirty: () => { dirty = true; },
+    userGitCalls,
+    workspaceGitCalls,
+    released,
+    isolatedRoot,
   };
 }
 
@@ -689,6 +745,52 @@ test("an implementer that produced no changes is a failure, not an empty commit"
 
   assert.equal(context.gitCalls.includes("commit"), false);
   assert.match(context.notifications.join("\n"), /produced no changes/);
+});
+
+test("a run with its own checkout works there, launches there, and never moves the user's HEAD", async () => {
+  const context = harness({ worktree: true, producesChanges: true });
+  assert.equal((await context.engine.start()).started, true);
+  await context.engine.settle();
+
+  // Every effect of the run — the branch, the commit, the push — belongs to the
+  // checkout it was given.
+  for (const effect of ["checkout", "createBranch", "add", "commit", "push"]) {
+    assert.ok(context.workspaceGitCalls.includes(effect), `${effect} must happen in the run's own checkout`);
+  }
+  // The user's checkout is only ever asked questions: what branch they are on,
+  // whether this is a repository at all. Nothing moves it.
+  for (const effect of ["checkout", "createBranch", "add", "commit", "push", "fastForward", "mergeFromRemote"]) {
+    assert.ok(!context.userGitCalls.includes(effect), `${effect} reached the user's own checkout`);
+  }
+  assert.ok(!context.notifications.some((message) => message.includes("back on")), "there is no branch to return to");
+
+  // Both agents run in that directory, fenced out of the user's by deny rules
+  // the definition's own tool list knows nothing about.
+  assert.ok(context.launches.length > 0);
+  for (const launch of context.launches) {
+    assert.equal(launch.isolation?.cwd, context.isolatedRoot);
+    assert.deepEqual(launch.isolation?.denyTools, ["Read(//C:/work/aboard/**)"]);
+  }
+  assert.deepEqual(context.released, ["drained"], "a drained run's checkout has nothing left in it for the user");
+});
+
+test("a run with its own checkout does not care what is in the user's working tree", async () => {
+  // The clean-tree precondition exists because the engine stages with
+  // `git add -A`; in this mode it stages somewhere else entirely, so the user
+  // keeps their uncommitted work and the run starts anyway. Only the refusal is
+  // asserted: the harness has one repository fake, so the run's checkout cannot
+  // be clean here while the user's is dirty.
+  const context = harness({ worktree: true, startDirty: true });
+  const result = await context.engine.start();
+  assert.equal(result.started, true, "the user's own uncommitted work is not this run's business");
+  await context.engine.settle();
+});
+
+test("an interrupted run keeps its checkout, because that is where the user was sent", async () => {
+  const context = harness({ worktree: true, producesChanges: true, mergeRefused: true });
+  assert.equal((await context.engine.start()).started, true);
+  await context.engine.settle();
+  assert.deepEqual(context.released, ["interrupted"]);
 });
 
 test("a dirty working tree refuses the run and names the dirty paths", async () => {

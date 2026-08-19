@@ -406,6 +406,11 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     record.lastResult === undefined
       ? undefined
       : parseWorkerResult(record.lastResult, "session.lastResult", issues);
+  let cwd: string | undefined;
+  if (record.cwd !== undefined) {
+    if (typeof record.cwd === "string" && record.cwd.trim().length > 0) cwd = record.cwd;
+    else issues.push("session.cwd must be a non-empty string when present");
+  }
   let expectsUncommittedTree: boolean | undefined;
   if (record.expectsUncommittedTree !== undefined) {
     if (typeof record.expectsUncommittedTree === "boolean") expectsUncommittedTree = record.expectsUncommittedTree;
@@ -478,6 +483,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     // An empty array carries no attribution, so it round trips as absence
     // rather than as a session bound to nothing.
     ...(issueNumbers === undefined || issueNumbers.length === 0 ? {} : { issueNumbers: issueNumbers as number[] }),
+    ...(cwd === undefined ? {} : { cwd }),
     ...(expectsUncommittedTree === undefined ? {} : { expectsUncommittedTree }),
     ...(compactSummaries === undefined ? {} : { compactSummaries: compactSummaries as string[] }),
   };
@@ -765,6 +771,9 @@ export function parseSessionLedgerDto(
       endedAt,
       ...(issueNumbers === undefined ? {} : { issueNumbers: issueNumbers as number[] }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+      // A ledger entry is only ever a hint for the picker, so an unusable `cwd`
+      // drops to "the workspace" rather than dropping the whole entry.
+      ...(typeof session.cwd === "string" && session.cwd.trim().length > 0 ? { cwd: session.cwd } : {}),
     });
   }
   return { ok: true, value: { version: 1, sessions: parsed } };

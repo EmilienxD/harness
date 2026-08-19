@@ -73,8 +73,12 @@ export interface ReopenCoordinatorOptions {
   readonly fleet: FleetRegistry;
   readonly terminals: ReopenTerminals;
   readonly launcher: ReopenSessionLauncher;
-  /** Transcript test; the same one the Manager's resume and Restore Fleet use. */
-  readonly isResumable: (sessionId: SessionId) => Promise<boolean>;
+  /**
+   * Transcript test; the same one the Manager's resume and Restore Fleet use.
+   * `cwd` is the directory the session ran in, which is where Claude Code filed
+   * its transcript — absent for every session that ran in the workspace itself.
+   */
+  readonly isResumable: (sessionId: SessionId, cwd?: string) => Promise<boolean>;
 }
 
 /**
@@ -114,7 +118,7 @@ export class ReopenCoordinator {
       // A live session needs no transcript test: its conversation is in front of
       // the user, and reopening it means focusing the terminal it is already in.
       if (candidate.origin === "live") return { candidate, resumable: true };
-      const resumable = await this.options.isResumable(candidate.sessionId).catch(() => false);
+      const resumable = await this.options.isResumable(candidate.sessionId, candidate.cwd).catch(() => false);
       return resumable ? { candidate, resumable } : { candidate, resumable, reason: "no-transcript" };
     }));
   }
@@ -129,7 +133,7 @@ export class ReopenCoordinator {
       this.options.terminals.show(live);
       return { action: "focused", candidate };
     }
-    if (!await this.options.isResumable(candidate.sessionId).catch(() => false)) {
+    if (!await this.options.isResumable(candidate.sessionId, candidate.cwd).catch(() => false)) {
       return { action: "unresumable", candidate, reason: "no-transcript" };
     }
     const handles = await this.options.launcher.reopen({
@@ -139,6 +143,10 @@ export class ReopenCoordinator {
       terminalName: `aboard: ${candidate.description}`,
       ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
       ...(candidate.chromeEnabled === undefined ? {} : { chromeEnabled: candidate.chromeEnabled }),
+      // Reopened where it ran: an auto-run's own checkout holds the transcript,
+      // and the directory it names may no longer exist, which is what the
+      // transcript test above has already settled.
+      ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
     });
     return { action: "reopened", candidate, handles };
   }

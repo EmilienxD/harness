@@ -215,6 +215,13 @@ export interface AgentSession {
    * a property of the agent's contract, not of where its result goes, so it does
    * not live on `ResultDelivery` (`AGENTS.md`).
    */
+  /**
+   * Where the session runs, when that is not the workspace root — an auto-run
+   * working in its own checkout is the only case. Recorded because Claude Code
+   * keys a transcript by the directory its session ran in, so reopening the
+   * conversation later is impossible without it, and nothing else remembers.
+   */
+  readonly cwd?: string;
   readonly expectsUncommittedTree?: boolean;
   readonly compactSummaries?: readonly string[];
   readonly lastResult?: WorkerResult;

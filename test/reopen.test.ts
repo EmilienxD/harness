@@ -42,7 +42,16 @@ class FakeHost implements TerminalHost {
   public onDidCloseTerminal(): { dispose(): void } { return { dispose: () => {} }; }
 }
 
-function setup(options: { readonly ledger?: SessionLedgerDto; readonly resumable?: (sessionId: SessionId) => boolean } = {}) {
+function setup(options: {
+  readonly ledger?: SessionLedgerDto;
+  readonly resumable?: (sessionId: SessionId) => boolean;
+  /** Every transcript lookup, so a test can assert *where* it was looked for. */
+  readonly resumeChecks?: { sessionId: SessionId; cwd: string | undefined }[];
+} = {}) {
+  const record = (sessionId: SessionId, cwd: string | undefined): boolean => {
+    options.resumeChecks?.push({ sessionId, cwd });
+    return options.resumable?.(sessionId) ?? true;
+  };
   const fleet = new FleetRegistry();
   const lease = new WriteLease();
   const host = new FakeHost();
@@ -56,7 +65,7 @@ function setup(options: { readonly ledger?: SessionLedgerDto; readonly resumable
   });
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
-    isResumable: async (sessionId) => options.resumable?.(sessionId) ?? true,
+    isResumable: async (sessionId, cwd) => record(sessionId, cwd),
     fleet,
     lease,
     terminals,
@@ -91,7 +100,7 @@ function setup(options: { readonly ledger?: SessionLedgerDto; readonly resumable
       show: (id) => { shown.push(id); },
     },
     launcher: coordinator,
-    isResumable: async (sessionId) => options.resumable?.(sessionId) ?? true,
+    isResumable: async (sessionId, cwd) => record(sessionId, cwd),
   });
   return { fleet, lease, host, terminals, coordinator, reopen, openTerminals, liveTerminals, shown };
 }
@@ -134,6 +143,35 @@ test("an ended brainstormer is reopened with its own definition re-emitted, not 
   // Nothing waits on it and it is the user's conversation: no result, no lease.
   assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
   assert.equal(lease.current(), undefined);
+});
+
+test("a session that ran in an auto-run's own checkout is reopened there, not in the workspace", async () => {
+  const CHECKOUT = "C:\\sessions\\run_test\\repo";
+  const resumeChecks: { sessionId: SessionId; cwd: string | undefined }[] = [];
+  const ledger = recordEndedSession(undefined, {
+    agentId: agent("11"),
+    type: "implementer",
+    sessionId: BRAINSTORM_SESSION,
+    description: "implement issue 34",
+    startedAt: at("2026-07-30T09:00:00.000Z"),
+    endedAt: at("2026-07-30T09:30:00.000Z"),
+    cwd: CHECKOUT,
+  });
+  const { reopen, host } = setup({ ledger, resumeChecks });
+
+  const options = await reopen.list();
+  const outcome = await reopen.reopen(options[0]!.candidate);
+  assert.equal(outcome.action, "reopened");
+
+  // Claude Code files a transcript under the directory the session ran in, so
+  // asking the workspace would report a conversation that plainly exists as
+  // missing — and then relaunch it as a fresh session under the same id.
+  assert.ok(resumeChecks.length > 0);
+  assert.ok(resumeChecks.every((check) => check.cwd === CHECKOUT), JSON.stringify(resumeChecks));
+  assert.equal(host.created[0]?.options.cwd, CHECKOUT);
+  // The visible `cd` matches, so the shell cannot start the session anywhere
+  // else even if VS Code's own cwd handling is bypassed.
+  assert.match(host.created[0]!.terminal.sent[0] ?? "", /sessions/);
 });
 
 test("a general-purpose session is reopened with its recorded Chrome intent", async () => {

@@ -102,6 +102,14 @@ export interface CreateAboardTerminalRequest {
   readonly agentType: AgentType;
   readonly issueNumbers?: readonly number[];
   readonly name?: string;
+  /**
+   * Where the session runs. Defaults to the workspace root, which is what every
+   * launch the user drives wants. An auto-run in worktree mode passes its own
+   * checkout instead: the session's whole world is this directory, including the
+   * relative `--add-dir` and `@` paths its command line carries, and the
+   * transcript Claude Code files under it.
+   */
+  readonly cwd?: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
   readonly initialCommand?: string;
@@ -273,13 +281,18 @@ export class TerminalController {
     const environment = this.options.environment();
     const terminalId = this.options.terminalIdFactory();
     const name = request.name ?? `aboard: ${request.agentType}`;
+    const cwd = request.cwd ?? environment.workspaceRoot;
     const env: Record<string, string> = {
       ABOARD_BRIDGE_PORT: String(environment.port),
       ABOARD_BRIDGE_TOKEN: environment.token,
       ABOARD_AGENT_ID: request.agentId,
       ABOARD_SESSION_ID: request.sessionId,
       ABOARD_AGENT_TYPE: request.agentType,
-      ABOARD_WORKSPACE_ROOT: environment.workspaceRoot,
+      // The root of the tree *this session* works in, which is the workspace for
+      // every ordinary launch and the run's own checkout for an isolated one.
+      // Naming the user's checkout here would hand an isolated agent the one
+      // path the isolation exists to keep out of its reach.
+      ABOARD_WORKSPACE_ROOT: cwd,
     };
     if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
       env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");
@@ -296,7 +309,7 @@ export class TerminalController {
     }
 
     const creationOptions: TerminalCreationOptions = {
-      cwd: environment.workspaceRoot,
+      cwd,
       env,
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
       ...(request.shellArgs === undefined ? {} : { shellArgs: request.shellArgs }),
@@ -310,7 +323,7 @@ export class TerminalController {
       agentType: request.agentType,
       ...(request.issueNumbers === undefined ? {} : { issueNumbers: request.issueNumbers }),
       name,
-      cwd: environment.workspaceRoot,
+      cwd,
       status: "open",
       createdAt,
       closedAt: null,
@@ -332,7 +345,7 @@ export class TerminalController {
     if (isUserFacing(request)) handle.show(false);
     // VS Code receives cwd too; this visible belt-and-braces cd prevents a
     // shell that starts elsewhere from launching Claude against another tree.
-    handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, environment.workspaceRoot), true);
+    handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
 
     // Startup security pass: a failed launch (bad flag, missing binary) exits

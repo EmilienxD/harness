@@ -17,7 +17,7 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   assert.equal(result.value.bridgePort, 4823);
   assert.equal(result.value.maxInlinePromptChars, 4000);
   assert.deepEqual(result.value.managerDisallowedTools, []);
-  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30 });
+  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30, worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
   assert.equal(result.diagnostics.length, 6);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
@@ -33,6 +33,10 @@ test("configuration accepts every supported launch and review setting", () => {
     "aboard.autoRun.mergeStrategy": "rebase",
     "aboard.autoRun.mergeRunPullRequest": true,
     "aboard.autoRun.pollSeconds": 15,
+    "aboard.autoRun.worktree.enabled": true,
+    "aboard.autoRun.worktree.root": "  ../checkouts  ",
+    "aboard.autoRun.worktree.keep": true,
+    "aboard.autoRun.worktree.setupTimeoutSeconds": 900,
     "aboard.timeouts.managerStop": 7200,
     "aboard.timeouts.managerPrompt": 45,
     "aboard.timeouts.managerSessionStart": 90,
@@ -41,7 +45,12 @@ test("configuration accepts every supported launch and review setting", () => {
   assert.equal(result.diagnostics.length, 0);
   assert.equal(result.value.bridgePort, 0);
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash", "Read(./src/**)"]);
-  assert.deepEqual(result.value.autoRun, { review: true, pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15 });
+  assert.deepEqual(result.value.autoRun, {
+    review: true, pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15,
+    // The root is trimmed: it becomes a path, and a stray space in a settings
+    // file would produce a directory nobody meant to create.
+    worktree: { enabled: true, root: "../checkouts", keep: true, setupTimeoutSeconds: 900 },
+  });
 });
 
 test("project settings accept flat, nested, and unprefixed keys", () => {

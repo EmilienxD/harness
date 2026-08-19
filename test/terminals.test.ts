@@ -123,6 +123,30 @@ test("creates one real-terminal record with the complete aboard environment", ()
   assert.equal(host.created[1]?.options.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT, "0");
 });
 
+test("a launch given its own directory starts there, cds there, and calls it the workspace", () => {
+  const { controller, host } = setup();
+  const created = controller.create({
+    agentId: agent("agent-7"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "implementer",
+    cwd: "C:\\sessions\\run_test\\aboard",
+    initialCommand: "claude --add-dir .aboard/runtime/agents/agent-7",
+  });
+
+  assert.equal(created.cwd, "C:\\sessions\\run_test\\aboard");
+  assert.equal(host.created[0]?.options.cwd, "C:\\sessions\\run_test\\aboard");
+  // Relative launch paths — the rewritten agent definition, a spilled prompt —
+  // resolve against this directory, so the visible `cd` is what makes the
+  // command line mean what it says.
+  assert.deepEqual(host.created[0]?.terminal.sent[0], {
+    text: "cd -LiteralPath 'C:\\sessions\\run_test\\aboard'",
+    addNewLine: true,
+  });
+  // Naming the user's checkout here would hand an isolated session the one path
+  // the isolation exists to keep out of its reach.
+  assert.equal(host.created[0]?.options.env.ABOARD_WORKSPACE_ROOT, "C:\\sessions\\run_test\\aboard");
+});
+
 test("an agent's live terminal is findable without the fleet, so settlement can collect it", () => {
   // Session-death settlement drops the fleet record before closing the
   // terminal; a fleet-based lookup leaked the terminal and made the next launch

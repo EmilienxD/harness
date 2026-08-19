@@ -27,6 +27,23 @@ import {
 import type { SessionWrapperLayout } from "../claude/launch.js";
 import { sessionIsResumable } from "../claude/sessions.js";
 
+/**
+ * Where an automated launch runs when that is not the workspace itself, and what
+ * fences it there. Set only by the auto-run engine in worktree mode: the session
+ * runs in the run's own checkout, and its file tools are denied the user's
+ * (`src/auto/worktree.ts`).
+ */
+export interface LaunchIsolation {
+  /**
+   * Absolute path the terminal starts in. Every relative path on the launch
+   * command line — the rewritten agent definition, a spilled prompt — resolves
+   * against it, so the runtime files go there too.
+   */
+  readonly cwd: string;
+  /** Permission deny rules added to this launch's `--disallowedTools`. */
+  readonly denyTools: readonly string[];
+}
+
 export interface DelegationLaunchInput {
   readonly type: Exclude<AgentType, "manager">;
   readonly prompt?: string;
@@ -44,6 +61,8 @@ export interface DelegationLaunchInput {
    * (`AGENTS.md`).
    */
   readonly expectsUncommittedTree?: boolean;
+  /** Set only by the auto-run engine, and only when the run has its own checkout. */
+  readonly isolation?: LaunchIsolation;
 }
 
 /** What the engine needs back from a launch: the handles plus the result. */
@@ -70,6 +89,13 @@ export interface ReopenTarget {
   readonly chromeEnabled?: boolean;
   /** Default is the controller's; a bulk restore passes `false` explicitly. */
   readonly focus?: boolean;
+  /**
+   * Where the session ran, when that was not the workspace root. Claude Code
+   * keys a transcript by the directory its session ran in, so a resume from
+   * anywhere else finds no conversation at all — the session has to be reopened
+   * where it happened (`src/claude/sessions.ts`).
+   */
+  readonly cwd?: string;
 }
 
 export interface InteractiveLaunchHandles {
@@ -226,6 +252,7 @@ export class DelegationCoordinator {
       terminalName: session.terminal.name,
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       chromeEnabled: session.chromeEnabled === true,
+      ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
       // Restoration opens several terminals at once, so none of them steals
       // focus; the caller shows the one the user should land in.
       focus: false,
@@ -249,7 +276,10 @@ export class DelegationCoordinator {
     // system prompt and tool list, and reopening the session without them
     // yields Claude Code's default persona holding every default tool.
     const configuration = await this.options.configurations.get(target.type);
-    const resumable = await (this.options.isResumable ?? sessionIsResumable)(target.sessionId, this.options.workspaceRoot);
+    // Where the session ran is where its conversation is: a session that ran in
+    // an auto-run's own checkout has no transcript under the workspace at all.
+    const cwd = target.cwd ?? this.options.workspaceRoot;
+    const resumable = await (this.options.isResumable ?? sessionIsResumable)(target.sessionId, cwd);
     if (!resumable) {
       throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no Claude conversation to resume`);
     }
@@ -278,13 +308,14 @@ export class DelegationCoordinator {
     // No lease is taken: reopening is the user returning to their own
     // conversation, and an interactive launch is never leased. A run that still
     // needs the lease relaunches through the auto-run engine.
-    if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition);
+    if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition, target.cwd);
     const terminal = this.options.terminals.create({
       agentId: target.agentId,
       sessionId: target.sessionId,
       agentType: target.type,
       ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
       name: target.terminalName,
+      ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
       initialCommand: plan.commandLine,
       // Whatever this session once was, nothing is waiting on its result now:
       // the caller ended with the previous conversation. Reporting one would
@@ -306,6 +337,7 @@ export class DelegationCoordinator {
         telemetry: EMPTY_TELEMETRY,
         ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
         ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
+        ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
       }, occurredAt);
     } else {
       this.options.fleet.reattach(
@@ -390,7 +422,10 @@ export class DelegationCoordinator {
         : {}),
       configuration,
       prompt,
-      disallowedTools: this.options.disallowedTools,
+      // The isolation rules join the infrastructure denials rather than
+      // replacing them: both are launch-level facts about what this session may
+      // not touch, and the definition's own `tools:` allowlist is untouched.
+      disallowedTools: [...(this.options.disallowedTools ?? []), ...(input.isolation?.denyTools ?? [])],
       ...this.#command(),
       ...this.#effort(),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
@@ -409,15 +444,17 @@ export class DelegationCoordinator {
     if (leaseRequired(origin, interactive)) {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
     }
+    const cwd = input.isolation?.cwd;
     try {
-      if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition);
-      if (plan.spill !== undefined) await this.options.spills.write(plan.spill);
+      if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition, cwd);
+      if (plan.spill !== undefined) await this.options.spills.write(plan.spill, cwd);
       const terminal = this.options.terminals.create({
         agentId,
         sessionId,
         agentType: input.type,
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         name: `aboard: ${input.description}`,
+        ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,
         // Hooks and focus both key on this: a result-delivering session reports
         // over the bridge and runs unfocused; a handed-off one stays silent.
@@ -436,6 +473,10 @@ export class DelegationCoordinator {
         ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
+        // Recorded because it cannot be re-derived once the run is over: the
+        // transcript lives under this directory, so reopening the conversation
+        // later means knowing where it happened.
+        ...(cwd === undefined ? {} : { cwd }),
       }, occurredAt);
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
       return { agentId, sessionId, terminalId: terminal.terminalId };

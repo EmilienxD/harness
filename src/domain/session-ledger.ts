@@ -56,6 +56,12 @@ export interface EndedSessionRecord {
   readonly endedAt: IsoTimestamp;
   readonly issueNumbers?: readonly number[];
   readonly chromeEnabled?: true;
+  /**
+   * Where the session ran, when that was not the workspace root. Part of the
+   * non-derivable join this ledger exists for: the transcript lives under this
+   * directory, and an auto-run's own checkout is gone by the time anyone asks.
+   */
+  readonly cwd?: string;
 }
 
 export interface SessionLedgerDto {
@@ -102,6 +108,7 @@ export function endedSessionFrom(session: AgentSession, endedAt: IsoTimestamp): 
     endedAt,
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
     ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+    ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
   };
 }
 
@@ -141,6 +148,8 @@ export interface ReopenCandidate {
   readonly terminalId?: TerminalId;
   readonly issueNumbers?: readonly number[];
   readonly chromeEnabled?: boolean;
+  /** Where the session ran; absent means the workspace root. */
+  readonly cwd?: string;
 }
 
 /**
@@ -172,6 +181,7 @@ export function reopenCandidates(
       ...(open ? { terminalId: session.terminal.terminalId } : {}),
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true } : {}),
+      ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
     });
   }
   for (const entry of (ledger ?? EMPTY_SESSION_LEDGER).sessions) {
@@ -187,6 +197,7 @@ export function reopenCandidates(
       at: entry.endedAt,
       ...(entry.issueNumbers === undefined ? {} : { issueNumbers: entry.issueNumbers }),
       ...(entry.chromeEnabled === true ? { chromeEnabled: true } : {}),
+      ...(entry.cwd === undefined ? {} : { cwd: entry.cwd }),
     });
   }
   return [...candidates.values()].sort((left, right) => right.at.localeCompare(left.at));

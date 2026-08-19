@@ -57,6 +57,10 @@ export const ABOARD_SETTINGS = [
   "aboard.autoRun.mergeStrategy",
   "aboard.autoRun.mergeRunPullRequest",
   "aboard.autoRun.pollSeconds",
+  "aboard.autoRun.worktree.enabled",
+  "aboard.autoRun.worktree.root",
+  "aboard.autoRun.worktree.keep",
+  "aboard.autoRun.worktree.setupTimeoutSeconds",
   "aboard.timeouts.managerStop",
   "aboard.timeouts.managerPrompt",
   "aboard.timeouts.managerSessionStart",
@@ -149,6 +153,13 @@ function integer(reader: ConfigurationReader, setting: string, fallback: number,
   diagnostics.push({ setting, severity: "warning", message: `${setting} must be an integer between ${minimum} and ${maximum}; using ${fallback}.` });
   return fallback;
 }
+function text(reader: ConfigurationReader, setting: string, fallback: string, diagnostics: ConfigurationDiagnostic[]): string {
+  const value = reader.get(setting);
+  if (value === undefined) return fallback;
+  if (typeof value === "string") return value.trim();
+  diagnostics.push({ setting, severity: "warning", message: `${setting} must be a string; using ${fallback === "" ? "the default" : fallback}.` });
+  return fallback;
+}
 function choice<T extends string>(reader: ConfigurationReader, setting: string, allowed: readonly T[], fallback: T, diagnostics: ConfigurationDiagnostic[]): T {
   const value = reader.get(setting);
   if (typeof value === "string" && allowed.includes(value as T)) return value as T;
@@ -209,6 +220,17 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       // lands a batch of automated work on a branch a human is using.
       mergeRunPullRequest: flag(reader, "aboard.autoRun.mergeRunPullRequest", false, diagnostics),
       pollSeconds: integer(reader, "aboard.autoRun.pollSeconds", 30, 1, 3_600, diagnostics),
+      worktree: {
+        // Off by default: a checkout of its own costs a copy of the tree and
+        // whatever the project's setup command installs into it, which only a
+        // user who wants their own working tree left alone should pay.
+        enabled: flag(reader, "aboard.autoRun.worktree.enabled", false, diagnostics),
+        root: text(reader, "aboard.autoRun.worktree.root", "", diagnostics),
+        keep: flag(reader, "aboard.autoRun.worktree.keep", false, diagnostics),
+        // Generous: this is where `npm install` or `uv sync` runs, on a tree
+        // with no caches of its own yet.
+        setupTimeoutSeconds: integer(reader, "aboard.autoRun.worktree.setupTimeoutSeconds", 600, 1, 86_400, diagnostics),
+      },
     },
     managerStopTimeoutSeconds: integer(reader, "aboard.timeouts.managerStop", 3_600, 1, 86_400, diagnostics),
     managerPromptTimeoutSeconds: integer(reader, "aboard.timeouts.managerPrompt", 60, 1, 600, diagnostics),

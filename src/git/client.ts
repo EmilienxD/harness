@@ -37,6 +37,16 @@ export interface GitStatus {
 }
 
 /**
+ * One checkout of this repository. `branch` is absent for a detached or bare
+ * entry, neither of which a run ever creates but both of which `git worktree
+ * list` reports.
+ */
+export interface GitWorktree {
+  readonly path: string;
+  readonly branch: string | undefined;
+}
+
+/**
  * What the repository contains, for the question every recommendation rests on
  * and that no other briefing section answers: is there a project here yet?
  *
@@ -139,6 +149,19 @@ export interface GitClient {
    * pull request for a branch the remote has never seen.
    */
   isPushed(branch: string): Promise<boolean>;
+  /**
+   * Which of these repository-relative paths git tracks. A second checkout of
+   * this repository contains a file only if it is committed, so this is how a
+   * run asks whether the assets its agents need will exist there at all.
+   */
+  trackedPaths(paths: readonly string[]): Promise<readonly string[]>;
+  worktrees(): Promise<readonly GitWorktree[]>;
+  /**
+   * Adds a worktree at `path`. With `startPoint`, `branch` is created there;
+   * without one, an existing `branch` is checked out into it.
+   */
+  addWorktree(path: string, branch: string, startPoint?: string): Promise<void>;
+  removeWorktree(path: string, force: boolean): Promise<void>;
 }
 
 export class ProcessGitClient implements GitClient {
@@ -259,6 +282,50 @@ export class ProcessGitClient implements GitClient {
     if (local === undefined) return false;
     const remote = await this.tryRun(["rev-parse", `refs/remotes/origin/${branch}`]);
     return remote !== undefined && remote === local;
+  }
+
+  public async trackedPaths(paths: readonly string[]): Promise<readonly string[]> {
+    if (paths.length === 0) return [];
+    const listed = await this.tryRun(["ls-files", "--", ...paths]);
+    if (listed === undefined) return [];
+    const tracked = new Set(listed.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.length > 0));
+    return paths.filter((path) => tracked.has(path));
+  }
+
+  /**
+   * `--porcelain` rather than the human listing: a path with a space in it is
+   * unparseable in the default output, and this repository's paths are the
+   * user's, not aboard's.
+   */
+  public async worktrees(): Promise<readonly GitWorktree[]> {
+    const output = await this.tryRun(["worktree", "list", "--porcelain"]);
+    if (output === undefined) return [];
+    const worktrees: GitWorktree[] = [];
+    let path: string | undefined;
+    let branch: string | undefined;
+    const flush = (): void => {
+      if (path !== undefined) worktrees.push({ path, branch });
+      path = undefined;
+      branch = undefined;
+    };
+    for (const line of output.split(/\r?\n/u)) {
+      if (line.startsWith("worktree ")) { flush(); path = line.slice("worktree ".length).trim(); }
+      else if (line.startsWith("branch ")) branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//u, "");
+    }
+    flush();
+    return worktrees;
+  }
+
+  public async addWorktree(path: string, branch: string, startPoint?: string): Promise<void> {
+    await this.run(
+      startPoint === undefined
+        ? ["worktree", "add", path, branch]
+        : ["worktree", "add", "-b", branch, path, startPoint],
+    );
+  }
+
+  public async removeWorktree(path: string, force: boolean): Promise<void> {
+    await this.run(force ? ["worktree", "remove", "--force", path] : ["worktree", "remove", path]);
   }
 
   private async run(args: readonly string[]): Promise<string> {
