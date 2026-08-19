@@ -50,8 +50,8 @@ and deletes each draft file as soon as GitHub confirms creation, so a rerun neve
 dependencies, difficulty, and mode look right. Once you approve the mapping, it proceeds directly to
 writing one file per issue under `.issues-gateway/{session-id}/`, tagged with a shared session id so
 dependent issues can reference each other before any of them exist. `/publish-issues` creates them in
-dependency order and rewrites each `{session-id}/{i}` reference into the real number as soon as that
-issue exists — a whole dependency graph published without a single model call driving it.
+dependency order and rewrites each plain `{session-id}/{i}` reference into the real number as soon as
+that issue exists — a whole dependency graph published without a single model call driving it.
 
 **Spec.** `/to-spec` synthesizes what you've already discussed into a spec and delivers it in chat —
 no interview, no files. `/to-spec-draft-issue` does the same synthesis but writes it to
@@ -126,9 +126,10 @@ At runtime the drafting skills create a gateway folder at the project root — `
   commonly confused with reasoning effort in AI tooling; here the label chooses the model, not the
   effort setting.
 - **Blockers**: real tracker numbers only (`#42`) in single-issue drafts — there are no sibling
-  drafts to resolve. In a batch, `{session-id}/{i}` in curly braces (e.g.
-  `{6b1f0c2e-…-2e8a1d0c4f55/0}`) means "blocked by that issue"; the hook rewrites it to
-  `#<real-number>` as each referenced issue is published, and skips — without failing the batch — any
+  drafts to resolve. In a batch, a plain-text `{session-id}/{i}` token (no backticks, no braces, e.g.
+  `6b1f0c2e-…-2e8a1d0c4f55/0`) means "blocked by that issue"; the hook rewrites it to a bare
+  `#<real-number>` as each referenced issue is published — bare, because GitHub only autolinks issue
+  numbers that aren't wrapped in inline code — and skips, without failing the batch, any
   file whose reference isn't resolvable yet.
 - **Successful publish cleanup**: after `gh issue create` succeeds, the hook immediately deletes the
   draft file. If another draft fails later in the same run, any references to issues already created

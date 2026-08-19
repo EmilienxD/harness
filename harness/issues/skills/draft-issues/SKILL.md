@@ -90,13 +90,13 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 ## Blocked by
 
-`{${CLAUDE_SESSION_ID}/{i}}` of each blocking issue, one per line or "None - can start immediately" if no blockers.
+${CLAUDE_SESSION_ID}/{i} of each blocking issue, one per line, as plain text (no backticks, no braces), or "None - can start immediately" if no blockers.
 
 </issue-template>
 
 `{labels}` is a comma-separated list containing the difficulty and mode tokens decided during mapping — `difficulty:routine|basic|advanced|expert` and `mode:afk|hitl` — plus any extra labels approved during mapping. Each token is written only if it was decided: if the user asked for the difficulty and/or mode labels to be skipped, they're simply absent, so `> difficulty:advanced, mode:hitl`, `> mode:afk`, `> difficulty:basic`, and `> ci, mode:hitl` are all valid lines. Every issue must carry at least one label. Any extra label approved during mapping was verified to exist in this repo (`gh label list`) before being written here — never invent a label name.
 
-In "Blocked by", reference other issues in this batch by their `${CLAUDE_SESSION_ID}/{i}` token, wrapped in curly braces — e.g. if the session id were `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55` and the starting index were `2`, a reference to the first issue in this batch is `{6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/2}`. This works for references to issues in *this* batch only — a draft can't reference an issue from a different, unrelated batch. `/publish-issues` resolves these to real issue numbers once the referenced issue is published — don't try to resolve them yourself, and don't worry about getting the order perfect: unresolved references are retried automatically within a publish run, so an occasional misordering self-heals rather than getting silently stuck.
+In "Blocked by", reference other issues in this batch by their plain-text `${CLAUDE_SESSION_ID}/{i}` token — e.g. if the session id were `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55` and the starting index were `2`, a reference to the first issue in this batch is `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/2`. Never wrap it in backticks or braces: the reference must stay plain text, because `/publish-issues` rewrites it to a bare `#<number>` and GitHub only autolinks issue numbers that aren't inside inline code. This works for references to issues in *this* batch only — a draft can't reference an issue from a different, unrelated batch. `/publish-issues` resolves these to real issue numbers once the referenced issue is published — don't try to resolve them yourself, and don't worry about getting the order perfect: unresolved references are retried automatically within a publish run, so an occasional misordering self-heals rather than getting silently stuck.
 
 ### 6. Hand off to the user
 

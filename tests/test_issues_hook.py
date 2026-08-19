@@ -193,7 +193,7 @@ def test_failed_draft_keeps_resolved_references_after_success(tmp_path, monkeypa
         "# First\n\n> mode:afk\n\nBody\n", encoding="utf-8"
     )
     (batch / "issue-1.md").write_text(
-        f"# Second\n\n## Body\n\nBlocked by {{{SID}/0}}\n", encoding="utf-8"
+        f"# Second\n\n## Body\n\nBlocked by {SID}/0\n", encoding="utf-8"
     )
 
     report: list[str] = []
@@ -204,6 +204,17 @@ def test_failed_draft_keeps_resolved_references_after_success(tmp_path, monkeypa
     assert not (batch / ".published").exists()
     assert "Blocked by #42" in (batch / "issue-1.md").read_text(encoding="utf-8")
     assert any("missing or malformed label line" in line for line in report)
+
+
+def test_references_are_plain_text_and_resolve_to_bare_numbers():
+    # In-file references are "session-id/{i}" as plain text - no backticks,
+    # no braces - and resolve to a bare "#n", because GitHub only autolinks
+    # issue numbers that aren't inside inline code.
+    body = f"Blocked by {SID}/0\nSee also {SID}/0 and {SID}/1"
+    resolved, unresolved = hook.resolve_references(body, {f"{SID}/0": "42"})
+    assert "Blocked by #42" in resolved
+    assert resolved.count("#42") == 2
+    assert unresolved == [f"{SID}/1"]
 
 
 def test_dry_run_reports_each_draft_with_labels(tmp_path):

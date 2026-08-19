@@ -28,8 +28,10 @@ Design notes:
   gets posted, since the labels carry that information from then on. Extra
   (non-aliased) tokens pass through as-is - the drafting skills are
   responsible for checking with `gh label list` that they exist.
-- A reference to another draft issue, written as "{session-id}/{i}" in the body, is
-  rewritten to "#<real-issue-number>" once that draft has been published.
+- A reference to another draft issue, written as plain text "{session-id}/{i}"
+  in the body (no backticks, no braces - GitHub only autolinks a bare
+  "#<number>", so the resolved replacement must not sit inside inline code),
+  is rewritten to "#<real-issue-number>" once that draft has been published.
   This is how "blocked by" links get resolved without creating issues
   sequentially inside the agent loop.
 - Once an issue is published, its draft file is deleted immediately. If a
@@ -64,14 +66,20 @@ GATEWAY_DIR = Path(".issues-gateway")
 # "/publish-issue", "/publish-issues", and their "--dry" variants match.
 PROMPT_PATTERN = re.compile(r"^/publish-issues?(?:\s|$)")
 
-# A reference to another draft issue inside a body, e.g.
-# "{6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0}"
-REF_PATTERN = re.compile(r"\{([0-9a-zA-Z_-]+)/(\d+)\}")
-
 # A batch directory name: a Claude Code session id (a UUID).
 SESSION_ID_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+# A reference to another draft issue inside a body, written as plain text:
+# "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0"
+# Matching the full UUID keeps the pattern unambiguous without needing
+# wrappers like "{...}", and the session id must appear verbatim in the
+# draft anyway for the reference to point at the right batch.
+REF_PATTERN = re.compile(
+    r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/(\d+)\b"
 )
 
 # The draft filename convention produced by /draft-issues: "issue-{i}.md"
@@ -206,7 +214,7 @@ def extract_labels(rest: str) -> tuple[list[str], str]:
 
 
 def resolve_references(body: str, resolved: dict[str, str]) -> tuple[str, list[str]]:
-    """Replace {session-id}/{i} tokens with real issue numbers where known.
+    """Replace plain-text session-id/{i} tokens with real issue numbers.
 
     Returns the rewritten body and any tokens that could not be resolved
     (e.g. a forward reference to a draft not yet published in this run).
