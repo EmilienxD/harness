@@ -6,7 +6,8 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/commit_UserPromptSubmit_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/commit_UserPromptSubmit_hook.py"],
+            "timeout": 120
           }
         ]
       }
