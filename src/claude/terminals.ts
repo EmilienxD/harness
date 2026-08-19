@@ -1,4 +1,9 @@
 import {
+  buildChangeDirectoryCommandLine,
+  type ShellKind,
+} from "./shell.js";
+
+import {
   isInteractiveAgentType,
   type AgentId,
   type AgentType,
@@ -202,6 +207,7 @@ function isStartupTimeout(error: unknown): boolean {
 export interface TerminalControllerOptions {
   readonly host: TerminalHost;
   readonly environment: () => BridgeTerminalEnvironment;
+  readonly shell: ShellKind;
   readonly terminalIdFactory: () => TerminalId;
   readonly now?: () => Date;
   readonly onLifecycleEvent?: (event: TerminalLifecycleEvent) => void;
@@ -324,6 +330,9 @@ export class TerminalController {
     });
 
     if (isUserFacing(request)) handle.show(false);
+    // VS Code receives cwd too; this visible belt-and-braces cd prevents a
+    // shell that starts elsewhere from launching Claude against another tree.
+    handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, environment.workspaceRoot), true);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
 
     // Startup security pass: a failed launch (bad flag, missing binary) exits

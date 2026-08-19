@@ -65,6 +65,7 @@ function setup() {
   let id = 0;
   const controller = new TerminalController({
     host,
+    shell: "powershell",
     environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerMcpTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
@@ -96,6 +97,9 @@ test("creates one real-terminal record with the complete aboard environment", ()
     ABOARD_ISSUE_NUMBERS: "6",
   });
   assert.deepEqual(host.created[0]?.terminal.sent, [{
+    text: "cd -LiteralPath 'C:\\work\\aboard'",
+    addNewLine: true,
+  }, {
     text: "claude --agent implementer --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"Implement issue 6\"",
     addNewLine: true,
   }]);
@@ -253,6 +257,7 @@ test("focuses interactive terminals and exposes only takeover-named input contro
   controller.sendUserTakeoverText(created.terminalId, "human follow-up", true);
   await controller.sendUserTakeoverKeys(created.terminalId, ["down", "enter"], 0);
   assert.deepEqual(native.sent, [
+    { text: "cd -LiteralPath 'C:\\work\\aboard'", addNewLine: true },
     { text: "human follow-up", addNewLine: true },
     { text: "\u001b[B", addNewLine: false },
     { text: "\r", addNewLine: false },
@@ -323,7 +328,7 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
 
   const denied = await handler(request("POST", "/terminals/terminal-1/send", { text: "prompt" }));
   assert.equal(denied.status, 400);
-  assert.deepEqual(host.created[0]?.terminal.sent, []);
+  assert.deepEqual(host.created[0]?.terminal.sent, [{ text: "cd -LiteralPath 'C:\\work\\aboard'", addNewLine: true }]);
 
   const takeover = await handler(request("POST", "/terminals/terminal-1/send", {
     takeover: true,
@@ -331,7 +336,10 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
     addNewLine: false,
   }));
   assert.equal(takeover.status, 200);
-  assert.deepEqual(host.created[0]?.terminal.sent, [{ text: "user input", addNewLine: false }]);
+  assert.deepEqual(host.created[0]?.terminal.sent, [
+    { text: "cd -LiteralPath 'C:\\work\\aboard'", addNewLine: true },
+    { text: "user input", addNewLine: false },
+  ]);
 
   const duplicate = await handler(request("POST", "/terminals", {
     agentId: "worker",
@@ -360,6 +368,7 @@ function setupProofs(verdict: () => Promise<unknown>) {
   let id = 0;
   const controller = new TerminalController({
     host,
+    shell: "powershell",
     environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerMcpTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),

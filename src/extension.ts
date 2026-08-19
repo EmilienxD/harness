@@ -297,6 +297,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   const terminals = new TerminalController({
     host: createVsCodeTerminalHost(),
+    shell: process.platform === "win32" ? "powershell" : "git-bash",
     environment: () => {
       if (bridgeEnvironment === undefined) throw new Error("Bridge is not ready");
       return {

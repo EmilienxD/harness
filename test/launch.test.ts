@@ -25,7 +25,7 @@ import {
   FileSystemPromptSpillStore,
   PromptSpillPathError,
 } from "../src/claude/spill.js";
-import { ShellQuotingError, buildCommandLine, quoteArgument } from "../src/claude/shell.js";
+import { ShellQuotingError, buildChangeDirectoryCommandLine, buildCommandLine, quoteArgument } from "../src/claude/shell.js";
 import { deriveWriteCapability } from "../src/domain/capability.js";
 import { managerMcpConfigDocument } from "../src/bridge/mcp-config.js";
 import type { AgentId, SessionId } from "../src/domain/contracts.js";
@@ -921,6 +921,21 @@ test("quotes Windows paths with spaces, unicode, and quotes", () => {
     );
   }
   assert.equal(quoteArgument("git-bash", 'say "hi"'), `'say "hi"'`);
+});
+
+test("builds shell-safe project-root cd commands", () => {
+  assert.equal(
+    buildChangeDirectoryCommandLine("powershell", "C:\\Users\\emb\\dev\\aboard"),
+    "cd -LiteralPath 'C:\\Users\\emb\\dev\\aboard'",
+  );
+  assert.equal(
+    buildChangeDirectoryCommandLine("git-bash", "/c/Users/emb/dev/aboard"),
+    "cd -- /c/Users/emb/dev/aboard",
+  );
+  assert.equal(
+    buildChangeDirectoryCommandLine("cmd", "C:\\Users\\emb\\dev\\aboard"),
+    'cd /d "C:\\Users\\emb\\dev\\aboard"',
+  );
 });
 
 test("uses a launch executable path with spaces without breaking the plan", () => {

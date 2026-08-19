@@ -67,6 +67,17 @@ export function quoteArgument(shell: ShellKind, value: string): string {
   }
 }
 
+export function buildChangeDirectoryCommandLine(shell: ShellKind, cwd: string): string {
+  switch (shell) {
+    case "powershell":
+      return `cd -LiteralPath ${quoteArgument(shell, cwd)}`;
+    case "git-bash":
+      return `cd -- ${quoteArgument(shell, cwd)}`;
+    case "cmd":
+      return `cd /d ${quoteArgument(shell, cwd)}`;
+  }
+}
+
 /**
  * `command` is the launch command as tokens: the program followed by any fixed
  * arguments it takes before Claude Code's own (`wrapper run MyProfile --`). Every

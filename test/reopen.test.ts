@@ -49,6 +49,7 @@ function setup(options: { readonly ledger?: SessionLedgerDto; readonly resumable
   let nextTerminal = 0;
   const terminals = new TerminalController({
     host,
+    shell: "powershell",
     environment: () => ({ port: 4823, token: "secret", workspaceRoot: "C:\\repo", managerMcpTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
     terminalIdFactory: () => terminalId(`terminal-${++nextTerminal}`),
     now: () => new Date("2026-07-30T10:01:00.000Z"),
@@ -118,7 +119,7 @@ test("an ended brainstormer is reopened with its own definition re-emitted, not 
   // The whole point: `--resume` restores an `--agent` selection only by name, so
   // reopening without the per-launch definition would return the brainstormer as
   // default Claude holding every default tool.
-  const line = host.created[0]!.terminal.sent[0] ?? "";
+  const line = host.created[0]!.terminal.sent.at(-1) ?? "";
   assert.match(line, /--resume 4db0ed4c/);
   assert.match(line, /--add-dir/);
   assert.match(line, /--agent aboard-brainstormer-7/);
@@ -152,7 +153,7 @@ test("a general-purpose session is reopened with its recorded Chrome intent", as
   });
   const outcome = await reopen.reopenLatest();
   assert.equal(outcome.action, "reopened");
-  const line = host.created[0]!.terminal.sent[0] ?? "";
+  const line = host.created[0]!.terminal.sent.at(-1) ?? "";
   assert.match(line, /--resume af817a6c/);
   assert.match(line, /--chrome/);
   // Claude Code's unmodified default session: no --agent, nothing to re-emit.

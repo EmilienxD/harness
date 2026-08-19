@@ -77,6 +77,7 @@ function setup() {
   let terminalId = 0;
   const terminals = new TerminalController({
     host,
+    shell: "powershell",
     environment: () => ({
       port: 4823,
       token: "secret",
@@ -180,8 +181,8 @@ test("restores a persisted worker with --resume, no new prompt, no focus, and no
   }, at("2026-07-30T10:00:00.000Z"));
   fleet.transition(workerId, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
   await coordinator.resumePersisted(fleet.get(workerId)!);
-  assert.match(host.created[0]!.terminal.sent[0] ?? "", /--resume c15badb6/);
-  assert.match(host.created[0]!.terminal.sent[0] ?? "", /--chrome/);
+  assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /--resume c15badb6/);
+  assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /--chrome/);
   assert.deepEqual(host.created[0]!.terminal.shown, []);
   assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
   assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
@@ -655,7 +656,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent[0]!, /^& wrapper run MyProfile -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-implementer-worker-1 /);
+  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-implementer-worker-1 /);
 });
 
 test("an auto-run launch marks the tree it is expected to leave dirty", async () => {
