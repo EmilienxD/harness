@@ -223,6 +223,12 @@ export interface AgentSession {
    */
   readonly cwd?: string;
   readonly expectsUncommittedTree?: boolean;
+  /**
+   * This session originated in auto-run, whose git/GitHub command fence must be
+   * replayed on resume. It is not derivable from the role because `review_pr`
+   * can launch the same pr-doctor role outside a run.
+   */
+  readonly autoRunRestricted?: true;
   readonly compactSummaries?: readonly string[];
   readonly lastResult?: WorkerResult;
 }

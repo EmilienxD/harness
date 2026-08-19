@@ -62,6 +62,8 @@ export interface EndedSessionRecord {
    * directory, and an auto-run's own checkout is gone by the time anyone asks.
    */
   readonly cwd?: string;
+  /** Replays auto-run's git/GitHub command fence when this conversation reopens. */
+  readonly autoRunRestricted?: true;
 }
 
 export interface SessionLedgerDto {
@@ -109,6 +111,7 @@ export function endedSessionFrom(session: AgentSession, endedAt: IsoTimestamp): 
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
     ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
     ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+    ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
   };
 }
 
@@ -150,6 +153,7 @@ export interface ReopenCandidate {
   readonly chromeEnabled?: boolean;
   /** Where the session ran; absent means the workspace root. */
   readonly cwd?: string;
+  readonly autoRunRestricted?: true;
 }
 
 /**
@@ -182,6 +186,7 @@ export function reopenCandidates(
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true } : {}),
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
     });
   }
   for (const entry of (ledger ?? EMPTY_SESSION_LEDGER).sessions) {
@@ -198,6 +203,7 @@ export function reopenCandidates(
       ...(entry.issueNumbers === undefined ? {} : { issueNumbers: entry.issueNumbers }),
       ...(entry.chromeEnabled === true ? { chromeEnabled: true } : {}),
       ...(entry.cwd === undefined ? {} : { cwd: entry.cwd }),
+      ...(entry.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
     });
   }
   return [...candidates.values()].sort((left, right) => right.at.localeCompare(left.at));

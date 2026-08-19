@@ -858,11 +858,11 @@ function agentRuntimeArguments(
 }
 
 /**
- * Deny rules come from one place — `aboard.manager.disallowedTools` — and are
- * deduplicated, since the same rule twice says nothing more than once. An agent
- * definition declares no denials of its own: its `tools:` allowlist is the whole
- * tool authority (spec section 5.1.1), and there is no longer a project-scoped
- * MCP server whose tools an allowlist could fail to exclude.
+ * Launch-level deny rules are deduplicated, since the same rule twice says
+ * nothing more than once. An agent definition declares no denials of its own:
+ * its `tools:` allowlist is the whole tool authority (spec section 5.1.1), and
+ * there is no project-scoped MCP server whose tools an allowlist could fail to
+ * exclude.
  */
 function denyRules(requested: readonly string[] | undefined): readonly string[] {
   return [...new Set(requested ?? [])];

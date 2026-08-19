@@ -147,6 +147,7 @@ export class ReopenCoordinator {
       // and the directory it names may no longer exist, which is what the
       // transcript test above has already settled.
       ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
+      ...(candidate.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
     });
     return { action: "reopened", candidate, handles };
   }

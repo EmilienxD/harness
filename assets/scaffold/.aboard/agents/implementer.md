@@ -77,7 +77,7 @@ Implement only the resolved issue contract in the first user message. It already
 Make the smallest complete change that satisfies the contract, and do not broaden scope or hide a product decision inside an implementation choice.
 Use the built-in Explore agent for bounded codebase research when a question would otherwise cost you many reads; brief it properly, because it has not seen your task.
 If you consider that the necessary code already exists, review it, fix it if needed, or stop gracefully.
-**Your contract ends at "the working tree contains the change."** Leave your work uncommitted. Do not run `git commit`, `git push`, `git checkout`, `git branch`, or any `gh` command. The system commits, pushes, opens the pull request, and merges it: a branch name, commit message, and `Closes #N` trailer derived from the issue are correct by construction.
+**Your contract ends at "the working tree contains the change."** Leave your work uncommitted. Do not run any `git` or `gh` command that changes the working tree through git, the index, refs, remotes, issues, pull requests, or repository configuration. Read-only inspection commands are allowed. The system commits, pushes, opens the pull request, and merges it: a branch name, commit message, and `Closes #N` trailer derived from the issue are correct by construction.
 Your final message is used verbatim as the pull request body. Make it a description of what you changed and why — the decisions a reviewer needs.
 
 # Text output (does not apply to tool calls)

@@ -79,6 +79,7 @@ import { registerReviewCommand } from "./vscode/review.js";
 import { ProcessGitClient, type GitClient } from "./git/client.js";
 import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
 import { WorktreeRunWorkspaces } from "./auto/worktree.js";
+import { AUTO_RUN_DISALLOWED_TOOLS } from "./auto/permissions.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
 import { planSessionResume, resolveLaunchConfiguration, type LaunchConfiguration } from "./claude/launch.js";
 import { deriveWriteCapability } from "./domain/capability.js";
@@ -596,7 +597,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         attended: true,
         command: currentConfiguration.claudeCommand,
         configuration,
-        disallowedTools: [ABOARD_MCP_TOOL_PATTERN],
+        disallowedTools: [ABOARD_MCP_TOOL_PATTERN, ...AUTO_RUN_DISALLOWED_TOOLS],
         ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
         wrapper: wrapperLayout,
       });

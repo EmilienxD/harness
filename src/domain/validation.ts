@@ -416,6 +416,11 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     if (typeof record.expectsUncommittedTree === "boolean") expectsUncommittedTree = record.expectsUncommittedTree;
     else issues.push("session.expectsUncommittedTree must be a boolean");
   }
+  let autoRunRestricted: true | undefined;
+  if (record.autoRunRestricted !== undefined) {
+    if (record.autoRunRestricted === true) autoRunRestricted = true;
+    else issues.push("session.autoRunRestricted must be true when present");
+  }
   const compactSummaries = record.compactSummaries === undefined ? undefined : Array.isArray(record.compactSummaries)
     ? record.compactSummaries.map((value, index) => readNonEmptyString(value, `session.compactSummaries[${index}]`, issues))
     : (issues.push("session.compactSummaries must be an array"), undefined);
@@ -485,6 +490,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     ...(issueNumbers === undefined || issueNumbers.length === 0 ? {} : { issueNumbers: issueNumbers as number[] }),
     ...(cwd === undefined ? {} : { cwd }),
     ...(expectsUncommittedTree === undefined ? {} : { expectsUncommittedTree }),
+    ...(autoRunRestricted === undefined ? {} : { autoRunRestricted }),
     ...(compactSummaries === undefined ? {} : { compactSummaries: compactSummaries as string[] }),
   };
   return { ok: true, value: base };
@@ -774,6 +780,7 @@ export function parseSessionLedgerDto(
       // A ledger entry is only ever a hint for the picker, so an unusable `cwd`
       // drops to "the workspace" rather than dropping the whole entry.
       ...(typeof session.cwd === "string" && session.cwd.trim().length > 0 ? { cwd: session.cwd } : {}),
+      ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
     });
   }
   return { ok: true, value: { version: 1, sessions: parsed } };

@@ -156,6 +156,7 @@ test("a session that ran in an auto-run's own checkout is reopened there, not in
     startedAt: at("2026-07-30T09:00:00.000Z"),
     endedAt: at("2026-07-30T09:30:00.000Z"),
     cwd: CHECKOUT,
+    autoRunRestricted: true,
   });
   const { reopen, host } = setup({ ledger, resumeChecks });
 
@@ -169,6 +170,8 @@ test("a session that ran in an auto-run's own checkout is reopened there, not in
   assert.ok(resumeChecks.length > 0);
   assert.ok(resumeChecks.every((check) => check.cwd === CHECKOUT), JSON.stringify(resumeChecks));
   assert.equal(host.created[0]?.options.cwd, CHECKOUT);
+  assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /Bash\(git commit\*\)/);
+  assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /Bash\(gh pr merge\*\)/);
   // The visible `cd` matches, so the shell cannot start the session anywhere
   // else even if VS Code's own cwd handling is bypassed.
   assert.match(host.created[0]!.terminal.sent[0] ?? "", /sessions/);

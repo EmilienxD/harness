@@ -180,11 +180,14 @@ test("restores a persisted worker with --resume, no new prompt, no focus, and no
     telemetry,
     chromeEnabled: true,
     issueNumbers: [19],
+    autoRunRestricted: true,
   }, at("2026-07-30T10:00:00.000Z"));
   fleet.transition(workerId, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
   await coordinator.resumePersisted(fleet.get(workerId)!);
   assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /--resume c15badb6/);
   assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /--chrome/);
+  assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /Bash\(git commit\*\)/);
+  assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /Bash\(gh pr merge\*\)/);
   assert.deepEqual(host.created[0]!.terminal.shown, []);
   assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
   assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
@@ -659,10 +662,12 @@ test("the configured launch command leads every worker command line", async () =
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
   assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-implementer-worker-1 /);
+  // Role alone does not impose auto-run's fence: this launch is Manager-driven.
+  assert.doesNotMatch(host.created[0]!.terminal.sent.at(-1)!, /Bash\(git commit\*\)/);
 });
 
-test("an auto-run launch marks the tree it is expected to leave dirty", async () => {
-  const { coordinator, fleet } = setup();
+test("an auto-run launch marks the tree it is expected to leave dirty and fences git and GitHub writes", async () => {
+  const { coordinator, fleet, host } = setup();
   void coordinator.runAutomated({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine", expectsUncommittedTree: true });
   await new Promise((resolve) => setImmediate(resolve));
   const worker = fleet.list().find((entry) => entry.identity.type === "implementer")!;
@@ -670,6 +675,15 @@ test("an auto-run launch marks the tree it is expected to leave dirty", async ()
   // the flag is what tells the lifecycle reconciler so.
   assert.equal(worker.expectsUncommittedTree, true);
   assert.equal(worker.resultDelivery.mode, "tool-result");
+  assert.equal(worker.autoRunRestricted, true);
+  const line = host.created[0]!.terminal.sent.at(-1) ?? "";
+  assert.match(line, /Bash\(git worktree\*\)/);
+  assert.match(line, /Bash\(git commit\*\)/);
+  assert.match(line, /Bash\(git push\*\)/);
+  assert.match(line, /Bash\(gh issue create\*\)/);
+  assert.match(line, /Bash\(gh pr merge\*\)/);
+  assert.doesNotMatch(line, /Bash\(git status\*\)/);
+  assert.doesNotMatch(line, /Bash\(gh issue view\*\)/);
 });
 
 test("an isolated launch runs in its own directory, writes its runtime files there, and is denied the user's checkout", async () => {
@@ -688,9 +702,10 @@ test("an isolated launch runs in its own directory, writes its runtime files the
   // The rewritten agent definition is referenced relatively by `--add-dir`, so
   // it has to be written under the directory the session actually runs in.
   assert.deepEqual(spills, [{ path: ".aboard/runtime/agents/worker-1/.claude/agents/aboard-implementer-worker-1.md", root: CHECKOUT }]);
-  // The isolation rules join the infrastructure denial rather than replacing it.
+  // The isolation rules join the infrastructure and auto-run denials rather than replacing them.
   const line = host.created[0]!.terminal.sent.at(-1)!;
-  assert.match(line, /--disallowedTools 'mcp__aboard__\*,Read\(\/\/C:\/repo\/\*\*\),Edit\(\/\/C:\/repo\/\*\*\)'/);
+  assert.match(line, /--disallowedTools 'mcp__aboard__\*,Bash\(git -\*\),/);
+  assert.match(line, /,Read\(\/\/C:\/repo\/\*\*\),Edit\(\/\/C:\/repo\/\*\*\)'/);
   // Recorded on the session: nothing else remembers where the conversation is,
   // and reopening it later means resuming it in that directory.
   assert.equal(fleet.list().find((entry) => entry.identity.type === "implementer")?.cwd, CHECKOUT);

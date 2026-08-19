@@ -26,6 +26,7 @@ import {
 } from "../domain/lease.js";
 import type { SessionWrapperLayout } from "../claude/launch.js";
 import { sessionIsResumable } from "../claude/sessions.js";
+import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
 
 /**
  * Where an automated launch runs when that is not the workspace itself, and what
@@ -89,6 +90,8 @@ export interface ReopenTarget {
   readonly chromeEnabled?: boolean;
   /** Default is the controller's; a bulk restore passes `false` explicitly. */
   readonly focus?: boolean;
+  /** Replays the command fence carried by a session that originated in auto-run. */
+  readonly autoRunRestricted?: true;
   /**
    * Where the session ran, when that was not the workspace root. Claude Code
    * keys a transcript by the directory its session ran in, so a resume from
@@ -253,6 +256,7 @@ export class DelegationCoordinator {
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       chromeEnabled: session.chromeEnabled === true,
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
       // Restoration opens several terminals at once, so none of them steals
       // focus; the caller shows the one the user should land in.
       focus: false,
@@ -295,7 +299,10 @@ export class DelegationCoordinator {
         ? { chrome: target.chromeEnabled === true }
         : {}),
       configuration,
-      disallowedTools: this.options.disallowedTools,
+      disallowedTools: [
+        ...(this.options.disallowedTools ?? []),
+        ...(target.autoRunRestricted === true ? AUTO_RUN_DISALLOWED_TOOLS : []),
+      ],
       ...this.#effort(),
       ...this.#command(),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
@@ -338,6 +345,7 @@ export class DelegationCoordinator {
         ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
         ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
         ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
+        ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
       }, occurredAt);
     } else {
       this.options.fleet.reattach(
@@ -422,10 +430,15 @@ export class DelegationCoordinator {
         : {}),
       configuration,
       prompt,
-      // The isolation rules join the infrastructure denials rather than
-      // replacing them: both are launch-level facts about what this session may
-      // not touch, and the definition's own `tools:` allowlist is untouched.
-      disallowedTools: [...(this.options.disallowedTools ?? []), ...(input.isolation?.denyTools ?? [])],
+      // Auto-run's git/GitHub fence and worktree isolation join the
+      // infrastructure denials rather than replacing them. All three are
+      // launch-level facts about what this session may not touch, and the
+      // definition's own `tools:` allowlist is untouched.
+      disallowedTools: [
+        ...(this.options.disallowedTools ?? []),
+        ...(origin === "auto-run" ? AUTO_RUN_DISALLOWED_TOOLS : []),
+        ...(input.isolation?.denyTools ?? []),
+      ],
       ...this.#command(),
       ...this.#effort(),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
@@ -473,6 +486,9 @@ export class DelegationCoordinator {
         ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
+        // This policy is not derivable from the role: a fresh pr-doctor launched
+        // by `review_pr` is user-driven and deliberately unrestricted.
+        ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
         // Recorded because it cannot be re-derived once the run is over: the
         // transcript lives under this directory, so reopening the conversation
         // later means knowing where it happened.

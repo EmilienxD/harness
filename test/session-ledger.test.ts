@@ -35,6 +35,7 @@ function fleetSession(overrides: {
   readonly delivers?: AgentSession["resultDelivery"];
   readonly issueNumbers?: readonly number[];
   readonly chromeEnabled?: true;
+  readonly autoRunRestricted?: true;
 }): AgentSession {
   return {
     identity: { agentId: agent(overrides.agentId), type: overrides.type },
@@ -45,6 +46,7 @@ function fleetSession(overrides: {
     telemetry,
     ...(overrides.issueNumbers === undefined ? {} : { issueNumbers: overrides.issueNumbers }),
     ...(overrides.chromeEnabled === undefined ? {} : { chromeEnabled: overrides.chromeEnabled }),
+    ...(overrides.autoRunRestricted === undefined ? {} : { autoRunRestricted: overrides.autoRunRestricted }),
   };
 }
 
@@ -102,7 +104,7 @@ test("the ledger keeps one entry per agent, newest first, bounded by its limit",
 
 test("an ended record carries the launch facts a resume has to replay", () => {
   const record = endedSessionFrom(
-    fleetSession({ agentId: "9", type: "general-purpose", sessionId: SESSIONS[1], startedAt: "2026-07-30T09:00:00.000Z", name: "aboard: general purpose interactive session", issueNumbers: [19, 20], chromeEnabled: true }),
+    fleetSession({ agentId: "9", type: "general-purpose", sessionId: SESSIONS[1], startedAt: "2026-07-30T09:00:00.000Z", name: "aboard: general purpose interactive session", issueNumbers: [19, 20], chromeEnabled: true, autoRunRestricted: true }),
     at("2026-07-30T10:30:00.000Z"),
   );
   // The prefix is aboard's own and is re-applied on reopen; storing it twice
@@ -110,6 +112,7 @@ test("an ended record carries the launch facts a resume has to replay", () => {
   assert.equal(record.description, "general purpose interactive session");
   assert.deepEqual(record.issueNumbers, [19, 20]);
   assert.equal(record.chromeEnabled, true);
+  assert.equal(record.autoRunRestricted, true);
   assert.equal(record.endedAt, "2026-07-30T10:30:00.000Z");
 });
 
@@ -152,13 +155,14 @@ test("one unreadable ledger entry is dropped and the rest survive", () => {
   const parsed = parseSessionLedgerDto({
     version: 1,
     sessions: [
-      { agentId: "7", type: "brainstormer", sessionId: SESSIONS[0], description: "spec", startedAt: "2026-07-30T09:00:00.000Z", endedAt: "2026-07-30T10:00:00.000Z" },
+      { agentId: "7", type: "brainstormer", sessionId: SESSIONS[0], description: "spec", startedAt: "2026-07-30T09:00:00.000Z", endedAt: "2026-07-30T10:00:00.000Z", autoRunRestricted: true },
       { agentId: "8", type: "not-an-agent-type", sessionId: SESSIONS[1], description: "spec", startedAt: "2026-07-30T09:00:00.000Z", endedAt: "2026-07-30T10:00:00.000Z" },
       { agentId: "9", type: "general-purpose", sessionId: "not-a-uuid", description: "spec", startedAt: "2026-07-30T09:00:00.000Z", endedAt: "2026-07-30T10:00:00.000Z" },
     ],
   });
   assert.equal(parsed.ok, true);
   assert.deepEqual(parsed.ok ? parsed.value.sessions.map((entry) => entry.agentId) : [], ["7"]);
+  assert.equal(parsed.ok ? parsed.value.sessions[0]?.autoRunRestricted : undefined, true);
 
   // A file that is not a ledger at all is a wrong file rather than a stale one.
   assert.equal(parseSessionLedgerDto({ version: 2, sessions: [] }).ok, false);

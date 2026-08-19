@@ -766,7 +766,7 @@ export class AutoRunEngine {
       issues: [issue.number],
       description: `implement issue ${issue.number}`,
       chrome,
-      prompt: `Implement issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Do not run git commit, git push, or gh.`,
+      prompt: `Implement issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.`,
       expectsUncommittedTree: true,
       ...this.#isolation(),
     }, signal);

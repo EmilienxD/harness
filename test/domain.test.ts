@@ -71,12 +71,20 @@ function describeFailure(failure: WorkerFailure): string {
 }
 
 test("parses a valid domain session from unknown input", () => {
-  const result = parseAgentSession(validSession);
+  const result = parseAgentSession({ ...validSession, autoRunRestricted: true });
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.value.identity.type, "implementer");
     assert.equal(describeLifecycle(result.value.lifecycle), "running");
     assert.deepEqual(result.value.issueNumbers, [2]);
+    assert.equal(result.value.autoRunRestricted, true);
+  }
+});
+
+test("an auto-run restriction marker is true-only when present", () => {
+  assert.equal(parseAgentSession({ ...validSession, autoRunRestricted: true }).ok, true);
+  for (const malformed of [false, "true", 1, null]) {
+    assert.equal(parseAgentSession({ ...validSession, autoRunRestricted: malformed }).ok, false);
   }
 });
 
