@@ -82,7 +82,7 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
   });
 
   assert.ok(prompt !== undefined);
-  assert.equal(prompt.headline, "Implement issue #47 — Add token refresh.");
+  assert.equal(prompt.headline, "Address issue #47 — Add token refresh.");
   // Caller-supplied input survives verbatim; the resolved wording around it is
   // free to change without touching this test.
   assert.ok(prompt.text.includes("Keep the change small."));

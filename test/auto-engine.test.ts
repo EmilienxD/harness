@@ -265,7 +265,7 @@ function harness(options: HarnessOptions = {}): Harness {
         terminalId: `terminal-${launches.length}` as TerminalId,
         result: failed
           ? { outcome: "failed", failure: { type: "context-exhausted", exitCode: 1, lastAssistantMessage: null }, telemetry: telemetry() }
-          : { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Implemented the change.", telemetry: telemetry() },
+          : { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Addressed the issue.", telemetry: telemetry() },
       };
     },
     launchInteractive: async (input, origin) => {
@@ -379,6 +379,8 @@ test("the afk path runs branch to merge and performs every side effect itself", 
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
   assert.equal(context.launches[0]?.expectsUncommittedTree, true);
+  assert.equal(context.launches[0]?.description, "address issue 34");
+  assert.match(context.launches[0]?.prompt ?? "", /^Address issue #34/);
   assert.deepEqual(context.gitCalls, [
     // The session branch is cut from the remote's copy of the user's branch and
     // published before any issue starts, because it is a pull request base.
@@ -429,7 +431,7 @@ test("an issue that cannot be closed is reported instead of failing work that me
 
   assert.equal(context.pullRequests.get(56)?.state, "merged");
   assert.match(context.notifications.join("\n"), /issue #34 merged but could not be closed .*Close it yourself/);
-  assert.match(context.notifications.join("\n"), /queue drained \(1 issue implemented\)/);
+  assert.match(context.notifications.join("\n"), /queue drained \(1 issue addressed\)/);
 });
 
 test("a dependent issue is unblocked within the run by the closure of the issue it waits on", async () => {
@@ -444,7 +446,7 @@ test("a dependent issue is unblocked within the run by the closure of the issue 
 
   assert.deepEqual(context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]), [34, 33]);
   assert.deepEqual(context.closures.map((closure) => closure.issue), [34, 33]);
-  assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
+  assert.match(context.notifications.join("\n"), /queue drained \(2 issues addressed\)/);
 });
 
 test("the run opens one pull request into the user's branch and leaves it for them by default", async () => {
@@ -614,17 +616,17 @@ test("a stop with uncommitted work does not check out over it", async () => {
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
 });
 
-test("the implementer's account of its change is posted on the issue it implemented", async () => {
+test("the implementer's account of its change is posted on the issue it addressed", async () => {
   const context = harness();
   await context.engine.start();
   await context.engine.settle();
 
   // Verbatim and on the issue, not only in the pull request body a squash merge
   // eventually folds away.
-  assert.deepEqual(context.comments, [{ issue: 34, body: "Implemented the change." }]);
+  assert.deepEqual(context.comments, [{ issue: 34, body: "Addressed the issue." }]);
 });
 
-test("a comment that cannot be posted does not fail an issue that was implemented", async () => {
+test("a comment that cannot be posted does not fail an issue that was addressed", async () => {
   const context = harness({ commentFails: true });
   await context.engine.start();
   await context.engine.settle();
@@ -669,7 +671,7 @@ test("an unresolvable conflict parks its issue, alerts the user, and lets the ru
   // A conflict is a fact about one branch, so the queue behind it still runs.
   assert.deepEqual(context.launches.map((launch) => launch.issues), [[34], [35]]);
   assert.equal([...context.pullRequests.values()].every((pr) => pr.state === "open"), true);
-  assert.match(context.notifications.join("\n"), /queue drained \(0 issues implemented, 2 parked for you\)/);
+  assert.match(context.notifications.join("\n"), /queue drained \(0 issues addressed, 2 parked for you\)/);
   assert.equal(context.state.cleared, true);
 });
 
@@ -874,7 +876,7 @@ test("issues are processed serially and re-derived after every merge", async () 
 
   const branchOrder = context.gitCalls.filter((call) => call.startsWith("createBranch aboard/3"));
   assert.deepEqual(branchOrder, [`createBranch aboard/34-add-retry-backoff ${SESSION}`, `createBranch aboard/37-later ${SESSION}`]);
-  assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
+  assert.match(context.notifications.join("\n"), /queue drained \(2 issues addressed\)/);
 });
 
 test("the queue drains a parentless issue and a spec child alike, in creation order", async () => {
@@ -896,7 +898,7 @@ test("the queue drains a parentless issue and a spec child alike, in creation or
     context.gitCalls.filter((call) => call.startsWith("createBranch aboard/1") || call.startsWith("createBranch aboard/4")),
     [`createBranch aboard/40-fix-the-parser ${SESSION}`, `createBranch aboard/121-add-retry-backoff ${SESSION}`],
   );
-  assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
+  assert.match(context.notifications.join("\n"), /queue drained \(2 issues addressed\)/);
   assert.equal(/#12\b/u.test(context.notifications.join("\n")), false, "the spec is not queued and not reported");
   assert.equal(context.state.cleared, true);
 });

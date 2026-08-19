@@ -10,7 +10,7 @@
  * Three things make that checkout worth having:
  *
  * - It is a *sibling* of the project root, never a directory inside it. A
- *   checkout nested in the repository is one the run would then implement issues
+ *   checkout nested in the repository is one the run would then address issues
  *   into, and one `git add -A` would try to commit.
  * - It is not named after what it is. An agent that recognizes a second checkout
  *   can reason its way back to "the real repository is elsewhere"; one that sees
@@ -123,7 +123,7 @@ export function runWorkspacePath(options: {
     ? join(dirname(workspaceRoot), RUN_WORKSPACE_CONTAINER)
     : isAbsolute(configured) ? resolve(configured) : resolve(workspaceRoot, configured);
   const path = join(container, options.runId, basename(workspaceRoot));
-  // A checkout inside the project is one the run would implement issues into and
+  // A checkout inside the project is one the run would address issues in and
   // `git add -A` would then try to commit. The setting is the user's, so this is
   // checked rather than assumed.
   if (!isOutside(path, workspaceRoot)) {

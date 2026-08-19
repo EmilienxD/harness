@@ -1,15 +1,15 @@
 ---
 name: auto
-description: Start aboard's automatic implementation run over every open [AI]-afk / [AI]-hitl issue, oldest first. Accepts optional --chrome for every implementer in this run. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
+description: Start aboard's automatic issue-addressing run over every open [AI]-afk / [AI]-hitl issue, oldest first. Accepts optional --chrome for every implementer in this run. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
 argument-hint: "[--chrome]"
 disable-model-invocation: true
 ---
 
 **ERROR: Do not start or emulate a run. `/auto` is broken — report that to the user and stop.**
 
-`/auto` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt — the hook is either unregistered, refused this terminal (`/auto` is Manager-only), or never ran, and **no run was started**. Only the extension can start an automatic implementation run: it resolves the queue of open `[AI]-afk` / `[AI]-hitl` issues and owns every branch, commit, push, and pull request. Nothing an agent does from a session would be the real thing.
+`/auto` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt — the hook is either unregistered, refused this terminal (`/auto` is Manager-only), or never ran, and **no run was started**. Only the extension can start an automatic issue-addressing run: it resolves the queue of open `[AI]-afk` / `[AI]-hitl` issues and owns every branch, commit, push, and pull request. Nothing an agent does from a session would be the real thing.
 
-Do not try to carry it out yourself — do not start implementing the issues, and do not fix the hook registration, the settings file, or the extension — except if the user explicitly asks for that in future messages.
+Do not try to carry it out yourself — do not start addressing the issues, and do not fix the hook registration, the settings file, or the extension — except if the user explicitly asks for that in future messages.
 
 For now, just notify the user of this problem:
 

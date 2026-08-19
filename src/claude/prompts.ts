@@ -396,8 +396,8 @@ export class PromptResolver {
     builder.section(
       undefined,
       branch === undefined
-        ? `You are implementing ${named}. Create or switch to a dedicated branch before making changes.`
-        : `You are implementing ${named} on branch \`${branch}\`.`,
+        ? `You are addressing ${named}. Create or switch to a dedicated branch before making changes.`
+        : `You are addressing ${named} on branch \`${branch}\`.`,
     );
     builder.section(undefined, instruction);
 
@@ -405,7 +405,7 @@ export class PromptResolver {
     // The disposition is the primary issue's: it decides what happens to the
     // change, and the engine launches one implementer per issue.
     builder.section("Disposition", dispositionGuidance(issueDisposition(primary.labels)));
-    return builder.build(`Implement issue #${primary.number} — ${primary.title}.`);
+    return builder.build(`Address issue #${primary.number} — ${primary.title}.`);
   }
 
   async #resolveIssueContext(

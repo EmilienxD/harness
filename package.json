@@ -330,7 +330,7 @@
         "aboard.autoRun.review": {
           "type": "boolean",
           "default": false,
-          "description": "Launch a pr-doctor after each implementation during an auto-run. Automated review stays opt-in; the explicit review action is always available."
+          "description": "Launch a pr-doctor after each issue is addressed during an auto-run. Automated review stays opt-in; the explicit review action is always available."
         },
         "aboard.autoRun.pauseAfterHitl": {
           "type": "boolean",
@@ -350,7 +350,7 @@
         "aboard.autoRun.mergeRunPullRequest": {
           "type": "boolean",
           "default": false,
-          "description": "Merge the run's own pull request when the run ends. An auto-run implements each issue on its own branch, merges those into one session branch, and opens a single pull request from it into the branch you were on when the run started. Off by default: that branch is one you are working on, so a conflict there is likely and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, reconciles a conflict it can resolve, and otherwise leaves the pull request open for you."
+          "description": "Merge the run's own pull request when the run ends. An auto-run addresses each issue on its own branch, merges those into one session branch, and opens a single pull request from it into the branch you were on when the run started. Off by default: that branch is one you are working on, so a conflict there is likely and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, reconciles a conflict it can resolve, and otherwise leaves the pull request open for you."
         },
         "aboard.autoRun.pollSeconds": {
           "type": "integer",
@@ -367,7 +367,7 @@
         "aboard.autoRun.worktree.root": {
           "type": "string",
           "default": "",
-          "description": "Where a run's own checkout is created. Empty uses a sibling of the project directory. The path must be outside the project, or the run would implement issues into a directory the repository itself contains."
+          "description": "Where a run's own checkout is created. Empty uses a sibling of the project directory. The path must be outside the project, or the run would address issues in a directory the repository itself contains."
         },
         "aboard.autoRun.worktree.keep": {
           "type": "boolean",

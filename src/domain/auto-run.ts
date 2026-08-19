@@ -40,7 +40,7 @@ export interface WorktreeSettings {
   /**
    * Where the run's checkout is created. Empty means the derived default, a
    * sibling of the project root — never inside it, or the run would be
-   * implementing issues into a directory the repository itself contains.
+   * addressing issues in a directory the repository itself contains.
    */
   readonly root: string;
   /** Keep the checkout after a run that would otherwise remove it. */
@@ -341,7 +341,7 @@ export function runPullRequestTitle(landed: readonly LandedIssue[]): string {
 export function runPullRequestBody(landed: readonly LandedIssue[], sessionBranch: string, base: string): string {
   const lines = landed.map((issue) => `- #${issue.number} ${commitSubject(issue.title)} (PR #${issue.prNumber})`);
   const body = [
-    `Implemented by an aboard auto-run on \`${sessionBranch}\`, one issue at a time.`,
+    `Addressed by an aboard auto-run on \`${sessionBranch}\`, one issue at a time.`,
     "",
     ...lines,
     "",
@@ -412,11 +412,11 @@ export interface Selection {
  * merge.
  *
  * An umbrella — an `[AI]-spec` issue, or any issue with sub-issues of its own —
- * never enters the queue: implementing one directly would duplicate its
+ * never enters the queue: addressing one directly would duplicate its
  * children's work. That exclusion is silent for the ordinary case, because
  * every repository has specs and a skip line per spec on every start is noise,
  * and reported when the umbrella *is* classified, because an umbrella asking to
- * be implemented autonomously is a genuine contradiction.
+ * be addressed autonomously is a genuine contradiction.
  */
 export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
   const issues: PlannedIssue[] = [];
@@ -587,7 +587,7 @@ function umbrellaReason(candidate: CandidateIssue): string | undefined {
 export const autoRunMessage = {
   started: (afk: number, hitl: number, review: boolean, chrome: boolean): string =>
     `auto-run: started — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}, Chrome ${chrome ? "on" : "off"}.`,
-  implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} implemented on ${branch}.`,
+  implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} addressed on ${branch}.`,
   committed: (issue: number, sha: string, pr: number): string => `auto-run: issue #${issue} committed (${sha}) and opened PR #${pr}.`,
   reviewed: (issue: number, paths: readonly string[]): string =>
     `auto-run: issue #${issue} reviewed; committing ${paths.length === 0 ? "no further changes" : `${paths.length} changed path(s): ${paths.slice(0, 10).join(", ")}`}.`,
@@ -634,6 +634,6 @@ export const autoRunMessage = {
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
   complete: (count: number, parked: number): string =>
-    `auto-run: queue drained (${count} issue${count === 1 ? "" : "s"} implemented${parked === 0 ? "" : `, ${parked} parked for you`}). Run /auto again once more work is labelled.`,
+    `auto-run: queue drained (${count} issue${count === 1 ? "" : "s"} addressed${parked === 0 ? "" : `, ${parked} parked for you`}). Run /auto again once more work is labelled.`,
   returned: (branch: string): string => `auto-run: back on ${branch}.`,
 } as const;

@@ -43,7 +43,7 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
       return this.prompts.resolve({ kind: "free-form", instruction });
     }
     if (input.type === "implementer" && input.issues !== undefined) {
-      return this.prompts.resolve({ kind: "implementation", instruction: input.prompt ?? "Implement the issue.", issueNumbers: input.issues });
+      return this.prompts.resolve({ kind: "implementation", instruction: input.prompt ?? "Address the issue.", issueNumbers: input.issues });
     }
     if (input.issues !== undefined) {
       // The resolved issues and their parent specs lead; the Manager's wording

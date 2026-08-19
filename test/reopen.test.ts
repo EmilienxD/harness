@@ -152,7 +152,7 @@ test("a session that ran in an auto-run's own checkout is reopened there, not in
     agentId: agent("11"),
     type: "implementer",
     sessionId: BRAINSTORM_SESSION,
-    description: "implement issue 34",
+    description: "address issue 34",
     startedAt: at("2026-07-30T09:00:00.000Z"),
     endedAt: at("2026-07-30T09:30:00.000Z"),
     cwd: CHECKOUT,

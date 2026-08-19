@@ -59,7 +59,7 @@ test("records compact summaries, repeat count, and precise re-grounding", async 
   service.compact(parentId, "first summary"); service.compact(parentId, "second summary");
   assert.equal(fleet.get(parentId)?.telemetry.compactionCount, 2);
   assert.deepEqual(fleet.get(parentId)?.compactSummaries, ["first summary", "second summary"]);
-  assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, implementing issue #15 on branch feat/issue-15. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.");
+  assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, addressing issue #15 on branch feat/issue-15. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.");
   const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
   assert.equal((await import("../src/domain/validation.js")).parseFleetPersistenceDto(serialized).ok, true);
 });
@@ -77,7 +77,7 @@ test("re-grounding names every bound issue and refuses a worker bound to none", 
   const many = fleetWithWorker();
   many.register(bound("worker-16", [15, 18]), timestamp);
   const service = new WorkerHookService(many, branches, () => new Date(timestamp));
-  assert.match(await service.reground("worker-16" as AgentId, "C:\\repo"), /implementing issues #15, #18 on branch feat\/issue-15/);
+  assert.match(await service.reground("worker-16" as AgentId, "C:\\repo"), /addressing issues #15, #18 on branch feat\/issue-15/);
 
   const unbound = fleetWithWorker();
   unbound.register(bound("worker-17", []), timestamp);

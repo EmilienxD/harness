@@ -567,7 +567,7 @@ export class AutoRunEngine {
       if (settings.pauseAfterHitl && issue.disposition === "hitl") {
         this.options.notifier.notify(`auto-run: paused after hitl issue #${issue.number} (aboard.autoRun.pauseAfterHitl). Run /auto to continue.`);
         await this.options.store.clear();
-        // Everything this run implemented is committed, pushed, and merged onto
+        // Everything this run addressed is committed, pushed, and merged onto
         // the session branch: nothing is left in the checkout to look at, and
         // continuing means a fresh run with a checkout of its own.
         return parked === 0 ? "drained" : "interrupted";
@@ -764,9 +764,9 @@ export class AutoRunEngine {
     const outcome = await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
-      description: `implement issue ${issue.number}`,
+      description: `address issue ${issue.number}`,
       chrome,
-      prompt: `Implement issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.`,
+      prompt: `Address issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.`,
       expectsUncommittedTree: true,
       ...this.#isolation(),
     }, signal);
@@ -786,7 +786,7 @@ export class AutoRunEngine {
    *
    * Best-effort by design: the change is already in the working tree, and no
    * phase's postcondition depends on a comment, so a failed comment is logged
-   * rather than allowed to fail an issue that was implemented correctly.
+   * rather than allowed to fail an issue that was addressed correctly.
    */
   async #comment(issueNumber: number, summary: string): Promise<void> {
     const body = issueCommentBody(summary);
@@ -830,7 +830,7 @@ export class AutoRunEngine {
       await this.#git.add();
       await this.#git.commit(
         commitSubject(issue.title),
-        `Implements #${issue.number}.\n\n${summary.trim().slice(0, 500)}`.trim(),
+        `Addresses #${issue.number}.\n\n${summary.trim().slice(0, 500)}`.trim(),
       );
     } else if (!await this.#git.hasCommitFor(issue.number, base)) {
       throw new Error("the implementer produced no changes");
@@ -1234,5 +1234,5 @@ function emptyQueueReason(skipped: readonly SkippedIssue[]): string {
   if (skipped.length === 0) return "no open issue is labelled [AI]-afk or [AI]-hitl";
   const listed = skipped.slice(0, 20).map((entry) => `#${entry.number} (${entry.reason})`).join(", ");
   const rest = skipped.length > 20 ? `, and ${skipped.length - 20} more` : "";
-  return `no open issue is ready to implement: ${listed}${rest}`;
+  return `no open issue is ready to address: ${listed}${rest}`;
 }

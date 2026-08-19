@@ -276,7 +276,7 @@ test("an umbrella never enters the queue, silently unless it is classified", () 
   ]);
   // The plain spec and the plain parent are dropped without a line — every
   // repository has those, and a skip line each on every start is noise. Only
-  // #12, which asks to be implemented autonomously *and* has children, is a
+  // #12, which asks to be addressed autonomously *and* has children, is a
   // contradiction worth surfacing.
   assert.deepEqual(selection.issues.map((entry) => entry.number), [13]);
   assert.deepEqual(selection.skipped, [

@@ -47,10 +47,10 @@ Then try one of these in the Manager terminal:
 | :-- | :-- |
 | `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
 | `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet. Add `--chrome` when this session needs visible browser debugging |
-| `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, implement, commit, PR, merge — one issue at a time, onto a branch of the run's own |
+| `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, address, commit, PR, merge — one issue at a time, onto a branch of the run's own |
 | `/auto --chrome` | The same run, with Claude in Chrome enabled for every implementer in this run |
 | `/reopen` | The last session you were handed comes back — same conversation, same agent definition. `/reopen brainstorm` picks by type, `/reopen 7` by agent id, and **Aboard: Reopen a Session** lists them all |
-| *"Implement issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
+| *"Address issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
 
 ## The auto-run, honestly
 

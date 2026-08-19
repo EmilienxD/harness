@@ -198,7 +198,7 @@ test("restores a persisted worker with --resume, no new prompt, no focus, and no
 
 test("a terminal handed to the user takes no lease and runs beside the holder", async () => {
   const { launch, lease, coordinator } = setup();
-  await coordinator.spawn({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine" });
+  await coordinator.spawn({ type: "implementer", prompt: "Address issue nine", description: "address issue nine" });
   const holder = lease.current()?.agentId;
   assert.notEqual(holder, undefined);
   // Both are write-capable, but both
@@ -542,7 +542,7 @@ test("foreground delegation blocks until a result lands, background returns at o
   const { call, fleet, coordinator } = setup();
   let foregroundSettled = false;
   const foreground = coordinator
-    .run({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine" })
+    .run({ type: "implementer", prompt: "Address issue nine", description: "address issue nine" })
     .then((value) => { foregroundSettled = true; return value; });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(foregroundSettled, false);
@@ -550,7 +550,7 @@ test("foreground delegation blocks until a result lands, background returns at o
   coordinator.complete(worker.identity.agentId, success);
   assert.match(JSON.stringify(await foreground), /finished/);
 
-  const background = await coordinator.spawn({ type: "implementer", prompt: "Implement issue ten", description: "implement issue ten", issues: [10] });
+  const background = await coordinator.spawn({ type: "implementer", prompt: "Address issue ten", description: "address issue ten", issues: [10] });
   assert.match(JSON.stringify(background), /running/);
 });
 
@@ -668,7 +668,7 @@ test("the configured launch command leads every worker command line", async () =
 
 test("an auto-run launch marks the tree it is expected to leave dirty and fences git and GitHub writes", async () => {
   const { coordinator, fleet, host } = setup();
-  void coordinator.runAutomated({ type: "implementer", prompt: "Implement issue nine", description: "implement issue nine", expectsUncommittedTree: true });
+  void coordinator.runAutomated({ type: "implementer", prompt: "Address issue nine", description: "address issue nine", expectsUncommittedTree: true });
   await new Promise((resolve) => setImmediate(resolve));
   const worker = fleet.list().find((entry) => entry.identity.type === "implementer")!;
   // A dirty tree is this agent's success state, not a `no-commit` failure, and
@@ -691,8 +691,8 @@ test("an isolated launch runs in its own directory, writes its runtime files the
   const CHECKOUT = "C:\\sessions\\run_test\\repo";
   void coordinator.runAutomated({
     type: "implementer",
-    prompt: "Implement issue nine",
-    description: "implement issue nine",
+    prompt: "Address issue nine",
+    description: "address issue nine",
     expectsUncommittedTree: true,
     isolation: { cwd: CHECKOUT, denyTools: ["Read(//C:/repo/**)", "Edit(//C:/repo/**)"] },
   });

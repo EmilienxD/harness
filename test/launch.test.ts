@@ -78,7 +78,7 @@ function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest 
     agentType: "implementer",
     shell: "powershell",
     configuration: definition("implementer", IMPLEMENTER_TOOLS),
-    prompt: "Implement issue #47.",
+    prompt: "Address issue #47.",
     ...overrides,
   };
 }
@@ -255,7 +255,7 @@ test("wrapper tokens are validated like the launch command", () => {
 
 test("plans an agent-defined implementer and spills a multi-line prompt", () => {
   const prompt = resolvedPromptFromText(
-    "Implement issue #47 — Add token refresh.\n\n## Issue #47\n\nRotate the token.",
+    "Address issue #47 — Add token refresh.\n\n## Issue #47\n\nRotate the token.",
   );
   const plan = planLaunch(request({ shell: "git-bash", prompt }));
 
@@ -264,11 +264,11 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
     sessionId,
     ...definitionArgs("implementer"),
     "--disable-slash-commands",
-    "Implement issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.",
+    "Address issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.",
   ]);
   assert.equal(
     plan.commandLine,
-    `claude --session-id ${sessionId} ${definitionFlags("implementer")} --disable-slash-commands 'Implement issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.'`,
+    `claude --session-id ${sessionId} ${definitionFlags("implementer")} --disable-slash-commands 'Address issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.'`,
   );
   assert.equal(plan.promptDelivery, "spilled");
   assert.equal(plan.spill?.relativePath, ".aboard/runtime/prompts/a1b2c3.md");
@@ -389,7 +389,7 @@ test("passes the session effort level on every launch shape and refuses an unkno
     "--effort",
     "xhigh",
     "--disable-slash-commands",
-    "Implement issue #47.",
+    "Address issue #47.",
   ]);
 
   // A resume re-passes the definition's own flags too — see the resume test
@@ -463,7 +463,7 @@ test("puts the definition's model and effort on the command line, overriding the
     "--effort",
     "high",
     "--disable-slash-commands",
-    "Implement issue #47.",
+    "Address issue #47.",
   ]);
 
   // Each field falls back independently: a definition that declares only one
@@ -474,7 +474,7 @@ test("puts the definition's model and effort on the command line, overriding the
       agentType: "brainstormer",
       effort: "low",
     })).args.slice(6),
-    ["--model", "opus", "--effort", "low", "Implement issue #47."],
+    ["--model", "opus", "--effort", "low", "Address issue #47."],
   );
 
   // `model: inherit` is the definition declining to choose, which is no flag —
@@ -771,7 +771,7 @@ test("pins each launch shape to the agent types allowed to use it", () => {
     agentType: "general-purpose",
     configuration: resolveLaunchConfiguration({}),
   }));
-  assert.deepEqual(generalPurpose.args.slice(2), ["--disable-slash-commands", "Implement issue #47."]);
+  assert.deepEqual(generalPurpose.args.slice(2), ["--disable-slash-commands", "Address issue #47."]);
   assert.equal(generalPurpose.agentDefinition, undefined);
   const manager = planLaunch(request({
     agentType: "manager",
@@ -1078,14 +1078,14 @@ test("requires a minted session id and a file-safe agent id", () => {
 });
 
 test("describes a plan without leaking prompt content", () => {
-  const prompt = resolvedPromptFromText("Implement issue #47.\nThe secret token is hunter2.");
+  const prompt = resolvedPromptFromText("Address issue #47.\nThe secret token is hunter2.");
   const description = describeLaunchPlan(planLaunch(request({ prompt })), prompt);
 
   assert.equal(description.includes("hunter2"), false);
   assert.equal(description.includes("delivery=spilled"), true);
   assert.equal(description.includes("lease=required"), true);
   assert.equal(
-    describeLaunchPlan(planLaunch(request({ prompt: "Implement issue #47." }))).includes(
+    describeLaunchPlan(planLaunch(request({ prompt: "Address issue #47." }))).includes(
       "delivery=inline",
     ),
     true,
@@ -1125,7 +1125,7 @@ test("derives write capability from the effective tool set", () => {
 test("a prompt under the inline threshold still spills when the command line would be too long", async () => {
   // The threshold measures the prompt; the shell's limit applies to the whole
   // assembled line. A generous threshold must not be able to defeat it.
-  const text = "Implement issue #47. ".repeat(500);
+  const text = "Address issue #47. ".repeat(500);
   const plan = planLaunch(request({
     shell: "cmd",
     maxInlinePromptChars: 100_000,
