@@ -9,7 +9,10 @@ import type { GitClient, GitStatus } from "../src/git/client.js";
 import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
-const SETTINGS: AutoRunSettings = { review: false, pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 1 };
+const SETTINGS: AutoRunSettings = { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1 };
+
+/** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
+const SESSION = "aboard/run/test";
 
 interface FakePullRequest {
   readonly state: "open" | "closed" | "merged";
@@ -22,6 +25,11 @@ interface Harness {
   /** Messages the engine escalated because they need the user's hands. */
   readonly alerts: { readonly message: string; readonly url: string | undefined }[];
   readonly comments: { readonly issue: number; readonly body: string }[];
+  /** Issues aboard closed itself, with the comment it closed them with. */
+  readonly closures: { readonly issue: number; readonly body: string }[];
+  readonly createdPullRequests: { readonly title: string; readonly body: string; readonly head: string; readonly base: string }[];
+  /** Every merge the engine asked for, and whether it asked to delete the branch. */
+  readonly merges: { readonly pr: number; readonly deleteBranch: boolean }[];
   readonly launches: DelegationLaunchInput[];
   /** Origins the engine declared for its handed-off launches; they decide the lease. */
   readonly interactiveOrigins: LaunchOrigin[];
@@ -69,12 +77,17 @@ interface HarnessOptions {
   /** Simulates branch protection: the merge is refused for a non-conflict reason. */
   readonly mergeRefused?: boolean;
   readonly commentFails?: boolean;
+  readonly closeFails?: boolean;
+  /** The run's target branch exists only locally, so no pull request can target it. */
+  readonly baseNotOnRemote?: boolean;
 }
 
 function harness(options: HarnessOptions = {}): Harness {
   const notifications: string[] = [];
   const alerts: { message: string; url: string | undefined }[] = [];
   const comments: { issue: number; body: string }[] = [];
+  const closures: { issue: number; body: string }[] = [];
+  const merges: { pr: number; deleteBranch: boolean }[] = [];
   const launches: DelegationLaunchInput[] = [];
   const interactiveOrigins: LaunchOrigin[] = [];
   const gitCalls: string[] = [];
@@ -84,6 +97,9 @@ function harness(options: HarnessOptions = {}): Harness {
   const state = { cleared: false };
   const pullRequests = new Map<number, FakePullRequest>();
   const branches = new Set<string>(["main", "feature/wip"]);
+  // What origin has. A branch the user never pushed exists locally and not here,
+  // which is the difference a pull request base cares about.
+  const remoteBranches = new Set<string>(options.baseNotOnRemote === true ? ["main"] : ["main", "feature/wip"]);
   const commits = new Set<number>();
   const pushed = new Set<string>();
   let currentBranch = options.startBranch ?? "main";
@@ -103,10 +119,11 @@ function harness(options: HarnessOptions = {}): Harness {
     codebase: async () => ({ sourceFileCount: 12, languages: ["ts"], commitCount: 40 }),
     headSha: async () => "a1b2c3d",
     branchExists: async (branch) => branches.has(branch),
+    remoteBranchExists: async (branch) => remoteBranches.has(branch),
     fetch: async () => { gitCalls.push("fetch"); },
     checkout: async (branch) => { gitCalls.push(`checkout ${branch}`); currentBranch = branch; },
     createBranch: async (branch, from) => { gitCalls.push(`createBranch ${branch} ${from}`); branches.add(branch); currentBranch = branch; },
-    fastForward: async () => { gitCalls.push("fastForward"); },
+    fastForward: async (branch) => { gitCalls.push(`fastForward ${branch}`); },
     mergeFromRemote: async (base) => {
       gitCalls.push(`mergeFromRemote ${base}`);
       if (options.reconcilable !== true) return false;
@@ -119,8 +136,11 @@ function harness(options: HarnessOptions = {}): Harness {
     commit: async () => { gitCalls.push("commit"); dirty = false; commits.add(issueForBranch(currentBranch)); pushed.delete(currentBranch); return "a1b2c3d"; },
     push: async (branch, setUpstream) => {
       gitCalls.push(`push ${branch}${setUpstream ? " -u" : ""}`);
-      if (options.pushFails === true) throw new Error("push rejected");
+      // The session branch's own push is infrastructure, not the issue's commit;
+      // a `pushFails` test is about the latter.
+      if (options.pushFails === true && branch !== SESSION) throw new Error("push rejected");
       pushed.add(branch);
+      remoteBranches.add(branch);
     },
     hasCommitFor: async (issueNumber) => commits.has(issueNumber),
     isPushed: async (branch) => pushed.has(branch),
@@ -151,6 +171,11 @@ function harness(options: HarnessOptions = {}): Harness {
       if (options.commentFails === true) throw new Error("gh issue comment failed");
       comments.push({ issue: number, body });
     },
+    closeIssue: async (number, comment) => {
+      if (options.closeFails === true) throw new Error("gh issue close failed");
+      closures.push({ issue: number, body: comment });
+      open.delete(number);
+    },
     createPullRequest: async () => {
       const number = nextPr++;
       pullRequests.set(number, { state: "open", mergeable: options.conflicting === true ? "conflicting" : "mergeable" });
@@ -178,12 +203,15 @@ function harness(options: HarnessOptions = {}): Harness {
       return pr === undefined ? undefined : { ...pr, mergeable: pr.mergeable ?? "mergeable", url: `https://github.com/acme/app/pull/${number}` };
     },
     getReviewState: async () => ({ decision: "unreviewed" }),
-    mergePullRequest: async (number) => {
+    mergePullRequest: async (number, _strategy, deleteBranch) => {
       const pr = pullRequests.get(number);
+      merges.push({ pr: number, deleteBranch });
       if (options.mergeRefused === true) throw new Error("Protected branch rules not met");
       if (pr?.mergeable === "conflicting") throw new Error("Pull request is not mergeable");
       pullRequests.set(number, { state: "merged" });
-      open.delete(issueForPr(number));
+      // Deliberately no `open.delete`: these merge into the session branch, and
+      // GitHub only honours a closing keyword on the default branch. The issue
+      // stays open until aboard closes it.
     },
   };
 
@@ -230,11 +258,13 @@ function harness(options: HarnessOptions = {}): Harness {
 
   // The engine creates the PR before it knows the branch mapping, so record it
   // as each pull request is opened.
+  const createdPullRequests: { title: string; body: string; head: string; base: string }[] = [];
   const wrappedGithub: AutoRunGitHub = {
     ...github,
     createPullRequest: async (input) => {
       const number = await github.createPullRequest(input);
       branchesByPr.set(number, input.head);
+      createdPullRequests.push({ ...input });
       return number;
     },
   };
@@ -266,6 +296,9 @@ function harness(options: HarnessOptions = {}): Harness {
     notifications,
     alerts,
     comments,
+    closures,
+    merges,
+    createdPullRequests,
     launches,
     interactiveOrigins,
     gitCalls,
@@ -291,14 +324,182 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
   assert.equal(context.launches[0]?.expectsUncommittedTree, true);
   assert.deepEqual(context.gitCalls, [
-    "fetch", "checkout main", "fastForward", "createBranch aboard/34-add-retry-backoff main",
+    // The session branch is cut from the remote's copy of the user's branch and
+    // published before any issue starts, because it is a pull request base.
+    "fetch", `createBranch ${SESSION} origin/main`, `push ${SESSION} -u`,
+    "fetch", `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch aboard/34-add-retry-backoff ${SESSION}`,
     "add", "commit", "push aboard/34-add-retry-backoff -u",
+    `checkout ${SESSION}`,
     "checkout main",
   ]);
-  assert.equal([...context.pullRequests.values()][0]?.state, "merged");
+  assert.equal(context.pullRequests.get(56)?.state, "merged");
   assert.match(context.notifications.join("\n"), /issue #34 committed \(a1b2c3d\) and opened PR #56/);
-  assert.match(context.notifications.join("\n"), /issue #34 merged, issue closed/);
+  assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
   assert.equal(context.state.cleared, true);
+});
+
+test("the default branch is never a pull request base and never merged into", async () => {
+  const context = harness({ startBranch: "feature/wip" });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // Every issue targets the session branch; only the run's own pull request
+  // targets a branch a human owns, and it is the one aboard did not merge.
+  assert.deepEqual(context.createdPullRequests.map((pr) => pr.base), [SESSION, "feature/wip"]);
+  assert.equal(context.gitCalls.some((call) => call.startsWith("checkout main")), false);
+  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: true }]);
+});
+
+test("an issue merged into the session branch is closed by aboard, because GitHub will not", async () => {
+  const context = harness();
+  await context.engine.start();
+  await context.engine.settle();
+
+  // GitHub only honours `Closes #N` on a merge into the default branch. Without
+  // this the issue stays open, its dependents stay blocked, and a resumed run
+  // implements it again.
+  assert.deepEqual(context.closures.map((closure) => closure.issue), [34]);
+  assert.match(context.closures[0]?.body ?? "", new RegExp(SESSION.replace("/", "\\/")));
+  // The closure is aboard's own doing, so it is said out loud rather than
+  // implied by the merge line.
+  assert.match(context.notifications.join("\n"), /issue #34 closed by aboard/);
+  assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
+});
+
+test("an issue that cannot be closed is reported instead of failing work that merged", async () => {
+  const context = harness({ closeFails: true });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.pullRequests.get(56)?.state, "merged");
+  assert.match(context.notifications.join("\n"), /issue #34 merged but could not be closed .*Close it yourself/);
+  assert.match(context.notifications.join("\n"), /queue drained \(1 issue implemented\)/);
+});
+
+test("a dependent issue is unblocked within the run by the closure of the issue it waits on", async () => {
+  const context = harness({
+    issues: [
+      { number: 33, title: "Blocked first", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [34], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 34, title: "Unblock it", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]), [34, 33]);
+  assert.deepEqual(context.closures.map((closure) => closure.issue), [34, 33]);
+  assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
+});
+
+test("the run opens one pull request into the user's branch and leaves it for them by default", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    issues: [
+      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 35, title: "Trim the cache", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  const runPr = context.createdPullRequests.at(-1);
+  assert.equal(runPr?.head, SESSION);
+  assert.equal(runPr?.base, "feature/wip");
+  assert.match(runPr?.body ?? "", /- #34 Add retry backoff \(PR #56\)/);
+  assert.match(runPr?.body ?? "", /- #35 Trim the cache \(PR #57\)/);
+  assert.equal(context.pullRequests.get(58)?.state, "open", "the run's own pull request is not merged by default");
+  assert.match(context.notifications.join("\n"), /opened PR #58 into feature\/wip with 2 issues/);
+  // A pull request nobody is watching for is not progress, so it is escalated.
+  assert.match(context.alerts.at(-1)?.message ?? "", /PR #58 into feature\/wip is yours to merge/);
+});
+
+test("the run merges its own pull request only when the setting allows it", async () => {
+  const context = harness({ startBranch: "feature/wip", settings: { mergeRunPullRequest: true } });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.pullRequests.get(57)?.state, "merged");
+  // The session branch survives: parked or unmerged issue pull requests still
+  // target it, and deleting a base branch closes them.
+  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: true }, { pr: 57, deleteBranch: false }]);
+  assert.match(context.notifications.join("\n"), /PR #57 merged into feature\/wip\. Pull feature\/wip/);
+});
+
+test("the run's own pull request is reconciled when it conflicts with the user's branch", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    settings: { mergeRunPullRequest: true },
+    conflicting: true,
+    reconcilable: true,
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // The local session branch is caught up with its own merged issues first: the
+  // issue merges happened on GitHub, so a push after reconciling would be
+  // rejected without it.
+  const calls = context.gitCalls;
+  assert.ok(calls.lastIndexOf(`fastForward ${SESSION}`) < calls.lastIndexOf("mergeFromRemote feature/wip"));
+  assert.equal(calls.includes(`push ${SESSION}`), true);
+  assert.equal(context.pullRequests.get(57)?.state, "merged");
+});
+
+test("a run's pull request that will not merge is left open with the reason", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    settings: { mergeRunPullRequest: true },
+    conflicting: true,
+    reconcilable: false,
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // #34 parks on its own conflict, so nothing lands and there is no run pull
+  // request to merge — the run's alert is about the issue.
+  assert.match(context.alerts.at(-1)?.message ?? "", /issue #34 parked/);
+  assert.deepEqual(context.createdPullRequests.map((pr) => pr.base), [SESSION]);
+});
+
+test("a run that landed nothing opens no pull request", async () => {
+  const context = harness({ implementerFails: true, producesChanges: false });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.createdPullRequests, []);
+});
+
+test("a target branch that is not on origin still leaves the work pushed and says so", async () => {
+  const context = harness({ startBranch: "feature/wip", baseNotOnRemote: true });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // The session branch is cut locally, and the run refuses to push the user's
+  // branch on their behalf just to have a pull request base.
+  assert.equal(context.gitCalls.includes(`createBranch ${SESSION} feature/wip`), true);
+  assert.equal(context.gitCalls.includes("push feature/wip"), false);
+  assert.match(context.notifications.join("\n"), /feature\/wip is not on origin/);
+  assert.match(context.alerts.at(-1)?.message ?? "", new RegExp(`work is committed and pushed on ${SESSION.replace("/", "\\/")}`));
+  assert.equal(context.createdPullRequests.filter((pr) => pr.head === SESSION).length, 0);
+});
+
+test("a stopped run still opens a pull request for the issues that did land", async () => {
+  const context = harness({
+    issues: [
+      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+    resolveHitl: "closed",
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // #35 was rejected and stopped the run; #34 had already merged, and work on
+  // the session branch is invisible until something points at it.
+  assert.match(context.notifications.join("\n"), /stopped at issue #35/);
+  const runPr = context.createdPullRequests.at(-1);
+  assert.equal(runPr?.head, SESSION);
+  assert.match(runPr?.body ?? "", /- #34 Add retry backoff/);
+  assert.equal(/#35/u.test(runPr?.body ?? ""), false);
 });
 
 test("one Chrome choice is persisted for the run and reaches implementers only", async () => {
@@ -374,7 +575,7 @@ test("a comment that cannot be posted does not fail an issue that was implemente
 
   assert.deepEqual(context.comments, []);
   assert.equal([...context.pullRequests.values()][0]?.state, "merged");
-  assert.match(context.notifications.join("\n"), /issue #34 merged, issue closed/);
+  assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
 });
 
 test("a conflicting pull request is reconciled with its base and then merged", async () => {
@@ -382,12 +583,13 @@ test("a conflicting pull request is reconciled with its base and then merged", a
   await context.engine.start();
   await context.engine.settle();
 
-  assert.equal(context.gitCalls.includes("mergeFromRemote main"), true);
+  assert.equal(context.gitCalls.includes(`mergeFromRemote ${SESSION}`), true);
   // Pushed without `-u`: the branch already tracks by the time it is merged.
   assert.equal(context.gitCalls.filter((call) => call === "push aboard/34-add-retry-backoff").length, 1);
-  assert.match(context.notifications.join("\n"), /conflicted with main; merged main into its branch and pushed/);
-  assert.equal([...context.pullRequests.values()][0]?.state, "merged");
-  assert.deepEqual(context.alerts, []);
+  assert.match(context.notifications.join("\n"), new RegExp(`conflicted with ${SESSION}; merged ${SESSION} into its branch and pushed`));
+  assert.equal(context.pullRequests.get(56)?.state, "merged");
+  // The run's own pull request is the only thing left for the user.
+  assert.deepEqual(context.alerts.map((alert) => alert.message.includes("is yours to merge")), [true]);
 });
 
 test("an unresolvable conflict parks its issue, alerts the user, and lets the run continue", async () => {
@@ -402,7 +604,7 @@ test("an unresolvable conflict parks its issue, alerts the user, and lets the ru
   await context.engine.start();
   await context.engine.settle();
 
-  assert.match(context.notifications.join("\n"), /issue #34 parked — PR #56 needs you \(it conflicts with main/);
+  assert.match(context.notifications.join("\n"), new RegExp(`issue #34 parked — PR #56 needs you \\(it conflicts with ${SESSION}`));
   // The alert carries the pull request so the warning can offer to open it.
   assert.deepEqual(context.alerts.map((alert) => alert.url), [
     "https://github.com/acme/app/pull/56",
@@ -568,8 +770,8 @@ test("issues are processed serially and re-derived after every merge", async () 
   await context.engine.start();
   await context.engine.settle();
 
-  const branchOrder = context.gitCalls.filter((call) => call.startsWith("createBranch"));
-  assert.deepEqual(branchOrder, ["createBranch aboard/34-add-retry-backoff main", "createBranch aboard/37-later main"]);
+  const branchOrder = context.gitCalls.filter((call) => call.startsWith("createBranch aboard/3"));
+  assert.deepEqual(branchOrder, [`createBranch aboard/34-add-retry-backoff ${SESSION}`, `createBranch aboard/37-later ${SESSION}`]);
   assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
 });
 
@@ -589,8 +791,8 @@ test("the queue drains a parentless issue and a spec child alike, in creation or
   await context.engine.settle();
 
   assert.deepEqual(
-    context.gitCalls.filter((call) => call.startsWith("createBranch")),
-    ["createBranch aboard/40-fix-the-parser main", "createBranch aboard/121-add-retry-backoff main"],
+    context.gitCalls.filter((call) => call.startsWith("createBranch aboard/1") || call.startsWith("createBranch aboard/4")),
+    [`createBranch aboard/40-fix-the-parser ${SESSION}`, `createBranch aboard/121-add-retry-backoff ${SESSION}`],
   );
   assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
   assert.equal(/#12\b/u.test(context.notifications.join("\n")), false, "the spec is not queued and not reported");
@@ -694,9 +896,15 @@ test("a record an older version wrote against one spec resumes onto the flat que
   assert.equal((await context.engine.resume(legacy)).started, true);
   await context.engine.settle();
 
+  // The legacy record carries no return branch, so the run's target degrades to
+  // the default branch — and its session branch still comes from its own run id.
   assert.deepEqual(
     context.gitCalls.filter((call) => call.startsWith("createBranch")),
-    ["createBranch aboard/34-add-retry-backoff main", "createBranch aboard/40-fix-the-parser main"],
+    [
+      "createBranch aboard/run/legacy origin/main",
+      "createBranch aboard/34-add-retry-backoff aboard/run/legacy",
+      "createBranch aboard/40-fix-the-parser aboard/run/legacy",
+    ],
   );
 });
 

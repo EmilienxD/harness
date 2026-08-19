@@ -917,7 +917,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     try {
       const result = await autoRun.start(chrome ? { chrome: true } : {});
       if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
-      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued, review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
+      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued on ${result.sessionBranch}, opening a pull request into ${result.sessionBase} at the end (${result.mergesItsOwnPullRequest ? "merged automatically" : "yours to merge"}), review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
   };
   context.subscriptions.push(

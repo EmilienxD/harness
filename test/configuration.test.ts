@@ -17,7 +17,7 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   assert.equal(result.value.bridgePort, 4823);
   assert.equal(result.value.maxInlinePromptChars, 4000);
   assert.deepEqual(result.value.managerDisallowedTools, []);
-  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 30 });
+  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30 });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
   assert.equal(result.diagnostics.length, 6);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
@@ -31,6 +31,7 @@ test("configuration accepts every supported launch and review setting", () => {
     "aboard.autoRun.review": true,
     "aboard.autoRun.pauseAfterHitl": true,
     "aboard.autoRun.mergeStrategy": "rebase",
+    "aboard.autoRun.mergeRunPullRequest": true,
     "aboard.autoRun.pollSeconds": 15,
     "aboard.timeouts.managerStop": 7200,
     "aboard.timeouts.managerPrompt": 45,
@@ -40,7 +41,7 @@ test("configuration accepts every supported launch and review setting", () => {
   assert.equal(result.diagnostics.length, 0);
   assert.equal(result.value.bridgePort, 0);
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash", "Read(./src/**)"]);
-  assert.deepEqual(result.value.autoRun, { review: true, pauseAfterHitl: true, mergeStrategy: "rebase", pollSeconds: 15 });
+  assert.deepEqual(result.value.autoRun, { review: true, pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15 });
 });
 
 test("project settings accept flat, nested, and unprefixed keys", () => {

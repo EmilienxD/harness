@@ -12,14 +12,19 @@ import {
   autoRunMessage,
   branchName,
   commitSubject,
+  issueClosedComment,
   issueCommentBody,
   nextStep,
   pullRequestBody,
+  runPullRequestBody,
+  runPullRequestTitle,
   selectIssues,
+  sessionBranchName,
   type AutoRunPhase,
   type AutoRunRecord,
   type AutoRunSettings,
   type CandidateIssue,
+  type LandedIssue,
   type PlannedIssue,
   type RepositoryFacts,
   type SkippedIssue,
@@ -53,11 +58,12 @@ export interface AutoRunGitHub {
   }>;
   getIssue(number: number): Promise<{ readonly state: "open" | "closed" } | undefined>;
   addIssueComment(number: number, body: string): Promise<void>;
+  closeIssue(number: number, comment: string): Promise<void>;
   createPullRequest(input: { readonly title: string; readonly body: string; readonly head: string; readonly base: string }): Promise<number>;
   findOpenPullRequestForBranch(branch: string): Promise<number | undefined>;
   getPullRequest(number: number): Promise<PullRequestObservation | undefined>;
   getReviewState(number: number): Promise<{ readonly decision: "approved" | "changes-requested" | "reviewed" | "unreviewed" }>;
-  mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase"): Promise<void>;
+  mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase", deleteBranch: boolean): Promise<void>;
 }
 
 export interface AutoRunLauncher {
@@ -134,11 +140,29 @@ export type AutoRunStartResult =
       readonly runId: string;
       readonly reviewMode: boolean;
       readonly chromeEnabled: boolean;
+      /** The one branch this run's issues merge into. */
+      readonly sessionBranch: string;
+      /** Where the session branch's pull request will target when the run ends. */
+      readonly sessionBase: string;
+      readonly mergesItsOwnPullRequest: boolean;
       readonly issues: readonly PlannedIssue[];
       readonly skipped: readonly SkippedIssue[];
       readonly dependencyCycles: readonly (readonly number[])[];
     }
   | { readonly started: false; readonly reason: string; readonly active?: AutoRunState };
+
+/**
+ * The run's own branch and where it goes. Held for the whole run rather than
+ * recomputed per issue: the branch is derived from the run id and the base from
+ * the branch the user was on, and both must stay fixed even if the user moves
+ * HEAD while the run is in flight.
+ */
+interface RunSession {
+  readonly branch: string;
+  readonly base: string;
+  /** Issues whose pull request merged into `branch`, in the order they landed. */
+  readonly landed: LandedIssue[];
+}
 
 export class AutoRunEngine {
   #controller: AbortController | undefined;
@@ -204,6 +228,10 @@ export class AutoRunEngine {
       startedAt: this.#now().toISOString(),
     };
     await this.options.store.save(record);
+    // Reported with the plan: where this run's work will collect, and which
+    // branch it will ask to merge into, are the two facts the user is agreeing
+    // to when they start it.
+    const session = await this.#resolveSession(record);
     const afk = selection.issues.filter((issue) => issue.disposition === "afk").length;
     this.options.notifier.notify(autoRunMessage.started(afk, selection.issues.length - afk, settings.review, record.chromeEnabled === true));
     for (const cycle of selection.dependencyCycles) {
@@ -221,6 +249,9 @@ export class AutoRunEngine {
       runId: record.runId,
       reviewMode: settings.review,
       chromeEnabled: record.chromeEnabled === true,
+      sessionBranch: session.branch,
+      sessionBase: session.base,
+      mergesItsOwnPullRequest: settings.mergeRunPullRequest,
       issues: selection.issues,
       skipped: selection.skipped,
       dependencyCycles: selection.dependencyCycles,
@@ -240,12 +271,16 @@ export class AutoRunEngine {
     const precondition = await this.#checkResumePreconditions();
     if (precondition !== undefined) return { started: false, reason: precondition };
     const selection = selectIssues((await this.options.github.listImplementableIssues()).candidates);
+    const session = await this.#resolveSession(record);
     this.#begin(record);
     return {
       started: true,
       runId: record.runId,
       reviewMode: record.reviewMode,
       chromeEnabled: record.chromeEnabled === true,
+      sessionBranch: session.branch,
+      sessionBase: session.base,
+      mergesItsOwnPullRequest: this.options.settings().mergeRunPullRequest,
       issues: selection.issues,
       skipped: selection.skipped,
       dependencyCycles: selection.dependencyCycles,
@@ -323,17 +358,62 @@ export class AutoRunEngine {
     }
   }
 
+  /**
+   * The run's branch and its target, derived rather than persisted. The record
+   * already carries the run id and the branch the user was on, so a stored copy
+   * of either could only disagree with them.
+   */
+  async #resolveSession(record: AutoRunRecord): Promise<RunSession> {
+    // The user's own branch is the target. A detached HEAD is the only case with
+    // no such branch, and only there does the default branch stand in — a run
+    // otherwise never merges into it.
+    const base = record.returnBranch ?? await this.options.git.defaultBranch();
+    return { branch: sessionBranchName(record.runId), base, landed: [] };
+  }
+
+  /**
+   * Creates and publishes the session branch. Idempotent, because a resumed run
+   * finds it already there: existence is checked rather than assumed, and the
+   * push is what a pull request base and every `fastForward` afterwards need.
+   */
+  async #prepareSessionBranch(session: RunSession): Promise<void> {
+    this.options.notifier.notify(autoRunMessage.session(session.branch, session.base));
+    await this.options.git.fetch();
+    const baseOnRemote = await this.options.git.remoteBranchExists(session.base);
+    if (!await this.options.git.branchExists(session.branch)) {
+      // Cut from the remote's copy of the base when there is one: a run must not
+      // inherit local commits the user has not published, and must not move the
+      // user's own branch to do it.
+      await this.options.git.createBranch(session.branch, baseOnRemote ? `origin/${session.base}` : session.base);
+    }
+    if (!await this.options.git.remoteBranchExists(session.branch)) await this.options.git.push(session.branch, true);
+    // Said now rather than at the end, while the user can still act on it: a
+    // base that is not on origin cannot be a pull request's target.
+    if (!baseOnRemote) this.options.notifier.notify(autoRunMessage.baseNotOnRemote(session.base));
+  }
+
   async #run(initial: AutoRunRecord, signal: AbortSignal): Promise<void> {
-    let record = initial;
-    let completed = 0;
-    let parked = 0;
     // Review mode is decided when a run starts and belongs to that run: a
     // setting changed mid-run must not silently retarget a run already in
     // flight, and a resumed run must behave as the run it is resuming. The rest
     // of the settings are read live because they only affect the next action.
-    const settings: AutoRunSettings = { ...this.options.settings(), review: record.reviewMode };
+    const settings: AutoRunSettings = { ...this.options.settings(), review: initial.reviewMode };
+    const session = await this.#resolveSession(initial);
+    await this.#prepareSessionBranch(session);
+    try {
+      await this.#drive(initial, session, settings, signal);
+    } finally {
+      // However the run ended — drained, stopped, or aborted — anything already
+      // merged onto the session branch is invisible until it has a pull request.
+      await this.#concludeRun(session, settings, signal);
+    }
+  }
+
+  async #drive(initial: AutoRunRecord, session: RunSession, settings: AutoRunSettings, signal: AbortSignal): Promise<void> {
+    let record = initial;
+    let completed = 0;
+    let parked = 0;
     const reviewed = new Set(record.reviewedIssues);
-    const defaultBranch = await this.options.git.defaultBranch();
     const processed = new Set<number>();
 
     while (!signal.aborted) {
@@ -359,7 +439,7 @@ export class AutoRunEngine {
       const outcome = await this.#processIssue(
         issue,
         record,
-        defaultBranch,
+        session,
         settings,
         completed,
         completed + remaining.length,
@@ -395,6 +475,9 @@ export class AutoRunEngine {
 
       processed.add(issue.number);
       completed += 1;
+      if (outcome.landed !== undefined) {
+        session.landed.push({ number: issue.number, title: issue.title, prNumber: outcome.landed });
+      }
       record = { ...record, currentIssue: undefined, phase: "branch", branch: undefined, prNumber: undefined };
       await this.options.store.save(record);
       if (settings.pauseAfterHitl && issue.disposition === "hitl") {
@@ -408,7 +491,7 @@ export class AutoRunEngine {
   async #processIssue(
     issue: PlannedIssue,
     record: AutoRunRecord,
-    defaultBranch: string,
+    session: RunSession,
     settings: AutoRunSettings,
     completedCount: number,
     totalCount: number,
@@ -416,7 +499,8 @@ export class AutoRunEngine {
     knownPullRequest: number | undefined,
     signal: AbortSignal,
   ): Promise<
-    | { readonly kind: "done" }
+    /** `landed` carries the pull request that reached the session branch. */
+    | { readonly kind: "done"; readonly landed: number | undefined }
     | { readonly kind: "aborted" }
     | { readonly kind: "stopped"; readonly reason: string; readonly phase: AutoRunPhase; readonly prNumber: number | undefined }
     | { readonly kind: "parked"; readonly reason: string; readonly prNumber: number; readonly pullRequestUrl: string | undefined }
@@ -436,9 +520,9 @@ export class AutoRunEngine {
 
     for (;;) {
       if (signal.aborted) return { kind: "aborted" };
-      const facts = await this.#observe(issue, defaultBranch, prNumber, reviewed);
+      const facts = await this.#observe(issue, session.branch, prNumber, reviewed);
       prNumber = facts.pullRequest?.number ?? prNumber;
-      const step = nextStep({ issue, defaultBranch, reviewMode: settings.review, facts });
+      const step = nextStep({ issue, baseBranch: session.branch, reviewMode: settings.review, facts });
       phase = step.action === "advance" || step.action === "stop" ? phase : step.action;
       repeats = step.action === previous ? repeats + 1 : 0;
       previous = step.action;
@@ -476,21 +560,21 @@ export class AutoRunEngine {
             break;
           }
           case "commit": {
-            const sha = await this.#commit(issue, implementationSummary);
+            const sha = await this.#commit(issue, implementationSummary, session.branch);
             // The PR is opened immediately after so the notification can carry
             // both, which is the shape progress reporting specifies. A pull request this run
             // already knows about is reused rather than re-opened: the reducer
             // routes a second dirty tree (a doctor's fixes) back through this
             // same phase, and the branch lookup inside `#openPullRequest` only
             // finds *open* ones, so a merged or closed one would spawn a second.
-            const opened = prNumber ?? await this.#openPullRequest(issue, defaultBranch, implementationSummary);
+            const opened = prNumber ?? await this.#openPullRequest(issue, session.branch, implementationSummary);
             prNumber = opened;
             this.#attach(issue.number, opened);
             this.options.notifier.notify(autoRunMessage.committed(issue.number, sha, opened));
             break;
           }
           case "pr": {
-            const opened = await this.#openPullRequest(issue, defaultBranch, implementationSummary);
+            const opened = await this.#openPullRequest(issue, session.branch, implementationSummary);
             prNumber = opened;
             this.#attach(issue.number, opened);
             this.options.notifier.notify(`auto-run: issue #${issue.number} opened PR #${opened}.`);
@@ -509,15 +593,21 @@ export class AutoRunEngine {
             break;
           }
           case "merge": {
-            const merged = await this.#merge(issue, step.prNumber, defaultBranch, settings);
+            const merged = await this.#merge(issue, step.prNumber, session.branch, settings);
             if (merged !== "merged") return { kind: "parked", ...merged, prNumber: step.prNumber };
             break;
           }
-          case "cleanup":
-            await this.#cleanup(defaultBranch);
-            return { kind: "done" };
+          case "cleanup": {
+            // The one place both merge paths meet — the run merged the pull
+            // request, or a hitl user did — which is why the issue is closed
+            // here rather than beside either merge.
+            const landed = facts.pullRequest?.state === "merged" ? facts.pullRequest.number : undefined;
+            if (landed !== undefined && !facts.issueClosed) await this.#closeIssue(issue, landed, session);
+            await this.#cleanup(session.branch);
+            return { kind: "done", landed };
+          }
           case "advance":
-            return { kind: "done" };
+            return { kind: "done", landed: undefined };
           case "stop":
             return { kind: "stopped", reason: step.reason, phase, prNumber };
         }
@@ -528,11 +618,11 @@ export class AutoRunEngine {
   }
 
   /** Reads the repository, never the record. A record that disagrees loses. */
-  async #observe(issue: PlannedIssue, defaultBranch: string, knownPullRequest: number | undefined, reviewed: ReadonlySet<number>): Promise<RepositoryFacts> {
+  async #observe(issue: PlannedIssue, baseBranch: string, knownPullRequest: number | undefined, reviewed: ReadonlySet<number>): Promise<RepositoryFacts> {
     const status = await this.options.git.status();
     const branchExists = await this.options.git.branchExists(issue.branch);
     const onBranch = status.branch === issue.branch;
-    const hasCommit = branchExists && onBranch && await this.options.git.hasCommitFor(issue.number, defaultBranch);
+    const hasCommit = branchExists && onBranch && await this.options.git.hasCommitFor(issue.number, baseBranch);
     // The branch lookup only finds *open* pull requests, so a merged one would
     // read as "no pull request" and the `pr` phase would open a second. Falling
     // back to the number this run already knows keeps the merged state visible.
@@ -576,7 +666,7 @@ export class AutoRunEngine {
     await this.options.git.fetch();
     await this.options.git.checkout(base);
     await this.options.git.fastForward(base);
-    // Issue n+1 therefore branches from a default branch that already contains
+    // Issue n+1 therefore branches from a session branch that already contains
     // issue n's merge, which is what makes conflicts a non-event.
     if (await this.options.git.branchExists(branch)) await this.options.git.checkout(branch);
     else await this.options.git.createBranch(branch, base);
@@ -619,7 +709,27 @@ export class AutoRunEngine {
     }
   }
 
-  async #commit(issue: PlannedIssue, summary: string): Promise<string> {
+  /**
+   * Closes the issue its pull request just merged. Load-bearing rather than
+   * cosmetic: GitHub only honours a closing keyword on a merge into the default
+   * branch, and nothing here merges there, so without this every issue would
+   * stay open — leaving its dependents blocked, the roadmap wrong, and a resumed
+   * run free to implement it a second time.
+   *
+   * A failure is reported and survived. The work is merged either way, and
+   * failing the issue after its merge would be a worse answer than an open issue
+   * the user can close.
+   */
+  async #closeIssue(issue: PlannedIssue, prNumber: number, session: RunSession): Promise<void> {
+    try {
+      await this.options.github.closeIssue(issue.number, issueClosedComment(prNumber, session.branch, session.base));
+      this.options.notifier.notify(autoRunMessage.closed(issue.number));
+    } catch (error) {
+      this.options.notifier.notify(autoRunMessage.notClosed(issue.number, message(error)));
+    }
+  }
+
+  async #commit(issue: PlannedIssue, summary: string, base: string): Promise<string> {
     // The implementer is told not to touch git, but it has Bash. A mismatch
     // stops the run rather than committing to the wrong place.
     const current = await this.options.git.currentBranch();
@@ -633,7 +743,7 @@ export class AutoRunEngine {
         commitSubject(issue.title),
         `Implements #${issue.number}.\n\n${summary.trim().slice(0, 500)}`.trim(),
       );
-    } else if (!await this.options.git.hasCommitFor(issue.number, await this.options.git.defaultBranch())) {
+    } else if (!await this.options.git.hasCommitFor(issue.number, base)) {
       throw new Error("the implementer produced no changes");
     }
     // Reached with a clean tree when a previous attempt committed and then failed
@@ -761,7 +871,7 @@ export class AutoRunEngine {
   async #merge(
     issue: PlannedIssue,
     prNumber: number,
-    defaultBranch: string,
+    base: string,
     settings: AutoRunSettings,
   ): Promise<"merged" | { readonly reason: string; readonly pullRequestUrl: string | undefined }> {
     const snapshot = await this.options.github.getPullRequest(prNumber);
@@ -769,11 +879,16 @@ export class AutoRunEngine {
       // A known conflict is repaired before the merge is attempted; an `unknown`
       // verdict — the normal answer for a head pushed seconds ago — is left to
       // the attempt itself rather than waited on.
-      if (snapshot?.mergeable === "conflicting" && !await this.#reconcile(issue, prNumber, defaultBranch)) {
-        return { reason: `it conflicts with ${defaultBranch} and the conflict is not one aboard can resolve`, pullRequestUrl: snapshot.url };
+      if (snapshot?.mergeable === "conflicting") {
+        if (!await this.#reconcile(issue.branch, base)) {
+          return { reason: `it conflicts with ${base} and the conflict is not one aboard can resolve`, pullRequestUrl: snapshot.url };
+        }
+        this.options.notifier.notify(autoRunMessage.reconciled(issue.number, prNumber, base));
       }
       try {
-        await this.options.github.mergePullRequest(prNumber, settings.mergeStrategy);
+        // The issue branch is deleted with its merge: nothing targets it, and
+        // the work is on the session branch from here on.
+        await this.options.github.mergePullRequest(prNumber, settings.mergeStrategy, true);
       } catch (error) {
         // Re-read rather than guess: by now GitHub has computed a verdict the
         // pre-merge read may not have had, and a conflict and a protected
@@ -782,7 +897,7 @@ export class AutoRunEngine {
         if (after?.state === "merged") {
           this.options.log?.(`auto-run: PR #${prNumber} was already merged when the merge failed (${message(error)})`);
         } else if (after?.mergeable === "conflicting") {
-          return { reason: `it conflicts with ${defaultBranch}`, pullRequestUrl: after.url };
+          return { reason: `it conflicts with ${base}`, pullRequestUrl: after.url };
         } else {
           // Not a fact about this branch. Branch protection that requires a
           // review applies to every pull request the run will open, so unlike a
@@ -793,38 +908,126 @@ export class AutoRunEngine {
         }
       }
     }
-    this.options.notifier.notify(autoRunMessage.merged(issue.number));
+    this.options.notifier.notify(autoRunMessage.merged(issue.number, base));
     this.#owners.delete(prNumber);
     return "merged";
   }
 
   /**
-   * Brings the issue branch up to date with its base and pushes the result.
-   * Refuses on anything it did not put there: merging over uncommitted work, or
-   * from the wrong branch, would strand changes nobody is reviewing in a tree
-   * the user did not ask to have merged.
+   * Brings a branch up to date with its base and pushes the result. Refuses on
+   * anything it did not put there: merging over uncommitted work, or from the
+   * wrong branch, would strand changes nobody is reviewing in a tree the user
+   * did not ask to have merged.
    */
-  async #reconcile(issue: PlannedIssue, prNumber: number, base: string): Promise<boolean> {
+  async #reconcile(branch: string, base: string): Promise<boolean> {
     const status = await this.options.git.status();
-    if (status.branch !== issue.branch || status.entries.length > 0) return false;
+    if (status.branch !== branch || status.entries.length > 0) return false;
     await this.options.git.fetch();
     if (!await this.options.git.mergeFromRemote(base)) return false;
-    await this.options.git.push(issue.branch, false);
-    this.options.notifier.notify(autoRunMessage.reconciled(issue.number, prNumber, base));
+    await this.options.git.push(branch, false);
     return true;
   }
 
-  async #cleanup(defaultBranch: string): Promise<void> {
+  async #cleanup(sessionBranch: string): Promise<void> {
     for (const terminalId of this.#openTerminals) {
       try { this.options.terminals.close(terminalId); } catch { /* already closed */ }
     }
     this.#openTerminals.clear();
     try {
-      await this.options.git.checkout(defaultBranch);
+      // Back to the session branch, never the default one: the run's work lives
+      // there, and the next issue's `branch` phase starts from it anyway.
+      await this.options.git.checkout(sessionBranch);
     } catch (error) {
       // Cleanup failure is logged and the run continues: the work is merged and
-      // the next issue's `branch` phase checks out the default branch anyway.
-      this.options.log?.(`auto-run cleanup could not return to ${defaultBranch}: ${message(error)}`);
+      // the next issue's `branch` phase checks the branch out anyway.
+      this.options.log?.(`auto-run cleanup could not return to ${sessionBranch}: ${message(error)}`);
+    }
+  }
+
+  /**
+   * Opens — and, when the user has allowed it, merges — the run's own pull
+   * request. This is the only place a run touches a branch the user owns, and it
+   * is the reason the per-issue merges can be automatic: they land on a branch
+   * nobody else is working on.
+   *
+   * Runs on every exit, including a stop or an abort, because work already
+   * merged onto the session branch is invisible until it has a pull request. It
+   * never throws: the run is over, and its outcome stands whatever happens here.
+   */
+  async #concludeRun(session: RunSession, settings: AutoRunSettings, signal: AbortSignal): Promise<void> {
+    if (session.landed.length === 0) return;
+    try {
+      if (!await this.options.git.remoteBranchExists(session.base)) {
+        this.options.notifier.alert(autoRunMessage.runNotOpened(session.branch, session.base, `${session.base} is not on origin`));
+        return;
+      }
+      const existing = await this.options.github.findOpenPullRequestForBranch(session.branch);
+      const prNumber = existing ?? await this.options.github.createPullRequest({
+        title: runPullRequestTitle(session.landed),
+        body: runPullRequestBody(session.landed, session.branch, session.base),
+        head: session.branch,
+        base: session.base,
+      });
+      this.options.notifier.notify(autoRunMessage.runOpened(prNumber, session.base, session.landed.length));
+      const snapshot = await this.options.github.getPullRequest(prNumber);
+      // An aborted run is one the user interrupted; finishing it with a merge
+      // into their branch would be the opposite of what they asked for.
+      if (!settings.mergeRunPullRequest || signal.aborted) {
+        this.options.notifier.alert(autoRunMessage.runWaiting(prNumber, session.base), snapshot?.url);
+        return;
+      }
+      await this.#mergeRun(session, prNumber, settings);
+    } catch (error) {
+      this.options.notifier.alert(autoRunMessage.runNotOpened(session.branch, session.base, message(error)));
+    }
+  }
+
+  /**
+   * The run's own merge. Unlike an issue's, this one competes with whatever the
+   * user (or anyone else) pushed to their branch while the run worked, so a
+   * conflict here is ordinary rather than exceptional — and a conflict aboard
+   * cannot resolve is handed back with the pull request intact rather than
+   * retried.
+   */
+  async #mergeRun(session: RunSession, prNumber: number, settings: AutoRunSettings): Promise<void> {
+    const snapshot = await this.options.github.getPullRequest(prNumber);
+    if (snapshot?.state === "merged") {
+      this.options.notifier.notify(autoRunMessage.runMerged(prNumber, session.base));
+      return;
+    }
+    if (snapshot?.mergeable === "conflicting" && !await this.#syncSessionBranch(session)) {
+      this.options.notifier.alert(autoRunMessage.runParked(prNumber, session.base, `it conflicts with ${session.base}`), snapshot.url);
+      return;
+    }
+    try {
+      // The session branch survives its merge: parked and unmerged issue pull
+      // requests still target it, and deleting a base branch closes them.
+      await this.options.github.mergePullRequest(prNumber, settings.mergeStrategy, false);
+      this.options.notifier.notify(autoRunMessage.runMerged(prNumber, session.base));
+    } catch (error) {
+      const after = await this.options.github.getPullRequest(prNumber);
+      if (after?.state === "merged") this.options.notifier.notify(autoRunMessage.runMerged(prNumber, session.base));
+      else this.options.notifier.alert(autoRunMessage.runParked(prNumber, session.base, message(error)), after?.url ?? snapshot?.url);
+    }
+  }
+
+  /**
+   * Catches the local session branch up with its merged issues, then merges the
+   * base into it. The catch-up is what an issue branch never needs: every issue
+   * merge happened on GitHub, so the local branch is behind its own remote and a
+   * push after reconciling would be rejected.
+   */
+  async #syncSessionBranch(session: RunSession): Promise<boolean> {
+    try {
+      const status = await this.options.git.status();
+      if (status.entries.length > 0) return false;
+      if (status.branch !== session.branch) await this.options.git.checkout(session.branch);
+      await this.options.git.fetch();
+      await this.options.git.fastForward(session.branch);
+      return await this.#reconcile(session.branch, session.base);
+    } catch (error) {
+      this.options.log?.(`auto-run could not reconcile ${session.branch} with ${session.base}: ${message(error)}`);
+      return false;
     }
   }
 

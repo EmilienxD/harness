@@ -108,6 +108,12 @@ export interface GitClient {
   codebase(): Promise<CodebaseSurvey>;
   headSha(short?: boolean): Promise<string>;
   branchExists(branch: string): Promise<boolean>;
+  /**
+   * Whether `origin` has this branch, as of the last fetch. Distinct from
+   * `isPushed`: a branch with local commits the remote has not seen still exists
+   * there, and existence is the question a pull request base has to answer.
+   */
+  remoteBranchExists(branch: string): Promise<boolean>;
   fetch(): Promise<void>;
   checkout(branch: string): Promise<void>;
   createBranch(branch: string, from: string): Promise<void>;
@@ -189,6 +195,10 @@ export class ProcessGitClient implements GitClient {
 
   public async branchExists(branch: string): Promise<boolean> {
     return await this.tryRun(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) !== undefined;
+  }
+
+  public async remoteBranchExists(branch: string): Promise<boolean> {
+    return await this.tryRun(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]) !== undefined;
   }
 
   public async fetch(): Promise<void> {

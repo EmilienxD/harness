@@ -347,6 +347,11 @@
           "default": "squash",
           "description": "How auto-run merges a pull request. Squash by default because one issue is one logical change even when the engine made two commits."
         },
+        "aboard.autoRun.mergeRunPullRequest": {
+          "type": "boolean",
+          "default": false,
+          "description": "Merge the run's own pull request when the run ends. An auto-run implements each issue on its own branch, merges those into one session branch, and opens a single pull request from it into the branch you were on when the run started. Off by default: that branch is one you are working on, so a conflict there is likely and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, reconciles a conflict it can resolve, and otherwise leaves the pull request open for you."
+        },
         "aboard.autoRun.pollSeconds": {
           "type": "integer",
           "default": 30,

@@ -4,10 +4,14 @@ import test from "node:test";
 import {
   branchName,
   commitSubject,
+  issueClosedComment,
   issueCommentBody,
   nextStep,
   pullRequestBody,
+  runPullRequestBody,
+  runPullRequestTitle,
   selectIssues,
+  sessionBranchName,
   slugify,
   type AutoRunPhase,
   type CandidateIssue,
@@ -57,11 +61,13 @@ function facts(overrides: Partial<RepositoryFacts> = {}): RepositoryFacts {
 function step(_expected: AutoRunPhase, overrides: Partial<RepositoryFacts> = {}, options: { readonly reviewMode?: boolean; readonly issue?: PlannedIssue } = {}) {
   return nextStep({
     issue: options.issue ?? issue,
-    defaultBranch: "main",
+    baseBranch: SESSION_BRANCH,
     reviewMode: options.reviewMode ?? false,
     facts: facts(overrides),
   });
 }
+
+const SESSION_BRANCH = "aboard/run/abc123";
 
 test("slug normalization collapses punctuation, trims, and never cuts mid-word", () => {
   assert.equal(slugify("Add retry backoff"), "add-retry-backoff");
@@ -90,6 +96,43 @@ test("commit subject and pull request body are bounded and carry the closing tra
   assert.ok(pullRequestBody("y".repeat(5_000), 34).length <= 4_000 + "\n\nCloses #34".length);
 });
 
+test("a session branch is derived from the run id and stays out of the issue namespace", () => {
+  assert.equal(sessionBranchName("run_k3f9x1"), "aboard/run/k3f9x1");
+  // Same id, same branch: a resumed run finds the branch it created.
+  assert.equal(sessionBranchName("run_k3f9x1"), sessionBranchName("run_k3f9x1"));
+  assert.notEqual(sessionBranchName("run_a"), sessionBranchName("run_b"));
+  assert.ok(sessionBranchName("run_k3f9x1").startsWith("aboard/run/"));
+});
+
+test("the run's pull request indexes what landed and closes nothing itself", () => {
+  const landed = [
+    { number: 34, title: "Add retry backoff", prNumber: 56 },
+    { number: 35, title: "Trim the cache", prNumber: 57 },
+  ];
+  assert.equal(runPullRequestTitle(landed), "aboard auto-run: 2 issues");
+  assert.equal(runPullRequestTitle([landed[0]!]), "aboard auto-run: Add retry backoff");
+  const body = runPullRequestBody(landed, "aboard/run/k3f9x1", "feature/wip");
+  assert.match(body, /- #34 Add retry backoff \(PR #56\)/);
+  assert.match(body, /- #35 Trim the cache \(PR #57\)/);
+  assert.match(body, /aboard\/run\/k3f9x1/);
+  assert.match(body, /feature\/wip/);
+  // The issues are already closed; a second closing reference on a branch where
+  // GitHub would honour it only invites reopen/close churn.
+  assert.equal(/closes #/iu.test(body), false);
+  assert.ok(runPullRequestBody(
+    Array.from({ length: 500 }, (_, index) => ({ number: index, title: "x".repeat(60), prNumber: index })),
+    "aboard/run/k3f9x1",
+    "main",
+  ).length <= 4_000);
+});
+
+test("an issue closed by aboard says who closed it and where the work is", () => {
+  const comment = issueClosedComment(56, "aboard/run/k3f9x1", "feature/wip");
+  assert.match(comment, /#56/);
+  assert.match(comment, /aboard\/run\/k3f9x1/);
+  assert.match(comment, /feature\/wip/);
+});
+
 test("an issue comment is the agent's own text, bounded, and absent when there is none", () => {
   assert.equal(issueCommentBody("  Rewrote the backoff.  "), "Rewrote the backoff.");
   assert.equal(issueCommentBody("   "), undefined);
@@ -97,7 +140,8 @@ test("an issue comment is the agent's own text, bounded, and absent when there i
 });
 
 test("the reducer walks the phases in order from a clean start", () => {
-  assert.deepEqual(step("branch", { branchExists: false, currentBranch: "main" }), { action: "branch", branch: issue.branch, base: "main" });
+  // The base is the run's session branch, never the repository's default one.
+  assert.deepEqual(step("branch", { branchExists: false, currentBranch: "main" }), { action: "branch", branch: issue.branch, base: SESSION_BRANCH });
   assert.deepEqual(step("implement"), { action: "implement", issue });
   assert.deepEqual(step("commit", { workingTreeDirty: true, dirtyPaths: ["src/a.ts"] }), { action: "commit", issue });
 });

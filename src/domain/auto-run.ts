@@ -33,6 +33,13 @@ export interface AutoRunSettings {
   readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly pollSeconds: number;
+  /**
+   * Whether the run merges its own pull request into the branch the user was on
+   * when it started. Off by default: that branch is one a human is actively
+   * working on, and landing a batch of automated work on it is exactly the kind
+   * of decision the user has to be able to see and refuse.
+   */
+  readonly mergeRunPullRequest: boolean;
 }
 
 export interface PlannedIssue {
@@ -116,7 +123,13 @@ export type AutoRunStep =
 
 export interface ReducerInput {
   readonly issue: PlannedIssue;
-  readonly defaultBranch: string;
+  /**
+   * The run's session branch: what every issue branch is cut from and merged
+   * into. Never the repository's default branch — a run leaves the default
+   * branch alone and reaches the user's own branch through one pull request at
+   * the end.
+   */
+  readonly baseBranch: string;
   readonly reviewMode: boolean;
   readonly facts: RepositoryFacts;
 }
@@ -153,7 +166,7 @@ export function nextStep(input: ReducerInput): AutoRunStep {
             reason: `the repository is on ${facts.currentBranch ?? "a detached HEAD"} with uncommitted work, but issue #${issue.number} belongs on ${issue.branch}`,
           };
         }
-        return { action: "branch", branch: issue.branch, base: input.defaultBranch };
+        return { action: "branch", branch: issue.branch, base: input.baseBranch };
       case "implement":
         // A commit or a pull request already carries the implementation; a dirty
         // tree on the right branch is an implementation waiting to be committed.
@@ -223,6 +236,16 @@ export function branchName(issueNumber: number, title: string): string {
   return `aboard/${issueNumber}-${slugify(title)}`;
 }
 
+/**
+ * `aboard/run/<run id>` — the branch a whole run merges into, one level below
+ * the branch the user was on. Derived from the run id rather than persisted:
+ * the record already carries the id, and a stored copy could disagree with it.
+ * The `run/` segment keeps it out of the `aboard/<issue>-<slug>` namespace.
+ */
+export function sessionBranchName(runId: string): string {
+  return `aboard/run/${slugify(runId.replace(/^run_/u, ""))}`;
+}
+
 const SLUG_MAX_CHARS = 40;
 
 /**
@@ -259,13 +282,60 @@ export const PR_BODY_MAX_CHARS = 4_000;
 /**
  * The implementer's final message is already a summary of what it did, so the
  * extension uses it verbatim rather than asking an agent for a second one. The
- * `Closes #N` trailer lives here and not in the commit message: PR-based closure
- * is what `closingIssuesReferences` reads and what the merge must trigger.
+ * `Closes #N` trailer lives here and not in the commit message: it is what
+ * `closingIssuesReferences` reads, which is how a pull request is traced back to
+ * its issue.
+ *
+ * It no longer *closes* anything. GitHub only acts on a closing keyword when the
+ * pull request merges into the repository's default branch, and these merge into
+ * the run's session branch, so the extension closes the issue itself. The
+ * trailer stays for the link, and because the run's own pull request eventually
+ * carries the same work to a branch where the keyword may well apply.
  */
 export function pullRequestBody(summary: string, issueNumber: number): string {
   const trimmed = summary.trim();
   const bounded = trimmed.length <= PR_BODY_MAX_CHARS ? trimmed : `${trimmed.slice(0, PR_BODY_MAX_CHARS - 1).trimEnd()}…`;
   return bounded.length === 0 ? `Closes #${issueNumber}` : `${bounded}\n\nCloses #${issueNumber}`;
+}
+
+/** One issue whose pull request merged into the session branch. */
+export interface LandedIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly prNumber: number;
+}
+
+export function runPullRequestTitle(landed: readonly LandedIssue[]): string {
+  return landed.length === 1
+    ? `aboard auto-run: ${commitSubject(landed[0]!.title)}`
+    : `aboard auto-run: ${landed.length} issues`;
+}
+
+/**
+ * The run's own pull request: an index of what landed on the session branch and
+ * where each piece came from. Deliberately carries no closing keyword — every
+ * issue listed here is already closed, and a second closing reference on a
+ * branch where GitHub *would* honour it only invites reopen/close churn.
+ */
+export function runPullRequestBody(landed: readonly LandedIssue[], sessionBranch: string, base: string): string {
+  const lines = landed.map((issue) => `- #${issue.number} ${commitSubject(issue.title)} (PR #${issue.prNumber})`);
+  const body = [
+    `Implemented by an aboard auto-run on \`${sessionBranch}\`, one issue at a time.`,
+    "",
+    ...lines,
+    "",
+    `Each issue was merged into \`${sessionBranch}\` and closed as it landed; this pull request carries all of it to \`${base}\`.`,
+  ].join("\n");
+  return body.length <= PR_BODY_MAX_CHARS ? body : `${body.slice(0, PR_BODY_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+/**
+ * Why aboard is closing an issue that no merge closed by itself. Worth stating
+ * on the issue: a reader who knows GitHub's rule would otherwise wonder what
+ * closed it, and the work is not on the user's branch yet.
+ */
+export function issueClosedComment(prNumber: number, sessionBranch: string, base: string): string {
+  return `Merged into \`${sessionBranch}\` by aboard auto-run (#${prNumber}), and closed here because a merge outside the default branch does not close its issue. The work reaches \`${base}\` when the run's pull request merges.`;
 }
 
 /**
@@ -502,7 +572,27 @@ export const autoRunMessage = {
     `auto-run: issue #${issue} reviewed; committing ${paths.length === 0 ? "no further changes" : `${paths.length} changed path(s): ${paths.slice(0, 10).join(", ")}`}.`,
   captured: (issue: number, pr: number, paths: readonly string[]): string =>
     `auto-run: committed ${paths.length} changed path(s) from issue #${issue}'s open terminals to PR #${pr}: ${paths.slice(0, 10).join(", ")}.`,
-  merged: (issue: number): string => `auto-run: issue #${issue} merged, issue closed.`,
+  session: (branch: string, base: string): string =>
+    `auto-run: every issue lands on ${branch}; the run opens one pull request into ${base} when it ends.`,
+  baseNotOnRemote: (base: string): string =>
+    `auto-run: ${base} is not on origin, so the run cannot open its pull request against it. Push ${base} before the run ends, or open the pull request yourself afterwards.`,
+  merged: (issue: number, branch: string): string => `auto-run: issue #${issue} merged into ${branch}.`,
+  // Said out loud because it is aboard's own doing, and because a reader who
+  // knows GitHub's rule would otherwise wonder what closed the issue.
+  closed: (issue: number): string =>
+    `auto-run: issue #${issue} closed by aboard; a merge outside the default branch does not close its issue.`,
+  notClosed: (issue: number, reason: string): string =>
+    `auto-run: issue #${issue} merged but could not be closed (${reason}). Close it yourself: issues that depend on it stay blocked until you do.`,
+  runOpened: (pr: number, base: string, count: number): string =>
+    `auto-run: opened PR #${pr} into ${base} with ${count} issue${count === 1 ? "" : "s"}.`,
+  runWaiting: (pr: number, base: string): string =>
+    `auto-run: PR #${pr} into ${base} is yours to merge (aboard.autoRun.mergeRunPullRequest is off).`,
+  runMerged: (pr: number, base: string): string =>
+    `auto-run: PR #${pr} merged into ${base}. Pull ${base} to get the work.`,
+  runParked: (pr: number, base: string, reason: string): string =>
+    `auto-run: PR #${pr} into ${base} needs you (${reason}). The session branch and its pull request are left in place.`,
+  runNotOpened: (branch: string, base: string, reason: string): string =>
+    `auto-run: the run's work is committed and pushed on ${branch}, but no pull request into ${base} could be opened (${reason}). Open it yourself when you are ready.`,
   reconciled: (issue: number, pr: number, base: string): string =>
     `auto-run: issue #${issue} conflicted with ${base}; merged ${base} into its branch and pushed before retrying PR #${pr}.`,
   parked: (issue: number, pr: number, reason: string): string =>

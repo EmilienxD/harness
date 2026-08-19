@@ -120,7 +120,8 @@ The scaffolded definitions are the detailed authority for role prompts, tool all
 - GitHub issues and pull requests are the durable work-state source. Do not introduce a local `TODO.md` or duplicate issue/PR state.
 - Preserve exactly four aboard labels: `[AI]-spec`, `[AI]-todo`, `[AI]-afk`, and `[AI]-hitl`. The former `ai:*` labels and unprefixed equivalents are ordinary user labels; do not recognize or migrate them.
 - The roadmap is an open GitHub issue labelled `[AI]-todo`, using a flat Markdown checkbox list whose order is priority. Other issue and PR states are derived from GitHub.
-- `[AI]-afk` work may merge unattended. `[AI]-hitl` normally waits for the user's merge; approval from another account also permits the extension to merge. An issue with neither disposition is legitimate but must not be guessed.
+- `[AI]-afk` work may merge unattended into a run's session branch. `[AI]-hitl` normally waits for the user's merge; approval from another account also permits the extension to merge. An issue with neither disposition is legitimate but must not be guessed.
+- GitHub closes a linked issue only when its pull request merges into the default branch. Nothing aboard automates merges there, so any closure aboard depends on is one aboard performs explicitly.
 
 ### Auto Mode Flow
 
@@ -129,13 +130,14 @@ The diagram shows ownership, not the reducer's exact phase logic. The current co
 ```mermaid
 flowchart TD
   START["User starts auto mode"] --> PREFLIGHT["Extension preflight<br/>clean local Git tree + authenticated GitHub CLI"]
-  PREFLIGHT --> GH["GitHub<br/>open issues, labels, dependencies"]
+  PREFLIGHT --> SESSION["Extension + local Git<br/>cut and push the session branch<br/>from the branch the user was on"]
+  SESSION --> GH["GitHub<br/>open issues, labels, dependencies"]
   GH -->|read| SELECT["Extension selects the next ready leaf<br/>dependencies first, then oldest"]
-  SELECT -->|one issue at a time| BRANCH["Extension + local Git<br/>fetch default branch and checkout/create aboard branch"]
+  SELECT -->|one issue at a time| BRANCH["Extension + local Git<br/>fast-forward the session branch and checkout/create aboard branch"]
   BRANCH --> IMPLEMENTER["Visible implementer terminal"]
   IMPLEMENTER -->|final message| COMMENT["Extension + GitHub<br/>post the implementer's summary on the issue"]
   IMPLEMENTER -->|uncommitted working-tree edits only| COMMIT["Extension + local Git<br/>stage, commit, and push"]
-  COMMIT --> PR["Extension + GitHub<br/>open PR with Closes issue"]
+  COMMIT --> PR["Extension + GitHub<br/>open PR into the session branch, with Closes issue"]
   PR --> DISPOSITION{"Issue disposition"}
   DISPOSITION -->|"[AI]-afk"| AFK_REVIEW{"Review enabled?"}
   AFK_REVIEW -->|yes| AFK_DOCTOR["Visible automated pr-doctor"]
@@ -148,22 +150,32 @@ flowchart TD
   HITL_DOCTOR --> WAIT
   WAIT -->|working-tree edits while waiting| CAPTURE["Extension commits and pushes<br/>open-terminal changes"]
   CAPTURE --> WAIT
-  WAIT -->|user merged| CLEANUP["Extension + local Git<br/>checkout default branch and clean up terminals"]
+  WAIT -->|user merged| CLOSE["Extension + GitHub<br/>close the issue, because a merge<br/>outside the default branch does not"]
   WAIT -->|approved by another account| MERGE
-  MERGE -->|merged| CLEANUP
-  MERGE -->|conflicts with the base| RECONCILE["Extension + local Git<br/>merge the base back in and push"]
+  MERGE -->|merged| CLOSE
+  MERGE -->|conflicts with the session branch| RECONCILE["Extension + local Git<br/>merge the session branch back in and push"]
   RECONCILE -->|reconciled, retried once| MERGE
   RECONCILE -->|the conflict needs a human| PARK["Extension parks the issue and alerts the user<br/>PR, branch, and terminals left in place"]
   MERGE -->|refused for any other reason| STOP["Extension alerts the user<br/>and stops the whole run"]
+  CLOSE --> CLEANUP["Extension + local Git<br/>checkout the session branch and clean up terminals"]
   PARK -->|re-read GitHub| SELECT
   CLEANUP -->|re-read GitHub| SELECT
-  SELECT -->|no ready issues remain| DONE["Restore the user's original branch<br/>and end the run"]
+  SELECT -->|no ready issues remain| RUNPR["Extension + GitHub<br/>open one PR from the session branch<br/>into the branch the user was on"]
+  STOP --> RUNPR
+  RUNPR --> RUNMERGE{"aboard.autoRun.mergeRunPullRequest?"}
+  RUNMERGE -->|on| RUNMERGED["Extension merges it,<br/>reconciling a conflict once"]
+  RUNMERGE -->|off, or the run was stopped| RUNWAIT["Extension alerts the user<br/>PR left open for them"]
+  RUNMERGED --> DONE["Restore the user's original branch<br/>and end the run"]
+  RUNWAIT --> DONE
 ```
 
-- The extension owns every automatic git and GitHub side effect: branch, commit, push, issue comment, pull request, and merge. Implementers and pr-doctors leave edits uncommitted and never run `gh` or mutating git workflow commands.
+- The extension owns every automatic git and GitHub side effect: branch, commit, push, issue comment, issue closure, pull request, and merge. Implementers and pr-doctors leave edits uncommitted and never run `gh` or mutating git workflow commands.
+- A run never merges into the repository's default branch, and never moves a branch the user owns. It cuts one session branch, `aboard/run/<run id>`, from the branch the user was on; every issue branch is cut from and merged into that; and the run's one pull request from it into the user's branch is the only place a run touches something a human is working on. The session branch is derived from the run id and the target from the recorded return branch, so neither is stored twice. A detached HEAD is the only case where the default branch stands in as the target.
+- The extension closes each issue as its pull request merges into the session branch. GitHub only honours a closing keyword for a merge into the default branch, so without this every issue would stay open — leaving dependents blocked, the roadmap wrong, and a resumed run free to implement the same issue twice. A closure that fails is reported and survived, never allowed to fail work that merged.
+- The run's own pull request is opened on every exit, including a stop or an abort, whenever at least one issue landed: work on the session branch is invisible until something points at it. Merging it is opt-in through `aboard.autoRun.mergeRunPullRequest` and is never attempted for a run the user interrupted. It merges without deleting the session branch, because parked and unmerged issue pull requests still target it.
 - An agent's final message is content, never a side effect. The extension is what publishes it: as the commit body, as the pull request body, and as a comment on the issue the implementer resolved. Publishing it is best-effort and carries no postcondition.
 - Auto-run re-observes git and GitHub before each phase and after every issue. The persisted record is only a resume hint; every phase is idempotent and skips an already-satisfied postcondition.
-- Review stays opt-in. An AFK pull request may be merged directly; a HITL pull request requires the user's merge or another account's approval. The extension never attempts self-approval.
+- Review stays opt-in. An AFK pull request may be merged into the session branch directly; a HITL pull request requires the user's merge or another account's approval. The extension never attempts self-approval.
 - A merge conflict is a fact about one branch, so it parks that issue and the run continues. Anything else that refuses a merge — branch protection above all — is a fact about the repository, so it stops the run. Parking never closes or abandons anything: the pull request, branch, and terminals stay as they are for the user.
 - A run that needs the user's hands says so immediately rather than only queueing a line for the Manager, because a parked or stopped run no longer owns any visible progress indicator.
 

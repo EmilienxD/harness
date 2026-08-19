@@ -671,6 +671,16 @@ export class GitHubClient implements GitHubPromptSource {
     await this.gh.run(["issue", "comment", String(number), "--body", body]);
   }
 
+  /**
+   * Closes an issue as completed. Auto-run needs this because GitHub only acts
+   * on a `Closes #N` keyword when the pull request merges into the default
+   * branch, and aboard's pull requests merge into a run's session branch. The
+   * comment is posted with the closure so the issue says who closed it and why.
+   */
+  public async closeIssue(number: number, comment: string): Promise<void> {
+    await this.gh.run(["issue", "close", String(number), "--reason", "completed", "--comment", comment]);
+  }
+
   public async createPullRequest(input: CreatePullRequestInput): Promise<number> {
     const output = (await this.gh.run([
       "pr", "create", "--title", input.title, "--body", input.body, "--head", input.head, "--base", input.base,
@@ -698,8 +708,14 @@ export class GitHubClient implements GitHubPromptSource {
     return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
   }
 
-  public async mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase"): Promise<void> {
-    await this.gh.run(["pr", "merge", String(number), `--${strategy}`, "--delete-branch"]);
+  /**
+   * `deleteBranch` is a caller's decision because deleting a base branch closes
+   * every open pull request still targeting it. An issue branch has no such
+   * dependents and is deleted; a run's session branch is the base of any parked
+   * or unmerged issue pull request, so it is kept.
+   */
+  public async mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase", deleteBranch: boolean): Promise<void> {
+    await this.gh.run(["pr", "merge", String(number), `--${strategy}`, ...(deleteBranch ? ["--delete-branch"] : [])]);
   }
 
   public async getPullRequest(number: number): Promise<(PullRequestSnapshot & PullRequestMergeFacts) | undefined> {

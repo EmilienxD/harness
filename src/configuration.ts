@@ -55,6 +55,7 @@ export const ABOARD_SETTINGS = [
   "aboard.autoRun.review",
   "aboard.autoRun.pauseAfterHitl",
   "aboard.autoRun.mergeStrategy",
+  "aboard.autoRun.mergeRunPullRequest",
   "aboard.autoRun.pollSeconds",
   "aboard.timeouts.managerStop",
   "aboard.timeouts.managerPrompt",
@@ -204,6 +205,9 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),
+      // Off by default for the same reason review is: the run's own pull request
+      // lands a batch of automated work on a branch a human is using.
+      mergeRunPullRequest: flag(reader, "aboard.autoRun.mergeRunPullRequest", false, diagnostics),
       pollSeconds: integer(reader, "aboard.autoRun.pollSeconds", 30, 1, 3_600, diagnostics),
     },
     managerStopTimeoutSeconds: integer(reader, "aboard.timeouts.managerStop", 3_600, 1, 86_400, diagnostics),

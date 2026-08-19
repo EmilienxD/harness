@@ -365,7 +365,8 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "\"nothing is labelled\" from \"everything is unclassified or blocked\".\n\n" +
 
       "On success it immediately returns the run id, forecast issue order, " +
-      "dispositions, branch names, detected dependency cycles, and skips with reasons. " +
+      "dispositions, branch names, the run's session branch and the branch it will target, " +
+      "detected dependency cycles, and skips with reasons. " +
       "Report that plan and continue the conversation; do not wait or poll. " +
       "Calling again while a run is active returns the current run instead of creating a second one. " +
       "Progress is delivered later through bounded notifications.\n\n" +
@@ -375,7 +376,16 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "are best-effort ordering constraints. Cycles are reported and ordered oldest first within the cycle. " +
       "Umbrella issues never enter the queue: an [AI]-spec issue, or any issue with sub-issues of its own, " +
       "is represented by its children. " +
-      "[AI]-afk work may merge automatically. " +
+      "The run works on one session branch of its own, cut from the branch the user was on. " +
+      "Every issue branches off that session branch and merges back into it, " +
+      "and the extension closes the issue itself, because GitHub only acts on a closing keyword " +
+      "for a merge into the default branch and a run never merges there. " +
+      "When the run ends it opens a single pull request from the session branch " +
+      "into the branch the user started on; aboard.autoRun.mergeRunPullRequest decides " +
+      "whether aboard attempts that merge, and it is off by default. " +
+      "Never tell the user their work has landed on their branch until that pull request is merged.\n\n" +
+
+      "[AI]-afk work may merge into the session branch automatically. " +
       "[AI]-hitl work waits at its pull request until the user merges it; " +
       "that merge is the approval and normally resumes the run. " +
       "A failure stops the whole run rather than skipping to the next issue, " +

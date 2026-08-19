@@ -69,6 +69,25 @@ async function trackRemote(root: string, branch: string): Promise<void> {
   await run("git", ["update-ref", `refs/remotes/origin/${branch}`, branch], { cwd: root, windowsHide: true });
 }
 
+test("remote branch existence is a separate question from being pushed", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  assert.equal(await client.remoteBranchExists("main"), false);
+
+  await trackRemote(root, "main");
+  assert.equal(await client.remoteBranchExists("main"), true);
+  assert.equal(await client.isPushed("main"), true);
+
+  // A local commit the remote has not seen: still there, no longer in sync. A
+  // pull request base cares about the first, the commit phase about the second.
+  await writeFile(join(root, "NOTES.md"), "moved on\n");
+  await client.add();
+  await client.commit("Move on", "");
+  assert.equal(await client.remoteBranchExists("main"), true);
+  assert.equal(await client.isPushed("main"), false);
+  assert.equal(await client.remoteBranchExists("aboard/run/nothing"), false);
+});
+
 test("mergeFromRemote brings the branch up to date with its base", async () => {
   const root = await repository();
   const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });

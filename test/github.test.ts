@@ -426,6 +426,24 @@ test("an issue comment is posted with the body it was given", async () => {
   assert.deepEqual(gh.calls, [["issue", "comment", "34", "--body", "Rewrote the backoff."]]);
 });
 
+test("an issue is closed as completed with the comment explaining the closure", async () => {
+  const gh = new FixtureGh(() => "");
+  await new GitHubClient(gh).closeIssue(34, "Merged into `aboard/run/k3f9x1`.");
+  assert.deepEqual(gh.calls, [["issue", "close", "34", "--reason", "completed", "--comment", "Merged into `aboard/run/k3f9x1`."]]);
+});
+
+test("branch deletion on merge is the caller's decision, not the boundary's", async () => {
+  // Deleting a base branch closes every pull request still targeting it, which
+  // is why a run's session branch is merged without it.
+  const withDelete = new FixtureGh(() => "");
+  await new GitHubClient(withDelete).mergePullRequest(56, "squash", true);
+  assert.deepEqual(withDelete.calls, [["pr", "merge", "56", "--squash", "--delete-branch"]]);
+
+  const withoutDelete = new FixtureGh(() => "");
+  await new GitHubClient(withoutDelete).mergePullRequest(57, "merge", false);
+  assert.deepEqual(withoutDelete.calls, [["pr", "merge", "57", "--merge"]]);
+});
+
 test("malformed gh JSON is a typed boundary failure", async () => {
   await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json")).readRoadmap(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
 });

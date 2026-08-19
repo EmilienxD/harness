@@ -47,7 +47,7 @@ Then try one of these in the Manager terminal:
 | :-- | :-- |
 | `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
 | `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet. Add `--chrome` when this session needs visible browser debugging |
-| `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, implement, commit, PR, merge — one issue at a time |
+| `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, implement, commit, PR, merge — one issue at a time, onto a branch of the run's own |
 | `/auto --chrome` | The same run, with Claude in Chrome enabled for every implementer in this run |
 | `/reopen` | The last session you were handed comes back — same conversation, same agent definition. `/reopen brainstorm` picks by type, `/reopen 7` by agent id, and **Aboard: Reopen a Session** lists them all |
 | *"Implement issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
@@ -57,7 +57,8 @@ Then try one of these in the Manager terminal:
 `/auto` is the closest aboard gets to hands-off, and it's deliberately fenced in:
 
 - **The extension does every git and GitHub side effect** — branch, commit, push, PR, merge. Agents only produce content. A branch name and a `Closes #N` trailer derived from the issue are correct by construction; an agent writing them is a sampling operation that drifts silently.
-- **One issue at a time.** No parallel fan-out, no worktrees. Merge conflicts and self-contradicting agents destroy more value than concurrency creates.
+- **Nothing lands on your branch behind your back.** A run cuts one session branch, `aboard/run/<id>`, from the branch you were on. Every issue branches off that, merges back into it, and the run closes the issue itself — GitHub only honours `Closes #N` on the default branch, and a run never merges there. When the queue drains, you get **one** pull request from the session branch into the branch you started on. `aboard.autoRun.mergeRunPullRequest` decides whether aboard tries to merge that one; it is off by default.
+- **One issue at a time.** No parallel fan-out, no worktrees. Merge conflicts and self-contradicting agents destroy more value than concurrency creates. Issues merge into a branch nobody else is touching, so conflicts collect at the one pull request a human looks at.
 - **Labels decide how far it goes.** `afk` means an issue may be merged unattended. `hitl` means the run opens the PR and stops — your merge *is* the approval. Four labels, no hidden state: `spec`, `todo`, `afk`, `hitl`.
 - **Every phase is idempotent.** Close your laptop mid-run. Resume re-derives state from git and GitHub rather than trusting a file.
 - **Review is opt-in.** LLM tokens are your money, not ours.
