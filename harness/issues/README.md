@@ -113,16 +113,18 @@ At runtime the drafting skills create a gateway folder at the project root — `
   drafts; for a batch, numbering continues from that index in publish order (blockers before what
   they block).
 - **Labels**: the first non-empty line after the title. For issues: `> ` followed by a
-  comma-separated list of label tokens — `difficulty:{low|medium|high}` and `mode:{afk|hitl}` are
+  comma-separated list of label tokens — `difficulty:{routine|basic|advanced|expert}` and `mode:{afk|hitl}` are
   each optional (the user can ask the drafting skill to skip them), and extra labels the user asks
   for are listed alongside them after the skill verifies they exist in the repo (`gh label list`).
   For specs: `> spec`. The hook maps the difficulty/mode/spec tokens to the workflow's own label
-  names (`[AI]-low-difficulty`, `[AI]-medium-difficulty`, `[AI]-high-difficulty`, `[AI]-afk`,
-  `[AI]-hitl`, `[AI]-spec`), applies any extra
+  names (`[AI]-routine-difficulty`, `[AI]-basic-difficulty`, `[AI]-advanced-difficulty`,
+  `[AI]-expert-difficulty`, `[AI]-afk`, `[AI]-hitl`, `[AI]-spec`), applies any extra
   tokens as-is, strips the line from the published body, and creates the canonical labels in the
   repo only if they don't already exist — an existing label is never re-styled. The `[AI]-` prefix
   keeps these labels from colliding with a repo's own, and lets projects that share this workflow
-  use one common label set.
+  use one common label set. The difficulty names avoid `low`, `medium`, and `high` because those are
+  commonly confused with reasoning effort in AI tooling; here the label chooses the model, not the
+  effort setting.
 - **Blockers**: real tracker numbers only (`#42`) in single-issue drafts — there are no sibling
   drafts to resolve. In a batch, `{session-id}/{i}` in curly braces (e.g.
   `{6b1f0c2e-…-2e8a1d0c4f55/0}`) means "blocked by that issue"; the hook rewrites it to

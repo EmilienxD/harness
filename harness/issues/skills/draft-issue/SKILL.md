@@ -20,7 +20,11 @@ Scope constraint: exactly **one agent, working alone, in one pass**. If what the
 
 Decide the labels:
 
-- **Difficulty** (default, but optional): `low`, `medium`, or `high` — your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Routine, well-understood work is `low`; multi-step work with real design decisions is `medium`; anything needing careful judgment, wide context, or unusual reasoning is `high`.
+- **Difficulty** (default, but optional): your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Select one of:
+  - `routine`: For low reasoning level work such as renaming a variable, cleaning up files/folders, adding missing type hint. 1% usage rate; use this rarely.
+  - `basic`: For easy and small refactoring such as splitting a function into multiple functions, updating a model or signature, adding missing tests, writing or updating documentation. 5% usage rate.
+  - `advanced`: For multi-step work with expected outcomes, low chance of encountering bugs, easy UI design. 34% usage rate.
+  - `expert`: For multi-step complex work, anything needing careful judgment, complex UI design, wide context and bug prone. 60% usage rate.
 - **Mode** (default, but optional): `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
 
 Both labels are defaults, not requirements: if the user explicitly says not to use the difficulty and/or mode label, leave that label off the declaration line entirely — don't fall back to a guessed value.
@@ -63,7 +67,7 @@ A reference to each blocking issue, or "None — can start immediately".
 
 </issue-template>
 
-`{labels}` is a comma-separated list of `difficulty:low|medium|high`, `mode:afk|hitl`, and any extra labels requested and verified above — the difficulty and mode tokens are each included only when decided, so any of `> difficulty:medium, mode:hitl`, `> difficulty:low`, `> mode:afk`, or `> ci, difficulty:low` is a valid line. Every issue must carry at least one label.
+`{labels}` is a comma-separated list of `difficulty:routine|basic|advanced|expert`, `mode:afk|hitl`, and any extra labels requested and verified above — the difficulty and mode tokens are each included only when decided, so any of `> difficulty:advanced, mode:hitl`, `> difficulty:basic`, `> mode:afk`, or `> ci, difficulty:routine` is a valid line. Every issue must carry at least one label.
 
 3. Hand off to the user
 

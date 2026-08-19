@@ -52,16 +52,16 @@ def _dry_publish(tmp_path: Path):
 
 
 def test_both_labels_any_order():
-    labels, body = _labels("> difficulty:medium, mode:hitl\n\n## What\n")
-    assert labels == ["[AI]-medium-difficulty", "[AI]-hitl"]
+    labels, body = _labels("> difficulty:advanced, mode:hitl\n\n## What\n")
+    assert labels == ["[AI]-advanced-difficulty", "[AI]-hitl"]
     assert body == "## What"
-    labels, _ = _labels("> mode:afk, difficulty:high\n\nbody")
-    assert labels == ["[AI]-afk", "[AI]-high-difficulty"]
+    labels, _ = _labels("> mode:afk, difficulty:expert\n\nbody")
+    assert labels == ["[AI]-afk", "[AI]-expert-difficulty"]
 
 
 def test_only_one_of_each_pair():
-    labels, _ = _labels("> difficulty:low\n\nbody")
-    assert labels == ["[AI]-low-difficulty"]
+    labels, _ = _labels("> difficulty:basic\n\nbody")
+    assert labels == ["[AI]-basic-difficulty"]
     labels, _ = _labels("> mode:afk\n\nbody")
     assert labels == ["[AI]-afk"]
 
@@ -71,8 +71,8 @@ def test_extra_labels_pass_through_asis():
     assert labels == ["ci"]
     labels, _ = _labels("> ci, mode:hitl\n\nbody")
     assert labels == ["ci", "[AI]-hitl"]
-    labels, _ = _labels("> good-first-issue, difficulty:low\n\nbody")
-    assert labels == ["good-first-issue", "[AI]-low-difficulty"]
+    labels, _ = _labels("> good-first-issue, difficulty:routine\n\nbody")
+    assert labels == ["good-first-issue", "[AI]-routine-difficulty"]
 
 
 def test_spec_line_maps_to_canonical_label():
@@ -81,8 +81,8 @@ def test_spec_line_maps_to_canonical_label():
     assert body == "## Problem"
 
 def test_whitespace_and_case_tolerance():
-    labels, _ = _labels("  > Difficulty:Medium , MODE:hitl \n\nbody")
-    assert labels == ["[AI]-medium-difficulty", "[AI]-hitl"]
+    labels, _ = _labels("  > Difficulty:Advanced , MODE:hitl \n\nbody")
+    assert labels == ["[AI]-advanced-difficulty", "[AI]-hitl"]
 
 
 def test_blank_lines_before_label_line_are_skipped():
@@ -108,8 +108,8 @@ def test_malformed_lines_yield_no_labels_and_keep_body():
 def test_unknown_difficulty_value_is_treated_as_extra_label():
     # "difficulty:extreme" isn't an alias; it passes through verbatim so a
     # dry run shows it and a real publish lets gh be the authority.
-    labels, _ = _labels("> difficulty:medium, difficulty:extreme\n\nbody")
-    assert labels == ["[AI]-medium-difficulty", "difficulty:extreme"]
+    labels, _ = _labels("> difficulty:advanced, difficulty:extreme\n\nbody")
+    assert labels == ["[AI]-advanced-difficulty", "difficulty:extreme"]
 
 
 def test_duplicate_tokens_dedupe():
@@ -207,11 +207,11 @@ def test_failed_draft_keeps_resolved_references_after_success(tmp_path, monkeypa
 
 
 def test_dry_run_reports_each_draft_with_labels(tmp_path):
-    _draft(tmp_path, "issue-0.md", "# A\n\n> difficulty:low\n\nbody a\n")
+    _draft(tmp_path, "issue-0.md", "# A\n\n> difficulty:basic\n\nbody a\n")
     _draft(tmp_path, "issue-1.md", "# B\n\n> bug, mode:hitl\n\nbody b\n")
     report, count, failures = _dry_publish(tmp_path)
     assert count == 2 and failures == 0
-    assert any('"A" [[AI]-low-difficulty]' in line for line in report)
+    assert any('"A" [[AI]-basic-difficulty]' in line for line in report)
     assert any('"B" [bug, [AI]-hitl]' in line for line in report)
 
 

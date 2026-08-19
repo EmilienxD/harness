@@ -22,8 +22,8 @@ Design notes:
   "> " followed by a comma-separated list of label tokens in any order -
   "difficulty:{level}" and "mode:{afk|hitl}" are each optional (the user can
   ask for them to be left off), and extra labels the user asked for may be
-  added alongside (e.g. "> ci, difficulty:low"). Aliased tokens map to the
-  workflow's own "[AI]-" prefixed label names ("[AI]-low-difficulty", "[AI]-afk",
+  added alongside (e.g. "> ci, difficulty:advanced"). Aliased tokens map to the
+  workflow's own "[AI]-" prefixed label names ("[AI]-advanced-difficulty", "[AI]-afk",
   "[AI]-spec", ...) via LABEL_ALIASES, then are stripped from the body that
   gets posted, since the labels carry that information from then on. Extra
   (non-aliased) tokens pass through as-is - the drafting skills are
@@ -80,7 +80,7 @@ FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
 # The label declaration line produced by /draft-issues or /draft-issue: a
 # comma-separated list of label tokens in any order, with "difficulty:*" and
 # "mode:*" each optional and extra labels allowed, e.g.
-# "> difficulty:medium, mode:hitl", "> mode:afk", "> ci, difficulty:low".
+# "> difficulty:advanced, mode:hitl", "> mode:afk", "> ci, difficulty:basic".
 # Tolerant of leading whitespace before the ">" and of surrounding spaces
 # around tokens and commas.
 _LABEL_TOKEN = r"[a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)?"
@@ -98,9 +98,10 @@ SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*spec\s*$", re.IGNORECASE)
 # They are created at the start of every publish run if missing; existing ones
 # are left alone, so the user's own styling is never overwritten.
 CANONICAL_LABELS = {
-    "[AI]-low-difficulty": ("0E8A16", "Routine, well-understood work - safe for a lighter model."),
-    "[AI]-medium-difficulty": ("FBCA04", "Multi-step work with real design decisions."),
-    "[AI]-high-difficulty": ("D93F0B", "Needs careful judgment, wide context, or unusual reasoning."),
+    "[AI]-routine-difficulty": ("0E8A16", "Low reasoning level work - use rarely."),
+    "[AI]-basic-difficulty": ("FBCA04", "Easy, small refactors, missing tests, or documentation."),
+    "[AI]-advanced-difficulty": ("D93F0B", "Multi-step work with expected outcomes and low bug risk."),
+    "[AI]-expert-difficulty": ("B60205", "Complex, judgment-heavy, wide-context, or bug-prone work."),
     "[AI]-afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
     "[AI]-hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
     "[AI]-spec": ("7057FF", "A product spec synthesized from conversation."),
@@ -111,9 +112,10 @@ CANONICAL_LABELS = {
 # the line is applied as-is (the drafting skills check those exist with
 # `gh label list` before writing them).
 LABEL_ALIASES = {
-    "difficulty:low": "[AI]-low-difficulty",
-    "difficulty:medium": "[AI]-medium-difficulty",
-    "difficulty:high": "[AI]-high-difficulty",
+    "difficulty:routine": "[AI]-routine-difficulty",
+    "difficulty:basic": "[AI]-basic-difficulty",
+    "difficulty:advanced": "[AI]-advanced-difficulty",
+    "difficulty:expert": "[AI]-expert-difficulty",
     "mode:afk": "[AI]-afk",
     "mode:hitl": "[AI]-hitl",
     "spec": "[AI]-spec",
