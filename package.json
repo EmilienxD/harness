@@ -54,6 +54,11 @@
         "title": "Aboard: Review a Pull Request"
       },
       {
+        "command": "aboard.reopenSession",
+        "title": "Aboard: Reopen a Session",
+        "icon": "$(history)"
+      },
+      {
         "command": "aboard.startAutoRun",
         "title": "Aboard: Start Auto Run"
       },
@@ -155,6 +160,11 @@
           "command": "aboard.restoreFleet",
           "when": "view == aboard.fleet && aboard.fleetRestoreAvailable && !aboard.fleetRestoreRunning",
           "group": "navigation@2"
+        },
+        {
+          "command": "aboard.reopenSession",
+          "when": "view == aboard.fleet",
+          "group": "navigation@3"
         }
       ],
       "commandPalette": [
@@ -180,6 +190,10 @@
         },
         {
           "command": "aboard.reviewPr",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.reopenSession",
           "when": "aboard.initialized"
         },
         {

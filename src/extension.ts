@@ -37,7 +37,10 @@ import {
   readAboardConfiguration,
   type ProjectSettings,
 } from "./configuration.js";
-import { FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
+import { FileFleetStore, FileSessionLedgerStore, PersistOnChange } from "./runtime/persistence.js";
+import { endedSessionFrom, isLedgerRecordable, recordEndedSession } from "./domain/session-ledger.js";
+import { ReopenCoordinator } from "./claude/reopen.js";
+import { registerReopenCommand } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { ABOARD_MCP_TOOL_PATTERN, createMcpHandler } from "./bridge/mcp.js";
@@ -345,6 +348,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         // The reconciler would have released the lease; do it here for the paths
         // that skip it, or an interactive agent's lease outlives its terminal.
         lease.releaseForTerminalOutcome(event.agentId, occurredAt, "agent terminal closed");
+        rememberEndedSession(closed, occurredAt);
         fleet.remove(event.agentId, occurredAt);
       } else void lifecycle?.terminalClosed(event).catch((error: unknown) => output.appendLine(`Lifecycle reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
     },
@@ -353,6 +357,35 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(workspaceRoot);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
+  const sessionLedger = new FileSessionLedgerStore(workspaceRoot);
+  // Writes are chained rather than concurrent: a session can settle from two
+  // sources within milliseconds — the terminal closing and the wrapper's marker
+  // vanishing — and two read-modify-writes racing on one file would drop an
+  // entry. `recordEndedSession` is idempotent per agent, so the second one
+  // simply refreshes the first.
+  let ledgerWrites: Promise<void> = Promise.resolve();
+  /**
+   * Remembers a handed-off session on its way out of the fleet, so the user can
+   * get back into the conversation later. Only sessions that report no result
+   * qualify: an automated launch's result already reached its caller, while a
+   * brainstormer or an interactive general-purpose is a conversation the user
+   * was part of and the fleet is about to forget entirely.
+   *
+   * Best-effort by contract. This runs on the settlement path, where throwing
+   * would strand the lease or the fleet record; a failed write costs the ability
+   * to reopen one session and is logged.
+   */
+  const rememberEndedSession = (session: AgentSession, endedAt: IsoTimestamp): void => {
+    // Writing here would recreate `.aboard/` behind the user's back, including
+    // right after they deleted it — the same reason fleet persistence is gated.
+    if (!initialized || !isLedgerRecordable(session)) return;
+    ledgerWrites = ledgerWrites
+      .then(async () => {
+        const current = await sessionLedger.load().catch(() => undefined);
+        await sessionLedger.save(recordEndedSession(current, endedSessionFrom(session, endedAt)));
+      })
+      .catch((error: unknown) => output.appendLine(`Session ledger write failed: ${error instanceof Error ? error.message : "unknown error"}`));
+  };
   // Workspace-scoped and never reset: agent labels read as plain, strictly
   // increasing numbers so the user can see how many agents ran across the
   // project's whole life. Seeded from the fleet's highest numeric id, so an
@@ -458,6 +491,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const at = new Date().toISOString() as IsoTimestamp;
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(observation.agentId, at, "agent session process ended");
+        rememberEndedSession(session, at);
         fleet.remove(observation.agentId, at);
         releaseAbandonedTerminal(observation.agentId);
         output.appendLine(`Session process for agent ${observation.agentId} ended`);
@@ -478,6 +512,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // the agent record is spent history; the user deliberately kept the TUI.
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(agentId, at, `agent session ended (${reason})`);
+        // `/clear` and `/resume` end this conversation while the terminal lives
+        // on. The session id stays reopenable — the transcript is untouched —
+        // so it belongs in the ledger exactly like a closed terminal's.
+        rememberEndedSession(session, at);
         fleet.remove(agentId, at);
         releaseAbandonedTerminal(agentId);
         return;
@@ -575,6 +613,20 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
   };
   const reviews = new ReviewCoordinator(github, coordinator, ownership, reviewTerminals);
+  // The way back into a conversation aboard started: what the fleet still holds
+  // and what the ledger remembers, merged and checked against the transcripts
+  // Claude Code actually has.
+  const reopen = new ReopenCoordinator({
+    ledger: sessionLedger,
+    fleet,
+    terminals: {
+      isOpen: (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"),
+      liveTerminalFor: (agentId) => terminals.liveTerminalForAgent(agentId),
+      show: (terminalId) => terminals.show(terminalId),
+    },
+    launcher: coordinator,
+    isResumable: (sessionId) => sessionIsResumable(sessionId, workspaceRoot),
+  });
   const briefings = new ManagerBriefings(
     briefingSources(git, github, workspaceRoot, () => recordedManager?.updatedAt, () => autoRun.state()),
     fleet,
@@ -605,6 +657,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
     startAutoRun: (options) => autoRun.start(options),
     reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
+    reopenSession: (selector) => reopen.reopenLatest(selector),
   }, terminals, roadmapReminders);
   const discovery = new FileBridgeDiscoveryPersistence(storageRoot);
   // Beside `bridge.json` and for the same reason: it carries a resolved bearer
@@ -870,6 +923,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     commands.registerCommand("aboard.newManager", () => launch("new")),
     commands.registerCommand("aboard.restoreFleet", restoreFleet),
     registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
+    registerReopenCommand({
+      registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined),
+      // `matchOnDetail` so "paused", "ended", or an age filters the list, which
+      // is how a user with a long history finds the one they mean.
+      pick: async (items, placeHolder) => window.showQuickPick([...items], { placeHolder, matchOnDescription: true, matchOnDetail: true }),
+      info: (message) => { void window.showInformationMessage(message); },
+      warning: (message) => { void window.showWarningMessage(message); },
+      error: (message) => { void window.showErrorMessage(message); },
+    }, reopen),
     commands.registerCommand("aboard.startAutoRun", () => startAutoRun(false)),
     commands.registerCommand("aboard.startAutoRunWithChrome", () => startAutoRun(true)),
     commands.registerCommand("aboard.stopAutoRun", () => autoRun.stop()),

@@ -25,6 +25,7 @@ import type {
   FleetPersistenceDto,
   MailboxEntry,
 } from "./fleet.js";
+import type { EndedSessionRecord, SessionLedgerDto } from "./session-ledger.js";
 
 export type ValidationResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -716,6 +717,57 @@ export function parseFleetPersistenceDto(
       nextEventSequence,
     },
   };
+}
+
+/**
+ * Parses `.aboard/runtime/sessions.json`. A single unreadable entry is dropped
+ * rather than failing the file: the ledger is a convenience — the way back into
+ * a conversation the fleet has forgotten — so one malformed record must not cost
+ * the user every other session they could still reopen. A file that is not a
+ * ledger at all still fails, since that is a wrong file rather than a stale one.
+ */
+export function parseSessionLedgerDto(
+  value: unknown,
+): ValidationResult<SessionLedgerDto> {
+  const issues: string[] = [];
+  const record = readRecord(value, "sessions", issues);
+  if (record === undefined) return { ok: false, issues };
+  if (record.version !== 1) issues.push("sessions.version must be 1");
+  if (!Array.isArray(record.sessions)) issues.push("sessions.sessions must be an array");
+  if (issues.length > 0) return { ok: false, issues };
+
+  const parsed: EndedSessionRecord[] = [];
+  for (const entry of record.sessions as readonly unknown[]) {
+    const dropped: string[] = [];
+    const session = readRecord(entry, "sessions.session", dropped);
+    if (session === undefined) continue;
+    const agentId = readNonEmptyString(session.agentId, "agentId", dropped);
+    const type = parseAgentType(session.type, "type", dropped);
+    const sessionId = parseSessionId(session.sessionId, "sessionId", dropped);
+    const description = readNonEmptyString(session.description, "description", dropped);
+    const startedAt = readTimestamp(session.startedAt, "startedAt", dropped);
+    const endedAt = readTimestamp(session.endedAt, "endedAt", dropped);
+    const issueNumbers = session.issueNumbers === undefined
+      ? undefined
+      : Array.isArray(session.issueNumbers)
+        ? session.issueNumbers.map((number, index) => readNonNegativeInteger(number, `issueNumbers[${index}]`, dropped))
+        : (dropped.push("issueNumbers must be an array"), undefined);
+    if (
+      dropped.length > 0 || agentId === undefined || type === undefined || sessionId === undefined
+      || description === undefined || startedAt === undefined || endedAt === undefined
+    ) continue;
+    parsed.push({
+      agentId: agentId as AgentId,
+      type,
+      sessionId,
+      description,
+      startedAt,
+      endedAt,
+      ...(issueNumbers === undefined ? {} : { issueNumbers: issueNumbers as number[] }),
+      ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+    });
+  }
+  return { ok: true, value: { version: 1, sessions: parsed } };
 }
 
 export function parseManagerPersistenceDto(

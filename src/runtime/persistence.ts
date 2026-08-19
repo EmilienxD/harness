@@ -2,7 +2,8 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AUTO_RUN_PHASES, AUTO_RUN_SCOPES, type AutoRunPhase, type AutoRunRecord, type AutoRunScope } from "../domain/auto-run.js";
 import type { FleetPersistenceDto } from "../domain/fleet.js";
-import { parseFleetPersistenceDto } from "../domain/validation.js";
+import type { SessionLedgerDto } from "../domain/session-ledger.js";
+import { parseFleetPersistenceDto, parseSessionLedgerDto } from "../domain/validation.js";
 
 export class AtomicJsonFile<T> {
   public constructor(private readonly path: string, private readonly parse: (value: unknown) => T | undefined) {}
@@ -31,6 +32,21 @@ export class FileFleetStore extends AtomicJsonFile<FleetPersistenceDto> {
   public constructor(workspaceRoot: string) {
     super(join(workspaceRoot, ".aboard", "runtime", "fleet.json"), (value) => {
       const result = parseFleetPersistenceDto(value);
+      return result.ok ? result.value : undefined;
+    });
+  }
+}
+
+/**
+ * `.aboard/runtime/sessions.json` — ended handed-off sessions, so a conversation
+ * the fleet has forgotten can still be reopened. Gitignored with the rest of the
+ * runtime directory: it names sessions and describes their launches, which is
+ * live state rather than project history.
+ */
+export class FileSessionLedgerStore extends AtomicJsonFile<SessionLedgerDto> {
+  public constructor(workspaceRoot: string) {
+    super(join(workspaceRoot, ".aboard", "runtime", "sessions.json"), (value) => {
+      const result = parseSessionLedgerDto(value);
       return result.ok ? result.value : undefined;
     });
   }

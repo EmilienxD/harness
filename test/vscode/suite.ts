@@ -23,7 +23,7 @@ export async function run(): Promise<void> {
   assert.ok(api?.bridgeDiscoveryPath, "activation exposes the bridge discovery path");
 
   const available = await commands.getCommands(true);
-  for (const command of ["aboard.focusFleet", "aboard.focusAgent", "aboard.killAgent", "aboard.removePausedSession", "aboard.initializeProject", "aboard.updateProject", "aboard.restoreFleet"]) {
+  for (const command of ["aboard.focusFleet", "aboard.focusAgent", "aboard.killAgent", "aboard.removePausedSession", "aboard.initializeProject", "aboard.updateProject", "aboard.restoreFleet", "aboard.reopenSession"]) {
     assert.ok(available.includes(command), `${command} is registered`);
   }
 

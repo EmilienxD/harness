@@ -54,6 +54,24 @@ export interface AutomatedLaunchOutcome {
   readonly result: WorkerResult;
 }
 
+/**
+ * One recorded conversation to reopen. It is deliberately not an `AgentSession`:
+ * the sessions this exists for are the ones the fleet no longer holds, so the
+ * ledger's identity is all there is, and requiring a live record would rule out
+ * every case that motivated the surface.
+ */
+export interface ReopenTarget {
+  readonly agentId: AgentId;
+  readonly type: Exclude<AgentType, "manager">;
+  readonly sessionId: SessionId;
+  /** The terminal name, already carrying aboard's own prefix. */
+  readonly terminalName: string;
+  readonly issueNumbers?: readonly number[];
+  readonly chromeEnabled?: boolean;
+  /** Default is the controller's; a bulk restore passes `false` explicitly. */
+  readonly focus?: boolean;
+}
+
 export interface InteractiveLaunchHandles {
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
@@ -201,24 +219,50 @@ export class DelegationCoordinator {
         `The ${session.identity.type} session cannot be restored after its result caller is gone; launch a fresh ${session.identity.type} instead`,
       );
     }
+    return this.reopen({
+      agentId: session.identity.agentId,
+      type: session.identity.type,
+      sessionId: session.sessionId,
+      terminalName: session.terminal.name,
+      ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
+      chromeEnabled: session.chromeEnabled === true,
+      // Restoration opens several terminals at once, so none of them steals
+      // focus; the caller shows the one the user should land in.
+      focus: false,
+    });
+  }
+
+  /**
+   * Reopens one recorded conversation and hands it to the user, whether the
+   * fleet still holds it (paused by a host restart) or the session ledger is the
+   * only thing that remembers it (ended normally, so the fleet dropped it).
+   *
+   * The identity is the whole input because it is the whole problem: a resume
+   * must re-emit the agent's definition and re-pass `--add-dir`/`--agent`, and
+   * `--resume` restores that selection only by name — reopening without them
+   * would silently return a brainstormer as default Claude holding every default
+   * tool. `planSessionResume` handles that, given the agent id, type, and
+   * session id this target carries.
+   */
+  public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
     // The definition is required, not merely useful: a resume re-passes the
     // system prompt and tool list, and reopening the session without them
     // yields Claude Code's default persona holding every default tool.
-    const configuration = await this.options.configurations.get(session.identity.type);
-    const resumable = await (this.options.isResumable ?? sessionIsResumable)(session.sessionId, this.options.workspaceRoot);
+    const configuration = await this.options.configurations.get(target.type);
+    const resumable = await (this.options.isResumable ?? sessionIsResumable)(target.sessionId, this.options.workspaceRoot);
     if (!resumable) {
-      throw new DelegationError("unresumable-session", `Session ${session.sessionId} has no Claude conversation to resume`);
+      throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no Claude conversation to resume`);
     }
     const plan = planSessionResume({
-      agentId: session.identity.agentId,
-      sessionId: session.sessionId,
-      agentType: session.identity.type,
+      agentId: target.agentId,
+      sessionId: target.sessionId,
+      agentType: target.type,
       shell: this.options.shell,
-      // Restoration hands the worker to the user whatever it was: the extension
-      // host that waited on its result is gone, so the terminal is theirs.
+      // Reopening hands the session to the user whatever it was: an automated
+      // launch's caller is long gone, and this terminal is theirs to type in.
       attended: true,
-      ...((session.identity.type === "general-purpose" || session.identity.type === "implementer")
-        ? { chrome: session.chromeEnabled === true }
+      ...((target.type === "general-purpose" || target.type === "implementer")
+        ? { chrome: target.chromeEnabled === true }
         : {}),
       configuration,
       disallowedTools: this.options.disallowedTools,
@@ -231,34 +275,49 @@ export class DelegationCoordinator {
     // clear a command this launch never uses.
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    // No lease is taken: restoration is the user reopening their own fleet
-    // after a window reload, and it hands every worker back to them (see
-    // below). A run that still needs the lease relaunches through the auto-run
-    // engine, whose launches are leased.
+    // No lease is taken: reopening is the user returning to their own
+    // conversation, and an interactive launch is never leased. A run that still
+    // needs the lease relaunches through the auto-run engine.
     if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition);
     const terminal = this.options.terminals.create({
-      agentId: session.identity.agentId,
-      sessionId: session.sessionId,
-      agentType: session.identity.type,
-      ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
-      name: session.terminal.name,
+      agentId: target.agentId,
+      sessionId: target.sessionId,
+      agentType: target.type,
+      ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
+      name: target.terminalName,
       initialCommand: plan.commandLine,
-      // The extension-host waiter that owned an automated result is gone.
-      // Restoration therefore hands every worker to the user instead of
-      // pretending the interrupted workflow can still receive its result.
+      // Whatever this session once was, nothing is waiting on its result now:
+      // the caller ended with the previous conversation. Reporting one would
+      // resolve a wait nobody is holding.
       deliversResult: false,
-      focus: false,
+      ...(target.focus === undefined ? {} : { focus: target.focus }),
       ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
     });
-    this.options.fleet.reattach(
-      session.identity.agentId,
-      { terminalId: terminal.terminalId, name: terminal.name },
-      occurredAt,
-      undefined,
-      { mode: "none" },
-    );
-    this.options.fleet.transition(session.identity.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
-    return { agentId: session.identity.agentId, sessionId: session.sessionId, terminalId: terminal.terminalId };
+    // A paused session still has its record; an ended one was removed from the
+    // fleet when its conversation finished, so it is registered afresh under the
+    // same identity — same agent id, same session id, same definition path.
+    if (this.options.fleet.get(target.agentId) === undefined) {
+      this.options.fleet.register({
+        identity: { agentId: target.agentId, type: target.type },
+        sessionId: target.sessionId,
+        terminal: { terminalId: terminal.terminalId, name: terminal.name },
+        lifecycle: { status: "starting", startedAt: occurredAt },
+        resultDelivery: { mode: "none" },
+        telemetry: EMPTY_TELEMETRY,
+        ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+        ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
+      }, occurredAt);
+    } else {
+      this.options.fleet.reattach(
+        target.agentId,
+        { terminalId: terminal.terminalId, name: terminal.name },
+        occurredAt,
+        undefined,
+        { mode: "none" },
+      );
+    }
+    this.options.fleet.transition(target.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
+    return { agentId: target.agentId, sessionId: target.sessionId, terminalId: terminal.terminalId };
   }
 
   public async spawn(input: DelegationLaunchInput): Promise<unknown> {

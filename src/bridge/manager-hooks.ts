@@ -3,6 +3,7 @@ import { renderTasks, type RoadmapTask } from "../domain/roadmap.js";
 import type { FleetRegistry, MailboxEntry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { describeIssueNumbers } from "../shared/issues.js";
+import { describeReopenOutcome, type ReopenOutcome } from "../claude/reopen.js";
 import type { DelegationLaunchInput } from "./delegation.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 
@@ -513,11 +514,20 @@ export interface InvokingTerminalKiller {
   kill(terminalId: AgentSession["terminal"]["terminalId"]): void;
 }
 
-/** The extension-owned actions `/auto` and `/review-pr` trigger. */
+/** The extension-owned actions `/auto`, `/review-pr`, and `/reopen` trigger. */
 export interface ManagerCommandActions {
   startAutoRun(options?: { readonly chrome?: boolean }): Promise<unknown>;
   /** `focus` is the user's trailing text: what they want the session to look at. */
   reviewPullRequest(focus?: string): Promise<unknown>;
+  /**
+   * `selector` is the user's trailing text: an agent id or an agent type.
+   * Omitted, the most recent reopenable session is taken. The action resolves to
+   * exactly one session rather than offering a picker: this runs inside a
+   * `UserPromptSubmit` hook, which blocks the Manager's prompt and times out in
+   * 60s, so waiting on a UI choice would let the raw command through to the
+   * model. The palette command is where the full list lives.
+   */
+  reopenSession(selector?: string): Promise<unknown>;
 }
 
 export class ManagerPromptService {
@@ -624,7 +634,9 @@ export class ManagerPromptService {
     try {
       outcome = action.type === "auto"
         ? await this.actions.startAutoRun(action.chrome ? { chrome: true } : {})
-        : await this.actions.reviewPullRequest(action.focus);
+        : action.type === "reopen"
+          ? await this.actions.reopenSession(action.selector)
+          : await this.actions.reviewPullRequest(action.focus);
     } catch (error) {
       return { intercepted: true, message: `aboard could not run /${action.command}: ${error instanceof Error ? error.message : "the action failed"}.` };
     }
@@ -640,9 +652,12 @@ export class ManagerPromptService {
 
 function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unknown): string {
   if (typeof outcome !== "object" || outcome === null) {
-    return type === "auto" ? "auto-run triggered." : "reopened the session for the open pull request.";
+    return type === "auto" ? "auto-run triggered." : type === "reopen" ? "reopened a recorded session." : "reopened the session for the open pull request.";
   }
   const value = outcome as Record<string, unknown>;
+  // `/reopen` returns the coordinator's own union, which already has one
+  // wording shared with the palette command; describing it twice would drift.
+  if (type === "reopen") return describeReopenOutcome(outcome as ReopenOutcome);
   if (type === "auto") {
     if (value.started === false) return `auto-run did not start: ${typeof value.reason === "string" ? value.reason : "no reason given"}.`;
     const spec = value.spec as { number?: unknown; title?: unknown } | undefined;
@@ -670,12 +685,14 @@ function unusedFocusNote(focus: unknown): string {
 }
 
 interface ParsedActionCommand {
-  readonly type: "auto" | "review-pr";
+  readonly type: "auto" | "review-pr" | "reopen";
   readonly command: string;
   readonly invalidArguments: boolean;
   readonly chrome: boolean;
   /** `/review-pr` only: the trailing text, forwarded as the review focus. */
   readonly focus?: string;
+  /** `/reopen` only: the trailing text, an agent id or an agent type. */
+  readonly selector?: string;
 }
 
 interface ParsedDoneCommand {
@@ -691,16 +708,25 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
 /**
  * `/auto` accepts only the explicit `--chrome` launch choice. Unknown trailing
  * text is intercepted but rejected, so a typo cannot silently start a run with
- * the wrong capability. `/review-pr` is the exception: its trailing text is a
- * real `focus` parameter for a fallback doctor's first pass over the diff.
+ * the wrong capability. `/review-pr` and `/reopen` are the exceptions: their
+ * trailing text is a real parameter — the focus for a fallback doctor's first
+ * pass over the diff, and which recorded session to come back to.
+ *
+ * The name is `/reopen` rather than `/resume` because `/resume` is a Claude Code
+ * builtin: the TUI handles it locally and it never reaches `UserPromptSubmit`,
+ * so a skill of that name could not be intercepted at all. `/review-pr` avoids
+ * the builtin `/review` for the same reason.
  */
 function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
-  const match = /^\s*\/(auto|review-pr)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
+  const match = /^\s*\/(auto|review-pr|reopen)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
-  const command = match[1] as "auto" | "review-pr";
+  const command = match[1] as "auto" | "review-pr" | "reopen";
   const trailing = match[2]?.trim() ?? "";
   if (command === "review-pr") {
     return { type: command, command, invalidArguments: false, chrome: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
+  }
+  if (command === "reopen") {
+    return { type: command, command, invalidArguments: false, chrome: false, ...(trailing.length === 0 ? {} : { selector: trailing }) };
   }
   return { type: command, command, invalidArguments: trailing !== "" && trailing !== "--chrome", chrome: trailing === "--chrome" };
 }

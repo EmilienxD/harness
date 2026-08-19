@@ -491,6 +491,7 @@ test("/auto and /review-pr are performed by the extension, reported to the user,
     {
       startAutoRun: async () => { started.push("auto"); return { started: true, spec: { number: 12, title: "Offline sync" }, issues: [{ number: 34 }, { number: 35 }] }; },
       reviewPullRequest: async () => { started.push("review"); return { action: "focused", prNumber: 56, type: "implementer" }; },
+      reopenSession: async () => assert.fail("no session reopen"),
     },
   );
   const auto = await prompts.handle(managerId, "/auto");
@@ -522,6 +523,7 @@ test("/review-pr forwards its trailing text as the review focus, and reports it 
           ? { action: "launched", prNumber: 56, notice: "Launched a fresh doctor for PR #56." }
           : { action: "focused", prNumber: 56, type: "implementer", unusedFocus: focus };
       },
+      reopenSession: async () => assert.fail("no session reopen"),
     },
   );
 
@@ -548,6 +550,7 @@ test("an extension action reports a refusal verbatim and rejects unknown trailin
     {
       startAutoRun: async () => ({ started: false, reason: "the working tree is not clean: src/a.ts" }),
       reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
     },
   );
   const refused = await prompts.handle(managerId, "/auto");
@@ -566,6 +569,7 @@ test("/auto --chrome passes one explicit Chrome choice to the run", async () => 
     {
       startAutoRun: async (options) => { starts.push(options); return { started: true, spec: { number: 12 }, issues: [{ number: 34 }], chromeEnabled: true }; },
       reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
     },
   );
   const result = await prompts.handle(managerId, "/auto --chrome");
@@ -623,12 +627,12 @@ test("Python prompt hook injects a drained queue on a real prompt", async () => 
 
 test("aboard-owned command skills are user-only shims and general-purpose has no aboard definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
-  for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr"]) {
+  for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr", "reopen"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
     // Only the two launch commands advertise the explicit Chrome option;
     // `/review-pr` advertises its forwarded focus. The other shims take none.
-    if (["general-purpose", "auto", "review-pr"].includes(name)) assert.match(skill, /argument-hint:/);
+    if (["general-purpose", "auto", "review-pr", "reopen"].includes(name)) assert.match(skill, /argument-hint:/);
     else assert.doesNotMatch(skill, /argument-hint:/);
     // The body is reachable only when the hook failed to intercept, so it must
     // read as an error notice: an empty body leaves the model to invent a
@@ -647,7 +651,7 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
 });
 
 test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
-  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/brainstorm", "/brainstorm caching layer", "/done", "/done close now", "/auto", "/review-pr", "/auto the next spec"]) {
+  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/brainstorm", "/brainstorm caching layer", "/done", "/done close now", "/auto", "/review-pr", "/auto the next spec", "/reopen", "/reopen brainstorm"]) {
     const result = await runPromptHook(500, { error: "boom" }, prompt);
     assert.equal(result.status, 2, `${prompt} must erase the prompt even when the bridge fails`);
     assert.equal(result.stdout, "");

@@ -48,7 +48,7 @@ WORKER_AGENT_TYPES: frozenset[str] = frozenset({"webresearcher", "implementer", 
 # Commands the bridge handles itself. `/done` is available in every aboard
 # terminal; the remaining commands belong only to the Manager. These expressions
 # match the bridge-side parsers.
-MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|done|auto|review-pr)(?:\s[\s\S]*)?$")
+MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|done|auto|review-pr|reopen)(?:\s[\s\S]*)?$")
 DONE_COMMAND: re.Pattern[str] = re.compile(r"^\s*/done(?:\s[\s\S]*)?$")
 
 # Leads every roadmap injection the bridge emits, on the session-start briefing

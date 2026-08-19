@@ -51,6 +51,13 @@ test("fleet recovery actions are visible where the stranded record is shown", as
   const titleRestore = (contributes.menus["view/title"] ?? []).find((entry) => entry.command === "aboard.restoreFleet");
   assert.match(titleRestore?.group ?? "", /^navigation@/, "Restore Fleet must be a visible title action, not overflow-only");
 
+  // Reopening is not a recovery state like Restore Fleet, which appears only
+  // while a restorable fleet exists: an ended conversation is always something
+  // the user may want back, so the action is always on the view title.
+  const titleReopen = (contributes.menus["view/title"] ?? []).find((entry) => entry.command === "aboard.reopenSession");
+  assert.match(titleReopen?.group ?? "", /^navigation@/, "Reopen a Session must be a visible title action");
+  assert.equal(titleReopen?.when, "view == aboard.fleet");
+
   const rowRemove = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.removePausedSession");
   assert.match(rowRemove?.when ?? "", /paused\|orphaned/, "both recoverable and orphaned disconnected rows need cleanup");
   assert.match(rowRemove?.group ?? "", /^inline@/, "cleanup must be visible on the row without discovering its context menu");
