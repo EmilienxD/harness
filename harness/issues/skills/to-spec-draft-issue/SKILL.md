@@ -15,7 +15,7 @@ Publishing happens separately in the later publishing step. Do not run `gh` or p
 2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
 
 3. Write the spec using the template below. Create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md` where {i} is:
-!`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; for f in "$d"/.published/issue-*-#*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
+!`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
 
 Do not spend time checking whether the folder exists or what it already contains — just write the file.
 
@@ -24,7 +24,7 @@ Use this template. The title is the first `# ` header. The line directly below i
 <spec-template>
 # {Spec title}
 
-> ai:spec
+> spec
 
 ## Problem Statement
 
@@ -80,7 +80,7 @@ Any further notes about the feature.
 
 </spec-template>
 
-Make sur to respect the `> ai:spec` second non-empty line because it will be parsed to the `ai:spec` label, automatically created in the repo if missing.
+Make sure to respect the `> spec` second non-empty line. The publishing hook maps it to the `ai:spec` label and automatically creates that label in the repo if missing. Do not write the `ai:` prefix in the draft.
 
 5. Hand off to the user
 

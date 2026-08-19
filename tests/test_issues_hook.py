@@ -75,14 +75,14 @@ def test_extra_labels_pass_through_asis():
     assert labels == ["good-first-issue", "ai:low-difficulty"]
 
 
-def test_spec_line_ai_prefixed_is_checked_first():
-    labels, body = _labels("> ai:spec\n\n## Problem\n")
+def test_spec_line_maps_to_canonical_label():
+    labels, body = _labels("> spec\n\n## Problem\n")
     assert labels == ["ai:spec"]
     assert body == "## Problem"
 
 
-def test_spec_line_legacy_spelling_still_works():
-    labels, _ = _labels("> spec\n\nbody\n")
+def test_spec_line_legacy_prefixed_spelling_still_works():
+    labels, _ = _labels("> ai:spec\n\nbody\n")
     assert labels == ["ai:spec"]
 
 
@@ -181,8 +181,35 @@ def test_publish_uses_exact_parsed_labels(tmp_path, monkeypatch):
     count, failures = hook.publish_batch(batch, dry=False, report=report)
     assert count == 1 and failures == 0
     assert created == [("T", "Body with {ref} kept", ["ci", "ai:afk"])]
+    assert not (batch / "issue-0.md").exists()
+    assert not (batch / ".published").exists()
     # The label line is stripped from the body that gets posted.
     assert "mode:afk" not in created[0][1]
+
+
+def test_failed_draft_keeps_resolved_references_after_success(tmp_path, monkeypatch):
+    def fake_create(title, body, labels):
+        assert title == "First"
+        return True, "https://github.com/x/y/issues/42"
+
+    monkeypatch.setattr(hook, "gh_create_issue", fake_create)
+    batch = tmp_path / ".issues-gateway" / SID
+    batch.mkdir(parents=True)
+    (batch / "issue-0.md").write_text(
+        "# First\n\n> mode:afk\n\nBody\n", encoding="utf-8"
+    )
+    (batch / "issue-1.md").write_text(
+        f"# Second\n\n## Body\n\nBlocked by {{{SID}/0}}\n", encoding="utf-8"
+    )
+
+    report: list[str] = []
+    count, failures = hook.publish_batch(batch, dry=False, report=report)
+
+    assert count == 1 and failures == 1
+    assert not (batch / "issue-0.md").exists()
+    assert not (batch / ".published").exists()
+    assert "Blocked by #42" in (batch / "issue-1.md").read_text(encoding="utf-8")
+    assert any("missing or malformed label line" in line for line in report)
 
 
 def test_dry_run_reports_each_draft_with_labels(tmp_path):

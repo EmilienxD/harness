@@ -18,7 +18,7 @@ Design notes:
   *assumes* that ordering is perfect - see the retry pass below.
 - The first "# " header line in a draft file is the issue title. The first
   non-empty line after that declares labels (see /draft-issues, /draft-issue,
-  /to-spec-draft-issue): either "> ai:spec" (legacy "> spec" also works), or
+  /to-spec-draft-issue): either "> spec" (legacy "> ai:spec" also works), or
   "> " followed by a comma-separated list of label tokens in any order -
   "difficulty:{level}" and "mode:{afk|hitl}" are each optional (the user can
   ask for them to be left off), and extra labels the user asked for may be
@@ -32,13 +32,10 @@ Design notes:
   rewritten to "#<real-issue-number>" once that draft has been published.
   This is how "blocked by" links get resolved without creating issues
   sequentially inside the agent loop.
-- Resolution survives across separate invocations of this hook: once an
-  issue is published, its file is renamed to encode the real issue number
-  ("issue-{i}-#{number}.md") before being moved into the batch's
-  ".published/" folder. On every run, "resolved" is rebuilt by reading
-  those filenames back, not kept only in memory - so a partial failure
-  followed by a rerun doesn't get stuck thinking earlier, already-published
-  issues in the batch don't exist.
+- Once an issue is published, its draft file is deleted immediately. If a
+  later draft cannot publish in the same run, any references that are already
+  known are rewritten in that remaining draft before it is left in place, so
+  a rerun does not need an archive of successful drafts to resolve them.
 - Within a single run, unresolved references are retried in a worklist loop
   rather than skipped once and left for a manual rerun - this self-heals
   ordering mistakes (e.g. a diamond dependency the model numbered wrong)
@@ -48,7 +45,7 @@ Design notes:
   inline on the command line. This is what avoids the Windows command-line
   length limit, on every platform, regardless of body size.
 - "--dry" runs the exact same parse/resolve logic but never calls
-  `gh issue create` and never moves/renames files - it reports what would
+  `gh issue create` and never deletes files - it reports what would
   happen, so a bad label line or a genuinely unresolvable reference can be
   caught before anything touches the tracker.
 """
@@ -80,11 +77,6 @@ SESSION_ID_PATTERN = re.compile(
 # The draft filename convention produced by /draft-issues: "issue-{i}.md"
 FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
 
-# The filename convention for an already-published file, which encodes the
-# real issue number so it can be recovered on a later run:
-# "issue-{i}-#{number}.md"
-PUBLISHED_FILENAME_PATTERN = re.compile(r"^issue-(\d+)-#(\d+)\.md$")
-
 # The label declaration line produced by /draft-issues or /draft-issue: a
 # comma-separated list of label tokens in any order, with "difficulty:*" and
 # "mode:*" each optional and extra labels allowed, e.g.
@@ -97,8 +89,8 @@ LABEL_LINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# The label declaration line produced by /to-spec-draft-issue ("> ai:spec";
-# plain "> spec" from older installs also still matches).
+# The label declaration line produced by /to-spec-draft-issue ("> spec";
+# prefixed "> ai:spec" from older drafts also still matches).
 SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*(?:ai\s*:\s*)?spec\s*$", re.IGNORECASE)
 
 # Canonical labels this workflow depends on: (color, description). They carry
@@ -182,7 +174,7 @@ def parse_issue_file(path: Path) -> tuple[str, str]:
 def extract_labels(rest: str) -> tuple[list[str], str]:
     """Pull the label declaration line out of the body.
 
-    Accepts either "> ai:spec" (one label; legacy "> spec" works too) or
+    Accepts either "> spec" (one label; legacy "> ai:spec" works too) or
     "> " followed by a comma-separated
     list of label tokens in any order - "difficulty:*" and "mode:*" are each
     optional, and extra labels pass through as-is. Returns (labels,
@@ -252,22 +244,27 @@ def gather_draft_files(batch_dir: Path) -> list[Path]:
     return [p for _, p in ordered]
 
 
-def load_resolved(batch_dir: Path) -> dict[str, str]:
-    """Rebuild {session-id}/{i} -> real number from already-published files.
+def rewrite_known_references(path: Path, resolved: dict[str, str]) -> None:
+    """Persist any known reference rewrites in a draft that remains pending."""
+    if not resolved:
+        return
 
-    This is what makes resolution survive across separate hook invocations:
-    a rerun after a partial failure sees earlier successes in this batch as
-    already resolved, instead of starting from an empty map.
-    """
-    resolved: dict[str, str] = {}
-    published_dir = batch_dir / ".published"
-    if not published_dir.is_dir():
-        return resolved
-    for path in published_dir.glob("issue-*.md"):
-        m = PUBLISHED_FILENAME_PATTERN.match(path.name)
-        if m:
-            resolved[f"{batch_dir.name}/{m.group(1)}"] = m.group(2)
-    return resolved
+    text = path.read_text(encoding="utf-8")
+
+    def _sub(match: re.Match) -> str:
+        key = f"{match.group(1)}/{match.group(2)}"
+        if key in resolved:
+            return f"#{resolved[key]}"
+        return match.group(0)
+
+    rewritten = REF_PATTERN.sub(_sub, text)
+    if rewritten != text:
+        path.write_text(rewritten, encoding="utf-8")
+
+
+def delete_published_draft(path: Path) -> None:
+    """Remove a draft after gh confirms the issue exists."""
+    path.unlink()
 
 
 def gh_create_issue(title: str, body: str, labels: list[str]) -> tuple[bool, str]:
@@ -304,14 +301,8 @@ def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, i
     if not files:
         return 0, 0
 
-    published_dir = batch_dir / ".published"
-    if not dry:
-        published_dir.mkdir(exist_ok=True)
-
-    resolved = load_resolved(batch_dir)
+    resolved: dict[str, str] = {}
     batch_header = f"Batch: {len(files)} draft issue(s)"
-    if resolved:
-        batch_header += f", {len(resolved)} already published"
     report.append(batch_header)
     report.append("")
 
@@ -336,6 +327,8 @@ def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, i
             labels, body_with_refs = extract_labels(rest)
 
             if not labels:
+                if not dry:
+                    rewrite_known_references(path, resolved)
                 failed_entries.append(
                     f"  SKIP  {path.name} - missing or malformed label line"
                 )
@@ -344,6 +337,8 @@ def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, i
 
             body, unresolved = resolve_references(body_with_refs, resolved)
             if unresolved:
+                if not dry:
+                    rewrite_known_references(path, resolved)
                 still_pending.append(path)
                 continue
 
@@ -370,9 +365,10 @@ def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, i
                 resolved_number = number_match.group(1) if number_match else "?"
                 resolved[key] = resolved_number
                 report.append(f"  Created: {info}")
-                path.rename(published_dir / f"issue-{i}-#{resolved_number}.md")
+                delete_published_draft(path)
                 published += 1
             else:
+                rewrite_known_references(path, resolved)
                 failed_entries.append(f"  FAIL  {path.name}: {info}")
             made_progress = True
 
@@ -383,6 +379,8 @@ def publish_batch(batch_dir: Path, dry: bool, report: list[str]) -> tuple[int, i
     # Anything still pending after the retry loop is a genuine problem:
     # either a reference outside this batch, or a real dependency cycle.
     for path in pending:
+        if not dry:
+            rewrite_known_references(path, resolved)
         title, rest = parse_issue_file(path)
         _, body_with_refs = extract_labels(rest)
         _, unresolved = resolve_references(body_with_refs, resolved)

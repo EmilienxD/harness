@@ -43,9 +43,8 @@ size irrelevant to the Windows command-length limit.
 
 **Single issue.** `/draft-issue` pins down scope, difficulty, and mode with you in chat, then writes
 one markdown file under `.issues-gateway/{session-id}/issue-{n}.md`, where `{n}` is the next free
-index (pending drafts and already-published files in that session are scanned automatically).
-`/publish-issues` publishes every draft in that folder and moves each published file aside so a
-rerun never re-creates it.
+index among pending drafts in that session. `/publish-issues` publishes every draft in that folder
+and deletes each draft file as soon as GitHub confirms creation, so a rerun never re-creates it.
 
 **Batch.** `/draft-issues` first proposes a breakdown in chat and iterates until granularity,
 dependencies, difficulty, and mode look right. Once you approve the mapping, it proceeds directly to
@@ -99,10 +98,7 @@ At runtime the drafting skills create a gateway folder at the project root — `
 ├── .gitignore                                   # contains '*', created on first draft
 └── 6b1f0c2e-…-2e8a1d0c4f55/                     # one dir per drafting session
     ├── issue-0.md
-    ├── issue-1.md
-    └── .published/                              # created by the hook, once gh confirms
-        ├── issue-0-#42.md
-        └── issue-1-#43.md
+    └── issue-1.md
 ```
 
 ### File conventions the skills and hooks agree on
@@ -120,7 +116,7 @@ At runtime the drafting skills create a gateway folder at the project root — `
   comma-separated list of label tokens — `difficulty:{low|medium|high}` and `mode:{afk|hitl}` are
   each optional (the user can ask the drafting skill to skip them), and extra labels the user asks
   for are listed alongside them after the skill verifies they exist in the repo (`gh label list`).
-  For specs: `> ai:spec` (plain `> spec` from older drafts also still parses). The hook maps the
+  For specs: `> spec` (legacy prefixed `> ai:spec` drafts also still parse). The hook maps the
   difficulty/mode/spec tokens to the workflow's own label names (`ai:low-difficulty`,
   `ai:medium-difficulty`, `ai:high-difficulty`, `ai:afk`, `ai:hitl`, `ai:spec`), applies any extra
   tokens as-is, strips the line from the published body, and creates the canonical labels in the
@@ -133,6 +129,10 @@ At runtime the drafting skills create a gateway folder at the project root — `
   `{6b1f0c2e-…-2e8a1d0c4f55/0}`) means "blocked by that issue"; the hook rewrites it to
   `#<real-number>` as each referenced issue is published, and skips — without failing the batch — any
   file whose reference isn't resolvable yet.
+- **Successful publish cleanup**: after `gh issue create` succeeds, the hook immediately deletes the
+  draft file. If another draft fails later in the same run, any references to issues already created
+  in that run are rewritten to their real `#<number>` form before the failed draft is left for a
+  rerun.
 
 ## Installation
 
@@ -201,7 +201,7 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 
 /publish-issues [--dry]
   → hook creates the labels, publishes every draft via gh,
-    moves published files to .issues-gateway/{session-id}/.published/
+    deletes each draft file after GitHub confirms creation
   (also accepts /publish-issue alias — same hook, same behavior)
 
 /draft-issues [optional: issue number, URL, or path to a plan]
