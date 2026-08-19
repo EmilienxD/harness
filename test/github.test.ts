@@ -50,6 +50,7 @@ const ROADMAP = "- [ ] Ship the bridge\n- [x] Rotate the tokens";
 function roadmapGh(response: (args: readonly string[]) => string): FixtureGh {
   return new FixtureGh((args) => {
     if (args[0] === "issue" && args[1] === "edit") return "";
+    if (args[0] === "issue" && args[1] === "pin") return "";
     if (args[0] === "label") return "";
     return response(args);
   });
@@ -132,11 +133,37 @@ test("an empty candidate set mints on create, is the first-run state on read, an
   // Plain `label create`, so a user-owned `ai:todo` keeps its colour.
   assert.equal(createGh.calls.some((args) => args.includes("--force")), false);
   assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "create")?.slice(0, 4), ["issue", "create", "--title", "Project roadmap"]);
+  assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "pin"), ["issue", "pin", "44"]);
 
   await assert.rejects(
     () => new GitHubClient(roadmapGh(empty)).updateRoadmapTask({ task: 1, expect: "Anything", status: "completed" }),
     (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo",
   );
+});
+
+test("roadmap issue pinning is best effort after minting", async () => {
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "issue" && args[1] === "list") return "[]";
+    if (args[0] === "label") return "";
+    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
+    if (args[0] === "issue" && args[1] === "pin") throw new GitHubBoundaryError("command-failed", "pin failed");
+    if (args[0] === "issue" && args[1] === "view") {
+      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["ai:todo"] });
+    }
+    if (args[0] === "issue" && args[1] === "edit") return "";
+    throw new Error(`unexpected ${args.join(" ")}`);
+  });
+  const github = new GitHubClient(gh);
+  const created = await github.createRoadmapTasks({ subjects: ["Write the first task"] });
+  assert.equal(created.issue, 44);
+  assert.match(created.notices.join(" "), /could not pin #44/);
+
+  // The issue was already created, so the seed is still live and an immediate
+  // follow-up edit must target it instead of minting a duplicate after pinning
+  // failed.
+  await github.updateRoadmapTask({ task: 1, expect: "Write the first task", status: "completed" });
+  assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+  assert.deepEqual(gh.calls.find((args) => args[0] === "issue" && args[1] === "edit")?.slice(0, 3), ["issue", "edit", "44"]);
 });
 
 test("a batch create is one issue edit, returns positions in order, and honours --after", async () => {

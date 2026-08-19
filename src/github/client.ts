@@ -322,8 +322,8 @@ export class GitHubClient implements GitHubPromptSource {
     const chosen = carriers[0];
     if (chosen === undefined) {
       const edit = this.#applied(createTasks("", input), []);
-      const number = await this.#mintRoadmap(edit.body);
-      return { issue: number, positions: edit.value.positions, notices: [`Created issue #${number} and labelled it \`${LABEL_TODO}\`; this repository had no roadmap yet.`, ...this.#boundNotices(edit.body)] };
+      const minted = await this.#mintRoadmap(edit.body);
+      return { issue: minted.number, positions: edit.value.positions, notices: [`Created issue #${minted.number} and labelled it \`${LABEL_TODO}\`; this repository had no roadmap yet.`, ...minted.notices, ...this.#boundNotices(edit.body)] };
     }
     const edit = this.#applied(createTasks(chosen.body, input), parseRoadmap(chosen.body).tasks);
     await this.gh.run(["issue", "edit", String(chosen.number), "--body", edit.body]);
@@ -409,7 +409,7 @@ export class GitHubClient implements GitHubPromptSource {
     return carriers.length <= 1 ? [] : [`${carriers.length} open issues carry \`${LABEL_TODO}\`; #${chosen} is in use and the others were left untouched.`];
   }
 
-  async #mintRoadmap(body: string): Promise<number> {
+  async #mintRoadmap(body: string): Promise<{ readonly number: number; readonly notices: readonly string[] }> {
     // Plain create, not `--force`: a user-owned `ai:todo` label keeps its colour
     // and description, and "already exists" is a success for our purposes.
     try { await this.gh.run(["label", "create", LABEL_TODO, "--description", "Project roadmap", "--color", "1D76DB"]); }
@@ -422,7 +422,16 @@ export class GitHubClient implements GitHubPromptSource {
     // typically the immediate follow-up write, which is exactly when the label
     // index has not caught up with this creation.
     this.#minted = number;
-    return number;
+    return { number, notices: await this.#pinRoadmap(number) };
+  }
+
+  async #pinRoadmap(number: number): Promise<readonly string[]> {
+    try {
+      await this.gh.run(["issue", "pin", String(number)]);
+      return [];
+    } catch {
+      return [`Created the roadmap issue, but could not pin #${number}. The issue remains the \`${LABEL_TODO}\` carrier; pin it manually if you want it at the top of the repository issues page.`];
+    }
   }
 
   public async getIssue(number: number): Promise<IssueSnapshot | undefined> {
