@@ -33,6 +33,7 @@ Issues are worked one at a time, never in parallel — don't optimize the breakd
 For each issue, decide:
 - **Title**: short descriptive name
 - **Summary**: what this issue covers, in a sentence or two
+- **Parent**: the issue this one is a piece of, if there is one — typically the spec these issues were broken out of, or the existing issue passed as an argument. Publishing turns this into a real GitHub sub-issue link, so it is worth getting right; leave it out when the issue stands on its own.
 - **Blocked by**: which other issues, if any, must complete first
 - **Difficulty** (default, but optional): your honest estimate of how hard this issue is to execute correctly. This is used to choose which model runs it later. Select one of:
   - `routine`: For low reasoning level work such as renaming a variable, cleaning up files/folders, adding missing type hint. 1% usage rate; use this rarely.
@@ -48,11 +49,12 @@ If the user asks for extra labels, verify them before the breakdown is finalized
 
 ### 4. Review the mapping with the user
 
-Present the proposed breakdown as a numbered list, showing title, summary, blocked-by, and whichever labels were decided (difficulty, mode, extras) for each issue.
+Present the proposed breakdown as a numbered list, showing title, summary, parent, blocked-by, and whichever labels were decided (difficulty, mode, extras) for each issue.
 
 Ask the user:
 
 - Does the granularity feel right? (too coarse / too fine — remember, one agent per issue)
+- Is the parent right, if these issues belong under one?
 - Are the dependency relationships correct?
 - Do the label assignments look right — difficulty and mode where they're used, any extras?
 - Should any issues be merged or split further?
@@ -74,7 +76,7 @@ Use this template. The title is the first `# ` header. The line directly below i
 
 ## Parent
 
-A reference to the parent issue on the issue tracker (if the source was an existing issue, otherwise omit this section).
+One bare reference and nothing else — see below. Omit this whole section when the issue has no parent.
 
 ## What to build
 
@@ -95,6 +97,15 @@ ${CLAUDE_SESSION_ID}/{i} of each blocking issue, one per line, as plain text (no
 </issue-template>
 
 `{labels}` is a comma-separated list containing the difficulty and mode tokens decided during mapping — `difficulty:routine|basic|advanced|expert` and `mode:afk|hitl` — plus any extra labels approved during mapping. Each token is written only if it was decided: if the user asked for the difficulty and/or mode labels to be skipped, they're simply absent, so `> difficulty:advanced, mode:hitl`, `> mode:afk`, `> difficulty:basic`, and `> ci, mode:hitl` are all valid lines. Every issue must carry at least one label. Any extra label approved during mapping was verified to exist in this repo (`gh label list`) before being written here — never invent a label name.
+
+In "Parent", write exactly one reference on the first non-empty line under the heading, as plain text with no backticks, no prose around it, and nothing else in the section. `/publish-issues` reads it, creates the issue as a real GitHub sub-issue of that parent, and drops the section from the published body (GitHub shows the parent itself). Anything other than a bare reference there is treated as prose and published as written — no link is made. Valid forms:
+
+- `#42` — a real issue number. Use this whenever you know it, including a number from a `/publish-issues` run earlier in this session: that run publishes with no assistant turn, but the numbers it created are injected into your context on the next message, so a spec you drafted and the user then published is referenced by its real number.
+- The issue URL, if that is what the user gave you.
+- `${CLAUDE_SESSION_ID}/spec` — the spec issue drafted in this session, whether or not it has been published yet. Use this when the spec these issues came from is still an unpublished draft in `.issues-gateway/${CLAUDE_SESSION_ID}/`, so its number does not exist yet.
+- `${CLAUDE_SESSION_ID}/{i}` — another issue in this batch, for a nested breakdown. Same token as a blocked-by reference.
+
+A parent is not a blocker: an issue can be a sub-issue of a spec and still be startable immediately. Fill in both sections independently.
 
 In "Blocked by", reference other issues in this batch by their plain-text `${CLAUDE_SESSION_ID}/{i}` token — e.g. if the session id were `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55` and the starting index were `2`, a reference to the first issue in this batch is `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/2`. Never wrap it in backticks or braces: the reference must stay plain text, because `/publish-issues` rewrites it to a bare `#<number>` and GitHub only autolinks issue numbers that aren't inside inline code. This works for references to issues in *this* batch only — a draft can't reference an issue from a different, unrelated batch. `/publish-issues` resolves these to real issue numbers once the referenced issue is published — don't try to resolve them yourself, and don't worry about getting the order perfect: unresolved references are retried automatically within a publish run, so an occasional misordering self-heals rather than getting silently stuck.
 

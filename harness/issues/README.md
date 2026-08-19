@@ -23,6 +23,9 @@ Creating GitHub issues from Claude Code with the `gh` CLI has three problems:
    scales with the size of the batch instead of staying flat.
 3. **Windows breaks on large bodies.** Windows caps command-line length. A `gh issue create
    --body "..."` call with a long body can exceed that cap and fail outright, on Windows only.
+4. **Sub-issues need numbers nobody has.** Publishing a spec and then breaking it into sub-issues
+   normally costs a round trip just to read back the spec's number — and publishing here happens in
+   a hook that produces no assistant turn at all, so the agent never sees it.
 
 ## Solution
 
@@ -58,6 +61,32 @@ no interview, no files. `/to-spec-draft-issue` does the same synthesis but write
 `.issues-gateway/{session-id}/issue-{n}.md` (same auto-indexing), so `/publish-issues` can put it
 on the tracker with an `[AI]-spec` label.
 
+**Sub-issues.** A draft whose `## Parent` section contains one bare reference is published as a real
+GitHub sub-issue of that parent, via `gh issue create --parent`. Knowing the number isn't enough —
+GitHub's sub-issue graph is structural — so the hook makes the link itself and strips the section
+from the published body, since GitHub renders the parent natively. This costs no model call: the
+reference is one line in a file the drafting skill was already writing.
+
+### Spec → sub-issues, without a round trip
+
+The common flow is `/to-spec-draft-issue` → `/publish-issues` → `/draft-issues` in one session, and
+the middle step is a hook: it erases the prompt and produces no assistant turn, so the agent would
+never learn that the spec became `#42`. Two mechanisms close that gap, and they cover different
+failure modes:
+
+- **A ledger.** Every successful create is recorded in `.issues-gateway/{session-id}/.published.json`
+  before the draft file is deleted, and every ledger is loaded back at the start of the next run. So
+  `{session-id}/spec` resolves to the spec's real number in a later run, and a `Blocked by` reference
+  to an issue published in an *earlier* run resolves too — which it previously couldn't.
+- **A one-shot notice.** Each run queues what it created in `.issues-gateway/.pending-notice.json`.
+  The next prompt that isn't a publish command flushes it into the agent's context as
+  `additionalContext` and deletes it. It rides along with a prompt you were sending anyway, so it
+  costs **0 extra API calls** and roughly one line of tokens per issue — and it means the next
+  `/draft-issues` can write a real `#42` under `## Parent`, and can tell you what got published.
+
+The ledger is deterministic and survives compaction; the notice makes the agent aware. Neither
+requires you to change how you drive the workflow.
+
 ### Why the batch flow is 3 API calls, not one-per-issue
 
 A batch of N interdependent issues normally costs at least N model calls if each issue must be
@@ -84,19 +113,26 @@ additional API calls**.
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
 │   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
 └── hooks/
-    └── publish_issues_UserPromptSubmit_hook.py  # UserPromptSubmit hook: gh calls, id resolution, labels
+    └── publish_issues_UserPromptSubmit_hook.py  # UserPromptSubmit hook: gh calls, id resolution, labels, sub-issue links
 ```
 
 The hook is registered on `UserPromptSubmit` and matches `/publish-issues` or `/publish-issue`
 (followed by end of string or whitespace), handling both singular and batch drafts. Every other
-prompt passes through untouched (exit 0), so it is safe alongside other `UserPromptSubmit` hooks.
+prompt passes through untouched (exit 0) — carrying the pending-publish notice, if there is one —
+so it is safe alongside other `UserPromptSubmit` hooks. It is registered with `"timeout": 300`
+because `UserPromptSubmit` lowers the default command-hook timeout to 30 seconds, which a large
+batch of `gh` calls can exceed; a timed-out hook is canceled and the prompt reaches Claude anyway,
+which for this hook would mean a half-published batch and a literal `/publish-issues` for the model
+to interpret.
 
 At runtime the drafting skills create a gateway folder at the project root — `.issues-gateway/`:
 
 ```
 .issues-gateway/
 ├── .gitignore                                   # contains '*', created on first draft
+├── .pending-notice.json                         # published issues the agent hasn't been told about
 └── 6b1f0c2e-…-2e8a1d0c4f55/                     # one dir per drafting session
+    ├── .published.json                          # ledger: reference key -> real issue number
     ├── issue-0.md
     └── issue-1.md
 ```
@@ -130,11 +166,34 @@ At runtime the drafting skills create a gateway folder at the project root — `
   `6b1f0c2e-…-2e8a1d0c4f55/0`) means "blocked by that issue"; the hook rewrites it to a bare
   `#<real-number>` as each referenced issue is published — bare, because GitHub only autolinks issue
   numbers that aren't wrapped in inline code — and skips, without failing the batch, any
-  file whose reference isn't resolvable yet.
-- **Successful publish cleanup**: after `gh issue create` succeeds, the hook immediately deletes the
-  draft file. If another draft fails later in the same run, any references to issues already created
-  in that run are rewritten to their real `#<number>` form before the failed draft is left for a
-  rerun.
+  file whose reference isn't resolvable yet. References to issues published in an earlier run
+  resolve from the ledger.
+- **Parent**: a `## Parent` section (any heading level) whose first non-empty line is one bare
+  reference and nothing else — `#42`, an issue URL, `{session-id}/{i}`, or `{session-id}/spec` —
+  publishes the issue as a GitHub sub-issue of that parent and removes the section from the body.
+  `{session-id}/spec` resolves to whichever issue that session published carrying `[AI]-spec`, so a
+  batch can point at its spec whether the spec is already on the tracker or still an unpublished
+  draft. Prose under `## Parent` is left exactly as written and creates no link, so the section is
+  safe to use for a human note instead; `none` there is an explicit opt-out and is dropped from the
+  body. A parent that isn't resolvable yet is retried within the run just like a blocker, and the
+  draft is left in place rather than published without its link. On a `gh` too old for
+  `gh issue create --parent`, the link is made afterwards with `gh issue edit --parent` and the
+  reference is kept in the body as a fallback.
+- **Ledger**: `{session-id}/.published.json` records `{"{session-id}/{i}": {number, url, title,
+  labels, spec, parent}}` after each successful create, written immediately so an interrupted run
+  still leaves behind the numbers it did create. It is what makes references and `{session-id}/spec`
+  resolve across runs, once the draft files themselves are gone. A corrupt ledger degrades to
+  "nothing known yet" rather than blocking a publish.
+- **Pending notice**: `.pending-notice.json` at the gateway root collects what each run published
+  (and how many drafts failed). The next prompt that isn't a publish command injects it as
+  `additionalContext` and deletes the file, so it is delivered exactly once. It is deliberately not
+  keyed by session id — a `/clear` between publishing and the next prompt must not strand it — and
+  two publish runs in a row accumulate rather than overwrite. A malformed notice is dropped, never
+  raised: this hook sees every prompt in the session and must not be able to fail one.
+- **Successful publish cleanup**: after `gh issue create` succeeds, the hook records the issue in the
+  ledger and then deletes the draft file. If another draft fails later in the same run, any
+  references to issues already created in that run are rewritten to their real `#<number>` form
+  before the failed draft is left for a rerun.
 
 ## Installation
 
@@ -164,7 +223,8 @@ see the exact file list and settings diff. See the [repo README](../../README.md
           {
             "type": "command",
             "command": "python",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"]
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"],
+            "timeout": 300
           }
         ]
       }
@@ -202,8 +262,10 @@ see the exact file list and settings diff. See the [repo README](../../README.md
   → review/edit the file by hand if needed
 
 /publish-issues [--dry]
-  → hook creates the labels, publishes every draft via gh,
-    deletes each draft file after GitHub confirms creation
+  → hook creates the labels, publishes every draft via gh, links each draft
+    that declares a parent as a real GitHub sub-issue,
+    deletes each draft file after GitHub confirms creation,
+    and hands the real issue numbers to the agent on your next prompt
   (also accepts /publish-issue alias — same hook, same behavior)
 
 /draft-issues [optional: issue number, URL, or path to a plan]
@@ -215,4 +277,15 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 
 /to-spec-draft-issue
   → same synthesis, written to .issues-gateway/{session-id}/issue-{n}.md for /publish-issues
+```
+
+The spec-to-sub-issues loop, end to end:
+
+```
+/to-spec-draft-issue     → issue-0.md, labelled "> spec"
+/publish-issues          → creates it as #42; ledger records it; notice queued
+/draft-issues            → the notice arrives with this prompt, so the breakdown
+                           is drafted with "## Parent" → #42 (or {session-id}/spec
+                           if you skipped the publish step)
+/publish-issues          → each issue is created as a sub-issue of #42
 ```

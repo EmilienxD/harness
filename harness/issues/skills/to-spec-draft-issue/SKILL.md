@@ -82,6 +82,10 @@ Any further notes about the feature.
 
 Make sure to respect the `> spec` second non-empty line. The publishing hook maps it to the `[AI]-spec` label and automatically creates that label in the repo if missing. Do not write the `[AI]-` prefix in the draft.
 
+If this spec belongs under an existing tracker issue — an epic, or an issue the user named — add a `## Parent` section directly below the `> spec` line whose only content is one bare reference on its own line: `#42` or the issue URL, as plain text with no backticks and no prose. `/publish-issues` turns that into a real GitHub sub-issue link and strips the section from the published body. Omit the section entirely otherwise; most specs are top-level.
+
+Issues broken out of this spec later (via `/draft-issues`) become its sub-issues, so the spec does not need to list them.
+
 5. Hand off to the user
 
 Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body — before publishing. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.

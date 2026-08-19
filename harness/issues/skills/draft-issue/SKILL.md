@@ -47,7 +47,7 @@ Use this template. The title is the first `# ` header. The line directly below i
 
 ## Parent
 
-A reference to the parent issue on the issue tracker (if the source was an existing issue, otherwise omit this section).
+One bare reference and nothing else — see below. Omit this whole section when the issue has no parent.
 
 ## What to build
 
@@ -66,6 +66,8 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 A reference to each blocking issue, or "None — can start immediately".
 
 </issue-template>
+
+In "Parent", write exactly one reference on the first non-empty line under the heading, as plain text with no backticks and no prose around it. `/publish-issues` reads it, creates the issue as a real GitHub sub-issue of that parent, and drops the section from the published body (GitHub shows the parent itself). Anything other than a bare reference there is published as ordinary prose and creates no link. Valid forms: `#42`, the issue URL, or `${CLAUDE_SESSION_ID}/spec` for a spec drafted in this session that has not been published yet. If the user passed an issue number or URL as the argument, that issue is the parent. If a `/publish-issues` run earlier in this session published issues, their real numbers were injected into your context — use those rather than a session reference. A parent is not a blocker; fill in "Parent" and "Blocked by" independently.
 
 `{labels}` is a comma-separated list of `difficulty:routine|basic|advanced|expert`, `mode:afk|hitl`, and any extra labels requested and verified above — the difficulty and mode tokens are each included only when decided, so any of `> difficulty:advanced, mode:hitl`, `> difficulty:basic`, `> mode:afk`, or `> ci, difficulty:routine` is a valid line. Every issue must carry at least one label.
 
