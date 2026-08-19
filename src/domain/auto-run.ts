@@ -8,7 +8,7 @@
  * postcondition" and that decision must be testable without fakes.
  */
 
-import { issueDisposition } from "../shared/labels.js";
+import { LABEL_SPEC, issueDisposition } from "../shared/labels.js";
 
 export const AUTO_RUN_PHASES = [
   "branch",
@@ -25,15 +25,11 @@ export type AutoRunPhase = (typeof AUTO_RUN_PHASES)[number];
 
 export type IssueDisposition = "afk" | "hitl";
 
-export const AUTO_RUN_SCOPES = ["spec", "all"] as const;
-export type AutoRunScope = (typeof AUTO_RUN_SCOPES)[number];
-
 export const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 export type MergeStrategy = (typeof MERGE_STRATEGIES)[number];
 
 export interface AutoRunSettings {
   readonly review: boolean;
-  readonly scope: AutoRunScope;
   readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly pollSeconds: number;
@@ -59,7 +55,6 @@ export interface SkippedIssue {
 export interface AutoRunRecord {
   readonly version: 1;
   readonly runId: string;
-  readonly specNumber: number;
   readonly issueNumbers: readonly number[];
   readonly currentIssue: number | undefined;
   readonly phase: AutoRunPhase;
@@ -68,7 +63,6 @@ export interface AutoRunRecord {
   readonly reviewMode: boolean;
   /** One explicit choice made when the run starts; replayed by every implementer. */
   readonly chromeEnabled?: boolean;
-  readonly scope: AutoRunScope;
   /**
    * The branch the user was on when the run started, carried so a resumed run
    * still knows where "home" is after a restart. `undefined` either means a
@@ -130,8 +124,8 @@ export interface ReducerInput {
 /**
  * Decides the next step for the current issue. `advance` means this issue is
  * finished; `stop` is terminal for the whole run, never a skip — a failing
- * implementer usually means the issue or the spec is wrong, and the siblings
- * share that spec.
+ * implementer usually means the issue, or the spec it came from, is wrong, and
+ * the issues queued behind it are likely to share that premise.
  *
  * The walk always starts at the first phase and skips every already-satisfied
  * postcondition, so the observed repository — not a persisted phase — decides
@@ -274,13 +268,17 @@ export function pullRequestBody(summary: string, issueNumber: number): string {
   return bounded.length === 0 ? `Closes #${issueNumber}` : `${bounded}\n\nCloses #${issueNumber}`;
 }
 
-/** A candidate child issue as GitHub reports it, before selection filters it. */
+/** A candidate issue as GitHub reports it, before selection filters it. */
 export interface CandidateIssue {
   readonly number: number;
   readonly title: string;
   readonly labels: readonly string[];
   readonly state: "open" | "closed";
   readonly openBlockedByNumbers: readonly number[];
+  /** Creation time, which is the queue's order. */
+  readonly createdAt: string;
+  /** Whether the issue has sub-issues of its own, which makes it an umbrella. */
+  readonly hasChildren: boolean;
 }
 
 export interface Selection {
@@ -289,18 +287,37 @@ export interface Selection {
 }
 
 /**
- * Selection. Unclassified is skipped and reported, never guessed at —
- * `AGENTS.md` is explicit that unclassified is a legitimate third state and that
- * the system flags rather than infers. A blocked issue is deferred rather than
- * failed, because a later merge can unblock it; the engine re-runs this after
- * every merge.
+ * Selection over the whole open issue queue, oldest first. "Oldest" is by
+ * `createdAt` and not by `updatedAt` — an issue being edited is not an issue
+ * being deprioritized — with ties on the lower number, so the order is total.
+ *
+ * Unclassified is skipped and reported, never guessed at — `AGENTS.md` is
+ * explicit that unclassified is a legitimate third state and that the system
+ * flags rather than infers. A blocked issue is deferred rather than failed,
+ * because a later merge can unblock it; the engine re-runs this after every
+ * merge.
+ *
+ * An umbrella — an `ai:spec` issue, or any issue with sub-issues of its own —
+ * never enters the queue: implementing one directly would duplicate its
+ * children's work. That exclusion is silent for the ordinary case, because
+ * every repository has specs and a skip line per spec on every start is noise,
+ * and reported when the umbrella *is* classified, because an umbrella asking to
+ * be implemented autonomously is a genuine contradiction.
  */
 export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
   const issues: PlannedIssue[] = [];
   const skipped: SkippedIssue[] = [];
-  for (const candidate of [...candidates].sort((left, right) => left.number - right.number)) {
+  const ordered = [...candidates].sort(
+    (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.number - right.number,
+  );
+  for (const candidate of ordered) {
     if (candidate.state !== "open") continue;
     const disposition = classify(candidate.labels);
+    const umbrella = umbrellaReason(candidate);
+    if (umbrella !== undefined) {
+      if (disposition !== undefined) skipped.push({ number: candidate.number, reason: umbrella });
+      continue;
+    }
     if (disposition === undefined) {
       skipped.push({ number: candidate.number, reason: "unclassified: neither ai:afk nor ai:hitl" });
       continue;
@@ -327,10 +344,18 @@ function classify(labels: readonly string[]): IssueDisposition | undefined {
   return disposition === "unclassified" ? undefined : disposition;
 }
 
+/** Why this issue is an umbrella, or `undefined` when it is a leaf. */
+function umbrellaReason(candidate: CandidateIssue): string | undefined {
+  if (candidate.labels.some((label) => label.trim().toLowerCase() === LABEL_SPEC)) {
+    return `umbrella: labelled ${LABEL_SPEC}, so its children are the work`;
+  }
+  return candidate.hasChildren ? "umbrella: has sub-issues, which are the work" : undefined;
+}
+
 /** Notification lines. Kept terse on purpose; they are read in bulk. */
 export const autoRunMessage = {
-  started: (spec: number, title: string, afk: number, hitl: number, review: boolean, chrome: boolean): string =>
-    `auto-run: started spec #${spec} "${title}" — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}, Chrome ${chrome ? "on" : "off"}.`,
+  started: (afk: number, hitl: number, review: boolean, chrome: boolean): string =>
+    `auto-run: started — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}, Chrome ${chrome ? "on" : "off"}.`,
   implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} implemented on ${branch}.`,
   committed: (issue: number, sha: string, pr: number): string => `auto-run: issue #${issue} committed (${sha}) and opened PR #${pr}.`,
   reviewed: (issue: number, paths: readonly string[]): string =>
@@ -342,7 +367,7 @@ export const autoRunMessage = {
   resolved: (pr: number): string => `auto-run: PR #${pr} merged by you; continuing.`,
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
-  complete: (spec: number, count: number, remainingSpecs: number): string =>
-    `auto-run: spec #${spec} complete (${count} issue${count === 1 ? "" : "s"}). ${remainingSpecs} open spec${remainingSpecs === 1 ? " remains" : "s remain"} — run /auto to continue.`,
+  complete: (count: number): string =>
+    `auto-run: queue drained (${count} issue${count === 1 ? "" : "s"} implemented). Run /auto again once more work is labelled.`,
   returned: (branch: string): string => `auto-run: back on ${branch}.`,
 } as const;

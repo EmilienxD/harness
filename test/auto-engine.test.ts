@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AutoRunEngine, type AutoRunGitHub, type AutoRunLauncher } from "../src/auto/engine.js";
+import { AutoRunEngine, type AutoRunGitHub, type AutoRunLauncher, type AutoRunState } from "../src/auto/engine.js";
 import type { AutoRunRecord, AutoRunSettings } from "../src/domain/auto-run.js";
 import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
 import type { LaunchOrigin } from "../src/domain/lease.js";
 import type { GitClient, GitStatus } from "../src/git/client.js";
+import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
-const SETTINGS: AutoRunSettings = { review: false, scope: "spec", pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 1 };
+const SETTINGS: AutoRunSettings = { review: false, pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 1 };
 
 interface Harness {
   readonly engine: AutoRunEngine;
@@ -19,14 +20,27 @@ interface Harness {
   readonly gitCalls: string[];
   readonly githubCalls: string[];
   readonly saved: AutoRunRecord[];
+  readonly states: AutoRunState[];
   readonly state: { cleared: boolean };
   readonly pullRequests: Map<number, { state: "open" | "closed" | "merged" }>;
   readonly setDirty: () => void;
 }
 
+interface QueueIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly labels: string[];
+  readonly state: "open" | "closed";
+  readonly openBlockedByNumbers: number[];
+  /** Defaults to the issue number's own order when a test does not care. */
+  readonly createdAt?: string;
+  readonly hasChildren?: boolean;
+}
+
 interface HarnessOptions {
   readonly settings?: Partial<AutoRunSettings>;
-  readonly subIssues?: readonly { number: number; title: string; labels: string[]; state: "open" | "closed"; openBlockedByNumbers: number[] }[];
+  /** The open issue queue the repository reports, in any order. */
+  readonly issues?: readonly QueueIssue[];
   /** Working-tree entries reported after an implementer runs. */
   readonly producesChanges?: boolean;
   readonly implementerFails?: boolean;
@@ -37,15 +51,8 @@ interface HarnessOptions {
   readonly githubAuthenticationFails?: boolean;
   /** Simulates a hitl pr-doctor applying fixes the user approved, mid-wait. */
   readonly dirtyDuringWait?: boolean;
-  /** More than one open spec, for the scope setting. Issue n belongs to spec n % 10. */
-  readonly specs?: readonly { number: number; title: string; createdAt: string }[];
   /** The branch checked out when the run starts. Defaults to `main`. */
   readonly startBranch?: string;
-}
-
-/** With multiple specs, an issue's parent is encoded in its number: 121 → spec 12. */
-function parentOf(issueNumber: number): number {
-  return Math.floor(issueNumber / 10);
 }
 
 function harness(options: HarnessOptions = {}): Harness {
@@ -55,6 +62,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const gitCalls: string[] = [];
   const githubCalls: string[] = [];
   const saved: AutoRunRecord[] = [];
+  const states: AutoRunState[] = [];
   const state = { cleared: false };
   const pullRequests = new Map<number, { state: "open" | "closed" | "merged" }>();
   const branches = new Set<string>(["main", "feature/wip"]);
@@ -65,10 +73,10 @@ function harness(options: HarnessOptions = {}): Harness {
   let nextPr = 56;
   let hitlPolls = 0;
 
-  const subIssues = options.subIssues ?? [
+  const queue = options.issues ?? [
     { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open" as const, openBlockedByNumbers: [] },
   ];
-  const open = new Set(subIssues.filter((entry) => entry.state === "open").map((entry) => entry.number));
+  const open = new Set(queue.filter((entry) => entry.state === "open").map((entry) => entry.number));
 
   const git: GitClient = {
     currentBranch: async () => currentBranch,
@@ -97,11 +105,19 @@ function harness(options: HarnessOptions = {}): Harness {
       githubCalls.push("checkAuthentication");
       if (options.githubAuthenticationFails === true) throw new Error("GitHub CLI command failed");
     },
-    listSpecIssues: async () => {
-      githubCalls.push("listSpecIssues");
-      return options.specs ?? [{ number: 12, title: "Offline sync", createdAt: "2026-01-01T00:00:00.000Z" }];
+    listImplementableIssues: async () => {
+      githubCalls.push("listImplementableIssues");
+      const candidates = queue.filter((entry) => open.has(entry.number)).map((entry) => ({
+        number: entry.number,
+        title: entry.title,
+        labels: entry.labels,
+        state: "open" as const,
+        openBlockedByNumbers: entry.openBlockedByNumbers.filter((number) => open.has(number)),
+        createdAt: entry.createdAt ?? `2026-01-${String(entry.number % 28 + 1).padStart(2, "0")}T00:00:00.000Z`,
+        hasChildren: entry.hasChildren === true,
+      }));
+      return { candidates };
     },
-    listSubIssues: async (parent) => subIssues.filter((entry) => open.has(entry.number) && (options.specs === undefined || parentOf(entry.number) === parent)),
     getIssue: async (number) => ({ state: open.has(number) ? "open" : "closed" }),
     createPullRequest: async () => { const number = nextPr++; pullRequests.set(number, { state: "open" }); return number; },
     findOpenPullRequestForBranch: async (branch) => {
@@ -144,7 +160,7 @@ function harness(options: HarnessOptions = {}): Harness {
     return issueForBranch(branchesByPr.get(number) ?? "");
   }
   function isHitl(number: number): boolean {
-    return subIssues.find((entry) => entry.number === issueForPr(number))?.labels.includes("ai:hitl") === true;
+    return queue.find((entry) => entry.number === issueForPr(number))?.labels.includes("ai:hitl") === true;
   }
 
   const launcher: AutoRunLauncher = {
@@ -200,6 +216,7 @@ function harness(options: HarnessOptions = {}): Harness {
     // A macrotask, not an immediately-resolved promise: a microtask-only poll
     // would starve the event loop and never observe an abort.
     sleep: () => new Promise((resolve) => { setImmediate(resolve); }),
+    onStateChange: (next) => { if (next !== undefined) states.push(next); },
   });
 
   return {
@@ -210,6 +227,7 @@ function harness(options: HarnessOptions = {}): Harness {
     gitCalls,
     githubCalls,
     saved,
+    states,
     state,
     pullRequests,
     setDirty: () => { dirty = true; },
@@ -308,7 +326,7 @@ test("review mode launches a pr-doctor-afk and commits its fixes as a second com
 
 test("a hitl issue waits at its pull request and continues once the user merges", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "merged",
   });
   await context.engine.start();
@@ -321,7 +339,7 @@ test("a hitl issue waits at its pull request and continues once the user merges"
 
 test("a hitl pull request closed unmerged stops the run and leaves the branch alone", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "closed",
   });
   await context.engine.start();
@@ -375,14 +393,12 @@ test("an unauthenticated GitHub CLI refuses resume without rejecting a dirty rec
   const result = await context.engine.resume({
     version: 1,
     runId: "run_interrupted",
-    specNumber: 12,
     issueNumbers: [34],
     currentIssue: 34,
     phase: "commit",
     branch: "aboard/34-add-retry-backoff",
     prNumber: undefined,
     reviewMode: false,
-    scope: "spec",
     reviewedIssues: [],
     startedAt: "2026-01-01T00:00:00.000Z",
   });
@@ -394,7 +410,7 @@ test("an unauthenticated GitHub CLI refuses resume without rejecting a dirty rec
 
 test("a second start returns the active run instead of starting another", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
   });
   await context.engine.start();
   const second = await context.engine.start();
@@ -406,7 +422,7 @@ test("a second start returns the active run instead of starting another", async 
 
 test("an active run takes precedence over a dirty working tree without repeating authentication preflight", async () => {
   const context = harness({
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
   });
   assert.equal((await context.engine.start()).started, true);
   context.setDirty();
@@ -424,7 +440,7 @@ test("an active run takes precedence over a dirty working tree without repeating
 
 test("issues are processed serially and re-derived after every merge", async () => {
   const context = harness({
-    subIssues: [
+    issues: [
       { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
       { number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
     ],
@@ -434,47 +450,65 @@ test("issues are processed serially and re-derived after every merge", async () 
 
   const branchOrder = context.gitCalls.filter((call) => call.startsWith("createBranch"));
   assert.deepEqual(branchOrder, ["createBranch aboard/34-add-retry-backoff main", "createBranch aboard/37-later main"]);
-  assert.match(context.notifications.join("\n"), /spec #12 complete \(2 issues\)/);
+  assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
 });
 
-test("scope spec stops after one spec and reports what remains", async () => {
+test("the queue drains a parentless issue and a spec child alike, in creation order", async () => {
   const context = harness({
-    specs: [
-      { number: 12, title: "Offline sync", createdAt: "2026-01-01T00:00:00.000Z" },
-      { number: 13, title: "Search", createdAt: "2026-02-01T00:00:00.000Z" },
-    ],
-    subIssues: [
-      { number: 121, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
-      { number: 131, title: "Index the corpus", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
+    issues: [
+      // The spec itself is an umbrella and never enters the queue, even though
+      // it is open and older than everything else.
+      { number: 12, title: "Offline sync", labels: ["ai:spec"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z", hasChildren: true },
+      { number: 40, title: "Fix the parser", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+      { number: 121, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
     ],
   });
-  await context.engine.start();
+  const result = await context.engine.start();
+  assert.equal(result.started, true);
+  assert.deepEqual(result.started && result.issues.map((issue) => issue.number), [40, 121]);
   await context.engine.settle();
 
-  assert.match(context.notifications.join("\n"), /spec #12 complete \(1 issue\)\. 1 open spec remains — run \/auto to continue/);
-  assert.equal(context.notifications.join("\n").includes("issue #131"), false, "the next spec is not touched");
-});
-
-test("scope all continues into the next open spec", async () => {
-  const context = harness({
-    settings: { scope: "all" },
-    specs: [
-      { number: 12, title: "Offline sync", createdAt: "2026-01-01T00:00:00.000Z" },
-      { number: 13, title: "Search", createdAt: "2026-02-01T00:00:00.000Z" },
-    ],
-    subIssues: [
-      { number: 121, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
-      { number: 131, title: "Index the corpus", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
-    ],
-  });
-  await context.engine.start();
-  await context.engine.settle();
-
-  const log = context.notifications.join("\n");
-  assert.match(log, /continuing into spec #13 "Search"/);
-  assert.match(log, /issue #131 merged/);
-  assert.match(log, /spec #13 complete \(1 issue\)\. 0 open specs remain/);
+  assert.deepEqual(
+    context.gitCalls.filter((call) => call.startsWith("createBranch")),
+    ["createBranch aboard/40-fix-the-parser main", "createBranch aboard/121-add-retry-backoff main"],
+  );
+  assert.match(context.notifications.join("\n"), /queue drained \(2 issues implemented\)/);
+  assert.equal(/#12\b/u.test(context.notifications.join("\n")), false, "the spec is not queued and not reported");
   assert.equal(context.state.cleared, true);
+});
+
+test("an empty queue refuses the run and names why each candidate was skipped", async () => {
+  const unlabelled = harness({
+    issues: [{ number: 40, title: "Fix the parser", labels: [], state: "open", openBlockedByNumbers: [] }],
+  });
+  const refused = await unlabelled.engine.start();
+  assert.equal(refused.started, false);
+  assert.match((refused as { reason: string }).reason, /#40 \(unclassified: neither ai:afk nor ai:hitl\)/);
+  assert.equal(unlabelled.launches.length, 0);
+  assert.equal(unlabelled.saved.length, 0);
+
+  // Nothing labelled at all is a different problem with a different fix, so it
+  // must not read as "everything is unclassified".
+  const empty = harness({ issues: [] });
+  const nothing = await empty.engine.start();
+  assert.equal(nothing.started, false);
+  assert.equal((nothing as { reason: string }).reason, "no open issue is labelled ai:afk or ai:hitl");
+});
+
+test("progress expands when an older blocked issue becomes ready", async () => {
+  const context = harness({
+    issues: [
+      { number: 33, title: "Blocked first", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [34], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 34, title: "Unblock it", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+      { number: 35, title: "Still queued", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
+    ],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]), [34, 33, 35]);
+  assert.equal(context.states.some((state) => state.currentIssue === 33 && state.completedCount === 1 && state.totalCount === 3), true);
+  assert.equal(context.states.some((state) => state.currentIssue === 35 && state.completedCount === 2 && state.totalCount === 3), true);
 });
 
 test("resume re-derives from the repository rather than trusting the record", async () => {
@@ -484,14 +518,12 @@ test("resume re-derives from the repository rather than trusting the record", as
   const record: AutoRunRecord = {
     version: 1,
     runId: "run_old",
-    specNumber: 12,
     issueNumbers: [34],
     currentIssue: 34,
     phase: "merge",
     branch: "aboard/34-add-retry-backoff",
     prNumber: 56,
     reviewMode: false,
-    scope: "spec",
     reviewedIssues: [],
     startedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -501,12 +533,42 @@ test("resume re-derives from the repository rather than trusting the record", as
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
 });
 
+test("a record an older version wrote against one spec resumes onto the flat queue", async () => {
+  const context = harness({
+    issues: [
+      { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      // Unreachable under the old model — no parent spec — and processed now.
+      { number: 40, title: "Fix the parser", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  const legacy = parseAutoRunRecord({
+    version: 1,
+    runId: "run_legacy",
+    specNumber: 12,
+    scope: "spec",
+    issueNumbers: [34],
+    currentIssue: 34,
+    phase: "branch",
+    branch: "aboard/34-add-retry-backoff",
+    reviewMode: false,
+    startedAt: "2026-01-01T00:00:00.000Z",
+  });
+  assert.ok(legacy);
+  assert.equal((await context.engine.resume(legacy)).started, true);
+  await context.engine.settle();
+
+  assert.deepEqual(
+    context.gitCalls.filter((call) => call.startsWith("createBranch")),
+    ["createBranch aboard/34-add-retry-backoff main", "createBranch aboard/40-fix-the-parser main"],
+  );
+});
+
 test("a hitl doctor's approved fixes are committed to the pull request before it merges", async () => {
   // Without this the user merges a pull request that does not contain the
   // changes they just approved, and the work is stranded uncommitted.
   const context = harness({
     settings: { review: true },
-    subIssues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] }],
     resolveHitl: "merged",
     dirtyDuringWait: true,
   });
@@ -544,14 +606,12 @@ test("a persisted pull request that no longer exists does not skip the pr phase"
   const record: AutoRunRecord = {
     version: 1,
     runId: "run_old",
-    specNumber: 12,
     issueNumbers: [34],
     currentIssue: 34,
     phase: "await-approval",
     branch: "aboard/34-add-retry-backoff",
     prNumber: 999,
     reviewMode: false,
-    scope: "spec",
     reviewedIssues: [],
     startedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -570,14 +630,12 @@ test("a resumed run keeps the review mode it started with, not the current setti
   const record: AutoRunRecord = {
     version: 1,
     runId: "run_old",
-    specNumber: 12,
     issueNumbers: [34],
     currentIssue: 34,
     phase: "branch",
     branch: "aboard/34-add-retry-backoff",
     prNumber: undefined,
     reviewMode: true,
-    scope: "spec",
     reviewedIssues: [],
     startedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -592,14 +650,12 @@ test("a review already recorded is not repeated after a restart", async () => {
   const record: AutoRunRecord = {
     version: 1,
     runId: "run_old",
-    specNumber: 12,
     issueNumbers: [34],
     currentIssue: 34,
     phase: "review",
     branch: "aboard/34-add-retry-backoff",
     prNumber: undefined,
     reviewMode: true,
-    scope: "spec",
     // The in-memory owner map is empty after a restart and a review that found
     // nothing leaves no commit, so the record is the only witness.
     reviewedIssues: [34],

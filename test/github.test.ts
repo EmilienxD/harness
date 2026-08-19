@@ -15,6 +15,7 @@ class FixtureGh implements GhExecutor {
 
 const repo = JSON.stringify({ owner: { login: "EmilienxD" }, name: "aboard" });
 const graph = (value: unknown) => JSON.stringify({ data: { repository: value } });
+const endPage = { hasNextPage: false, endCursor: null };
 
 test("authentication preflight is fresh, targets the workspace repository, and primes GraphQL identity", async () => {
   let failing = true;
@@ -24,7 +25,7 @@ test("authentication preflight is fresh, targets the workspace repository, and p
       if (failing) throw new GitHubBoundaryError("command-failed", "GitHub CLI command failed");
       return repo;
     }
-    return graph({ issues: { nodes: [] } });
+    return graph({ issues: { nodes: [], pageInfo: endPage } });
   });
   const github = new GitHubClient(gh);
 
@@ -34,7 +35,7 @@ test("authentication preflight is fresh, targets the workspace repository, and p
   );
   failing = false;
   await github.checkAuthentication();
-  assert.deepEqual(await github.listSpecIssues(), []);
+  assert.deepEqual((await github.listImplementableIssues()).candidates, []);
 
   assert.equal(gh.calls.filter((args) => args[0] === "repo").length, 2);
   assert.equal(gh.calls.filter((args) => args[0] === "api").length, 1);
@@ -249,20 +250,131 @@ test("the size bound accepts the write and warns rather than deadlocking the Man
   assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), true);
 });
 
+/** One page of open issues as the GraphQL query returns it. */
+function openIssues(): string {
+  const nodes = [
+    { number: 16, title: "ready hitl", createdAt: "2026-01-01T00:00:00Z", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }], pageInfo: endPage } },
+    { number: 17, title: "blocked afk", createdAt: "2026-01-02T00:00:00Z", labels: { nodes: [{ name: "ai:afk" }], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }], pageInfo: endPage } },
+    { number: 18, title: "unclassified", createdAt: "2026-01-03T00:00:00Z", labels: { nodes: [], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [], pageInfo: endPage } },
+    { number: 19, title: "umbrella", createdAt: "2026-01-04T00:00:00Z", labels: { nodes: [{ name: "ai:spec" }], pageInfo: endPage }, subIssues: { totalCount: 3 }, blockedBy: { nodes: [], pageInfo: endPage } },
+  ];
+  return graph({ issues: { nodes, pageInfo: endPage } });
+}
+
 test("derives readiness solely from dependency closedness and flags classification", async () => {
-  const gh = new FixtureGh((args) => {
-    if (args[0] === "repo") return repo;
-    return graph({ issues: { nodes: [
-      { number: 16, title: "ready hitl", labels: { nodes: [{ name: "ai:hitl" }] }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }] } },
-      { number: 17, title: "blocked afk", labels: { nodes: [{ name: "ai:afk" }] }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }] } },
-      { number: 18, title: "unclassified", labels: { nodes: [] }, blockedBy: { nodes: [] } },
-      { number: 19, title: "umbrella", labels: { nodes: [{ name: "ai:spec" }] }, blockedBy: { nodes: [] } },
-    ] } });
-  });
+  const gh = new FixtureGh((args) => args[0] === "repo" ? repo : openIssues());
   const issues = await new GitHubClient(gh).listRoadmapIssues();
   assert.deepEqual(issues.map((issue) => [issue.number, issue.ready, issue.disposition]), [
     [16, true, "hitl"], [17, false, "afk"], [18, true, "unclassified"],
   ]);
+});
+
+test("the queue and the briefing are projected from one open-issue read", async () => {
+  const gh = new FixtureGh((args) => args[0] === "repo" ? repo : openIssues());
+  const github = new GitHubClient(gh);
+  const { candidates } = await github.listImplementableIssues();
+
+  // The umbrella and the unclassified issue are the queue's to judge, so the
+  // boundary hands them over rather than filtering: selection lives in the
+  // domain, and both reads must agree about the rows they share.
+  assert.deepEqual(candidates.map((issue) => issue.number), [16, 17, 18, 19]);
+  assert.deepEqual(candidates.map((issue) => issue.hasChildren), [false, false, false, true]);
+  assert.deepEqual(candidates.map((issue) => issue.createdAt), [
+    "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z", "2026-01-04T00:00:00Z",
+  ]);
+  assert.deepEqual(candidates.find((issue) => issue.number === 17)?.openBlockedByNumbers, [16]);
+  assert.deepEqual(candidates.find((issue) => issue.number === 16)?.openBlockedByNumbers, []);
+
+  const briefing = await github.listRoadmapIssues();
+  for (const issue of briefing) {
+    const candidate = candidates.find((entry) => entry.number === issue.number);
+    assert.equal(issue.ready, candidate?.openBlockedByNumbers.length === 0);
+    assert.equal(issue.title, candidate?.title);
+  }
+
+  // Ascending creation order establishes priority before cursor pagination.
+  const query = gh.calls.flat().find((arg) => arg.startsWith("query=")) ?? "";
+  assert.match(query, /orderBy:\{field:CREATED_AT,direction:ASC\}/);
+  assert.match(query, /subIssues\(first:1\)\{totalCount\}/);
+  assert.match(query, /pageInfo\{hasNextPage endCursor\}/);
+});
+
+test("the queue paginates past one hundred permanently unprocessable issues", async () => {
+  const oldUmbrellas = Array.from({ length: 100 }, (_, index) => ({
+    number: index + 1,
+    title: `Spec ${index + 1}`,
+    createdAt: new Date(Date.UTC(2025, 0, 1, 0, index)).toISOString(),
+    labels: { nodes: [{ name: "ai:spec" }], pageInfo: endPage },
+    subIssues: { totalCount: 1 },
+    blockedBy: { nodes: [], pageInfo: endPage },
+  }));
+  const implementable = {
+    number: 101,
+    title: "Newest work",
+    createdAt: "2026-01-01T00:00:00Z",
+    labels: { nodes: [{ name: "ai:afk" }], pageInfo: endPage },
+    subIssues: { totalCount: 0 },
+    blockedBy: { nodes: [], pageInfo: endPage },
+  };
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "repo") return repo;
+    const secondPage = args.includes("after=issues-100");
+    return graph({ issues: secondPage
+      ? { nodes: [implementable], pageInfo: endPage }
+      : { nodes: oldUmbrellas, pageInfo: { hasNextPage: true, endCursor: "issues-100" } } });
+  });
+  const { candidates } = await new GitHubClient(gh).listImplementableIssues();
+  assert.equal(candidates.length, 101);
+  assert.equal(candidates.at(-1)?.number, 101);
+  assert.equal(gh.calls.some((args) => args.includes("after=issues-100")), true);
+});
+
+test("label and blocker connections are completed before queue classification", async () => {
+  const initial = {
+    number: 42,
+    title: "Deep connections",
+    createdAt: "2026-01-01T00:00:00Z",
+    labels: { nodes: [{ name: "enhancement" }], pageInfo: { hasNextPage: true, endCursor: "labels-100" } },
+    subIssues: { totalCount: 0 },
+    blockedBy: { nodes: [{ number: 1, state: "CLOSED" }], pageInfo: { hasNextPage: true, endCursor: "blocked-100" } },
+  };
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "repo") return repo;
+    const query = args.find((arg) => arg.startsWith("query=")) ?? "";
+    if (query.includes("labels(first:100,after:$after)")) {
+      return graph({ issue: { labels: { nodes: [{ name: "ai:afk" }], pageInfo: endPage } } });
+    }
+    if (query.includes("blockedBy(first:100,after:$after)")) {
+      return graph({ issue: { blockedBy: { nodes: [{ number: 999, state: "OPEN" }], pageInfo: endPage } } });
+    }
+    return graph({ issues: { nodes: [initial], pageInfo: endPage } });
+  });
+  const candidate = (await new GitHubClient(gh).listImplementableIssues()).candidates[0];
+  assert.deepEqual(candidate?.labels, ["enhancement", "ai:afk"]);
+  assert.deepEqual(candidate?.openBlockedByNumbers, [999]);
+  assert.equal(gh.calls.some((args) => args.includes("after=labels-100")), true);
+  assert.equal(gh.calls.some((args) => args.includes("after=blocked-100")), true);
+});
+
+test("an issue prompt receives labels beyond the first connection page", async () => {
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "repo") return repo;
+    const query = args.find((arg) => arg.startsWith("query=")) ?? "";
+    if (query.includes("labels(first:100,after:$after)")) {
+      return graph({ issue: { labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage } } });
+    }
+    return graph({ issue: {
+      number: 17,
+      title: "Review",
+      body: "Contract",
+      state: "OPEN",
+      labels: { nodes: [{ name: "enhancement" }], pageInfo: { hasNextPage: true, endCursor: "labels-100" } },
+      parent: null,
+      closedByPullRequestsReferences: { nodes: [] },
+    } });
+  });
+  assert.deepEqual((await new GitHubClient(gh).getIssue(17))?.labels, ["enhancement", "ai:hitl"]);
+  assert.equal(gh.calls.some((args) => args.includes("after=labels-100")), true);
 });
 
 test("resolves issue parent, PR state, threads, diff, and publishes line comments", async () => {
@@ -272,7 +384,7 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
     if (args[0] === "api" && args[1]?.startsWith("repos/")) return "{}";
     const query = args.find((arg) => arg.startsWith("query=")) ?? "";
     if (query.includes("reviewThreads(first:100){nodes{id")) return graph({ pullRequest: { reviewThreads: { nodes: [{ id: "T1", isResolved: false, path: "src/a.ts", line: 7, comments: { nodes: [{ body: "Bug", author: { login: "emb" } }] } }] } } });
-    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract", state: "OPEN", labels: { nodes: [{ name: "ai:hitl" }] }, parent: { number: 9 }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
+    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract", state: "OPEN", labels: { nodes: [{ name: "ai:hitl" }], pageInfo: endPage }, parent: { number: 9 }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
     return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
   });
   const github = new GitHubClient(gh);

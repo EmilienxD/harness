@@ -202,8 +202,6 @@ function briefingSources(
       const state = autoRunState();
       if (state === undefined) return undefined;
       return {
-        specNumber: state.specNumber,
-        specTitle: state.specTitle,
         phase: state.phase,
         currentIssue: state.currentIssue,
         completedCount: state.completedCount,
@@ -699,7 +697,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (state === undefined) {
       autoRunStatus.hide();
     } else {
-      autoRunStatus.text = `$(sync~spin) Auto-run: spec #${state.specNumber} (${state.completedCount + 1}/${state.totalCount})`;
+      autoRunStatus.text = `$(sync~spin) Auto-run: issue #${state.currentIssue ?? "?"} (${state.completedCount + 1}/${state.totalCount})`;
       autoRunStatus.tooltip = state.waiting
         ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Chrome ${state.chromeEnabled ? "on" : "off"}. Click to stop the run.`
         : `${state.phase} — issue #${state.currentIssue ?? "?"}. Chrome ${state.chromeEnabled ? "on" : "off"}. Click to stop the run.`;
@@ -902,7 +900,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     try {
       const result = await autoRun.start(chrome ? { chrome: true } : {});
       if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
-      else void window.showInformationMessage(`Auto-run started on spec #${result.spec.number} — ${result.issues.length} issue(s), review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
+      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued, review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
   };
   context.subscriptions.push(
@@ -954,7 +952,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }
     autoRunResumeDeferred = false;
     const choice = await window.showWarningMessage(
-      `An aboard auto-run for spec #${record.specNumber} was interrupted at the ${record.phase} phase of issue #${record.currentIssue ?? "?"}. Resume it?`,
+      `An aboard auto-run was interrupted at the ${record.phase} phase of issue #${record.currentIssue ?? "?"}. Resume it?`,
       { modal: false },
       "Resume", "Discard",
     );

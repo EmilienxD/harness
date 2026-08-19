@@ -75,7 +75,7 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
       unreviewedMergeCount: 2,
     }),
     roadmap: async () => roadmapOf("- [ ] Ship the bridge\n- [x] Rotate the tokens"),
-    autoRun: () => ({ specNumber: 4, specTitle: "Bridge hardening", phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
+    autoRun: () => ({ phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
   }), fleet, new WriteLease());
   const rendered = await briefings.render(new AbortController().signal);
 
@@ -94,6 +94,7 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
   assert.match(rendered, /^2\. \[x\] Rotate the tokens$/m);
   assert.match(rendered, /<\/aboard-roadmap>/);
   assert.match(rendered, /PR #21 is hitl and waiting/);
+  assert.match(rendered, /phase await-approval, 1 issue\(s\) done/);
   assert.match(rendered, /default branch main \| verify with npm run check/);
 });
 
@@ -136,7 +137,7 @@ test("hook output stays ASCII-only so the Claude TUI renders it cleanly", async 
       unreviewedMergeCount: 2,
     }),
     roadmap: async () => roadmapOf(LONG_ROADMAP),
-    autoRun: () => ({ specNumber: 4, specTitle: "Bridge hardening", phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
+    autoRun: () => ({ phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
   }), fleet, new WriteLease(), { write: async (_slice, content) => content });
   // The briefing, including its truncated roadmap and oversized-block preview.
   const rendered = await briefings.render(new AbortController().signal);
@@ -489,14 +490,14 @@ test("/auto and /review-pr are performed by the extension, reported to the user,
     { spawnInteractive: async () => assert.fail("an extension action must not launch an agent") },
     () => new Date("2026-07-30T14:31:00.000Z"),
     {
-      startAutoRun: async () => { started.push("auto"); return { started: true, spec: { number: 12, title: "Offline sync" }, issues: [{ number: 34 }, { number: 35 }] }; },
+      startAutoRun: async () => { started.push("auto"); return { started: true, issues: [{ number: 34 }, { number: 35 }] }; },
       reviewPullRequest: async () => { started.push("review"); return { action: "focused", prNumber: 56, type: "implementer" }; },
       reopenSession: async () => assert.fail("no session reopen"),
     },
   );
   const auto = await prompts.handle(managerId, "/auto");
   assert.equal(auto.intercepted, true);
-  assert.equal(auto.message, "auto-run started on spec #12 with 2 issues, Chrome off.");
+  assert.equal(auto.message, "auto-run started with 2 issues queued, Chrome off.");
   const review = await prompts.handle(managerId, "/review-pr");
   assert.equal(review.message, "Focused the implementer terminal for PR #56.");
   assert.deepEqual(started, ["auto", "review"]);
@@ -504,7 +505,7 @@ test("/auto and /review-pr are performed by the extension, reported to the user,
   // The Manager is told later, batched into the next real prompt, rather than
   // being woken to narrate a mechanical action.
   const drained = await prompts.handle(managerId, "what changed?");
-  assert.match(String(drained.additionalContext), /you ran \/auto: auto-run started on spec #12/);
+  assert.match(String(drained.additionalContext), /you ran \/auto: auto-run started with 2 issues queued/);
   assert.match(String(drained.additionalContext), /you ran \/review-pr: Focused the implementer terminal/);
 });
 
@@ -567,14 +568,14 @@ test("/auto --chrome passes one explicit Chrome choice to the run", async () => 
     { spawnInteractive: async () => assert.fail("no agent") },
     undefined,
     {
-      startAutoRun: async (options) => { starts.push(options); return { started: true, spec: { number: 12 }, issues: [{ number: 34 }], chromeEnabled: true }; },
+      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }], chromeEnabled: true }; },
       reviewPullRequest: async () => ({ action: "none" }),
       reopenSession: async () => assert.fail("no session reopen"),
     },
   );
   const result = await prompts.handle(managerId, "/auto --chrome");
   assert.deepEqual(starts, [{ chrome: true }]);
-  assert.equal(result.message, "auto-run started on spec #12 with 1 issue, Chrome on.");
+  assert.equal(result.message, "auto-run started with 1 issue queued, Chrome on.");
 });
 
 test("an unavailable extension action is reported instead of falling through to the Manager", async () => {

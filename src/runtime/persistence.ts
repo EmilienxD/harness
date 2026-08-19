@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { AUTO_RUN_PHASES, AUTO_RUN_SCOPES, type AutoRunPhase, type AutoRunRecord, type AutoRunScope } from "../domain/auto-run.js";
+import { AUTO_RUN_PHASES, type AutoRunPhase, type AutoRunRecord } from "../domain/auto-run.js";
 import type { FleetPersistenceDto } from "../domain/fleet.js";
 import type { SessionLedgerDto } from "../domain/session-ledger.js";
 import { parseFleetPersistenceDto, parseSessionLedgerDto } from "../domain/validation.js";
@@ -64,22 +64,23 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
   const positiveInteger = (candidate: unknown): number | undefined =>
     Number.isInteger(candidate) && (candidate as number) > 0 ? (candidate as number) : undefined;
   const runId = typeof record.runId === "string" && record.runId.trim().length > 0 ? record.runId : undefined;
-  const specNumber = positiveInteger(record.specNumber);
   const startedAt = typeof record.startedAt === "string" && Number.isFinite(Date.parse(record.startedAt)) ? record.startedAt : undefined;
   const phase = AUTO_RUN_PHASES.includes(record.phase as AutoRunPhase) ? (record.phase as AutoRunPhase) : undefined;
-  const scope = AUTO_RUN_SCOPES.includes(record.scope as AutoRunScope) ? (record.scope as AutoRunScope) : undefined;
   const issueNumbers = Array.isArray(record.issueNumbers)
     ? record.issueNumbers.map(positiveInteger)
     : undefined;
+  // `specNumber` and `scope` are deliberately not read. A record an older
+  // version wrote still carries them and still parses: the engine re-derives
+  // every fact from git and GitHub, so back-compat here is by removal rather
+  // than by migration.
   if (
-    runId === undefined || specNumber === undefined || startedAt === undefined || phase === undefined
-    || scope === undefined || issueNumbers === undefined || issueNumbers.some((number) => number === undefined)
+    runId === undefined || startedAt === undefined || phase === undefined
+    || issueNumbers === undefined || issueNumbers.some((number) => number === undefined)
     || typeof record.reviewMode !== "boolean"
   ) return undefined;
   return {
     version: 1,
     runId,
-    specNumber,
     issueNumbers: issueNumbers as number[],
     currentIssue: positiveInteger(record.currentIssue),
     phase,
@@ -88,7 +89,6 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     reviewMode: record.reviewMode,
     // Records written before Chrome launch intent existed resume safely off.
     chromeEnabled: record.chromeEnabled === true,
-    scope,
     // Optional: records written before this field existed degrade to "no safe
     // branch to return to", and a run that started on a detached HEAD stored
     // none either. The end-of-run restore is skipped in both cases.

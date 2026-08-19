@@ -332,19 +332,6 @@
           "default": false,
           "description": "Launch a pr-doctor after each implementation during an auto-run. Automated review stays opt-in; the explicit review action is always available."
         },
-        "aboard.autoRun.scope": {
-          "type": "string",
-          "enum": [
-            "spec",
-            "all"
-          ],
-          "enumDescriptions": [
-            "Stop after one spec issue's children are processed.",
-            "Continue into the next open spec without stopping."
-          ],
-          "default": "spec",
-          "description": "How much one auto-run invocation covers. A spec is the natural human review unit, and stopping there bounds the blast radius of the run's irreversible acts."
-        },
         "aboard.autoRun.pauseAfterHitl": {
           "type": "boolean",
           "default": false,

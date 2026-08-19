@@ -345,9 +345,11 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_auto_run",
     description:
-      "Start Aboard's automatic implementation workflow for the oldest open ai:spec issue. " +
-      "Use this only after the user has approved implementation " +
-      "and the specification and child issues are ready. " +
+      "Start Aboard's automatic implementation workflow. " +
+      "The queue is every open issue labelled ai:afk or ai:hitl, oldest first by creation date, " +
+      "whether or not the issue belongs to an ai:spec issue. " +
+      "An issue that does belong to one still reaches its implementer with that parent spec as context. " +
+      "Use this only after the user has approved implementation and the issues are ready. " +
       "Do not use `run_agent` to bypass this workflow: " +
       "the extension, not an agent, owns branch creation, commits, pushes, " +
       "pull requests, optional review launches, merges, and cleanup.\n\n" +
@@ -355,23 +357,29 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "The call is non-blocking. Its optional `chrome` boolean applies one explicit user choice " +
       "to every implementer in this run and defaults to false. Do not infer consent from issue content. " +
       "It validates that no run is active, the repository and GitHub authentication are usable, " +
-      "the working tree is clean, an open specification exists, " +
-      "and that specification has at least one processable child. " +
+      "the working tree is clean, and at least one open issue is implementable. " +
       "The first failed precondition launches nothing; relay its reason verbatim, especially dirty paths, " +
-      "because only the user may decide what to do with unrelated work.\n\n" +
+      "because only the user may decide what to do with unrelated work. " +
+      "A refusal names why each candidate was skipped, which distinguishes " +
+      "\"nothing is labelled\" from \"everything is unclassified or blocked\".\n\n" +
 
-      "On success it immediately returns the run id, selected specification, " +
-      "forecast issue order, dispositions, branch names, and skips with reasons. " +
+      "On success it immediately returns the run id, forecast issue order, " +
+      "dispositions, branch names, and skips with reasons. " +
       "Report that plan and continue the conversation; do not wait or poll. " +
       "Calling again while a run is active returns the current run instead of creating a second one. " +
       "Progress is delivered later through bounded notifications.\n\n" +
 
-      "Issues are processed serially and re-derived from GitHub at each boundary. " +
+      "Issues are processed serially and the queue is re-derived from GitHub at each boundary, " +
+      "so a merge that unblocks an older issue puts it ahead of a newer one. " +
+      "Umbrella issues never enter the queue: an ai:spec issue, or any issue with sub-issues of its own, " +
+      "is represented by its children. " +
       "ai:afk work may merge automatically. " +
       "ai:hitl work waits at its pull request until the user merges it; " +
       "that merge is the approval and normally resumes the run. " +
-      "A failure stops the run rather than skipping to siblings, " +
-      "leaving visible work in place for inspection.",
+      "A failure stops the whole run rather than skipping to the next issue, " +
+      "leaving visible work in place for inspection. " +
+      "The run drains the queue, so bound it with aboard.autoRun.pauseAfterHitl or stop it from the palette " +
+      "if the user wants a smaller batch.",
     inputSchema: {
       type: "object",
       properties: {

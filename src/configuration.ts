@@ -1,7 +1,7 @@
 import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, parseClaudeCommand, type EffortLevel } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 import { DEFAULT_TRANSCRIPT_BACKUPS } from "./claude/transcript-backup.js";
-import { AUTO_RUN_SCOPES, MERGE_STRATEGIES, type AutoRunScope, type AutoRunSettings, type MergeStrategy } from "./domain/auto-run.js";
+import { MERGE_STRATEGIES, type AutoRunSettings, type MergeStrategy } from "./domain/auto-run.js";
 
 export interface ConfigurationReader { get(section: string): unknown; }
 export interface AboardConfiguration {
@@ -53,7 +53,6 @@ export const ABOARD_SETTINGS = [
   "aboard.manager.roadmapReminderBytes",
   "aboard.manager.transcriptBackups",
   "aboard.autoRun.review",
-  "aboard.autoRun.scope",
   "aboard.autoRun.pauseAfterHitl",
   "aboard.autoRun.mergeStrategy",
   "aboard.autoRun.pollSeconds",
@@ -203,7 +202,6 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       // Automated review stays opt-in: spec section 7.5's invariant is
       // unchanged, only its shape is.
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
-      scope: choice<AutoRunScope>(reader, "aboard.autoRun.scope", AUTO_RUN_SCOPES, "spec", diagnostics),
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),
       pollSeconds: integer(reader, "aboard.autoRun.pollSeconds", 30, 1, 3_600, diagnostics),

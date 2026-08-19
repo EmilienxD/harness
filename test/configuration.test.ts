@@ -9,7 +9,7 @@ test("configuration validates untrusted values and reports actionable fallbacks"
     ["aboard.bridge.port", 70_000],
     ["aboard.launch.maxInlinePromptChars", -1],
     ["aboard.manager.disallowedTools", ["Read", ""]],
-    ["aboard.autoRun.scope", "everything"],
+    ["aboard.autoRun.mergeStrategy", "cherry-pick"],
     ["aboard.autoRun.review", "yes"],
     ["aboard.timeouts.managerStop", 0],
   ]);
@@ -17,7 +17,7 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   assert.equal(result.value.bridgePort, 4823);
   assert.equal(result.value.maxInlinePromptChars, 4000);
   assert.deepEqual(result.value.managerDisallowedTools, []);
-  assert.deepEqual(result.value.autoRun, { review: false, scope: "spec", pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 30 });
+  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", pollSeconds: 30 });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
   assert.equal(result.diagnostics.length, 6);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
@@ -29,7 +29,6 @@ test("configuration accepts every supported launch and review setting", () => {
     "aboard.launch.maxInlinePromptChars": 12_000,
     "aboard.manager.disallowedTools": ["Bash", "Read(./src/**)"],
     "aboard.autoRun.review": true,
-    "aboard.autoRun.scope": "all",
     "aboard.autoRun.pauseAfterHitl": true,
     "aboard.autoRun.mergeStrategy": "rebase",
     "aboard.autoRun.pollSeconds": 15,
@@ -41,14 +40,14 @@ test("configuration accepts every supported launch and review setting", () => {
   assert.equal(result.diagnostics.length, 0);
   assert.equal(result.value.bridgePort, 0);
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash", "Read(./src/**)"]);
-  assert.deepEqual(result.value.autoRun, { review: true, scope: "all", pauseAfterHitl: true, mergeStrategy: "rebase", pollSeconds: 15 });
+  assert.deepEqual(result.value.autoRun, { review: true, pauseAfterHitl: true, mergeStrategy: "rebase", pollSeconds: 15 });
 });
 
 test("project settings accept flat, nested, and unprefixed keys", () => {
   const result = parseProjectSettings(JSON.stringify({
     "aboard.launch.maxInlinePromptChars": 6000,
     aboard: { timeouts: { managerPrompt: 45 }, manager: { disallowedTools: ["Bash"] } },
-    "autoRun.scope": "all",
+    "autoRun.mergeStrategy": "rebase",
     "bridge.port": null,
   }));
   assert.deepEqual(result.diagnostics, []);
@@ -56,7 +55,7 @@ test("project settings accept flat, nested, and unprefixed keys", () => {
     "aboard.launch.maxInlinePromptChars": 6000,
     "aboard.timeouts.managerPrompt": 45,
     "aboard.manager.disallowedTools": ["Bash"],
-    "aboard.autoRun.scope": "all",
+    "aboard.autoRun.mergeStrategy": "rebase",
   });
 });
 
@@ -80,9 +79,9 @@ test("a bad project value falls back exactly like a bad vs code value", () => {
 });
 
 test("project settings override globals, and an explicit vs code workspace value overrides both", () => {
-  const user = new Map<string, unknown>([["aboard.bridge.port", 6000], ["aboard.autoRun.scope", "all"], ["aboard.manager.disallowedTools", ["Bash"]]]);
+  const user = new Map<string, unknown>([["aboard.bridge.port", 6000], ["aboard.autoRun.mergeStrategy", "rebase"], ["aboard.manager.disallowedTools", ["Bash"]]]);
   const workspaceScope = new Map<string, unknown>([["aboard.bridge.port", 7000]]);
-  const project = parseProjectSettings(JSON.stringify({ "aboard.bridge.port": 8000, "aboard.autoRun.scope": "spec" }));
+  const project = parseProjectSettings(JSON.stringify({ "aboard.bridge.port": 8000, "aboard.autoRun.mergeStrategy": "merge" }));
   const reader = createLayeredReader({
     user: { get: (key) => user.get(key) },
     workspace: { get: (key) => workspaceScope.get(key) },
@@ -91,7 +90,7 @@ test("project settings override globals, and an explicit vs code workspace value
   const result = readAboardConfiguration(reader);
   assert.equal(result.diagnostics.length, 0);
   assert.equal(result.value.bridgePort, 7000, "an explicit .vscode value wins");
-  assert.equal(result.value.autoRun.scope, "spec", "the project file wins over a global");
+  assert.equal(result.value.autoRun.mergeStrategy, "merge", "the project file wins over a global");
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash"], "an unoverridden global still applies");
 });
 
@@ -101,7 +100,7 @@ test("manager launch changes are detected by value for the project settings relo
   assert.equal(managerLaunchChanged(base, read({})), false);
   assert.equal(managerLaunchChanged(base, read({ "aboard.launch.claudeCommand": "openclaude" })), true);
   assert.equal(managerLaunchChanged(base, read({ "aboard.manager.disallowedTools": ["Bash"] })), true);
-  assert.equal(managerLaunchChanged(base, read({ "aboard.autoRun.scope": "all" })), false);
+  assert.equal(managerLaunchChanged(base, read({ "aboard.autoRun.mergeStrategy": "rebase" })), false);
 });
 
 test("the launch effort setting accepts every level, and inherit means no flag", () => {

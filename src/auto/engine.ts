@@ -18,6 +18,7 @@ import {
   type AutoRunPhase,
   type AutoRunRecord,
   type AutoRunSettings,
+  type CandidateIssue,
   type PlannedIssue,
   type RepositoryFacts,
   type SkippedIssue,
@@ -31,14 +32,13 @@ import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHa
 export interface AutoRunGitHub {
   /** Proves that gh can authenticate to and resolve the workspace repository. */
   checkAuthentication(): Promise<void>;
-  listSpecIssues(): Promise<readonly { readonly number: number; readonly title: string; readonly createdAt: string }[]>;
-  listSubIssues(parentNumber: number): Promise<readonly {
-    readonly number: number;
-    readonly title: string;
-    readonly labels: readonly string[];
-    readonly state: "open" | "closed";
-    readonly openBlockedByNumbers: readonly number[];
-  }[]>;
+  /**
+   * Every open issue, oldest first — the complete queue this run drains,
+   * regardless of which spec (if any) an issue belongs to.
+   */
+  listImplementableIssues(): Promise<{
+    readonly candidates: readonly CandidateIssue[];
+  }>;
   getIssue(number: number): Promise<{ readonly state: "open" | "closed" } | undefined>;
   createPullRequest(input: { readonly title: string; readonly body: string; readonly head: string; readonly base: string }): Promise<number>;
   findOpenPullRequestForBranch(branch: string): Promise<number | undefined>;
@@ -94,8 +94,6 @@ export interface AutoRunEngineOptions {
 
 export interface AutoRunState {
   readonly runId: string;
-  readonly specNumber: number;
-  readonly specTitle: string;
   readonly phase: AutoRunPhase;
   readonly currentIssue: number | undefined;
   readonly completedCount: number;
@@ -114,10 +112,8 @@ export type AutoRunStartResult =
   | {
       readonly started: true;
       readonly runId: string;
-      readonly spec: { readonly number: number; readonly title: string };
       readonly reviewMode: boolean;
       readonly chromeEnabled: boolean;
-      readonly scope: AutoRunSettings["scope"];
       readonly issues: readonly PlannedIssue[];
       readonly skipped: readonly SkippedIssue[];
     }
@@ -163,16 +159,9 @@ export class AutoRunEngine {
     const precondition = await this.#checkPreconditions();
     if (precondition !== undefined) return { started: false, reason: precondition };
 
-    const specs = await this.options.github.listSpecIssues();
-    const spec = specs[0];
-    if (spec === undefined) return { started: false, reason: "no open issue is labelled ai:spec" };
-    const selection = selectIssues(await this.options.github.listSubIssues(spec.number));
-    if (selection.issues.length === 0) {
-      return {
-        started: false,
-        reason: `spec #${spec.number} has no processable child (open, afk or hitl, not blocked)`,
-      };
-    }
+    const queue = await this.options.github.listImplementableIssues();
+    const selection = selectIssues(queue.candidates);
+    if (selection.issues.length === 0) return { started: false, reason: emptyQueueReason(selection.skipped) };
     // Where the user was when the run took over. Read here — after the
     // clean-tree precondition, before the first branch phase moves HEAD — so the
     // end-of-run restore targets the branch the run actually displaced. A
@@ -182,7 +171,6 @@ export class AutoRunEngine {
     const record: AutoRunRecord = {
       version: 1,
       runId: this.#runId(),
-      specNumber: spec.number,
       issueNumbers: selection.issues.map((issue) => issue.number),
       currentIssue: selection.issues[0]?.number,
       phase: "branch",
@@ -190,26 +178,23 @@ export class AutoRunEngine {
       prNumber: undefined,
       reviewMode: settings.review,
       chromeEnabled: options.chrome === true,
-      scope: settings.scope,
       returnBranch,
       reviewedIssues: [],
       startedAt: this.#now().toISOString(),
     };
     await this.options.store.save(record);
     const afk = selection.issues.filter((issue) => issue.disposition === "afk").length;
-    this.options.notifier.notify(autoRunMessage.started(spec.number, spec.title, afk, selection.issues.length - afk, settings.review, record.chromeEnabled === true));
+    this.options.notifier.notify(autoRunMessage.started(afk, selection.issues.length - afk, settings.review, record.chromeEnabled === true));
     for (const skipped of selection.skipped) {
       this.options.notifier.notify(`auto-run: issue #${skipped.number} skipped (${skipped.reason}).`);
     }
 
-    this.#begin(record, spec.title);
+    this.#begin(record);
     return {
       started: true,
       runId: record.runId,
-      spec: { number: spec.number, title: spec.title },
       reviewMode: settings.review,
       chromeEnabled: record.chromeEnabled === true,
-      scope: settings.scope,
       issues: selection.issues,
       skipped: selection.skipped,
     };
@@ -227,17 +212,13 @@ export class AutoRunEngine {
     }
     const precondition = await this.#checkResumePreconditions();
     if (precondition !== undefined) return { started: false, reason: precondition };
-    const specs = await this.options.github.listSpecIssues();
-    const spec = specs.find((candidate) => candidate.number === record.specNumber);
-    const selection = selectIssues(await this.options.github.listSubIssues(record.specNumber));
-    this.#begin(record, spec?.title ?? `#${record.specNumber}`);
+    const selection = selectIssues((await this.options.github.listImplementableIssues()).candidates);
+    this.#begin(record);
     return {
       started: true,
       runId: record.runId,
-      spec: { number: record.specNumber, title: spec?.title ?? `#${record.specNumber}` },
       reviewMode: record.reviewMode,
       chromeEnabled: record.chromeEnabled === true,
-      scope: record.scope,
       issues: selection.issues,
       skipped: selection.skipped,
     };
@@ -264,7 +245,7 @@ export class AutoRunEngine {
     await this.#loop;
   }
 
-  #begin(record: AutoRunRecord, specTitle: string): void {
+  #begin(record: AutoRunRecord): void {
     const controller = new AbortController();
     this.#controller = controller;
     // All exits below carry the branch the user was on when the run started, so
@@ -272,8 +253,6 @@ export class AutoRunEngine {
     const homeBranch = record.returnBranch;
     this.#publish({
       runId: record.runId,
-      specNumber: record.specNumber,
-      specTitle,
       phase: record.phase,
       currentIssue: record.currentIssue,
       completedCount: 0,
@@ -282,7 +261,7 @@ export class AutoRunEngine {
       chromeEnabled: record.chromeEnabled === true,
       currentPullRequest: record.prNumber,
     });
-    this.#loop = this.#run(record, specTitle, controller.signal).catch((error: unknown) => {
+    this.#loop = this.#run(record, controller.signal).catch((error: unknown) => {
       this.options.log?.(`auto-run failed: ${message(error)}`);
       this.options.notifier.notify(autoRunMessage.stopped(this.#state?.currentIssue, message(error)));
     }).finally(() => {
@@ -316,54 +295,49 @@ export class AutoRunEngine {
     }
   }
 
-  async #run(initial: AutoRunRecord, initialTitle: string, signal: AbortSignal): Promise<void> {
+  async #run(initial: AutoRunRecord, signal: AbortSignal): Promise<void> {
     let record = initial;
-    let specTitle = initialTitle;
     let completed = 0;
-    // Review mode and scope are decided when a run starts and belong to that
-    // run: a setting changed mid-run must not silently retarget a run already in
+    // Review mode is decided when a run starts and belongs to that run: a
+    // setting changed mid-run must not silently retarget a run already in
     // flight, and a resumed run must behave as the run it is resuming. The rest
     // of the settings are read live because they only affect the next action.
-    const settings: AutoRunSettings = { ...this.options.settings(), review: record.reviewMode, scope: record.scope };
+    const settings: AutoRunSettings = { ...this.options.settings(), review: record.reviewMode };
     const reviewed = new Set(record.reviewedIssues);
     const defaultBranch = await this.options.git.defaultBranch();
     const processed = new Set<number>();
-    const finishedSpecs = new Set<number>();
 
     while (!signal.aborted) {
-      // Re-derived at every issue boundary: a merge can unblock a later sibling,
-      // so the plan returned at start is a forecast, not a commitment.
-      const selection = selectIssues(await this.options.github.listSubIssues(record.specNumber));
-      const issue = selection.issues.find((candidate) => !processed.has(candidate.number));
+      // Re-derived at every issue boundary, repository-wide: a merge can unblock
+      // an older issue that then goes ahead of a newer one, so the plan returned
+      // at start is a forecast, not a commitment.
+      const selection = selectIssues((await this.options.github.listImplementableIssues()).candidates);
+      const remaining = selection.issues.filter((candidate) => !processed.has(candidate.number));
+      const issue = remaining[0];
       if (issue === undefined) {
         for (const skipped of selection.skipped) {
           this.options.notifier.notify(`auto-run: issue #${skipped.number} left unprocessed (${skipped.reason}).`);
         }
-        finishedSpecs.add(record.specNumber);
-        const remaining = (await this.options.github.listSpecIssues()).filter((spec) => !finishedSpecs.has(spec.number));
-        this.options.notifier.notify(autoRunMessage.complete(record.specNumber, completed, remaining.length));
-        // A spec is the natural human review unit, and the run's irreversible
-        // acts should have a bounded blast radius per invocation. `all`
-        // is the opt-in that trades that bound for fewer gestures.
-        const next = settings.scope === "all" ? remaining[0] : undefined;
-        if (next === undefined) {
-          await this.options.store.clear();
-          return;
-        }
-        specTitle = next.title;
-        completed = 0;
-        processed.clear();
-        record = { ...record, specNumber: next.number, currentIssue: undefined, phase: "branch", branch: undefined, prNumber: undefined };
-        await this.options.store.save(record);
-        this.options.notifier.notify(`auto-run: continuing into spec #${next.number} "${next.title}" (aboard.autoRun.scope is all).`);
-        continue;
+        this.options.notifier.notify(autoRunMessage.complete(completed));
+        await this.options.store.clear();
+        return;
       }
 
       // The persisted pull request seeds only the issue it was recorded against.
       // A merged pull request no longer answers a head-branch lookup, so without
       // this a resume could open a second one for work that already landed.
       const knownPullRequest = record.currentIssue === issue.number ? record.prNumber : undefined;
-      const outcome = await this.#processIssue(issue, record, defaultBranch, settings, specTitle, completed, reviewed, knownPullRequest, signal);
+      const outcome = await this.#processIssue(
+        issue,
+        record,
+        defaultBranch,
+        settings,
+        completed,
+        completed + remaining.length,
+        reviewed,
+        knownPullRequest,
+        signal,
+      );
       if (outcome.kind === "stopped") {
         this.options.notifier.notify(autoRunMessage.stopped(issue.number, outcome.reason));
         // The record survives a stop so an explicit resume can re-enter at the
@@ -390,8 +364,8 @@ export class AutoRunEngine {
     record: AutoRunRecord,
     defaultBranch: string,
     settings: AutoRunSettings,
-    specTitle: string,
     completedCount: number,
+    totalCount: number,
     reviewed: Set<number>,
     knownPullRequest: number | undefined,
     signal: AbortSignal,
@@ -426,12 +400,10 @@ export class AutoRunEngine {
       }
       this.#publish({
         runId: record.runId,
-        specNumber: record.specNumber,
-        specTitle,
         phase,
         currentIssue: issue.number,
         completedCount,
-        totalCount: Math.max(record.issueNumbers.length, completedCount + 1),
+        totalCount,
         waiting: step.action === "await-approval",
         chromeEnabled: record.chromeEnabled === true,
         currentPullRequest: prNumber,
@@ -835,4 +807,16 @@ function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> 
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
+}
+
+/**
+ * Why nothing can run. "Nothing is labelled" and "everything is unclassified or
+ * blocked" are different problems with different fixes, so the skip reasons are
+ * named rather than collapsed into one refusal.
+ */
+function emptyQueueReason(skipped: readonly SkippedIssue[]): string {
+  if (skipped.length === 0) return "no open issue is labelled ai:afk or ai:hitl";
+  const listed = skipped.slice(0, 20).map((entry) => `#${entry.number} (${entry.reason})`).join(", ");
+  const rest = skipped.length > 20 ? `, and ${skipped.length - 20} more` : "";
+  return `no open issue is ready to implement: ${listed}${rest}`;
 }

@@ -38,7 +38,6 @@ test("the auto-run record round-trips, carries no prompt text, and clears on dis
   const record: AutoRunRecord = {
     version: 1,
     runId: "run_01H",
-    specNumber: 12,
     issueNumbers: [34, 35],
     currentIssue: 35,
     phase: "await-approval",
@@ -46,7 +45,6 @@ test("the auto-run record round-trips, carries no prompt text, and clears on dis
     prNumber: 57,
     reviewMode: false,
     chromeEnabled: true,
-    scope: "spec",
     reviewedIssues: [],
     startedAt: "2026-07-31T09:12:04.221Z",
   };
@@ -67,14 +65,12 @@ test("an auto-run record preserves the branch to return to at end-of-run", async
   const record: AutoRunRecord = {
     version: 1,
     runId: "run_return",
-    specNumber: 12,
     issueNumbers: [34],
     currentIssue: 34,
     phase: "cleanup",
     branch: "aboard/34-add-retry-backoff",
     prNumber: 56,
     reviewMode: false,
-    scope: "spec",
     returnBranch: "feature/wip",
     reviewedIssues: [],
     startedAt: "2026-07-31T09:12:04.221Z",
@@ -86,21 +82,24 @@ test("an auto-run record preserves the branch to return to at end-of-run", async
 // The record is only a resume hint, so anything unusable degrades to "no run to
 // resume" rather than an error: the engine re-derives every fact anyway.
 test("an unusable auto-run record degrades to nothing to resume", () => {
-  const valid = { version: 1, runId: "r", specNumber: 12, issueNumbers: [34], currentIssue: 34, phase: "commit", branch: "b", prNumber: 1, reviewMode: true, scope: "all", startedAt: "2026-07-31T09:12:04.221Z" };
+  const valid = { version: 1, runId: "r", issueNumbers: [34], currentIssue: 34, phase: "commit", branch: "b", prNumber: 1, reviewMode: true, startedAt: "2026-07-31T09:12:04.221Z" };
   assert.ok(parseAutoRunRecord(valid));
   assert.equal(parseAutoRunRecord(valid)?.chromeEnabled, false);
   for (const broken of [
     undefined, null, [], "run",
     { ...valid, version: 2 },
     { ...valid, phase: "publish" },
-    { ...valid, scope: "everything" },
-    { ...valid, specNumber: 0 },
     { ...valid, reviewMode: "yes" },
     { ...valid, issueNumbers: [34, "x"] },
     { ...valid, startedAt: "yesterday" },
   ]) {
     assert.equal(parseAutoRunRecord(broken), undefined, JSON.stringify(broken));
   }
+  // A record an older version wrote still names a spec and a scope. Back-compat
+  // is by removal: the fields are ignored, and the run resumes off the
+  // repository exactly as a current record does.
+  const legacy = parseAutoRunRecord({ ...valid, specNumber: 12, scope: "all" });
+  assert.deepEqual(legacy, parseAutoRunRecord(valid));
   // Optional fields legitimately absent, not malformed.
   assert.equal(parseAutoRunRecord({ ...valid, currentIssue: undefined, branch: undefined, prNumber: undefined })?.currentIssue, undefined);
   // A malformed returnBranch degrades to undefined rather than rejecting the record:

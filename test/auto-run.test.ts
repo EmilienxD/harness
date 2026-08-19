@@ -9,9 +9,27 @@ import {
   selectIssues,
   slugify,
   type AutoRunPhase,
+  type CandidateIssue,
   type PlannedIssue,
   type RepositoryFacts,
 } from "../src/domain/auto-run.js";
+
+/**
+ * A candidate with the queue's two new facts defaulted, so each test states only
+ * what it is about. Creation time defaults to the issue number's own order, and
+ * a candidate is a leaf unless it says otherwise.
+ */
+function candidate(overrides: Partial<CandidateIssue> & { readonly number: number }): CandidateIssue {
+  return {
+    title: `Issue ${overrides.number}`,
+    labels: ["ai:afk"],
+    state: "open",
+    openBlockedByNumbers: [],
+    createdAt: `2026-01-${String(overrides.number % 28 + 1).padStart(2, "0")}T00:00:00.000Z`,
+    hasChildren: false,
+    ...overrides,
+  };
+}
 
 const issue: PlannedIssue = { number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff" };
 
@@ -142,13 +160,13 @@ test("an afk issue has no approval gate", () => {
   assert.deepEqual(outcome, { action: "merge", issue, prNumber: 56 });
 });
 
-test("selection skips unclassified, defers blocked, and orders by number", () => {
+test("selection skips unclassified, defers blocked, and orders by creation", () => {
   const selection = selectIssues([
-    { number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [35] },
-    { number: 35, title: "Migrate the queue", labels: ["ai:hitl"], state: "open", openBlockedByNumbers: [] },
-    { number: 34, title: "Add retry backoff", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] },
-    { number: 36, title: "Unlabelled", labels: [], state: "open", openBlockedByNumbers: [] },
-    { number: 38, title: "Already done", labels: ["ai:afk"], state: "closed", openBlockedByNumbers: [] },
+    candidate({ number: 37, title: "Later", openBlockedByNumbers: [35], createdAt: "2026-01-04T00:00:00.000Z" }),
+    candidate({ number: 35, title: "Migrate the queue", labels: ["ai:hitl"], createdAt: "2026-01-02T00:00:00.000Z" }),
+    candidate({ number: 34, title: "Add retry backoff", createdAt: "2026-01-01T00:00:00.000Z" }),
+    candidate({ number: 36, title: "Unlabelled", labels: [], createdAt: "2026-01-03T00:00:00.000Z" }),
+    candidate({ number: 38, title: "Already done", state: "closed", createdAt: "2026-01-05T00:00:00.000Z" }),
   ]);
   assert.deepEqual(selection.issues.map((entry) => entry.number), [34, 35]);
   assert.deepEqual(selection.issues.map((entry) => entry.disposition), ["afk", "hitl"]);
@@ -158,14 +176,51 @@ test("selection skips unclassified, defers blocked, and orders by number", () =>
   ]);
 });
 
+test("the queue is ordered by creation date, not by number, with ties on the lower number", () => {
+  // The newer issue holds the lower number — filed later, numbered first is
+  // impossible on GitHub, but a transferred issue reproduces exactly this.
+  const selection = selectIssues([
+    candidate({ number: 12, createdAt: "2026-03-01T00:00:00.000Z" }),
+    candidate({ number: 91, createdAt: "2026-01-01T00:00:00.000Z" }),
+    candidate({ number: 40, createdAt: "2026-02-01T00:00:00.000Z" }),
+    candidate({ number: 39, createdAt: "2026-02-01T00:00:00.000Z" }),
+  ]);
+  assert.deepEqual(selection.issues.map((entry) => entry.number), [91, 39, 40, 12]);
+});
+
+test("an umbrella never enters the queue, silently unless it is classified", () => {
+  const selection = selectIssues([
+    candidate({ number: 10, labels: ["ai:spec"], createdAt: "2026-01-01T00:00:00.000Z" }),
+    candidate({ number: 11, labels: [], hasChildren: true, createdAt: "2026-01-02T00:00:00.000Z" }),
+    candidate({ number: 12, labels: ["ai:afk"], hasChildren: true, createdAt: "2026-01-03T00:00:00.000Z" }),
+    candidate({ number: 13, createdAt: "2026-01-04T00:00:00.000Z" }),
+  ]);
+  // The plain spec and the plain parent are dropped without a line — every
+  // repository has those, and a skip line each on every start is noise. Only
+  // #12, which asks to be implemented autonomously *and* has children, is a
+  // contradiction worth surfacing.
+  assert.deepEqual(selection.issues.map((entry) => entry.number), [13]);
+  assert.deepEqual(selection.skipped, [
+    { number: 12, reason: "umbrella: has sub-issues, which are the work" },
+  ]);
+});
+
+test("a spec that is also labelled for implementation is reported as the contradiction it is", () => {
+  const selection = selectIssues([candidate({ number: 10, labels: ["ai:spec", "ai:hitl"] })]);
+  assert.equal(selection.issues.length, 0);
+  assert.deepEqual(selection.skipped, [
+    { number: 10, reason: "umbrella: labelled ai:spec, so its children are the work" },
+  ]);
+});
+
 test("a blocked issue becomes selectable once its dependency closes", () => {
-  const before = selectIssues([{ number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [35] }]);
+  const before = selectIssues([candidate({ number: 37, title: "Later", openBlockedByNumbers: [35] })]);
   assert.equal(before.issues.length, 0);
-  const after = selectIssues([{ number: 37, title: "Later", labels: ["ai:afk"], state: "open", openBlockedByNumbers: [] }]);
+  const after = selectIssues([candidate({ number: 37, title: "Later" })]);
   assert.deepEqual(after.issues.map((entry) => entry.number), [37]);
 });
 
 test("hitl wins a contradictory label pair because only a human may close it", () => {
-  const selection = selectIssues([{ number: 40, title: "Both", labels: ["ai:afk", "ai:hitl"], state: "open", openBlockedByNumbers: [] }]);
+  const selection = selectIssues([candidate({ number: 40, title: "Both", labels: ["ai:afk", "ai:hitl"] })]);
   assert.equal(selection.issues[0]?.disposition, "hitl");
 });

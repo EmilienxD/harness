@@ -120,8 +120,6 @@ export interface RoadmapBriefing {
 
 /** What the auto-run engine is doing, flattened to the facts that change advice. */
 export interface AutoRunBriefing {
-  readonly specNumber: number;
-  readonly specTitle: string;
   readonly phase: string;
   readonly currentIssue: number | undefined;
   readonly completedCount: number;
@@ -286,9 +284,9 @@ export class ManagerBriefings {
 
   #autoRun(): string {
     const run = this.sources.autoRun();
-    if (run === undefined) return "No run is active. `/auto` starts one on the oldest open spec.";
+    if (run === undefined) return "No run is active. `/auto` starts one over every open ai:afk / ai:hitl issue, oldest first.";
     const lines = [
-      `Running spec #${run.specNumber} "${run.specTitle}" - phase ${run.phase}, ${run.completedCount} issue(s) done, Chrome ${run.chromeEnabled ? "on" : "off"}.`,
+      `Running - phase ${run.phase}, ${run.completedCount} issue(s) done, Chrome ${run.chromeEnabled ? "on" : "off"}.`,
     ];
     if (run.currentIssue !== undefined) lines.push(`Current issue: #${run.currentIssue}.`);
     if (run.waitingOnPullRequest !== undefined) {
@@ -660,9 +658,8 @@ function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unkno
   if (type === "reopen") return describeReopenOutcome(outcome as ReopenOutcome);
   if (type === "auto") {
     if (value.started === false) return `auto-run did not start: ${typeof value.reason === "string" ? value.reason : "no reason given"}.`;
-    const spec = value.spec as { number?: unknown; title?: unknown } | undefined;
     const issues = Array.isArray(value.issues) ? value.issues.length : 0;
-    return `auto-run started on spec #${String(spec?.number ?? "?")} with ${issues} issue${issues === 1 ? "" : "s"}, Chrome ${value.chromeEnabled === true ? "on" : "off"}.`;
+    return `auto-run started with ${issues} issue${issues === 1 ? "" : "s"} queued, Chrome ${value.chromeEnabled === true ? "on" : "off"}.`;
   }
   switch (value.action) {
     case "none": return "No pull request is open, so nothing was launched.";
