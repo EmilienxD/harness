@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  BY_DIFFICULTY,
   DEFAULT_MAX_INLINE_PROMPT_CHARS,
+  DIFFICULTY_LAUNCH_POLICIES,
   EFFORT_LEVELS,
   MAX_COMMAND_LINE_CHARS,
   LaunchPlanError,
@@ -29,6 +31,7 @@ import { ShellQuotingError, buildChangeDirectoryCommandLine, buildCommandLine, q
 import { deriveWriteCapability } from "../src/domain/capability.js";
 import { managerMcpConfigDocument } from "../src/bridge/mcp-config.js";
 import type { AgentId, SessionId } from "../src/domain/contracts.js";
+import type { IssueDifficulty } from "../src/shared/labels.js";
 
 const agentId = "a1b2c3" as AgentId;
 const sessionId = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b" as SessionId;
@@ -527,6 +530,94 @@ test("puts the definition's model and effort on the command line, overriding the
         error instanceof LaunchPlanError && error.code === "declared-tools-without-agent",
     );
   }
+});
+
+test("by-difficulty hands model and effort to the issue's tier, and a declared value takes them back", () => {
+  const routed = definition("implementer", IMPLEMENTER_TOOLS, {
+    declaredModel: BY_DIFFICULTY,
+    declaredEffort: BY_DIFFICULTY,
+  });
+  // The tiers are data. What is asserted here is that each one reaches the
+  // command line whole, not what any particular tier happens to be worth.
+  for (const [difficulty, policy] of Object.entries(DIFFICULTY_LAUNCH_POLICIES)) {
+    assert.deepEqual(
+      planLaunch(request({ configuration: routed, difficulty: difficulty as IssueDifficulty })).args.slice(6),
+      ["--model", policy.model, "--effort", policy.effort, "--disable-slash-commands", "Address issue #47."],
+      `the ${difficulty} tier must reach the command line`,
+    );
+  }
+
+  // Unrated work is expert work: the launch must never quietly drop to the
+  // user's global default, which is the one outcome a missing label could make
+  // invisible.
+  assert.deepEqual(
+    planLaunch(request({ configuration: routed })).args.slice(6),
+    ["--model", "opus", "--effort", "high", "--disable-slash-commands", "Address issue #47."],
+  );
+  // ...and the session-wide setting does not get to fill the gap either, since
+  // the definition did choose — it chose to ask the label.
+  assert.deepEqual(
+    planLaunch(request({ configuration: routed, model: "haiku", effort: "low" })).args.slice(6, 10),
+    ["--model", "opus", "--effort", "high"],
+  );
+
+  // A definition that names either field keeps it. The two resolve
+  // independently, so one agent may route its model and pin its effort.
+  const pinned = definition("implementer", IMPLEMENTER_TOOLS, {
+    declaredModel: "opus",
+    declaredEffort: BY_DIFFICULTY,
+  });
+  assert.deepEqual(
+    planLaunch(request({ configuration: pinned, difficulty: "routine" })).args.slice(6, 10),
+    ["--model", "opus", "--effort", "medium"],
+  );
+  assert.deepEqual(
+    planLaunch(request({
+      configuration: definition("implementer", IMPLEMENTER_TOOLS, { declaredModel: BY_DIFFICULTY, declaredEffort: "max" }),
+      difficulty: "routine",
+    })).args.slice(6, 10),
+    ["--model", "haiku", "--effort", "max"],
+  );
+
+  // A difficulty carried by a launch whose definition never asked for one
+  // changes nothing at all.
+  assert.deepEqual(
+    planLaunch(request({ difficulty: "routine" })).args.includes("--model"),
+    false,
+  );
+
+  // The rewritten definition describes the session that is actually starting:
+  // the sentinel means nothing to Claude Code, so the resolved tier is what
+  // survives into the file `--resume` reads back.
+  const file = planLaunch(request({ configuration: routed, difficulty: "basic" })).agentDefinition;
+  assert.match(file?.contents ?? "", /^model: sonnet$/mu);
+  assert.match(file?.contents ?? "", /^effort: high$/mu);
+  assert.doesNotMatch(file?.contents ?? "", new RegExp(BY_DIFFICULTY, "u"));
+
+  // Resume is the same launch policy or it is a different agent: a reopened
+  // session must not come back cheaper than it started.
+  assert.deepEqual(
+    planSessionResume({
+      agentId,
+      sessionId,
+      agentType: "implementer",
+      shell: "powershell",
+      configuration: routed,
+      difficulty: "routine",
+    }).args,
+    ["--resume", sessionId, ...definitionArgs("implementer"), "--model", "haiku", "--effort", "medium", "--disable-slash-commands"],
+  );
+
+  // The sentinel is a launch-policy value like any other, so a builtin profile
+  // may carry it too.
+  assert.deepEqual(
+    planLaunch(request({
+      configuration: resolveLaunchConfiguration({ agentName: "Explore", declaredModel: BY_DIFFICULTY }),
+      agentType: "Explore",
+      difficulty: "advanced",
+    })).args.slice(4, 6),
+    ["--model", "opus"],
+  );
 });
 
 test("rejects every tool override beside a builtin --agent but accepts launch policy", () => {

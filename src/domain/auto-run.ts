@@ -8,7 +8,7 @@
  * postcondition" and that decision must be testable without fakes.
  */
 
-import { LABEL_SPEC, hasLabel, issueDisposition } from "../shared/labels.js";
+import { LABEL_SPEC, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
 
 export const AUTO_RUN_PHASES = [
   "branch",
@@ -68,6 +68,14 @@ export interface PlannedIssue {
   readonly title: string;
   readonly disposition: IssueDisposition;
   readonly branch: string;
+  /**
+   * The tier the issue's difficulty label expresses, which decides the model and
+   * effort of the agents that work it. Absent is the ordinary state of an issue
+   * nobody rated, and resolves to the most capable tier at launch time. Derived
+   * here and never persisted: the run record re-reads GitHub on resume, so a
+   * relabelled issue is worked at its new tier rather than its recorded one.
+   */
+  readonly difficulty?: IssueDifficulty;
 }
 
 export interface SkippedIssue {
@@ -443,11 +451,13 @@ export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
       });
       continue;
     }
+    const difficulty = issueDifficulty(candidate.labels);
     issues.push({
       number: candidate.number,
       title: candidate.title,
       disposition,
       branch: branchName(candidate.number, candidate.title),
+      ...(difficulty === undefined ? {} : { difficulty }),
     });
   }
   return { issues, skipped, dependencyCycles };

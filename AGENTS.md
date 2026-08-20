@@ -85,6 +85,7 @@ User <-> VS Code UI and terminals <-> extension host
 
 - Authored aboard definitions live in `.aboard/agents/`, never `.claude/agents/`. Each defined launch receives an isolated rewritten definition under `.aboard/runtime/`; no aboard worker may become discoverable by unrelated Claude sessions.
 - An aboard agent definition is the authority for that role's whole system prompt and tools. Capability and write access are derived from the effective tool set, never from a second manual flag.
+- The same definition is the authority for its own model and effort, including the choice not to decide: `by-difficulty` delegates one field to the difficulty label on the issue that launch is working, and any named value wins over the label. Precedence, most specific first, is definition, then difficulty, then `aboard.launch.effort`, then no flag. Unrated work resolves to the most capable tier, never to the user's global default.
 - `Explore` remains Claude Code's built-in read-only agent with metadata-only launch policy. `general-purpose` remains an unmodified default Claude Code session. Do not reconstruct either as an aboard definition.
 - The aboard MCP server is exposed only to the Manager through per-launch configuration stored outside the workspace. Never register it in `.mcp.json`, agent frontmatter, or another project-scoped location, and never widen the Manager-only caller check.
 - Start and resume must preserve the same launch policy, including isolated definitions, capability limits, model/effort policy, Chrome intent, and Manager MCP access.
@@ -118,7 +119,8 @@ The scaffolded definitions are the detailed authority for role prompts, tool all
 ### GitHub Work Model
 
 - GitHub issues and pull requests are the durable work-state source. Do not introduce a local `TODO.md` or duplicate issue/PR state.
-- Preserve exactly four aboard labels: `[AI]-spec`, `[AI]-todo`, `[AI]-afk`, and `[AI]-hitl`. The former `ai:*` labels and unprefixed equivalents are ordinary user labels; do not recognize or migrate them.
+- Preserve exactly four classifying labels — `[AI]-spec`, `[AI]-todo`, `[AI]-afk`, `[AI]-hitl` — and exactly four rating ones: `[AI]-routine-difficulty`, `[AI]-basic-difficulty`, `[AI]-advanced-difficulty`, and `[AI]-expert-difficulty`. The former `ai:*` labels and unprefixed equivalents are ordinary user labels; do not recognize or migrate them.
+- A difficulty label rates work; it never admits it. Only the disposition labels decide what a run picks up, an unrated issue is ordinary rather than deficient, and aboard reads these labels without ever writing one — the issue-writing skill owns them.
 - The roadmap is an open GitHub issue labelled `[AI]-todo`, using a flat Markdown checkbox list whose order is priority. Other issue and PR states are derived from GitHub.
 - `[AI]-afk` work may merge unattended into a run's session branch. `[AI]-hitl` normally waits for the user's merge; approval from another account also permits the extension to merge. An issue with neither disposition is legitimate but must not be guessed.
 - GitHub closes a linked issue only when its pull request merges into the default branch. Nothing aboard automates merges there, so any closure aboard depends on is one aboard performs explicitly.

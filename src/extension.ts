@@ -599,6 +599,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         configuration,
         disallowedTools: [ABOARD_MCP_TOOL_PATTERN, ...AUTO_RUN_DISALLOWED_TOOLS],
         ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
+        // The session resumes at the tier it was launched under, so a doctor the
+        // user reopens is the same agent they watched, not a cheaper one.
+        ...(owner.difficulty === undefined ? {} : { difficulty: owner.difficulty }),
         wrapper: wrapperLayout,
       });
       // Written and reopened where the session ran: a run with its own checkout

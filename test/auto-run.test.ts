@@ -228,6 +228,21 @@ test("selection skips unclassified, defers blocked, and orders by creation", () 
   ]);
 });
 
+test("a planned issue carries the difficulty its label rates it at, and nothing when unrated", () => {
+  const selection = selectIssues([
+    candidate({ number: 10, labels: ["[AI]-afk", "[AI]-routine-difficulty"], createdAt: "2026-01-01T00:00:00.000Z" }),
+    candidate({ number: 11, labels: ["[AI]-afk"], createdAt: "2026-01-02T00:00:00.000Z" }),
+    candidate({ number: 12, labels: ["[AI]-hitl", "[AI]-expert-difficulty"], createdAt: "2026-01-03T00:00:00.000Z" }),
+  ]);
+  assert.deepEqual(selection.issues.map((entry) => entry.difficulty), ["routine", undefined, "expert"]);
+  // A difficulty label alone classifies nothing: it rates work the disposition
+  // labels admit, and never admits work on its own.
+  assert.deepEqual(
+    selectIssues([candidate({ number: 13, labels: ["[AI]-expert-difficulty"] })]).issues,
+    [],
+  );
+});
+
 test("the queue is ordered by creation date, not by number, with ties on the lower number", () => {
   // The newer issue holds the lower number — filed later, numbered first is
   // impossible on GitHub, but a transferred issue reproduces exactly this.

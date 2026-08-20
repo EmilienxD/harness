@@ -43,6 +43,7 @@ import {
   type SessionId,
 } from "../domain/contracts.js";
 import { ABOARD_MCP_SERVER_NAME, MANAGER_TOOL_NAMES } from "../bridge/mcp-tools.js";
+import type { IssueDifficulty } from "../shared/labels.js";
 import {
   describeResolvedPrompt,
   resolvedPromptFromText,
@@ -165,6 +166,87 @@ export function isEffortLevel(value: unknown): value is EffortLevel {
   return typeof value === "string" && EFFORT_LEVEL_SET.has(value);
 }
 
+/**
+ * The `model:`/`effort:` value that defers to the difficulty label on the issue
+ * a launch is working (`src/shared/labels.ts`).
+ *
+ * It is the definition delegating, not aboard overriding: a definition that
+ * names a model or a level keeps it, and only this sentinel hands the choice to
+ * the label. That keeps one rule for both fields — the definition is the
+ * authority for its own launch policy, and one of the things it may declare is
+ * which tier decides.
+ */
+export const BY_DIFFICULTY = "by-difficulty";
+export type ByDifficulty = typeof BY_DIFFICULTY;
+
+/** A definition's `effort:`, which may defer to the issue's difficulty. */
+export type DeclaredEffort = EffortLevel | ByDifficulty;
+
+export interface DifficultyLaunchPolicy {
+  readonly model: string;
+  readonly effort: EffortLevel;
+}
+
+/**
+ * What each difficulty tier costs to work. The point is to stop paying the
+ * expert rate for a rename, so the cheap tiers are genuinely cheap; the
+ * expensive ones split on effort rather than model, because a multi-step change
+ * with a known shape needs the good model more than it needs the long think.
+ */
+export const DIFFICULTY_LAUNCH_POLICIES: { readonly [K in IssueDifficulty]: DifficultyLaunchPolicy } = {
+  routine: { model: "haiku", effort: "medium" },
+  basic: { model: "sonnet", effort: "high" },
+  advanced: { model: "opus", effort: "medium" },
+  expert: { model: "opus", effort: "high" },
+};
+
+/**
+ * Unrated work is expert work. A launch reaches this with no difficulty
+ * whenever the issue carries no label, whenever the agent is not working an
+ * issue at all, and whenever a session is restored without one — and in every
+ * one of those cases the failure worth avoiding is a capable job done by a
+ * model too small for it, not a cheap job done too well.
+ */
+export function difficultyLaunchPolicy(difficulty: IssueDifficulty | undefined): DifficultyLaunchPolicy {
+  return DIFFICULTY_LAUNCH_POLICIES[difficulty ?? "expert"];
+}
+
+interface ResolvedLaunchPolicy {
+  /**
+   * What the definition declares, once `by-difficulty` has been resolved. This
+   * is what the rewritten file records: the file describes the agent, and an
+   * agent that declined to choose still declines in writing.
+   */
+  readonly declaredModel: string | undefined;
+  readonly declaredEffort: EffortLevel | undefined;
+  /** What the command line carries — the declaration, or the session default behind it. */
+  readonly model: string | undefined;
+  readonly effort: EffortLevel | undefined;
+}
+
+/**
+ * The model and effort a launch actually runs under, resolved once so the
+ * command line and the rewritten definition cannot disagree.
+ *
+ * Precedence, most specific first: a value the definition names, then the
+ * issue's difficulty when the definition defers to it, then the session-wide
+ * setting, then no flag at all.
+ */
+function launchPolicy(
+  declared: { readonly declaredModel?: string | undefined; readonly declaredEffort?: DeclaredEffort | undefined },
+  request: { readonly model?: string | undefined; readonly effort?: EffortLevel | undefined; readonly difficulty?: IssueDifficulty | undefined },
+): ResolvedLaunchPolicy {
+  const tier = difficultyLaunchPolicy(request.difficulty);
+  const declaredModel = declared.declaredModel === BY_DIFFICULTY ? tier.model : declared.declaredModel;
+  const declaredEffort = declared.declaredEffort === BY_DIFFICULTY ? tier.effort : declared.declaredEffort;
+  return {
+    declaredModel,
+    declaredEffort,
+    model: declaredModel ?? request.model,
+    effort: declaredEffort ?? request.effort,
+  };
+}
+
 export type LaunchConfiguration =
   /**
    * An aboard agent definition (`.aboard/agents/<name>.md`), rewritten into a
@@ -203,10 +285,11 @@ export type LaunchConfiguration =
        * launched from a system-prompt file has no frontmatter to read at all. So
        * aboard reads both fields itself and passes `--model`/`--effort`
        * explicitly. `inherit` is normalized away at resolve time, because
-       * "inherit" is the frontmatter spelling of "pass no flag".
+       * "inherit" is the frontmatter spelling of "pass no flag"; `by-difficulty`
+       * survives to `launchPolicy`, which is where the issue is known.
        */
       readonly declaredModel?: string;
-      readonly declaredEffort?: EffortLevel;
+      readonly declaredEffort?: DeclaredEffort;
       /**
        * `command:` read from the same definition, in the same token form as
        * `aboard.launch.claudeCommand`. It replaces the configured launch command
@@ -227,7 +310,7 @@ export type LaunchConfiguration =
       readonly shape: "builtin";
       readonly agentName: string;
       readonly declaredModel?: string;
-      readonly declaredEffort?: EffortLevel;
+      readonly declaredEffort?: DeclaredEffort;
       readonly declaredCommand?: readonly string[];
     }
   /** Claude Code's unmodified default session, exposed as `general-purpose`. */
@@ -242,7 +325,7 @@ export interface LaunchConfigurationInput {
   readonly declaredDescription?: string | undefined;
   readonly extraFrontmatter?: readonly string[] | undefined;
   readonly declaredModel?: string | undefined;
-  readonly declaredEffort?: EffortLevel | undefined;
+  readonly declaredEffort?: DeclaredEffort | undefined;
   readonly declaredCommand?: readonly string[] | undefined;
   /** Rejected for builtins; retained here so the invalid combination is typed. */
   readonly tools?: readonly string[] | undefined;
@@ -310,10 +393,14 @@ export function resolveLaunchConfiguration(
       input.declaredModel === undefined || input.declaredModel === "inherit"
         ? undefined
         : assertFlagValue(input.declaredModel, "invalid-model", "agent model");
-    if (input.declaredEffort !== undefined && !isEffortLevel(input.declaredEffort)) {
+    if (
+      input.declaredEffort !== undefined &&
+      input.declaredEffort !== BY_DIFFICULTY &&
+      !isEffortLevel(input.declaredEffort)
+    ) {
       throw new LaunchPlanError(
         "invalid-effort",
-        `Agent effort must be one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(input.declaredEffort)}`,
+        `Agent effort must be ${BY_DIFFICULTY} or one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(input.declaredEffort)}`,
       );
     }
     const declaredCommand =
@@ -538,6 +625,13 @@ interface CommonPlanRequest {
   readonly attended?: boolean | undefined;
   readonly model?: string | undefined;
   readonly effort?: EffortLevel | undefined;
+  /**
+   * The difficulty of the issue this launch is working, when it works one. It
+   * decides `model:`/`effort:` for a definition that declared `by-difficulty`
+   * and is ignored by every definition that named its own — so it is passed
+   * whenever it is known rather than only when it will be used.
+   */
+  readonly difficulty?: IssueDifficulty | undefined;
   readonly command?: readonly string[] | undefined;
   /**
    * Absolute path of the per-launch MCP registration, carried as
@@ -806,12 +900,16 @@ function frontmatterLine(key: string, value: string | undefined): readonly strin
  *
  * `tools:` is emitted as the documented comma-separated scalar. `model:` and
  * `effort:` are emitted even though the command line also carries them — the
- * two always agree because both come from this same parse, and a file that
- * describes the agent completely is the one that survives `--resume`.
+ * two always agree because both are the one resolved policy this launch was
+ * planned with, and a file that describes the agent completely is the one that
+ * survives `--resume`. The resolved value is written rather than the
+ * `by-difficulty` the definition may have declared: the sentinel means nothing
+ * to Claude Code, and the rewritten file has to describe this launch.
  */
 function renderAgentDefinition(
   configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
   name: string,
+  policy: ResolvedLaunchPolicy,
 ): string {
   const frontmatter = [
     `name: ${name}`,
@@ -821,8 +919,8 @@ function renderAgentDefinition(
     // main-session agent never uses for delegation would be the worse trade.
     `description: ${configuration.declaredDescription ?? `aboard ${configuration.agentName} agent`}`,
     `tools: ${configuration.declaredTools.join(", ")}`,
-    ...frontmatterLine("model", configuration.declaredModel),
-    ...frontmatterLine("effort", configuration.declaredEffort),
+    ...frontmatterLine("model", policy.declaredModel),
+    ...frontmatterLine("effort", policy.declaredEffort),
     ...(configuration.extraFrontmatter ?? []),
   ];
   return `---\n${frontmatter.join("\n")}\n---\n\n${configuration.systemPrompt.trim()}\n`;
@@ -844,6 +942,7 @@ function agentRuntimeArguments(
   configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
   agentId: AgentId,
   runtimeDirectory: string,
+  policy: ResolvedLaunchPolicy,
 ): { readonly args: readonly string[]; readonly file: AgentDefinitionFile } {
   const directory = agentRuntimeDirectory(runtimeDirectory, agentId);
   const name = runtimeAgentName(configuration.agentName, agentId);
@@ -852,7 +951,7 @@ function agentRuntimeArguments(
     file: {
       agentId,
       relativePath: `${directory}/.claude/agents/${name}.md`,
-      contents: renderAgentDefinition(configuration, name),
+      contents: renderAgentDefinition(configuration, name, policy),
     },
   };
 }
@@ -1057,10 +1156,15 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const shapeArguments: string[] = [...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration))];
+  // A complete definition or builtin profile wins over the session settings.
+  // Explore's profile affects only these launch flags; its prompt and tools
+  // still come exclusively from Claude Code through `--agent`.
+  const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
+
   let agentDefinition: AgentDefinitionFile | undefined;
   switch (configuration.shape) {
     case "agent-defined": {
-      const definition = agentRuntimeArguments(configuration, request.agentId, runtimeDirectory);
+      const definition = agentRuntimeArguments(configuration, request.agentId, runtimeDirectory, policy);
       shapeArguments.push(...definition.args);
       agentDefinition = definition.file;
       break;
@@ -1072,22 +1176,14 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       break;
   }
 
-  // A complete definition or builtin profile wins over the session settings.
-  // Explore's profile affects only these launch flags; its prompt and tools
-  // still come exclusively from Claude Code through `--agent`.
-  const declared =
-    configuration.shape !== "default"
-      ? configuration
-      : { declaredModel: undefined, declaredEffort: undefined };
-
   const fixedArguments = [
     "--session-id",
     request.sessionId,
     ...shapeArguments,
     ...toolListArguments("--allowedTools", aboardMcpAllowRules(configuration)),
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
-    ...modelArguments(declared.declaredModel ?? request.model),
-    ...effortArguments(declared.declaredEffort ?? request.effort),
+    ...modelArguments(policy.model),
+    ...effortArguments(policy.effort),
     ...chromeArguments(agentType, request.chrome),
     ...slashCommandArguments(attended),
   ];
@@ -1166,7 +1262,8 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
       "The Manager resumes from .aboard/agents/manager.md",
     );
   }
-  const definition = agentRuntimeArguments(request.configuration, request.agentId, runtimeDirectory);
+  const policy = launchPolicy(request.configuration, request);
+  const definition = agentRuntimeArguments(request.configuration, request.agentId, runtimeDirectory, policy);
   const args = [
     "--resume",
     request.sessionId,
@@ -1180,8 +1277,8 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     // pre-approvals would stall behind the same prompts the launch avoided.
     ...toolListArguments("--allowedTools", aboardMcpAllowRules(request.configuration)),
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
-    ...modelArguments(request.configuration.declaredModel ?? request.model),
-    ...effortArguments(request.configuration.declaredEffort ?? request.effort),
+    ...modelArguments(policy.model),
+    ...effortArguments(policy.effort),
     ...slashCommandArguments(attended),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId);
@@ -1216,24 +1313,22 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
   const { command, wrapper, runtimeDirectory, attended } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
+  const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
   const definition = configuration.shape === "agent-defined"
-    ? agentRuntimeArguments(configuration, request.agentId, runtimeDirectory)
+    ? agentRuntimeArguments(configuration, request.agentId, runtimeDirectory, policy)
     : undefined;
   // Claude Code restores a builtin's `--agent` selection with the conversation.
   const shapeArguments = [
     ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration)),
     ...(definition?.args ?? []),
   ];
-  const declared = configuration.shape !== "default"
-    ? configuration
-    : { declaredModel: undefined, declaredEffort: undefined };
   const args = [
     "--resume",
     request.sessionId,
     ...shapeArguments,
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
-    ...modelArguments(declared.declaredModel ?? request.model),
-    ...effortArguments(declared.declaredEffort ?? request.effort),
+    ...modelArguments(policy.model),
+    ...effortArguments(policy.effort),
     ...chromeArguments(request.agentType, request.chrome),
     ...slashCommandArguments(attended),
   ];

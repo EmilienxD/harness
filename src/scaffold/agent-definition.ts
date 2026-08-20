@@ -6,10 +6,12 @@ import {
   type WriteCapability,
 } from "../domain/capability.js";
 import {
+  BY_DIFFICULTY,
   EFFORT_LEVELS,
   isEffortLevel,
   parseClaudeCommand,
-  type EffortLevel,
+  type ByDifficulty,
+  type DeclaredEffort,
 } from "../claude/launch.js";
 
 /** The Manager runs as the main session agent. */
@@ -109,13 +111,21 @@ export const SCAFFOLDED_AGENT_NAMES = [MANAGER_AGENT_NAME, ...WORKER_AGENT_NAMES
 export type WorkerAgentName = (typeof WORKER_AGENT_NAMES)[number];
 export type BuiltinAgentName = (typeof BUILTIN_AGENT_NAMES)[number];
 export type ScaffoldedAgentName = (typeof SCAFFOLDED_AGENT_NAMES)[number];
-export type AgentModel = "opus" | "sonnet" | "haiku" | "fable" | "inherit";
+/**
+ * The definition's `model:` field. `by-difficulty` defers to the difficulty
+ * label on the issue the launch is working, and `inherit` defers to Claude
+ * Code's own setting; every other value is the agent's own final answer
+ * (`src/claude/launch.ts`).
+ */
+export type AgentModel = "opus" | "sonnet" | "haiku" | "fable" | "inherit" | ByDifficulty;
 /**
  * The definition's `effort:` field. Unlike `model:` it is optional, because an
  * absent field is a meaningful value rather than an omission: the agent inherits
- * the session's effort level, which is what `aboard.launch.effort` sets.
+ * the session's effort level, which is what `aboard.launch.effort` sets. It
+ * takes `by-difficulty` independently of `model:`, so an agent may route one
+ * and pin the other.
  */
-export type AgentEffort = EffortLevel;
+export type AgentEffort = DeclaredEffort;
 
 export interface AgentDefinition {
   readonly name: WorkerAgentName;
@@ -176,7 +186,7 @@ export type BuiltinAgentProfileResult =
   | { readonly ok: true; readonly value: BuiltinAgentProfile }
   | { readonly ok: false; readonly reason: string };
 
-const MODELS: ReadonlySet<string> = new Set(["opus", "sonnet", "haiku", "fable", "inherit"]);
+const MODELS: ReadonlySet<string> = new Set(["opus", "sonnet", "haiku", "fable", "inherit", BY_DIFFICULTY]);
 
 function scalarField(lines: readonly string[], field: string): string | undefined {
   const prefix = `${field}:`;
@@ -255,10 +265,11 @@ function commonFields(frontmatter: readonly string[]): CommonFieldsResult {
   }
   // An absent `effort:` inherits the session level, so only a present-but-wrong
   // value is an error: Claude Code refuses the launch outright on one.
-  const effort = scalarField(frontmatter, "effort");
-  if (effort !== undefined && !isEffortLevel(effort)) {
-    return { ok: false, reason: `Unsupported agent effort: ${effort}. Expected one of ${EFFORT_LEVELS.join(", ")}` };
+  const rawEffort = scalarField(frontmatter, "effort");
+  if (rawEffort !== undefined && rawEffort !== BY_DIFFICULTY && !isEffortLevel(rawEffort)) {
+    return { ok: false, reason: `Unsupported agent effort: ${rawEffort}. Expected ${BY_DIFFICULTY} or one of ${EFFORT_LEVELS.join(", ")}` };
   }
+  const effort = rawEffort as AgentEffort | undefined;
   // `command:` overrides `aboard.launch.claudeCommand` for this agent alone —
   // one agent behind a provider wrapper (`wrapper run MyProfile --`) while the rest
   // of the fleet keeps the configured default. It is read here rather than at

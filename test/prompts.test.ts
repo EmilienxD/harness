@@ -12,6 +12,7 @@ import {
   type PullRequestSnapshot,
   type ReviewThreadSnapshot,
 } from "../src/claude/prompts.js";
+import { issueDifficulty } from "../src/shared/labels.js";
 
 interface FakeData {
   readonly issues?: readonly IssueSnapshot[];
@@ -110,6 +111,22 @@ test("carries the disposition each label implies", () => {
   assert.equal(issueDisposition(["ai:afk", "ai:hitl", "AI:AFK"]), "unclassified");
   // The unprefixed names are the user's own labels, never aboard's.
   assert.equal(issueDisposition(["afk", "hitl"]), "unclassified");
+});
+
+test("carries the difficulty each label implies", () => {
+  assert.equal(issueDifficulty(["[AI]-routine-difficulty"]), "routine");
+  assert.equal(issueDifficulty(["[AI]-basic-difficulty"]), "basic");
+  assert.equal(issueDifficulty(["[AI]-advanced-difficulty"]), "advanced");
+  assert.equal(issueDifficulty(["[AI]-expert-difficulty"]), "expert");
+  assert.equal(issueDifficulty(["[ai]-EXPERT-Difficulty"]), "expert");
+  // Unrated is not a guess and not an error; the caller resolves it to a tier.
+  assert.equal(issueDifficulty([]), undefined);
+  assert.equal(issueDifficulty(["[AI]-afk", "[AI]-spec"]), undefined);
+  // The unprefixed names are the user's own labels, never aboard's.
+  assert.equal(issueDifficulty(["expert", "expert-difficulty"]), undefined);
+  // A contradictory set resolves upward, whatever order it arrives in.
+  assert.equal(issueDifficulty(["[AI]-routine-difficulty", "[AI]-advanced-difficulty"]), "advanced");
+  assert.equal(issueDifficulty(["[AI]-expert-difficulty", "[AI]-basic-difficulty"]), "expert");
 });
 
 test("the prompt differs when GitHub knows no branch for the issue", async () => {

@@ -27,6 +27,7 @@ import {
 import type { SessionWrapperLayout } from "../claude/launch.js";
 import { sessionIsResumable } from "../claude/sessions.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
+import type { IssueDifficulty } from "../shared/labels.js";
 
 /**
  * Where an automated launch runs when that is not the workspace itself, and what
@@ -64,6 +65,13 @@ export interface DelegationLaunchInput {
   readonly expectsUncommittedTree?: boolean;
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
   readonly isolation?: LaunchIsolation;
+  /**
+   * The difficulty of the issue this agent is being sent at. It selects model
+   * and effort for a definition that declared `by-difficulty` and is ignored by
+   * one that named either itself, so the caller passes whatever it knows rather
+   * than deciding whether it will be used.
+   */
+  readonly difficulty?: IssueDifficulty;
 }
 
 /** What the engine needs back from a launch: the handles plus the result. */
@@ -87,6 +95,13 @@ export interface ReopenTarget {
   /** The terminal name, already carrying aboard's own prefix. */
   readonly terminalName: string;
   readonly issueNumbers?: readonly number[];
+  /**
+   * The difficulty the session was launched under, when the caller still knows
+   * it. The ledger does not record it — it is a fact about the issue, not about
+   * the session — so a restore that has lost the run it belonged to reopens at
+   * the fallback tier rather than at a stored one.
+   */
+  readonly difficulty?: IssueDifficulty;
   readonly chromeEnabled?: boolean;
   /** Default is the controller's; a bulk restore passes `false` explicitly. */
   readonly focus?: boolean;
@@ -305,6 +320,7 @@ export class DelegationCoordinator {
       ],
       ...this.#effort(),
       ...this.#command(),
+      ...(target.difficulty === undefined ? {} : { difficulty: target.difficulty }),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
     // `plan.command`, not the setting: an agent whose definition declares
@@ -441,6 +457,7 @@ export class DelegationCoordinator {
       ],
       ...this.#command(),
       ...this.#effort(),
+      ...(input.difficulty === undefined ? {} : { difficulty: input.difficulty }),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });

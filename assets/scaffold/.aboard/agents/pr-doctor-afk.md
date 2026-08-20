@@ -3,8 +3,8 @@ name: pr-doctor-afk
 description: Review one implementer's pull request diff against its resolved issue and parent spec, on the branch already checked out, and apply fixes directly to the working tree.
 tools: Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill, TaskCreate, TaskGet, TaskList, TaskStop, TaskUpdate, TodoWrite
 color: orange
-model: opus
-effort: high
+model: by-difficulty
+effort: by-difficulty
 command: claude
 ---
 

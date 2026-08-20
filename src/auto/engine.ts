@@ -34,6 +34,7 @@ import type { LaunchOrigin } from "../domain/lease.js";
 import type { GitClient } from "../git/client.js";
 import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles, LaunchIsolation } from "../bridge/delegation.js";
 import type { RunWorkspace, RunWorkspaceOutcome, RunWorkspaceProvider } from "./worktree.js";
+import type { IssueDifficulty } from "../shared/labels.js";
 
 /**
  * A pull request as the run observes it. `mergeable` is carried because a merge
@@ -102,6 +103,8 @@ export interface PullRequestOwner {
   readonly terminalId: TerminalId;
   readonly type: "implementer" | "pr-doctor-afk" | "pr-doctor-hitl";
   readonly issueNumber: number;
+  /** The tier the session was launched under, so `review_pr` resumes it as it started. */
+  readonly difficulty?: IssueDifficulty;
   /**
    * Where the session ran, when the run had a checkout of its own. `review_pr`
    * resumes the conversation, and Claude Code files a transcript under the
@@ -760,12 +763,22 @@ export class AutoRunEngine {
     else await this.#git.createBranch(branch, base);
   }
 
+  /**
+   * The tier every agent sent at this issue runs under. Implementer and doctor
+   * share it: the doctor reviews the same change, and a review is not the place
+   * to economize below what the work was judged to need.
+   */
+  #difficulty(issue: PlannedIssue): { readonly difficulty?: IssueDifficulty } {
+    return issue.difficulty === undefined ? {} : { difficulty: issue.difficulty };
+  }
+
   async #implement(issue: PlannedIssue, chrome: boolean, signal: AbortSignal): Promise<string> {
     const outcome = await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
       description: `address issue ${issue.number}`,
       chrome,
+      ...this.#difficulty(issue),
       prompt: `Address issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.`,
       expectsUncommittedTree: true,
       ...this.#isolation(),
@@ -865,12 +878,13 @@ export class AutoRunEngine {
         issues: [issue.number],
         pullRequest: prNumber,
         description: `review pull request ${prNumber}`,
+        ...this.#difficulty(issue),
         // The doctor's fixes are committed by the run, from the same checkout
         // the implementer worked in — so it has to be in that checkout.
         ...this.#isolation(),
       }, "auto-run");
       this.#openTerminals.add(handles.terminalId);
-      this.#owners.set(prNumber, { prNumber, ...handles, type: "pr-doctor-hitl", issueNumber: issue.number, ...this.#ownerCwd() });
+      this.#owners.set(prNumber, { prNumber, ...handles, type: "pr-doctor-hitl", issueNumber: issue.number, ...this.#difficulty(issue), ...this.#ownerCwd() });
       return;
     }
     const outcome = await this.options.launcher.runAutomated({
@@ -879,6 +893,7 @@ export class AutoRunEngine {
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
       expectsUncommittedTree: true,
+      ...this.#difficulty(issue),
       ...this.#isolation(),
     }, signal);
     this.#openTerminals.add(outcome.terminalId);
@@ -1181,6 +1196,7 @@ export class AutoRunEngine {
       sessionId: outcome.sessionId,
       terminalId: outcome.terminalId,
       type,
+      ...this.#difficulty(issue),
       ...this.#ownerCwd(),
     });
     this.#attach(issue.number, this.#prForIssue(issue.number));

@@ -704,6 +704,28 @@ test("review mode launches a pr-doctor-afk and commits its fixes as a second com
   assert.match(context.notifications.join("\n"), /issue #34 reviewed; committing 1 changed path\(s\)/);
 });
 
+test("every agent sent at an issue is launched at that issue's difficulty", async () => {
+  const context = harness({
+    settings: { review: true },
+    issues: [{ number: 34, title: "Add retry backoff", labels: ["[AI]-afk", "[AI]-basic-difficulty"], state: "open", openBlockedByNumbers: [] }],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // The doctor reviews the same change the implementer made, so it is rated the
+  // same. What each tier costs is the launch planner's business.
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
+  assert.deepEqual(context.launches.map((launch) => launch.difficulty), ["basic", "basic"]);
+});
+
+test("an unrated issue is delegated with no difficulty at all, rather than a guessed one", async () => {
+  const context = harness({ settings: { review: true } });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.difficulty), [undefined, undefined]);
+});
+
 test("a hitl issue waits at its pull request and continues once the user merges", async () => {
   const context = harness({
     issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],

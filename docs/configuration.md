@@ -64,3 +64,19 @@ Every aboard-defined agent takes its capability set from the `tools:` field of i
 The definitions are deliberately **not** in `.claude/agents/`. A file there is a registered Claude Code subagent type, which every session in the workspace can see and spawn — including a `claude` you start yourself, which would then be able to run aboard's `implementer` outside aboard entirely. aboard keeps them where nothing scans and passes each aboard definition to Claude Code as launch flags instead: the body as `--system-prompt-file`, the `tools:` list as `--tools`. `Explore` is the named built-in exception and launches with `--agent Explore`. Its metadata-only `.aboard/agents/Explore.md` profile may set `model:`, `effort:`, and `command:`, but must contain neither `tools:` nor a body: Claude Code remains responsible for the builtin's current prompt and tool set. `general-purpose` is aboard's name for Claude Code's unmodified default session, so its command includes neither `--agent` nor any system-prompt flag.
 
 Model and effort are edited in the same place and compose rather than compete: `aboard.launch.effort` sets the session level, and an agent or the Explore profile that declares `model: opus` or `effort: high` in its own frontmatter overrides it. Nothing in an aboard launch applies that frontmatter on its own, so aboard reads both fields and passes `--model`/`--effort` on the command line for you — including on a resume. Use the per-agent file to give one agent more or less reasoning than the rest; use the setting as the fleet-wide default. A level aboard does not recognise is reported in Output → aboard rather than passed through, because Claude Code refuses the whole launch on an unknown one.
+
+### Routing a model by issue difficulty
+
+Either field may instead be set to `by-difficulty`, which hands that one choice to the difficulty label on the issue the agent is being sent at. The three roles that only ever work a single issue — `implementer`, `pr-doctor-afk`, and `pr-doctor-hitl` — ship that way, so a rename is not addressed at the same price as a redesign:
+
+| Issue label | `model:` | `effort:` |
+| :-- | :-- | :-- |
+| `[AI]-routine-difficulty` | `haiku` | `medium` |
+| `[AI]-basic-difficulty` | `sonnet` | `high` |
+| `[AI]-advanced-difficulty` | `opus` | `medium` |
+| `[AI]-expert-difficulty` | `opus` | `high` |
+| *no difficulty label* | `opus` | `high` |
+
+The label rates the work; it never decides whether the work runs. Only `[AI]-afk` and `[AI]-hitl` admit an issue to a run, and an issue with no difficulty label is ordinary — it is worked at the last row, the most capable tier, because the mistake worth avoiding is a hard job given to a small model.
+
+The two fields are independent, and either one you name yourself wins outright: `model: by-difficulty` with `effort: max` routes the model and pins the reasoning level for every tier. Pinning both is how you turn the routing off for an agent, and `model: opus` alone is exactly the definition that shipped before. The tier reaches the terminal you are watching, the rewritten definition, and any later resume of that session, so an agent never comes back cheaper than it started.

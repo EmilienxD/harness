@@ -40,22 +40,24 @@ const expected = {
     effort: "medium",
     tools: ["WebSearch", "WebFetch"],
   },
+  // The three roles that are only ever sent at one issue defer both fields to
+  // that issue's difficulty label; every other role answers for itself.
   implementer: {
     capability: "write-capable",
-    model: "opus",
-    effort: "high",
+    model: "by-difficulty",
+    effort: "by-difficulty",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
   },
   "pr-doctor-afk": {
     capability: "write-capable",
-    model: "opus",
-    effort: "high",
+    model: "by-difficulty",
+    effort: "by-difficulty",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
   },
   "pr-doctor-hitl": {
     capability: "write-capable",
-    model: "opus",
-    effort: "high",
+    model: "by-difficulty",
+    effort: "by-difficulty",
     tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
   },
 } as const;
@@ -86,6 +88,7 @@ test("the Explore profile configures launch policy without copying Claude's prom
     description: "Claude Code's built-in read-only codebase exploration agent",
     model: "haiku",
     effort: "low",
+    command: ["claude"],
   });
   assert.doesNotMatch(source, /^tools\s*:/mu);
   assert.equal(source.replace(/^---\n[\s\S]*?\n---\s*/u, ""), "");
@@ -306,5 +309,4 @@ test("only the Manager's definition admits the aboard MCP tools", async () => {
   }
 
   assert.equal(ABOARD_MCP_TOOLS, "mcp__aboard__*");
-  assert.equal(AGENT_DEFINITION_DIRECTORY, ".aboard/agents");
-});
+  assert.equal(AGENT_DEFINITION_DIRECTORY, ".aboa
