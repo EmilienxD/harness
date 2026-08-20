@@ -309,4 +309,5 @@ test("only the Manager's definition admits the aboard MCP tools", async () => {
   }
 
   assert.equal(ABOARD_MCP_TOOLS, "mcp__aboard__*");
-  assert.equal(AGENT_DEFINITION_DIRECTORY, ".aboa
+  assert.equal(AGENT_DEFINITION_DIRECTORY, ".aboard/agents");
+});
