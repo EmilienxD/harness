@@ -47,6 +47,13 @@ set `platforms = ["chatgpt"]` (or `"claude"`) for a variant. The adapter maps th
 `.agents`, and `.codex`; do not put platform-path conditionals in installer call sites. Legacy
 Claude-relative `dest` entries and `settings.fragment.json` remain supported unchanged.
 
+ChatGPT skill payloads place a variant `SKILL.md` (plus reference doc variants) under
+`targets/chatgpt/` when the content diverges — Claude-only frontmatter keys such as
+`disable-model-invocation` or `argument-hint`, Claude tool names, or `$ARGUMENTS` references.
+Claude's `disable-model-invocation: true` maps to `targets/chatgpt/agents/openai.yaml` with
+`policy: allow_implicit_invocation: false`; ChatGPT has no documented argument substitution, so
+argument-taking skills read the invocation's surrounding user text instead of `$ARGUMENTS`.
+
 ## Tools
 
 - `harness/audit/` — audits a codebase and reports evidence-backed findings. See `SKILL.md`.

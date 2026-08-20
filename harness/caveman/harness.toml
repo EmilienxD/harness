@@ -1,8 +1,25 @@
 name = "caveman"
-version = "1.0.0"
+version = "1.0.1"
 description = "Ultra-compressed communication mode (~75% fewer tokens)"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/caveman/SKILL.md"
 
+[platforms.chatgpt]
+status = "supported"
+
 [[files]]
 src = "SKILL.md"
-dest = "skills/caveman/SKILL.md"
+dest = "caveman/SKILL.md"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "targets/chatgpt/SKILL.md"
+dest = "caveman/SKILL.md"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "targets/chatgpt/agents/openai.yaml"
+dest = "caveman/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

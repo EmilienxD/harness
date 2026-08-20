@@ -159,10 +159,10 @@ def test_chatgpt_rejects_claude_local_config(tmp_path):
 def test_cli_reports_unsupported_and_replacement_states(tmp_path, capsys):
     assert main(["list", "--platform", "chatgpt", "--dir", str(tmp_path)]) == 0
     output = capsys.readouterr().out
-    assert "caveman" in output and "[unsupported]" in output
+    assert "prefer-read-tool" in output and "[unsupported]" in output
     assert "create-skill" in output and "[replacement:" in output
 
-    assert main(["install", "caveman", "--platform", "chatgpt", "--dir", str(tmp_path)]) == 1
+    assert main(["install", "prefer-read-tool", "--platform", "chatgpt", "--dir", str(tmp_path)]) == 1
     assert "unsupported for the ChatGPT target" in capsys.readouterr().err
 
     assert main(["install", "create-skill", "--platform", "chatgpt", "--dir", str(tmp_path)]) == 1

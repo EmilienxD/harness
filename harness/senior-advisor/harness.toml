@@ -1,8 +1,19 @@
 name = "senior-advisor"
-version = "1.0.0"
+version = "1.0.1"
 description = "Read-only senior-developer advisory mode"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/senior-advisor/SKILL.md"
 
+[platforms.chatgpt]
+status = "supported"
+
 [[files]]
 src = "SKILL.md"
-dest = "skills/senior-advisor/SKILL.md"
+dest = "senior-advisor/SKILL.md"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "targets/chatgpt/SKILL.md"
+dest = "senior-advisor/SKILL.md"
+root = "skills"
+platforms = ["chatgpt"]
