@@ -15,13 +15,16 @@ from harness_cli.installer import (
     apply_install,
     is_installed,
     plan_install,
+    require_supported,
     substitute,
     uninstall,
 )
-from harness_cli.manifest import ManifestError, Tool, discover
+from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
+from harness_cli.platforms import Platform
 
 
 def _target_from_args(args: argparse.Namespace) -> Target:
+    platform = Platform.parse(args.platform)
     if args.user:
         # Claude Code reads only settings.json at the user level, and --dir names
         # a project, so both flags are meaningless here rather than merely odd.
@@ -29,9 +32,9 @@ def _target_from_args(args: argparse.Namespace) -> Target:
             raise InstallError("--user and --local are mutually exclusive")
         if args.dir is not None:
             raise InstallError("--dir applies to a project install; drop it or drop --user")
-        return Target.for_user()
+        return Target.for_user(platform=platform)
     settings_name = "settings.local.json" if args.local else "settings.json"
-    return Target.for_project(Path(args.dir or ".").resolve(), settings_name)
+    return Target.for_project(Path(args.dir or ".").resolve(), settings_name, platform=platform)
 
 
 def _resolve(names: list[str], available: dict[str, Tool]) -> list[Tool]:
@@ -65,14 +68,19 @@ def _gitignore_diff(plan: Plan) -> str:
 
 
 def _print_plan(plan: Plan) -> None:
-    print(f"{plan.tool.name} {plan.tool.version} -> {plan.target.claude_dir}")
-    for action in sorted(plan.files, key=lambda a: a.dest):
-        print(f"  {action.status:>10}  {action.dest}")
+    print(f"{plan.tool.name} {plan.tool.version} -> {plan.target.install_root}")
+    for action in sorted(plan.files, key=lambda a: str(a.path)):
+        shown = action.dest if plan.target.platform is Platform.CLAUDE else (
+            action.path.as_posix()
+            if plan.target.is_user
+            else action.path.relative_to(plan.target.scope_root).as_posix()
+        )
+        print(f"  {action.status:>10}  {shown}")
     if plan.settings_changed:
         print(f"  settings changes to {plan.target.settings_name}:")
         for line in _settings_diff(plan).splitlines():
             print(f"    {line}")
-    elif plan.tool.fragment:
+    elif plan.fragment:
         print(f"  {plan.target.settings_name}: already up to date")
     if plan.gitignore_changed:
         # Spelt out in full: for a project install this is the one file written
@@ -92,30 +100,54 @@ def cmd_list(args: argparse.Namespace) -> int:
     width = max((len(n) for n in available), default=0)
     any_installed = False
     for name, tool in available.items():
+        support = tool.support_for(target.platform)
         installed = is_installed(tool, target)
         any_installed = any_installed or installed
         mark = "*" if installed else " "
-        print(f"{mark} {name.ljust(width)}  {tool.description}")
+        suffix = ""
+        if support.status is SupportStatus.REPLACEMENT:
+            suffix = f"  [replacement: {support.replacement}]"
+        elif support.status is SupportStatus.UNSUPPORTED:
+            suffix = "  [unsupported]"
+        print(f"{mark} {name.ljust(width)}  {tool.description}{suffix}")
     if any_installed:
-        print(f"\n* installed in {target.claude_dir}")
+        if target.platform is Platform.CLAUDE:
+            print(f"\n* installed in {target.install_root}")
+        else:
+            print(f"\n* installed for {target.adapter.product_name} in {target.install_root}")
     return 0
 
 
 def cmd_info(args: argparse.Namespace) -> int:
     tool = _resolve([args.tool], discover())[0]
+    target = _target_from_args(args)
+    support = tool.support_for(target.platform)
     print(f"{tool.name} {tool.version}\n{tool.description}\n")
+    if target.platform is not Platform.CLAUDE or support.status is not SupportStatus.SUPPORTED:
+        print(f"{target.adapter.product_name}: {support.status.value}")
+    if support.replacement:
+        print(f"Replacement: {support.replacement}")
+    if support.reason:
+        print(f"Reason: {support.reason}")
+    if support.status is not SupportStatus.SUPPORTED:
+        if tool.docs:
+            print(f"\nDocs: {tool.docs}")
+        return 0
     if tool.requires:
         print(f"Requires: {', '.join(tool.requires)}")
     print("Files:")
-    for _, dest, executable, _ in tool.expand():
-        print(f"  .claude/{dest}{'  (executable)' if executable else ''}")
+    for payload in tool.expand(target.platform):
+        path = target.destination_path(payload.root, payload.dest)
+        shown = path.as_posix() if target.is_user else path.relative_to(target.scope_root).as_posix()
+        print(f"  {shown}{'  (executable)' if payload.executable else ''}")
     if tool.gitignore:
         print("\nAdded to .gitignore:")
         for entry in tool.gitignore:
-            print(f"  .claude/{entry}")
-    if tool.fragment:
-        print("\nsettings.json fragment:")
-        for line in settings_merge.dumps(substitute(tool.fragment)).splitlines():
+            print(f"  {target.gitignore_pattern(entry)}")
+    fragment = tool.fragment_for(target.platform)
+    if fragment:
+        print(f"\n{target.settings_name} fragment:")
+        for line in settings_merge.dumps(substitute(fragment, target)).splitlines():
             print(f"  {line}")
     if tool.docs:
         print(f"\nDocs: {tool.docs}")
@@ -123,8 +155,18 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    tools = _resolve(args.tools, discover())
+    available = discover()
     target = _target_from_args(args)
+    tools = (
+        [tool for tool in available.values() if tool.support_for(target.platform).status is SupportStatus.SUPPORTED]
+        if args.tools == ["all"]
+        else _resolve(args.tools, available)
+    )
+    if not tools:
+        raise InstallError(f"no tools are installable for the {target.adapter.product_name} target")
+    # Validate the whole batch before planning or writing any member.
+    for tool in tools:
+        require_supported(tool, target)
 
     # Each tool's fragment must merge onto what the previous tool wrote, not
     # onto the original file — otherwise the last install wins and silently
@@ -150,7 +192,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     if args.dry:
         print("\n(dry run — nothing written)")
     elif tools:
-        print("\nRestart Claude Code (or run /doctor) to pick up the changes.")
+        print(f"\n{target.adapter.restart_guidance}")
     return 0
 
 
@@ -163,7 +205,8 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         else _resolve(args.tools, available)
     )
     for tool in tools:
-        print(f"{tool.name} -> {target.claude_dir}")
+        require_supported(tool, target)
+        print(f"{tool.name} -> {target.install_root}")
         for note in uninstall(tool, target, force=args.force):
             print(f"  note: {note}")
     return 0
@@ -174,20 +217,29 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
     target = _target_from_args(args)
     installed = [name for name, tool in available.items() if is_installed(tool, target)]
     if not args.tools and not installed:
-        print(f"nothing installed in {target.claude_dir}")
+        if target.platform is Platform.CLAUDE:
+            print(f"nothing installed in {target.install_root}")
+        else:
+            print(f"nothing installed for {target.adapter.product_name} in {target.install_root}")
         return 0
     args.tools = args.tools or installed
     return cmd_install(args)
 
 
 def _add_target_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--platform",
+        choices=[platform.value for platform in Platform],
+        default=Platform.CLAUDE.value,
+        help="installation target (default: claude)",
+    )
     parser.add_argument("--dir", help="project root to install into (default: cwd)")
     parser.add_argument(
         "--user",
         "--global",
         dest="user",
         action="store_true",
-        help="install machine-wide into ~/.claude, for every project",
+        help="install machine-wide for the selected platform, for every project",
     )
     parser.add_argument(
         "--local", action="store_true", help="write to settings.local.json (project scope only)"
@@ -196,7 +248,7 @@ def _add_target_flags(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="harness", description="Install Claude Code tools from the harness collection."
+        prog="harness", description="Install tools from the harness collection."
     )
     parser.add_argument("--version", action="version", version=f"harness {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -207,6 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_info = sub.add_parser("info", help="show what a tool installs")
     p_info.add_argument("tool")
+    _add_target_flags(p_info)
     p_info.set_defaults(func=cmd_info)
 
     p_install = sub.add_parser("install", help="install one or more tools (or 'all')")

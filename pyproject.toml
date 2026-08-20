@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "harness"
 version = "0.1.2"
-description = "Installer for the harness collection of Claude Code tools (skills, hooks, agents)"
+description = "Installer for the harness collection of agent tools (skills, hooks, agents)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "EmilienxD" }]
-keywords = ["claude", "claude-code", "skills", "hooks", "agent"]
+keywords = ["claude", "claude-code", "chatgpt", "skills", "hooks", "agent"]
 dependencies = []
 
 [project.urls]

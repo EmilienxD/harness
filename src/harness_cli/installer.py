@@ -1,4 +1,4 @@
-"""Copying tool files into `.claude/` and merging the settings they need.
+"""Platform-neutral planning and installation of harness tools.
 
 Installing leaves nothing behind but the tool's own files: no lock file, no
 backups. Everything an uninstall needs to know — which paths belong to a tool,
@@ -8,10 +8,10 @@ there is no reason to write a second copy of it into the user's repo.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -19,10 +19,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from harness_cli import gitignore, settings_merge
-from harness_cli.manifest import Tool
+from harness_cli.manifest import SupportStatus, Tool
+from harness_cli.platforms import Platform, PlatformAdapter, get_adapter
 
-# Written by earlier versions of this installer; removed on sight.
-LEGACY_ARTIFACTS = (".harness.lock.json", "settings.json.bak", "settings.local.json.bak")
+# Public compatibility alias for callers that inspected the old installer.
+LEGACY_ARTIFACTS = get_adapter().legacy_artifacts
 
 
 class InstallError(Exception):
@@ -31,23 +32,72 @@ class InstallError(Exception):
 
 @dataclass(frozen=True)
 class Target:
-    """Where an install lands: a `.claude/` directory and one settings file."""
+    """One platform and scope selected for an install."""
 
-    claude_dir: Path
-    settings_name: str = "settings.json"
+    scope_root: Path
+    adapter: PlatformAdapter
     is_user: bool = False
+    local: bool = False
 
     @classmethod
-    def for_project(cls, root: Path, settings_name: str = "settings.json") -> "Target":
-        return cls(claude_dir=root / ".claude", settings_name=settings_name)
+    def for_project(
+        cls,
+        root: Path,
+        settings_name: str | None = None,
+        platform: Platform | str = Platform.CLAUDE,
+    ) -> "Target":
+        adapter = get_adapter(platform)
+        local = settings_name == "settings.local.json"
+        if settings_name not in (None, adapter.config_name, "settings.json", "settings.local.json"):
+            raise InstallError(f"custom config filename '{settings_name}' is not supported")
+        if adapter.platform is Platform.CHATGPT and settings_name == "settings.json":
+            # The old default was settings.json; a caller selecting ChatGPT
+            # gets the adapter's native default rather than a Claude filename.
+            local = False
+        if local and not adapter.supports_local_config:
+            raise InstallError(f"--local is not supported for the {adapter.product_name} target")
+        return cls(scope_root=root.resolve(), adapter=adapter, local=local)
 
     @classmethod
-    def for_user(cls, settings_name: str = "settings.json") -> "Target":
-        return cls(claude_dir=Path.home() / ".claude", settings_name=settings_name, is_user=True)
+    def for_user(
+        cls,
+        settings_name: str | None = None,
+        platform: Platform | str = Platform.CLAUDE,
+    ) -> "Target":
+        adapter = get_adapter(platform)
+        if settings_name not in (None, adapter.config_name, "settings.json"):
+            raise InstallError(f"custom user config filename '{settings_name}' is not supported")
+        return cls(scope_root=Path.home(), adapter=adapter, is_user=True)
+
+    @property
+    def platform(self) -> Platform:
+        return self.adapter.platform
+
+    @property
+    def install_root(self) -> Path:
+        return self.adapter.platform_root(self.scope_root, self.is_user)
+
+    @property
+    def claude_dir(self) -> Path:
+        """Legacy alias for the primary platform root."""
+        return self.install_root
+
+    def destination_root(self, root: str) -> Path:
+        return self.adapter.destination_root(self.scope_root, self.is_user, root)
+
+    def destination_path(self, root: str, dest: str) -> Path:
+        return self.destination_root(root) / dest
+
+    @property
+    def settings_name(self) -> str:
+        return self.settings_path.name
 
     @property
     def settings_path(self) -> Path:
-        return self.claude_dir / self.settings_name
+        try:
+            return self.adapter.config_path(self.scope_root, self.is_user, self.local)
+        except ValueError as exc:
+            raise InstallError(str(exc)) from exc
 
     @property
     def gitignore_path(self) -> Path:
@@ -59,12 +109,12 @@ class Target:
         for the common case of dotfiles kept in git, and is inert otherwise.
         """
         if self.is_user:
-            return self.claude_dir / ".gitignore"
-        return self.claude_dir.parent / ".gitignore"
+            return self.install_root / ".gitignore"
+        return self.scope_root / ".gitignore"
 
     def gitignore_pattern(self, entry: str) -> str:
         """Manifest entries are install-dir-relative, exactly like `dest`."""
-        return entry if self.is_user else f".claude/{entry}"
+        return self.adapter.gitignore_pattern(entry, self.is_user)
 
     def read_gitignore(self) -> str:
         path = self.gitignore_path
@@ -87,8 +137,8 @@ class Target:
     def sweep_legacy(self) -> list[str]:
         """Delete artifacts older versions of this installer used to leave behind."""
         removed = []
-        for name in LEGACY_ARTIFACTS:
-            path = self.claude_dir / name
+        for name in self.adapter.legacy_artifacts:
+            path = self.install_root / name
             if path.is_file():
                 path.unlink()
                 removed.append(name)
@@ -164,28 +214,31 @@ def substitute(value, target: "Target | None" = None, python_info=None):
         python_info = result if result else (FALLBACK_PYTHON, [])
 
     if isinstance(value, str):
-        claude_dir = (
-            target.claude_dir.as_posix()
-            if target and target.is_user
-            else "${CLAUDE_PROJECT_DIR}/.claude"
-        )
-        return value.replace("${CLAUDE_DIR}", claude_dir)
+        adapter = target.adapter if target else get_adapter()
+        scope_root = target.scope_root if target else Path(".").resolve()
+        is_user = target.is_user if target else False
+        expanded = value
+        for placeholder, replacement in adapter.placeholders(scope_root, is_user).items():
+            expanded = expanded.replace(placeholder, replacement)
+        if "${PYTHON}" in expanded and python_info:
+            command, args_prefix = python_info
+            argv = (command, *args_prefix)
+            launcher = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+            expanded = expanded.replace("${PYTHON}", launcher)
+        return expanded
 
     if isinstance(value, dict):
-        # Special handling for hook command/args pattern
-        if value.get("type") == "command" and "${PYTHON}" in json.dumps(value):
+        # Claude hook commands keep the executable and argv separate. ChatGPT
+        # deliberately falls through to ordinary recursive substitution because
+        # its native hooks.json schema stores the complete command as one string.
+        if (
+            (target is None or target.platform is Platform.CLAUDE)
+            and value.get("type") == "command"
+            and "${PYTHON}" in json.dumps(value)
+        ):
             command, args_prefix = python_info
             script_args = value.get("args", [])
-            # Expand ${CLAUDE_DIR} in script args
-            expanded_args = [
-                arg.replace(
-                    "${CLAUDE_DIR}",
-                    target.claude_dir.as_posix()
-                    if target and target.is_user
-                    else "${CLAUDE_PROJECT_DIR}/.claude",
-                )
-                for arg in script_args
-            ]
+            expanded_args = [substitute(arg, target, python_info) for arg in script_args]
             return {
                 **{k: v for k, v in value.items() if k not in ("command", "args")},
                 "command": command,
@@ -299,6 +352,8 @@ def rehome_moved_hooks(settings: dict, fragment: dict) -> None:
 @dataclass
 class FileAction:
     dest: str
+    root: str
+    path: Path
     source: Path
     executable: bool
     status: str  # new | overwrite | unchanged
@@ -331,8 +386,25 @@ def is_installed(tool: Tool, target: Target) -> bool:
     Presence of the files is the state — there is no separate record to consult
     and therefore nothing that can disagree with what is actually on disk.
     """
-    expanded = tool.expand()
-    return bool(expanded) and all((target.claude_dir / dest).is_file() for _, dest, _, _ in expanded)
+    if tool.support_for(target.platform).status is not SupportStatus.SUPPORTED:
+        return False
+    expanded = tool.expand(target.platform)
+    return bool(expanded) and all(
+        target.destination_path(item.root, item.dest).is_file() for item in expanded
+    )
+
+
+def require_supported(tool: Tool, target: Target) -> None:
+    support = tool.support_for(target.platform)
+    if support.status is SupportStatus.SUPPORTED:
+        return
+    if support.status is SupportStatus.REPLACEMENT:
+        detail = f" Use {support.replacement} instead."
+    else:
+        detail = f" {support.reason}" if support.reason else ""
+    raise InstallError(
+        f"{tool.name} is {support.status.value} for the {target.adapter.product_name} target.{detail}"
+    )
 
 
 def plan_install(
@@ -351,9 +423,11 @@ def plan_install(
     `force` overwrites user-edited starter files instead of keeping them —
     mirroring `uninstall --force` for files modified since install.
     """
+    require_supported(tool, target)
     actions: list[FileAction] = []
-    for source, dest, executable, starter in tool.expand():
-        path = target.claude_dir / dest
+    for payload in tool.expand(target.platform):
+        source, dest, executable, starter = payload
+        path = target.destination_path(payload.root, dest)
         if not path.exists():
             status = "new"
         elif sha256(path) == sha256(source):
@@ -365,19 +439,27 @@ def plan_install(
             status = "unchanged"
         else:
             status = "overwrite"
-        actions.append(FileAction(dest=dest, source=source, executable=executable, status=status))
+        actions.append(
+            FileAction(
+                dest=dest,
+                root=payload.root,
+                path=path,
+                source=source,
+                executable=executable,
+                status=status,
+            )
+        )
 
-    needs_python = "${PYTHON}" in json.dumps(tool.fragment)
+    native_fragment = tool.fragment_for(target.platform)
+    needs_python = "${PYTHON}" in json.dumps(native_fragment)
     python_info = python_command() if needs_python else None
     fallback_info = (FALLBACK_PYTHON, []) if needs_python else None
-    fragment = substitute(tool.fragment, target, python_info or fallback_info)
+    fragment = substitute(native_fragment, target, python_info or fallback_info)
     before = target.read_settings() if settings_override is None else settings_override
     # The heal below rewrites entries, so it works on a copy: `before` stays
     # the file as found, and a plan that only heals still reads as a change.
-    base = copy.deepcopy(before)
-    restore_proxied_hooks(base)  # settings left behind by the retired stopHook convention
-    rehome_moved_hooks(base, fragment)  # groups under a matcher this tool has since changed
-    after = settings_merge.merge(base, fragment) if fragment else base
+    base = target.adapter.prepare_config(before, fragment)
+    after = target.adapter.merge_config(base, fragment) if fragment else base
 
     ignore_before = (
         target.read_gitignore() if gitignore_override is None else gitignore_override
@@ -416,18 +498,17 @@ def _make_executable(path: Path) -> None:
 def apply_install(plan: Plan) -> list[str]:
     """Execute a plan. Returns human-readable notes about what happened."""
     target = plan.target
-    target.claude_dir.mkdir(parents=True, exist_ok=True)
-
     for action in plan.files:
         if action.status == "unchanged":
             continue
-        path = target.claude_dir / action.dest
+        path = action.path
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(action.source, path)
         if action.executable:
             _make_executable(path)
 
     if plan.settings_changed:
+        target.settings_path.parent.mkdir(parents=True, exist_ok=True)
         target.settings_path.write_text(settings_merge.dumps(plan.settings_after), encoding="utf-8")
 
     if plan.gitignore_changed:
@@ -459,27 +540,27 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
     user's and is left in place unless `force` is set — the same conservatism
     the lock file used to provide, without needing to store anything.
     """
+    require_supported(tool, target)
     notes: list[str] = []
     removed_any = False
 
-    for source, dest, _, _ in tool.expand():
-        path = target.claude_dir / dest
+    for payload in tool.expand(target.platform):
+        source, dest, _, _ = payload
+        path = target.destination_path(payload.root, dest)
         if not path.is_file():
             continue
         if sha256(path) != sha256(source) and not force:
             notes.append(f"kept {dest} (modified since install)")
             continue
         path.unlink()
-        _prune_empty_parents(path, target.claude_dir)
+        _prune_empty_parents(path, target.destination_root(payload.root))
         removed_any = True
 
-    fragment = substitute(tool.fragment, target)
+    fragment = substitute(tool.fragment_for(target.platform), target)
     if fragment:
         before = target.read_settings()
-        healed = copy.deepcopy(before)
-        restore_proxied_hooks(healed)  # settings left by the retired stopHook convention
-        rehome_moved_hooks(healed, fragment)  # groups under a matcher this tool has since changed
-        after = settings_merge.unmerge(healed, fragment)
+        healed = target.adapter.prepare_config(before, fragment)
+        after = target.adapter.unmerge_config(healed, fragment)
         if after != before:
             removed_any = True
             if after:
@@ -503,12 +584,17 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
                 target.gitignore_path.unlink(missing_ok=True)
                 notes.append(f"removed now-empty {target.gitignore_path.name}")
 
-    # If nothing is left in .claude/, we created it and should take it with us.
-    if target.claude_dir.is_dir():
-        try:
-            target.claude_dir.rmdir()
-        except OSError:
-            pass
+    # Remove any platform roots made empty by this tool. ChatGPT uses separate
+    # `.agents` and `.codex` trees, while Claude's logical roots are nested.
+    roots = {target.install_root, *(target.destination_root(p.root) for p in tool.expand(target.platform))}
+    for root in sorted(roots, key=lambda p: len(p.parts), reverse=True):
+        current = root
+        while current != target.scope_root and target.scope_root in current.parents:
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
     if not removed_any and not notes:
         notes.append("nothing to remove")

@@ -1,4 +1,4 @@
-name: Update Claude references
+name: Update documentation references
 
 on:
   workflow_dispatch:
@@ -19,11 +19,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: python -m pip install requests
-
-      - name: Update Claude references
-        run: python scripts/update_claude_references.py
+      - name: Update reference sets
+        run: >-
+          python scripts/update_references.py
+          docs/CLAUDE-REFERENCES
+          docs/CHATGPT-REFERENCES
 
       - name: Commit changes
         run: |
@@ -35,6 +35,6 @@ jobs:
             exit 0
           fi
 
-          git add docs/CLAUDE-REFERENCES
-          git commit -m "Update Claude references"
+          git add docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES
+          git commit -m "Update documentation references"
           git push

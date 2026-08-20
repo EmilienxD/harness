@@ -1,7 +1,9 @@
 # harness
 
-A collection of installable Claude Code tools — skills, hooks, agents — each one
-independently installable into any project with a single command.
+A collection of installable agent tools — skills, hooks, agents — each one
+independently installable into any project with a single command. Claude Code
+is the default target; the installer also has a native ChatGPT target ready for
+tool-specific implementations.
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness harness install commit
@@ -19,7 +21,11 @@ harness install commit --dry  # file list + a settings.json diff, nothing writte
 harness install caveman zoom-out  # several at once ('all' installs everything)
 harness uninstall commit          # removes only what it added ('all' too)
 harness upgrade                   # reinstall everything at the shipped version
+harness list --platform chatgpt   # inspect ChatGPT availability/status
 ```
+
+Every command accepts `--platform claude|chatgpt`; omitting it is exactly the
+same as `--platform claude`, preserving the original command behavior.
 
 Shorten the command by aliasing it, since the `--from` prefix is the same every time:
 
@@ -49,6 +55,11 @@ leaves the other alone.
 | `--dir PATH` | project scope, but some project other than the cwd |
 | `--user`, `--global` | machine-wide `~/.claude/`, active in every project |
 | `--local` | write to `settings.local.json` (gitignored) — project scope only |
+
+For ChatGPT, project skills go to `.agents/skills/` and native hook payloads
+and `hooks.json` go under `.codex/`. User installs use the corresponding roots
+in the home directory. `--local` is Claude Code-specific and is rejected for a
+ChatGPT target.
 
 Hook paths adapt to the scope automatically: a project install writes Claude
 Code's `${CLAUDE_PROJECT_DIR}` placeholder, while a machine-wide install writes
@@ -109,9 +120,42 @@ src = "skills/commit"
 dest = "skills/commit"
 ```
 
-Settings live beside it in `settings.fragment.json` — real JSON, exactly what
-gets merged, so it stays diffable against what Claude Code expects. Two
-placeholders are resolved at install time: `${PYTHON}` becomes `uv run --no-project`
+That original form remains valid and means a Claude Code-supported tool whose
+destinations are relative to `.claude/`. New manifests can declare target
+status, target-native fragments, logical destination roots, shared payloads,
+and target-specific payload variants:
+
+```toml
+[platforms.chatgpt]
+status = "supported" # or "replacement" / "unsupported"
+fragment = "targets/chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "skills/example/SKILL.md" # shared by every supported target
+dest = "example/SKILL.md"
+root = "skills"                 # .claude/skills or .agents/skills
+
+[[files]]
+src = "targets/chatgpt/hook.py"
+dest = "example.py"
+root = "hooks"                  # .claude/hooks or .codex/hooks
+platforms = ["chatgpt"]
+```
+
+The logical roots are `platform` (the default: `.claude` or `.codex`),
+`skills`, and `hooks`. A file entry without `platforms` is shared; an entry
+with it is selected only for those targets. Existing manifests implicitly
+support Claude Code and are unsupported on ChatGPT until they explicitly
+declare a native implementation. A `replacement` declaration must name the
+capability users should choose instead.
+
+Claude Code settings live beside it in `settings.fragment.json`; a target's
+`fragment` declaration names that platform's native JSON fragment (for example,
+a ChatGPT `hooks.json` fragment). The JSON is merged as written, so it stays
+diffable against what each product expects. `${PLATFORM_DIR}`, `${SKILLS_DIR}`,
+and `${HOOKS_DIR}` are portable placeholders; ChatGPT resolves project paths
+absolutely because it has no documented project-root placeholder. `${PYTHON}`
+becomes `uv run --no-project`
 when `uv` is installed (which it is if you used `uvx`), otherwise falls back to
 the first working interpreter among `python3`/`python`/`py`. `${CLAUDE_DIR}`
 becomes `${CLAUDE_PROJECT_DIR}/.claude` (or an absolute path for `--user` installs).
@@ -150,3 +194,15 @@ uv run harness list        # run the CLI from the checkout
 
 The CLI lives in `src/harness_cli/`; the tool payload is the top-level
 `harness/` directory, shipped inside the wheel as package data.
+
+## ChatGPT support
+
+The platform architecture is in place, but individual ChatGPT equivalents are
+not implemented yet. `list`, `info`, `install`, `uninstall`, and `upgrade`
+understand `--platform chatgpt` and report current tools as unsupported or
+replacement-only instead of copying incompatible Claude payloads. Future ports
+can use shared skills alongside native `.codex/hooks.json` fragments and
+target-specific payloads without adding platform conditionals to the installer.
+See
+the [tool-by-tool compatibility assessment](docs/CHATGPT-COMPATIBILITY.md) and
+the mirrored [official ChatGPT references](docs/CHATGPT-REFERENCES/README.md).

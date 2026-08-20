@@ -17,9 +17,11 @@ tool needs. The CLI is in `src/harness_cli/`; see the root `README.md`.
 ## Adding or changing a tool
 
 Every installable tool needs a `harness.toml` in its directory declaring `name`, `version`,
-`description`, and one or more `[[files]]` entries (`src` relative to the tool dir, `dest` relative to
-the target `.claude/`). Settings go in a sibling `settings.fragment.json` — plain JSON, merged as-is,
-with `${PYTHON}` and `${CLAUDE_DIR}` resolved at install time. `${PYTHON}` becomes `uv run --no-project`
+`description`, and one or more `[[files]]` entries (`src` relative to the tool dir and `dest` relative
+to its logical destination root). Claude Code settings default to a sibling `settings.fragment.json`;
+platform-specific native JSON fragments are named by `[platforms.<name>].fragment`. They are merged
+as-is, with `${PYTHON}` and platform placeholders resolved at install time. `${PYTHON}` becomes
+`uv run --no-project`
 when `uv` is installed (which it is if you used `uvx`), otherwise falls back to the first working
 interpreter among `python3`, `python`, `py` (the Windows Store alias passes `which` without being a
 real interpreter, so actual execution is tested). A file the user is meant to edit after install —
@@ -35,6 +37,15 @@ again on uninstall, and it does not rewrite hook entries belonging to anyone els
 out of the old group rather than leaving both firing. Keys that Claude
 Code's settings schema doesn't define don't belong in a fragment either — project settings are
 validated strictly, and a file that fails validation is rejected whole.
+
+The installer has explicit `claude` and `chatgpt` platform adapters. Commands default to Claude Code
+for backward compatibility and select ChatGPT with `--platform chatgpt`. A legacy manifest implicitly
+supports Claude Code only. New target support belongs in `[platforms.<name>]` with a `supported`,
+`replacement`, or `unsupported` status and, for native config, a target-specific `fragment`. File
+entries can use `root = "platform"`, `"skills"`, or `"hooks"`; omit `platforms` for a shared payload or
+set `platforms = ["chatgpt"]` (or `"claude"`) for a variant. The adapter maps those roots to `.claude`,
+`.agents`, and `.codex`; do not put platform-path conditionals in installer call sites. Legacy
+Claude-relative `dest` entries and `settings.fragment.json` remain supported unchanged.
 
 ## Tools
 
@@ -74,6 +85,11 @@ validated strictly, and a file that fails validation is rejected whole.
 ## Other directories
 
 - `docs/CLAUDE-REFERENCES/` — mirrored upstream Claude Code docs, refreshed by
-  `scripts/update_claude_references.py` via the `update-claude-references.yml` workflow. Consult these
+  `scripts/update_references.py` via the `update-references.yml` workflow. Consult these
   for how Claude Code itself works (hooks, skills, settings, tools) rather than relying on prior
   knowledge.
+- `docs/CHATGPT-REFERENCES/` — mirrored official ChatGPT developer docs, refreshed by the same
+  script and workflow. Upstream still uses `codex` and `.codex` for some CLI implementation
+  identifiers; use ChatGPT as the product name in harness-authored material.
+- `docs/CHATGPT-COMPATIBILITY.md` — current feasibility map and implementation plan for a native
+  ChatGPT target.
