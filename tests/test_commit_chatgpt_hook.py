@@ -125,6 +125,22 @@ def test_missing_pre_snapshot_forces_visible_whole_tree_fallback(repo):
     assert core.changed_paths(scan) is None
 
 
+def test_chatgpt_unhandled_hook_exception_blocks_with_exit_2(monkeypatch, capsys):
+    monkeypatch.setattr(
+        adapter,
+        "main",
+        lambda: (_ for _ in ()).throw(RuntimeError("adapter failure")),
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        adapter.entrypoint()
+
+    assert stopped.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "harness commit hook failed in ChatGPT" in stderr
+    assert "RuntimeError: adapter failure" in stderr
+
+
 def test_chatgpt_ai_key_uses_codex_locations(repo, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)

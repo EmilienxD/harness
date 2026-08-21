@@ -547,6 +547,37 @@ def finish(message: str) -> None:
     sys.exit(2)
 
 
+def fail_unhandled_exception(host: str, exc: Exception) -> None:
+    """
+    Convert unexpected hook crashes into the UserPromptSubmit rejection code.
+
+    A plain Python crash exits 1, which some hosts can treat as "hook failed,
+    continue anyway". For /commit that is the expensive failure mode: the
+    fallback skill reaches the model. Exit 2 keeps the prompt blocked and
+    shows a useful error instead.
+    """
+    _force_utf8_output()
+    details = str(exc).strip() or "(no details)"
+    try:
+        sys.stderr.write(
+            "\n\n"
+            f"harness commit hook failed in {host}; blocking the prompt so "
+            "it cannot fall back to the model.\n"
+            f"{exc.__class__.__name__}: {details}"
+        )
+    finally:
+        sys.exit(2)
+
+
+def guarded_main(host: str, entrypoint) -> None:
+    try:
+        entrypoint()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        fail_unhandled_exception(host, exc)
+
+
 def allow() -> None:
     """Let the prompt through unchanged; a normal model turn follows."""
     sys.exit(0)
@@ -1927,5 +1958,9 @@ def main() -> None:
     finish(f"Committed {sha} ({count} file(s){suffix}){widened}: {message}")
 
 
+def entrypoint() -> None:
+    guarded_main("Claude Code", main)
+
+
 if __name__ == "__main__":
-    main()
+    entrypoint()

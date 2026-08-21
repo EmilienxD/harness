@@ -18,7 +18,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-import commit_core as core
+try:
+    import commit_core as core
+except Exception as exc:
+    details = str(exc).strip() or "(no details)"
+    sys.stderr.write(
+        "\n\n"
+        "harness commit hook failed in ChatGPT; blocking the prompt so "
+        "it cannot fall back to the model.\n"
+        f"{exc.__class__.__name__}: {details}"
+    )
+    sys.exit(2)
 
 
 core.HOST_CONFIG_DIR = ".codex"
@@ -373,5 +383,9 @@ def main() -> None:
     core.allow()
 
 
+def entrypoint() -> None:
+    core.guarded_main("ChatGPT", main)
+
+
 if __name__ == "__main__":
-    main()
+    entrypoint()

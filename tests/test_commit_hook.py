@@ -157,6 +157,22 @@ def test_only_ignored_writes_stage_nothing(repo):
     assert _git(repo, "status", "--porcelain", "--", ".issues-gateway").strip() == ""
 
 
+def test_unhandled_hook_exception_blocks_prompt_with_exit_2(monkeypatch, capsys):
+    monkeypatch.setattr(
+        hook,
+        "main",
+        lambda: (_ for _ in ()).throw(RuntimeError("thread failure")),
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        hook.entrypoint()
+
+    assert stopped.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "harness commit hook failed in Claude Code" in stderr
+    assert "RuntimeError: thread failure" in stderr
+
+
 # --- files written by shell commands, not by Edit/Write --------------------
 
 
