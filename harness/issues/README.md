@@ -76,8 +76,8 @@ failure modes:
 
 - **A ledger.** Every successful create is recorded in `.issues-gateway/{session-id}/.published.json`
   before the draft file is deleted, and every ledger is loaded back at the start of the next run. So
-  `{session-id}/spec` resolves to the spec's real number in a later run, and a `Blocked by` reference
-  to an issue published in an *earlier* run resolves too — which it previously couldn't.
+  a `{session-id}/{i}` reference — in `Blocked by` or under `## Parent` — to an issue published in an
+  *earlier* run resolves too, even though its draft file is long gone.
 - **A one-shot notice.** Each run queues what it created in `.issues-gateway/.pending-notice.json`.
   The next prompt that isn't a publish command flushes it into the agent's context as
   `additionalContext` and deletes it. It rides along with a prompt you were sending anyway, so it
@@ -148,11 +148,13 @@ At runtime the drafting skills create a gateway folder at the project root — `
 - **Filename**: `{session-id}/issue-{i}.md`. `{i}` is the next free index for single-issue and spec
   drafts; for a batch, numbering continues from that index in publish order (blockers before what
   they block).
-- **Labels**: the first non-empty line after the title. For issues: `> ` followed by a
-  comma-separated list of label tokens — `difficulty:{routine|basic|advanced|expert}` and `mode:{afk|hitl}` are
-  each optional (the user can ask the drafting skill to skip them), and extra labels the user asks
-  for are listed alongside them after the skill verifies they exist in the repo (`gh label list`).
-  For specs: `> spec`. The hook maps the difficulty/mode/spec tokens to the workflow's own label
+- **Labels**: the first non-empty line after the title. One format for every draft, specs included:
+  `> ` followed by a comma-separated list of label tokens —
+  `difficulty:{routine|basic|advanced|expert}` and `mode:{afk|hitl}` are
+  each optional (the user can ask the drafting skill to skip them), a spec's line always includes
+  `spec`, and extra labels the user asks for are listed alongside them after the skill verifies they
+  exist in the repo (`gh label list`) — multi-word labels included (`> spec, security`, `> good first
+  issue, difficulty:basic`). The hook maps the difficulty/mode/spec tokens to the workflow's own label
   names (`[AI]-routine-difficulty`, `[AI]-basic-difficulty`, `[AI]-advanced-difficulty`,
   `[AI]-expert-difficulty`, `[AI]-afk`, `[AI]-hitl`, `[AI]-spec`), applies any extra
   tokens as-is, strips the line from the published body, and creates the canonical labels in the
@@ -169,19 +171,20 @@ At runtime the drafting skills create a gateway folder at the project root — `
   file whose reference isn't resolvable yet. References to issues published in an earlier run
   resolve from the ledger.
 - **Parent**: a `## Parent` section (any heading level) whose first non-empty line is one bare
-  reference and nothing else — `#42`, an issue URL, `{session-id}/{i}`, or `{session-id}/spec` —
-  publishes the issue as a GitHub sub-issue of that parent and removes the section from the body.
-  `{session-id}/spec` resolves to whichever issue that session published carrying `[AI]-spec`, so a
-  batch can point at its spec whether the spec is already on the tracker or still an unpublished
-  draft. Prose under `## Parent` is left exactly as written and creates no link, so the section is
+  reference and nothing else — `#42`, an issue URL, or `{session-id}/{i}`, the same token used for a
+  blocker — publishes the issue as a GitHub sub-issue of that parent and removes the section from
+  the body. Parent linking is structural, not label-based: a spec drafted earlier in the session is
+  referenced like any other draft, by its filename index (`{session-id}/0`), whether it is already
+  on the tracker or still an unpublished draft. Prose under `## Parent` is left exactly as written
+  and creates no link, so the section is
   safe to use for a human note instead; `none` there is an explicit opt-out and is dropped from the
   body. A parent that isn't resolvable yet is retried within the run just like a blocker, and the
   draft is left in place rather than published without its link. On a `gh` too old for
   `gh issue create --parent`, the link is made afterwards with `gh issue edit --parent` and the
   reference is kept in the body as a fallback.
 - **Ledger**: `{session-id}/.published.json` records `{"{session-id}/{i}": {number, url, title,
-  labels, spec, parent}}` after each successful create, written immediately so an interrupted run
-  still leaves behind the numbers it did create. It is what makes references and `{session-id}/spec`
+  labels, parent}}` after each successful create, written immediately so an interrupted run
+  still leaves behind the numbers it did create. It is what makes references
   resolve across runs, once the draft files themselves are gone. A corrupt ledger degrades to
   "nothing known yet" rather than blocking a publish.
 - **Pending notice**: `.pending-notice.json` at the gateway root collects what each run published
@@ -285,7 +288,7 @@ The spec-to-sub-issues loop, end to end:
 /to-spec-draft-issue     → issue-0.md, labelled "> spec"
 /publish-issues          → creates it as #42; ledger records it; notice queued
 /draft-issues            → the notice arrives with this prompt, so the breakdown
-                           is drafted with "## Parent" → #42 (or {session-id}/spec
-                           if you skipped the publish step)
+                           is drafted with "## Parent" → #42 (or {session-id}/{i}
+                           of the spec draft if you skipped the publish step)
 /publish-issues          → each issue is created as a sub-issue of #42
 ```

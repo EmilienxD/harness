@@ -82,6 +82,23 @@ def test_spec_line_maps_to_canonical_label():
     assert labels == ["[AI]-spec"]
     assert body == "## Problem"
 
+
+def test_spec_with_extra_labels():
+    # A spec declares labels like any other issue: "spec" is one token on
+    # the list, everything else rides alongside it.
+    labels, body = _labels("> spec, security\n\n## Problem\n")
+    assert labels == ["[AI]-spec", "security"]
+    assert body == "## Problem"
+    labels, _ = _labels("> spec, good first issue, mode:hitl\n\nbody")
+    assert labels == ["[AI]-spec", "good first issue", "[AI]-hitl"]
+
+
+def test_multiword_extra_labels_parse():
+    labels, _ = _labels("> good first issue\n\nbody")
+    assert labels == ["good first issue"]
+    labels, _ = _labels("> good first issue, difficulty:basic\n\nbody")
+    assert labels == ["good first issue", "[AI]-basic-difficulty"]
+
 def test_whitespace_and_case_tolerance():
     labels, _ = _labels("  > Difficulty:Advanced , MODE:hitl \n\nbody")
     assert labels == ["[AI]-advanced-difficulty", "[AI]-hitl"]
@@ -98,8 +115,6 @@ def test_malformed_lines_yield_no_labels_and_keep_body():
     for bad in [
         "> ci, mode:",            # second token isn't a label
         "> mode:hitl, ",          # trailing comma / empty token
-        "> some prose line",      # spaces inside a token
-        "> mode:hitl and more",   # prose bolted onto a label
         "> # comment",            # header-ish
     ]:
         labels, body = _labels(f"{bad}\n\nrest\n")
@@ -245,7 +260,6 @@ def test_parent_section_accepts_every_reference_form():
         ("42", "42"),
         ("https://github.com/o/r/issues/42", "42"),
         (f"{SID}/0", f"{SID}/0"),
-        (f"{SID}/spec", f"{SID}/spec"),
     ]:
         ref, body = hook.extract_parent(f"## Parent\n\n{text}\n\n## What\n\nx")
         assert ref == expected, text
@@ -280,13 +294,11 @@ def test_no_parent_section_changes_nothing():
     assert hook.extract_parent(original) == (None, original)
 
 
-def test_resolve_parent_direct_session_and_spec_references():
-    assert hook.resolve_parent("42", {}, {}) == ("42", False)
-    assert hook.resolve_parent(f"{SID}/0", {f"{SID}/0": "7"}, {}) == ("7", False)
+def test_resolve_parent_direct_and_session_references():
+    assert hook.resolve_parent("42", {}) == ("42", False)
+    assert hook.resolve_parent(f"{SID}/0", {f"{SID}/0": "7"}) == ("7", False)
     # Not yet published: retryable, because it may come later in this run.
-    assert hook.resolve_parent(f"{SID}/0", {}, {}) == (None, True)
-    assert hook.resolve_parent(f"{SID}/spec", {}, {SID: "9"}) == ("9", False)
-    assert hook.resolve_parent(f"{SID}/spec", {}, {}) == (None, True)
+    assert hook.resolve_parent(f"{SID}/0", {}) == (None, True)
 
 
 # --- publishing a sub-issue ------------------------------------------------
@@ -324,7 +336,7 @@ def test_declared_parent_reaches_gh_and_is_stripped_from_the_body(tmp_path, monk
     assert any("sub-issue of #42" in line for line in report)
 
 
-def test_spec_sentinel_resolves_within_one_run(tmp_path, monkeypatch):
+def test_parent_reference_resolves_within_one_run(tmp_path, monkeypatch):
     monkeypatch.setattr(hook, "parent_flag_supported", lambda: True)
     created = _capture_creates(
         monkeypatch,
@@ -334,7 +346,7 @@ def test_spec_sentinel_resolves_within_one_run(tmp_path, monkeypatch):
     _draft(
         tmp_path,
         "issue-1.md",
-        f"# Child\n\n> mode:afk\n\n## Parent\n\n{SID}/spec\n\n## What\n\ny\n",
+        f"# Child\n\n> mode:afk\n\n## Parent\n\n{SID}/0\n\n## What\n\ny\n",
     )
 
     report: list[str] = []
@@ -349,7 +361,7 @@ def test_spec_sentinel_resolves_within_one_run(tmp_path, monkeypatch):
     ]
 
 
-def test_spec_sentinel_resolves_from_the_ledger_in_a_later_run(tmp_path, monkeypatch):
+def test_parent_reference_resolves_from_the_ledger_in_a_later_run(tmp_path, monkeypatch):
     monkeypatch.setattr(hook, "parent_flag_supported", lambda: True)
     batch = tmp_path / ".issues-gateway" / SID
 
@@ -359,12 +371,12 @@ def test_spec_sentinel_resolves_from_the_ledger_in_a_later_run(tmp_path, monkeyp
     hook.publish_batch(batch, dry=False, report=[])
     assert not (batch / "issue-0.md").exists()
 
-    # Run 2: a batch drafted afterwards still resolves the spec by sentinel.
+    # Run 2: an issue drafted afterwards still resolves it by filename index.
     created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/43"])
     _draft(
         tmp_path,
         "issue-1.md",
-        f"# Child\n\n> mode:afk\n\n## Parent\n\n{SID}/spec\n\n## What\n\ny\n",
+        f"# Child\n\n> mode:afk\n\n## Parent\n\n{SID}/0\n\n## What\n\ny\n",
     )
     count, failures = hook.publish_batch(batch, dry=False, report=[])
 
@@ -388,11 +400,11 @@ def test_blocker_reference_resolves_across_runs_from_the_ledger(tmp_path, monkey
 
 
 def test_unresolvable_parent_leaves_the_draft_for_a_rerun(tmp_path):
-    _draft(tmp_path, "issue-0.md", f"# A\n\n> mode:afk\n\n## Parent\n\n{SID}/spec\n")
+    _draft(tmp_path, "issue-0.md", f"# A\n\n> mode:afk\n\n## Parent\n\n{SID}/9\n")
     report, count, failures = _dry_publish(tmp_path)
 
     assert (count, failures) == (0, 1)
-    assert any(f"parent {SID}/spec" in line for line in report)
+    assert any(f"parent {SID}/9" in line for line in report)
     assert (tmp_path / ".issues-gateway" / SID / "issue-0.md").exists()
 
 
@@ -535,7 +547,7 @@ def test_corrupt_ledger_degrades_to_empty(tmp_path):
     batch.mkdir(parents=True)
     (batch / hook.LEDGER_NAME).write_text("[]", encoding="utf-8")
     assert hook.load_ledger(batch) == {}
-    assert hook.seed_from_ledgers([batch]) == ({}, {})
+    assert hook.seed_from_ledgers([batch]) == {}
 
 
 def test_notice_stays_under_the_additional_context_cap(tmp_path):

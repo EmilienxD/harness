@@ -18,16 +18,19 @@ Design notes:
   *assumes* that ordering is perfect - see the retry pass below.
 - The first "# " header line in a draft file is the issue title. The first
   non-empty line after that declares labels (see /draft-issues, /draft-issue,
-  /to-spec-draft-issue): either "> spec", or
-  "> " followed by a comma-separated list of label tokens in any order -
+  /to-spec-draft-issue): "> " followed by a comma-separated list of label
+  tokens in any order. Every draft uses this same format - a spec is just a
+  draft whose tokens include "spec" (mandatory for /to-spec-draft-issue
+  output, alongside any extra labels, e.g. "> spec, security").
   "difficulty:{level}" and "mode:{afk|hitl}" are each optional (the user can
   ask for them to be left off), and extra labels the user asked for may be
   added alongside (e.g. "> ci, difficulty:advanced"). Aliased tokens map to the
-  workflow's own "[AI]-" prefixed label names ("[AI]-advanced-difficulty", "[AI]-afk",
-  "[AI]-spec", ...) via LABEL_ALIASES, then are stripped from the body that
-  gets posted, since the labels carry that information from then on. Extra
-  (non-aliased) tokens pass through as-is - the drafting skills are
-  responsible for checking with `gh label list` that they exist.
+  workflow's own "[AI]-" prefixed label names ("[AI]-advanced-difficulty",
+  "[AI]-afk", "[AI]-spec", ...) via LABEL_ALIASES, then are stripped from the
+  body that gets posted, since the labels carry that information from then
+  on. Extra (non-aliased) tokens pass through as-is - multi-word tokens are
+  fine ("good first issue" is a standard GitHub label) - and the drafting
+  skills are responsible for checking with `gh label list` that they exist.
 - A reference to another draft issue, written as plain text "{session-id}/{i}"
   in the body (no backticks, no braces - GitHub only autolinks a bare
   "#<number>", so the resolved replacement must not sit inside inline code),
@@ -50,11 +53,12 @@ Design notes:
   ".issues-gateway/{session-id}/.published.json", keyed exactly like an
   in-body reference. Every ledger is seeded back into the resolver at the
   start of a run, so a reference to an issue published in an *earlier* run
-  still resolves, and the ledger remembers which issue carried the
-  "[AI]-spec" label so "{session-id}/spec" works as a parent reference.
+  still resolves.
 - A "## Parent" section whose first non-empty line is a bare reference
-  ("#42", an issue URL, "{session-id}/{i}", or "{session-id}/spec") makes
-  the new issue a real GitHub sub-issue of that parent. Knowing the number
+  ("#42", an issue URL, or "{session-id}/{i}" - the same token used under
+  "Blocked by") makes the new issue a real GitHub sub-issue of that parent.
+  Parents are structural, not label-based: any draft can be a parent.
+  Knowing the number
   is not enough: GitHub's sub-issue graph is structural, so the link is made
   with `gh issue create --parent` (or, on a gh too old for that flag, a
   follow-up `gh issue edit --parent`). The section is stripped from the
@@ -108,22 +112,16 @@ SESSION_ID_PATTERN = re.compile(
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
-# A reference to another draft issue inside a body, written as plain text:
-# "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0"
-# Matching the full UUID keeps the pattern unambiguous without needing
-# wrappers like "{...}", and the session id must appear verbatim in the
-# draft anyway for the reference to point at the right batch.
+# A reference to another draft issue, written as plain text
+# "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0" - in a body ("Blocked by") or under
+# "## Parent". {i} is the target draft's filename index: one reference form
+# for every draft, whatever its labels. Matching the full UUID keeps the
+# pattern unambiguous without needing wrappers like "{...}", and the session
+# id must appear verbatim in the draft anyway for the reference to point at
+# the right batch.
 REF_PATTERN = re.compile(
     r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/(\d+)\b"
-)
-
-# "{session-id}/spec": the issue published from this session that carried the
-# "[AI]-spec" label. Lets a batch declare the spec as its parent without
-# anyone - model or user - having to know the real issue number.
-SPEC_REF_PATTERN = re.compile(
-    r"^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/spec$"
 )
 
 # The "## Parent" section (any heading level) and the reference forms allowed
@@ -137,20 +135,21 @@ PARENT_NONE_PATTERN = re.compile(r"^(none|n/a)\.?$", re.IGNORECASE)
 # The draft filename convention produced by /draft-issues: "issue-{i}.md"
 FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
 
-# The label declaration line produced by /draft-issues or /draft-issue: a
-# comma-separated list of label tokens in any order, with "difficulty:*" and
-# "mode:*" each optional and extra labels allowed, e.g.
-# "> difficulty:advanced, mode:hitl", "> mode:afk", "> ci, difficulty:basic".
-# Tolerant of leading whitespace before the ">" and of surrounding spaces
-# around tokens and commas.
-_LABEL_TOKEN = r"[a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)?"
+# The label declaration line every drafting skill produces - specs included:
+# "> " followed by a comma-separated list of label tokens in any order, with
+# "difficulty:*" and "mode:*" each optional and extra labels allowed, e.g.
+# "> difficulty:advanced, mode:hitl", "> mode:afk", "> ci, difficulty:basic",
+# "> spec, security". A token is one or more whitespace-separated words, each
+# word carrying an optional ":suffix" (the "difficulty:*" / "mode:*" form), so
+# multi-word extra labels like "good first issue" parse. Tolerant of leading
+# whitespace before the ">" and of surrounding spaces around tokens and
+# commas.
+_LABEL_WORD = r"[a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)?"
+_LABEL_TOKEN = rf"{_LABEL_WORD}(?:\s+{_LABEL_WORD})*"
 LABEL_LINE_PATTERN = re.compile(
     rf"^\s*>(?:\s*{_LABEL_TOKEN}\s*,)*\s*{_LABEL_TOKEN}\s*$",
     re.IGNORECASE,
 )
-
-# The label declaration line produced by /to-spec-draft-issue ("> spec").
-SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*spec\s*$", re.IGNORECASE)
 
 # Canonical labels this workflow depends on: (color, description). They carry
 # an "[AI]-" prefix so they can't collide with a repo's own labels, and so the
@@ -158,19 +157,41 @@ SPEC_LABEL_LINE_PATTERN = re.compile(r"^\s*>\s*spec\s*$", re.IGNORECASE)
 # They are created at the start of every publish run if missing; existing ones
 # are left alone, so the user's own styling is never overwritten.
 CANONICAL_LABELS = {
-    "[AI]-routine-difficulty": ("0E8A16", "Low reasoning level work - use rarely."),
-    "[AI]-basic-difficulty": ("FBCA04", "Easy, small refactors, missing tests, or documentation."),
-    "[AI]-advanced-difficulty": ("D93F0B", "Multi-step work with expected outcomes and low bug risk."),
-    "[AI]-expert-difficulty": ("B60205", "Complex, judgment-heavy, wide-context, or bug-prone work."),
-    "[AI]-afk": ("1D76DB", "Safe to implement in one shot, no review needed before landing."),
-    "[AI]-hitl": ("5319E7", "Sensitive, design-touching, or complex - needs human review."),
-    "[AI]-spec": ("7057FF", "A product spec synthesized from conversation."),
+    "[AI]-routine-difficulty": (
+        "0E8A16",
+        "Low reasoning level work (renames, cleanups, missing type hints) - use rarely.",
+    ),
+    "[AI]-basic-difficulty": (
+        "FBCA04",
+        "Easy, small refactoring (splitting functions, updating a model or "
+        "signature), adding missing tests, writing or updating documentation.",
+    ),
+    "[AI]-advanced-difficulty": (
+        "D93F0B",
+        "Multi-step work with expected outcomes, low chance of encountering "
+        "bugs, easy UI design.",
+    ),
+    "[AI]-expert-difficulty": (
+        "B60205",
+        "Multi-step complex work: careful judgment, complex UI design, wide "
+        "context, bug-prone.",
+    ),
+    "[AI]-afk": (
+        "1D76DB",
+        "The agent can be trusted to implement it in one shot with no review.",
+    ),
+    "[AI]-hitl": (
+        "5319E7",
+        "Sensitive, touches frontend or UI design, or complex enough that a "
+        "human should review it before it lands.",
+    ),
+    "[AI]-spec": ("7057FF", "A spec synthesized from conversation."),
 }
 
-# The declaration line uses "difficulty:{level}" / "mode:{mode}" tokens; the
-# labels actually created and applied are the names above. Any other token on
-# the line is applied as-is (the drafting skills check those exist with
-# `gh label list` before writing them).
+# The declaration line uses the "difficulty:{level}" / "mode:{mode}" / "spec"
+# tokens below; the labels actually created and applied are the names above.
+# Any other token on the line is applied as-is (the drafting skills check
+# those exist with `gh label list` before writing them).
 LABEL_ALIASES = {
     "difficulty:routine": "[AI]-routine-difficulty",
     "difficulty:basic": "[AI]-basic-difficulty",
@@ -215,16 +236,14 @@ def record_published(batch_dir: Path, key: str, entry: dict) -> None:
         pass  # the issue exists on the tracker; a missing ledger is not fatal
 
 
-def seed_from_ledgers(batch_dirs: list[Path]) -> tuple[dict[str, str], dict[str, str]]:
-    """Build (resolved, specs) from every batch ledger on disk.
+def seed_from_ledgers(batch_dirs: list[Path]) -> dict[str, str]:
+    """Build the resolved map from every batch ledger on disk.
 
-    resolved maps "{session-id}/{i}" -> issue number, exactly like the
-    in-run map. specs maps "{session-id}" -> the number of the issue that
-    session published with the spec label. Both are merged across batches
-    because reference keys carry their own session id and so are unique.
+    Maps "{session-id}/{i}" -> issue number, exactly like the in-run map.
+    Ledgers are merged across batches because reference keys carry their own
+    session id and so are unique.
     """
     resolved: dict[str, str] = {}
-    specs: dict[str, str] = {}
     for batch_dir in batch_dirs:
         for key, entry in load_ledger(batch_dir).items():
             if not isinstance(entry, dict):
@@ -233,9 +252,7 @@ def seed_from_ledgers(batch_dirs: list[Path]) -> tuple[dict[str, str], dict[str,
             if not number:
                 continue
             resolved[key] = str(number)
-            if entry.get("spec"):
-                specs[key.split("/", 1)[0]] = str(number)
-    return resolved, specs
+    return resolved
 
 
 def queue_notice(created: list[dict], failed: int, gateway_dir: Path = GATEWAY_DIR) -> None:
@@ -384,10 +401,10 @@ def parse_issue_file(path: Path) -> tuple[str, str]:
 def extract_labels(rest: str) -> tuple[list[str], str]:
     """Pull the label declaration line out of the body.
 
-    Accepts either "> spec" (one label) or
-    "> " followed by a comma-separated
-    list of label tokens in any order - "difficulty:*" and "mode:*" are each
-    optional, and extra labels pass through as-is. Returns (labels,
+    One format covers every draft, specs included: "> " followed by a
+    comma-separated list of label tokens in any order - "difficulty:*" and
+    "mode:*" are each optional, "spec" marks a spec (and may sit alongside
+    extra labels), and any other token passes through as-is. Returns (labels,
     remaining_body). labels is empty if the line is missing or malformed
     (e.g. a ">" quote, or a list carrying a token that can't be a label -
     the whole line is left in the body untouched rather than silently
@@ -397,20 +414,16 @@ def extract_labels(rest: str) -> tuple[list[str], str]:
     idx = 0
     while idx < len(lines) and not lines[idx].strip():
         idx += 1
-    if idx < len(lines):
-        if SPEC_LABEL_LINE_PATTERN.match(lines[idx]):
+    if idx < len(lines) and LABEL_LINE_PATTERN.match(lines[idx]):
+        content = lines[idx].strip()[1:]  # drop the leading ">"
+        labels = []
+        for token in content.split(","):
+            name = LABEL_ALIASES.get(token.strip().lower(), token.strip())
+            if name not in labels:
+                labels.append(name)
+        if labels:
             remaining = "\n".join(lines[idx + 1:]).strip()
-            return [LABEL_ALIASES["spec"]], remaining
-        if LABEL_LINE_PATTERN.match(lines[idx]):
-            content = lines[idx].strip()[1:]  # drop the leading ">"
-            labels = []
-            for token in content.split(","):
-                name = LABEL_ALIASES.get(token.strip().lower(), token.strip())
-                if name not in labels:
-                    labels.append(name)
-            if labels:
-                remaining = "\n".join(lines[idx + 1:]).strip()
-                return labels, remaining
+            return labels, remaining
     return [], rest.strip()
 
 
@@ -418,9 +431,9 @@ def parse_parent_ref(text: str) -> str | None:
     """Recognize the reference forms allowed under "## Parent".
 
     Returns a bare issue number for a direct reference ("#42", a URL), the
-    "{session-id}/{i}" or "{session-id}/spec" token for a reference that
-    still needs resolving, or None for anything else - prose under that
-    heading is a description, not a link, and must be left alone.
+    "{session-id}/{i}" token for a reference that still needs resolving, or
+    None for anything else - prose under that heading is a description, not
+    a link, and must be left alone.
     """
     text = text.strip()
     match = PARENT_URL_PATTERN.match(text)
@@ -429,9 +442,6 @@ def parse_parent_ref(text: str) -> str | None:
     match = REF_PATTERN.fullmatch(text)
     if match:
         return f"{match.group(1)}/{match.group(2)}"
-    match = SPEC_REF_PATTERN.match(text)
-    if match:
-        return f"{match.group(1)}/spec"
     match = PARENT_NUMBER_PATTERN.match(text)
     if match:
         return match.group(1)
@@ -473,20 +483,16 @@ def extract_parent(body: str) -> tuple[str | None, str]:
     return None, body
 
 
-def resolve_parent(
-    ref: str, resolved: dict[str, str], specs: dict[str, str]
-) -> tuple[str | None, bool]:
+def resolve_parent(ref: str, resolved: dict[str, str]) -> tuple[str | None, bool]:
     """Turn a parent reference into an issue number.
 
     Returns (number, retryable). A direct "#42" always resolves; a session
     reference resolves once the issue it points at has been published, and
-    is retryable until then - the spec may simply be later in this same run.
+    is retryable until then - the parent may simply be later in this same
+    run, whichever draft it is.
     """
     if ref.isdigit():
         return ref, False
-    if ref.endswith("/spec"):
-        number = specs.get(ref[: -len("/spec")])
-        return number, number is None
     number = resolved.get(ref)
     return number, number is None
 
@@ -624,15 +630,15 @@ def publish_batch(
     dry: bool,
     report: list[str],
     created: list[dict] | None = None,
-    seed: tuple[dict[str, str], dict[str, str]] | None = None,
+    seed: dict[str, str] | None = None,
 ) -> tuple[int, int]:
     """Publish (or dry-run) every draft file in one batch directory.
 
     `created` collects one record per published issue, for the ledger and
     for the notice delivered to the agent on the next prompt. `seed` is the
-    (resolved, specs) pair built from ledgers on disk; when omitted, only
-    this batch's own ledger is consulted, so references to issues published
-    in an earlier run still resolve.
+    resolved map built from ledgers on disk; when omitted, only this batch's
+    own ledger is consulted, so references to issues published in an earlier
+    run still resolve.
 
     Returns (published_count, failed_count) for this batch.
     """
@@ -640,9 +646,7 @@ def publish_batch(
     if not files:
         return 0, 0
 
-    resolved, specs = seed if seed is not None else seed_from_ledgers([batch_dir])
-    resolved = dict(resolved)
-    specs = dict(specs)
+    resolved = dict(seed if seed is not None else seed_from_ledgers([batch_dir]))
     batch_header = f"Batch: {len(files)} draft issue(s)"
     report.append(batch_header)
     report.append("")
@@ -680,10 +684,9 @@ def publish_batch(
             parent_ref, body_with_refs = extract_parent(body_with_refs)
             parent_number = None
             if parent_ref:
-                parent_number, retryable = resolve_parent(parent_ref, resolved, specs)
+                parent_number, retryable = resolve_parent(parent_ref, resolved)
                 if parent_number is None and retryable:
-                    # The parent may simply be published later in this run
-                    # (a spec drafted alongside the issues that hang off it).
+                    # The parent may simply be published later in this run.
                     if not dry:
                         rewrite_known_references(path, resolved)
                     still_pending.append(path)
@@ -701,7 +704,6 @@ def publish_batch(
                 continue
             i = m.group(1)
             key = f"{batch_dir.name}/{i}"
-            is_spec = LABEL_ALIASES["spec"] in labels
 
             if dry:
                 suffix = f" -> sub-issue of #{parent_number}" if parent_number else ""
@@ -711,8 +713,6 @@ def publish_batch(
                 # Fabricate a placeholder so later dry-run references in
                 # this batch resolve too, for a fuller preview.
                 resolved[key] = f"NEW-{i}"
-                if is_spec:
-                    specs[batch_dir.name] = f"NEW-{i}"
                 published += 1
                 made_progress = True
                 continue
@@ -728,8 +728,6 @@ def publish_batch(
                 number_match = re.search(r"/issues/(\d+)", info)
                 resolved_number = number_match.group(1) if number_match else "?"
                 resolved[key] = resolved_number
-                if is_spec:
-                    specs[batch_dir.name] = resolved_number
                 report.append(f"  Created: {info}")
                 linked_parent = parent_number
                 if parent_number and keep_parent_in_body:
@@ -749,7 +747,6 @@ def publish_batch(
                     "url": info,
                     "title": title,
                     "labels": labels,
-                    "spec": is_spec,
                     "parent": linked_parent,
                 }
                 record_published(batch_dir, key, record)
@@ -775,7 +772,7 @@ def publish_batch(
         _, body_with_refs = extract_labels(rest)
         parent_ref, body_with_refs = extract_parent(body_with_refs)
         _, unresolved = resolve_references(body_with_refs, resolved)
-        if parent_ref and resolve_parent(parent_ref, resolved, specs)[0] is None:
+        if parent_ref and resolve_parent(parent_ref, resolved)[0] is None:
             unresolved.append(f"parent {parent_ref}")
         failed_entries.append(
             f"  SKIP  {path.name} - unresolved reference: {', '.join(unresolved)}"
