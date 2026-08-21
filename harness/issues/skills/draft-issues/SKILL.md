@@ -1,18 +1,18 @@
 ---
 name: draft-issues
-description: Break a plan, spec, or PRD into an approved issue breakdown, then write it to markdown files in .issues-gateway/ for the user to review and edit before publishing.
+description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, written to markdown files for the user to review and edit before publishing.
 disable-model-invocation: true
 ---
 
-This skill handles ONLY mapping and drafting in an issue publishing system: map the issues, agree on the breakdown with the user, then draft the approved issues for review. It turns what the user wants — from the conversation, or from the argument passed to this skill — into a markdown file.
+Break a plan, spec, or conversation into a set of GitHub **issues**: tracer-bullet vertical slices, each declaring the issues that **block** it.
 
-Publishing happens separately in the later publishing step. Do not create issue draft files or publish anything while mapping. Once the user approves the breakdown, proceed directly to drafting it without asking them to invoke `/draft-issues` again. Do not run `gh` while drafting or publish anything — that only happens in the next step.
+This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as markdown files. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
 
 ## Process
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation. If the user passes an issue reference (issue number, URL, or path) as an argument, fetch it using `gh view` and read its full body and comments.
+Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body.
 
 ### 2. Explore the codebase (optional)
 
@@ -45,7 +45,7 @@ For each issue, decide:
 
 Both the difficulty and mode labels are defaults, not requirements: if the user explicitly says not to use one or both of them, leave them off the breakdown entirely rather than forcing a value.
 
-If the user asks for extra labels, verify them before the breakdown is finalized: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding.
+If the user asks for extra labels, verify them before the breakdown is finalized: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
 
 ### 4. Review the mapping with the user
 
@@ -92,25 +92,23 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 ## Blocked by
 
-${CLAUDE_SESSION_ID}/{i} of each blocking issue, one per line, as plain text (no backticks, no braces), or "None - can start immediately" if no blockers.
+A reference to each blocking issue (see instructions below), or "None — can start immediately".
 
 </issue-template>
 
-`{labels}` is a comma-separated list containing the difficulty and mode tokens decided during mapping — `difficulty:routine|basic|advanced|expert` and `mode:afk|hitl` — plus any extra labels approved during mapping. Each token is written only if it was decided: if the user asked for the difficulty and/or mode labels to be skipped, they're simply absent, so `> difficulty:advanced, mode:hitl`, `> mode:afk`, `> difficulty:basic`, and `> ci, mode:hitl` are all valid lines. Every issue must carry at least one label. Any extra label approved during mapping was verified to exist in this repo (`gh label list`) before being written here — never invent a label name.
+`{labels}` is a comma-separated list containing the difficulty and mode tokens decided during mapping. All labels written will be automatically created by the system in GitHub if they don't exist.
 
-In "Parent", write exactly one reference on the first non-empty line under the heading, as plain text with no backticks, no prose around it, and nothing else in the section. `/publish-issues` reads it, creates the issue as a real GitHub sub-issue of that parent, and drops the section from the published body (GitHub shows the parent itself). Anything other than a bare reference there is treated as prose and published as written — no link is made. Valid forms:
+Examples:
+```
+> difficulty:advanced, mode:hitl
+# or
+> difficulty:basic
+# or
+> mode:afk
+```
 
-- `#42` — a real issue number. Use this whenever you know it, including a number from a `/publish-issues` run earlier in this session: that run publishes with no assistant turn, but the numbers it created are injected into your context on the next message, so a spec you drafted and the user then published is referenced by its real number.
-- The issue URL, if that is what the user gave you.
-- `${CLAUDE_SESSION_ID}/spec` — the spec issue drafted in this session, whether or not it has been published yet. Use this when the spec these issues came from is still an unpublished draft in `.issues-gateway/${CLAUDE_SESSION_ID}/`, so its number does not exist yet.
-- `${CLAUDE_SESSION_ID}/{i}` — another issue in this batch, for a nested breakdown. Same token as a blocked-by reference.
-
-A parent is not a blocker: an issue can be a sub-issue of a spec and still be startable immediately. Fill in both sections independently.
-
-In "Blocked by", reference other issues in this batch by their plain-text `${CLAUDE_SESSION_ID}/{i}` token — e.g. if the session id were `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55` and the starting index were `2`, a reference to the first issue in this batch is `6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/2`. Never wrap it in backticks or braces: the reference must stay plain text, because `/publish-issues` rewrites it to a bare `#<number>` and GitHub only autolinks issue numbers that aren't inside inline code. This works for references to issues in *this* batch only — a draft can't reference an issue from a different, unrelated batch. `/publish-issues` resolves these to real issue numbers once the referenced issue is published — don't try to resolve them yourself, and don't worry about getting the order perfect: unresolved references are retried automatically within a publish run, so an occasional misordering self-heals rather than getting silently stuck.
+In "Parent" and "Blocked by", reference other issues drafted in this turn by their plain-text `${CLAUDE_SESSION_ID}/{i}` token — never wrap it in backticks or braces; the system will rewrite it to a bare `#<number>` resolving to real issue numbers once the referenced issue is published. This works for references to issues from THIS TURN ONLY — a draft can't reference an issue from a different, unrelated turn. To reference an issue not drafted in this turn, use the real existing GitHub issue number. Once this turn's issues are published, you will be notified of the result and the actual GitHub numbers of the published issues, so you don't need any additional `gh` calls to get the issue numbers for the next turns in this session.
 
 ### 6. Hand off to the user
 
-List the relative file paths you created and tell the user they can review them. They can edit any file directly — title, labels, body, blockers — before publishing. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.
-
-Do NOT close or modify any parent issue.
+List the relative file paths you created and tell the user they can review them. They can edit any file directly — title, labels, body, blockers — before publishing. Ask if they want you to make changes. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real.

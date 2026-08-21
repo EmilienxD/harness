@@ -1,20 +1,25 @@
 ﻿---
 name: draft-issue
-description: Draft a single GitHub issue to a markdown file in .issues-gateway/ for the user to review and edit before publishing. Use when the user wants to create one issue, with no multi-issue breakdown needed.
+description: Turn a request, a plan, or the current conversation into one tracer-bullet ticket declaring its blocking edges, written to a markdown file for the user to review and edit before publishing. Use when a single issue is wanted, with no multi-issue breakdown.
 disable-model-invocation: true
 ---
 
-This skill handles ONLY drafting in an issue publishing system: drafting, then publishing. It turns what the user wants — from the conversation, or from the argument passed to this skill — into a markdown file.
+Turn a plan, spec or conversation into a single GitHub **issue**.
 
-Publishing happens separately in the later publishing step. Do not run `gh` or publish anything.
+This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
 
 ## Process
 
-1. Pin down the issue
+### 1. Gather context
 
-Work from whatever is already in the conversation. If the user passes a description as an argument, use it. If the argument is an issue number or URL, fetch it with `gh issue view` and treat that issue as the parent. If the title, scope, or acceptance criteria are still unclear, ask one short round of questions before writing anything.
+Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body.
 
-Optionally explore the codebase so "What to build" describes the real end-to-end behavior, not a guess.
+### 2. Explore the codebase (optional)
+
+If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
+Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+
+### 3. Pin down the issue
 
 Scope constraint: exactly **one agent, working alone, in one pass**. If what the user describes is bigger than that, say so and ask them to narrow the scope instead of drafting an oversized issue.
 
@@ -26,12 +31,13 @@ Decide the labels:
   - `advanced`: For multi-step work with expected outcomes, low chance of encountering bugs, easy UI design. 34% usage rate.
   - `expert`: For multi-step complex work, anything needing careful judgment, complex UI design, wide context and bug prone. 60% usage rate.
 - **Mode** (default, but optional): `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
+- **Extra labels** (only if the user asks): any other labels the user explicitly requests.
 
-Both labels are defaults, not requirements: if the user explicitly says not to use the difficulty and/or mode label, leave that label off the declaration line entirely — don't fall back to a guessed value.
+Both the difficulty and mode labels are defaults, not requirements: if the user explicitly says not to use one or both of them, leave them off the declaration line entirely rather than forcing a value.
 
-If the user explicitly asks for other labels (e.g. `ci`, `good-first-issue`), verify each one before writing it: run `gh label list` and confirm the label name exists in this repo, mapping it through the repo's own spelling. Do not invent labels that aren't there — if a requested label doesn't exist, flag it to the user and ask, rather than writing a label `gh` will reject at publish time.
+If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
 
-2. Write 1 file
+### 2. Write one file
 
 Create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md` where {i} is:
 !`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
@@ -63,16 +69,21 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 ## Blocked by
 
-A reference to each blocking issue, or "None — can start immediately".
+A reference to each blocking issue (see instructions below), or "None — can start immediately".
 
 </issue-template>
 
-In "Parent", write exactly one reference on the first non-empty line under the heading, as plain text with no backticks and no prose around it. `/publish-issues` reads it, creates the issue as a real GitHub sub-issue of that parent, and drops the section from the published body (GitHub shows the parent itself). Anything other than a bare reference there is published as ordinary prose and creates no link. Valid forms: `#42`, the issue URL, or `${CLAUDE_SESSION_ID}/spec` for a spec drafted in this session that has not been published yet. If the user passed an issue number or URL as the argument, that issue is the parent. If a `/publish-issues` run earlier in this session published issues, their real numbers were injected into your context — use those rather than a session reference. A parent is not a blocker; fill in "Parent" and "Blocked by" independently.
+`{labels}` is a comma-separated list containing the difficulty and mode tokens decided above. All labels written will be automatically created by the system in GitHub if they don't exist.
 
-`{labels}` is a comma-separated list of `difficulty:routine|basic|advanced|expert`, `mode:afk|hitl`, and any extra labels requested and verified above — the difficulty and mode tokens are each included only when decided, so any of `> difficulty:advanced, mode:hitl`, `> difficulty:basic`, `> mode:afk`, or `> ci, difficulty:routine` is a valid line. Every issue must carry at least one label.
+Examples:
+```
+> difficulty:advanced, mode:hitl
+# or
+> difficulty:basic
+# or
+> mode:afk
+```
 
-3. Hand off to the user
+### 3. Hand off to the user
 
-Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.
-
-Do NOT close or modify any parent issue.
+Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing.  Ask if they want you to make changes. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real.

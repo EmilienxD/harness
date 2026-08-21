@@ -4,17 +4,30 @@ description: Turn the current conversation into a spec, as a draft issue — no 
 disable-model-invocation: true
 ---
 
-This skill handles ONLY spec drafting in an issue publishing system: drafting, then publishing. It takes the current conversation context and codebase understanding and produces a spec as a markdown file. Do NOT interview the user — just synthesize what you already know.
+Turn the current conversation context and codebase understanding into a single GitHub **spec issue**. Do NOT interview the user; just synthesize what you already know.
 
-Publishing happens separately in the later publishing step. Do not run `gh` or publish anything.
+This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at spec drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
 
 ## Process
 
-1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary, if available, throughout the spec.
+### 1. Gather context
 
-2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
+Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body. Use the project's domain glossary vocabulary throughout the spec if available.
 
-3. Write the spec using the template below. Create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md` where {i} is:
+### 2. Explore the codebase (optional)
+
+If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
+Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+
+### 3. Pin down the spec
+
+Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better — the ideal number is one. Check with the user that these seams match their expectations.
+
+If the feature is too unclear to write a useful spec, say what is missing instead of inventing requirements.
+
+### 2. Write 1 file
+
+Create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md` where {i} is:
 !`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
 
 Do not spend time checking whether the folder exists or what it already contains — just write the file.
@@ -48,7 +61,7 @@ This list of user stories should be extremely extensive and cover all aspects of
 
 ## Implementation Decisions
 
-A list of implementation decisions that were made. This can include:
+A list of implementation decisions that were made, such as:
 
 - The modules that will be built/modified
 - The interfaces of those modules that will be modified
@@ -80,14 +93,21 @@ Any further notes about the feature.
 
 </spec-template>
 
-Make sure to respect the `> spec` second non-empty line. The publishing hook maps it to the `[AI]-spec` label and automatically creates that label in the repo if missing. Do not write the `[AI]-` prefix in the draft.
+`{labels}` is a comma-separated list containing the labels. All labels written will be automatically created by the system in GitHub if they don't exist.
 
-If this spec belongs under an existing tracker issue — an epic, or an issue the user named — add a `## Parent` section directly below the `> spec` line whose only content is one bare reference on its own line: `#42` or the issue URL, as plain text with no backticks and no prose. `/publish-issues` turns that into a real GitHub sub-issue link and strips the section from the published body. Omit the section entirely otherwise; most specs are top-level.
+Keep `spec` as a mandatory label.
 
-Issues broken out of this spec later (via `/draft-issues`) become its sub-issues, so the spec does not need to list them.
+If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
 
-5. Hand off to the user
+Examples:
+```
+> spec
+# or
+> spec, security
+# or
+> spec, good first issue
+```
 
-Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body — before publishing. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real. Ask if they want changes.
+### 3. Hand off to the user
 
-Do NOT close or modify any parent issue.
+Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real.
