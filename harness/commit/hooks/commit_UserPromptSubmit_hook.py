@@ -775,10 +775,13 @@ KEY_ENV_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 KEY_FILE_NAME = "commit-ai.key"
 # Most specific first, mirroring Claude Code's own settings precedence.
 SETTINGS_NAMES = ("settings.local.json", "settings.json")
+# The ChatGPT wrapper switches this before calling the shared AI helpers.
+# Keeping it mutable avoids duplicating the large diff/message-generation core.
+HOST_CONFIG_DIR = ".claude"
 
 
-def _claude_dirs(repo_root: str | None) -> list[str]:
-    """Every `.claude` directory that could hold a key, nearest scope first.
+def _host_dirs(repo_root: str | None) -> list[str]:
+    """Every host config directory that could hold a key, nearest scope first.
 
     `CLAUDE_PROJECT_DIR` is set by Claude Code itself and is authoritative when
     present; `repo_root` covers the standalone-CLI case where it is not.
@@ -786,10 +789,10 @@ def _claude_dirs(repo_root: str | None) -> list[str]:
     candidates = []
     project = os.environ.get("CLAUDE_PROJECT_DIR")
     if project:
-        candidates.append(os.path.join(project, ".claude"))
+        candidates.append(os.path.join(project, HOST_CONFIG_DIR))
     if repo_root:
-        candidates.append(os.path.join(repo_root, ".claude"))
-    candidates.append(os.path.join(os.path.expanduser("~"), ".claude"))
+        candidates.append(os.path.join(repo_root, HOST_CONFIG_DIR))
+    candidates.append(os.path.join(os.path.expanduser("~"), HOST_CONFIG_DIR))
 
     seen, out = set(), []
     for path in candidates:
@@ -829,6 +832,27 @@ def _read_key_file(path: str) -> str | None:
 
 def key_setup_help(repo_root: str | None) -> str:
     """Setup instructions with this project's real paths filled in."""
+    if HOST_CONFIG_DIR == ".codex":
+        project_key = os.path.join(repo_root or ".", HOST_CONFIG_DIR, KEY_FILE_NAME)
+        user_key = os.path.join(os.path.expanduser("~"), HOST_CONFIG_DIR, KEY_FILE_NAME)
+        return f"""No Google AI Studio API key found. Get one (the free tier is ample
+for commit messages) at https://aistudio.google.com/apikey then pick one:
+
+  1. Key file -- one line, nothing else, no restart needed:
+       {project_key}
+     Or {user_key} for every repository. Both locations are gitignored by
+     this tool's installer where applicable.
+
+  2. Environment variable -- shared with every other Gemini tool:
+       setx GEMINI_API_KEY "your-key-here"        (Windows, new shells only)
+       export GEMINI_API_KEY="your-key-here"      (add to ~/.bashrc / ~/.zshrc)
+
+Checked in the order: live environment, then each {HOST_CONFIG_DIR}/{KEY_FILE_NAME}
+-- project scope before user scope.
+
+Do NOT paste the key into a ChatGPT prompt. Restart ChatGPT after setting an
+environment variable."""
+
     local = os.path.join(repo_root or ".", ".claude", "settings.local.json")
     key_file = os.path.join(os.path.expanduser("~"), ".claude", KEY_FILE_NAME)
     return f"""No Google AI Studio API key found. Get one (the free tier is ample
@@ -874,15 +898,16 @@ def find_api_key(repo_root: str | None = None) -> tuple[str | None, str | None]:
         if value:
             return value, f"${var}"
 
-    dirs = _claude_dirs(repo_root)
-    for directory in dirs:
-        for name in SETTINGS_NAMES:
-            path = os.path.join(directory, name)
-            env = _settings_env(path)
-            for var in KEY_ENV_VARS:
-                value = str(env.get(var) or "").strip()
-                if value:
-                    return value, f"{path} (env.{var})"
+    dirs = _host_dirs(repo_root)
+    if HOST_CONFIG_DIR == ".claude":
+        for directory in dirs:
+            for name in SETTINGS_NAMES:
+                path = os.path.join(directory, name)
+                env = _settings_env(path)
+                for var in KEY_ENV_VARS:
+                    value = str(env.get(var) or "").strip()
+                    if value:
+                        return value, f"{path} (env.{var})"
 
     for directory in dirs:
         path = os.path.join(directory, KEY_FILE_NAME)

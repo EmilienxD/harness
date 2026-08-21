@@ -1,0 +1,7 @@
+interface:
+  display_name: "Commit"
+  short_description: "Commit this session's changes without a model turn"
+  default_prompt: "Use /commit followed by a commit message. Add --dry to preview or --ai to generate the message."
+
+policy:
+  allow_implicit_invocation: false

@@ -59,7 +59,7 @@ hooks as events happen.
 | --- | --- | --- |
 | `audit` | Adapt | Keep the workflow, but replace Claude tool vocabulary, `$ARGUMENTS`, and Claude-specific subagent waiting instructions. |
 | `caveman` | Near-direct | Reuse the instructions and express explicit-only invocation in `agents/openai.yaml`. |
-| `commit` | Adapt | Reuse `UserPromptSubmit` blocking, but add ChatGPT hook config and replace the unstable Claude-transcript write detector. |
+| `commit` | Native | Uses `UserPromptSubmit` blocking plus pre/post tool snapshots stored under `.git`, avoiding the unstable ChatGPT transcript while preserving session-selective staging. |
 | `create-skill` | Replace | Use ChatGPT's built-in skill creator; retain a harness version only if it adds repository-specific policy beyond the built-in. |
 | `grill-me` | Near-direct | Reuse the instructions and map explicit-only invocation metadata. |
 | `handoff` | Near-direct | Reuse the instructions and map its argument hint/explicit invocation behavior. |

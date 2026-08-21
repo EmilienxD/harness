@@ -1,19 +1,44 @@
 name = "commit"
-version = "1.3.2"
-description = "Zero-model-call /commit — stages and commits via a UserPromptSubmit hook"
+version = "1.4.0"
+description = "Zero-model-call /commit — stages and commits via native prompt hooks"
 requires = ["git"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/commit/README.md"
 
-# Both places `--ai` will look for a Google AI Studio key. Paths are relative to
-# the install directory, so a project install ignores `.claude/commit-ai.key`
-# and a user install ignores `commit-ai.key` inside `~/.claude`.
+# Secret/config files used by `--ai`. Paths are relative to the selected
+# platform directory, so project installs ignore `.claude/...` or `.codex/...`.
 gitignore = ["commit-ai.key", "settings.local.json"]
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "targets/chatgpt/hooks.fragment.json"
 
 [[files]]
 src = "hooks/commit_UserPromptSubmit_hook.py"
 dest = "hooks/commit_UserPromptSubmit_hook.py"
 executable = true
+platforms = ["claude"]
 
 [[files]]
 src = "skills/commit"
 dest = "skills/commit"
+platforms = ["claude"]
+
+[[files]]
+src = "hooks/commit_UserPromptSubmit_hook.py"
+dest = "commit_core.py"
+root = "hooks"
+executable = true
+platforms = ["chatgpt"]
+
+[[files]]
+src = "targets/chatgpt/hooks/commit_ChatGPT_hook.py"
+dest = "commit_ChatGPT_hook.py"
+root = "hooks"
+executable = true
+platforms = ["chatgpt"]
+
+[[files]]
+src = "targets/chatgpt/skills/commit"
+dest = "commit"
+root = "skills"
+platforms = ["chatgpt"]

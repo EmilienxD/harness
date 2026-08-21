@@ -1,11 +1,11 @@
 ﻿# zero-call-commit
 
-A `/commit <message>` command for Claude Code that stages and commits your
-changes without spending a single additional model call.
+A `/commit <message>` command for Claude Code and ChatGPT that stages and
+commits your changes without spending a single additional model call.
 
 Optionally, `--ai` will write the message for you from the staged diff. That
 one flag does make a network call — but to a small, cheap model directly, not
-to Claude, so your conversation history is still never re-sent. See
+through the host model, so the full conversation payload is never re-sent. See
 [`--ai`](#--ai--generated-commit-messages).
 
 ## Problem
@@ -21,7 +21,7 @@ for a task that's fundamentally mechanical.
 
 Intercept the `/commit` prompt with a `UserPromptSubmit` hook, which fires
 **before** the prompt is ever sent to the model. The hook does the git work
-itself and rejects the prompt with a status string, which Claude Code shows
+itself and rejects the prompt with a status string, which the host shows
 directly to the user in place of a model response.
 
 Net result: typing `/commit fix the login bug` runs `git add`, `git commit`,
@@ -34,14 +34,15 @@ has already emitted a tool call, so it can't avoid that first API round trip.
 
 ## Components
 
-| File | Purpose |
+| Host | Components |
 |---|---|
-| `.claude/settings.json` | Registers the hook on the `UserPromptSubmit` event |
-| `.claude/hooks/commit_UserPromptSubmit_hook.py` | Parses the prompt, stages changes, commits, and reports back — all without touching the model |
+| Claude Code | `.claude/settings.json` plus `.claude/hooks/commit_UserPromptSubmit_hook.py` |
+| ChatGPT | `.codex/hooks.json`, `.codex/hooks/commit_ChatGPT_hook.py`, and its shared commit core |
 
-No slash-command or skill definition is required. The hook matches on the
-raw prompt text (`^/commit ...`), so `/commit` doesn't need to be a
-registered command for this to work.
+The hook matches the raw prompt text (`^/commit ...`), so `/commit` does not
+need to be a registered built-in command. The installed skill is an
+explicit-only fallback that reports a hook installation or trust problem if
+the prompt ever reaches the model.
 
 ## Usage
 
@@ -58,9 +59,10 @@ commits with that literal message rather than parsing `--ai` as a flag.
 
 ### What gets committed
 
-Only the files **Claude actually wrote this session**, not every dirty file
-in the repo. The hook reads the session's JSONL transcript, collects the
-`Edit`/`Write`/`NotebookEdit` tool calls, and stages exactly those paths.
+Only the files the agent actually wrote this session, not every dirty file in
+the repo. On Claude Code, the hook reads the session's JSONL transcript,
+collects the `Edit`/`Write`/`NotebookEdit` tool calls, and stages exactly those
+paths.
 Writes that failed, writes outside the repo (`~/.claude/settings.json`),
 gitignored paths (an agent-scratch dir like `.issues-gateway/`, build output,
 ...), and files created then deleted are all dropped — `--dry` lists each
@@ -86,6 +88,14 @@ real run says so in its result line.
 The commit is pathspec-scoped, so anything you staged by hand beforehand
 stays staged and is left out. If the transcript can't be read at all, the
 hook falls back to `git add -A`; `--dry` says so loudly when that happens.
+
+ChatGPT does not expose its transcript as a stable hook interface. Its native
+adapter instead snapshots dirty-file fingerprints before each `Bash` or
+`apply_patch` call and records the actual delta afterwards under `.git`. This
+catches arbitrary generators and shell writes without parsing command syntax,
+while preserving edits that were already dirty before the agent touched the
+repo. If the pre-tool snapshot is unavailable, it visibly widens to the whole
+tree rather than risk a partial commit.
 
 ### `--ai` — generated commit messages
 
@@ -145,10 +155,16 @@ the live environment, then each `.claude/settings*.json` `env` dict, then each
 So an exported variable always wins, and a per-repo key overrides your global
 one.
 
-Do **not** paste the key into a Claude prompt — prompts are written verbatim
-to the session transcript. Since the session narrative sent to Gemini is built
-from your own prompts, the hook also runs a redaction pass over it for
-key-shaped strings before anything leaves the machine.
+On ChatGPT, use the same environment variables or put the key in
+`.codex/commit-ai.key` (project) or `~/.codex/commit-ai.key` (user). ChatGPT's
+JSON hook configuration has no Claude-style `env` dictionary, so the native
+adapter intentionally does not inspect `hooks.json` for secrets.
+
+Do **not** paste the key into an agent prompt — Claude Code writes prompts to
+its transcript, and the ChatGPT adapter records them in its session state.
+Since the session narrative sent to Gemini is built from your own prompts, the
+hook also runs a redaction pass over it for key-shaped strings before anything
+leaves the machine.
 
 Set `COMMIT_AI_MODEL` to override the default `gemini-3.5-flash-lite`.
 
@@ -189,11 +205,23 @@ python .claude/hooks/commit_UserPromptSubmit_hook.py \
 
 ## Installation
 
+Claude Code (the backward-compatible default):
+
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness harness install commit
 ```
 
-That copies the hook and the skill into `.claude/`, marks the hook executable,
+ChatGPT:
+
+```bash
+uvx --from git+https://github.com/EmilienxD/harness harness install commit --platform chatgpt
+```
+
+After installing for ChatGPT, restart it and open `/hooks` to review and trust
+the three native hook definitions. Until they are trusted, ChatGPT skips them.
+
+The default command copies the hook and the skill into `.claude/`, marks the
+hook executable,
 merges the `UserPromptSubmit` registration below into `.claude/settings.json`
 without disturbing any hooks you already had, and adds a small fenced block to
 the repo's `.gitignore` so the two places `--ai` looks for an API key
