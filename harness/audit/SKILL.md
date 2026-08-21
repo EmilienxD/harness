@@ -49,9 +49,11 @@ Count relevant source, test, configuration, infrastructure, and documentation fi
 Honor an explicit agent count or no-agent request first. Otherwise:
 
 - 10 files or less: audit alone.
-- More than 10 files: Invoke N `Explore` agents based on codebase size and the number of genuinely distinct areas.
+- More than 10 files: Invoke N `Explore` agents based on codebase size and the number of genuinely distinct areas. Limit to 5 agents.
 
-Adjust for repository shape and available capacity. Do not manufacture overlapping assignments just to reach a number. 
+Adjust for repository shape and available capacity. Do not manufacture overlapping assignments just to reach a number.
+
+If the user already provides these instructions in argument (e.g. "Run 2 subagents to audit Stripe and Supabase integration"), skip this phase and stick to what they asked.
 
 ## 3. Delegate without overlap
 
