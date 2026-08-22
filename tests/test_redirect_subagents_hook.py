@@ -32,7 +32,10 @@ def clean_env(monkeypatch, tmp_path):
     """No inherited configuration; state and home live in tmp_path."""
     for name in ("REDIRECT_SUBAGENTS_CLAUDER_BIN", "REDIRECT_SUBAGENTS_BACKEND", "LOG_LEVEL"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(rs_io, "USER_CONFIG", tmp_path / "home" / ".claude" / "harness" / "subagents.json")
+    monkeypatch.setattr(
+        rs_io, "USER_CONFIG",
+        tmp_path / "home" / ".claude" / "harness-redirect-subagents" / "subagents.json",
+    )
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
@@ -83,7 +86,7 @@ def capture_emit(payload):
 
 
 def write_project_config(tmp_path, data):
-    path = tmp_path / ".claude" / "harness" / "subagents.json"
+    path = tmp_path / ".claude" / "harness-redirect-subagents" / "subagents.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
     return path

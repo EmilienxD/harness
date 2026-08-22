@@ -341,6 +341,19 @@ def test_a_tool_without_gitignore_entries_writes_none(target, tmp_path):
     assert not (tmp_path / ".gitignore").exists()
 
 
+def test_redirect_subagents_gitignores_itself_not_the_repo(target, tmp_path):
+    """redirect-subagents keeps its machine-local state out of the repo with a
+    scaffolded .gitignore inside its own directory; the project root
+    .gitignore is untouched."""
+    install("redirect-subagents", target)
+    assert not (tmp_path / ".gitignore").exists()
+    inner = target.claude_dir / "harness-redirect-subagents" / ".gitignore"
+    lines = inner.read_text(encoding="utf-8").strip().splitlines()
+    assert "*" in lines
+    assert "!.gitignore" in lines
+
+
+
 def test_user_install_gitignores_inside_claude_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     target = Target.for_user()
@@ -526,7 +539,7 @@ def test_starter_files_are_never_overwritten(target):
     """subagents.json is edited by the user after install; reinstall/upgrade
     must leave it alone, exactly like the .rules templates."""
     install("redirect-subagents", target)
-    config = target.claude_dir / "harness" / "subagents.json"
+    config = target.claude_dir / "harness-redirect-subagents" / "subagents.json"
     config.write_text(json.dumps({"Explore": "auto"}), encoding="utf-8")
     plan = plan_install(TOOLS["redirect-subagents"], target)
     apply_install(plan)
@@ -537,11 +550,11 @@ def test_force_overwrites_edited_starter_files(target):
     """--force is the user's way to get a pristine copy back of a file they
     customised — mirroring uninstall --force for modified files."""
     install("redirect-subagents", target)
-    config = target.claude_dir / "harness" / "subagents.json"
+    config = target.claude_dir / "harness-redirect-subagents" / "subagents.json"
     config.write_text(json.dumps({"Explore": "auto"}), encoding="utf-8")
     plan = plan_install(TOOLS["redirect-subagents"], target, force=True)
     statuses = {a.dest: a.status for a in plan.files}
-    assert statuses["harness/subagents.json"] == "overwrite"
+    assert statuses["harness-redirect-subagents/subagents.json"] == "overwrite"
     apply_install(plan)
     source = TOOLS["redirect-subagents"].root / "subagents.example.json"
     assert config.read_bytes() == source.read_bytes()

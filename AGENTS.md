@@ -82,7 +82,7 @@ argument-taking skills read the invocation's surrounding user text instead of `$
   See `README.md`.
 - `harness/redirect-subagents/` — PreToolUse/PostToolUse/Stop hooks redirecting Agent subagents
   to alternate providers (clauder, `claude -p`, custom CLIs) instead of consuming the Claude
-  subscription. Config in `.claude/harness/subagents.json`. See `README.md`.
+  subscription. Config in `.claude/harness-redirect-subagents/subagents.json`. See `README.md`.
 - `harness/senior-advisor/` — read-only senior-developer advisory mode. See `SKILL.md`.
 - `harness/usage-limit-wait/` — `UserPromptSubmit` + `PostToolBatch` hook that warns as a Claude
   subscription usage window fills and blocks the session until it resets. See `README.md`.

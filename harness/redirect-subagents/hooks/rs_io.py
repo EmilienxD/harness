@@ -8,9 +8,9 @@ imports this module.
 Layout this tool reads and writes. The state root is the anchored session
 project root (see root()); user-level config is read from home:
 
-    <root>/.claude/harness/subagents.json               project subagent definitions
-    <root>/.claude/harness-redirect-subagents/<job>/    background + deferred job state
-    ~/.claude/harness/subagents.json                    user-level definitions (fallback)
+    <root>/.claude/harness-redirect-subagents/subagents.json   project subagent definitions
+    <root>/.claude/harness-redirect-subagents/<job>/           background + deferred job state
+    ~/.claude/harness-redirect-subagents/subagents.json        user-level definitions (fallback)
 
 Environment variables (all optional):
 
@@ -45,7 +45,7 @@ JOBS_REL = Path(".claude") / "harness-redirect-subagents"
 # User-level definitions: apply (as a fallback under project config) only in
 # projects the file explicitly names, so a global config never intercepts
 # subagents in an unrelated checkout.
-USER_CONFIG = Path.home() / ".claude" / "harness" / "subagents.json"
+USER_CONFIG = Path.home() / ".claude" / "harness-redirect-subagents" / "subagents.json"
 
 
 def root() -> Path:
@@ -72,7 +72,7 @@ def root() -> Path:
 
 def project_config() -> Path:
     """The project-level config file this tool installs and reads."""
-    return root() / ".claude" / "harness" / "subagents.json"
+    return root() / JOBS_REL / "subagents.json"
 
 
 def jobs_root() -> Path:
@@ -122,11 +122,11 @@ def _normalize(data: dict) -> dict:
 def load_subagents() -> dict:
     """The subagent registry in effect for this session: {subagent_type: entry}.
 
-    Project config (`.claude/harness/subagents.json`) wins on a name; entries
-    defined only in the user-level file apply when that file's `projects`
-    list names this project root. Every entry carries its own `_cwd`: the
-    config file's base directory, which is where the backend runs — the
-    project for project entries, home for user entries.
+    Project config (`.claude/harness-redirect-subagents/subagents.json`) wins
+    on a name; entries defined only in the user-level file apply when that
+    file's `projects` list names this project root. Every entry carries its
+    own `_cwd`: the config file's base directory, which is where the backend
+    runs — the project for project entries, home for user entries.
     """
     project = _normalize(_load_config(project_config()))
     for entry in project.values():

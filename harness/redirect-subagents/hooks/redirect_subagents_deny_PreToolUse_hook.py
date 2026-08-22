@@ -3,8 +3,8 @@
 configured redirected subagent.
 
 Installed into .claude/hooks/ by `harness install redirect-subagents`;
-configuration lives in .claude/harness/subagents.json, runtime state in
-.claude/harness-redirect-subagents/ — see README.md.
+configuration lives in .claude/harness-redirect-subagents/subagents.json,
+runtime state alongside it — see README.md.
 """
 from __future__ import annotations
 
@@ -42,8 +42,8 @@ def run_subagent(agent: str, prompt: str, timeout: float | None = None) -> tuple
     """Run a subagent synchronously through its configured backend.
 
     The backend runs in the config file's own directory: the project for
-    entries from `.claude/harness/subagents.json`, the user's home for
-    user-level entries.
+    entries from `.claude/harness-redirect-subagents/subagents.json`, the
+    user's home for user-level entries.
     """
     cfg = load_subagents().get(agent)
     if not cfg:

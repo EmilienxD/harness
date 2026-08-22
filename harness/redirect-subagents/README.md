@@ -11,17 +11,21 @@ harness install redirect-subagents
 ```
 
 That installs three hooks into `.claude/hooks/` plus an example
-`.claude/harness/subagents.json`, registers them in `.claude/settings.json`,
-and gitignores `.claude/harness-redirect-subagents/`. **Install at project
-scope** — the hooks read their config from the project root, so a `--user`
-install would register hooks that never find their config.
+`.claude/harness-redirect-subagents/subagents.json`, registers them in
+`.claude/settings.json`, and drops a `.gitignore` inside
+`.claude/harness-redirect-subagents/` so none of its machine-local state or
+your local config lands in the repo — the project root `.gitignore` is left
+untouched. **Install at project scope** — the hooks read their config from
+the project root, so a `--user` install would register hooks that never find
+their config.
 
 Nothing is intercepted until you edit the config.
 
 ## Configuration
 
-`.claude/harness/subagents.json` — one entry per `subagent_type` the Agent
-tool might be called with. Three ways to define an entry:
+`.claude/harness-redirect-subagents/subagents.json` — one entry per
+`subagent_type` the Agent tool might be called with. Three ways to define an
+entry:
 
 ```jsonc
 {
@@ -61,7 +65,7 @@ too; it defaults to argv because not every backend does.
 
 ### User-level fallback config
 
-`~/.claude/harness/subagents.json` applies in *any* project the file names —
+`~/.claude/harness-redirect-subagents/subagents.json` applies in *any* project the file names —
 so one shared set of redirected subagents works across every checkout you
 list. Entries there lose to the project's own on a name conflict, and run
 with their cwd set to your home directory:
@@ -128,8 +132,9 @@ The first hook to run in a session anchors the project root (writing
 up from cwd, so an in-session `cd` doesn't orphan running jobs. Jobs are
 state under `.claude/harness-redirect-subagents/<job-id>/` — logs, exit
 code, meta. Anything older than a day is removed by the next PostToolUse
-hook run; `.claude/harness-redirect-subagents/` is gitignored by the
-installer.
+hook run. The directory holds machine-local state plus your local config, so
+the installer drops a `.gitignore` inside it that ignores everything; your
+project root `.gitignore` is untouched.
 
 ## Uninstall
 
@@ -137,9 +142,9 @@ installer.
 harness uninstall redirect-subagents
 ```
 
-Removes the hooks and their settings entries and drops the gitignore block,
-leaving hooks you wrote yourself untouched. A `subagents.json` you modified
-is kept; an untouched one goes with the tool.
+Removes the hooks and their settings entries, leaving hooks you wrote
+yourself untouched. A `subagents.json` you modified is kept; an untouched
+one goes with the tool.
 
 > Version 1.0.0 briefly rewrote every other Stop/SubagentStop hook to run
 > through this tool's wait script, recording the argv it replaced under a

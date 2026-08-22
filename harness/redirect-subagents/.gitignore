@@ -1,0 +1,7 @@
+# Everything in this directory is machine-local runtime state or local
+# configuration: background/deferred job state under <job-id>/ and the
+# session-anchor marker on one side, the user's edited subagents.json on the
+# other. The .gitignore itself stays unignored so this file is trackable in
+# the harness repo where it is authored.
+*
+!.gitignore
