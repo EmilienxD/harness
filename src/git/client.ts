@@ -149,12 +149,10 @@ export interface GitClient {
    * pull request for a branch the remote has never seen.
    */
   isPushed(branch: string): Promise<boolean>;
-  /**
-   * Which of these repository-relative paths git tracks. A second checkout of
-   * this repository contains a file only if it is committed, so this is how a
-   * run asks whether the assets its agents need will exist there at all.
-   */
-  trackedPaths(paths: readonly string[]): Promise<readonly string[]>;
+  /** Which repository-relative paths are excluded by the checkout's ignore rules. */
+  ignoredPaths(paths: readonly string[]): Promise<readonly string[]>;
+  /** Tracked entries at `ref` beneath a repository-relative directory. */
+  trackedPathsUnder(ref: string, directory: string): Promise<readonly string[]>;
   worktrees(): Promise<readonly GitWorktree[]>;
   /**
    * Adds a worktree at `path`. With `startPoint`, `branch` is created there;
@@ -284,12 +282,26 @@ export class ProcessGitClient implements GitClient {
     return remote !== undefined && remote === local;
   }
 
-  public async trackedPaths(paths: readonly string[]): Promise<readonly string[]> {
+  public async ignoredPaths(paths: readonly string[]): Promise<readonly string[]> {
+    const ignored = new Set<string>();
     if (paths.length === 0) return [];
-    const listed = await this.tryRun(["ls-files", "--", ...paths]);
-    if (listed === undefined) return [];
-    const tracked = new Set(listed.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.length > 0));
-    return paths.filter((path) => tracked.has(path));
+    // NUL-delimited stdin handles arbitrary filenames and avoids Windows'
+    // command-line limit when a `.claude` tree contains many support files.
+    const listed = await this.tryRunWithInput(
+      ["check-ignore", "--no-index", "--stdin", "-z"],
+      `${paths.join("\0")}\0`,
+    );
+    if (listed !== undefined) {
+      for (const path of listed.split("\0")) {
+        if (path.length > 0) ignored.add(path.replaceAll("\\", "/"));
+      }
+    }
+    return paths.filter((path) => ignored.has(path.replaceAll("\\", "/")));
+  }
+
+  public async trackedPathsUnder(ref: string, directory: string): Promise<readonly string[]> {
+    const listed = await this.run(["ls-tree", "-r", "--name-only", "-z", ref, "--", directory]);
+    return listed.split("\0").filter((path) => path.length > 0);
   }
 
   /**
@@ -346,10 +358,42 @@ export class ProcessGitClient implements GitClient {
     }
   }
 
+  private async runWithInput(args: readonly string[], input: string): Promise<string> {
+    return new Promise((resolvePromise, reject) => {
+      const child = execFile(
+        "git",
+        [...args],
+        {
+          cwd: this.cwd,
+          encoding: "utf8",
+          windowsHide: true,
+          maxBuffer: 16 * 1024 * 1024,
+        },
+        (error, stdout, stderr) => {
+          if (error === null) return resolvePromise(stdout);
+          const cause = error as { code?: unknown };
+          reject(new GitBoundaryError("command-failed", `git ${args[0] ?? ""} failed`, {
+            exitCode: typeof cause.code === "number" ? cause.code : undefined,
+            stderr: stderr.trim().slice(0, 2_000),
+          }));
+        },
+      );
+      child.stdin?.end(input);
+    });
+  }
+
   /** For probes where a non-zero exit is an answer rather than a failure. */
   private async tryRun(args: readonly string[]): Promise<string | undefined> {
     try {
       return await this.run(args);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async tryRunWithInput(args: readonly string[], input: string): Promise<string | undefined> {
+    try {
+      return await this.runWithInput(args, input);
     } catch {
       return undefined;
     }

@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 import {
-  REQUIRED_TRACKED_PATHS,
   RunWorkspaceError,
   WorktreeRunWorkspaces,
   hasSetupCommands,
   isolationDenyRules,
+  overlayProjectConfiguration,
   runWorkspacePath,
   setupCommandLine,
   setupCommandPath,
@@ -82,7 +84,8 @@ test("the setup file and its interpreter follow the platform", () => {
 interface FakeGitOptions {
   readonly branches?: readonly string[];
   readonly remoteBranches?: readonly string[];
-  readonly tracked?: readonly string[];
+  readonly ignored?: readonly string[];
+  readonly trackedRuntime?: readonly string[];
   readonly worktrees?: readonly GitWorktree[];
   readonly dirty?: readonly string[];
   readonly removeFails?: boolean;
@@ -118,9 +121,13 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     push: async () => { calls.push("push"); },
     hasCommitFor: async () => false,
     isPushed: async () => true,
-    trackedPaths: async (paths: readonly string[]) => {
-      const tracked = new Set(options.tracked ?? REQUIRED_TRACKED_PATHS);
-      return paths.filter((path) => tracked.has(path));
+    ignoredPaths: async (paths: readonly string[]) => {
+      const ignored = new Set(options.ignored ?? paths);
+      return paths.filter((path) => ignored.has(path));
+    },
+    trackedPathsUnder: async (ref: string, directory: string) => {
+      calls.push(`trackedPathsUnder ${ref} ${directory}`);
+      return [...(options.trackedRuntime ?? [])];
     },
     worktrees: async () => [...worktrees],
     addWorktree: async (path: string, branch: string, startPoint?: string) => {
@@ -142,6 +149,7 @@ interface Fixture {
   readonly setups: SetupCommandRequest[];
   readonly created: string[];
   readonly removed: string[];
+  readonly overlays: string[];
 }
 
 function fixture(options: {
@@ -156,6 +164,7 @@ function fixture(options: {
   const setups: SetupCommandRequest[] = [];
   const created: string[] = [];
   const removed: string[] = [];
+  const overlays: string[] = [];
   const present = new Set(options.existingDirectories ?? []);
   const directories: RunWorkspaceDirectories = {
     exists: async (path) => present.has(path),
@@ -171,6 +180,7 @@ function fixture(options: {
     platform: "win32",
     directories,
     readSetupFile: async () => options.setupFile,
+    overlayProjectConfiguration: async (request) => { overlays.push(request.worktreeRoot); },
     setup: {
       run: async (request) => {
         setups.push(request);
@@ -178,7 +188,7 @@ function fixture(options: {
       },
     },
   });
-  return { provider, git, notifications, setups, created, removed };
+  return { provider, git, notifications, setups, created, removed, overlays };
 }
 
 const REQUEST = { runId: "run_test", sessionBranch: "aboard/run/test", base: "main" } as const;
@@ -214,6 +224,7 @@ test("an existing session branch is checked out rather than created a second tim
   const { provider, git } = fixture({ git: { branches: ["aboard/run/test"] } });
   await provider.prepare(REQUEST);
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  assert.ok(git.calls.includes("trackedPathsUnder aboard/run/test .aboard/runtime"), git.calls.join(", "));
   assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test`), git.calls.join(", "));
 });
 
@@ -251,14 +262,134 @@ test("setup leftovers the run would commit refuse it too", async () => {
   });
 });
 
-test("uncommitted aboard hooks refuse worktree mode, because a second checkout holds only what git has", async () => {
-  const { provider, git } = fixture({ git: { tracked: [".claude/hooks/aboard_hook.py"] } });
+test("untracked aboard hooks are supplied by the project configuration overlay", async () => {
+  const { provider, git, overlays } = fixture();
+  const workspace = await provider.prepare(REQUEST);
+  assert.ok(git.calls.some((call) => call.startsWith("addWorktree")));
+  assert.deepEqual(overlays, [workspace.root]);
+});
+
+test("tracked runtime state refuses a new checkout at its exact start point before creation", async () => {
+  const trackedRuntime = Array.from({ length: 25 }, (_, index) => `.aboard/runtime/file-${index + 1}.json`);
+  trackedRuntime[0] = ".aboard/runtime/.gitkeep";
+  const { provider, git, overlays } = fixture({ git: { trackedRuntime } });
   await assert.rejects(provider.prepare(REQUEST), (error: unknown) => {
     assert.ok(error instanceof RunWorkspaceError);
-    assert.match(error.message, /\.claude\/settings\.json/u);
+    assert.match(error.message, /origin\/main tracks 25 path/u);
+    assert.match(error.message, /\.gitkeep/u, "even an empty keeper is tracked runtime state");
+    assert.match(error.message, /git rm -r --cached/u);
+    assert.doesNotMatch(error.message, /file-21\.json/u, "the diagnostic is bounded");
     return true;
   });
-  assert.ok(!git.calls.some((call) => call.startsWith("addWorktree")), "nothing is created before the refusal");
+  assert.ok(git.calls.includes("trackedPathsUnder origin/main .aboard/runtime"), git.calls.join(", "));
+  assert.ok(!git.calls.some((call) => call.startsWith("addWorktree")), "the unsafe checkout is never created");
+  assert.deepEqual(overlays, [], "no source configuration is read after the preflight fails");
+});
+
+test("a resumed checkout refuses runtime state tracked at its own HEAD", async () => {
+  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const { provider, git } = fixture({
+    git: {
+      trackedRuntime: [".aboard/runtime/session.json"],
+      worktrees: [{ path, branch: "aboard/run/test" }],
+    },
+  });
+  await assert.rejects(provider.prepare(REQUEST), /HEAD tracks 1 path/u);
+  assert.ok(git.calls.includes("trackedPathsUnder HEAD .aboard/runtime"), git.calls.join(", "));
+});
+
+test("the project overlay copies ignored Claude and aboard files, preserves checkout files, and is a one-time snapshot", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-overlay-"));
+  context.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const project = join(root, "project");
+  const checkout = join(root, "checkout");
+  await mkdir(join(project, ".claude", "hooks"), { recursive: true });
+  await mkdir(join(project, ".claude", "skills", "local"), { recursive: true });
+  await mkdir(join(project, ".claude", "worktrees", "other"), { recursive: true });
+  await mkdir(join(project, ".aboard", "agents"), { recursive: true });
+  await mkdir(join(project, ".aboard", "runtime", "events"), { recursive: true });
+  await mkdir(join(checkout, ".claude"), { recursive: true });
+  await mkdir(join(checkout, ".aboard"), { recursive: true });
+  await mkdir(join(checkout, ".aboard", "runtime"), { recursive: true });
+  await writeFile(join(project, ".claude", "settings.json"), "from project\n");
+  await writeFile(join(project, ".claude", "settings.local.json"), "local settings\n");
+  await writeFile(join(project, ".claude", "hooks", "aboard_hook.py"), "hook\n");
+  await writeFile(join(project, ".claude", "skills", "local", "SKILL.md"), "skill\n");
+  await writeFile(join(project, ".claude", "worktrees", "other", "secret"), "transient\n");
+  await writeFile(join(project, ".aboard", "scaffold.json"), "scaffold\n");
+  await writeFile(join(project, ".aboard", "agents", "manager.md"), "manager\n");
+  await writeFile(join(project, ".aboard", "session-setup.ps1"), "from project\n");
+  await writeFile(join(project, ".aboard", "settings.json"), "local aboard settings\n");
+  await writeFile(join(project, ".aboard", "runtime", "events", "secret.json"), "runtime\n");
+  await writeFile(join(checkout, ".claude", "settings.json"), "from git\n");
+  await writeFile(join(checkout, ".aboard", "session-setup.ps1"), "from git\n");
+  const requested: string[] = [];
+  const git = {
+    ignoredPaths: async (paths: readonly string[]) => { requested.push(...paths); return paths; },
+  } as Pick<GitClient, "ignoredPaths"> as GitClient;
+
+  await overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git });
+  assert.equal(await readFile(join(checkout, ".claude", "settings.json"), "utf8"), "from git\n");
+  assert.equal(await readFile(join(checkout, ".claude", "settings.local.json"), "utf8"), "local settings\n");
+  assert.equal(await readFile(join(checkout, ".claude", "hooks", "aboard_hook.py"), "utf8"), "hook\n");
+  assert.equal(await readFile(join(checkout, ".claude", "skills", "local", "SKILL.md"), "utf8"), "skill\n");
+  assert.equal(await readFile(join(checkout, ".aboard", "scaffold.json"), "utf8"), "scaffold\n");
+  assert.equal(await readFile(join(checkout, ".aboard", "agents", "manager.md"), "utf8"), "manager\n");
+  assert.equal(await readFile(join(checkout, ".aboard", "settings.json"), "utf8"), "local aboard settings\n");
+  assert.equal(await readFile(join(checkout, ".aboard", "session-setup.ps1"), "utf8"), "from git\n");
+  assert.ok(requested.includes(".claude/settings.local.json"), "settings.local.json is deliberately copied");
+  await assert.rejects(readFile(join(checkout, ".claude", "worktrees", "other", "secret")), { code: "ENOENT" });
+  await assert.rejects(readFile(join(checkout, ".aboard", "runtime", "events", "secret.json")), { code: "ENOENT" });
+
+  await writeFile(join(project, ".claude", "settings.local.json"), "changed later\n");
+  await writeFile(join(project, ".claude", "new-after-creation.md"), "later\n");
+  await overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git });
+  assert.equal(await readFile(join(checkout, ".claude", "settings.local.json"), "utf8"), "local settings\n");
+  await assert.rejects(readFile(join(checkout, ".claude", "new-after-creation.md")), { code: "ENOENT" });
+});
+
+test("the project overlay refuses unignored local configuration before copying any of it", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-overlay-ignore-"));
+  context.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const project = join(root, "project");
+  const checkout = join(root, "checkout");
+  await mkdir(join(project, ".claude"), { recursive: true });
+  await mkdir(join(project, ".aboard"), { recursive: true });
+  await mkdir(join(checkout, ".aboard", "runtime"), { recursive: true });
+  await writeFile(join(project, ".claude", "settings.local.json"), "local settings\n");
+  const git = { ignoredPaths: async () => [] } as Pick<GitClient, "ignoredPaths"> as GitClient;
+  await assert.rejects(
+    overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git }),
+    /git does not ignore.*settings\.local\.json/u,
+  );
+  await assert.rejects(readFile(join(checkout, ".claude", "settings.local.json")), { code: "ENOENT" });
+});
+
+test("the project overlay never follows a missing symbolic link", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-overlay-link-"));
+  context.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const project = join(root, "project");
+  const checkout = join(root, "checkout");
+  await mkdir(join(project, ".claude"), { recursive: true });
+  await mkdir(join(project, ".aboard"), { recursive: true });
+  await mkdir(join(checkout, ".aboard", "runtime"), { recursive: true });
+  const outside = join(root, "outside.json");
+  await writeFile(outside, "secret\n");
+  try {
+    await symlink(outside, join(project, ".claude", "linked.json"), "file");
+  } catch (error) {
+    if (process.platform === "win32" && typeof error === "object" && error !== null && "code" in error && error.code === "EPERM") {
+      context.skip("creating symlinks requires Windows Developer Mode");
+      return;
+    }
+    throw error;
+  }
+  const git = { ignoredPaths: async (paths: readonly string[]) => paths } as Pick<GitClient, "ignoredPaths"> as GitClient;
+  await assert.rejects(
+    overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git }),
+    /symbolic link or junction/u,
+  );
+  await assert.rejects(readFile(join(checkout, ".claude", "linked.json")), { code: "ENOENT" });
 });
 
 test("a directory in the way is reported rather than checked out over", async () => {

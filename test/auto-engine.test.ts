@@ -155,7 +155,8 @@ function harness(options: HarnessOptions = {}): Harness {
     },
     hasCommitFor: async (issueNumber) => commits.has(issueNumber),
     isPushed: async (branch) => pushed.has(branch),
-    trackedPaths: async (paths) => [...paths],
+    ignoredPaths: async (paths) => [...paths],
+    trackedPathsUnder: async () => [],
     worktrees: async () => [...worktrees],
     addWorktree: async (path, branch, startPoint) => {
       gitCalls.push(`addWorktree ${path} ${branch}${startPoint === undefined ? "" : ` ${startPoint}`}`);

@@ -204,15 +204,30 @@ test("the git boundary creates, lists, and removes a checkout beside the reposit
   assert.equal((await client.worktrees()).length, 1);
 });
 
-test("tracked paths answer what a second checkout would contain", async () => {
+test("ignored paths identify local configuration that git add cannot stage", async () => {
   const root = await repository();
   const client = new ProcessGitClient(root);
-  await mkdir(join(root, ".claude"), { recursive: true });
-  await writeFile(join(root, ".claude", "settings.json"), "{}\n");
-  // Written but never committed, which is exactly the state that would give a
-  // second checkout no aboard hooks at all.
-  assert.deepEqual(await client.trackedPaths([".claude/settings.json", "README.md"]), ["README.md"]);
-  await run("git", ["add", "-A"], { cwd: root, windowsHide: true });
-  await run("git", ["commit", "-m", "hooks"], { cwd: root, windowsHide: true });
-  assert.deepEqual(await client.trackedPaths([".claude/settings.json", "README.md"]), [".claude/settings.json", "README.md"]);
+  await writeFile(join(root, ".gitignore"), ".claude/settings.local.json\n.claude/private/\n");
+  assert.deepEqual(
+    await client.ignoredPaths([
+      ".claude/settings.json",
+      ".claude/settings.local.json",
+      ".claude/private/skill.md",
+    ]),
+    [".claude/settings.local.json", ".claude/private/skill.md"],
+  );
+});
+
+test("tracked paths under a directory are read from the requested tree without reading contents", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  await mkdir(join(root, ".aboard", "runtime"), { recursive: true });
+  await writeFile(join(root, ".aboard", "runtime", ".gitkeep"), "");
+  await writeFile(join(root, ".aboard", "runtime", "session.json"), "private\n");
+  await run("git", ["add", "-f", ".aboard/runtime"], { cwd: root, windowsHide: true });
+  await run("git", ["commit", "-m", "bad runtime"], { cwd: root, windowsHide: true });
+  assert.deepEqual(
+    await client.trackedPathsUnder("HEAD", ".aboard/runtime"),
+    [".aboard/runtime/.gitkeep", ".aboard/runtime/session.json"],
+  );
 });

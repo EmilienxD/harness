@@ -5,7 +5,9 @@
  * why it has to move HEAD, why it demands a clean tree before it starts, and why
  * the user cannot touch the repository while it works. This module is the other
  * option: the run gets a checkout of its own, outside the project directory
- * entirely, and the user's tree is never read, written, or moved.
+ * entirely, and the user's tree is never written or moved. Preparation reads
+ * its setup script and snapshots missing local project configuration before
+ * any agent starts.
  *
  * Three things make that checkout worth having:
  *
@@ -25,7 +27,8 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { copyFile, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { autoRunMessage, type WorktreeSettings } from "../domain/auto-run.js";
@@ -37,14 +40,119 @@ import type { GitClient } from "../git/client.js";
  */
 export const RUN_WORKSPACE_CONTAINER = ".aboard-sessions";
 
+const PROJECT_OVERLAY_MARKER = ".aboard/runtime/project-overlay-v2";
+const RUNTIME_DIRECTORY = ".aboard/runtime";
+
+interface ProjectOverlayFile {
+  readonly source: string;
+  readonly target: string;
+  readonly repositoryPath: string;
+}
+
+export interface ProjectConfigurationOverlayRequest {
+  readonly workspaceRoot: string;
+  readonly worktreeRoot: string;
+  readonly git: GitClient;
+}
+
 /**
- * Files an agent's session needs that only exist in a second checkout if they
- * are committed. Both carry the hook registration that reports a worker's
- * result: `${CLAUDE_PROJECT_DIR}` resolves to the session's own directory, so an
- * uncommitted `.claude/settings.json` means a run whose workers never report
- * anything and are killed by the startup-proof timeout instead.
+ * Carries local aboard and Claude project configuration into a checkout Git
+ * cannot supply. Existing entries win, so committed configuration from the
+ * session branch is never replaced by the user's checkout. The marker makes
+ * this a creation-time snapshot even when a run later resumes in the same
+ * checkout.
  */
-export const REQUIRED_TRACKED_PATHS = [".claude/settings.json", ".claude/hooks/aboard_hook.py"] as const;
+export async function overlayProjectConfiguration(request: ProjectConfigurationOverlayRequest): Promise<void> {
+  const marker = join(request.worktreeRoot, ...PROJECT_OVERLAY_MARKER.split("/"));
+  if (await pathStat(marker) !== undefined) return;
+
+  const files: ProjectOverlayFile[] = [];
+  for (const root of [
+    { name: ".claude", excludedDirectory: "worktrees" },
+    { name: ".aboard", excludedDirectory: "runtime" },
+  ] as const) {
+    const sourceRoot = join(request.workspaceRoot, root.name);
+    const targetRoot = join(request.worktreeRoot, root.name);
+    const source = await pathStat(sourceRoot);
+    if (source === undefined || !source.isDirectory()) {
+      throw new RunWorkspaceError(`The project configuration directory at ${sourceRoot} is missing or is not a directory.`);
+    }
+    await planProjectOverlay(sourceRoot, targetRoot, [root.name], root.excludedDirectory, files);
+  }
+
+  // The snapshot marker is local runtime state too. Validate it alongside the
+  // copied files so a missing scaffold ignore rule cannot turn a successful
+  // prepare into something the next `git add -A` would publish.
+  const paths = [PROJECT_OVERLAY_MARKER, ...files.map((file) => file.repositoryPath)];
+  const ignored = new Set(await request.git.ignoredPaths(paths));
+  const exposed = paths.filter((path) => !ignored.has(path));
+  if (exposed.length > 0) {
+    throw new RunWorkspaceError(
+      `The run cannot copy ${exposed.length} local project configuration path(s) because git does not ignore them (${exposed.slice(0, 20).join(", ")}). Ignore the local .claude or .aboard content, or commit it before using worktree mode; otherwise git add -A could publish it.`,
+    );
+  }
+
+  for (const file of files) {
+    await mkdir(dirname(file.target), { recursive: true });
+    try {
+      await copyFile(file.source, file.target, constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (!hasCode(error, "EEXIST")) throw error;
+    }
+  }
+  await mkdir(dirname(marker), { recursive: true });
+  await writeFile(marker, "", { flag: "wx" }).catch((error: unknown) => {
+    if (!hasCode(error, "EEXIST")) throw error;
+  });
+}
+
+async function planProjectOverlay(
+  sourceDirectory: string,
+  targetDirectory: string,
+  segments: readonly string[],
+  excludedDirectory: string,
+  files: ProjectOverlayFile[],
+): Promise<void> {
+  for (const entry of await readdir(sourceDirectory, { withFileTypes: true })) {
+    // Claude's own checkouts and aboard's runtime are live state rather than
+    // project configuration. Neither belongs in another run checkout.
+    if (segments.length === 1 && entry.name.toLowerCase() === excludedDirectory.toLowerCase()) continue;
+    const nextSegments = [...segments, entry.name];
+    const source = join(sourceDirectory, entry.name);
+    const target = join(targetDirectory, entry.name);
+    const targetEntry = await pathStat(target);
+    if (entry.isSymbolicLink()) {
+      if (targetEntry !== undefined) continue;
+      throw new RunWorkspaceError(
+        `The local project configuration entry ${nextSegments.join("/")} is a symbolic link or junction. aboard will not follow links while copying configuration into a run checkout.`,
+      );
+    }
+    if (entry.isDirectory()) {
+      if (targetEntry !== undefined && !targetEntry.isDirectory()) continue;
+      await planProjectOverlay(source, target, nextSegments, excludedDirectory, files);
+      continue;
+    }
+    if (!entry.isFile()) {
+      if (targetEntry !== undefined) continue;
+      throw new RunWorkspaceError(`The local project configuration entry ${nextSegments.join("/")} is not a regular file.`);
+    }
+    if (targetEntry !== undefined) continue;
+    files.push({ source, target, repositoryPath: nextSegments.join("/") });
+  }
+}
+
+async function pathStat(path: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (hasCode(error, "ENOENT")) return undefined;
+    throw error;
+  }
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
 
 export class RunWorkspaceError extends Error {
   public constructor(message: string) {
@@ -252,6 +360,7 @@ export interface WorktreeRunWorkspaceOptions {
   readonly platform?: NodeJS.Platform;
   readonly setup?: SetupCommandRunner;
   readonly readSetupFile?: (path: string) => Promise<string | undefined>;
+  readonly overlayProjectConfiguration?: (request: ProjectConfigurationOverlayRequest) => Promise<void>;
   readonly directories?: RunWorkspaceDirectories;
 }
 
@@ -281,6 +390,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   readonly #platform: NodeJS.Platform;
   readonly #setup: SetupCommandRunner;
   readonly #readSetupFile: (path: string) => Promise<string | undefined>;
+  readonly #overlayProjectConfiguration: (request: ProjectConfigurationOverlayRequest) => Promise<void>;
 
   public constructor(private readonly options: WorktreeRunWorkspaceOptions) {
     this.#directories = options.directories ?? nodeDirectories;
@@ -288,6 +398,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     this.#setup = options.setup ?? processSetupCommandRunner;
     this.#readSetupFile = options.readSetupFile
       ?? (async (path) => { try { return await readFile(path, "utf8"); } catch { return undefined; } });
+    this.#overlayProjectConfiguration = options.overlayProjectConfiguration ?? overlayProjectConfiguration;
   }
 
   public isolates(): boolean {
@@ -299,18 +410,23 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     if (!settings.enabled) {
       return { root: this.options.workspaceRoot, git: this.options.git, denyTools: [], isolated: false };
     }
-    await this.#requireTrackedAssets();
     const path = runWorkspacePath({
       workspaceRoot: this.options.workspaceRoot,
       runId: request.runId,
       root: settings.root,
     });
     const created = await this.#checkout(path, request);
+    if (!created) await this.#requireRuntimeUntracked(this.options.gitFor(path), "HEAD");
     // The gitignored runtime directory does not come with a checkout, and every
     // launch writes its rewritten agent definition and any spilled prompt under
     // it — as paths relative to the session's own directory.
     await this.#directories.create(join(path, ".aboard", "runtime", "agents"));
     await this.#directories.create(join(path, ".aboard", "runtime", "prompts"));
+    await this.#overlayProjectConfiguration({
+      workspaceRoot: this.options.workspaceRoot,
+      worktreeRoot: path,
+      git: this.options.gitFor(path),
+    });
     if (created) await this.#runSetup(path, request);
     await this.#requireCleanCheckout(path, created);
     this.options.notify(autoRunMessage.workspace(path));
@@ -344,20 +460,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     return undefined;
   }
 
-  /**
-   * A second checkout contains what is committed. aboard's hook registration is
-   * the load-bearing part: without it a worker starts, does its work, and reports
-   * nothing, which the run can only observe as a launch that never came up.
-   */
-  async #requireTrackedAssets(): Promise<void> {
-    const tracked = new Set(await this.options.git.trackedPaths(REQUIRED_TRACKED_PATHS));
-    const missing = REQUIRED_TRACKED_PATHS.filter((path) => !tracked.has(path));
-    if (missing.length === 0) return;
-    throw new RunWorkspaceError(
-      `a run with its own checkout needs aboard's hooks committed, and ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not tracked by git. Commit ${missing.length === 1 ? "it" : "them"}, or turn aboard.autoRun.worktree.enabled off`,
-    );
-  }
-
   /** Creates the checkout, or re-attaches to the one a previous attempt made. */
   async #checkout(path: string, request: RunWorkspaceRequest): Promise<boolean> {
     const existing = (await this.options.git.worktrees()).find((worktree) => samePath(worktree.path, path));
@@ -370,6 +472,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     await this.#directories.create(dirname(path));
     await this.options.git.fetch();
     if (await this.options.git.branchExists(request.sessionBranch)) {
+      await this.#requireRuntimeUntracked(this.options.git, request.sessionBranch);
       await this.options.git.addWorktree(path, request.sessionBranch);
       return true;
     }
@@ -378,8 +481,17 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     const startPoint = await this.options.git.remoteBranchExists(request.base)
       ? `origin/${request.base}`
       : request.base;
+    await this.#requireRuntimeUntracked(this.options.git, startPoint);
     await this.options.git.addWorktree(path, request.sessionBranch, startPoint);
     return true;
+  }
+
+  async #requireRuntimeUntracked(git: GitClient, ref: string): Promise<void> {
+    const tracked = await git.trackedPathsUnder(ref, RUNTIME_DIRECTORY);
+    if (tracked.length === 0) return;
+    throw new RunWorkspaceError(
+      `${ref} tracks ${tracked.length} path(s) under ${RUNTIME_DIRECTORY} (${tracked.slice(0, 20).join(", ")}). Remove the directory from Git tracking (for example, git rm -r --cached -- ${RUNTIME_DIRECTORY}), keep it ignored, commit and publish that change to the inspected branch, then retry. aboard did not modify these files.`,
+    );
   }
 
   /**

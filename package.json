@@ -362,7 +362,7 @@
         "aboard.autoRun.worktree.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout of this repository beside the project directory, runs every agent in it, and leaves your working tree and your branch exactly as they are — so you can keep working while the run does. Off by default: a separate checkout costs a full copy of the tree plus whatever .aboard/session-setup.ps1 or .aboard/session-setup.sh installs into it. It needs aboard's hooks committed, because a second checkout only contains what is in git."
+          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout beside the project, carries ignored local .claude and non-runtime .aboard configuration into it without replacing tracked files, and leaves your working tree and branch exactly as they are. It refuses any Git-tracked .aboard/runtime content. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
         },
         "aboard.autoRun.worktree.root": {
           "type": "string",
