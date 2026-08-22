@@ -2,6 +2,7 @@ import type { IncomingHttpHeaders } from "node:http";
 
 export type BridgeErrorCode =
   | "unauthorized"
+  | "forbidden"
   | "malformed-request"
   | "invalid-request"
   | "conflict"

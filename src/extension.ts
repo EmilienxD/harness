@@ -12,6 +12,8 @@ import {
   type BridgeRuntime,
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
+import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
+import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./claude/terminals.js";
 import { isNamedBuiltinAgentType, isNonRestorablePersistedAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
@@ -69,6 +71,8 @@ import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
 import { agentDefinitionPath, parseAgentDefinition, parseBuiltinAgentProfile, sanitizeAgentDefinition } from "./scaffold/agent-definition.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
 
@@ -85,6 +89,7 @@ import { planSessionResume, resolveLaunchConfiguration, type LaunchConfiguration
 import { deriveWriteCapability } from "./domain/capability.js";
 
 let bridge: BridgeRuntime | undefined;
+let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
 let persistence: PersistOnChange | undefined;
 let activeAutoRun: AutoRunEngine | undefined;
 
@@ -266,6 +271,8 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
 /** Exposed so the VS Code integration suite can locate the out-of-workspace discovery file. */
 export interface AboardExtensionApi {
   readonly bridgeDiscoveryPath: string;
+  /** Where `/commands` publishes this window's port and command-scoped token. */
+  readonly commandEndpointDirectory: string;
 }
 
 export async function activate(context: ExtensionContext): Promise<AboardExtensionApi | undefined> {
@@ -355,6 +362,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
   });
   context.subscriptions.push({ dispose: () => terminals.dispose() });
+  // Terminals for automated scripts, not for agents: no fleet row, no lease, no
+  // bridge credentials, and no initialization requirement — an uninitialized
+  // project is exactly where a setup command runs.
+  const commandTerminals = new CommandTerminalService({
+    host: createVsCodeTerminalHost(),
+    defaultCwd: () => workspaceRoot,
+    idFactory: () => randomUUID() as CommandTerminalId,
+    directoryExists: (path) => existsSync(path),
+  });
+  context.subscriptions.push({ dispose: () => commandTerminals.dispose() });
   const fleetStore = new FileFleetStore(workspaceRoot);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
@@ -698,11 +715,35 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       // from recreating the runtime directory behind the user's back.
       const session = fleet.get(agentId);
       if (session?.identity.type === "manager") void transcripts.checkpoint(session.sessionId);
-    }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals)),
+    }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
     persistence: discovery,
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
   });
   bridgeEnvironment = { port: bridge.port, token: bridge.token };
+  // Published so a script nobody launched from aboard can still reach
+  // `/commands`. Only the command-scoped token goes here; the full one stays in
+  // extension storage and in the environment of processes aboard started.
+  const commandEndpoint = new FileCommandEndpointRegistry({
+    directory: commandEndpointDirectory(process.platform, process.env, homedir()),
+  });
+  commandEndpointRegistry = commandEndpoint;
+  context.subscriptions.push({ dispose: () => void commandEndpoint.clear() });
+  try {
+    const published = await commandEndpoint.publish({
+      version: 1,
+      host: bridge.host,
+      port: bridge.port,
+      workspaceRoot,
+      commandToken: bridge.commandToken,
+      pid: process.pid,
+      activatedAt: new Date().toISOString(),
+    });
+    output.appendLine(`Command endpoint published at ${published}`);
+  } catch (error) {
+    // A script losing its way in is worth a line; it is not worth refusing to
+    // activate, and every other route reaches the bridge without this file.
+    output.appendLine(`Command endpoint could not be published: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
   const fleetUi = registerNativeFleetUi(context, bridge.port, fleet, lease, terminals, () => initialized);
   // Progress is pull, not push: one bounded line per transition, drained by the
   // Manager's UserPromptSubmit hook on the user's next message. If the user is
@@ -1029,7 +1070,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   }
   context.subscriptions.push(settingsWatcher);
   context.subscriptions.push({ dispose: () => void bridge?.stop() });
-  return { bridgeDiscoveryPath: discovery.path };
+  return { bridgeDiscoveryPath: discovery.path, commandEndpointDirectory: commandEndpoint.directory };
 }
 
 let activeSessionMonitor: SessionProcessMonitor | undefined;
@@ -1046,4 +1087,7 @@ export async function deactivate(): Promise<void> {
   persistence = undefined;
   await bridge?.stop();
   bridge = undefined;
+  // The published record names a port and a token that both die with the bridge.
+  await commandEndpointRegistry?.clear().catch(() => undefined);
+  commandEndpointRegistry = undefined;
 }

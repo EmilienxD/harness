@@ -7,6 +7,7 @@ export function createVsCodeTerminalHost(): TerminalHost {
     createTerminal: (options) => window.createTerminal({
       cwd: options.cwd,
       env: { ...options.env },
+      ...(options.name === undefined ? {} : { name: options.name }),
       ...(options.shellPath === undefined ? {} : { shellPath: options.shellPath }),
       ...(options.shellArgs === undefined ? {} : { shellArgs: [...options.shellArgs] }),
     }),

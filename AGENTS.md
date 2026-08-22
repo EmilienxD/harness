@@ -76,7 +76,9 @@ User <-> VS Code UI and terminals <-> extension host
 - Parse and validate untrusted data at process, HTTP/MCP, hook, configuration, and persisted-file boundaries.
 - The bridge runs in the extension host, binds only to `127.0.0.1`, and requires a new bearer token for every activation and every request.
 - The bridge is the only creator of aboard agents. Hand-started Claude Code sessions are deliberately outside the fleet.
-- Never log or commit tokens, prompts, transcripts, session data, or other `.aboard/runtime/` contents. Bridge discovery and Manager MCP configuration containing credentials live in VS Code extension storage, outside the workspace.
+- `POST /commands` is the one bridge surface that opens a terminal for something other than an agent: an automated script's command, run in a visible VS Code terminal. It creates no fleet row, takes no lease, passes no `ABOARD_*` credentials, and requires no initialized project. Keep it that way; a caller that needs an agent asks for one.
+- The bridge mints two per-activation credentials. The full token reaches everything and is never published — it stays in extension storage and in the environment of processes aboard launched. The command token reaches `/commands` and is refused everywhere else, and it is the only one published where an unrelated script can find it. A script needing a way in is never a reason to widen what it finds: keep the published credential scoped, and keep the scope check in the server rather than in a route.
+- Never log or commit tokens, prompts, transcripts, session data, or other `.aboard/runtime/` contents. Bridge discovery and Manager MCP configuration containing credentials live in VS Code extension storage, outside the workspace; the published command endpoint lives in a per-user directory outside every workspace. No credential is ever written into the user's tree.
 - `.aboard/scaffold.json` is the sole initialized-project signal. Side-effecting commands must also enforce initialization at runtime; VS Code `when` clauses are visibility controls, not authorization.
 - Use native VS Code and Node APIs unless a new dependency has a demonstrated need. Do not introduce a database, UI framework, DI container, web framework, or separate bridge process speculatively.
 - Assume one workspace root and GitHub as the only durable backend.
@@ -237,6 +239,7 @@ npm run package           # verify and build the VSIX
 - `README.md`: product overview and user workflow
 - `CONTRIBUTING.md`: development setup, verification, and safe manual testing
 - `docs/configuration.md`: authoritative `aboard.*` settings reference
+- `docs/command-terminals.md`: the `/commands` endpoint for automated scripts
 - `docs/CLAUDE-REFERENCES/README.md`: index of checked-in Claude Code documentation snapshots
 
 ## Current Project State

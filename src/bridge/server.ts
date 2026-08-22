@@ -6,7 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 
-import { isAuthorized, redactSecret } from "./authentication.js";
+import { authorize, redactSecret, type BridgeTokens } from "./authentication.js";
 import type {
   BridgeDiscoveryMetadata,
   BridgeDiscoveryPersistence,
@@ -32,6 +32,7 @@ export interface StartBridgeOptions {
   readonly persistence: BridgeDiscoveryPersistence;
   readonly logger?: BridgeLogger;
   readonly tokenFactory?: () => string;
+  readonly commandTokenFactory?: () => string;
   readonly now?: () => Date;
 }
 
@@ -39,6 +40,8 @@ export interface BridgeRuntime {
   readonly host: typeof BRIDGE_HOST;
   readonly port: number;
   readonly token: string;
+  /** Reaches `/commands` only; see `BridgeTokens`. */
+  readonly commandToken: string;
   stop(): Promise<void>;
 }
 
@@ -106,6 +109,7 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
   const preferredPort = options.preferredPort ?? DEFAULT_BRIDGE_PORT;
   validatePort(preferredPort);
   const token = (options.tokenFactory ?? randomUUID)();
+  const tokens: BridgeTokens = { full: token, command: (options.commandTokenFactory ?? randomUUID)() };
   const activatedAt = (options.now ?? (() => new Date()))().toISOString();
   const activeRequests = new Set<AbortController>();
   const activeResponses = new Set<ServerResponse>();
@@ -115,8 +119,14 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
     activeResponses.add(response);
     response.once("close", () => activeResponses.delete(response));
 
-    if (!isAuthorized(request.headers.authorization, token)) {
+    const url = new URL(request.url ?? "/", `http://${BRIDGE_HOST}`);
+    const outcome = authorize(request.headers.authorization, tokens, url.pathname);
+    if (outcome === "unauthorized") {
       writeResponse(response, protocolError(401, "unauthorized", "Bearer authentication is required"));
+      return;
+    }
+    if (outcome === "out-of-scope") {
+      writeResponse(response, protocolError(403, "forbidden", "This credential only authorizes the command endpoint"));
       return;
     }
 
@@ -128,7 +138,6 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
 
     try {
       const body = await readBody(request);
-      const url = new URL(request.url ?? "/", `http://${BRIDGE_HOST}`);
       const result = await options.handler({
         method: request.method ?? "GET",
         url,
@@ -141,7 +150,7 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
       if (error instanceof MalformedRequestError) {
         writeResponse(response, protocolError(400, "malformed-request", error.message));
       } else if (!stopping) {
-        options.logger?.error(redactSecret("Bridge request failed", token));
+        options.logger?.error(redactSecret(redactSecret("Bridge request failed", token), tokens.command));
         writeResponse(response, protocolError(500, "internal-error", "The bridge could not process the request"));
       }
     } finally {
@@ -179,6 +188,7 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
     host: BRIDGE_HOST,
     port,
     token,
+    commandToken: tokens.command,
     stop(): Promise<void> {
       stopPromise ??= (async () => {
         stopping = true;

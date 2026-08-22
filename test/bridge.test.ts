@@ -75,6 +75,57 @@ test("rotates tokens between activations", async () => {
   await Promise.all([first.stop(), second.stop()]);
 });
 
+test("the command token opens the command endpoint and nothing else", async (context) => {
+  let calls = 0;
+  const bridge = await startBridge({
+    preferredPort: 0,
+    persistence: new MemoryPersistence(),
+    tokenFactory: () => "full-token",
+    commandTokenFactory: () => "command-token",
+    handler: (incoming) => { calls += 1; return { status: 200, body: { path: incoming.url.pathname } }; },
+  });
+  context.after(() => bridge.stop());
+
+  assert.notEqual(bridge.commandToken, bridge.token);
+  for (const path of ["/commands", "/commands/abc/show"]) {
+    assert.deepEqual(await request(bridge.port, path, bridge.commandToken), { status: 200, body: { path } });
+  }
+  // A discoverable credential must not reach the agent surface: no launches, no
+  // fleet or session state, no Manager MCP, and no hook routes.
+  for (const path of ["/terminals", "/mcp", "/hook", "/sessions", "/commandsandmore"]) {
+    const refused = await request(bridge.port, path, bridge.commandToken);
+    assert.equal(refused.status, 403, path);
+    assert.deepEqual(refused.body, { ok: false, error: { code: "forbidden", message: "This credential only authorizes the command endpoint" } });
+  }
+  assert.equal(calls, 2, "a refused request never reaches the handler");
+  // The full token keeps reaching everything, including the command endpoint.
+  assert.equal((await request(bridge.port, "/commands", bridge.token)).status, 200);
+  assert.equal((await request(bridge.port, "/terminals", bridge.token)).status, 200);
+});
+
+test("rotates the command token between activations and never logs it", async (context) => {
+  const messages: string[] = [];
+  const first = await startBridge({
+    preferredPort: 0,
+    persistence: new MemoryPersistence(),
+    commandTokenFactory: () => "never-log-this-command-token",
+    logger: { info: () => undefined, error: (message) => messages.push(message) },
+    handler: () => { throw new Error("never-log-this-command-token"); },
+  });
+  context.after(() => first.stop());
+  const second = await startBridge({ preferredPort: 0, persistence: new MemoryPersistence(), handler: () => ({ status: 204 }) });
+  context.after(() => second.stop());
+
+  const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  assert.match(second.commandToken, uuidV4);
+  assert.notEqual(first.commandToken, second.commandToken);
+
+  const response = await request(first.port, "/commands", first.commandToken);
+  assert.equal(response.status, 500);
+  assert.equal(messages.join("\n").includes(first.commandToken), false);
+  assert.equal(JSON.stringify(response.body).includes(first.commandToken), false);
+});
+
 test("falls back to an ephemeral port when the preferred port is occupied", async (context) => {
   const occupyingServer = createServer();
   await new Promise<void>((resolve) => occupyingServer.listen(0, BRIDGE_HOST, resolve));

@@ -58,14 +58,17 @@ export interface TerminalHandle {
 }
 
 /**
- * No `name`: aboard deliberately leaves the VS Code terminal with its default
- * shell name. An "aboard: manager" tab keeps that label after the session dies,
- * and a stale name that claims a live agent misleads worse than a generic one
- * informs. The aboard label lives on the fleet record instead, which is where
- * the user looks for agent state and which settles the moment the session does.
+ * `name` is left unset for every agent launch: aboard deliberately leaves those
+ * VS Code terminals with their default shell name. An "aboard: manager" tab
+ * keeps that label after the session dies, and a stale name that claims a live
+ * agent misleads worse than a generic one informs. The aboard label lives on the
+ * fleet record instead, which is where the user looks for agent state and which
+ * settles the moment the session does. A plain command terminal has no fleet row
+ * to carry its label and claims no liveness, so it names its tab.
  */
 export interface TerminalCreationOptions {
   readonly cwd: string;
+  readonly name?: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
   readonly env: Readonly<Record<string, string>>;

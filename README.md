@@ -92,6 +92,7 @@ This list is a feature, and it's [written into the contract](./AGENTS.md#mission
 | :-- | :-- |
 | [AGENTS.md](./AGENTS.md) | The product, behavior, and architecture contract — the reasoning behind every decision above, the auto-run phase by phase, and the module layout |
 | [docs/configuration.md](./docs/configuration.md) | Every `aboard.*` setting and how the three config layers resolve |
+| [docs/command-terminals.md](./docs/command-terminals.md) | Running a script's command in a visible VS Code terminal over the bridge |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Build, test, package |
 
 ## Status
