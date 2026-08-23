@@ -16,14 +16,17 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
     // interactive path that would leave it with no diff.
     if (input.type === "pr-doctor-afk" || input.type === "pr-doctor-hitl") {
       if (input.pullRequest === undefined) {
-        return this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Review the supplied change against its contract." });
+        return appendAdditionalGuideline(
+          await this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Review the supplied change against its contract." }),
+          input.additionalGuideline,
+        );
       }
-      return this.prompts.resolve({
+      return appendAdditionalGuideline(await this.prompts.resolve({
         kind: "review",
         instruction: input.prompt ?? PR_DOCTOR_INSTRUCTION,
         pullRequestNumber: input.pullRequest,
         ...(input.focus === undefined ? {} : { focus: input.focus }),
-      });
+      }), input.additionalGuideline);
     }
     // Any agent handed to the user has one in front of it, so it needs no
     // opening message — whether it is an interactive-only type or a dual-mode
@@ -43,7 +46,10 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
       return this.prompts.resolve({ kind: "free-form", instruction });
     }
     if (input.type === "implementer" && input.issues !== undefined) {
-      return this.prompts.resolve({ kind: "implementation", instruction: input.prompt ?? "Address the issue.", issueNumbers: input.issues });
+      return appendAdditionalGuideline(
+        await this.prompts.resolve({ kind: "implementation", instruction: input.prompt ?? "Address the issue.", issueNumbers: input.issues }),
+        input.additionalGuideline,
+      );
     }
     if (input.issues !== undefined) {
       // The resolved issues and their parent specs lead; the Manager's wording
@@ -54,4 +60,18 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
     }
     return this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Continue with the requested task." });
   }
+}
+
+const ADDITIONAL_GUIDELINE_HEADING = "# Additional User Guideline For this Session";
+
+/** Appends user guidance literally last, after every resolved contract section. */
+function appendAdditionalGuideline(prompt: ResolvedPrompt | undefined, guideline: string | undefined): ResolvedPrompt | undefined {
+  const trimmed = guideline?.trim();
+  if (prompt === undefined || trimmed === undefined || trimmed.length === 0) return prompt;
+  const section = `${ADDITIONAL_GUIDELINE_HEADING}\n\n${trimmed}`;
+  return {
+    ...prompt,
+    body: prompt.body.length === 0 ? section : `${prompt.body}\n\n${section}`,
+    text: `${prompt.text}\n\n${section}`,
+  };
 }

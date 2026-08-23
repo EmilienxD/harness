@@ -243,7 +243,7 @@ export class AutoRunEngine {
    * after the GitHub queue is read, so `/auto --dry` remains useful for planning
    * even when `/auto` would currently refuse to start.
    */
-  public async dryRun(options: { readonly chrome?: boolean } = {}): Promise<AutoRunDryRunResult> {
+  public async dryRun(options: { readonly chrome?: boolean; readonly additionalGuideline?: string } = {}): Promise<AutoRunDryRunResult> {
     if (this.#state !== undefined) {
       return { dryRun: true, inspected: false, reason: "a run is already active" };
     }
@@ -276,6 +276,7 @@ export class AutoRunEngine {
       reviewMode: settings.review,
       pauseAfterHitl: settings.pauseAfterHitl,
       chromeEnabled: options.chrome === true,
+      ...guidelineProperty(options.additionalGuideline),
       isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
       keepsWorkspace: settings.worktree.keep,
       sessionBranch: "aboard/run/<run-id>",
@@ -292,7 +293,7 @@ export class AutoRunEngine {
    * routinely outlasts any single command, and the run must outlive the
    * Manager that triggered it.
    */
-  public async start(options: { readonly chrome?: boolean } = {}): Promise<AutoRunStartResult> {
+  public async start(options: { readonly chrome?: boolean; readonly additionalGuideline?: string } = {}): Promise<AutoRunStartResult> {
     if (this.#state !== undefined) {
       return { started: false, reason: "a run is already active", active: this.#state };
     }
@@ -319,6 +320,7 @@ export class AutoRunEngine {
       prNumber: undefined,
       reviewMode: settings.review,
       chromeEnabled: options.chrome === true,
+      ...guidelineProperty(options.additionalGuideline),
       returnBranch,
       reviewedIssues: [],
       startedAt: this.#now().toISOString(),
@@ -689,7 +691,7 @@ export class AutoRunEngine {
             await this.#branch(step.branch, step.base);
             break;
           case "implement": {
-            implementationSummary = await this.#implement(issue, record.chromeEnabled === true, signal);
+            implementationSummary = await this.#implement(issue, record.chromeEnabled === true, record.additionalGuideline, signal);
             // The implement phase's postcondition is "tree dirty on the right
             // branch". It is checked here rather than in the reducer because an
             // unmet one is indistinguishable from "not started yet" in the
@@ -723,7 +725,7 @@ export class AutoRunEngine {
             break;
           }
           case "review":
-            await this.#review(issue, step.prNumber, signal);
+            await this.#review(issue, step.prNumber, record.additionalGuideline, signal);
             reviewed.add(issue.number);
             break;
           case "await-approval": {
@@ -823,7 +825,7 @@ export class AutoRunEngine {
     return issue.difficulty === undefined ? {} : { difficulty: issue.difficulty };
   }
 
-  async #implement(issue: PlannedIssue, chrome: boolean, signal: AbortSignal): Promise<string> {
+  async #implement(issue: PlannedIssue, chrome: boolean, additionalGuideline: string | undefined, signal: AbortSignal): Promise<string> {
     const outcome = await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
@@ -831,6 +833,7 @@ export class AutoRunEngine {
       chrome,
       ...this.#difficulty(issue),
       prompt: `Address issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.`,
+      ...guidelineProperty(additionalGuideline),
       expectsUncommittedTree: true,
       ...this.#isolation(),
     }, signal);
@@ -917,7 +920,7 @@ export class AutoRunEngine {
     });
   }
 
-  async #review(issue: PlannedIssue, prNumber: number, signal: AbortSignal): Promise<void> {
+  async #review(issue: PlannedIssue, prNumber: number, additionalGuideline: string | undefined, signal: AbortSignal): Promise<void> {
     if (issue.disposition === "hitl") {
       // Interactive: the terminal is focused and handed over, and no result is
       // delivered. The run's continue signal is the PR's resolution.
@@ -929,6 +932,7 @@ export class AutoRunEngine {
         issues: [issue.number],
         pullRequest: prNumber,
         description: `review pull request ${prNumber}`,
+        ...guidelineProperty(additionalGuideline),
         ...this.#difficulty(issue),
         // The doctor's fixes are committed by the run, from the same checkout
         // the implementer worked in — so it has to be in that checkout.
@@ -943,6 +947,7 @@ export class AutoRunEngine {
       issues: [issue.number],
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
+      ...guidelineProperty(additionalGuideline),
       expectsUncommittedTree: true,
       ...this.#difficulty(issue),
       ...this.#isolation(),
@@ -1290,6 +1295,12 @@ function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> 
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
+}
+
+/** Normalizes the optional run-wide user text once at its boundary. */
+function guidelineProperty(value: string | undefined): { readonly additionalGuideline?: string } {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? {} : { additionalGuideline: trimmed };
 }
 
 /**

@@ -515,7 +515,7 @@ export interface InvokingTerminalKiller {
 
 /** The extension-owned actions `/auto`, `/review-pr`, and `/reopen` trigger. */
 export interface ManagerCommandActions {
-  startAutoRun(options?: { readonly chrome?: boolean; readonly dry?: boolean }): Promise<unknown>;
+  startAutoRun(options?: { readonly chrome?: boolean; readonly dry?: boolean; readonly additionalGuideline?: string }): Promise<unknown>;
   /** `focus` is the user's trailing text: what they want the session to look at. */
   reviewPullRequest(focus?: string): Promise<unknown>;
   /**
@@ -630,14 +630,18 @@ export class ManagerPromptService {
       return {
         intercepted: true,
         message: action.type === "auto"
-          ? "/auto accepts the optional --dry and --chrome flags."
+          ? "/auto accepts optional --dry and --chrome flags before an optional session guideline."
           : `/${action.command} does not accept those arguments.`,
       };
     }
     let outcome: unknown;
     try {
       outcome = action.type === "auto"
-        ? await this.actions.startAutoRun({ ...(action.chrome ? { chrome: true as const } : {}), ...(action.dry ? { dry: true as const } : {}) })
+        ? await this.actions.startAutoRun({
+            ...(action.chrome ? { chrome: true as const } : {}),
+            ...(action.dry ? { dry: true as const } : {}),
+            ...(action.additionalGuideline === undefined ? {} : { additionalGuideline: action.additionalGuideline }),
+          })
         : action.type === "reopen"
           ? await this.actions.reopenSession(action.selector)
           : await this.actions.reviewPullRequest(action.focus);
@@ -645,17 +649,23 @@ export class ManagerPromptService {
       return { intercepted: true, message: `aboard could not run /${action.command}: ${error instanceof Error ? error.message : "the action failed"}.` };
     }
     const summary = describeActionOutcome(action.type, outcome);
+    const message = action.type === "auto"
+      && action.additionalGuideline !== undefined
+      && record(outcome)?.dryRun !== true
+      && record(outcome)?.started === true
+      ? `${summary} The additional session guideline will be appended to every implementer and pr-doctor prompt.`
+      : summary;
     // A dry run is an inspection, not an event the Manager needs replayed on
     // the user's next real prompt. Keeping the full forecast out of the fleet
     // mailbox is also part of its promise not to change runtime state.
     const isDryRun = action.type === "auto" && record(outcome)?.dryRun === true;
     if (!isDryRun) {
       const occurredAt = this.#now().toISOString() as IsoTimestamp;
-      this.fleet.enqueueNotification(agentId, `you ran /${action.command}: ${summary}`, occurredAt);
+      this.fleet.enqueueNotification(agentId, `you ran /${action.command}: ${message}`, occurredAt);
     }
     return {
       intercepted: true,
-      message: summary,
+      message,
     };
   }
 }
@@ -699,6 +709,9 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
       ? `- Workspace: create a separate checkout; your checkout and branch stay untouched${result.keepsWorkspace ? ", and the checkout is kept when the run drains" : ", and the checkout is removed after a clean drain"}.`
       : "- Workspace: use this checkout; it must be clean, aboard moves HEAD during the run, and restores the current branch when the run ends.",
     `- Agents: visible implementers run one at a time with Chrome ${result.chromeEnabled ? "on" : "off"}; pull-request review is ${result.reviewMode ? "on" : "off"}.`,
+    ...(result.additionalGuideline === undefined
+      ? []
+      : ["- Additional guideline: append this final section to every implementer and pr-doctor prompt:", "", "# Additional User Guideline For this Session", "", result.additionalGuideline]),
     "",
     `Forecast issue order (${result.issues.length}):`,
   ];
@@ -755,6 +768,8 @@ interface ParsedActionCommand {
   readonly invalidArguments: boolean;
   readonly chrome: boolean;
   readonly dry: boolean;
+  /** `/auto` only: user-authored text appended to every auto agent prompt. */
+  readonly additionalGuideline?: string;
   /** `/review-pr` only: the trailing text, forwarded as the review focus. */
   readonly focus?: string;
   /** `/reopen` only: the trailing text, an agent id or an agent type. */
@@ -772,11 +787,12 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
 }
 
 /**
- * `/auto` accepts the explicit `--dry` inspection and `--chrome` launch choice. Unknown trailing
- * text is intercepted but rejected, so a typo cannot silently start a run with
- * the wrong capability. `/review-pr` and `/reopen` are the exceptions: their
- * trailing text is a real parameter — the focus for a fallback doctor's first
- * pass over the diff, and which recorded session to come back to.
+ * `/auto` accepts the explicit `--dry` inspection and `--chrome` launch choice,
+ * followed by optional free-form guidance for every auto agent. Flags lead so
+ * an unknown option is still rejected instead of silently becoming guidance.
+ * `/review-pr` and `/reopen` also treat trailing text as a real parameter: the
+ * focus for a fallback doctor's first pass over the diff, and which recorded
+ * session to come back to.
  *
  * The name is `/reopen` rather than `/resume` because `/resume` is a Claude Code
  * builtin: the TUI handles it locally and it never reaches `UserPromptSubmit`,
@@ -794,14 +810,25 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   if (command === "reopen") {
     return { type: command, command, invalidArguments: false, chrome: false, dry: false, ...(trailing.length === 0 ? {} : { selector: trailing }) };
   }
-  const flags = trailing.length === 0 ? [] : trailing.split(/\s+/u);
-  const known = new Set(["--chrome", "--dry"]);
+  const flags: string[] = [];
+  let remainder = trailing;
+  while (remainder.startsWith("--")) {
+    const token = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(remainder);
+    if (token === null) break;
+    const flag = token[1]!;
+    if (flag !== "--chrome" && flag !== "--dry") {
+      return { type: command, command, invalidArguments: true, chrome: false, dry: false };
+    }
+    flags.push(flag);
+    remainder = token[2]?.trim() ?? "";
+  }
   return {
     type: command,
     command,
-    invalidArguments: flags.some((flag) => !known.has(flag)) || new Set(flags).size !== flags.length,
+    invalidArguments: new Set(flags).size !== flags.length,
     chrome: flags.includes("--chrome"),
     dry: flags.includes("--dry"),
+    ...(remainder.length === 0 ? {} : { additionalGuideline: remainder }),
   };
 }
 

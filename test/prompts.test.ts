@@ -455,6 +455,36 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
   assert.ok(doctor!.text.length > 0);
 });
 
+test("auto-agent guidance is the final section after resolved issue and pull-request context", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
+    github: new FakeGitHub({ issues: [issue47, issue31], pullRequests: [pull42], diff: "+ refreshEarly();" }),
+  }));
+  const guideline = "no unit tests needed";
+  const expectedEnd = `# Additional User Guideline For this Session\n\n${guideline}`;
+
+  const implementer = await adapter.resolve({
+    type: "implementer",
+    description: "address issue 47",
+    issues: [47],
+    additionalGuideline: guideline,
+  }, { interactive: false });
+  assert.equal(implementer?.text.endsWith(expectedEnd), true);
+  assert.match(implementer?.text ?? "", /## Disposition[\s\S]*# Additional User Guideline/u);
+
+  for (const type of ["pr-doctor-afk", "pr-doctor-hitl"] as const) {
+    const doctor = await adapter.resolve({
+      type,
+      description: "review pull request 42",
+      issues: [47],
+      pullRequest: 42,
+      additionalGuideline: guideline,
+    }, { interactive: type === "pr-doctor-hitl" });
+    assert.equal(doctor?.text.endsWith(expectedEnd), true, type);
+    assert.match(doctor?.text ?? "", /## Diff[\s\S]*# Additional User Guideline/u, type);
+  }
+});
+
 test("a builtin type's prompt follows its launch mode, not its type", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));

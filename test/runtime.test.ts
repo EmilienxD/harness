@@ -31,7 +31,7 @@ test("persistence drains queued writes and performs a final save on disposal", a
   assert.equal(listener, undefined);
 });
 
-test("the auto-run record round-trips, carries no prompt text, and clears on discard", async () => {
+test("the auto-run record round-trips its session guideline and clears on discard", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-autorun-"));
   const store = new FileAutoRunStore(root);
   assert.equal(await store.load(), undefined);
@@ -45,6 +45,7 @@ test("the auto-run record round-trips, carries no prompt text, and clears on dis
     prNumber: 57,
     reviewMode: false,
     chromeEnabled: true,
+    additionalGuideline: "no unit tests needed",
     reviewedIssues: [],
     startedAt: "2026-07-31T09:12:04.221Z",
   };
@@ -53,7 +54,7 @@ test("the auto-run record round-trips, carries no prompt text, and clears on dis
   // resumed run still knows where to return after a restart.
   assert.deepEqual(await store.load(), { ...record, returnBranch: undefined });
   const raw = await readFile(join(root, ".aboard", "runtime", "auto-run.json"), "utf8");
-  assert.doesNotMatch(raw, /prompt/i);
+  assert.match(raw, /"additionalGuideline": "no unit tests needed"/);
   assert.match(raw, /"chromeEnabled": true/);
   await store.clear();
   assert.equal(await store.load(), undefined);
@@ -85,6 +86,8 @@ test("an unusable auto-run record degrades to nothing to resume", () => {
   const valid = { version: 1, runId: "r", issueNumbers: [34], currentIssue: 34, phase: "commit", branch: "b", prNumber: 1, reviewMode: true, startedAt: "2026-07-31T09:12:04.221Z" };
   assert.ok(parseAutoRunRecord(valid));
   assert.equal(parseAutoRunRecord(valid)?.chromeEnabled, false);
+  assert.equal(parseAutoRunRecord({ ...valid, additionalGuideline: "  keep fixtures small  " })?.additionalGuideline, "keep fixtures small");
+  assert.equal(parseAutoRunRecord({ ...valid, additionalGuideline: 42 })?.additionalGuideline, undefined);
   for (const broken of [
     undefined, null, [], "run",
     { ...valid, version: 2 },

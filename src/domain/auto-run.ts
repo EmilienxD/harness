@@ -102,6 +102,8 @@ export type AutoRunDryRunResult =
       readonly reviewMode: boolean;
       readonly pauseAfterHitl: boolean;
       readonly chromeEnabled: boolean;
+      /** User-authored guidance that would be appended to every auto agent. */
+      readonly additionalGuideline?: string;
       readonly isolatedWorkspace: boolean;
       readonly keepsWorkspace: boolean;
       readonly sessionBranch: "aboard/run/<run-id>";
@@ -115,7 +117,9 @@ export type AutoRunDryRunResult =
 /**
  * The persisted run record. A resume *hint*, never a source of truth: on
  * resume the engine re-derives every fact from git and GitHub, and a record that
- * disagrees with the repository loses. It carries no prompt text.
+ * disagrees with the repository loses. The one user-authored prompt fragment it
+ * carries is the run-wide guideline, because every later agent and a resumed
+ * run must receive the same instruction.
  */
 export interface AutoRunRecord {
   readonly version: 1;
@@ -128,6 +132,8 @@ export interface AutoRunRecord {
   readonly reviewMode: boolean;
   /** One explicit choice made when the run starts; replayed by every implementer. */
   readonly chromeEnabled?: boolean;
+  /** Appended to every implementer and pr-doctor prompt for this run. */
+  readonly additionalGuideline?: string;
   /**
    * The branch the user was on when the run started, carried so a resumed run
    * still knows where "home" is after a restart. `undefined` either means a

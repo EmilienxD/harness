@@ -89,6 +89,11 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     reviewMode: record.reviewMode,
     // Records written before Chrome launch intent existed resume safely off.
     chromeEnabled: record.chromeEnabled === true,
+    // Optional and absent from older records. Whitespace-only guidance has no
+    // meaning, so it degrades to the same state as an omitted argument.
+    ...(typeof record.additionalGuideline === "string" && record.additionalGuideline.trim().length > 0
+      ? { additionalGuideline: record.additionalGuideline.trim() }
+      : {}),
     // Optional: records written before this field existed degrade to "no safe
     // branch to return to", and a run that started on a detached HEAD stored
     // none either. The end-of-run restore is skipped in both cases.

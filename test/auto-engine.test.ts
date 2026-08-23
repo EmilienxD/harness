@@ -575,6 +575,16 @@ test("one Chrome choice is persisted for the run and reaches implementers only",
   assert.match(context.notifications[0] ?? "", /Chrome on/);
 });
 
+test("one additional guideline is persisted and reaches every auto agent", async () => {
+  const context = harness({ settings: { review: true } });
+  await context.engine.start({ additionalGuideline: "  no unit tests needed  " });
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
+  assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["no unit tests needed", "no unit tests needed"]);
+  assert.equal(context.saved.every((record) => record.additionalGuideline === "no unit tests needed"), true);
+});
+
 test("a run started off the default branch returns there when it ends", async () => {
   const context = harness({ startBranch: "feature/wip" });
   assert.equal((await context.engine.start()).started, true);
@@ -839,7 +849,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
     ],
   });
 
-  const result = await context.engine.dryRun({ chrome: true });
+  const result = await context.engine.dryRun({ chrome: true, additionalGuideline: "  no unit tests needed  " });
 
   assert.equal(result.inspected, true);
   if (!result.inspected) return;
@@ -850,6 +860,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.equal(result.reviewMode, true);
   assert.equal(result.pauseAfterHitl, true);
   assert.equal(result.chromeEnabled, true);
+  assert.equal(result.additionalGuideline, "no unit tests needed");
   assert.equal(result.mergesItsOwnPullRequest, true);
   assert.deepEqual(result.issues.map((issue) => [issue.number, issue.branch]), [
     [42, "aboard/42-build-the-api"],
@@ -1043,6 +1054,7 @@ test("resume re-derives from the repository rather than trusting the record", as
     branch: "aboard/34-add-retry-backoff",
     prNumber: 56,
     reviewMode: false,
+    additionalGuideline: "keep fixtures small",
     reviewedIssues: [],
     startedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -1050,6 +1062,7 @@ test("resume re-derives from the repository rather than trusting the record", as
   await context.engine.settle();
   assert.equal(context.gitCalls[0], "fetch");
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
+  assert.equal(context.launches[0]?.additionalGuideline, "keep fixtures small");
 });
 
 test("a record an older version wrote against one spec resumes onto the flat queue", async () => {
@@ -1097,10 +1110,11 @@ test("a hitl doctor's approved fixes are committed to the pull request before it
     resolveHitl: "merged",
     dirtyDuringWait: true,
   });
-  await context.engine.start();
+  await context.engine.start({ additionalGuideline: "keep migration reversible" });
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-hitl"]);
+  assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["keep migration reversible", "keep migration reversible"]);
   // Handed to the user but still leased: the run is committing behind it, which
   // is exactly the collision the lease exists to prevent.
   assert.deepEqual(context.interactiveOrigins, ["auto-run"]);

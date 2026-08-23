@@ -49,6 +49,11 @@ export interface LaunchIsolation {
 export interface DelegationLaunchInput {
   readonly type: Exclude<AgentType, "manager">;
   readonly prompt?: string;
+  /**
+   * Set only by auto-run. Kept separate from the task instruction so prompt
+   * resolution can append it after all issue, pull-request, and diff context.
+   */
+  readonly additionalGuideline?: string;
   readonly description: string;
   /** Every issue whose resolved contract belongs in the opening prompt, in the caller's order. */
   readonly issues?: readonly number[];

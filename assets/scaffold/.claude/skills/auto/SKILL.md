@@ -1,7 +1,7 @@
 ---
 name: auto
-description: Start aboard's automatic issue-addressing run over every open [AI]-afk / [AI]-hitl issue, or inspect it without changes using --dry. Accepts optional --chrome for every implementer in this run. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
-argument-hint: "[--dry] [--chrome]"
+description: Start aboard's automatic issue-addressing run over every open [AI]-afk / [AI]-hitl issue, or inspect it without changes using --dry. Accepts optional --chrome and trailing guidance for every implementer and pr-doctor in this run. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
+argument-hint: "[--dry] [--chrome] [guideline]"
 disable-model-invocation: true
 ---
 

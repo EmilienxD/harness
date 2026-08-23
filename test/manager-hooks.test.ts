@@ -542,7 +542,7 @@ test("/review-pr forwards its trailing text as the review focus, and reports it 
   assert.equal(bare.message, "Launched a fresh doctor for PR #56.");
 });
 
-test("an extension action reports a refusal verbatim and rejects unknown trailing arguments", async () => {
+test("an extension action reports a refusal verbatim and rejects unknown option flags", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const prompts = new ManagerPromptService(
     fleet,
@@ -556,8 +556,8 @@ test("an extension action reports a refusal verbatim and rejects unknown trailin
   );
   const refused = await prompts.handle(managerId, "/auto");
   assert.match(String(refused.message), /auto-run did not start: the working tree is not clean: src\/a\.ts/);
-  const invalid = await prompts.handle(managerId, "/auto now please");
-  assert.match(String(invalid.message), /optional --dry and --chrome flags/);
+  const invalid = await prompts.handle(managerId, "/auto --fast");
+  assert.match(String(invalid.message), /optional --dry and --chrome flags before an optional session guideline/);
 });
 
 test("/auto --chrome passes one explicit Chrome choice to the run", async () => {
@@ -578,6 +578,26 @@ test("/auto --chrome passes one explicit Chrome choice to the run", async () => 
   assert.equal(result.message, "auto-run started with 1 issue queued, Chrome on.");
 });
 
+test("/auto forwards trailing text as one run-wide agent guideline", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const starts: unknown[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }], chromeEnabled: true }; },
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+
+  const result = await prompts.handle(managerId, "/auto no unit tests needed");
+
+  assert.deepEqual(starts, [{ additionalGuideline: "no unit tests needed" }]);
+  assert.match(String(result.message), /additional session guideline will be appended to every implementer and pr-doctor prompt/);
+});
+
 test("/auto --dry reports the forecast and user gates without starting a run", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const starts: unknown[] = [];
@@ -596,6 +616,7 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
           reviewMode: true,
           pauseAfterHitl: false,
           chromeEnabled: true,
+          additionalGuideline: options?.additionalGuideline,
           isolatedWorkspace: false,
           keepsWorkspace: false,
           sessionBranch: "aboard/run/<run-id>",
@@ -614,13 +635,14 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
     },
   );
 
-  const result = await prompts.handle(managerId, "/auto --chrome --dry");
+  const result = await prompts.handle(managerId, "/auto --chrome --dry keep generated files out of commits");
 
-  assert.deepEqual(starts, [{ chrome: true, dry: true }]);
+  assert.deepEqual(starts, [{ chrome: true, dry: true, additionalGuideline: "keep generated files out of commits" }]);
   assert.match(String(result.message), /no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed/);
   assert.match(String(result.message), /1\. #34 Add retry backoff.*aboard\/34-add-retry-backoff/);
   assert.match(String(result.message), /2\. #35 Migrate the queue.*You must merge its PR/);
   assert.match(String(result.message), /interactive pr-doctor/);
+  assert.match(String(result.message), /# Additional User Guideline For this Session\n\nkeep generated files out of commits/);
   assert.match(String(result.message), /#36: unclassified/);
   assert.match(String(result.message), /opens one PR from aboard\/run\/<run-id> into feature\/wip; you must review and merge/);
   assert.deepEqual(await prompts.handle(managerId, "show me the plan"), {}, "a dry-run forecast is not replayed through the Manager mailbox");

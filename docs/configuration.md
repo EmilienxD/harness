@@ -59,6 +59,8 @@ Every local-only file copied this way must already be ignored by Git in the run 
 
 Chrome access is a per-launch choice rather than a persistent setting. Use `/general-purpose --chrome`, set `chrome: true` on `run_agent`, use `/auto --chrome`, set `chrome: true` on `start_auto_run`, or run **Aboard: Start Auto Run with Chrome** from the command palette. `/auto --dry --chrome` previews the same choice without starting a run. The ordinary forms explicitly pass `--no-chrome`; the Chrome forms pass `--chrome`. Auto-run chooses once for the entire run and passes the choice only to implementers, including after recovery. General-purpose fleet restoration likewise replays the session's original choice.
 
+`/auto` also accepts free-form guidance after its optional flags, such as `/auto --chrome no unit tests needed`. The extension appends it under `# Additional User Guideline For this Session` at the end of every implementer and pr-doctor prompt in that run. It is stored only in the gitignored runtime run record so recovery preserves the instruction; `/auto --dry <guideline>` previews it without writing that record.
+
 Enabling the integration exposes browser tools and the signed-in Chrome session to Claude. aboard does not auto-approve those tools: your own Claude permissions decide whether calls run or prompt. Missing extensions, unsupported providers, or a disconnected browser remain visible in the Claude terminal rather than silently falling back.
 
 ## Agent tool sets are not settings
