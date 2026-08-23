@@ -116,6 +116,13 @@ def intercepted_prompt(prompt: Any, agent_type: str | None) -> bool:
 
 
 def main() -> int:
+    # Claude Code writes hook JSON as UTF-8. Python otherwise opens redirected
+    # standard streams with the active ANSI code page on Windows, silently
+    # turning characters such as an em dash into mojibake before they reach the
+    # bridge. Hook output uses the same wire encoding in the opposite direction.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     if len(sys.argv) >= 2 and sys.argv[1] == "--routes":
         json.dump(ROUTES, sys.stdout)
         return 0

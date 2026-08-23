@@ -102,7 +102,7 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
 
 test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and treats Explore as automated worker", async () => {
   const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
-  const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "done" });
+  const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "Changed the boundary — safely." });
   // An interactive general-purpose session reports nothing: without the delivery flag
   // the guard exits 0 with no output, exactly like a brainstormer.
   const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose" } });
@@ -133,7 +133,9 @@ test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and tr
     // streams: its output is the bridge call, never terminal text.
     const report = async (env: NodeJS.ProcessEnv): Promise<void> => {
       const child = spawn("uv", ["run", "--no-project", "python", script, "worker-stop"], {
-        env: { ...process.env, ...env, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" },
+        // Force the Windows failure mode on every platform. The hook must use
+        // Claude Code's UTF-8 wire format rather than Python's ambient locale.
+        env: { ...process.env, ...env, PYTHONIOENCODING: "cp1252", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" },
         stdio: ["pipe", "pipe", "pipe"],
       });
       let stdout = ""; let stderr = "";
@@ -154,9 +156,13 @@ test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and tr
 
     assert.equal(received.length, 2);
     assert.equal(received[0]!.url, "/hooks/stop");
-    assert.match(received[0]!.body ?? "", /gp-1/);
+    assert.deepEqual(JSON.parse(received[0]!.body ?? "{}"), {
+      agentId: "gp-1",
+      cwd: "C:\\repo",
+      lastAssistantMessage: "Changed the boundary — safely.",
+    });
     assert.equal(received[1]!.url, "/hooks/stop");
-    assert.match(received[1]!.body ?? "", /explore-1/);
+    assert.equal((JSON.parse(received[1]!.body ?? "{}") as { lastAssistantMessage?: unknown }).lastAssistantMessage, "Changed the boundary — safely.");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
   }
