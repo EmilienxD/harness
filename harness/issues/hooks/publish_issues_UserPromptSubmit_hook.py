@@ -49,11 +49,15 @@ Design notes:
 - The body is always passed to `gh` via --body-file (a temp file), never
   inline on the command line. This is what avoids the Windows command-line
   length limit, on every platform, regardless of body size.
-- Every successful create is recorded in a per-batch ledger,
-  ".issues-gateway/{session-id}/.published.json", keyed exactly like an
-  in-body reference. Every ledger is seeded back into the resolver at the
-  start of a run, so a reference to an issue published in an *earlier* run
-  still resolves.
+- Every successful create is recorded in one shared ledger,
+  ".issues-gateway/.published.json", keyed exactly like an in-body
+  reference. It is seeded back into the resolver at the start of a run,
+  so a reference to an issue published in an *earlier* run still resolves.
+  Reads and writes of the ledger run under a portalocker file lock
+  (falling back to no lock when portalocker is unavailable), so two
+  concurrent Claude Code sessions publishing in the same project cannot
+  lose each other's entries; the loser of the race gets a warning in the
+  report instead of a clobbered ledger.
 - A "## Parent" section whose first non-empty line is a bare reference
   ("#42", an issue URL, or "{session-id}/{i}" - the same token used under
   "Blocked by") makes the new issue a real GitHub sub-issue of that parent.
@@ -81,6 +85,7 @@ Design notes:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import subprocess
@@ -88,11 +93,24 @@ import sys
 import tempfile
 from pathlib import Path
 
+# The shared ledger is read and written by any session publishing in the
+# same project, so every read-modify-write cycle runs under a file lock
+# (same pattern as src/harness_cli): portalocker when installed, no lock
+# otherwise - the fallback loses cross-session safety but never the hook.
+with contextlib.suppress(ImportError):
+    import portalocker
+
 GATEWAY_DIR = Path(".issues-gateway")
 
-# Per-batch record of what has already been published, so numbers survive
-# both the deletion of the draft and the end of the run that created them.
+# One ledger for the whole project, at the gateway root: every batch's
+# published numbers in one place, so reference resolution needs exactly
+# one read no matter how many sessions drafted the work.
 LEDGER_NAME = ".published.json"
+
+# Sidecar carrying the ledger's file lock. Keystone of the concurrency
+# story: never replaced or renamed, so a lock on it always names the same
+# file, unlike the ledger itself.
+LOCK_NAME = ".published.lock"
 
 # Queue of published issues the agent has not been told about yet. Lives at
 # the gateway root, not inside a batch dir, so a notice is delivered on the
@@ -203,15 +221,12 @@ LABEL_ALIASES = {
 }
 
 
-def load_ledger(batch_dir: Path) -> dict:
-    """Read a batch's record of already-published issues, or {}.
+def _read_json_dict(path: Path) -> dict:
+    """Best-effort read of a {str: object} JSON file. Never raises.
 
     A corrupt or hand-mangled ledger must never block publishing, so any
-    read error degrades to "nothing is known yet" rather than raising.
+    read error degrades to "nothing is known yet".
     """
-    path = batch_dir / LEDGER_NAME
-    if not path.is_file():
-        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -219,33 +234,76 @@ def load_ledger(batch_dir: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def record_published(batch_dir: Path, key: str, entry: dict) -> None:
-    """Append one published issue to the batch ledger, immediately.
+def _write_ledger(path: Path, ledger: dict) -> None:
+    """Persist the ledger via a sibling temp file, so a concurrent reader
+    never sees a half-written JSON document. (The lock lives on a separate
+    sidecar file, so renaming over the ledger is never lock-blocked.)"""
+    tmp = path.with_name(path.stem + ".tmp")  # .published.tmp
+    tmp.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+@contextlib.contextmanager
+def _locked_ledger(gateway_dir: Path = GATEWAY_DIR):
+    """Yield (path, ledger) under the portalocker lock, or (None, {}).
+
+    The lock is taken on a sidecar file, ".published.lock" - locking the
+    ledger itself would let Windows deny the ledger's own atomic replace
+    (leaving it empty) and truncate it on contention, and a POSIX fcntl
+    lock would not survive the ledger being unlinked by a replace. Failing
+    to take the lock (another session holds it) never blocks publishing:
+    the caller gets None and reports a warning, since skipping the ledger
+    write loses only cross-run reference resolution, not issues.
+    Read-modify-write happens entirely inside the lock, so two sessions
+    publishing at once merge instead of the last record_published
+    clobbering the other's entries.
+    """
+    path = gateway_dir / LEDGER_NAME
+    if "portalocker" not in sys.modules:
+        yield path, _read_json_dict(path)
+        return
+    lock_path = gateway_dir / LOCK_NAME
+    try:
+        lock_path.touch(exist_ok=True)
+        with portalocker.Lock(
+            str(lock_path), mode="a", timeout=10, fail_when_locked=True
+        ):
+            yield path, _read_json_dict(path)
+    except (portalocker.exceptions.LockException, OSError):
+        yield None, {}
+
+
+def record_published(key: str, entry: dict, gateway_dir: Path = GATEWAY_DIR) -> bool:
+    """Append one published issue to the shared ledger, immediately.
 
     Written after every single create rather than once at the end of the
     run, so an interrupted batch still leaves behind the numbers it did
     create - that is what a rerun needs to resolve references to them.
+    Returns False when the write could not happen (lock held by another
+    session, or an OS error): the issue exists on the tracker, so a
+    missing ledger entry is a warning, not a failure.
     """
-    ledger = load_ledger(batch_dir)
-    ledger[key] = entry
-    try:
-        (batch_dir / LEDGER_NAME).write_text(
-            json.dumps(ledger, indent=2) + "\n", encoding="utf-8"
-        )
-    except OSError:
-        pass  # the issue exists on the tracker; a missing ledger is not fatal
+    with _locked_ledger(gateway_dir) as (path, ledger):
+        if path is None:
+            return False
+        ledger[key] = entry
+        try:
+            _write_ledger(path, ledger)
+        except OSError:
+            return False
+    return True
 
 
-def seed_from_ledgers(batch_dirs: list[Path]) -> dict[str, str]:
-    """Build the resolved map from every batch ledger on disk.
+def seed_from_ledger(gateway_dir: Path = GATEWAY_DIR) -> dict[str, str]:
+    """Build the resolved map from the shared ledger on disk.
 
     Maps "{session-id}/{i}" -> issue number, exactly like the in-run map.
-    Ledgers are merged across batches because reference keys carry their own
-    session id and so are unique.
+    Reference keys carry their own session id, so one flat file can hold
+    every session's numbers without collisions.
     """
     resolved: dict[str, str] = {}
-    for batch_dir in batch_dirs:
-        for key, entry in load_ledger(batch_dir).items():
+    with _locked_ledger(gateway_dir) as (_, ledger):
+        for key, entry in ledger.items():
             if not isinstance(entry, dict):
                 continue
             number = entry.get("number")
@@ -515,12 +573,12 @@ def resolve_references(body: str, resolved: dict[str, str]) -> tuple[str, list[s
     return REF_PATTERN.sub(_sub, body), unresolved
 
 
-def gather_batch_dirs() -> list[Path]:
+def gather_batch_dirs(gateway_dir: Path = GATEWAY_DIR) -> list[Path]:
     """List batch directories under the gateway dir, sorted by name."""
-    if not GATEWAY_DIR.is_dir():
+    if not gateway_dir.is_dir():
         return []
     return sorted(
-        d for d in GATEWAY_DIR.iterdir()
+        d for d in gateway_dir.iterdir()
         if d.is_dir() and SESSION_ID_PATTERN.match(d.name)
     )
 
@@ -636,9 +694,9 @@ def publish_batch(
 
     `created` collects one record per published issue, for the ledger and
     for the notice delivered to the agent on the next prompt. `seed` is the
-    resolved map built from ledgers on disk; when omitted, only this batch's
-    own ledger is consulted, so references to issues published in an earlier
-    run still resolve.
+    resolved map built from the shared ledger on disk; when omitted, it is
+    loaded here, so references to issues published in an earlier run still
+    resolve.
 
     Returns (published_count, failed_count) for this batch.
     """
@@ -646,7 +704,12 @@ def publish_batch(
     if not files:
         return 0, 0
 
-    resolved = dict(seed if seed is not None else seed_from_ledgers([batch_dir]))
+    gateway_dir = batch_dir.parent
+    # The seed map is used in place, not copied: entries published here are
+    # added to it as the run proceeds, so a caller looping over several
+    # batches (publish_issues) lets a later batch reference an earlier
+    # batch's freshly created issues without re-reading the ledger.
+    resolved = seed if seed is not None else seed_from_ledger(gateway_dir)
     batch_header = f"Batch: {len(files)} draft issue(s)"
     report.append(batch_header)
     report.append("")
@@ -749,7 +812,14 @@ def publish_batch(
                     "labels": labels,
                     "parent": linked_parent,
                 }
-                record_published(batch_dir, key, record)
+                if not record_published(key, record, gateway_dir):
+                    # The issue exists on the tracker; losing the ledger
+                    # entry only means a rerun cannot resolve references
+                    # to it. A warning, never a failure.
+                    report.append(
+                        f"  WARN  #{resolved_number} could not be recorded in "
+                        "the shared ledger (locked by another publish?)"
+                    )
                 if created is not None:
                     created.append(record)
                 delete_published_draft(path)
@@ -797,10 +867,10 @@ def publish_issues(dry: bool) -> str:
         report.extend(label_warnings)
         report.append("")
 
-    # Ledgers from every batch are merged up front: reference keys carry
-    # their own session id, so a draft can point at an issue another batch
-    # published in an earlier run.
-    seed = seed_from_ledgers(batch_dirs)
+    # The shared ledger is loaded up front: reference keys carry their own
+    # session id, so a draft can point at an issue another batch published
+    # in an earlier run.
+    seed = seed_from_ledger(GATEWAY_DIR)
 
     total_published = 0
     total_failed = 0

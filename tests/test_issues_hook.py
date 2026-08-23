@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import portalocker
+
 HOOK = (
     Path(__file__).resolve().parent.parent
     / "harness" / "issues" / "hooks" / "publish_issues_UserPromptSubmit_hook.py"
@@ -195,8 +197,11 @@ def test_publish_uses_exact_parsed_labels(tmp_path, monkeypatch):
     assert not (batch / "issue-0.md").exists()
     # The label line is stripped from the body that gets posted.
     assert "mode:afk" not in created[0][1]
-    # ...and the number survives the draft it came from.
-    assert hook.load_ledger(batch)[f"{SID}/0"]["number"] == "42"
+    # ...and the number survives the draft it came from, in the shared ledger
+    # at the gateway root - one ledger for the whole project, none per batch.
+    ledger = hook._read_json_dict(batch.parent / hook.LEDGER_NAME)
+    assert ledger[f"{SID}/0"]["number"] == "42"
+    assert not (batch / hook.LEDGER_NAME).exists()
 
 
 def test_failed_draft_keeps_resolved_references_after_success(tmp_path, monkeypatch):
@@ -425,8 +430,10 @@ def test_old_gh_links_after_creating_and_keeps_the_reference_in_the_body(
         "issue-0.md",
         f"# Child\n\n> mode:afk\n\n## Parent\n\n#42\n\n## Blocked by\n\n{SID}/0\n",
     )
-    # Its own key resolves from the ledger seeded below, not from this run.
-    (tmp_path / ".issues-gateway" / SID / hook.LEDGER_NAME).write_text(
+    # Its own key resolves from the shared ledger seeded below, not from
+    # this run.
+    batch = tmp_path / ".issues-gateway" / SID
+    (batch.parent / hook.LEDGER_NAME).write_text(
         json.dumps({f"{SID}/0": {"number": "41"}}), encoding="utf-8"
     )
 
@@ -448,7 +455,7 @@ def test_dry_run_previews_the_sub_issue_link(tmp_path):
     assert (count, failures) == (1, 0)
     assert any("sub-issue of #42" in line for line in report)
     # A dry run must not write a ledger.
-    assert not (tmp_path / ".issues-gateway" / SID / hook.LEDGER_NAME).exists()
+    assert not (tmp_path / ".issues-gateway" / hook.LEDGER_NAME).exists()
 
 
 # --- what actually reaches the gh command line -----------------------------
@@ -543,11 +550,71 @@ def test_corrupt_notice_is_dropped_not_raised(tmp_path):
 
 
 def test_corrupt_ledger_degrades_to_empty(tmp_path):
+    gateway = tmp_path / ".issues-gateway"
+    gateway.mkdir()
+    (gateway / hook.LEDGER_NAME).write_text("[]", encoding="utf-8")
+    assert hook.seed_from_ledger(gateway) == {}
+
+
+def test_seed_from_ledger_maps_keys_to_numbers(tmp_path):
+    gateway = tmp_path / ".issues-gateway"
+    gateway.mkdir()
+    (gateway / hook.LEDGER_NAME).write_text(
+        json.dumps(
+            {
+                f"{SID}/0": {"number": "42", "title": "Spec"},
+                f"{SID}/1": {"number": 43},  # stray ints still resolve
+                f"{SID}/2": "not-an-entry",  # malformed entries are dropped
+                f"{SID}/3": {"no-number": None},  # entries without a number too
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert hook.seed_from_ledger(gateway) == {f"{SID}/0": "42", f"{SID}/1": "43"}
+
+
+def test_record_published_appends_to_the_shared_ledger(tmp_path):
+    gateway = tmp_path / ".issues-gateway"
+    gateway.mkdir()
+    assert hook.record_published(f"{SID}/0", {"number": "42"}, gateway)
+    assert hook.record_published(f"{SID}/1", {"number": "43"}, gateway)
+    data = hook._read_json_dict(gateway / hook.LEDGER_NAME)
+    assert data[f"{SID}/0"]["number"] == "42"
+    assert data[f"{SID}/1"]["number"] == "43"
+
+
+def test_record_published_warns_instead_of_clobbering_a_locked_ledger(tmp_path):
+    """The loser of a ledger race must not pause or overwrite the winner.
+
+    The lock sidecar is held by the winner; the loser's _locked_ledger
+    fails fast with fail_when_locked and yields None, the caller reports a
+    warning, and the ledger simply keeps the winner's entries.
+    """
+    gateway = tmp_path / ".issues-gateway"
+    gateway.mkdir()
+    lock_path = gateway / hook.LOCK_NAME
+    lock_path.touch()
+    with portalocker.Lock(str(lock_path), mode="a", timeout=10, fail_when_locked=True):
+        assert hook.record_published(f"{SID}/0", {"number": "42"}, gateway) is False
+    assert hook.seed_from_ledger(gateway) == {}
+
+
+def test_publish_under_ledger_contention_warns_but_still_creates(tmp_path, monkeypatch):
+    """A locked ledger must not block the gh work: the issue is still
+    created and its draft deleted; only the ledger record warns."""
+    created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
+    _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
     batch = tmp_path / ".issues-gateway" / SID
-    batch.mkdir(parents=True)
-    (batch / hook.LEDGER_NAME).write_text("[]", encoding="utf-8")
-    assert hook.load_ledger(batch) == {}
-    assert hook.seed_from_ledgers([batch]) == {}
+    lock_path = batch.parent / hook.LOCK_NAME
+    lock_path.touch()
+
+    report: list[str] = []
+    with portalocker.Lock(str(lock_path), mode="a", timeout=10, fail_when_locked=True):
+        count, failures = hook.publish_batch(batch, dry=False, report=report)
+
+    assert (count, failures) == (1, 0)
+    assert not (batch / "issue-0.md").exists()
+    assert any("could not be recorded in the shared ledger" in line for line in report)
 
 
 def test_notice_stays_under_the_additional_context_cap(tmp_path):

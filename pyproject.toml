@@ -21,7 +21,10 @@ Source = "https://github.com/EmilienxD/harness"
 harness = "harness_cli.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "portalocker>=4.2.0",
+    "pytest>=8.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/harness_cli"]

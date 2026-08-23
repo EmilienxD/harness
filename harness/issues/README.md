@@ -74,10 +74,13 @@ the middle step is a hook: it erases the prompt and produces no assistant turn, 
 never learn that the spec became `#42`. Two mechanisms close that gap, and they cover different
 failure modes:
 
-- **A ledger.** Every successful create is recorded in `.issues-gateway/{session-id}/.published.json`
-  before the draft file is deleted, and every ledger is loaded back at the start of the next run. So
-  a `{session-id}/{i}` reference — in `Blocked by` or under `## Parent` — to an issue published in an
-  *earlier* run resolves too, even though its draft file is long gone.
+- **A ledger.** Every successful create is recorded in one shared
+  `.issues-gateway/.published.json` before the draft file is deleted, and the ledger is loaded back
+  at the start of the next run. So a `{session-id}/{i}` reference — in `Blocked by` or under
+  `## Parent` — to an issue published in an *earlier* run resolves too, even though its draft file
+  is long gone. Every ledger read/write runs under a file lock on a `.published.lock` sidecar
+  (portalocker when available, no lock otherwise), so two sessions publishing at once in the same
+  project merge their entries instead of clobbering each other.
 - **A one-shot notice.** Each run queues what it created in `.issues-gateway/.pending-notice.json`.
   The next prompt that isn't a publish command flushes it into the agent's context as
   `additionalContext` and deletes it. It rides along with a prompt you were sending anyway, so it
@@ -131,8 +134,9 @@ At runtime the drafting skills create a gateway folder at the project root — `
 .issues-gateway/
 ├── .gitignore                                   # contains '*', created on first draft
 ├── .pending-notice.json                         # published issues the agent hasn't been told about
+├── .published.json                              # shared ledger: reference key -> real issue number
+├── .published.lock                              # sidecar carrying the ledger's file lock
 └── 6b1f0c2e-…-2e8a1d0c4f55/                     # one dir per drafting session
-    ├── .published.json                          # ledger: reference key -> real issue number
     ├── issue-0.md
     └── issue-1.md
 ```
@@ -182,11 +186,16 @@ At runtime the drafting skills create a gateway folder at the project root — `
   draft is left in place rather than published without its link. On a `gh` too old for
   `gh issue create --parent`, the link is made afterwards with `gh issue edit --parent` and the
   reference is kept in the body as a fallback.
-- **Ledger**: `{session-id}/.published.json` records `{"{session-id}/{i}": {number, url, title,
-  labels, parent}}` after each successful create, written immediately so an interrupted run
-  still leaves behind the numbers it did create. It is what makes references
-  resolve across runs, once the draft files themselves are gone. A corrupt ledger degrades to
-  "nothing known yet" rather than blocking a publish.
+- **Ledger**: `.published.json` at the gateway root records `{"{session-id}/{i}": {number, url,
+  title, labels, parent}}` for every batch — one file for the whole project, because reference keys
+  already carry their session id. It is written after each successful create, immediately, so an
+  interrupted run still leaves behind the numbers it did create, and it is what makes references
+  resolve across runs, once the draft files themselves are gone. Read-modify-write cycles hold a
+  portalocker lock on a `.published.lock` sidecar (the sidecar — not the ledger — carries the lock,
+  so the ledger's own atomic temp-file replace can't be blocked or truncated by lock semantics, on
+  Windows or POSIX). A session that loses the lock race still publishes its issues; only the ledger
+  record is skipped, with a warning in the report. A corrupt ledger degrades to "nothing known yet"
+  rather than blocking a publish.
 - **Pending notice**: `.pending-notice.json` at the gateway root collects what each run published
   (and how many drafts failed). The next prompt that isn't a publish command injects it as
   `additionalContext` and deletes the file, so it is delivered exactly once. It is deliberately not
