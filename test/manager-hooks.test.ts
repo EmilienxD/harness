@@ -387,7 +387,7 @@ test("long poll observes abort and route validates stop input", async () => {
 });
 
 test("Python Manager hook silently self-guards non-addressed sessions", () => {
-  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   for (const env of [{}, { ABOARD_AGENT_ID: "worker", ABOARD_AGENT_TYPE: "implementer" }]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "manager-brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
@@ -395,7 +395,7 @@ test("Python Manager hook silently self-guards non-addressed sessions", () => {
 });
 
 test("hook registration covers cold start, resume, and explicit timeouts in one briefing call", async () => {
-  const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8"));
+  const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "aboard-hooks.json"), "utf8"));
   const parsed = JSON.parse(hooks) as any;
   // Index 0 is the proof-of-life session-start hook (pid report); index 1 is
   // the manager briefing call.
@@ -702,7 +702,7 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address !== null && typeof address !== "string");
-  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   const child = spawn("uv", ["run", "--no-project", "python", script, "manager-prompt"], {
     env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: agentType, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token },
     stdio: ["pipe", "pipe", "pipe"],
@@ -736,7 +736,7 @@ test("Python prompt hook injects a drained queue on a real prompt", async () => 
 test("aboard-owned command skills are user-only shims and general-purpose has no aboard definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
   for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr", "reopen"]) {
-    const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "skills", name, "SKILL.md"), "utf8");
+    const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
     // Only the two launch commands advertise the explicit Chrome option;
     // `/review-pr` advertises its forwarded focus. The other shims take none.
@@ -753,7 +753,7 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
     assert.match(body, /is broken — report that to the user and stop/, `${name} SKILL.md body must announce it is an error state`);
     assert.match(body, /Do not try to carry it out yourself/, `${name} SKILL.md body must forbid simulating the command`);
     assert.match(body, /except if the user explicitly asks/, `${name} SKILL.md body must forbid fixing the installation unprompted`);
-    assert.match(body, /Reset \.aboard\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);
+    assert.match(body, /Update \.aboard\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);
   }
   await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".aboard", "agents", "general-purpose.md")));
 });
@@ -766,7 +766,7 @@ test("Python prompt hook blocks both intercepted commands and never blocks other
   }
   // A bridge that wrongly reports interception on a Stop poll must not exit 2:
   // that would refuse to let the Manager stop, looping the session forever.
-  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   const stop = spawnSync("uv", ["run", "--no-project", "python", script, "manager-stop"], {
     input: JSON.stringify({ hook_event_name: "Stop", stop_hook_active: false }),
     encoding: "utf8",

@@ -605,6 +605,8 @@ export interface LaunchPlan {
    * and `--add-dir`/`--agent` re-passed on every command line.
    */
   readonly agentDefinition?: AgentDefinitionFile;
+  /** Per-launch directory selected with `--settings` and `--add-dir`. */
+  readonly runtimeDirectory: string;
 }
 
 interface CommonPlanRequest {
@@ -947,7 +949,7 @@ function agentRuntimeArguments(
   const directory = agentRuntimeDirectory(runtimeDirectory, agentId);
   const name = runtimeAgentName(configuration.agentName, agentId);
   return {
-    args: ["--add-dir", directory, "--agent", name],
+    args: ["--agent", name],
     file: {
       agentId,
       relativePath: `${directory}/.claude/agents/${name}.md`,
@@ -1155,7 +1157,12 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     );
   }
 
-  const shapeArguments: string[] = [...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration))];
+  const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
+  const shapeArguments: string[] = [
+    ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration)),
+    "--add-dir", launchRuntimeDirectory,
+    "--settings", `${launchRuntimeDirectory}/settings.json`,
+  ];
   // A complete definition or builtin profile wins over the session settings.
   // Explore's profile affects only these launch flags; its prompt and tools
   // still come exclusively from Claude Code through `--agent`.
@@ -1233,6 +1240,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     writeCapability: capability,
     requiresWriteLease: requiresWriteLease(agentType, capability),
     promptDelivery: promptPlan.delivery,
+    runtimeDirectory: launchRuntimeDirectory,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
     ...(agentDefinition === undefined ? {} : { agentDefinition }),
   };
@@ -1264,6 +1272,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
   }
   const policy = launchPolicy(request.configuration, request);
   const definition = agentRuntimeArguments(request.configuration, request.agentId, runtimeDirectory, policy);
+  const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   const args = [
     "--resume",
     request.sessionId,
@@ -1272,6 +1281,8 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     // delegate through, and the file is rewritten per launch so the port and
     // token are this activation's rather than the dead one's.
     ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, request.configuration)),
+    "--add-dir", launchRuntimeDirectory,
+    "--settings", `${launchRuntimeDirectory}/settings.json`,
     ...definition.args,
     // Re-passed like every other launch flag: a resumed Manager that lost the
     // pre-approvals would stall behind the same prompts the launch avoided.
@@ -1294,6 +1305,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     writeCapability: "read-only",
     requiresWriteLease: false,
     promptDelivery: "none",
+    runtimeDirectory: launchRuntimeDirectory,
     agentDefinition: definition.file,
   };
 }
@@ -1317,9 +1329,12 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
   const definition = configuration.shape === "agent-defined"
     ? agentRuntimeArguments(configuration, request.agentId, runtimeDirectory, policy)
     : undefined;
+  const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   // Claude Code restores a builtin's `--agent` selection with the conversation.
   const shapeArguments = [
     ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration)),
+    "--add-dir", launchRuntimeDirectory,
+    "--settings", `${launchRuntimeDirectory}/settings.json`,
     ...(definition?.args ?? []),
   ];
   const args = [
@@ -1346,6 +1361,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     writeCapability: capability,
     requiresWriteLease: requiresWriteLease(request.agentType, capability),
     promptDelivery: "none",
+    runtimeDirectory: launchRuntimeDirectory,
     ...(definition === undefined ? {} : { agentDefinition: definition.file }),
   };
 }

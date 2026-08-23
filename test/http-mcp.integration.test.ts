@@ -3,14 +3,9 @@ import test from "node:test";
 
 import { createMcpHandler } from "../src/bridge/mcp.js";
 import { startBridge } from "../src/bridge/server.js";
-import type { BridgeDiscoveryPersistence } from "../src/bridge/discovery.js";
 import type { AgentId } from "../src/domain/contracts.js";
 
 const managerAgentId = "manager-1" as AgentId;
-const persistence: BridgeDiscoveryPersistence = {
-  write: async () => undefined,
-  clear: async () => undefined,
-};
 
 async function rpc(
   port: number,
@@ -34,7 +29,6 @@ async function rpc(
 test("serves the MCP protocol over authenticated loopback HTTP to the Manager only", async (context) => {
   const bridge = await startBridge({
     preferredPort: 0,
-    persistence,
     tokenFactory: () => "activation-token",
     handler: createMcpHandler({
       run: async () => ({ result: "done" }),

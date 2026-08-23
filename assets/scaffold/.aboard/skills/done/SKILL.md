@@ -14,6 +14,6 @@ For now, just notify the user of this problem:
 
 - `/done` did not run, so this terminal is still open. aboard's `UserPromptSubmit` hook should have intercepted it and did not.
 - Ask them to open the **aboard** view in VS Code's activity bar and check that the **Agents** panel shows this agent; killing it from there is the manual equivalent.
-- If the agent is listed and the command still falls through, suggest clicking the **Reset .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/done`.
+- If the agent is listed and the command still falls through, suggest clicking the **Update .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/done`.
 
 Then stop and wait for them.

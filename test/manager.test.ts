@@ -19,7 +19,7 @@ const RUNTIME_DIRECTORY = `.aboard/runtime/agents/${agentId}`;
 const RUNTIME_AGENT = `aboard-manager-${agentId}`;
 const RUNTIME_PATH = `${RUNTIME_DIRECTORY}/.claude/agents/${RUNTIME_AGENT}.md`;
 /** The two flags every Manager command line carries, in their shell form. */
-const DEFINITION_FLAGS = `--add-dir ${RUNTIME_DIRECTORY} --agent ${RUNTIME_AGENT}`;
+const DEFINITION_FLAGS = `--add-dir ${RUNTIME_DIRECTORY} --settings ${RUNTIME_DIRECTORY}/settings.json --agent ${RUNTIME_AGENT}`;
 /** The pre-approval list the Manager's command line carries. */
 const ABOARD_ALLOW = "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr";
 
@@ -44,7 +44,8 @@ function managerDefinition(
 /** Records the runtime definition each launch and resume writes before starting. */
 function recordingFiles() {
   const written: string[] = [];
-  return { written, store: { write: async (file: { relativePath: string }) => { written.push(file.relativePath); return file.relativePath; } } };
+  const write = async (file: { relativePath: string }) => { written.push(file.relativePath); return file.relativePath; };
+  return { written, store: { write, prepare: async (plan: { agentDefinition?: { relativePath: string } }) => { if (plan.agentDefinition !== undefined) await write(plan.agentDefinition); } } };
 }
 
 const definition = async (): Promise<ManagerLaunchDefinition> => managerDefinition();
@@ -58,6 +59,8 @@ test("plans a promptless Manager resume with only the recorded UUID", () => {
     sessionId,
     "--add-dir",
     RUNTIME_DIRECTORY,
+    "--settings",
+    `${RUNTIME_DIRECTORY}/settings.json`,
     "--agent",
     RUNTIME_AGENT,
     "--allowedTools",
@@ -107,6 +110,28 @@ test("a recorded Manager identity is reused without minting another index", () =
   assert.equal(mints, 0);
 });
 
+test("reset during Manager bundle preparation prevents terminal creation", async () => {
+  let admitted = true;
+  let release!: () => void;
+  const preparing = new Promise<void>((resolve) => { release = resolve; });
+  let created = false;
+  const lifecycle = new ManagerLifecycle({
+    store: { load: async () => undefined, save: async () => undefined },
+    terminals: { create: () => { created = true; throw new Error("must not create"); } } as unknown as TerminalController,
+    workspaceRoot: "C:\\work",
+    shell: "powershell",
+    admission: () => admitted,
+    files: { write: async () => "unused", prepare: async () => preparing },
+    definition,
+  });
+
+  const launch = lifecycle.start("new");
+  admitted = false;
+  release();
+  await assert.rejects(launch, /runtime reset/);
+  assert.equal(created, false);
+});
+
 test("resume keeps the recorded identity and new replaces the session", async () => {
   const records: unknown[] = [];
   const saved: any[] = [];
@@ -133,7 +158,7 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   // A new Manager is a new agent id, so it gets its own runtime directory and
   // its own agent name: one launch's definition is never visible to another's.
   assert.ok((records[1] as any).request.initialCommand.includes(
-    "--add-dir .aboard/runtime/agents/manager-2 --agent aboard-manager-manager-2",
+    "--add-dir .aboard/runtime/agents/manager-2 --settings .aboard/runtime/agents/manager-2/settings.json --agent aboard-manager-manager-2",
   ));
   assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
   // Both the resume and the fresh start write the file `--agent` resolves.

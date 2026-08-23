@@ -7,10 +7,6 @@ import {
 } from "node:http";
 
 import { authorize, redactSecret, type BridgeTokens } from "./authentication.js";
-import type {
-  BridgeDiscoveryMetadata,
-  BridgeDiscoveryPersistence,
-} from "./discovery.js";
 import {
   protocolError,
   type BridgeRequestHandler,
@@ -29,11 +25,9 @@ export interface BridgeLogger {
 export interface StartBridgeOptions {
   readonly preferredPort?: number;
   readonly handler: BridgeRequestHandler;
-  readonly persistence: BridgeDiscoveryPersistence;
   readonly logger?: BridgeLogger;
   readonly tokenFactory?: () => string;
   readonly commandTokenFactory?: () => string;
-  readonly now?: () => Date;
 }
 
 export interface BridgeRuntime {
@@ -110,7 +104,6 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
   validatePort(preferredPort);
   const token = (options.tokenFactory ?? randomUUID)();
   const tokens: BridgeTokens = { full: token, command: (options.commandTokenFactory ?? randomUUID)() };
-  const activatedAt = (options.now ?? (() => new Date()))().toISOString();
   const activeRequests = new Set<AbortController>();
   const activeResponses = new Set<ServerResponse>();
   let stopping = false;
@@ -167,20 +160,6 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
     port = await listen(server, 0);
   }
 
-  const metadata: BridgeDiscoveryMetadata = {
-    version: 1,
-    host: BRIDGE_HOST,
-    port,
-    token,
-    activatedAt,
-  };
-  try {
-    await options.persistence.write(metadata);
-  } catch {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    throw new Error("Bridge discovery metadata could not be persisted");
-  }
   options.logger?.info(`Bridge listening on ${BRIDGE_HOST}:${port}`);
 
   let stopPromise: Promise<void> | undefined;
@@ -198,11 +177,6 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
         await new Promise<void>((resolve, reject) => {
           server.close((error) => error === undefined ? resolve() : reject(error));
         });
-        try {
-          await options.persistence.clear();
-        } catch {
-          options.logger?.error("Bridge discovery metadata could not be cleared");
-        }
       })();
       return stopPromise;
     },

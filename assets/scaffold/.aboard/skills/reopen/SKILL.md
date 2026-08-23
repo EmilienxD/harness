@@ -15,6 +15,6 @@ For now, just notify the user of this problem:
 
 - `/reopen` did not run, so no session was reopened. aboard's `UserPromptSubmit` hook should have intercepted it and did not.
 - Ask them to open the **aboard** view in VS Code's activity bar and check that the **Agents** panel shows a live Manager (use **+ New Manager** otherwise). The command **Aboard: Reopen a Session** performs the same handoff, lists every session that can be reopened, and shows a precise error if it fails.
-- If a Manager is live and the command still falls through, suggest clicking the **Reset .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/reopen`.
+- If a Manager is live and the command still falls through, suggest clicking the **Update .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/reopen`.
 
 Then stop and wait for them.

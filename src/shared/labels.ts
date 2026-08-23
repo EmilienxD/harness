@@ -6,7 +6,7 @@
  * The `[AI]-` prefix keeps these from colliding with a user's own labels — a
  * plainly-named `todo` would let aboard adopt (or, worse, strip the label from)
  * an issue it does not own, and a user-applied `hitl` would silently flip
- * merge gating. The prefix is shared with the vendored user's issue skills
+ * merge gating. The prefix is shared with the project's issue skills
  * (map-issues/draft-issues/publish-issues emit the same names), so `[AI]-` is a
  * project convention, not an aboard-private one.
  *

@@ -9,6 +9,7 @@ import { sessionIsResumable } from "./sessions.js";
 import type { PromptSpillStore } from "./spill.js";
 import type { ShellKind } from "./shell.js";
 import type { TerminalController, TerminalSnapshot } from "./terminals.js";
+import { RuntimeAdmission } from "../runtime/admission.js";
 
 /** Proof-of-life arm for a Manager launch; the TUI has longer to boot than a worker because the first SessionStart briefing may run git/gh work. */
 export const MANAGER_STARTUP_PROOF_TIMEOUT_MS = 120_000;
@@ -16,7 +17,7 @@ export const MANAGER_STARTUP_PROOF_TIMEOUT_MS = 120_000;
 export interface ManagerStore { load(): Promise<ManagerPersistenceDto | undefined>; save(value: ManagerPersistenceDto): Promise<void>; }
 export class FileManagerStore implements ManagerStore {
   readonly #path: string;
-  public constructor(workspaceRoot: string) { this.#path = join(workspaceRoot, ".aboard", "runtime", "manager.json"); }
+  public constructor(workspaceRoot: string, private readonly admission: RuntimeAdmission = new RuntimeAdmission(true)) { this.#path = join(workspaceRoot, ".aboard", "runtime", "manager.json"); }
   public async load(): Promise<ManagerPersistenceDto | undefined> {
     let contents: string;
     try { contents = await readFile(this.#path, "utf8"); }
@@ -24,7 +25,15 @@ export class FileManagerStore implements ManagerStore {
     try { const parsed: unknown = JSON.parse(contents); const result = parseManagerPersistenceDto(parsed); return result.ok ? result.value : undefined; }
     catch (error: unknown) { if (error instanceof SyntaxError) return undefined; throw error; }
   }
-  public async save(value: ManagerPersistenceDto): Promise<void> { const temporary = `${this.#path}.${process.pid}.tmp`; await mkdir(dirname(this.#path), { recursive: true }); await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { encoding: "utf8", mode: 0o600 }); await rm(this.#path, { force: true }); await rename(temporary, this.#path); }
+  public async save(value: ManagerPersistenceDto): Promise<void> {
+    return this.admission.run(() => this.#save(value));
+  }
+  async #save(value: ManagerPersistenceDto): Promise<void> {
+    const temporary = `${this.#path}.${process.pid}.tmp`;
+    await mkdir(dirname(this.#path), { recursive: true });
+    await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+    await rm(this.#path, { force: true }); await rename(temporary, this.#path);
+  }
 }
 
 /** Keeps a recorded Manager identity available without minting a new one merely because the extension activated. */
@@ -36,6 +45,7 @@ export class ManagerIdentity {
   }
 
   public current(): AgentId | undefined { return this.#agentId; }
+  public reset(): void { this.#agentId = undefined; }
 
   public require(): AgentId {
     this.#agentId ??= this.mint();
@@ -86,7 +96,7 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
 }
 
 /** `command` and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout;
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly admission?: () => boolean; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout;
   /**
    * Writes the per-launch aboard MCP registration and returns the path
    * `--mcp-config` names. It runs on every start and resume so the port and
@@ -149,10 +159,15 @@ export class ManagerLifecycle {
     await this.options.preflight?.(plan.command);
     // `--agent` names this file; a missing one is a refused launch rather than a
     // Manager on Claude Code's default persona.
-    if (plan.agentDefinition !== undefined) await this.options.files.write(plan.agentDefinition);
+    await this.options.files.prepare(plan);
+    if (this.options.admission?.() === false) throw new Error("aboard runtime reset while preparing Manager launch");
     const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine, startupTimeoutMs: MANAGER_STARTUP_PROOF_TIMEOUT_MS });
     const updatedAt = this.#now().toISOString() as IsoTimestamp;
-    await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt });
+    try { await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt }); }
+    catch (error) {
+      try { this.options.terminals.kill(terminal.terminalId); } catch { /* already closed */ }
+      throw error;
+    }
     return terminal;
   }
 }

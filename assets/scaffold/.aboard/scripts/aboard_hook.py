@@ -170,7 +170,7 @@ def main() -> int:
         port = int(os.environ["ABOARD_BRIDGE_PORT"])
         token = os.environ["ABOARD_BRIDGE_TOKEN"]
     except (KeyError, ValueError):
-        return finish("Aboard could not handle that command because bridge discovery is unavailable.") if is_intercepted else 0
+        return finish("Aboard could not handle that command because its bridge credentials or runtime are unavailable.") if is_intercepted else 0
     event = payload.get("hook_event_name")
     session_id = os.environ.get("ABOARD_SESSION_ID") or payload.get("session_id")
     body: dict[str, Any]

@@ -8,9 +8,9 @@ everything else.
 This is for scripts — a project's own setup command, a backend or frontend
 bootstrap, a task runner in another repository. A command terminal is not an
 aboard agent: it gets no fleet row, no write lease, no `ABOARD_*` credentials, no
-resume, and it never appears in the fleet view. Nothing about it requires an
-initialized project, because a setup command is exactly what runs before one
-exists.
+resume, and it never appears in the fleet view. The endpoint is published only
+while the project is initialized. Deleting `.aboard/` removes the endpoint and
+turns this surface off with the rest of aboard.
 
 ## Endpoints
 
@@ -130,15 +130,15 @@ Notes for a robust reader:
 
 Processes aboard launched itself do not need any of this: they inherit
 `ABOARD_BRIDGE_PORT` and `ABOARD_BRIDGE_TOKEN`. Another VS Code extension can read
-`bridgeDiscoveryPath` or `commandEndpointDirectory` from aboard's exported API.
+`commandEndpointDirectory` from aboard's exported API.
 
 ## Security
 
 The bridge mints two per-activation credentials:
 
-- The **full token** reaches every route. It stays in extension storage
-  (`bridge.json`) and in the environment of processes aboard started. It is not
-  published.
+- The **full token** reaches every route. It stays in memory and in the
+  environment of processes aboard started; only the Manager's ephemeral MCP
+  configuration contains a resolved copy while initialized. It is not published.
 - The **command token** reaches `/commands` and nothing else — a request to any
   other path is `403 forbidden`. This is the one that gets published, because a
   credential a script can find is a credential anything running as that user can

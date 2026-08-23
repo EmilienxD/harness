@@ -2,25 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 
-import type {
-  BridgeDiscoveryMetadata,
-  BridgeDiscoveryPersistence,
-} from "../src/bridge/discovery.js";
 import { BRIDGE_HOST, startBridge } from "../src/bridge/server.js";
-
-class MemoryPersistence implements BridgeDiscoveryPersistence {
-  public metadata: BridgeDiscoveryMetadata | undefined;
-  public cleared = false;
-
-  public async write(metadata: BridgeDiscoveryMetadata): Promise<void> {
-    this.metadata = metadata;
-  }
-
-  public async clear(): Promise<void> {
-    this.cleared = true;
-    this.metadata = undefined;
-  }
-}
 
 async function request(
   port: number,
@@ -38,17 +20,14 @@ async function request(
 }
 
 test("binds to IPv4 loopback and authenticates every route", async (context) => {
-  const persistence = new MemoryPersistence();
   const bridge = await startBridge({
     preferredPort: 0,
-    persistence,
     tokenFactory: () => "activation-token",
     handler: (incoming) => ({ status: 200, body: { path: incoming.url.pathname } }),
   });
   context.after(() => bridge.stop());
 
   assert.equal(bridge.host, "127.0.0.1");
-  assert.equal(persistence.metadata?.host, "127.0.0.1");
   assert.equal((await request(bridge.port, "/hook")).status, 401);
   assert.equal((await request(bridge.port, "/mcp", "wrong-token")).status, 401);
   assert.deepEqual(await request(bridge.port, "/mcp", bridge.token), {
@@ -60,12 +39,10 @@ test("binds to IPv4 loopback and authenticates every route", async (context) => 
 test("rotates tokens between activations", async () => {
   const first = await startBridge({
     preferredPort: 0,
-    persistence: new MemoryPersistence(),
     handler: () => ({ status: 204 }),
   });
   const second = await startBridge({
     preferredPort: 0,
-    persistence: new MemoryPersistence(),
     handler: () => ({ status: 204 }),
   });
   const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -79,7 +56,6 @@ test("the command token opens the command endpoint and nothing else", async (con
   let calls = 0;
   const bridge = await startBridge({
     preferredPort: 0,
-    persistence: new MemoryPersistence(),
     tokenFactory: () => "full-token",
     commandTokenFactory: () => "command-token",
     handler: (incoming) => { calls += 1; return { status: 200, body: { path: incoming.url.pathname } }; },
@@ -107,13 +83,12 @@ test("rotates the command token between activations and never logs it", async (c
   const messages: string[] = [];
   const first = await startBridge({
     preferredPort: 0,
-    persistence: new MemoryPersistence(),
     commandTokenFactory: () => "never-log-this-command-token",
     logger: { info: () => undefined, error: (message) => messages.push(message) },
     handler: () => { throw new Error("never-log-this-command-token"); },
   });
   context.after(() => first.stop());
-  const second = await startBridge({ preferredPort: 0, persistence: new MemoryPersistence(), handler: () => ({ status: 204 }) });
+  const second = await startBridge({ preferredPort: 0, handler: () => ({ status: 204 }) });
   context.after(() => second.stop());
 
   const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -137,7 +112,6 @@ test("falls back to an ephemeral port when the preferred port is occupied", asyn
 
   const bridge = await startBridge({
     preferredPort: address.port,
-    persistence: new MemoryPersistence(),
     handler: () => ({ status: 204 }),
   });
   context.after(() => bridge.stop());
@@ -148,7 +122,6 @@ test("rejects malformed JSON without invoking the handler", async (context) => {
   let calls = 0;
   const bridge = await startBridge({
     preferredPort: 0,
-    persistence: new MemoryPersistence(),
     tokenFactory: () => "secret-token",
     handler: () => {
       calls += 1;
@@ -163,15 +136,13 @@ test("rejects malformed JSON without invoking the handler", async (context) => {
   assert.equal(JSON.stringify(result.body).includes(bridge.token), false);
 });
 
-test("shutdown aborts pending long polls and clears discovery metadata", async () => {
-  const persistence = new MemoryPersistence();
+test("shutdown aborts pending long polls", async () => {
   let observedStart!: () => void;
   const started = new Promise<void>((resolve) => { observedStart = resolve; });
   let observedAbort!: () => void;
   const aborted = new Promise<void>((resolve) => { observedAbort = resolve; });
   const bridge = await startBridge({
     preferredPort: 0,
-    persistence,
     handler: (incoming) => new Promise((resolve) => {
       observedStart();
       incoming.signal.addEventListener("abort", () => {
@@ -188,14 +159,12 @@ test("shutdown aborts pending long polls and clears discovery metadata", async (
   await bridge.stop();
   await aborted;
   await pending;
-  assert.equal(persistence.cleared, true);
 });
 
 test("logs and typed errors never disclose the bearer token", async (context) => {
   const messages: string[] = [];
   const bridge = await startBridge({
     preferredPort: 0,
-    persistence: new MemoryPersistence(),
     tokenFactory: () => "never-log-this-token",
     logger: { info: (message) => messages.push(message), error: (message) => messages.push(message) },
     handler: () => { throw new Error("never-log-this-token"); },

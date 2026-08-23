@@ -22,7 +22,7 @@ export function isAuthorized(
  * Two credentials, because they are discoverable in very different ways.
  *
  * `full` reaches every route and is only ever handed to processes aboard itself
- * launched, plus the discovery file in extension storage. `command` reaches
+ * launched. `command` reaches
  * `/commands` and nothing else, and is published where an unrelated script can
  * find it. Scripts need to be able to find a credential; nothing about that need
  * justifies letting whatever finds it drive the Manager, create agents, or read

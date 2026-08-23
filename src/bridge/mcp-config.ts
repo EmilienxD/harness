@@ -1,5 +1,6 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { RuntimeAdmission } from "../runtime/admission.js";
 
 import { ABOARD_MCP_SERVER_NAME } from "./mcp-tools.js";
 
@@ -45,9 +46,9 @@ export function managerMcpConfigDocument(registration: ManagerMcpRegistration): 
  * project-scoped — every worker, every `Explore`, and the user's own
  * hand-started `claude` would connect it and spend context on tool descriptions
  * for a surface the bridge refuses them anyway. **Location:** the file holds a
- * resolved bearer token, so it lives beside `bridge.json` in the extension's own
- * storage rather than anywhere under the workspace, for exactly the reason
- * `bridge.json` was moved out of the tree.
+ * resolved bearer token. This ephemeral Manager-only configuration is the sole
+ * resolved copy outside memory and launched-process environments; it lives in
+ * extension storage only while the workspace is initialized.
  *
  * The values are resolved rather than left as `${ABOARD_BRIDGE_*}` references.
  * Claude Code expands those in `.mcp.json`-shaped configuration, but the file is
@@ -66,7 +67,7 @@ export function managerMcpConfigDocument(registration: ManagerMcpRegistration): 
 export class FileManagerMcpConfig {
   readonly #path: string;
 
-  public constructor(storageDirectory: string) {
+  public constructor(storageDirectory: string, private readonly runtimeAdmission: RuntimeAdmission = new RuntimeAdmission(true), private readonly available: () => boolean = () => true) {
     this.#path = join(storageDirectory, MANAGER_MCP_CONFIG_FILE_NAME);
   }
 
@@ -76,12 +77,20 @@ export class FileManagerMcpConfig {
 
   /** Writes the registration and returns the path `--mcp-config` must name. */
   public async write(registration: ManagerMcpRegistration): Promise<string> {
+    if (!this.available()) throw new Error("aboard runtime is not initialized");
+    return this.runtimeAdmission.run(() => this.#write(registration));
+  }
+  async #write(registration: ManagerMcpRegistration): Promise<string> {
     const temporaryPath = `${this.#path}.${process.pid}.tmp`;
     await mkdir(dirname(this.#path), { recursive: true });
     await writeFile(temporaryPath, managerMcpConfigDocument(registration), {
       encoding: "utf8",
       mode: 0o600,
     });
+    if (!this.available()) {
+      await rm(temporaryPath, { force: true });
+      throw new Error("aboard runtime reset while preparing Manager MCP configuration");
+    }
     // Windows does not consistently replace an existing destination with rename().
     await rm(this.#path, { force: true });
     await rename(temporaryPath, this.#path);

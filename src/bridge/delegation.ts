@@ -141,6 +141,8 @@ export interface DelegationPromptResolver {
 }
 
 export interface DelegationCoordinatorOptions {
+  /** Runtime admission gate; closed synchronously before reset cleanup begins. */
+  readonly admission?: () => boolean;
   readonly workspaceRoot: string;
   /** Tests transcript availability before deciding between resume and a fresh session. */
   readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>;
@@ -337,7 +339,8 @@ export class DelegationCoordinator {
     // No lease is taken: reopening is the user returning to their own
     // conversation, and an interactive launch is never leased. A run that still
     // needs the lease relaunches through the auto-run engine.
-    if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition, target.cwd);
+    await this.options.spills.prepare(plan, target.cwd);
+    if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
     const terminal = this.options.terminals.create({
       agentId: target.agentId,
       sessionId: target.sessionId,
@@ -482,8 +485,9 @@ export class DelegationCoordinator {
     }
     const cwd = input.isolation?.cwd;
     try {
-      if (plan.agentDefinition !== undefined) await this.options.spills.write(plan.agentDefinition, cwd);
+      await this.options.spills.prepare(plan, cwd);
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill, cwd);
+      if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
       const terminal = this.options.terminals.create({
         agentId,
         sessionId,

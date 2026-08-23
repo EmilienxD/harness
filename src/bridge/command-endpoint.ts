@@ -2,18 +2,17 @@
  * Where a script that aboard did not launch finds the command endpoint.
  *
  * The bridge's port and full token are deliberately hard to find: they live in
- * VS Code's extension storage, and every process aboard starts inherits them.
+ * memory, and every process aboard starts inherits them.
  * That is right for the agent surface and useless for the case `/commands`
- * exists to serve — a setup script the user runs from any shell, in a project
- * that may not even be initialized, which has no way to guess an extension
- * storage path.
+ * exists to serve — a script the user runs from any shell in an initialized
+ * project, which has no way to discover the in-memory bridge runtime.
  *
  * So the endpoint publishes itself: one small record per open window, in a
  * per-user directory outside every workspace, carrying the port and the
  * command-scoped token — never the full one. A script reads the directory, picks
  * the record whose `workspaceRoot` contains its own working directory, and
  * calls. Nothing is written into the user's tree, so nothing can be committed,
- * and no `.aboard/` directory appears before the project has one.
+ * and the record exists only while that workspace's aboard runtime is active.
  */
 
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -114,6 +113,11 @@ export class FileCommandEndpointRegistry {
     if (this.#fileName === undefined) return;
     await rm(join(this.#directory, this.#fileName), { force: true });
     this.#fileName = undefined;
+  }
+
+  /** Removes this workspace's stale activation record without publishing one. */
+  public async clearWorkspace(workspaceRoot: string): Promise<void> {
+    await rm(join(this.#directory, recordFileName(workspaceRoot)), { force: true });
   }
 
   /**

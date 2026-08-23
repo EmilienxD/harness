@@ -3,7 +3,6 @@ import { join } from "node:path";
 
 import { createVSIX, listFiles, PackageManager } from "@vscode/vsce";
 
-import { VENDORED_TOOLS } from "../src/scaffold/project.js";
 
 const root = process.cwd();
 const output = join(root, "dist", "aboard-0.0.0.vsix");
@@ -11,8 +10,9 @@ const output = join(root, "dist", "aboard-0.0.0.vsix");
 const required = [
   "dist/extension.js",
   "assets/aboard.svg",
-  "assets/scaffold/.claude/hooks/aboard_hook.py",
-  "assets/scaffold/.claude/hooks/aboard-hooks.json",
+  "assets/scaffold/.aboard/scripts/aboard_hook.py",
+  "assets/scaffold/.aboard/aboard-hooks.json",
+  "assets/scaffold/.aboard/.gitignore",
   "assets/scaffold/.aboard/scripts/aboard_wrapper.py",
   // Under `.aboard/`, not `.claude/agents/`: a definition in the latter is a
   // subagent type every session in the workspace can discover and spawn.
@@ -23,18 +23,13 @@ const required = [
   // one aboard is not running on is still the user's to edit.
   "assets/scaffold/.aboard/session-setup.ps1",
   "assets/scaffold/.aboard/session-setup.sh",
-  "assets/scaffold/.claude/skills/update-todo/SKILL.md",
-  "assets/scaffold/.claude/skills/brainstorm/SKILL.md",
-  "assets/scaffold/.claude/skills/general-purpose/SKILL.md",
+  "assets/scaffold/.aboard/skills/update-todo/SKILL.md",
+  "assets/scaffold/.aboard/skills/brainstorm/SKILL.md",
+  "assets/scaffold/.aboard/skills/general-purpose/SKILL.md",
   "LICENSE",
 ];
 
 const forbidden = [
-  // User-owned skills are installed from upstream by command; a copy in the VSIX
-  // would resurrect the drift that removing them was meant to end.
-  ...VENDORED_TOOLS
-    .filter((tool) => tool.kind === "skill")
-    .map((tool) => new RegExp(`(^|/)\\.claude/skills/${tool.name}(/|$)`)),
   // Runtime state belongs to a live project and must never ship, but
   // `assets/scaffold/.aboard/scripts/` is extension-owned and legitimately
   // packaged (it is installed by the scaffolder like every other asset).

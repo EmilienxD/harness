@@ -10,7 +10,7 @@ export interface NativeFleetUiRegistration extends Disposable {
   readonly refresh: () => void;
 }
 
-export function registerNativeFleetUi(context: ExtensionContext, port: number, fleet: FleetRegistry, lease: WriteLease, terminals: TerminalController, isInitialized: () => boolean): NativeFleetUiRegistration {
+export function registerNativeFleetUi(context: ExtensionContext, port: () => number | undefined, fleet: FleetRegistry, lease: WriteLease, terminals: TerminalController, isInitialized: () => boolean): NativeFleetUiRegistration {
   const disposables: Disposable[] = [];
   const changes = new EventEmitter<FleetTreeNode | undefined>();
   const model = new FleetTreeModel(
@@ -70,7 +70,7 @@ export function registerNativeFleetUi(context: ExtensionContext, port: number, f
   // before the user has asked for a `.aboard/`.
   const render = () => {
     if (!isInitialized()) { status.hide(); return; }
-    const snapshot = renderFleetStatus(port, fleet, lease, (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"));
+    const snapshot = renderFleetStatus(port() ?? 0, fleet, lease, (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"));
     status.text = snapshot.text;
     status.tooltip = snapshot.tooltip;
     status.show();

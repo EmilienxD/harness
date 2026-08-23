@@ -46,7 +46,7 @@
       },
       {
         "command": "aboard.updateProject",
-        "title": "Reset .aboard/",
+        "title": "Update .aboard/",
         "icon": "$(sync)"
       },
       {

@@ -8,7 +8,7 @@ import test from "node:test";
 
 import { ROADMAP_MARKER } from "../src/bridge/manager-hooks.js";
 
-const SCRIPT = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+const SCRIPT = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
 
 interface HookRun {
   readonly route: string;
@@ -163,7 +163,7 @@ test("UserPromptSubmit carries the same verdict with the prompt rather than call
 });
 
 test("the reminder is registered on PostToolUse with no matcher, alongside the Agent telemetry hook", async () => {
-  const parsed = JSON.parse(await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8")) as {
+  const parsed = JSON.parse(await readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "aboard-hooks.json"), "utf8")) as {
     PostToolUse: { matcher?: string; hooks: { args: string[]; timeout?: number }[] }[];
     SessionStart: { matcher?: string; hooks: { args: string[] }[] }[];
   };

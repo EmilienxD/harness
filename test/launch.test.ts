@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -66,13 +66,14 @@ function definition(
 const runtimeDir = `.aboard/runtime/agents/${agentId}`;
 const runtimeName = (agentName: string) => `aboard-${agentName}-${agentId}`;
 const runtimePath = (agentName: string) => `${runtimeDir}/.claude/agents/${runtimeName(agentName)}.md`;
+const runtimeArgs = ["--add-dir", runtimeDir, "--settings", `${runtimeDir}/settings.json`] as const;
 
 /** The two flags every agent-defined launch and resume carries, in order. */
 function definitionArgs(agentName: string): readonly string[] {
-  return ["--add-dir", runtimeDir, "--agent", runtimeName(agentName)];
+  return [...runtimeArgs, "--agent", runtimeName(agentName)];
 }
 
-const definitionFlags = (agentName: string) => `--add-dir ${runtimeDir} --agent ${runtimeName(agentName)}`;
+const definitionFlags = (agentName: string) => `--add-dir ${runtimeDir} --settings ${runtimeDir}/settings.json --agent ${runtimeName(agentName)}`;
 
 function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest {
   return {
@@ -311,8 +312,8 @@ test("plans general-purpose as Claude Code's unmodified default session", () => 
     }),
   );
 
-  assert.deepEqual(plan.args, ["--session-id", sessionId]);
-  assert.equal(plan.commandLine, `& claude --session-id ${sessionId}`);
+  assert.deepEqual(plan.args, ["--session-id", sessionId, ...runtimeArgs]);
+  assert.equal(plan.commandLine, `& claude --session-id ${sessionId} --add-dir ${runtimeDir} --settings ${runtimeDir}/settings.json`);
   assert.equal(plan.agentDefinition, undefined);
   assert.equal(plan.promptDelivery, "none");
   assert.equal(plan.writeCapability, "write-capable");
@@ -328,9 +329,9 @@ test("Chrome intent is explicit for eligible launches and is replayed on resume"
     configuration: resolveLaunchConfiguration({}),
     attended: true,
   };
-  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: true }).args, ["--session-id", sessionId, "--chrome"]);
-  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: false }).args, ["--session-id", sessionId, "--no-chrome"]);
-  assert.deepEqual(planSessionResume({ ...generalPurpose, chrome: true }).args, ["--resume", sessionId, "--chrome"]);
+  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: true }).args, ["--session-id", sessionId, ...runtimeArgs, "--chrome"]);
+  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: false }).args, ["--session-id", sessionId, ...runtimeArgs, "--no-chrome"]);
+  assert.deepEqual(planSessionResume({ ...generalPurpose, chrome: true }).args, ["--resume", sessionId, ...runtimeArgs, "--chrome"]);
 
   const implementer = planLaunch(request({ chrome: true }));
   assert.equal(implementer.args.includes("--chrome"), true);
@@ -361,7 +362,7 @@ test("the builtin types carry Claude Code's own capabilities and Explore accepts
   }));
   assert.equal(explore.requiresWriteLease, false);
   // The bare profile resolves to --agent <builtin name> with no tool flags.
-  assert.deepEqual(explore.args, ["--session-id", sessionId, "--agent", "Explore", "--disable-slash-commands", "Map the auth flow."]);
+  assert.deepEqual(explore.args, ["--session-id", sessionId, ...runtimeArgs, "--agent", "Explore", "--disable-slash-commands", "Map the auth flow."]);
 
   const profiled = resolveLaunchConfiguration({
     agentName: "Explore",
@@ -376,7 +377,7 @@ test("the builtin types carry Claude Code's own capabilities and Explore accepts
   }));
   assert.deepEqual(configured.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.deepEqual(configured.args, [
-    "--session-id", sessionId, "--agent", "Explore", "--model", "haiku", "--effort", "high", "--disable-slash-commands", "Map the auth flow.",
+    "--session-id", sessionId, ...runtimeArgs, "--agent", "Explore", "--model", "haiku", "--effort", "high", "--disable-slash-commands", "Map the auth flow.",
   ]);
   assert.equal(configured.args.includes("--tools"), false);
   assert.equal(configured.agentDefinition, undefined);
@@ -430,7 +431,7 @@ test("passes the session effort level on every launch shape and refuses an unkno
 
   for (const level of EFFORT_LEVELS) {
     assert.equal(isEffortLevel(level), true);
-    assert.deepEqual(planLaunch(request({ effort: level })).args.slice(6, 8), ["--effort", level]);
+    assert.deepEqual(planLaunch(request({ effort: level })).args.slice(8, 10), ["--effort", level]);
   }
   // The value reaches the planner from a settings file, where a typo is a user
   // mistake rather than a compile error, and Claude Code refuses the launch on
@@ -476,7 +477,7 @@ test("puts the definition's model and effort on the command line, overriding the
       configuration: definition("brainstormer", BRAINSTORMER_TOOLS, { declaredModel: "opus" }),
       agentType: "brainstormer",
       effort: "low",
-    })).args.slice(6),
+    })).args.slice(8),
     ["--model", "opus", "--effort", "low", "Address issue #47."],
   );
 
@@ -541,7 +542,7 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
   // command line whole, not what any particular tier happens to be worth.
   for (const [difficulty, policy] of Object.entries(DIFFICULTY_LAUNCH_POLICIES)) {
     assert.deepEqual(
-      planLaunch(request({ configuration: routed, difficulty: difficulty as IssueDifficulty })).args.slice(6),
+      planLaunch(request({ configuration: routed, difficulty: difficulty as IssueDifficulty })).args.slice(8),
       ["--model", policy.model, "--effort", policy.effort, "--disable-slash-commands", "Address issue #47."],
       `the ${difficulty} tier must reach the command line`,
     );
@@ -551,13 +552,13 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
   // user's global default, which is the one outcome a missing label could make
   // invisible.
   assert.deepEqual(
-    planLaunch(request({ configuration: routed })).args.slice(6),
+    planLaunch(request({ configuration: routed })).args.slice(8),
     ["--model", "opus", "--effort", "high", "--disable-slash-commands", "Address issue #47."],
   );
   // ...and the session-wide setting does not get to fill the gap either, since
   // the definition did choose — it chose to ask the label.
   assert.deepEqual(
-    planLaunch(request({ configuration: routed, model: "haiku", effort: "low" })).args.slice(6, 10),
+    planLaunch(request({ configuration: routed, model: "haiku", effort: "low" })).args.slice(8, 12),
     ["--model", "opus", "--effort", "high"],
   );
 
@@ -568,14 +569,14 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
     declaredEffort: BY_DIFFICULTY,
   });
   assert.deepEqual(
-    planLaunch(request({ configuration: pinned, difficulty: "routine" })).args.slice(6, 10),
+    planLaunch(request({ configuration: pinned, difficulty: "routine" })).args.slice(8, 12),
     ["--model", "opus", "--effort", "medium"],
   );
   assert.deepEqual(
     planLaunch(request({
       configuration: definition("implementer", IMPLEMENTER_TOOLS, { declaredModel: BY_DIFFICULTY, declaredEffort: "max" }),
       difficulty: "routine",
-    })).args.slice(6, 10),
+    })).args.slice(8, 12),
     ["--model", "haiku", "--effort", "max"],
   );
 
@@ -615,7 +616,7 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
       configuration: resolveLaunchConfiguration({ agentName: "Explore", declaredModel: BY_DIFFICULTY }),
       agentType: "Explore",
       difficulty: "advanced",
-    })).args.slice(4, 6),
+    })).args.slice(8, 10),
     ["--model", "opus"],
   );
 });
@@ -701,7 +702,7 @@ test("an agent-defined launch registers its definition where only that launch ca
   // directory this launch alone carries, and `--agent` names the file inside
   // it. Nothing else in the workspace scans that path.
   assert.deepEqual(plan.args, [
-    "--session-id", sessionId, "--add-dir", runtimeDir, "--agent", runtimeName("implementer"),
+    "--session-id", sessionId, ...definitionArgs("implementer"),
     "--model", "opus", "--effort", "high", "--disable-slash-commands", "Go.",
   ]);
   assert.equal(plan.args.includes("--tools"), false);
@@ -709,7 +710,7 @@ test("an agent-defined launch registers its definition where only that launch ca
   // `--add-dir` takes a list, so it must never end the line: the positional
   // prompt would be read as a second directory. `--agent` follows it directly.
   assert.equal(plan.args.at(-1), "Go.");
-  assert.equal(plan.args[plan.args.indexOf("--add-dir") + 2], "--agent");
+  assert.equal(plan.args[plan.args.indexOf("--add-dir") + 2], "--settings");
 
   assert.equal(plan.agentDefinition?.relativePath, runtimePath("implementer"));
   assert.equal(
@@ -742,7 +743,7 @@ test("an agent-defined launch registers its definition where only that launch ca
     configuration,
   });
   assert.deepEqual(resumed.args, [
-    "--resume", sessionId, "--add-dir", runtimeDir, "--agent", runtimeName("implementer"),
+    "--resume", sessionId, ...definitionArgs("implementer"),
     "--model", "opus", "--effort", "high", "--disable-slash-commands",
   ]);
   assert.equal(resumed.agentDefinition?.relativePath, plan.agentDefinition?.relativePath);
@@ -788,16 +789,16 @@ test("model and effort ride the command line as well as the rewritten file, on s
     agentType: "Explore", configuration: explore, prompt: "Map the auth flow.",
   }));
   assert.deepEqual(exploreLaunch.args, [
-    "--session-id", sessionId, "--agent", "Explore", "--model", "haiku", "--effort", "low",
+    "--session-id", sessionId, ...runtimeArgs, "--agent", "Explore", "--model", "haiku", "--effort", "low",
     "--disable-slash-commands", "Map the auth flow.",
   ]);
   assert.equal(exploreLaunch.agentDefinition, undefined);
-  assert.equal(exploreLaunch.args.includes("--add-dir"), false);
+  assert.equal(exploreLaunch.args.includes("--add-dir"), true);
   assert.deepEqual(
     planSessionResume({
       agentId, sessionId, agentType: "Explore", shell: "powershell", configuration: explore,
     }).args,
-    ["--resume", sessionId, "--model", "haiku", "--effort", "low", "--disable-slash-commands"],
+    ["--resume", sessionId, ...runtimeArgs, "--model", "haiku", "--effort", "low", "--disable-slash-commands"],
   );
 });
 
@@ -862,7 +863,7 @@ test("pins each launch shape to the agent types allowed to use it", () => {
     agentType: "general-purpose",
     configuration: resolveLaunchConfiguration({}),
   }));
-  assert.deepEqual(generalPurpose.args.slice(2), ["--disable-slash-commands", "Address issue #47."]);
+  assert.deepEqual(generalPurpose.args.slice(6), ["--disable-slash-commands", "Address issue #47."]);
   assert.equal(generalPurpose.agentDefinition, undefined);
   const manager = planLaunch(request({
     agentType: "manager",
@@ -912,7 +913,7 @@ test("a resume re-passes every flag that shaped the launch", () => {
       agentId, sessionId, agentType: "Explore", shell: "powershell",
       configuration: resolveLaunchConfiguration({ agentName: "Explore" }),
     }).args,
-    ["--resume", sessionId, "--disable-slash-commands"],
+    ["--resume", sessionId, ...runtimeArgs, "--disable-slash-commands"],
   );
   const resumedExplore = planSessionResume({
     agentId, sessionId, agentType: "Explore", shell: "powershell",
@@ -921,7 +922,7 @@ test("a resume re-passes every flag that shaped the launch", () => {
     }),
   });
   assert.deepEqual(resumedExplore.command, ["wrapper", "run", "MyProfile", "--"]);
-  assert.deepEqual(resumedExplore.args, ["--resume", sessionId, "--model", "haiku", "--effort", "high", "--disable-slash-commands"]);
+  assert.deepEqual(resumedExplore.args, ["--resume", sessionId, ...runtimeArgs, "--model", "haiku", "--effort", "high", "--disable-slash-commands"]);
   assert.equal(resumedExplore.args.includes("--tools"), false);
   assert.equal(resumedExplore.agentDefinition, undefined);
   // The Manager resumes from its own definition or not at all.
@@ -1197,6 +1198,21 @@ test("writes spill files under the workspace runtime directory", async () => {
     () => store.write({ ...plan.spill!, relativePath: "../outside.md" }),
     (error: unknown) => error instanceof PromptSpillPathError,
   );
+});
+
+test("runtime bundles give every launch done and reserve Manager commands for Manager", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-bundle-"));
+  await cp(join(process.cwd(), "assets", "scaffold", ".aboard"), join(root, ".aboard"), { recursive: true });
+  const store = new FileSystemPromptSpillStore(root);
+  const manager = planLaunch(request({ agentType: "manager", configuration: definition("manager", MANAGER_TOOLS), prompt: undefined }));
+  await store.prepare(manager);
+  assert.deepEqual((await readdir(join(root, manager.runtimeDirectory, ".claude", "skills"))).sort(), [
+    "auto", "brainstorm", "done", "general-purpose", "reopen", "review-pr", "update-todo",
+  ]);
+  const worker = planLaunch(request({ agentId: "worker-2" as AgentId }));
+  await store.prepare(worker);
+  assert.deepEqual(await readdir(join(root, worker.runtimeDirectory, ".claude", "skills")), ["done"]);
+  assert.equal((JSON.parse(await readFile(join(root, worker.runtimeDirectory, "settings.json"), "utf8")) as { hooks?: unknown }).hooks !== undefined, true);
 });
 
 test("derives write capability from the effective tool set", () => {

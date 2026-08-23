@@ -129,7 +129,10 @@ function setup() {
           : definitionFor(type, type === "brainstormer" || type === "webresearcher" ? ["Read", "Grep"] : ["Read", "Edit"]),
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
-    spills: { write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); return spill.relativePath; } },
+    spills: {
+      write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); return spill.relativePath; },
+      prepare: async (plan, root) => { if (plan.agentDefinition !== undefined) spills.push({ path: plan.agentDefinition.relativePath, root }); },
+    },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
   const handler = createMcpHandler(coordinator, { managerAgentId: () => MANAGER });
@@ -303,7 +306,7 @@ test("keeps a transcript-less persisted worker paused", async () => {
     managerAgentId: () => MANAGER, shell: "powershell",
     agentIdFactory: () => agent("unused"), sessionIdFactory: () => session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     configurations: { get: async () => definitionFor("implementer", ["Read", "Edit"]) },
-    prompts: { resolve: async () => undefined }, spills: { write: async (spill) => spill.relativePath },
+    prompts: { resolve: async () => undefined }, spills: { write: async (spill) => spill.relativePath, prepare: async () => undefined },
   });
   await assert.rejects(() => refusing.resumePersisted(context.fleet.get(workerId)!), /no Claude conversation/);
   assert.equal(context.host.created.length, 0);
@@ -638,7 +641,7 @@ test("an unobservable session is not a gone one: no liveness source never reclai
     sessionIdFactory: () => session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
     configurations: { get: async () => definitionFor("pr-doctor-afk", ["Read", "Edit"]) },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
-    spills: { write: async (spill) => spill.relativePath },
+    spills: { write: async (spill) => spill.relativePath, prepare: async () => undefined },
   });
   await assert.rejects(
     unobserved.spawn({ type: "pr-doctor-afk", prompt: "Fix second task", description: "fix second task now" }),
@@ -673,7 +676,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-implementer-worker-1 /);
+  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --settings \.aboard\/runtime\/agents\/worker-1\/settings\.json --agent aboard-implementer-worker-1 /);
   // Role alone does not impose auto-run's fence: this launch is Manager-driven.
   assert.doesNotMatch(host.created[0]!.terminal.sent.at(-1)!, /Bash\(git commit\*\)/);
 });
@@ -728,7 +731,7 @@ test("interactive mode makes the prompt optional", async () => {
   const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true });
   assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-brainstormer-worker-1 --disallowedTools 'mcp__aboard__\*'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --settings \.aboard\/runtime\/agents\/worker-1\/settings\.json --agent aboard-brainstormer-worker-1 --disallowedTools 'mcp__aboard__\*'\s*$/);
 
   const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
@@ -749,7 +752,7 @@ test("webresearcher runs unattended, reports a result, and takes no lease", asyn
   assert.equal(researcher.resultDelivery.mode, "mailbox");
   assert.equal(lease.current(), undefined);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --agent aboard-webresearcher-worker-1/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --settings \.aboard\/runtime\/agents\/worker-1\/settings\.json --agent aboard-webresearcher-worker-1/);
   assert.deepEqual(host.created.at(-1)!.terminal.shown, []);
 });
 

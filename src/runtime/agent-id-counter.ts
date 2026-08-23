@@ -7,19 +7,14 @@ export const AGENT_COUNTER_FILE_NAME = "agent-counter.json";
 /**
  * Mints user-facing agent ids as sequential integers. The ids exist so a
  * Claude Code session label reads `aboard-implementer-4` rather than carrying
- * a UUID, so the sequence is workspace-scoped and never reset: it counts the
- * agents run in one project across every restart, even after `.aboard/` is
- * deleted. The counter file therefore lives in the extension's workspace
- * storage with `bridge.json`, not in `.aboard/runtime/` — putting it under the
- * tree the user deletes would restart the numbers and silently reuse ids, and
- * `.aboard/` only exists once the project is initialized while the counter
- * must survive before and after.
+ * a UUID. The sequence belongs to one initialized runtime and is reset when
+ * `.aboard/` is deleted. The counter file lives under `.aboard/runtime/`.
  */
 export class WorkspaceAgentIdCounter {
   readonly #path: string;
   #next: number;
 
-  private constructor(path: string, next: number) {
+  private constructor(path: string, next: number, private readonly admission: () => boolean) {
     this.#path = path;
     this.#next = next;
   }
@@ -35,11 +30,11 @@ export class WorkspaceAgentIdCounter {
    * launch files live at UUID-named paths, which plain numbers can never
    * match, so reusing 1..N alongside them is collision-free.
    */
-  public static load(storageDirectory: string, seeder?: () => Iterable<string>): WorkspaceAgentIdCounter {
-    const path = join(storageDirectory, AGENT_COUNTER_FILE_NAME);
+  public static load(projectRoot: string, seeder?: () => Iterable<string>, admission: () => boolean = () => true): WorkspaceAgentIdCounter {
+    const path = join(projectRoot, ".aboard", "runtime", AGENT_COUNTER_FILE_NAME);
     const persisted = this.#readCeiling(path);
     const fleet = seeder === undefined ? 0 : this.#fleetCeiling(seeder());
-    return new WorkspaceAgentIdCounter(path, Math.max(persisted, fleet) + 1);
+    return new WorkspaceAgentIdCounter(path, Math.max(persisted, fleet) + 1, admission);
   }
 
   /**
@@ -54,6 +49,7 @@ export class WorkspaceAgentIdCounter {
    * and the durable store can only skip ids, never repeat them.
    */
   public next(): AgentId {
+    if (!this.admission()) throw new Error("aboard runtime is not initialized");
     const value = this.#next;
     this.#next = value + 1;
     this.#persistCeiling(value);

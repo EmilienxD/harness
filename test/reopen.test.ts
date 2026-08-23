@@ -80,7 +80,7 @@ function setup(options: {
         : resolveLaunchConfiguration({ agentName: type, systemPrompt: `You are the ${type}.`, declaredTools: ["Read", "Grep"] }),
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
-    spills: { write: async (file) => file.relativePath },
+    spills: { write: async (file) => file.relativePath, prepare: async () => undefined },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
   const openTerminals = new Set<string>();

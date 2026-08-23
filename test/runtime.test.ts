@@ -8,6 +8,45 @@ import { FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore }
 import type { AutoRunRecord } from "../src/domain/auto-run.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
+import { RuntimeAdmission, RuntimeStartup } from "../src/runtime/admission.js";
+
+test("runtime admission closes immediately and drains admitted operations before reset cleanup", async () => {
+  const admission = new RuntimeAdmission(true);
+  let release!: () => void;
+  const deferred = new Promise<void>((resolve) => { release = resolve; });
+  const admitted = admission.run(async () => { await deferred; });
+  let drained = false;
+  const closing = admission.close().then(() => { drained = true; });
+
+  await assert.rejects(admission.run(async () => undefined), /not initialized/);
+  assert.equal(drained, false);
+  release();
+  await admitted;
+  await closing;
+  assert.equal(drained, true);
+
+  admission.open();
+  await admission.run(async () => undefined);
+});
+
+test("runtime startup is single-flight and reset drains endpoint publication", async () => {
+  const admission = new RuntimeAdmission(true);
+  const startup = new RuntimeStartup(admission);
+  let starts = 0;
+  let release!: () => void;
+  const publishing = new Promise<void>((resolve) => { release = resolve; });
+  const operation = async () => { starts += 1; await publishing; };
+  const first = startup.run(operation);
+  const second = startup.run(operation);
+  assert.equal(first, second);
+  assert.equal(starts, 1);
+  let resetFinished = false;
+  const reset = admission.close().then(() => { resetFinished = true; });
+  assert.equal(resetFinished, false);
+  release();
+  await Promise.all([first, reset]);
+  assert.equal(resetFinished, true);
+});
 
 test("fleet runtime metadata saves atomically and ignores corrupt recovery data", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-runtime-"));

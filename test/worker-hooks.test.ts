@@ -85,7 +85,7 @@ test("re-grounding names every bound issue and refuses a worker bound to none", 
 });
 
 test("worker Python hook is silent for non-aboard and wrong-role sessions", () => {
-  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   for (const env of [
     {},
     { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" },
@@ -101,7 +101,7 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
 });
 
 test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and treats Explore as automated worker", async () => {
-  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "Changed the boundary — safely." });
   // An interactive general-purpose session reports nothing: without the delivery flag
   // the guard exits 0 with no output, exactly like a brainstormer.
@@ -169,7 +169,7 @@ test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and tr
 });
 
 test("session Python hooks post proof-of-life and reason, and stay silent without boarding env", async () => {
-  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   // Guard path: no ABOARD_AGENT_ID means a hand-started session, which must
   // exit 0 with neither stdout nor stderr even for the new routes.
   const silent = spawnSync("uv", ["run", "--no-project", "python", script, "session-start"], { input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup" }), encoding: "utf8" });
@@ -226,7 +226,7 @@ test("session Python hooks post proof-of-life and reason, and stay silent withou
 
 test("scaffold registers lifecycle, Agent telemetry, and compact re-grounding", async () => {
 
-  const hooks = JSON.parse(await readFile(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8")) as Record<string, unknown>;
+  const hooks = JSON.parse(await readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "aboard-hooks.json"), "utf8")) as Record<string, unknown>;
   for (const event of ["SubagentStart", "SubagentStop", "PostToolUse", "PostCompact", "Stop", "StopFailure"]) assert.ok(event in hooks);
   assert.equal((hooks.PostToolUse as { matcher: string }[])[0]?.matcher, "Agent");
   // SessionStart carries the proof-of-life registration plus the manager
@@ -247,11 +247,11 @@ test("scaffold registers lifecycle, Agent telemetry, and compact re-grounding", 
  * reading it back keeps this test on the same source of truth.
  */
 function scaffoldedRoutes(): { readonly names: readonly string[]; readonly table: Readonly<Record<string, string>> } {
-  const script = join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   const printed = spawnSync("uv", ["run", "--no-project", "python", script, "--routes"], { encoding: "utf8" });
   assert.equal(printed.status, 0);
   const table = JSON.parse(printed.stdout) as Record<string, string>;
-  const registration = readFileSync(join(process.cwd(), "assets", "scaffold", ".claude", "hooks", "aboard-hooks.json"), "utf8");
+  const registration = readFileSync(join(process.cwd(), "assets", "scaffold", ".aboard", "aboard-hooks.json"), "utf8");
   const entries = JSON.parse(registration) as Record<string, { hooks: { command: string; args: string[] }[] }[]>;
   const names: string[] = [];
   for (const groups of Object.values(entries)) {

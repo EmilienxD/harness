@@ -38,7 +38,7 @@ You talk to the **Manager**. It plans, delegates, and reports — and it cannot 
 **You need:** VS Code 1.125+, Claude Code, Git, the GitHub CLI (`gh`), and [`uv`](https://docs.astral.sh/uv/).
 
 1. Install the extension (`code --install-extension aboard-*.vsix`).
-2. Open your project, click the aboard icon, hit **Initialize**. It installs agent definitions, skills, and hooks, starts a loopback-only bridge, and adds the authenticated aboard MCP registration while preserving your existing servers and settings.
+2. Open your project, click the aboard icon, hit **Initialize**. It installs aboard-owned agent definitions, skills, and hooks under `.aboard/`, starts a loopback-only bridge, and supplies the Manager's authenticated MCP configuration only for that launch. Your project-wide Claude settings and MCP servers are untouched.
 3. Click **+ New Manager** and ask it something: *"What's the state of this project?"*
 
 Then try one of these in the Manager terminal:
@@ -76,7 +76,7 @@ Then try one of these in the Manager terminal:
 
 - **One writer, enforced.** The write lease is derived from each agent's actual tool set, not a flag someone remembered to set. Two delegated tasks cannot edit your tree at once. It locks automated work, never your own hands: a terminal you're chatting in takes no lease, so you stay free to work in parallel.
 - **Loopback only.** The bridge binds `127.0.0.1` and requires a per-activation bearer token on every request. Tokens live outside your project and are never committed.
-- **Your config stays yours.** aboard adds hook registrations to `.claude/settings.json` and nothing else. It never writes `permissions`. It never scaffolds a `CLAUDE.md` — that file is yours.
+- **Your config stays yours.** aboard never modifies `.claude/`, `.gitignore`, or `CLAUDE.md`. Hooks and skills are selected from an isolated bundle for each aboard launch.
 - **Nothing hidden runs.** The bridge is the only creator of agents. A Claude session you start by hand is outside the system, and aboard's hooks stay silent in it.
 - **Scaffolded files are versioned.** Edit one, and the next update warns instead of clobbering it.
 

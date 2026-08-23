@@ -4,9 +4,10 @@ import { AUTO_RUN_PHASES, type AutoRunPhase, type AutoRunRecord } from "../domai
 import type { FleetPersistenceDto } from "../domain/fleet.js";
 import type { SessionLedgerDto } from "../domain/session-ledger.js";
 import { parseFleetPersistenceDto, parseSessionLedgerDto } from "../domain/validation.js";
+import type { RuntimeAdmission } from "./admission.js";
 
 export class AtomicJsonFile<T> {
-  public constructor(private readonly path: string, private readonly parse: (value: unknown) => T | undefined) {}
+  public constructor(private readonly path: string, private readonly parse: (value: unknown) => T | undefined, private readonly admission?: RuntimeAdmission) {}
   public async load(): Promise<T | undefined> {
     try {
       const value: unknown = JSON.parse(await readFile(this.path, "utf8"));
@@ -17,6 +18,10 @@ export class AtomicJsonFile<T> {
     }
   }
   public async save(value: T): Promise<void> {
+    if (this.admission !== undefined) return this.admission.run(() => this.write(value));
+    return this.write(value);
+  }
+  private async write(value: T): Promise<void> {
     const temporary = `${this.path}.${process.pid}.tmp`;
     await mkdir(dirname(this.path), { recursive: true });
     await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
@@ -29,11 +34,11 @@ export class AtomicJsonFile<T> {
 }
 
 export class FileFleetStore extends AtomicJsonFile<FleetPersistenceDto> {
-  public constructor(workspaceRoot: string) {
+  public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
     super(join(workspaceRoot, ".aboard", "runtime", "fleet.json"), (value) => {
       const result = parseFleetPersistenceDto(value);
       return result.ok ? result.value : undefined;
-    });
+    }, admission);
   }
 }
 
@@ -44,11 +49,11 @@ export class FileFleetStore extends AtomicJsonFile<FleetPersistenceDto> {
  * live state rather than project history.
  */
 export class FileSessionLedgerStore extends AtomicJsonFile<SessionLedgerDto> {
-  public constructor(workspaceRoot: string) {
+  public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
     super(join(workspaceRoot, ".aboard", "runtime", "sessions.json"), (value) => {
       const result = parseSessionLedgerDto(value);
       return result.ok ? result.value : undefined;
-    });
+    }, admission);
   }
 }
 
@@ -108,8 +113,8 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
 }
 
 export class FileAutoRunStore extends AtomicJsonFile<AutoRunRecord> {
-  public constructor(workspaceRoot: string) {
-    super(join(workspaceRoot, ".aboard", "runtime", "auto-run.json"), parseAutoRunRecord);
+  public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
+    super(join(workspaceRoot, ".aboard", "runtime", "auto-run.json"), parseAutoRunRecord, admission);
   }
 
   public async clear(): Promise<void> {
