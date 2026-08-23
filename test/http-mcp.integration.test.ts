@@ -40,7 +40,7 @@ test("serves the MCP protocol over authenticated loopback HTTP to the Manager on
       run: async () => ({ result: "done" }),
       spawn: async () => ({ status: "running" }),
       spawnInteractive: async () => ({ handoff: "open" }),
-    }, { managerAgentId }),
+    }, { managerAgentId: () => managerAgentId }),
   });
   context.after(() => bridge.stop());
 

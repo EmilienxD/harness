@@ -27,6 +27,22 @@ export class FileManagerStore implements ManagerStore {
   public async save(value: ManagerPersistenceDto): Promise<void> { const temporary = `${this.#path}.${process.pid}.tmp`; await mkdir(dirname(this.#path), { recursive: true }); await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { encoding: "utf8", mode: 0o600 }); await rm(this.#path, { force: true }); await rename(temporary, this.#path); }
 }
 
+/** Keeps a recorded Manager identity available without minting a new one merely because the extension activated. */
+export class ManagerIdentity {
+  #agentId: AgentId | undefined;
+
+  public constructor(agentId: AgentId | undefined, private readonly mint: () => AgentId) {
+    this.#agentId = agentId;
+  }
+
+  public current(): AgentId | undefined { return this.#agentId; }
+
+  public require(): AgentId {
+    this.#agentId ??= this.mint();
+    return this.#agentId;
+  }
+}
+
 /**
  * The rewritten Manager definition, plus the `model:` and `effort:` it declares.
  * Those two are also passed as `--model`/`--effort`, because `--resume` reads no

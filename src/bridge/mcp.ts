@@ -34,7 +34,8 @@ export type McpCoordinator = Pick<DelegationCoordinator,
   "run" | "spawn" | "spawnInteractive">;
 
 export interface McpHandlerOptions {
-  readonly managerAgentId: AgentId;
+  /** Undefined until a first-ever Manager is actually launched. */
+  readonly managerAgentId: () => AgentId | undefined;
   readonly services?: McpServices;
 }
 
@@ -317,7 +318,8 @@ export function createMcpHandler(
     if (request.method !== "POST") return protocolError(405, "invalid-request", "Method not allowed");
 
     const caller = request.headers[AGENT_ID_HEADER];
-    if (caller !== options.managerAgentId) {
+    const managerAgentId = options.managerAgentId();
+    if (managerAgentId === undefined || caller !== managerAgentId) {
       return refusal(403, "not-the-manager", "This MCP server is the Manager's. Only the Aboard Manager session may orchestrate the fleet.");
     }
 

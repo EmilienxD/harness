@@ -110,7 +110,7 @@ function setup() {
     terminals,
     sessions: { observe: (agentId) => sessionLiveness.get(agentId) ?? "live" },
     onStaleLeaseRecovered: (holder) => { reclaimed.push(holder.agentId); },
-    managerAgentId: MANAGER,
+    managerAgentId: () => MANAGER,
     shell: "powershell",
     disallowedTools: ["mcp__aboard__*"],
     // aboard.launch.claudeCommand: a wrapper that takes its own arguments.
@@ -132,7 +132,7 @@ function setup() {
     spills: { write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); return spill.relativePath; } },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
-  const handler = createMcpHandler(coordinator, { managerAgentId: MANAGER });
+  const handler = createMcpHandler(coordinator, { managerAgentId: () => MANAGER });
   const call = (name: string, args: unknown = {}, caller: readonly [string | undefined] = [MANAGER]) =>
     mcpCall(handler, name, args, caller[0]);
   const launch = (args: unknown = {}) => call("run_agent", args);
@@ -300,7 +300,7 @@ test("keeps a transcript-less persisted worker paused", async () => {
   const refusing = new DelegationCoordinator({
     workspaceRoot: "C:\\repo", isResumable: async () => false,
     fleet: context.fleet, lease: context.lease, terminals: context.terminals,
-    managerAgentId: MANAGER, shell: "powershell",
+    managerAgentId: () => MANAGER, shell: "powershell",
     agentIdFactory: () => agent("unused"), sessionIdFactory: () => session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     configurations: { get: async () => definitionFor("implementer", ["Read", "Edit"]) },
     prompts: { resolve: async () => undefined }, spills: { write: async (spill) => spill.relativePath },
@@ -316,7 +316,7 @@ test("the todo verbs pass their arguments through and reject an unknown status",
   const handler = createMcpHandler(
     setup().coordinator,
     {
-      managerAgentId: MANAGER,
+      managerAgentId: () => MANAGER,
       services: {
         log: (message: string) => logged.push(message),
         github: {
@@ -367,7 +367,7 @@ test("todo_update takes a numeric position and a required expect, and rejects an
   const handler = createMcpHandler(
     setup().coordinator,
     {
-      managerAgentId: MANAGER,
+      managerAgentId: () => MANAGER,
       services: {
         github: {
           updateRoadmapTask: async (input: unknown) => { calls.push(input); return { issue: 9, task: 3, notices: [] }; },
@@ -442,6 +442,18 @@ test("refuses every MCP call from any session but the Manager", async () => {
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
 });
 
+test("a pre-Manager MCP request is refused without resolving an identity", async () => {
+  const context = setup();
+  const handler = createMcpHandler(context.coordinator, { managerAgentId: () => undefined });
+  const response = await mcpCall(handler, "run_agent", {
+    type: "general-purpose",
+    description: "try to launch before the Manager exists",
+    interactive: true,
+  }, MANAGER);
+  assert.equal(response.status, 403);
+  assert.deepEqual(context.fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
+});
+
 test("runtime-validates every tool boundary and rejects unknown fields", async () => {
   const { call } = setup();
   for (const [name, args] of [
@@ -486,7 +498,7 @@ test("start_auto_run forwards one explicit Chrome choice", async () => {
   const { coordinator } = setup();
   const starts: unknown[] = [];
   const handler = createMcpHandler(coordinator, {
-    managerAgentId: MANAGER,
+    managerAgentId: () => MANAGER,
     services: { autoRun: { start: async (options) => { starts.push(options); return { started: true, chromeEnabled: options?.chrome === true }; } } },
   });
   const response = await mcpCall(handler, "start_auto_run", { chrome: true }, MANAGER);
@@ -621,7 +633,7 @@ test("an unobservable session is not a gone one: no liveness source never reclai
   const unobserved = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
     fleet: context.fleet, lease: context.lease, terminals: context.terminals,
-    managerAgentId: MANAGER, shell: "powershell",
+    managerAgentId: () => MANAGER, shell: "powershell",
     agentIdFactory: () => agent("worker-unobserved"),
     sessionIdFactory: () => session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
     configurations: { get: async () => definitionFor("pr-doctor-afk", ["Read", "Edit"]) },

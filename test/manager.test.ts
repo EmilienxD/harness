@@ -3,7 +3,8 @@ import test from "node:test";
 import { mkdtemp, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { FileManagerStore, ManagerLifecycle } from "../src/claude/manager.js";
+import { FileManagerStore, ManagerIdentity, ManagerLifecycle } from "../src/claude/manager.js";
+import { WorkspaceAgentIdCounter } from "../src/runtime/agent-id-counter.js";
 import { planManagerResume, resolveLaunchConfiguration } from "../src/claude/launch.js";
 import type { ManagerLaunchDefinition } from "../src/claude/manager.js";
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
@@ -78,6 +79,32 @@ test("manager metadata persists and corrupt metadata recovers as missing", async
   assert.deepEqual(JSON.parse(await readFile(path, "utf8")), value);
   await writeFile(path, "not json", "utf8");
   assert.equal(await store.load(), undefined);
+});
+
+test("reactivation before the first Manager launch does not consume agent 1", async () => {
+  const storage = await mkdtemp(join(tmpdir(), "aboard-manager-identity-"));
+  const firstCounter = WorkspaceAgentIdCounter.load(storage);
+  let firstMints = 0;
+  const firstActivation = new ManagerIdentity(undefined, () => { firstMints += 1; return firstCounter.next(); });
+
+  assert.equal(firstActivation.current(), undefined);
+  assert.equal(firstMints, 0);
+
+  // A reload before any Manager launch must see the counter untouched. The
+  // next activation therefore gives the first real Manager index 1, not 2.
+  const secondCounter = WorkspaceAgentIdCounter.load(storage);
+  const secondActivation = new ManagerIdentity(undefined, () => secondCounter.next());
+  assert.equal(secondActivation.require(), "1");
+  assert.equal(secondActivation.require(), "1");
+  assert.equal(secondActivation.current(), "1");
+});
+
+test("a recorded Manager identity is reused without minting another index", () => {
+  let mints = 0;
+  const identity = new ManagerIdentity(agentId, () => { mints += 1; return "2" as AgentId; });
+  assert.equal(identity.current(), agentId);
+  assert.equal(identity.require(), agentId);
+  assert.equal(mints, 0);
 });
 
 test("resume keeps the recorded identity and new replaces the session", async () => {

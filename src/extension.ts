@@ -17,7 +17,7 @@ import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/
 import { TerminalController } from "./claude/terminals.js";
 import { isNamedBuiltinAgentType, isNonRestorablePersistedAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
-import { FileManagerStore, ManagerLifecycle } from "./claude/manager.js";
+import { FileManagerStore, ManagerIdentity, ManagerLifecycle } from "./claude/manager.js";
 import { sessionIsResumable } from "./claude/sessions.js";
 import { TranscriptBackupStore } from "./claude/transcript-backup.js";
 import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
@@ -420,10 +420,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   ]);
   const lease = new WriteLease();
   // A recorded Manager keeps its id across restarts (identity stability). A
-  // first-ever Manager falls back to the numeric counter so new projects
-  // number their Manager too; a pre-upgrade recorded Manager keeps its UUID
-  // until the user starts a new Manager.
-  const managerAgentId = recordedManager?.agentId ?? agentIdCounter.next();
+  // first-ever Manager mints its number only when it actually launches: merely
+  // activating or reloading an untouched project must not consume agent 1.
+  const managerIdentity = new ManagerIdentity(recordedManager?.agentId, () => agentIdCounter.next());
   // Claude Code sweeps session files older than `cleanupPeriodDays` every time
   // it starts and offers no way to disable that, so the one session aboard
   // resumes for the project's whole life needs a copy of its own.
@@ -449,7 +448,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId, shell: process.platform === "win32" ? "powershell" : "git-bash", disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId: () => managerIdentity.require(), shell: process.platform === "win32" ? "powershell" : "git-bash", disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
   // A settled session leaves its terminal to be collected: the record the
   // fleet dropped still names an open terminal, and the next launch for the
@@ -718,7 +717,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push({ dispose: () => void managerMcpConfig.clear() });
   bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId, services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
+    handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId: () => managerIdentity.current(), services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
       // The fleet is what knows which session the Manager is currently on, and
       // an agent it no longer holds (the user deleted `.aboard/`, or this is
       // not the Manager) gets no copy — which is also what keeps a checkpoint
@@ -762,6 +761,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // line goes to the output channel instead of being lost silently.
   const enqueueManagerNotification = (message: string): void => {
     output.appendLine(message);
+    const managerAgentId = managerIdentity.current();
+    if (managerAgentId === undefined) return;
     if (fleet.get(managerAgentId)?.identity.type !== "manager") return;
     try { fleet.enqueueNotification(managerAgentId, message, new Date().toISOString() as IsoTimestamp); }
     catch (error) { output.appendLine(`Unable to queue auto-run notification: ${error instanceof Error ? error.message : "unknown error"}`); }
@@ -809,13 +810,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     preflight: (command) => claudeProbe.require(command),
     command: () => currentConfiguration.claudeCommand,
     effort: () => currentConfiguration.launchEffort,
-    agentIdFactory: () => managerAgentId,
+    agentIdFactory: () => managerIdentity.require(),
     isResumable: sessionIsResumable,
     restoreTranscript: (sessionId) => transcripts.restore(sessionId),
     wrapper: wrapperLayout,
     // The aboard MCP server is registered per Manager launch and nowhere in the
     // project, so no worker and no hand-started `claude` connects it.
-    mcpConfig: () => managerMcpConfig.write({ port: bridge!.port, token: bridge!.token, agentId: managerAgentId }),
+    mcpConfig: () => managerMcpConfig.write({ port: bridge!.port, token: bridge!.token, agentId: managerIdentity.require() }),
   });
   // The UI offers resume and new as separate actions, so the launch path never
   // has to interrupt with a "which did you mean?" prompt.

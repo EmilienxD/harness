@@ -156,7 +156,8 @@ export interface DelegationCoordinatorOptions {
   readonly configurations: DelegationConfigurationSource;
   readonly prompts: DelegationPromptResolver;
   readonly spills: PromptSpillStore;
-  readonly managerAgentId: AgentId;
+  /** Resolved lazily so extension activation alone does not consume the first agent id. */
+  readonly managerAgentId: () => AgentId;
   readonly shell: ShellKind;
   /** Infrastructure-level denials applied to every delegated launch and resume. */
   readonly disallowedTools?: readonly string[];
@@ -379,7 +380,7 @@ export class DelegationCoordinator {
   public async spawn(input: DelegationLaunchInput): Promise<unknown> {
     const launched = await this.#launch(input, {
       mode: "mailbox",
-      managerAgentId: this.options.managerAgentId,
+      managerAgentId: this.options.managerAgentId(),
     }, "manager");
     return { ...launched, status: "running" };
   }

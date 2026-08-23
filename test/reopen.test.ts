@@ -69,7 +69,7 @@ function setup(options: {
     fleet,
     lease,
     terminals,
-    managerAgentId: agent("manager-1"),
+    managerAgentId: () => agent("manager-1"),
     shell: "powershell",
     disallowedTools: ["mcp__aboard__*"],
     agentIdFactory: () => agent("unused"),
