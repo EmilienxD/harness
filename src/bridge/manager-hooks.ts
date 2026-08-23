@@ -2,6 +2,7 @@ import type { AgentId, AgentSession, IsoTimestamp, WorkerResult } from "../domai
 import { renderTasks, type RoadmapTask } from "../domain/roadmap.js";
 import type { FleetRegistry, MailboxEntry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
+import type { AutoRunDryRunResult } from "../domain/auto-run.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 import { describeReopenOutcome, type ReopenOutcome } from "../claude/reopen.js";
 import type { DelegationLaunchInput } from "./delegation.js";
@@ -514,7 +515,7 @@ export interface InvokingTerminalKiller {
 
 /** The extension-owned actions `/auto`, `/review-pr`, and `/reopen` trigger. */
 export interface ManagerCommandActions {
-  startAutoRun(options?: { readonly chrome?: boolean }): Promise<unknown>;
+  startAutoRun(options?: { readonly chrome?: boolean; readonly dry?: boolean }): Promise<unknown>;
   /** `focus` is the user's trailing text: what they want the session to look at. */
   reviewPullRequest(focus?: string): Promise<unknown>;
   /**
@@ -626,12 +627,17 @@ export class ManagerPromptService {
       return { intercepted: true, message: `aboard cannot handle /${action.command} right now: the extension action is unavailable.` };
     }
     if (action.invalidArguments) {
-      return { intercepted: true, message: `/${action.command} accepts only the optional --chrome flag.` };
+      return {
+        intercepted: true,
+        message: action.type === "auto"
+          ? "/auto accepts the optional --dry and --chrome flags."
+          : `/${action.command} does not accept those arguments.`,
+      };
     }
     let outcome: unknown;
     try {
       outcome = action.type === "auto"
-        ? await this.actions.startAutoRun(action.chrome ? { chrome: true } : {})
+        ? await this.actions.startAutoRun({ ...(action.chrome ? { chrome: true as const } : {}), ...(action.dry ? { dry: true as const } : {}) })
         : action.type === "reopen"
           ? await this.actions.reopenSession(action.selector)
           : await this.actions.reviewPullRequest(action.focus);
@@ -639,8 +645,14 @@ export class ManagerPromptService {
       return { intercepted: true, message: `aboard could not run /${action.command}: ${error instanceof Error ? error.message : "the action failed"}.` };
     }
     const summary = describeActionOutcome(action.type, outcome);
-    const occurredAt = this.#now().toISOString() as IsoTimestamp;
-    this.fleet.enqueueNotification(agentId, `you ran /${action.command}: ${summary}`, occurredAt);
+    // A dry run is an inspection, not an event the Manager needs replayed on
+    // the user's next real prompt. Keeping the full forecast out of the fleet
+    // mailbox is also part of its promise not to change runtime state.
+    const isDryRun = action.type === "auto" && record(outcome)?.dryRun === true;
+    if (!isDryRun) {
+      const occurredAt = this.#now().toISOString() as IsoTimestamp;
+      this.fleet.enqueueNotification(agentId, `you ran /${action.command}: ${summary}`, occurredAt);
+    }
     return {
       intercepted: true,
       message: summary,
@@ -657,6 +669,7 @@ function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unkno
   // wording shared with the palette command; describing it twice would drift.
   if (type === "reopen") return describeReopenOutcome(outcome as ReopenOutcome);
   if (type === "auto") {
+    if (value.dryRun === true) return describeAutoRunDryRun(outcome as AutoRunDryRunResult);
     if (value.started === false) return `auto-run did not start: ${typeof value.reason === "string" ? value.reason : "no reason given"}.`;
     const issues = Array.isArray(value.issues) ? value.issues.length : 0;
     const cycles = Array.isArray(value.dependencyCycles) ? value.dependencyCycles.length : 0;
@@ -669,6 +682,60 @@ function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unkno
     case "launched": return String(value.notice ?? `Launched a reviewer for PR #${String(value.prNumber)}.`);
     default: return "Reopened the session for the open pull request.";
   }
+}
+
+function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
+  if (!result.inspected) {
+    return `Auto-run dry run could not inspect the next run: ${result.reason}. No changes were made.`;
+  }
+
+  const lines = [
+    "Auto-run dry run - no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed.",
+    result.ready ? "Ready: /auto can start with the repository state inspected." : `Blocked: ${result.blockers.join("; ")}.`,
+    "",
+    "Run plan:",
+    `- Session: create ${result.sessionBranch} from ${result.sessionBase}; every issue PR targets that session branch.`,
+    result.isolatedWorkspace
+      ? `- Workspace: create a separate checkout; your checkout and branch stay untouched${result.keepsWorkspace ? ", and the checkout is kept when the run drains" : ", and the checkout is removed after a clean drain"}.`
+      : "- Workspace: use this checkout; it must be clean, aboard moves HEAD during the run, and restores the current branch when the run ends.",
+    `- Agents: visible implementers run one at a time with Chrome ${result.chromeEnabled ? "on" : "off"}; pull-request review is ${result.reviewMode ? "on" : "off"}.`,
+    "",
+    `Forecast issue order (${result.issues.length}):`,
+  ];
+
+  if (result.issues.length === 0) lines.push("- None.");
+  for (const [index, issue] of result.issues.entries()) {
+    const difficulty = issue.difficulty === undefined ? "unrated (most capable tier)" : `${issue.difficulty} difficulty`;
+    const review = result.reviewMode
+      ? issue.disposition === "hitl"
+        ? " An interactive pr-doctor reports findings and applies only fixes you approve."
+        : " An automated pr-doctor reviews and may leave fixes for aboard to commit."
+      : "";
+    const gate = issue.disposition === "hitl"
+      ? ` You must merge its PR, or another account must approve it so aboard may merge it, before the issue is closed and the run continues${result.pauseAfterHitl ? "; after it lands, the run pauses and you must run /auto again" : ""}.`
+      : " Aboard merges its PR into the session branch and closes the issue; you act only if a conflict cannot be reconciled or the repository refuses the merge.";
+    lines.push(
+      `${index + 1}. #${issue.number} ${issue.title} ([AI]-${issue.disposition}, ${difficulty}) -> ${issue.branch}. A visible implementer leaves edits; aboard comments on the issue, commits, pushes, and opens the PR.${review}${gate}`,
+    );
+  }
+
+  if (result.dependencyCycles.length > 0) {
+    lines.push("", "Dependency cycles:");
+    for (const cycle of result.dependencyCycles) lines.push(`- ${cycle.map((number) => `#${number}`).join(", ")}: internal edges are relaxed and those issues are ordered oldest first.`);
+  }
+  if (result.skipped.length > 0) {
+    lines.push("", "Skipped for this forecast:");
+    for (const issue of result.skipped) lines.push(`- #${issue.number}: ${issue.reason}.`);
+  }
+
+  lines.push(
+    "",
+    result.mergesItsOwnPullRequest
+      ? `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase} and attempts to merge it; you act if reconciliation or the merge fails.`
+      : `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase}; you must review and merge that final PR.`,
+    "The order is a forecast: aboard re-reads GitHub after every issue, so newly unblocked, closed, or relabelled work can change what comes next.",
+  );
+  return lines.join("\n");
 }
 
 /**
@@ -687,6 +754,7 @@ interface ParsedActionCommand {
   readonly command: string;
   readonly invalidArguments: boolean;
   readonly chrome: boolean;
+  readonly dry: boolean;
   /** `/review-pr` only: the trailing text, forwarded as the review focus. */
   readonly focus?: string;
   /** `/reopen` only: the trailing text, an agent id or an agent type. */
@@ -704,7 +772,7 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
 }
 
 /**
- * `/auto` accepts only the explicit `--chrome` launch choice. Unknown trailing
+ * `/auto` accepts the explicit `--dry` inspection and `--chrome` launch choice. Unknown trailing
  * text is intercepted but rejected, so a typo cannot silently start a run with
  * the wrong capability. `/review-pr` and `/reopen` are the exceptions: their
  * trailing text is a real parameter — the focus for a fallback doctor's first
@@ -721,12 +789,20 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   const command = match[1] as "auto" | "review-pr" | "reopen";
   const trailing = match[2]?.trim() ?? "";
   if (command === "review-pr") {
-    return { type: command, command, invalidArguments: false, chrome: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
+    return { type: command, command, invalidArguments: false, chrome: false, dry: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
   }
   if (command === "reopen") {
-    return { type: command, command, invalidArguments: false, chrome: false, ...(trailing.length === 0 ? {} : { selector: trailing }) };
+    return { type: command, command, invalidArguments: false, chrome: false, dry: false, ...(trailing.length === 0 ? {} : { selector: trailing }) };
   }
-  return { type: command, command, invalidArguments: trailing !== "" && trailing !== "--chrome", chrome: trailing === "--chrome" };
+  const flags = trailing.length === 0 ? [] : trailing.split(/\s+/u);
+  const known = new Set(["--chrome", "--dry"]);
+  return {
+    type: command,
+    command,
+    invalidArguments: flags.some((flag) => !known.has(flag)) || new Set(flags).size !== flags.length,
+    chrome: flags.includes("--chrome"),
+    dry: flags.includes("--dry"),
+  };
 }
 
 /**

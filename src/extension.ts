@@ -704,7 +704,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // an edit the user made on their phone.
   const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
-    startAutoRun: (options) => autoRun.start(options),
+    startAutoRun: (options) => options?.dry === true
+      ? autoRun.dryRun(options.chrome === true ? { chrome: true } : {})
+      : autoRun.start(options?.chrome === true ? { chrome: true } : {}),
     reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
     reopenSession: (selector) => reopen.reopenLatest(selector),
   }, terminals, roadmapReminders);

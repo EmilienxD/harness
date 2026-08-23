@@ -20,6 +20,7 @@ import {
   runPullRequestTitle,
   selectIssues,
   sessionBranchName,
+  type AutoRunDryRunResult,
   type AutoRunPhase,
   type AutoRunRecord,
   type AutoRunSettings,
@@ -234,6 +235,56 @@ export class AutoRunEngine {
   /** The owning agent for an open pull request, or `undefined` if unknown. */
   public owner(prNumber: number): PullRequestOwner | undefined {
     return this.#owners.get(prNumber);
+  }
+
+  /**
+   * Inspects exactly the inputs a new run uses without reserving an id or
+   * performing any write. A dirty in-place checkout is reported as a blocker
+   * after the GitHub queue is read, so `/auto --dry` remains useful for planning
+   * even when `/auto` would currently refuse to start.
+   */
+  public async dryRun(options: { readonly chrome?: boolean } = {}): Promise<AutoRunDryRunResult> {
+    if (this.#state !== undefined) {
+      return { dryRun: true, inspected: false, reason: "a run is already active" };
+    }
+
+    let status;
+    let defaultBranch: string;
+    try {
+      status = await this.options.git.status();
+      defaultBranch = await this.options.git.defaultBranch();
+    } catch (error) {
+      return { dryRun: true, inspected: false, reason: `the workspace is not a usable git repository (${message(error)})` };
+    }
+    const githubFailure = await this.#checkGitHubAuthentication();
+    if (githubFailure !== undefined) return { dryRun: true, inspected: false, reason: githubFailure };
+
+    const selection = selectIssues((await this.options.github.listImplementableIssues()).candidates);
+    const settings = this.options.settings();
+    const blockers: string[] = [];
+    if (status.entries.length > 0 && this.options.workspaces?.isolates() !== true) {
+      const paths = status.entries.map((entry) => entry.path);
+      blockers.push(`the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`);
+    }
+    if (selection.issues.length === 0) blockers.push(emptyQueueReason(selection.skipped));
+
+    return {
+      dryRun: true,
+      inspected: true,
+      ready: blockers.length === 0,
+      blockers,
+      reviewMode: settings.review,
+      pauseAfterHitl: settings.pauseAfterHitl,
+      chromeEnabled: options.chrome === true,
+      isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
+      keepsWorkspace: settings.worktree.keep,
+      sessionBranch: "aboard/run/<run-id>",
+      sessionBase: status.branch ?? defaultBranch,
+      mergesItsOwnPullRequest: settings.mergeRunPullRequest,
+      issues: selection.issues,
+      skipped: selection.skipped,
+      dependencyCycles: selection.dependencyCycles,
+    };
   }
 
   /**

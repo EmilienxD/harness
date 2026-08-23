@@ -827,6 +827,59 @@ test("a dirty working tree refuses the run and names the dirty paths", async () 
   assert.equal(context.saved.length, 0);
 });
 
+test("a dry run forecasts the exact queue and branches without creating run state or side effects", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    startDirty: true,
+    settings: { review: true, pauseAfterHitl: true, mergeRunPullRequest: true },
+    issues: [
+      { number: 41, title: "Ship the UI", labels: ["[AI]-hitl", "[AI]-advanced-difficulty"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [42], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 42, title: "Build the API", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+      { number: 43, title: "Needs classification", labels: [], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
+    ],
+  });
+
+  const result = await context.engine.dryRun({ chrome: true });
+
+  assert.equal(result.inspected, true);
+  if (!result.inspected) return;
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.blockers, ["the working tree is not clean: src/a.ts"]);
+  assert.equal(result.sessionBranch, "aboard/run/<run-id>");
+  assert.equal(result.sessionBase, "feature/wip");
+  assert.equal(result.reviewMode, true);
+  assert.equal(result.pauseAfterHitl, true);
+  assert.equal(result.chromeEnabled, true);
+  assert.equal(result.mergesItsOwnPullRequest, true);
+  assert.deepEqual(result.issues.map((issue) => [issue.number, issue.branch]), [
+    [42, "aboard/42-build-the-api"],
+    [41, "aboard/41-ship-the-ui"],
+  ]);
+  assert.deepEqual(result.skipped, [{ number: 43, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" }]);
+  assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"]);
+  assert.deepEqual(context.gitCalls, []);
+  assert.deepEqual(context.saved, []);
+  assert.deepEqual(context.states, []);
+  assert.deepEqual(context.notifications, []);
+  assert.deepEqual(context.launches, []);
+  assert.deepEqual(context.createdPullRequests, []);
+});
+
+test("a dry run in worktree mode treats the user's dirty checkout as read-only", async () => {
+  const context = harness({ worktree: true, startDirty: true });
+  const result = await context.engine.dryRun();
+
+  assert.equal(result.inspected, true);
+  if (!result.inspected) return;
+  assert.equal(result.ready, true);
+  assert.equal(result.isolatedWorkspace, true);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(context.userGitCalls.includes("status"), true);
+  assert.equal(context.workspaceGitCalls.length, 0, "dry-run never prepares or reads a second checkout");
+  assert.deepEqual(context.saved, []);
+  assert.deepEqual(context.launches, []);
+});
+
 test("an unauthenticated GitHub CLI refuses the run before querying or persisting a plan", async () => {
   const context = harness({ githubAuthenticationFails: true });
   const result = await context.engine.start();

@@ -84,6 +84,35 @@ export interface SkippedIssue {
 }
 
 /**
+ * A read-only forecast of the next run. The session branch uses a placeholder
+ * because a dry run deliberately does not mint or persist a run id; every issue
+ * branch and the final target are exact for the repository state inspected.
+ */
+export type AutoRunDryRunResult =
+  | {
+      readonly dryRun: true;
+      readonly inspected: false;
+      readonly reason: string;
+    }
+  | {
+      readonly dryRun: true;
+      readonly inspected: true;
+      readonly ready: boolean;
+      readonly blockers: readonly string[];
+      readonly reviewMode: boolean;
+      readonly pauseAfterHitl: boolean;
+      readonly chromeEnabled: boolean;
+      readonly isolatedWorkspace: boolean;
+      readonly keepsWorkspace: boolean;
+      readonly sessionBranch: "aboard/run/<run-id>";
+      readonly sessionBase: string;
+      readonly mergesItsOwnPullRequest: boolean;
+      readonly issues: readonly PlannedIssue[];
+      readonly skipped: readonly SkippedIssue[];
+      readonly dependencyCycles: readonly (readonly number[])[];
+    };
+
+/**
  * The persisted run record. A resume *hint*, never a source of truth: on
  * resume the engine re-derives every fact from git and GitHub, and a record that
  * disagrees with the repository loses. It carries no prompt text.

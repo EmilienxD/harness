@@ -557,7 +557,7 @@ test("an extension action reports a refusal verbatim and rejects unknown trailin
   const refused = await prompts.handle(managerId, "/auto");
   assert.match(String(refused.message), /auto-run did not start: the working tree is not clean: src\/a\.ts/);
   const invalid = await prompts.handle(managerId, "/auto now please");
-  assert.match(String(invalid.message), /accepts only the optional --chrome flag/);
+  assert.match(String(invalid.message), /optional --dry and --chrome flags/);
 });
 
 test("/auto --chrome passes one explicit Chrome choice to the run", async () => {
@@ -576,6 +576,91 @@ test("/auto --chrome passes one explicit Chrome choice to the run", async () => 
   const result = await prompts.handle(managerId, "/auto --chrome");
   assert.deepEqual(starts, [{ chrome: true }]);
   assert.equal(result.message, "auto-run started with 1 issue queued, Chrome on.");
+});
+
+test("/auto --dry reports the forecast and user gates without starting a run", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const starts: unknown[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async (options) => {
+        starts.push(options);
+        return {
+          dryRun: true,
+          inspected: true,
+          ready: true,
+          blockers: [],
+          reviewMode: true,
+          pauseAfterHitl: false,
+          chromeEnabled: true,
+          isolatedWorkspace: false,
+          keepsWorkspace: false,
+          sessionBranch: "aboard/run/<run-id>",
+          sessionBase: "feature/wip",
+          mergesItsOwnPullRequest: false,
+          issues: [
+            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff" },
+            { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "aboard/35-migrate-the-queue", difficulty: "advanced" },
+          ],
+          skipped: [{ number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" }],
+          dependencyCycles: [[34, 35]],
+        };
+      },
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+
+  const result = await prompts.handle(managerId, "/auto --chrome --dry");
+
+  assert.deepEqual(starts, [{ chrome: true, dry: true }]);
+  assert.match(String(result.message), /no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed/);
+  assert.match(String(result.message), /1\. #34 Add retry backoff.*aboard\/34-add-retry-backoff/);
+  assert.match(String(result.message), /2\. #35 Migrate the queue.*You must merge its PR/);
+  assert.match(String(result.message), /interactive pr-doctor/);
+  assert.match(String(result.message), /#36: unclassified/);
+  assert.match(String(result.message), /opens one PR from aboard\/run\/<run-id> into feature\/wip; you must review and merge/);
+  assert.deepEqual(await prompts.handle(managerId, "show me the plan"), {}, "a dry-run forecast is not replayed through the Manager mailbox");
+});
+
+test("/auto --dry reports blockers while preserving the inspected issue plan", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async () => ({
+        dryRun: true,
+        inspected: true,
+        ready: false,
+        blockers: ["the working tree is not clean: src/a.ts"],
+        reviewMode: false,
+        pauseAfterHitl: false,
+        chromeEnabled: false,
+        isolatedWorkspace: false,
+        keepsWorkspace: false,
+        sessionBranch: "aboard/run/<run-id>",
+        sessionBase: "main",
+        mergesItsOwnPullRequest: false,
+        issues: [{ number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff" }],
+        skipped: [],
+        dependencyCycles: [],
+      }),
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+
+  const result = await prompts.handle(managerId, "/auto --dry");
+  assert.match(String(result.message), /Blocked: the working tree is not clean: src\/a\.ts/);
+  assert.match(String(result.message), /#34 Add retry backoff/);
+
+  const invalid = await prompts.handle(managerId, "/auto --dry --dry");
+  assert.match(String(invalid.message), /optional --dry and --chrome flags/);
 });
 
 test("an unavailable extension action is reported instead of falling through to the Manager", async () => {
