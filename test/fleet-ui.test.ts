@@ -145,6 +145,22 @@ test("interrupted automated research is orphaned rather than advertised as resto
   registration.dispose(); model.dispose();
 });
 
+test("a finished session whose terminal was closed is removable, not restorable", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease();
+  fleet.register(worker, startedAt);
+  const finishedAt = at("2026-07-30T10:05:00.000Z");
+  fleet.transition(worker.identity.agentId, { status: "completed", startedAt, finishedAt, exitCode: 0, lastAssistantMessage: "done" }, finishedAt);
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => false);
+  const item = model.item(model.roots()[0]!);
+  assert.equal(item.description, "completed · terminal closed");
+  assert.equal(item.contextValue, "aboard.agent.orphaned");
+  assert.equal(item.command, undefined);
+  assert.match(item.tooltip, /cannot be restored/i);
+  assert.match(item.tooltip, /Remove Interrupted Session/);
+  assert.doesNotMatch(item.tooltip, /Restore Fleet/);
+  model.dispose();
+});
+
 test("status and typed notifications render domain state without sensitive content", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease(); const info: string[] = []; const errors: string[] = [];
   const notifications = new FleetNotifications(fleet, { information: (message) => info.push(message), warning: () => {}, error: (message) => errors.push(message) });

@@ -82,6 +82,7 @@ const SESSION_LIVENESS_POLL_MS = 5_000;
 import { registerReviewCommand } from "./vscode/review.js";
 import { ProcessGitClient, type GitClient } from "./git/client.js";
 import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
+import { closeSettledAutoRunTerminal } from "./auto/terminal-cleanup.js";
 import { WorktreeRunWorkspaces } from "./auto/worktree.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "./auto/permissions.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
@@ -404,15 +405,20 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       })
       .catch((error: unknown) => output.appendLine(`Session ledger write failed: ${error instanceof Error ? error.message : "unknown error"}`));
   };
-  // Workspace-scoped and never reset: agent labels read as plain, strictly
-  // increasing numbers so the user can see how many agents ran across the
-  // project's whole life. Seeded from the fleet's highest numeric id, so an
-  // upgrade never restarts past launches this scheme already made.
-  const agentIdCounter = WorkspaceAgentIdCounter.load(storageRoot, () => fleet.list().map((session) => session.identity.agentId as string));
-  const lease = new WriteLease();
   const managerStore = new FileManagerStore(workspaceRoot);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   const recordedManager = await managerStore.load();
+  // Workspace-scoped and never reset: agent labels read as plain, strictly
+  // increasing numbers so the user can see how many agents ran across the
+  // project's whole life. The Manager is stored separately from the fleet and
+  // keeps its identity across restarts, so it contributes to the ceiling too.
+  // Otherwise an upgrade with no counter file can mint workers 1, then 2, and
+  // collide with a live recorded Manager 2 on the second launch.
+  const agentIdCounter = WorkspaceAgentIdCounter.load(storageRoot, () => [
+    ...fleet.list().map((session) => session.identity.agentId as string),
+    ...(recordedManager === undefined ? [] : [recordedManager.agentId as string]),
+  ]);
+  const lease = new WriteLease();
   // A recorded Manager keeps its id across restarts (identity stability). A
   // first-ever Manager falls back to the numeric counter so new projects
   // number their Manager too; a pre-upgrade recorded Manager keeps its UUID
@@ -581,7 +587,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }),
     github,
     launcher: coordinator,
-    terminals: { close: (terminalId) => terminals.kill(terminalId) },
+    // By the time auto-run cleans up a result-delivering terminal, its caller
+    // has consumed the result. Closing that terminal therefore also retires the
+    // completed fleet row; leaving it behind creates a terminal-less row that
+    // cannot be restored and can only produce a misleading Focus action.
+    terminals: { close: (terminalId) => closeSettledAutoRunTerminal(terminals, fleet, terminalId) },
     store: new FileAutoRunStore(workspaceRoot),
     notifier: {
       notify: (message) => enqueueManagerNotification(message),

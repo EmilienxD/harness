@@ -59,16 +59,25 @@ export class FleetTreeModel {
     const terminalOpen = this.isTerminalOpen(session.terminal.terminalId);
     const active = ["starting", "running", "awaiting-user"].includes(session.lifecycle.status);
     const orphaned = active && !terminalOpen && isNonRestorablePersistedAgentType(session.identity.type);
-    const markers = [terminalOpen ? session.lifecycle.status : orphaned ? "interrupted · result caller gone" : "paused", node.leaseHolder ? "lease holder" : ""].filter(Boolean);
+    const closedFinished = !active && !terminalOpen;
+    const markers = [terminalOpen
+      ? session.lifecycle.status
+      : orphaned
+        ? "interrupted · result caller gone"
+        : closedFinished
+          ? `${session.lifecycle.status} · terminal closed`
+          : "paused", node.leaseHolder ? "lease holder" : ""].filter(Boolean);
     return {
       // The label matches the per-launch Claude session name — aboard-<type>-<id>,
       // the `@<name>` banner in the terminal head — so a row in the tree is
       // greppable straight back to the running session and its definition file.
       label: `${agentLabel(session)}${goal}`,
       description: markers.join(" · "),
-      tooltip: agentTooltip(session, node.leaseHolder, terminalOpen, orphaned),
+      tooltip: agentTooltip(session, node.leaseHolder, terminalOpen, orphaned, closedFinished),
       icon: agentIcon(session),
-      contextValue: active ? terminalOpen ? "aboard.agent.active" : orphaned ? "aboard.agent.orphaned" : "aboard.agent.paused" : "aboard.agent.finished",
+      contextValue: terminalOpen
+        ? active ? "aboard.agent.active" : "aboard.agent.finished"
+        : closedFinished || orphaned ? "aboard.agent.orphaned" : "aboard.agent.paused",
       collapsible: this.fleet.listChildren(session.identity.agentId).length > 0,
       ...(terminalOpen ? { command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const } } : {}),
     };
@@ -157,13 +166,15 @@ function agentLabel(session: AgentSession): string {
 }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
-function agentTooltip(session: AgentSession, leaseHolder: boolean, terminalOpen: boolean, orphaned: boolean): string {
+function agentTooltip(session: AgentSession, leaseHolder: boolean, terminalOpen: boolean, orphaned: boolean, closedFinished: boolean): string {
   return [
     `Session: ${session.sessionId}`,
-    `Status: ${terminalOpen ? session.lifecycle.status : orphaned ? "interrupted after VS Code restart" : "paused after VS Code restart"}`,
-    terminalOpen ? "" : orphaned
-      ? "Cannot be restored: this automated task's result caller no longer exists. Use Remove Interrupted Session."
-      : "Use Restore Fleet to reopen this Claude conversation",
+    `Status: ${terminalOpen ? session.lifecycle.status : closedFinished ? `${session.lifecycle.status}; terminal closed` : orphaned ? "interrupted after VS Code restart" : "paused after VS Code restart"}`,
+    terminalOpen ? "" : closedFinished
+      ? "This finished session has no terminal and cannot be restored. Use Remove Interrupted Session."
+      : orphaned
+        ? "Cannot be restored: this automated task's result caller no longer exists. Use Remove Interrupted Session."
+        : "Use Restore Fleet to reopen this Claude conversation",
     leaseHolder ? "Holds the write lease" : "",
   ].filter(Boolean).join("\n");
 }
