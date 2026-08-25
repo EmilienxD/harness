@@ -49,15 +49,15 @@ Design notes:
 - The body is always passed to `gh` via --body-file (a temp file), never
   inline on the command line. This is what avoids the Windows command-line
   length limit, on every platform, regardless of body size.
-- Every successful create is recorded in one shared ledger,
-  ".issues-gateway/.published.json", keyed exactly like an in-body
-  reference. It is seeded back into the resolver at the start of a run,
-  so a reference to an issue published in an *earlier* run still resolves.
-  Reads and writes of the ledger run under a portalocker file lock
+- Every successful create is recorded in the shared state file,
+  ".issues-gateway/.state.json", under "published", keyed exactly like an
+  in-body reference. It is seeded back into the resolver at the start of a
+  run, so a reference to an issue published in an *earlier* run still
+  resolves. Reads and writes of the state file run under a portalocker lock
   (falling back to no lock when portalocker is unavailable), so two
   concurrent Claude Code sessions publishing in the same project cannot
   lose each other's entries; the loser of the race gets a warning in the
-  report instead of a clobbered ledger.
+  report instead of clobbered state.
 - A "## Parent" section whose first non-empty line is a bare reference
   ("#42", an issue URL, or "{session-id}/{i}" - the same token used under
   "Blocked by") makes the new issue a real GitHub sub-issue of that parent.
@@ -70,14 +70,14 @@ Design notes:
   natively. Prose under "## Parent" is left exactly as written.
 - Publishing runs with no model turn at all (exit 2 erases the prompt), so
   the agent would otherwise never learn the real issue numbers. Each run
-  appends what it created to ".issues-gateway/.pending-notice.json"; the
-  next prompt that isn't a publish command flushes that file into the
-  model's context as `additionalContext` and deletes it. It is delivered
-  exactly once, riding along with a prompt the user was sending anyway, so
-  it costs no extra API call - and it lets the next drafting turn write a
-  real "#42" under "## Parent".
+  appends what it created to the "pending_notice" section of the shared state
+  file; the next prompt that isn't a publish command flushes that section
+  into the model's context as `additionalContext` and clears it. It is
+  delivered exactly once, riding along with a prompt the user was sending
+  anyway, so it costs no extra API call - and it lets the next drafting turn
+  write a real "#42" under "## Parent".
 - "--dry" runs the exact same parse/resolve logic but never calls
-  `gh issue create`, never deletes files, never writes the ledger, and
+  `gh issue create`, never deletes files, never writes state, and
   never queues a notice - it reports what would happen, so a bad label
   line or a genuinely unresolvable reference can be caught before anything
   touches the tracker.
@@ -93,7 +93,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-# The shared ledger is read and written by any session publishing in the
+# The shared state is read and written by any session publishing in the
 # same project, so every read-modify-write cycle runs under a file lock
 # (same pattern as src/harness_cli): portalocker when installed, no lock
 # otherwise - the fallback loses cross-session safety but never the hook.
@@ -102,21 +102,20 @@ with contextlib.suppress(ImportError):
 
 GATEWAY_DIR = Path(".issues-gateway")
 
-# One ledger for the whole project, at the gateway root: every batch's
-# published numbers in one place, so reference resolution needs exactly
-# one read no matter how many sessions drafted the work.
-LEDGER_NAME = ".published.json"
+# One state file for the whole project, at the gateway root. "published" is
+# durable reference resolution state; "pending_notice" is transient context
+# delivery state that is cleared after the next non-publish prompt.
+STATE_NAME = ".state.json"
 
-# Sidecar carrying the ledger's file lock. Keystone of the concurrency
-# story: never replaced or renamed, so a lock on it always names the same
-# file, unlike the ledger itself.
-LOCK_NAME = ".published.lock"
+# Sidecar carrying the state file's lock. Keystone of the concurrency story:
+# never replaced or renamed, so a lock on it always names the same file,
+# unlike the state file itself.
+LOCK_NAME = ".state.lock"
 
-# Queue of published issues the agent has not been told about yet. Lives at
-# the gateway root, not inside a batch dir, so a notice is delivered on the
-# next prompt whatever session that prompt belongs to (a /clear between the
-# publish and the next prompt must not strand it).
-NOTICE_NAME = ".pending-notice.json"
+# Legacy files from versions before the state file was consolidated. They are
+# read as migration inputs only.
+LEGACY_LEDGER_NAME = ".published.json"
+LEGACY_NOTICE_NAME = ".pending-notice.json"
 
 # Keeps a huge batch well under the 10,000-character cap on additionalContext.
 MAX_NOTICE_ENTRIES = 50
@@ -224,7 +223,7 @@ LABEL_ALIASES = {
 def _read_json_dict(path: Path) -> dict:
     """Best-effort read of a {str: object} JSON file. Never raises.
 
-    A corrupt or hand-mangled ledger must never block publishing, so any
+    Corrupt or hand-mangled state must never block publishing, so any
     read error degrades to "nothing is known yet".
     """
     try:
@@ -234,33 +233,32 @@ def _read_json_dict(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _write_ledger(path: Path, ledger: dict) -> None:
-    """Persist the ledger via a sibling temp file, so a concurrent reader
-    never sees a half-written JSON document. (The lock lives on a separate
-    sidecar file, so renaming over the ledger is never lock-blocked.)"""
-    tmp = path.with_name(path.stem + ".tmp")  # .published.tmp
-    tmp.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+def _write_json_dict(path: Path, data: dict) -> None:
+    """Persist JSON via a sibling temp file, so a concurrent reader never
+    sees a half-written document. The lock lives on a separate sidecar file,
+    so renaming over the state file is never lock-blocked."""
+    tmp = path.with_name(path.stem + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
 @contextlib.contextmanager
-def _locked_ledger(gateway_dir: Path = GATEWAY_DIR):
-    """Yield (path, ledger) under the portalocker lock, or (None, {}).
+def _locked_state(gateway_dir: Path = GATEWAY_DIR):
+    """Yield (path, state) under the portalocker lock, or (None, {}).
 
-    The lock is taken on a sidecar file, ".published.lock" - locking the
-    ledger itself would let Windows deny the ledger's own atomic replace
-    (leaving it empty) and truncate it on contention, and a POSIX fcntl
-    lock would not survive the ledger being unlinked by a replace. Failing
-    to take the lock (another session holds it) never blocks publishing:
-    the caller gets None and reports a warning, since skipping the ledger
-    write loses only cross-run reference resolution, not issues.
+    The lock is taken on a sidecar file, ".state.lock" - locking the state
+    file itself would let Windows deny the state file's own atomic replace
+    (leaving it empty) and truncate it on contention, and a POSIX fcntl lock
+    would not survive the state file being unlinked by a replace. Failing to
+    take the lock (another session holds it) never blocks publishing: the
+    caller gets None and reports a warning when durable state cannot be
+    updated.
     Read-modify-write happens entirely inside the lock, so two sessions
-    publishing at once merge instead of the last record_published
-    clobbering the other's entries.
+    publishing at once merge instead of one clobbering the other's entries.
     """
-    path = gateway_dir / LEDGER_NAME
+    path = gateway_dir / STATE_NAME
     if "portalocker" not in sys.modules:
-        yield path, _read_json_dict(path)
+        yield path, _read_state(gateway_dir)
         return
     lock_path = gateway_dir / LOCK_NAME
     try:
@@ -268,42 +266,80 @@ def _locked_ledger(gateway_dir: Path = GATEWAY_DIR):
         with portalocker.Lock(
             str(lock_path), mode="a", timeout=10, fail_when_locked=True
         ):
-            yield path, _read_json_dict(path)
+            yield path, _read_state(gateway_dir)
     except (portalocker.exceptions.LockException, OSError):
         yield None, {}
 
 
+def _read_state(gateway_dir: Path = GATEWAY_DIR) -> dict:
+    """Read the consolidated state file, with best-effort legacy migration."""
+    path = gateway_dir / STATE_NAME
+    state = _read_json_dict(path)
+    published = state.get("published")
+    notice = state.get("pending_notice")
+
+    if not isinstance(published, dict):
+        published = _read_json_dict(gateway_dir / LEGACY_LEDGER_NAME)
+    if not isinstance(notice, dict):
+        notice = _read_json_dict(gateway_dir / LEGACY_NOTICE_NAME)
+
+    state = {}
+    if published:
+        state["published"] = published
+    if notice:
+        state["pending_notice"] = notice
+    return state
+
+
+def _write_state(path: Path, state: dict) -> None:
+    cleaned: dict = {}
+    published = state.get("published")
+    notice = state.get("pending_notice")
+    if isinstance(published, dict) and published:
+        cleaned["published"] = published
+    if isinstance(notice, dict) and notice:
+        cleaned["pending_notice"] = notice
+    _write_json_dict(path, cleaned)
+
+
 def record_published(key: str, entry: dict, gateway_dir: Path = GATEWAY_DIR) -> bool:
-    """Append one published issue to the shared ledger, immediately.
+    """Append one published issue to the shared state, immediately.
 
     Written after every single create rather than once at the end of the
     run, so an interrupted batch still leaves behind the numbers it did
     create - that is what a rerun needs to resolve references to them.
     Returns False when the write could not happen (lock held by another
     session, or an OS error): the issue exists on the tracker, so a
-    missing ledger entry is a warning, not a failure.
+    missing state entry is a warning, not a failure.
     """
-    with _locked_ledger(gateway_dir) as (path, ledger):
+    with _locked_state(gateway_dir) as (path, state):
         if path is None:
             return False
-        ledger[key] = entry
+        published = state.get("published")
+        if not isinstance(published, dict):
+            published = {}
+        published[key] = entry
+        state["published"] = published
         try:
-            _write_ledger(path, ledger)
+            _write_state(path, state)
         except OSError:
             return False
     return True
 
 
-def seed_from_ledger(gateway_dir: Path = GATEWAY_DIR) -> dict[str, str]:
-    """Build the resolved map from the shared ledger on disk.
+def seed_from_state(gateway_dir: Path = GATEWAY_DIR) -> dict[str, str]:
+    """Build the resolved map from the shared state on disk.
 
     Maps "{session-id}/{i}" -> issue number, exactly like the in-run map.
     Reference keys carry their own session id, so one flat file can hold
     every session's numbers without collisions.
     """
     resolved: dict[str, str] = {}
-    with _locked_ledger(gateway_dir) as (_, ledger):
-        for key, entry in ledger.items():
+    with _locked_state(gateway_dir) as (_, state):
+        published = state.get("published")
+        if not isinstance(published, dict):
+            published = {}
+        for key, entry in published.items():
             if not isinstance(entry, dict):
                 continue
             number = entry.get("number")
@@ -322,24 +358,23 @@ def queue_notice(created: list[dict], failed: int, gateway_dir: Path = GATEWAY_D
     """
     if not created and not failed:
         return
-    path = gateway_dir / NOTICE_NAME
     pending = {"created": [], "failed": 0}
-    if path.is_file():
+    with _locked_state(gateway_dir) as (path, state):
+        if path is None:
+            return
+        existing = state.get("pending_notice")
+        if isinstance(existing, dict):
+            if isinstance(existing.get("created"), list):
+                pending["created"] = existing["created"]
+            if isinstance(existing.get("failed"), int):
+                pending["failed"] = existing["failed"]
+        pending["created"].extend(created)
+        pending["failed"] += failed
+        state["pending_notice"] = pending
         try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(existing, dict):
-                if isinstance(existing.get("created"), list):
-                    pending["created"] = existing["created"]
-                if isinstance(existing.get("failed"), int):
-                    pending["failed"] = existing["failed"]
-        except (OSError, ValueError):
+            _write_state(path, state)
+        except OSError:
             pass
-    pending["created"].extend(created)
-    pending["failed"] += failed
-    try:
-        path.write_text(json.dumps(pending, indent=2) + "\n", encoding="utf-8")
-    except OSError:
-        pass
 
 
 def format_notice(created: list[dict], failed: int) -> str:
@@ -384,17 +419,14 @@ def format_notice(created: list[dict], failed: int) -> str:
 
 def flush_notice(gateway_dir: Path = GATEWAY_DIR) -> str | None:
     """Consume the pending notice, if any. Delivered exactly once."""
-    path = gateway_dir / NOTICE_NAME
-    if not path.is_file():
-        return None
-    try:
-        pending = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        pending = None
-    try:
-        path.unlink()
-    except OSError:
-        pass
+    with _locked_state(gateway_dir) as (path, state):
+        if path is None:
+            return None
+        pending = state.pop("pending_notice", None)
+        try:
+            _write_state(path, state)
+        except OSError:
+            pass
     if not isinstance(pending, dict):
         return None
     created = pending.get("created")
@@ -692,9 +724,9 @@ def publish_batch(
 ) -> tuple[int, int]:
     """Publish (or dry-run) every draft file in one batch directory.
 
-    `created` collects one record per published issue, for the ledger and
-    for the notice delivered to the agent on the next prompt. `seed` is the
-    resolved map built from the shared ledger on disk; when omitted, it is
+    `created` collects one record per published issue, for durable reference
+    resolution and for the notice delivered to the agent on the next prompt.
+    `seed` is the resolved map built from the shared state on disk; when omitted, it is
     loaded here, so references to issues published in an earlier run still
     resolve.
 
@@ -708,8 +740,8 @@ def publish_batch(
     # The seed map is used in place, not copied: entries published here are
     # added to it as the run proceeds, so a caller looping over several
     # batches (publish_issues) lets a later batch reference an earlier
-    # batch's freshly created issues without re-reading the ledger.
-    resolved = seed if seed is not None else seed_from_ledger(gateway_dir)
+    # batch's freshly created issues without re-reading state.
+    resolved = seed if seed is not None else seed_from_state(gateway_dir)
     batch_header = f"Batch: {len(files)} draft issue(s)"
     report.append(batch_header)
     report.append("")
@@ -813,12 +845,12 @@ def publish_batch(
                     "parent": linked_parent,
                 }
                 if not record_published(key, record, gateway_dir):
-                    # The issue exists on the tracker; losing the ledger
+                    # The issue exists on the tracker; losing the state
                     # entry only means a rerun cannot resolve references
                     # to it. A warning, never a failure.
                     report.append(
                         f"  WARN  #{resolved_number} could not be recorded in "
-                        "the shared ledger (locked by another publish?)"
+                        "the shared state (locked by another publish?)"
                     )
                 if created is not None:
                     created.append(record)
@@ -867,10 +899,10 @@ def publish_issues(dry: bool) -> str:
         report.extend(label_warnings)
         report.append("")
 
-    # The shared ledger is loaded up front: reference keys carry their own
+    # The shared state is loaded up front: reference keys carry their own
     # session id, so a draft can point at an issue another batch published
     # in an earlier run.
-    seed = seed_from_ledger(GATEWAY_DIR)
+    seed = seed_from_state(GATEWAY_DIR)
 
     total_published = 0
     total_failed = 0

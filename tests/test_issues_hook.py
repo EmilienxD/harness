@@ -197,11 +197,11 @@ def test_publish_uses_exact_parsed_labels(tmp_path, monkeypatch):
     assert not (batch / "issue-0.md").exists()
     # The label line is stripped from the body that gets posted.
     assert "mode:afk" not in created[0][1]
-    # ...and the number survives the draft it came from, in the shared ledger
-    # at the gateway root - one ledger for the whole project, none per batch.
-    ledger = hook._read_json_dict(batch.parent / hook.LEDGER_NAME)
-    assert ledger[f"{SID}/0"]["number"] == "42"
-    assert not (batch / hook.LEDGER_NAME).exists()
+    # ...and the number survives the draft it came from, in shared state
+    # at the gateway root - one state file for the whole project, none per batch.
+    published = _state(batch.parent)["published"]
+    assert published[f"{SID}/0"]["number"] == "42"
+    assert not (batch / hook.STATE_NAME).exists()
 
 
 def test_failed_draft_keeps_resolved_references_after_success(tmp_path, monkeypatch):
@@ -366,7 +366,7 @@ def test_parent_reference_resolves_within_one_run(tmp_path, monkeypatch):
     ]
 
 
-def test_parent_reference_resolves_from_the_ledger_in_a_later_run(tmp_path, monkeypatch):
+def test_parent_reference_resolves_from_state_in_a_later_run(tmp_path, monkeypatch):
     monkeypatch.setattr(hook, "parent_flag_supported", lambda: True)
     batch = tmp_path / ".issues-gateway" / SID
 
@@ -389,7 +389,7 @@ def test_parent_reference_resolves_from_the_ledger_in_a_later_run(tmp_path, monk
     assert created[0]["parent"] == "42"
 
 
-def test_blocker_reference_resolves_across_runs_from_the_ledger(tmp_path, monkeypatch):
+def test_blocker_reference_resolves_across_runs_from_state(tmp_path, monkeypatch):
     batch = tmp_path / ".issues-gateway" / SID
 
     _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
@@ -430,11 +430,12 @@ def test_old_gh_links_after_creating_and_keeps_the_reference_in_the_body(
         "issue-0.md",
         f"# Child\n\n> mode:afk\n\n## Parent\n\n#42\n\n## Blocked by\n\n{SID}/0\n",
     )
-    # Its own key resolves from the shared ledger seeded below, not from
+    # Its own key resolves from the shared state seeded below, not from
     # this run.
     batch = tmp_path / ".issues-gateway" / SID
-    (batch.parent / hook.LEDGER_NAME).write_text(
-        json.dumps({f"{SID}/0": {"number": "41"}}), encoding="utf-8"
+    hook._write_json_dict(
+        batch.parent / hook.STATE_NAME,
+        {"published": {f"{SID}/0": {"number": "41"}}},
     )
 
     count, failures = hook.publish_batch(
@@ -454,8 +455,8 @@ def test_dry_run_previews_the_sub_issue_link(tmp_path):
 
     assert (count, failures) == (1, 0)
     assert any("sub-issue of #42" in line for line in report)
-    # A dry run must not write a ledger.
-    assert not (tmp_path / ".issues-gateway" / hook.LEDGER_NAME).exists()
+    # A dry run must not write state.
+    assert not (tmp_path / ".issues-gateway" / hook.STATE_NAME).exists()
 
 
 # --- what actually reaches the gh command line -----------------------------
@@ -519,6 +520,10 @@ def _gateway(tmp_path: Path) -> Path:
     return gateway
 
 
+def _state(gateway: Path) -> dict:
+    return hook._read_json_dict(gateway / hook.STATE_NAME)
+
+
 def test_notice_accumulates_across_runs_and_is_delivered_once(tmp_path):
     gateway = _gateway(tmp_path)
     hook.queue_notice(
@@ -532,63 +537,74 @@ def test_notice_accumulates_across_runs_and_is_delivered_once(tmp_path):
     assert "1 draft(s) failed" in notice
     assert "## Parent" in notice  # tells the agent how to use the numbers
     assert hook.flush_notice(gateway) is None
-    assert not (gateway / hook.NOTICE_NAME).exists()
+    assert "pending_notice" not in _state(gateway)
 
 
 def test_nothing_published_queues_nothing(tmp_path):
     gateway = _gateway(tmp_path)
     hook.queue_notice([], 0, gateway)
-    assert not (gateway / hook.NOTICE_NAME).exists()
+    assert not (gateway / hook.STATE_NAME).exists()
     assert hook.flush_notice(gateway) is None
 
 
 def test_corrupt_notice_is_dropped_not_raised(tmp_path):
     gateway = _gateway(tmp_path)
-    (gateway / hook.NOTICE_NAME).write_text("{ not json", encoding="utf-8")
+    hook._write_json_dict(gateway / hook.STATE_NAME, {"pending_notice": "not-a-dict"})
     assert hook.flush_notice(gateway) is None
-    assert not (gateway / hook.NOTICE_NAME).exists()
+    assert "pending_notice" not in _state(gateway)
 
 
-def test_corrupt_ledger_degrades_to_empty(tmp_path):
+def test_corrupt_state_degrades_to_empty(tmp_path):
     gateway = tmp_path / ".issues-gateway"
     gateway.mkdir()
-    (gateway / hook.LEDGER_NAME).write_text("[]", encoding="utf-8")
-    assert hook.seed_from_ledger(gateway) == {}
+    (gateway / hook.STATE_NAME).write_text("[]", encoding="utf-8")
+    assert hook.seed_from_state(gateway) == {}
 
 
-def test_seed_from_ledger_maps_keys_to_numbers(tmp_path):
+def test_seed_from_state_maps_keys_to_numbers(tmp_path):
     gateway = tmp_path / ".issues-gateway"
     gateway.mkdir()
-    (gateway / hook.LEDGER_NAME).write_text(
-        json.dumps(
-            {
+    hook._write_json_dict(
+        gateway / hook.STATE_NAME,
+        {
+            "published": {
                 f"{SID}/0": {"number": "42", "title": "Spec"},
                 f"{SID}/1": {"number": 43},  # stray ints still resolve
                 f"{SID}/2": "not-an-entry",  # malformed entries are dropped
                 f"{SID}/3": {"no-number": None},  # entries without a number too
             }
-        ),
-        encoding="utf-8",
+        },
     )
-    assert hook.seed_from_ledger(gateway) == {f"{SID}/0": "42", f"{SID}/1": "43"}
+    assert hook.seed_from_state(gateway) == {f"{SID}/0": "42", f"{SID}/1": "43"}
 
 
-def test_record_published_appends_to_the_shared_ledger(tmp_path):
+def test_seed_from_state_reads_legacy_published_file(tmp_path):
+    gateway = tmp_path / ".issues-gateway"
+    gateway.mkdir()
+    hook._write_json_dict(
+        gateway / hook.LEGACY_LEDGER_NAME,
+        {f"{SID}/0": {"number": "42", "title": "Spec"}},
+    )
+
+    assert hook.seed_from_state(gateway) == {f"{SID}/0": "42"}
+
+
+def test_record_published_appends_to_shared_state(tmp_path):
     gateway = tmp_path / ".issues-gateway"
     gateway.mkdir()
     assert hook.record_published(f"{SID}/0", {"number": "42"}, gateway)
     assert hook.record_published(f"{SID}/1", {"number": "43"}, gateway)
-    data = hook._read_json_dict(gateway / hook.LEDGER_NAME)
+    data = _state(gateway)["published"]
     assert data[f"{SID}/0"]["number"] == "42"
     assert data[f"{SID}/1"]["number"] == "43"
 
 
-def test_record_published_warns_instead_of_clobbering_a_locked_ledger(tmp_path):
-    """The loser of a ledger race must not pause or overwrite the winner.
+def test_record_published_warns_instead_of_clobbering_locked_state(tmp_path):
+    """The loser of a state-file race must not pause or overwrite the winner.
 
-    The lock sidecar is held by the winner; the loser's _locked_ledger
+    The lock sidecar is held by the winner; the loser's _locked_state
     fails fast with fail_when_locked and yields None, the caller reports a
-    warning, and the ledger simply keeps the winner's entries.
+    warning, and the state file simply keeps the winner's entries.
     """
     gateway = tmp_path / ".issues-gateway"
     gateway.mkdir()
@@ -596,12 +612,12 @@ def test_record_published_warns_instead_of_clobbering_a_locked_ledger(tmp_path):
     lock_path.touch()
     with portalocker.Lock(str(lock_path), mode="a", timeout=10, fail_when_locked=True):
         assert hook.record_published(f"{SID}/0", {"number": "42"}, gateway) is False
-    assert hook.seed_from_ledger(gateway) == {}
+    assert hook.seed_from_state(gateway) == {}
 
 
-def test_publish_under_ledger_contention_warns_but_still_creates(tmp_path, monkeypatch):
-    """A locked ledger must not block the gh work: the issue is still
-    created and its draft deleted; only the ledger record warns."""
+def test_publish_under_state_contention_warns_but_still_creates(tmp_path, monkeypatch):
+    """A locked state file must not block the gh work: the issue is still
+    created and its draft deleted; only the state record warns."""
     created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
     batch = tmp_path / ".issues-gateway" / SID
@@ -614,7 +630,7 @@ def test_publish_under_ledger_contention_warns_but_still_creates(tmp_path, monke
 
     assert (count, failures) == (1, 0)
     assert not (batch / "issue-0.md").exists()
-    assert any("could not be recorded in the shared ledger" in line for line in report)
+    assert any("could not be recorded in the shared state" in line for line in report)
 
 
 def test_notice_stays_under_the_additional_context_cap(tmp_path):
@@ -622,6 +638,19 @@ def test_notice_stays_under_the_additional_context_cap(tmp_path):
     text = hook.format_notice(many, 0)
     assert f"and {120 - hook.MAX_NOTICE_ENTRIES} more" in text
     assert len(text) < 10_000
+
+
+def test_flush_notice_reads_legacy_notice_file(tmp_path):
+    gateway = _gateway(tmp_path)
+    hook._write_json_dict(
+        gateway / hook.LEGACY_NOTICE_NAME,
+        {"created": [{"number": "42", "title": "Spec", "labels": []}], "failed": 0},
+    )
+
+    notice = hook.flush_notice(gateway)
+
+    assert "#42" in notice
+    assert "pending_notice" not in _state(gateway)
 
 
 # --- end-to-end through the hook's stdin/stdout contract -------------------
@@ -649,7 +678,7 @@ def test_next_prompt_carries_the_notice_as_additional_context(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert "#42" in payload["hookSpecificOutput"]["additionalContext"]
-    assert not (gateway / hook.NOTICE_NAME).exists()
+    assert "pending_notice" not in _state(gateway)
 
 
 def test_ordinary_prompt_without_a_notice_is_untouched(tmp_path):
@@ -694,4 +723,4 @@ def test_a_publish_prompt_does_not_consume_the_notice(tmp_path):
 
     assert result.returncode == 2
     assert "No draft batches found" in result.stderr
-    assert (gateway / hook.NOTICE_NAME).exists()
+    assert "pending_notice" in _state(gateway)

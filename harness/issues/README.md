@@ -74,20 +74,21 @@ the middle step is a hook: it erases the prompt and produces no assistant turn, 
 never learn that the spec became `#42`. Two mechanisms close that gap, and they cover different
 failure modes:
 
-- **A ledger.** Every successful create is recorded in one shared
-  `.issues-gateway/.published.json` before the draft file is deleted, and the ledger is loaded back
+- **Durable published state.** Every successful create is recorded in
+  `.issues-gateway/.state.json` under `published` before the draft file is deleted, and the state is loaded back
   at the start of the next run. So a `{session-id}/{i}` reference — in `Blocked by` or under
   `## Parent` — to an issue published in an *earlier* run resolves too, even though its draft file
-  is long gone. Every ledger read/write runs under a file lock on a `.published.lock` sidecar
+  is long gone. Every state read/write runs under a file lock on a `.state.lock` sidecar
   (portalocker when available, no lock otherwise), so two sessions publishing at once in the same
   project merge their entries instead of clobbering each other.
-- **A one-shot notice.** Each run queues what it created in `.issues-gateway/.pending-notice.json`.
+- **A one-shot notice.** Each run queues what it created in the same `.state.json`, under
+  `pending_notice`.
   The next prompt that isn't a publish command flushes it into the agent's context as
-  `additionalContext` and deletes it. It rides along with a prompt you were sending anyway, so it
+  `additionalContext` and clears that section. It rides along with a prompt you were sending anyway, so it
   costs **0 extra API calls** and roughly one line of tokens per issue — and it means the next
   `/draft-issues` can write a real `#42` under `## Parent`, and can tell you what got published.
 
-The ledger is deterministic and survives compaction; the notice makes the agent aware. Neither
+The published state is deterministic and survives compaction; the notice makes the agent aware. Neither
 requires you to change how you drive the workflow.
 
 ### Why the batch flow is 3 API calls, not one-per-issue
@@ -133,9 +134,8 @@ At runtime the drafting skills create a gateway folder at the project root — `
 ```
 .issues-gateway/
 ├── .gitignore                                   # contains '*', created on first draft
-├── .pending-notice.json                         # published issues the agent hasn't been told about
-├── .published.json                              # shared ledger: reference key -> real issue number
-├── .published.lock                              # sidecar carrying the ledger's file lock
+├── .state.json                                  # published refs + pending agent notice
+├── .state.lock                                  # sidecar carrying the state file lock
 └── 6b1f0c2e-…-2e8a1d0c4f55/                     # one dir per drafting session
     ├── issue-0.md
     └── issue-1.md
@@ -173,7 +173,7 @@ At runtime the drafting skills create a gateway folder at the project root — `
   `#<real-number>` as each referenced issue is published — bare, because GitHub only autolinks issue
   numbers that aren't wrapped in inline code — and skips, without failing the batch, any
   file whose reference isn't resolvable yet. References to issues published in an earlier run
-  resolve from the ledger.
+  resolve from the published state.
 - **Parent**: a `## Parent` section (any heading level) whose first non-empty line is one bare
   reference and nothing else — `#42`, an issue URL, or `{session-id}/{i}`, the same token used for a
   blocker — publishes the issue as a GitHub sub-issue of that parent and removes the section from
@@ -186,24 +186,25 @@ At runtime the drafting skills create a gateway folder at the project root — `
   draft is left in place rather than published without its link. On a `gh` too old for
   `gh issue create --parent`, the link is made afterwards with `gh issue edit --parent` and the
   reference is kept in the body as a fallback.
-- **Ledger**: `.published.json` at the gateway root records `{"{session-id}/{i}": {number, url,
-  title, labels, parent}}` for every batch — one file for the whole project, because reference keys
-  already carry their session id. It is written after each successful create, immediately, so an
-  interrupted run still leaves behind the numbers it did create, and it is what makes references
-  resolve across runs, once the draft files themselves are gone. Read-modify-write cycles hold a
-  portalocker lock on a `.published.lock` sidecar (the sidecar — not the ledger — carries the lock,
-  so the ledger's own atomic temp-file replace can't be blocked or truncated by lock semantics, on
-  Windows or POSIX). A session that loses the lock race still publishes its issues; only the ledger
-  record is skipped, with a warning in the report. A corrupt ledger degrades to "nothing known yet"
-  rather than blocking a publish.
-- **Pending notice**: `.pending-notice.json` at the gateway root collects what each run published
-  (and how many drafts failed). The next prompt that isn't a publish command injects it as
-  `additionalContext` and deletes the file, so it is delivered exactly once. It is deliberately not
-  keyed by session id — a `/clear` between publishing and the next prompt must not strand it — and
-  two publish runs in a row accumulate rather than overwrite. A malformed notice is dropped, never
-  raised: this hook sees every prompt in the session and must not be able to fail one.
+- **State file**: `.state.json` at the gateway root holds both durable and transient hook state. Its
+  `published` object records `{"{session-id}/{i}": {number, url, title, labels, parent}}` for every
+  batch — one shared map for the whole project, because reference keys already carry their session
+  id. It is written after each successful create, immediately, so an interrupted run still leaves
+  behind the numbers it did create, and it is what makes references resolve across runs, once the
+  draft files themselves are gone. Read-modify-write cycles hold a portalocker lock on a
+  `.state.lock` sidecar (the sidecar — not the state file — carries the lock, so the state file's
+  own atomic temp-file replace can't be blocked or truncated by lock semantics, on Windows or
+  POSIX). A session that loses the lock race still publishes its issues; only the state record is
+  skipped, with a warning in the report. Corrupt or malformed published state degrades to "nothing
+  known yet" rather than blocking a publish.
+- **Pending notice**: `.state.json` also has a `pending_notice` object that collects what each run
+  published (and how many drafts failed). The next prompt that isn't a publish command injects it as
+  `additionalContext` and clears that section, so it is delivered exactly once. It is deliberately
+  not keyed by session id — a `/clear` between publishing and the next prompt must not strand it —
+  and two publish runs in a row accumulate rather than overwrite. A malformed notice is dropped,
+  never raised: this hook sees every prompt in the session and must not be able to fail one.
 - **Successful publish cleanup**: after `gh issue create` succeeds, the hook records the issue in the
-  ledger and then deletes the draft file. If another draft fails later in the same run, any
+  state file and then deletes the draft file. If another draft fails later in the same run, any
   references to issues already created in that run are rewritten to their real `#<number>` form
   before the failed draft is left for a rerun.
 
@@ -295,7 +296,7 @@ The spec-to-sub-issues loop, end to end:
 
 ```
 /to-spec-draft-issue     → issue-0.md, labelled "> spec"
-/publish-issues          → creates it as #42; ledger records it; notice queued
+/publish-issues          → creates it as #42; state records it; notice queued
 /draft-issues            → the notice arrives with this prompt, so the breakdown
                            is drafted with "## Parent" → #42 (or {session-id}/{i}
                            of the spec draft if you skipped the publish step)
