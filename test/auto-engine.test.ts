@@ -134,6 +134,7 @@ function harness(options: HarnessOptions = {}): Harness {
     fetch: async () => { gitCalls.push("fetch"); },
     checkout: async (branch) => { gitCalls.push(`checkout ${branch}`); currentBranch = branch; },
     createBranch: async (branch, from) => { gitCalls.push(`createBranch ${branch} ${from}`); branches.add(branch); currentBranch = branch; },
+    deleteBranch: async (branch) => { gitCalls.push(`deleteBranch ${branch}`); branches.delete(branch); },
     fastForward: async (branch) => { gitCalls.push(`fastForward ${branch}`); },
     mergeFromRemote: async (base) => {
       gitCalls.push(`mergeFromRemote ${base}`);
@@ -773,13 +774,24 @@ test("a failing implementer stops the run with no commit and no pull request", a
   assert.match(context.notifications.join("\n"), /stopped at issue #34 \(implementer failed: context-exhausted\)/);
 });
 
-test("an implementer that produced no changes is a failure, not an empty commit", async () => {
-  const context = harness({ producesChanges: false });
+test("a successful implementer with no changes deletes its branch and continues", async () => {
+  const context = harness({
+    producesChanges: false,
+    issues: [
+      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 37, title: "Later", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+    ],
+  });
   await context.engine.start();
   await context.engine.settle();
 
   assert.equal(context.gitCalls.includes("commit"), false);
-  assert.match(context.notifications.join("\n"), /produced no changes/);
+  assert.equal(context.pullRequests.size, 0);
+  assert.equal(context.launches.length, 2);
+  assert.equal(context.gitCalls.includes("deleteBranch aboard/34-add-retry-backoff"), true);
+  assert.equal(context.gitCalls.includes("deleteBranch aboard/37-later"), true);
+  assert.match(context.notifications.join("\n"), /issue #34 finished with no changes; deleted its empty branch and continuing/);
+  assert.doesNotMatch(context.notifications.join("\n"), /stopped/);
 });
 
 test("a run with its own checkout works there, launches there, and never moves the user's HEAD", async () => {

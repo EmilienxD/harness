@@ -60,6 +60,23 @@ test("createBranch, add, and commit leave the branch carrying the issue's commit
   assert.equal(await client.hasCommitFor(34, "main"), false);
 });
 
+test("deleteBranch removes only a fully merged local branch", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  await client.createBranch("aboard/34-no-change", "main");
+  await client.checkout("main");
+  await client.deleteBranch("aboard/34-no-change");
+  assert.equal(await client.branchExists("aboard/34-no-change"), false);
+
+  await client.createBranch("aboard/35-has-work", "main");
+  await writeFile(join(root, "src.ts"), "export const changed = true;\n");
+  await client.add();
+  await client.commit("Unexpected work", "");
+  await client.checkout("main");
+  await assert.rejects(client.deleteBranch("aboard/35-has-work"));
+  assert.equal(await client.branchExists("aboard/35-has-work"), true);
+});
+
 /**
  * A remote-tracking ref without a remote. `git merge origin/main` reads the ref
  * and nothing else, so the boundary can be exercised against real git without a

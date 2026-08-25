@@ -698,7 +698,15 @@ export class AutoRunEngine {
             // repository, and relaunching the agent would loop forever.
             const produced = await this.#git.status();
             if (produced.entries.length === 0) {
-              return { kind: "stopped", reason: "the implementer produced no changes", phase: "implement", prNumber };
+              // A successful agent may correctly conclude that the issue needs
+              // no edit. There is nothing to commit or review, so discard only
+              // the empty, fully-merged local branch and move to the next issue.
+              // `deleteBranch` uses git's safe `-d`; an unexpected commit turns
+              // this into a stop instead of being destroyed.
+              await this.#discardEmptyBranch(issue.branch, session.branch);
+              this.#pending.delete(issue.number);
+              this.options.notifier.notify(autoRunMessage.unchanged(issue.number));
+              return { kind: "done", landed: undefined };
             }
             this.options.notifier.notify(autoRunMessage.implemented(issue.number, issue.branch));
             break;
@@ -1106,6 +1114,15 @@ export class AutoRunEngine {
       // the next issue's `branch` phase checks the branch out anyway.
       this.options.log?.(`auto-run cleanup could not return to ${sessionBranch}: ${message(error)}`);
     }
+  }
+
+  async #discardEmptyBranch(issueBranch: string, sessionBranch: string): Promise<void> {
+    for (const terminalId of this.#openTerminals) {
+      try { this.options.terminals.close(terminalId); } catch { /* already closed */ }
+    }
+    this.#openTerminals.clear();
+    await this.#git.checkout(sessionBranch);
+    await this.#git.deleteBranch(issueBranch);
   }
 
   /**

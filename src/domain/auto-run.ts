@@ -633,6 +633,8 @@ export const autoRunMessage = {
   started: (afk: number, hitl: number, review: boolean, chrome: boolean): string =>
     `auto-run: started — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}, Chrome ${chrome ? "on" : "off"}.`,
   implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} addressed on ${branch}.`,
+  unchanged: (issue: number): string =>
+    `auto-run: issue #${issue} finished with no changes; deleted its empty branch and continuing.`,
   committed: (issue: number, sha: string, pr: number): string => `auto-run: issue #${issue} committed (${sha}) and opened PR #${pr}.`,
   reviewed: (issue: number, paths: readonly string[]): string =>
     `auto-run: issue #${issue} reviewed; committing ${paths.length === 0 ? "no further changes" : `${paths.length} changed path(s): ${paths.slice(0, 10).join(", ")}`}.`,

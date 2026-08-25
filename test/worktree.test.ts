@@ -114,6 +114,7 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     fetch: async () => { calls.push("fetch"); },
     checkout: async (branch: string) => { calls.push(`checkout ${branch}`); },
     createBranch: async () => { calls.push("createBranch"); },
+    deleteBranch: async () => { calls.push("deleteBranch"); },
     fastForward: async () => { calls.push("fastForward"); },
     mergeFromRemote: async () => true,
     add: async () => { calls.push("add"); },

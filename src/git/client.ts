@@ -127,6 +127,8 @@ export interface GitClient {
   fetch(): Promise<void>;
   checkout(branch: string): Promise<void>;
   createBranch(branch: string, from: string): Promise<void>;
+  /** Deletes a local branch only when Git considers it fully merged. */
+  deleteBranch(branch: string): Promise<void>;
   /** Fast-forwards `branch`, which must be checked out, to its upstream. */
   fastForward(branch: string): Promise<void>;
   /**
@@ -232,6 +234,12 @@ export class ProcessGitClient implements GitClient {
 
   public async createBranch(branch: string, from: string): Promise<void> {
     await this.run(["checkout", "-b", branch, from]);
+  }
+
+  public async deleteBranch(branch: string): Promise<void> {
+    // Deliberately not `-D`: cleanup must never discard a commit merely because
+    // an implementer unexpectedly left the working tree clean.
+    await this.run(["branch", "-d", branch]);
   }
 
   public async fastForward(branch: string): Promise<void> {
