@@ -64,7 +64,7 @@ hooks as events happen.
 | `grill-me` | Near-direct | Reuse the instructions and map explicit-only invocation metadata. |
 | `handoff` | Near-direct | Reuse the instructions and map its argument hint/explicit invocation behavior. |
 | `improve-codebase-architecture` | Adapt | Core content is portable; rewrite the companion subagent exercise and Claude tool references. |
-| `issues` | Adapt | Port the skills and `UserPromptSubmit` publisher, replace `${CLAUDE_SESSION_ID}` and shell interpolation, and test the ChatGPT transcript/context flow. |
+| `issues` | Native | Uses ChatGPT skill variants plus a `UserPromptSubmit` adapter that supplies a stable gateway session id and next draft index, then delegates publishing—including resumable oversized issues—to the shared core. |
 | `on-edit-block` | Adapt | Match `apply_patch`, parse patch commands rather than `file_path`, and redesign read tracking around ChatGPT hook events. |
 | `on-edit-reminder` | Adapt | Same edit/read changes as `on-edit-block`, with ChatGPT `PostToolUse` context output. |
 | `on-read-reminder` | Adapt | Observe shell and local/MCP read calls that are visible to hooks; do not assume Claude's `Read` payload. |
@@ -117,7 +117,7 @@ remain platform-agnostic.
 
 1. Port and verify the near-direct skills.
 2. Add small native hook ports: `on-read-reminder`, then the edit guard/reminder pair.
-3. Port stateful workflows: `issues`, `commit`, `redirect-subagents`, and the
+3. Port the remaining stateful workflows: `redirect-subagents` and the
    weekly-window version of `usage-limit-wait`.
 
 ## Sources

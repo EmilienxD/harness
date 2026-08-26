@@ -4,15 +4,17 @@ Everything for getting work out of a conversation and onto the GitHub tracker: o
 reviewed issue, a whole plan → a dependency-linked batch, or the current conversation → a spec
 (in chat, or as an issue). Nothing reaches the tracker before a human has looked at it.
 
-One install ships all five skills and one publishing hook:
+One install ships all five skills and one publishing hook. Claude Code remains
+the default target; pass `--platform chatgpt` for the native ChatGPT payload:
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness harness install issues
+uvx --from git+https://github.com/EmilienxD/harness harness install issues --platform chatgpt
 ```
 
 ## Problem
 
-Creating GitHub issues from Claude Code with the `gh` CLI has three problems:
+Creating GitHub issues from Claude Code or ChatGPT with the `gh` CLI has four problems:
 
 1. **No review window.** When Claude runs `gh issue create` directly, the issue is live the moment
    the command executes. There's no point to edit the title, fix the body, or cancel it before it's
@@ -31,7 +33,7 @@ Creating GitHub issues from Claude Code with the `gh` CLI has three problems:
 
 Drafting and publishing are separate concerns, owned by different mechanisms. Drafting is a model
 turn that writes markdown files you can edit; publishing is a `UserPromptSubmit` hook that fires
-before Claude ever sees the prompt, so it costs **0 API calls** and does the `gh` work itself —
+before the model sees the prompt, so it costs **0 API calls** and does the `gh` work itself —
 including creating the workflow's labels and, for batches, rewriting cross-references into real
 issue numbers. Bodies always go through LF-only `--body-file` temporary files, never inline, which
 avoids both the Windows command-length limit and Windows newline expansion.
@@ -43,6 +45,10 @@ avoids both the Windows command-length limit and Windows newline expansion.
 | One issue | `/draft-issue` → `/publish-issues` | 2 API calls |
 | A plan, as a batch | `/draft-issues` → `/publish-issues` | 3 API calls |
 | This conversation, as a spec | `/to-spec`, or `/to-spec-draft-issue` → `/publish-issues` | 1–2 API calls |
+
+The table uses Claude Code's `/skill` spelling. In ChatGPT CLI/IDE prompts, invoke the same skills
+as `$draft-issue`, `$draft-issues`, `$publish-issues`, `$to-spec`, and
+`$to-spec-draft-issue`.
 
 **Single issue.** `/draft-issue` pins down scope, difficulty, and mode with you in chat, then writes
 one markdown file under `.issues-gateway/{session-id}/issue-{n}.md`, where `{n}` is the next free
@@ -237,6 +243,21 @@ At runtime the drafting skills create a gateway folder at the project root — `
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness harness install issues
 ```
+
+For ChatGPT:
+
+```bash
+uvx --from git+https://github.com/EmilienxD/harness harness install issues --platform chatgpt
+```
+
+That installs skills under `.agents/skills/`, the shared publishing core and a thin native adapter
+under `.codex/hooks/`, and registers the adapter in `.codex/hooks.json`. Review and trust the hook
+definition when ChatGPT prompts you. ChatGPT has no documented equivalent of Claude Code's
+pre-expanded `` !`command` `` skill syntax, so the adapter handles those commands on
+`UserPromptSubmit`: it derives a stable UUID-shaped batch id from the ChatGPT thread id, creates the
+gateway directory and `.gitignore`, computes the next free index, and injects those exact values as
+developer context before the drafting skill runs. The same adapter delegates publishing to the
+shared core, including 65,536-character splitting and resumable continuation comments.
 
 That copies the five skills and the hook into `.claude/` and merges the hook registration below
 into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry` first to
