@@ -511,6 +511,339 @@ def test_gh_create_issue_omits_parent_when_there_is_none(monkeypatch):
     assert "--parent" not in calls[0]
 
 
+# --- oversized bodies and resumable continuation comments -----------------
+
+
+def _rendered_content(payload: str) -> str:
+    return payload.split("\n\n", 1)[1].rsplit("\n\n<!-- issues-gateway:", 1)[0]
+
+
+def test_body_at_hard_limit_keeps_the_single_create_path(tmp_path, monkeypatch):
+    body = "é" * hook.GITHUB_BODY_LIMIT
+    created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
+    _draft(tmp_path, "issue-0.md", f"# T\n\n> mode:afk\n\n{body}\n")
+
+    count, failures = hook.publish_batch(
+        tmp_path / ".issues-gateway" / SID, dry=False, report=[]
+    )
+
+    assert (count, failures) == (1, 0)
+    assert created[0]["body"] == body
+    assert "issues-gateway:" not in created[0]["body"]
+
+
+def test_rendered_parts_are_ordered_complete_and_below_both_limits():
+    for body in [
+        ("Unicode café 🚀\n\n" * 6000),
+        ("line\n" * 20_000),
+        ("x" * 140_000),
+    ]:
+        parts = hook.render_oversized_parts(body, f"{SID}/0")
+        assert len(parts) >= 2
+        assert all(len(part) <= hook.CHUNK_TARGET for part in parts)
+        assert all(len(part) <= hook.GITHUB_BODY_LIMIT for part in parts)
+        assert "".join(_rendered_content(part) for part in parts) == body
+        for index, part in enumerate(parts, 1):
+            assert hook.part_marker(
+                f"{SID}/0", hook.content_digest(body), index, len(parts)
+            ) in part
+
+
+def test_chunker_prefers_paragraph_then_line_boundaries():
+    body = "first paragraph\n\nsecond paragraph\nlast line"
+    chunks = hook.chunk_markdown(body, 18)
+    assert chunks[0] == "first paragraph\n\n"
+
+    chunks = hook.chunk_markdown("first line\nsecond-line-is-long", 15)
+    assert chunks[0] == "first line\n"
+
+
+def test_chunker_closes_and_reopens_an_unavoidably_split_fence():
+    body = "```python\n" + ("print('x')\n" * 10_000) + "```"
+    parts = hook.render_oversized_parts(body, f"{SID}/0")
+    contents = [_rendered_content(part) for part in parts]
+    assert contents[0].endswith("```")
+    assert contents[1].startswith("```python\n")
+    repaired = "\n".join(contents).replace("\n```\n```python\n", "\n", 1)
+    assert repaired == body
+
+
+def _mock_oversized_remote(monkeypatch, *, comment_failure=None, existing=None):
+    calls = {
+        "creates": [],
+        "create_labels": [],
+        "create_parents": [],
+        "comments": [],
+        "finds": 0,
+    }
+    monkeypatch.setattr(hook, "gh_repository", lambda: (True, "x/y"))
+
+    def find(*args):
+        calls["finds"] += 1
+        return True, None
+
+    monkeypatch.setattr(hook, "gh_find_reserved_issue", find)
+
+    def create(title, body, labels, parent=None):
+        calls["creates"].append(body)
+        calls["create_labels"].append(labels)
+        calls["create_parents"].append(parent)
+        return True, "https://github.com/x/y/issues/42"
+
+    monkeypatch.setattr(hook, "gh_create_issue", create)
+    monkeypatch.setattr(
+        hook, "gh_existing_comment_parts", lambda *args: (True, set(existing or set()))
+    )
+
+    def comment(url, body):
+        part = int(hook.ISSUE_MARKER_PATTERN.search(body).group("part"))
+        calls["comments"].append(part)
+        if comment_failure == part:
+            return False, "boom"
+        return True, "ok"
+
+    monkeypatch.setattr(hook, "gh_comment_issue", comment)
+    return calls
+
+
+def test_oversized_publish_records_comments_then_cleans_up(tmp_path, monkeypatch):
+    calls = _mock_oversized_remote(monkeypatch)
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 70_000)
+    )
+    batch = path.parent
+    created = []
+
+    count, failures = hook.publish_batch(
+        batch, dry=False, report=[], created=created
+    )
+
+    assert (count, failures) == (1, 0)
+    assert len(calls["creates"]) == 1 and calls["comments"] == [2]
+    assert not path.exists()
+    state = _state(batch.parent)
+    assert f"{SID}/0" not in state.get("inflight", {})
+    assert state["published"][f"{SID}/0"]["url"].endswith("/42")
+    assert created[0]["number"] == "42"
+
+
+def test_labels_references_and_native_parent_are_processed_before_chunking(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(hook, "parent_flag_supported", lambda: True)
+    calls = _mock_oversized_remote(monkeypatch)
+    path = _draft(
+        tmp_path,
+        "issue-1.md",
+        (
+            "# Child\n\n> bug, mode:afk\n\n## Parent\n\n#42\n\n## What\n\n"
+            f"Blocked by {SID}/0\n\n" + ("x" * 70_000)
+        ),
+    )
+    hook._write_json_dict(
+        path.parent.parent / hook.STATE_NAME,
+        {"published": {f"{SID}/0": {"number": "41"}}},
+    )
+
+    assert hook.publish_batch(path.parent, dry=False, report=[]) == (1, 0)
+    assert calls["create_labels"] == [["bug", "[AI]-afk"]]
+    assert calls["create_parents"] == ["42"]
+    assert f"{SID}/0" not in calls["creates"][0]
+    assert "Blocked by #41" in calls["creates"][0]
+    assert "## Parent" not in calls["creates"][0]
+
+
+def test_old_gh_parent_fallback_is_included_before_chunking(tmp_path, monkeypatch):
+    monkeypatch.setattr(hook, "parent_flag_supported", lambda: False)
+    calls = _mock_oversized_remote(monkeypatch)
+    linked = []
+    monkeypatch.setattr(
+        hook,
+        "gh_link_parent",
+        lambda child, parent: (linked.append((child, parent)) or True, ""),
+    )
+    path = _draft(
+        tmp_path,
+        "issue-0.md",
+        "# Child\n\n> mode:afk\n\n## Parent\n\n#42\n\n" + ("x" * 70_000),
+    )
+
+    assert hook.publish_batch(path.parent, dry=False, report=[]) == (1, 0)
+    assert "## Parent\n\n#42" in calls["creates"][0]
+    assert linked == [("42", "42")]
+
+
+def test_comment_failure_resumes_existing_issue_without_duplicates(tmp_path, monkeypatch):
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 130_000)
+    )
+    batch = path.parent
+    first = _mock_oversized_remote(monkeypatch, comment_failure=3)
+    report = []
+
+    assert hook.publish_batch(batch, dry=False, report=report) == (0, 1)
+    assert first["creates"] and first["comments"] == [2, 3]
+    assert path.exists()
+    state = _state(batch.parent)
+    assert state["inflight"][f"{SID}/0"]["completed_parts"] == [1, 2]
+
+    second = _mock_oversized_remote(monkeypatch, existing={2})
+    assert hook.publish_batch(batch, dry=False, report=[]) == (1, 0)
+    assert second["creates"] == []
+    assert second["finds"] == 0
+    assert second["comments"] == [3]
+    assert not path.exists()
+
+
+def test_recovery_finds_marker_issue_when_url_was_not_recorded(tmp_path, monkeypatch):
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 70_000)
+    )
+    batch = path.parent
+    calls = _mock_oversized_remote(monkeypatch)
+    monkeypatch.setattr(hook, "gh_create_issue", lambda *args: (False, "lost response"))
+    assert hook.publish_batch(batch, dry=False, report=[]) == (0, 1)
+
+    marker_body = hook.render_oversized_parts("x" * 70_000, f"{SID}/0")[0]
+    monkeypatch.setattr(
+        hook,
+        "gh_find_reserved_issue",
+        lambda *args: (
+            True,
+            {
+                "number": 42,
+                "url": "https://github.com/x/y/issues/42",
+                "body": marker_body,
+                "createdAt": "9999-01-01T00:00:00Z",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        hook, "gh_create_issue", lambda *args: (_ for _ in ()).throw(AssertionError())
+    )
+    assert hook.publish_batch(batch, dry=False, report=[]) == (1, 0)
+    assert calls["comments"] == [2]
+
+
+def test_changed_draft_refuses_to_resume_and_reports_partial_url(tmp_path, monkeypatch):
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 130_000)
+    )
+    batch = path.parent
+    _mock_oversized_remote(monkeypatch, comment_failure=3)
+    assert hook.publish_batch(batch, dry=False, report=[]) == (0, 1)
+    path.write_text(path.read_text(encoding="utf-8") + "changed", encoding="utf-8")
+
+    calls = _mock_oversized_remote(monkeypatch)
+    report = []
+    assert hook.publish_batch(batch, dry=False, report=report) == (0, 1)
+    assert calls["creates"] == [] and calls["comments"] == []
+    assert any("draft changed" in line and "/42" in line for line in report)
+
+
+def test_shrinking_partial_draft_below_limit_still_refuses_duplicate(tmp_path, monkeypatch):
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 130_000)
+    )
+    batch = path.parent
+    _mock_oversized_remote(monkeypatch, comment_failure=3)
+    assert hook.publish_batch(batch, dry=False, report=[]) == (0, 1)
+    path.write_text("# T\n\n> mode:afk\n\nshort now", encoding="utf-8")
+
+    monkeypatch.setattr(
+        hook, "gh_create_issue", lambda *args: (_ for _ in ()).throw(AssertionError())
+    )
+    report = []
+    assert hook.publish_batch(batch, dry=False, report=report) == (0, 1)
+    assert any("refusing to create a replacement" in line and "/42" in line for line in report)
+
+
+def test_failed_reservation_makes_no_remote_issue_or_comment(tmp_path, monkeypatch):
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 70_000)
+    )
+    monkeypatch.setattr(hook, "gh_repository", lambda: (True, "x/y"))
+    monkeypatch.setattr(hook, "reserve_inflight", lambda *args: (False, None))
+    monkeypatch.setattr(
+        hook, "gh_create_issue", lambda *args: (_ for _ in ()).throw(AssertionError())
+    )
+    monkeypatch.setattr(
+        hook, "gh_comment_issue", lambda *args: (_ for _ in ()).throw(AssertionError())
+    )
+
+    report = []
+    assert hook.publish_batch(
+        path.parent,
+        dry=False,
+        report=report,
+        mutation_prelude=lambda: (_ for _ in ()).throw(AssertionError()),
+    ) == (0, 1)
+    assert path.exists()
+    assert any("no GitHub changes were made" in line for line in report)
+
+
+def test_comment_failure_does_not_stop_unrelated_drafts(tmp_path, monkeypatch):
+    first = _draft(
+        tmp_path, "issue-0.md", "# Big\n\n> mode:afk\n\n" + ("x" * 130_000)
+    )
+    second = _draft(tmp_path, "issue-1.md", "# Small\n\n> mode:afk\n\nsmall")
+    calls = _mock_oversized_remote(monkeypatch, comment_failure=3)
+
+    count, failures = hook.publish_batch(first.parent, dry=False, report=[])
+
+    assert (count, failures) == (1, 1)
+    assert first.exists() and not second.exists()
+    assert calls["comments"] == [2, 3]
+
+
+def test_comment_body_file_uses_lf_newlines(monkeypatch):
+    captured = []
+
+    def fake_run(args, **kwargs):
+        path = Path(args[args.index("--body-file") + 1])
+        captured.append((args, path.read_bytes()))
+        return type("R", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+    monkeypatch.setattr(hook.subprocess, "run", fake_run)
+    assert hook.gh_comment_issue("https://github.com/x/y/issues/42", "a\nb\n")[0]
+    args, payload = captured[0]
+    assert args[:4] == ["gh", "issue", "comment", "https://github.com/x/y/issues/42"]
+    assert payload == b"a\nb\n"
+
+
+def test_oversized_dry_run_reports_parts_without_state_or_gh(tmp_path, monkeypatch):
+    _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 70_000))
+    monkeypatch.setattr(
+        hook.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError())
+    )
+
+    report, count, failures = _dry_publish(tmp_path)
+
+    assert (count, failures) == (1, 0)
+    assert any("2 parts (1 continuation comment(s))" in line for line in report)
+    assert not (tmp_path / ".issues-gateway" / hook.STATE_NAME).exists()
+
+
+def test_state_migration_preserves_valid_maps_and_drops_bad_inflight(tmp_path):
+    gateway = _gateway(tmp_path)
+    hook._write_json_dict(
+        gateway / hook.STATE_NAME,
+        {
+            "published": {f"{SID}/0": {"number": "42"}},
+            "pending_notice": {"created": [], "failed": 1},
+            "inflight": {
+                f"{SID}/1": {"fingerprint": "ok"},
+                f"{SID}/2": "bad",
+            },
+        },
+    )
+
+    state = hook._read_state(gateway)
+    assert state["published"][f"{SID}/0"]["number"] == "42"
+    assert state["pending_notice"]["failed"] == 1
+    assert state["inflight"] == {f"{SID}/1": {"fingerprint": "ok"}}
+
+
 # --- the notice delivered to the agent on the next prompt ------------------
 
 

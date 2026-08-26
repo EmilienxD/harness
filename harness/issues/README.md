@@ -33,8 +33,8 @@ Drafting and publishing are separate concerns, owned by different mechanisms. Dr
 turn that writes markdown files you can edit; publishing is a `UserPromptSubmit` hook that fires
 before Claude ever sees the prompt, so it costs **0 API calls** and does the `gh` work itself —
 including creating the workflow's labels and, for batches, rewriting cross-references into real
-issue numbers. The body always goes through `--body-file`, never inline, which is what makes body
-size irrelevant to the Windows command-length limit.
+issue numbers. Bodies always go through LF-only `--body-file` temporary files, never inline, which
+avoids both the Windows command-length limit and Windows newline expansion.
 
 ### Three flows
 
@@ -66,6 +66,21 @@ GitHub sub-issue of that parent, via `gh issue create --parent`. Knowing the num
 GitHub's sub-issue graph is structural — so the hook makes the link itself and strips the section
 from the published body, since GitHub renders the parent natively. This costs no model call: the
 reference is one line in a file the drafting skill was already writing.
+
+**Oversized issues.** A processed body up to GitHub's 65,536-character limit keeps the existing
+single-create behavior byte for byte. A larger body is split at a conservative 60,000-character
+payload target after labels, cross-references, and parent handling are resolved. Part 1 is the issue
+body and identifies the total part count; the remaining parts are visibly numbered continuation
+comments. Splitting prefers paragraphs, then lines, and only hard-splits exceptionally long lines.
+Fenced code blocks are kept together where possible and are closed/reopened with the same language
+when a block itself cannot fit.
+
+Every oversized part also carries a hidden draft-key/content-digest/index marker. Before creating
+the issue, the hook reserves an `inflight` state entry. If a run stops after creation or between
+comments, rerunning `/publish-issues` finds the existing marker-bearing issue and comments, skips
+parts already present, and continues without duplicating content. The draft is retained until every
+continuation exists. Editing its processed title, labels, parent, or body while it is incomplete
+causes the rerun to stop that draft and report the partial issue URL rather than mixing versions.
 
 ### Spec → sub-issues, without a round trip
 
@@ -134,7 +149,7 @@ At runtime the drafting skills create a gateway folder at the project root — `
 ```
 .issues-gateway/
 ├── .gitignore                                   # contains '*', created on first draft
-├── .state.json                                  # published refs + pending agent notice
+├── .state.json                                  # published refs + inflight work + pending notice
 ├── .state.lock                                  # sidecar carrying the state file lock
 └── 6b1f0c2e-…-2e8a1d0c4f55/                     # one dir per drafting session
     ├── issue-0.md
@@ -186,7 +201,7 @@ At runtime the drafting skills create a gateway folder at the project root — `
   draft is left in place rather than published without its link. On a `gh` too old for
   `gh issue create --parent`, the link is made afterwards with `gh issue edit --parent` and the
   reference is kept in the body as a fallback.
-- **State file**: `.state.json` at the gateway root holds both durable and transient hook state. Its
+- **State file**: `.state.json` at the gateway root holds durable, inflight, and transient hook state. Its
   `published` object records `{"{session-id}/{i}": {number, url, title, labels, parent}}` for every
   batch — one shared map for the whole project, because reference keys already carry their session
   id. It is written after each successful create, immediately, so an interrupted run still leaves
@@ -203,10 +218,19 @@ At runtime the drafting skills create a gateway folder at the project root — `
   not keyed by session id — a `/clear` between publishing and the next prompt must not strand it —
   and two publish runs in a row accumulate rather than overwrite. A malformed notice is dropped,
   never raised: this hook sees every prompt in the session and must not be able to fail one.
-- **Successful publish cleanup**: after `gh issue create` succeeds, the hook records the issue in the
-  state file and then deletes the draft file. If another draft fails later in the same run, any
-  references to issues already created in that run are rewritten to their real `#<number>` form
-  before the failed draft is left for a rerun.
+- **Inflight oversized publication**: the `inflight` object is keyed by `{session-id}/{i}` and stores
+  the repository, reservation time, publication fingerprint, processed issue metadata, complete-body
+  SHA-256, part count, issue URL/number once known, and completed part indexes. The reservation is
+  written under the same lock before issue creation. The issue is added to `published` as soon as
+  its URL is known so later references resolve even while comments are pending. Marker inspection
+  makes issue creation and comment posting resumable; malformed inflight entries are ignored without
+  disturbing valid `published` or `pending_notice` data.
+- **Successful publish cleanup**: a normal issue is recorded after `gh issue create` succeeds and
+  its draft is then deleted. An oversized draft is deleted, removed from `inflight`, counted as
+  published, and queued for the normal agent notice only after all continuation markers exist. A
+  continuation failure retains the draft and progress, reports the partial URL and failed part, and
+  does not prevent unrelated drafts from being processed. If another draft fails later in the same
+  run, known references are still rewritten to their real `#<number>` form before it is retained.
 
 ## Installation
 
@@ -277,8 +301,10 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 /publish-issues [--dry]
   → hook creates the labels, publishes every draft via gh, links each draft
     that declares a parent as a real GitHub sub-issue,
+    publishes bodies over 65,536 characters as numbered continuation comments,
     deletes each draft file after GitHub confirms creation,
     and hands the real issue numbers to the agent on your next prompt
+  → --dry reports the issue/part/comment counts without invoking gh or writing state
   (also accepts /publish-issue alias — same hook, same behavior)
 
 /draft-issues [optional: issue number, URL, or path to a plan]
