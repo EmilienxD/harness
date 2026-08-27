@@ -11,15 +11,18 @@ test("configuration validates untrusted values and reports actionable fallbacks"
     ["aboard.manager.disallowedTools", ["Read", ""]],
     ["aboard.autoRun.mergeStrategy", "cherry-pick"],
     ["aboard.autoRun.review", "yes"],
+    ["aboard.autoRun.discardBehavior", "delete-everything"],
     ["aboard.timeouts.managerStop", 0],
   ]);
   const result = readAboardConfiguration({ get: (key) => values.get(key) });
   assert.equal(result.value.bridgePort, 4823);
   assert.equal(result.value.maxInlinePromptChars, 4000);
   assert.deepEqual(result.value.managerDisallowedTools, []);
-  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30, worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } });
+  // Discard falls back to the conservative behavior, not to the destructive one
+  // an unrecognised value happens to look like.
+  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30, discardBehavior: "record-only", worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
-  assert.equal(result.diagnostics.length, 6);
+  assert.equal(result.diagnostics.length, 7);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
 });
 
@@ -33,6 +36,7 @@ test("configuration accepts every supported launch and review setting", () => {
     "aboard.autoRun.mergeStrategy": "rebase",
     "aboard.autoRun.mergeRunPullRequest": true,
     "aboard.autoRun.pollSeconds": 15,
+    "aboard.autoRun.discardBehavior": "full-cleanup",
     "aboard.autoRun.worktree.enabled": true,
     "aboard.autoRun.worktree.root": "  ../checkouts  ",
     "aboard.autoRun.worktree.keep": true,
@@ -47,6 +51,7 @@ test("configuration accepts every supported launch and review setting", () => {
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash", "Read(./src/**)"]);
   assert.deepEqual(result.value.autoRun, {
     review: true, pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15,
+    discardBehavior: "full-cleanup",
     // The root is trimmed: it becomes a path, and a stray space in a settings
     // file would produce a directory nobody meant to create.
     worktree: { enabled: true, root: "../checkouts", keep: true, setupTimeoutSeconds: 900 },

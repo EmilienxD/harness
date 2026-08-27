@@ -1,17 +1,16 @@
 /**
  * Reopening a conversation aboard started.
  *
- * Restore Fleet covers one case — the extension host restarted under a session
- * that was still live — and `review_pr` covers another, the session that owns
- * the pull request in flight. Neither covers the ordinary one: a brainstormer or
- * an interactive general-purpose the user finished with yesterday and now wants
- * back. That session left the fleet when its conversation ended, so nothing
- * offered it, and resuming it by hand loses the agent definition — `--resume`
- * restores an `--agent` selection by name, and aboard's names live in a
- * per-launch directory no bare `claude` is pointed at.
+ * `review_pr` covers one case — the session that owns the pull request in
+ * flight. It does not cover the ordinary one: a brainstormer or an interactive
+ * general-purpose the user finished with yesterday and now wants back. That
+ * session left the fleet when its conversation ended, so nothing offered it,
+ * and resuming it by hand loses the agent definition — `--resume` restores an
+ * `--agent` selection by name, and aboard's names live in a per-launch
+ * directory no bare `claude` is pointed at.
  *
- * This coordinator is the way back for all three: it merges what the fleet still
- * holds with what the session ledger remembers, checks each candidate against
+ * This coordinator is the way back for both: it merges what the fleet still
+ * holds with what recent activity remembers, checks each candidate against
  * the transcript on disk, and reopens the chosen one through the same
  * `planSessionResume` path the other two use.
  */
@@ -21,9 +20,9 @@ import type { AgentId, AgentType, SessionId, TerminalId } from "../domain/contra
 import type { FleetRegistry } from "../domain/fleet.js";
 import {
   reopenCandidates,
+  type ActivityDto,
   type ReopenCandidate,
-  type SessionLedgerDto,
-} from "../domain/session-ledger.js";
+} from "../domain/activity.js";
 
 /** Why a recorded session cannot be reopened, as the user is told it. */
 export type UnresumableReason =
@@ -48,8 +47,8 @@ export type ReopenOutcome =
   | { readonly action: "reopened"; readonly candidate: ReopenCandidate; readonly handles: InteractiveLaunchHandles }
   | { readonly action: "unresumable"; readonly candidate: ReopenCandidate; readonly reason: UnresumableReason };
 
-export interface ReopenLedgerSource {
-  load(): Promise<SessionLedgerDto | undefined>;
+export interface ReopenActivitySource {
+  entries(): ActivityDto;
 }
 
 export interface ReopenSessionLauncher {
@@ -69,12 +68,12 @@ export interface ReopenTerminals {
 }
 
 export interface ReopenCoordinatorOptions {
-  readonly ledger: ReopenLedgerSource;
+  readonly activity: ReopenActivitySource;
   readonly fleet: FleetRegistry;
   readonly terminals: ReopenTerminals;
   readonly launcher: ReopenSessionLauncher;
   /**
-   * Transcript test; the same one the Manager's resume and Restore Fleet use.
+   * Transcript test; the same one the Manager's resume uses.
    * `cwd` is the directory the session ran in, which is where Claude Code filed
    * its transcript — absent for every session that ran in the workspace itself.
    */
@@ -105,12 +104,11 @@ export class ReopenCoordinator {
    *
    * The transcript checks run together — each stops at the first conversation
    * record, so they cost a few lines of JSONL apiece — and the list is bounded
-   * by the ledger's own retention.
+   * by the activity store's own retention.
    */
   public async list(): Promise<readonly ReopenOption[]> {
-    const ledger = await this.options.ledger.load().catch(() => undefined);
     const candidates = reopenCandidates(
-      ledger,
+      this.options.activity.entries(),
       this.options.fleet.list(),
       (terminalId) => this.options.terminals.isOpen(terminalId),
     );

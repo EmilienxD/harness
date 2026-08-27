@@ -1,49 +1,258 @@
-import { EventEmitter, ThemeIcon, TreeItem, TreeItemCollapsibleState, commands, window, workspace, type Disposable, type ExtensionContext, type TreeDataProvider } from "vscode";
+import { EventEmitter, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type TreeDataProvider } from "vscode";
 
 import type { TerminalController } from "../claude/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning, type FleetTreeNode } from "./fleet.js";
+import { AutoRunTreeModel, autoRunCard, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunViewSources } from "./auto-run.js";
+import { ActivityTreeModel, clearActivityWarning, type ActivityNode } from "./activity.js";
+import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
+import type { AutoRunEngine } from "../auto/engine.js";
+import type { DiscardBehavior } from "../domain/run-cleanup.js";
+import { describeDiscard } from "../domain/run-cleanup.js";
+
+/**
+ * How often the Auto Run view revalidates a recorded run while it is on screen.
+ * Frequent enough that a user who has just merged a pull request in the browser
+ * does not sit looking at a stale card, and cheap enough to run indefinitely:
+ * one fetch and a handful of `gh` reads.
+ */
+const RECOVERY_POLL_MS = 30_000;
 
 export interface NativeFleetUiRegistration extends Disposable {
   /** Re-renders status-bar visibility; call it whenever the project's initialized state changes. */
   readonly refresh: () => void;
 }
 
-export function registerNativeFleetUi(context: ExtensionContext, port: () => number | undefined, fleet: FleetRegistry, lease: WriteLease, terminals: TerminalController, isInitialized: () => boolean): NativeFleetUiRegistration {
+export interface AutoRunUiHost {
+  readonly engine: AutoRunEngine;
+  readonly discardBehavior: () => DiscardBehavior;
+  /** Opens an issue or pull request in the browser. */
+  readonly webUrl: (number: number) => Promise<string>;
+  readonly start: (chrome: boolean) => Promise<void>;
+}
+
+export interface ActivityUiHost {
+  readonly entries: () => readonly ActivityEntry[];
+  readonly store: () => ActivityDto | undefined;
+  readonly clear: () => Promise<void>;
+  readonly reopen: (entry: ActivityEntry) => Promise<void>;
+  readonly showTerminal: (entry: ActivityEntry) => void;
+  /** Fires whenever an entry is appended or the store is cleared. */
+  readonly onDidChange: (listener: () => void) => Disposable;
+}
+
+export interface NativeUiOptions {
+  readonly port: () => number | undefined;
+  readonly fleet: FleetRegistry;
+  readonly lease: WriteLease;
+  readonly terminals: TerminalController;
+  readonly isInitialized: () => boolean;
+  readonly autoRun: AutoRunUiHost;
+  readonly activity: ActivityUiHost;
+}
+
+export function registerNativeFleetUi(context: ExtensionContext, options: NativeUiOptions): NativeFleetUiRegistration {
+  const { fleet, lease, terminals, isInitialized } = options;
   const disposables: Disposable[] = [];
-  const changes = new EventEmitter<FleetTreeNode | undefined>();
-  const model = new FleetTreeModel(
-    fleet,
-    lease,
-    { refresh: () => changes.fire(undefined) },
-    (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"),
-  );
-  const provider = (roots: () => readonly FleetTreeNode[]): TreeDataProvider<FleetTreeNode> => ({
-    onDidChangeTreeData: changes.event,
-    getChildren: (node) => [...(node === undefined ? roots() : model.children(node))],
-    getTreeItem: (node) => {
-      const mapped = model.item(node);
-      const item = new TreeItem(mapped.label, mapped.collapsible ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None);
-      item.description = mapped.description;
-      item.tooltip = mapped.tooltip;
-      item.contextValue = mapped.contextValue;
-      item.iconPath = new ThemeIcon(mapped.icon);
-      if (mapped.command) item.command = { ...mapped.command, arguments: [...mapped.command.arguments] };
-      return item;
-    },
-  });
-  // One section over the whole model: the Manager sorts first, workers follow.
-  // Its welcome view renders only while the tree is empty, so the launch actions
-  // also live in the view title menu, where a leftover worker row cannot hide them.
+  const isTerminalOpen = (terminalId: string): boolean =>
+    terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open");
+
+  // -- Agents -----------------------------------------------------------------
+  const fleetChanges = new EventEmitter<FleetTreeNode | undefined>();
+  const fleetModel = new FleetTreeModel(fleet, lease, { refresh: () => fleetChanges.fire(undefined) }, (terminalId) => isTerminalOpen(terminalId));
   disposables.push(
-    window.registerTreeDataProvider("aboard.fleet", provider(() => model.roots())),
-    changes,
-    model,
+    window.registerTreeDataProvider("aboard.fleet", {
+      onDidChangeTreeData: fleetChanges.event,
+      getChildren: (node) => [...(node === undefined ? fleetModel.roots() : fleetModel.children(node))],
+      getTreeItem: (node) => {
+        const mapped = fleetModel.item(node);
+        const item = new TreeItem(mapped.label, mapped.collapsible ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None);
+        item.description = mapped.description;
+        item.tooltip = mapped.tooltip;
+        item.contextValue = mapped.contextValue;
+        item.iconPath = new ThemeIcon(mapped.icon);
+        if (mapped.command) item.command = { ...mapped.command, arguments: [...mapped.command.arguments] };
+        return item;
+      },
+    }),
+    fleetChanges,
+    fleetModel,
     // Hosts the pre-initialization presentation; never has rows of its own.
     window.registerTreeDataProvider("aboard.welcome", { getChildren: () => [], getTreeItem: (node: never) => node }),
   );
 
+  // -- Auto Run ---------------------------------------------------------------
+  const engine = options.autoRun.engine;
+  const autoRunSources: AutoRunViewSources = {
+    state: () => engine.state(),
+    persisted: () => engine.persisted(),
+    eligibility: () => engine.eligibility(),
+    titles: () => engine.observedTitles(),
+  };
+  const autoRunModel = new AutoRunTreeModel(autoRunSources);
+  const autoRunChanges = new EventEmitter<AutoRunNode | undefined>();
+  const autoRunView = window.createTreeView<AutoRunNode>("aboard.autoRun", {
+    treeDataProvider: {
+      onDidChangeTreeData: autoRunChanges.event,
+      getChildren: (node) => [...(node === undefined ? autoRunModel.roots() : autoRunModel.children(node))],
+      getTreeItem: (node) => {
+        const mapped = autoRunModel.item(node);
+        const item = new TreeItem(mapped.label, mapped.collapsible ? TreeItemCollapsibleState.Expanded : TreeItemCollapsibleState.None);
+        item.description = mapped.description;
+        item.tooltip = mapped.tooltip;
+        item.contextValue = mapped.contextValue;
+        item.iconPath = new ThemeIcon(mapped.icon);
+        if (mapped.command) item.command = { ...mapped.command, arguments: [...mapped.command.arguments] };
+        return item;
+      },
+    },
+  });
+  disposables.push(autoRunView, autoRunChanges);
+
+  const publishAutoRunContext = async (): Promise<void> => {
+    const card = autoRunCard(autoRunSources);
+    // One key per state rather than a family of booleans: menu `when` clauses
+    // then read as the state machine they describe, and no combination of flags
+    // can produce a card offering both Start and Resume.
+    await commands.executeCommand("setContext", "aboard.autoRunCard", card.kind);
+  };
+  const refreshAutoRun = (): void => {
+    autoRunChanges.fire(undefined);
+    void publishAutoRunContext();
+  };
+  refreshAutoRun();
+
+  /**
+   * Revalidation is serialized by the engine itself, so overlapping triggers —
+   * a visibility change arriving with the timer — collapse into one check.
+   */
+  let poll: ReturnType<typeof setInterval> | undefined;
+  const stopPolling = (): void => { if (poll !== undefined) { clearInterval(poll); poll = undefined; } };
+  const startPolling = (): void => {
+    if (poll !== undefined) return;
+    poll = setInterval(() => { void engine.refresh(); }, RECOVERY_POLL_MS);
+  };
+  disposables.push({ dispose: stopPolling });
+  disposables.push(autoRunView.onDidChangeVisibility((event) => {
+    if (!event.visible) { stopPolling(); return; }
+    void engine.refresh();
+    startPolling();
+  }));
+  disposables.push(window.onDidChangeWindowState((state) => {
+    if (state.focused && autoRunView.visible) void engine.refresh();
+  }));
+  if (autoRunView.visible) startPolling();
+
+  const openNumber = async (number: number | undefined): Promise<void> => {
+    if (number === undefined) return;
+    try { await env.openExternal(Uri.parse(await options.autoRun.webUrl(number))); }
+    catch (error) { void window.showWarningMessage(`aboard could not open #${number}: ${error instanceof Error ? error.message : "unknown error"}`); }
+  };
+
+  disposables.push(
+    commands.registerCommand("aboard.openIssue", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
+    commands.registerCommand("aboard.openPullRequest", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
+    commands.registerCommand("aboard.autoRun.refresh", async () => {
+      await engine.refresh();
+      // A waiting run polls GitHub on its own interval; "Check Now" is the user
+      // saying they have just merged and would rather not wait for it.
+      engine.continueNow();
+    }),
+    commands.registerCommand("aboard.autoRun.openCurrentIssue", () => {
+      const record = cardRecord(autoRunCard(autoRunSources));
+      void openNumber(engine.state()?.currentIssue ?? record?.currentIssue);
+    }),
+    commands.registerCommand("aboard.autoRun.openPullRequest", () => {
+      void openNumber(cardPullRequest(autoRunCard(autoRunSources), engine.state()));
+    }),
+    commands.registerCommand("aboard.startAutoRun", () => options.autoRun.start(false)),
+    commands.registerCommand("aboard.startAutoRunWithChrome", () => options.autoRun.start(true)),
+    commands.registerCommand("aboard.resumeAutoRun", async () => {
+      // Revalidated immediately before launching: the panel state may have gone
+      // stale between the poll that enabled this action and the click.
+      const eligibility = await engine.refresh();
+      if (eligibility?.state !== "resumable") {
+        void window.showWarningMessage(`aboard cannot resume that run: ${eligibility?.state === "broken" ? eligibility.reason : "its state is still being checked"}.`);
+        return;
+      }
+      const result = await engine.resume();
+      if (!result.started) void window.showErrorMessage(`aboard could not resume the run: ${result.reason}.`);
+    }),
+    commands.registerCommand("aboard.discardAutoRun", async () => {
+      const behavior = options.autoRun.discardBehavior();
+      const plan = await engine.planDiscard(behavior);
+      const confirmed = await window.showWarningMessage(
+        `Discard this auto-run? (aboard.autoRun.discardBehavior: ${behavior})`,
+        { modal: true, detail: describeDiscard(plan) },
+        "Discard",
+      );
+      if (confirmed !== "Discard") return;
+      const result = await engine.discard(behavior);
+      const removed = [
+        ...result.deletedLocalBranches.map((branch) => `local ${branch}`),
+        ...result.deletedRemoteBranches.map((branch) => `origin/${branch}`),
+        ...result.closedPullRequests.map((number) => `PR #${number}`),
+      ];
+      void window.showInformationMessage(
+        `Auto-run discarded${removed.length === 0 ? "" : `; removed ${removed.join(", ")}`}.`
+        + (result.leftovers.length === 0 ? "" : ` Left in place: ${result.leftovers.join("; ")}.`),
+      );
+    }),
+  );
+
+  // -- Recent Activity --------------------------------------------------------
+  const activityModel = new ActivityTreeModel({
+    entries: () => options.activity.entries(),
+    isTerminalOpen: (terminalId) => isTerminalOpen(terminalId),
+  });
+  const activityChanges = new EventEmitter<ActivityNode | undefined>();
+  disposables.push(
+    window.registerTreeDataProvider("aboard.recentActivity", {
+      onDidChangeTreeData: activityChanges.event,
+      getChildren: (node) => [...(node === undefined ? activityModel.roots() : [])],
+      getTreeItem: (node) => {
+        const mapped = activityModel.item(node);
+        const item = new TreeItem(mapped.label, TreeItemCollapsibleState.None);
+        item.description = mapped.description;
+        item.tooltip = mapped.tooltip;
+        item.contextValue = mapped.contextValue;
+        item.iconPath = new ThemeIcon(mapped.icon);
+        if (mapped.command) item.command = { ...mapped.command, arguments: [...mapped.command.arguments] };
+        return item;
+      },
+    }),
+    activityChanges,
+    options.activity.onDidChange(() => activityChanges.fire(undefined)),
+    commands.registerCommand("aboard.activity.openTerminal", (node: unknown) => {
+      const entry = activityEntryOf(node);
+      if (entry !== undefined) options.activity.showTerminal(entry);
+    }),
+    commands.registerCommand("aboard.activity.openIssue", (node: unknown) => {
+      void openNumber(activityEntryOf(node)?.issueNumbers?.[0]);
+    }),
+    commands.registerCommand("aboard.activity.openPullRequest", (node: unknown) => {
+      void openNumber(activityEntryOf(node)?.pullRequest);
+    }),
+    commands.registerCommand("aboard.activity.reopen", async (node: unknown) => {
+      const entry = activityEntryOf(node);
+      if (entry === undefined) return;
+      try { await options.activity.reopen(entry); }
+      catch (error) { void window.showErrorMessage(`aboard could not reopen that session: ${error instanceof Error ? error.message : "unknown error"}`); }
+    }),
+    commands.registerCommand("aboard.activity.clear", async () => {
+      const warning = clearActivityWarning(options.activity.store());
+      const confirmed = await window.showWarningMessage(
+        "Clear recent activity?",
+        { modal: true, ...(warning === undefined ? {} : { detail: warning }) },
+        "Clear All",
+      );
+      if (confirmed !== "Clear All") return;
+      await options.activity.clear();
+    }),
+  );
+
+  // -- Shared -----------------------------------------------------------------
   const commandRegistration = registerFleetCommands({
     register: (command, callback) => commands.registerCommand(command, callback),
     confirm: async (message, action) => await window.showWarningMessage(message, { modal: true }, action) === action,
@@ -52,7 +261,7 @@ export function registerNativeFleetUi(context: ExtensionContext, port: () => num
   }, {
     show: (terminalId) => terminals.show(terminalId),
     kill: (terminalId) => terminals.kill(terminalId),
-    isOpen: (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"),
+    isOpen: (terminalId) => isTerminalOpen(terminalId),
   }, fleet, lease);
   disposables.push(commandRegistration);
 
@@ -69,8 +278,9 @@ export function registerNativeFleetUi(context: ExtensionContext, port: () => num
   // button: the bridge status is aboard state, and none of it may surface
   // before the user has asked for a `.aboard/`.
   const render = () => {
+    refreshAutoRun();
     if (!isInitialized()) { status.hide(); return; }
-    const snapshot = renderFleetStatus(port() ?? 0, fleet, lease, (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"));
+    const snapshot = renderFleetStatus(options.port() ?? 0, fleet, lease, (terminalId) => isTerminalOpen(terminalId));
     status.text = snapshot.text;
     status.tooltip = snapshot.tooltip;
     status.show();
@@ -84,7 +294,16 @@ export function registerNativeFleetUi(context: ExtensionContext, port: () => num
     if (warning !== undefined) void window.showWarningMessage(warning);
   }));
 
-  const registration: NativeFleetUiRegistration = { refresh: render, dispose: () => { for (const disposable of [...disposables].reverse()) disposable.dispose(); } };
+  const registration: NativeFleetUiRegistration = {
+    refresh: render,
+    dispose: () => { for (const disposable of [...disposables].reverse()) disposable.dispose(); },
+  };
   context.subscriptions.push(registration);
   return registration;
+}
+
+function activityEntryOf(value: unknown): ActivityEntry | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const node = value as { kind?: unknown; entry?: unknown };
+  return node.kind === "activity" ? node.entry as ActivityEntry : undefined;
 }

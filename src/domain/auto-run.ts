@@ -48,8 +48,17 @@ export interface WorktreeSettings {
   readonly setupTimeoutSeconds: number;
 }
 
+/**
+ * What Discard removes besides the run record. The default leaves everything in
+ * place: a user discarding a broken run is usually about to go and look at its
+ * branches, and a cleanup that ran first would take the evidence with it.
+ */
+export const DISCARD_BEHAVIORS = ["record-only", "local-cleanup", "full-cleanup"] as const;
+export type DiscardBehavior = (typeof DISCARD_BEHAVIORS)[number];
+
 export interface AutoRunSettings {
   readonly review: boolean;
+  readonly discardBehavior: DiscardBehavior;
   readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly pollSeconds: number;
@@ -113,44 +122,6 @@ export type AutoRunDryRunResult =
       readonly skipped: readonly SkippedIssue[];
       readonly dependencyCycles: readonly (readonly number[])[];
     };
-
-/**
- * The persisted run record. A resume *hint*, never a source of truth: on
- * resume the engine re-derives every fact from git and GitHub, and a record that
- * disagrees with the repository loses. The one user-authored prompt fragment it
- * carries is the run-wide guideline, because every later agent and a resumed
- * run must receive the same instruction.
- */
-export interface AutoRunRecord {
-  readonly version: 1;
-  readonly runId: string;
-  readonly issueNumbers: readonly number[];
-  readonly currentIssue: number | undefined;
-  readonly phase: AutoRunPhase;
-  readonly branch: string | undefined;
-  readonly prNumber: number | undefined;
-  readonly reviewMode: boolean;
-  /** One explicit choice made when the run starts; replayed by every implementer. */
-  readonly chromeEnabled?: boolean;
-  /** Appended to every implementer and pr-doctor prompt for this run. */
-  readonly additionalGuideline?: string;
-  /**
-   * The branch the user was on when the run started, carried so a resumed run
-   * still knows where "home" is after a restart. `undefined` either means a
-   * detached HEAD — nothing safe to return to — or a record written before
-   * this field existed; either way the end-of-run restore is simply skipped.
-   */
-  readonly returnBranch?: string | undefined;
-  /**
-   * Issues a pr-doctor has already reviewed. This is the one fact about a run
-   * that the repository genuinely cannot answer — a review that found nothing
-   * leaves no commit — so it is the one thing the record is authoritative about
-   * rather than a hint. Absent or stale, the issue is reviewed again, which is
-   * the safe direction to be wrong in.
-   */
-  readonly reviewedIssues: readonly number[];
-  readonly startedAt: string;
-}
 
 /** Everything the engine observed about the repository for the current issue. */
 export interface RepositoryFacts {
@@ -436,198 +407,6 @@ export interface CandidateIssue {
   readonly hasChildren: boolean;
 }
 
-export interface Selection {
-  readonly issues: readonly PlannedIssue[];
-  readonly skipped: readonly SkippedIssue[];
-  /** Cycles whose internal edges were ignored, in deterministic queue order. */
-  readonly dependencyCycles: readonly (readonly number[])[];
-}
-
-/**
- * Selection over the whole open issue graph. Dependencies run first; among
- * issues that are ready together, "oldest" is by `createdAt` and not by
- * `updatedAt`, with ties on the lower number so the order is total.
- *
- * Unclassified is skipped and reported, never guessed at — `AGENTS.md` is
- * explicit that unclassified is a legitimate third state and that the system
- * flags rather than infers. A blocked issue is deferred rather than failed,
- * because a later merge can unblock it; the engine re-runs this after every
- * merge.
- *
- * An umbrella — an `[AI]-spec` issue, or any issue with sub-issues of its own —
- * never enters the queue: addressing one directly would duplicate its
- * children's work. That exclusion is silent for the ordinary case, because
- * every repository has specs and a skip line per spec on every start is noise,
- * and reported when the umbrella *is* classified, because an umbrella asking to
- * be addressed autonomously is a genuine contradiction.
- */
-export function selectIssues(candidates: readonly CandidateIssue[]): Selection {
-  const issues: PlannedIssue[] = [];
-  const skipped: SkippedIssue[] = [];
-  const { ordered, cycles: dependencyCycles } = orderByDependencies(
-    candidates.filter((candidate) => candidate.state === "open"),
-  );
-  for (const candidate of ordered) {
-    if (candidate.state !== "open") continue;
-    const disposition = classify(candidate.labels);
-    const umbrella = umbrellaReason(candidate);
-    if (umbrella !== undefined) {
-      if (disposition !== undefined) skipped.push({ number: candidate.number, reason: umbrella });
-      continue;
-    }
-    if (disposition === undefined) {
-      skipped.push({ number: candidate.number, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" });
-      continue;
-    }
-    if (candidate.openBlockedByNumbers.length > 0) {
-      skipped.push({
-        number: candidate.number,
-        reason: `blocked by open ${candidate.openBlockedByNumbers.map((number) => `#${number}`).join(", ")}`,
-      });
-      continue;
-    }
-    const difficulty = issueDifficulty(candidate.labels);
-    issues.push({
-      number: candidate.number,
-      title: candidate.title,
-      disposition,
-      branch: branchName(candidate.number, candidate.title),
-      ...(difficulty === undefined ? {} : { difficulty }),
-    });
-  }
-  return { issues, skipped, dependencyCycles };
-}
-
-function compareCandidates(left: CandidateIssue, right: CandidateIssue): number {
-  return Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.number - right.number;
-}
-
-/**
- * Stable Kahn sort with surgical cycle breaking. When no node is ready, a DFS
- * identifies one actual directed cycle. Removing only the edges within that
- * cycle keeps every acyclic constraint around it intact. Both walks carry
- * explicit visited state and therefore terminate for every finite input graph.
- */
-function orderByDependencies(candidates: readonly CandidateIssue[]): {
-  readonly ordered: readonly CandidateIssue[];
-  readonly cycles: readonly (readonly number[])[];
-} {
-  const byNumber = new Map(candidates.map((candidate) => [candidate.number, candidate]));
-  const dependencies = new Map<number, Set<number>>();
-  const dependents = new Map<number, Set<number>>();
-  for (const candidate of candidates) {
-    const local = new Set(
-      candidate.dependencyNumbers.filter((number) => byNumber.has(number)),
-    );
-    dependencies.set(candidate.number, local);
-    for (const dependency of local) {
-      const consumers = dependents.get(dependency) ?? new Set<number>();
-      consumers.add(candidate.number);
-      dependents.set(dependency, consumers);
-    }
-  }
-
-  const remaining = new Set(byNumber.keys());
-  const ordered: CandidateIssue[] = [];
-  const cycles: number[][] = [];
-  while (remaining.size > 0) {
-    const ready = [...remaining]
-      .filter((number) => dependencies.get(number)?.size === 0)
-      .map((number) => byNumber.get(number)!)
-      .sort(compareCandidates);
-    if (ready.length === 0) {
-      const cycle = findDependencyCycle(remaining, dependencies, byNumber);
-      // A finite graph with no ready node contains a cycle. The fallback is a
-      // defensive escape hatch if that invariant is broken by a future edit.
-      if (cycle.length === 0) {
-        dependencies.get([...remaining]
-          .map((number) => byNumber.get(number)!)
-          .sort(compareCandidates)[0]!.number)?.clear();
-        continue;
-      }
-      const members = new Set(cycle);
-      cycles.push(cycle
-        .map((number) => byNumber.get(number)!)
-        .sort(compareCandidates)
-        .map((candidate) => candidate.number));
-      for (const member of members) {
-        const own = dependencies.get(member)!;
-        for (const dependency of [...own]) {
-          if (members.has(dependency)) own.delete(dependency);
-        }
-      }
-      continue;
-    }
-
-    const candidate = ready[0]!;
-    remaining.delete(candidate.number);
-    ordered.push(candidate);
-    for (const dependent of dependents.get(candidate.number) ?? []) {
-      dependencies.get(dependent)?.delete(candidate.number);
-    }
-  }
-  return { ordered, cycles };
-}
-
-function findDependencyCycle(
-  remaining: ReadonlySet<number>,
-  dependencies: ReadonlyMap<number, ReadonlySet<number>>,
-  byNumber: ReadonlyMap<number, CandidateIssue>,
-): readonly number[] {
-  const visited = new Set<number>();
-  const visiting = new Set<number>();
-  const path: number[] = [];
-  const pathPositions = new Map<number, number>();
-  const starts = [...remaining]
-    .map((number) => byNumber.get(number)!)
-    .sort(compareCandidates);
-
-  for (const start of starts) {
-    if (visited.has(start.number)) continue;
-    const stack: { readonly number: number; readonly next: readonly number[]; index: number }[] = [];
-    const push = (number: number): void => {
-      visiting.add(number);
-      pathPositions.set(number, path.length);
-      path.push(number);
-      const next = [...(dependencies.get(number) ?? [])]
-        .filter((dependency) => remaining.has(dependency))
-        .map((dependency) => byNumber.get(dependency)!)
-        .sort(compareCandidates)
-        .map((candidate) => candidate.number);
-      stack.push({ number, next, index: 0 });
-    };
-    push(start.number);
-    while (stack.length > 0) {
-      const frame = stack.at(-1)!;
-      const next = frame.next[frame.index++];
-      if (next !== undefined) {
-        if (visiting.has(next)) return path.slice(pathPositions.get(next));
-        if (!visited.has(next)) push(next);
-        continue;
-      }
-      stack.pop();
-      visiting.delete(frame.number);
-      visited.add(frame.number);
-      pathPositions.delete(frame.number);
-      path.pop();
-    }
-  }
-  return [];
-}
-
-function classify(labels: readonly string[]): IssueDisposition | undefined {
-  const disposition = issueDisposition(labels);
-  return disposition === "unclassified" ? undefined : disposition;
-}
-
-/** Why this issue is an umbrella, or `undefined` when it is a leaf. */
-function umbrellaReason(candidate: CandidateIssue): string | undefined {
-  if (hasLabel(candidate.labels, LABEL_SPEC)) {
-    return `umbrella: labelled ${LABEL_SPEC}, so its children are the work`;
-  }
-  return candidate.hasChildren ? "umbrella: has sub-issues, which are the work" : undefined;
-}
-
 /** Notification lines. Kept terse on purpose; they are read in bulk. */
 export const autoRunMessage = {
   started: (afk: number, hitl: number, review: boolean, chrome: boolean): string =>
@@ -681,6 +460,6 @@ export const autoRunMessage = {
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
   complete: (count: number, parked: number): string =>
-    `auto-run: queue drained (${count} issue${count === 1 ? "" : "s"} addressed${parked === 0 ? "" : `, ${parked} parked for you`}). Run /auto again once more work is labelled.`,
+    `auto-run: plan drained (${count} issue${count === 1 ? "" : "s"} addressed${parked === 0 ? "" : `, ${parked} left for you`}). Start another run once more work is labelled.`,
   returned: (branch: string): string => `auto-run: back on ${branch}.`,
 } as const;

@@ -1,4 +1,4 @@
-import { isInteractiveAgentType, isNonRestorablePersistedAgentType, type AgentId, type AgentSession, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
+import { isInteractiveAgentType, type AgentId, type AgentSession, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
@@ -12,7 +12,7 @@ export interface FleetTreeItem {
   readonly description: string;
   readonly tooltip: string;
   readonly icon: string;
-  readonly contextValue: "aboard.agent.active" | "aboard.agent.paused" | "aboard.agent.orphaned" | "aboard.agent.finished" | "aboard.child";
+  readonly contextValue: "aboard.agent.active" | "aboard.child";
   readonly collapsible: boolean;
   readonly command?: { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
 }
@@ -36,18 +36,30 @@ export class FleetTreeModel {
   }
 
   /**
-   * A single section holds the Manager and its fleet. The Manager is pinned to
-   * the top so the row the user talks to never drifts down the worker list.
+   * Agents you can actually go and look at: live lifecycle, open terminal.
+   *
+   * Everything else belongs in Recent Activity. A row for a session whose
+   * terminal is gone can offer nothing but a misleading Focus, and a row for a
+   * finished agent describes history rather than a fleet. Completed and failed
+   * states may still exist in the domain for a moment while a result reaches its
+   * caller; they never render here.
+   *
+   * The Manager is pinned to the top so the row the user talks to never drifts
+   * down the worker list.
    */
   public roots(): readonly FleetTreeNode[] {
     return this.fleet.list()
+      .filter((session) => isLiveSession(session) && this.isTerminalOpen(session.terminal.terminalId))
       .map((session): FleetTreeNode => ({ kind: "agent", session, leaseHolder: this.lease.current()?.agentId === session.identity.agentId }))
       .sort((left, right) => managerRank(left) - managerRank(right));
   }
 
+  /** Only running children: a completed sub-agent is history, not fleet. */
   public children(node: FleetTreeNode): readonly FleetTreeNode[] {
     if (node.kind === "child") return [];
-    return this.fleet.listChildren(node.session.identity.agentId).map((child) => ({ kind: "child", child }));
+    return this.fleet.listChildren(node.session.identity.agentId)
+      .filter((child) => child.status === "running")
+      .map((child) => ({ kind: "child", child }));
   }
 
   public item(node: FleetTreeNode): FleetTreeItem {
@@ -56,30 +68,18 @@ export class FleetTreeModel {
     }
     const { session } = node;
     const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
-    const terminalOpen = this.isTerminalOpen(session.terminal.terminalId);
-    const active = ["starting", "running", "awaiting-user"].includes(session.lifecycle.status);
-    const orphaned = active && !terminalOpen && isNonRestorablePersistedAgentType(session.identity.type);
-    const closedFinished = !active && !terminalOpen;
-    const markers = [terminalOpen
-      ? session.lifecycle.status
-      : orphaned
-        ? "interrupted · result caller gone"
-        : closedFinished
-          ? `${session.lifecycle.status} · terminal closed`
-          : "paused", node.leaseHolder ? "lease holder" : ""].filter(Boolean);
+    const markers = [session.lifecycle.status, node.leaseHolder ? "lease holder" : ""].filter(Boolean);
     return {
       // The label matches the per-launch Claude session name — aboard-<type>-<id>,
       // the `@<name>` banner in the terminal head — so a row in the tree is
       // greppable straight back to the running session and its definition file.
       label: `${agentLabel(session)}${goal}`,
       description: markers.join(" · "),
-      tooltip: agentTooltip(session, node.leaseHolder, terminalOpen, orphaned, closedFinished),
+      tooltip: agentTooltip(session, node.leaseHolder),
       icon: agentIcon(session),
-      contextValue: terminalOpen
-        ? active ? "aboard.agent.active" : "aboard.agent.finished"
-        : closedFinished || orphaned ? "aboard.agent.orphaned" : "aboard.agent.paused",
-      collapsible: this.fleet.listChildren(session.identity.agentId).length > 0,
-      ...(terminalOpen ? { command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const } } : {}),
+      contextValue: "aboard.agent.active",
+      collapsible: this.children(node).length > 0,
+      command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const },
     };
   }
 
@@ -105,27 +105,18 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
     host.register("aboard.focusAgent", (value) => {
       const session = sessionOf(value);
       if (session === undefined) return;
+      // A row only reaches this view while its terminal is open, so a closed one
+      // means the tree is a frame behind rather than that the user chose wrong.
       if (terminals.isOpen?.(session.terminal.terminalId) === false) {
-        return host.info(isNonRestorablePersistedAgentType(session.identity.type)
-          ? "This automated session was interrupted after its result caller ended and cannot be restored. Remove it from the fleet."
-          : "This session is paused. Use Restore Fleet to reopen its terminal.");
+        return host.info("That session's terminal has closed. Recent Activity has what became of it.");
       }
       terminals.show(session.terminal.terminalId);
     }),
     host.register("aboard.killAgent", async (value) => {
       const session = sessionOf(value);
       if (session === undefined) return;
-      if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("This session has no live terminal. Remove it from the fleet instead.");
+      if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("That session's terminal has already closed.");
       if (await host.confirm(`Kill ${session.identity.type}?`, "Kill")) terminals.kill(session.terminal.terminalId);
-    }),
-    host.register("aboard.removePausedSession", async (value) => {
-      const session = sessionOf(value);
-      if (session === undefined || terminals.isOpen?.(session.terminal.terminalId) !== false) return;
-      if (!await host.confirm(`Remove the interrupted ${session.identity.type} session from the fleet? Its Claude transcript will stay on disk.`, "Remove")) return;
-      const occurredAt = now().toISOString() as IsoTimestamp;
-      lease.release(session.identity.agentId, occurredAt, "paused session removed by user");
-      fleet.remove(session.identity.agentId, occurredAt);
-      host.info("Interrupted session removed from the fleet. Its Claude transcript remains on disk.");
     }),
     // Recovery hatch only, reachable from the Command Palette: a worker that dies
     // without releasing the write lease would otherwise block every later
@@ -150,6 +141,11 @@ function agentIcon(session: AgentSession): string {
     : "lock";
 }
 
+/** Lifecycle states that describe an agent still doing something. */
+export function isLiveSession(session: AgentSession): boolean {
+  return ["starting", "running", "awaiting-user"].includes(session.lifecycle.status);
+}
+
 function managerRank(node: FleetTreeNode): number { return node.kind === "agent" && node.session.identity.type === "manager" ? 0 : 1; }
 function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "agent" }> { return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "agent"; }
 /**
@@ -166,15 +162,10 @@ function agentLabel(session: AgentSession): string {
 }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
-function agentTooltip(session: AgentSession, leaseHolder: boolean, terminalOpen: boolean, orphaned: boolean, closedFinished: boolean): string {
+function agentTooltip(session: AgentSession, leaseHolder: boolean): string {
   return [
     `Session: ${session.sessionId}`,
-    `Status: ${terminalOpen ? session.lifecycle.status : closedFinished ? `${session.lifecycle.status}; terminal closed` : orphaned ? "interrupted after VS Code restart" : "paused after VS Code restart"}`,
-    terminalOpen ? "" : closedFinished
-      ? "This finished session has no terminal and cannot be restored. Use Remove Interrupted Session."
-      : orphaned
-        ? "Cannot be restored: this automated task's result caller no longer exists. Use Remove Interrupted Session."
-        : "Use Restore Fleet to reopen this Claude conversation",
+    `Status: ${session.lifecycle.status}`,
     leaseHolder ? "Holds the write lease" : "",
   ].filter(Boolean).join("\n");
 }

@@ -248,3 +248,96 @@ test("tracked paths under a directory are read from the requested tree without r
     [".aboard/runtime/.gitkeep", ".aboard/runtime/session.json"],
   );
 });
+
+test("full SHAs answer for local and remote refs, and for neither when absent", async () => {
+  const root = await repository();
+  const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
+  const client = new ProcessGitClient(root);
+
+  const head = await client.branchSha("main");
+  // Full rather than abbreviated: recovery compares against a value recorded
+  // hours earlier, and an abbreviation that was unambiguous then need not stay so.
+  assert.match(head ?? "", /^[0-9a-f]{40}$/);
+  assert.equal(head, await client.headSha(false));
+  assert.notEqual(head, await client.headSha());
+
+  assert.equal(await client.branchSha("aboard/nothing"), undefined);
+  assert.equal(await client.remoteBranchSha("main"), undefined, "nothing has been pushed anywhere");
+
+  // A bare remote makes `origin/main` real without a network.
+  const remote = await mkdtemp(join(tmpdir(), "aboard-git-remote-"));
+  await run("git", ["init", "--bare", "--initial-branch", "main"], { cwd: remote, windowsHide: true });
+  await git("remote", "add", "origin", remote);
+  await git("push", "-u", "origin", "main");
+  assert.equal(await client.remoteBranchSha("main"), head);
+});
+
+test("a commit is recognisable again by its exact parent, message, and tree", async () => {
+  const root = await repository();
+  const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
+  const client = new ProcessGitClient(root);
+  const parent = await client.headSha(false);
+
+  await writeFile(join(root, "src.ts"), "export const a = 1;\n");
+  await client.add();
+  const treeSha = await client.stagedTreeSha();
+  // A subject with the punctuation an issue title routinely carries.
+  await client.commit("Add retry backoff: 2x, with jitter", "Addresses #34.");
+
+  const details = await client.commitDetails("main");
+  assert.equal(details?.parents.length, 1);
+  assert.equal(details?.parents[0], parent);
+  assert.equal(details?.subject, "Add retry backoff: 2x, with jitter");
+  assert.equal(details?.message, "Add retry backoff: 2x, with jitter\n\nAddresses #34.");
+  assert.equal(details?.treeSha, treeSha);
+  assert.equal(details?.sha, await client.headSha(false));
+  assert.equal(await client.commitDetails("refs/heads/nothing"), undefined);
+});
+
+test("branch deletion is refused unless the ref still points where the run left it", async () => {
+  const root = await repository();
+  const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
+  const client = new ProcessGitClient(root);
+  await client.createBranch("aboard/34-one", "main");
+  await writeFile(join(root, "src.ts"), "export const a = 1;\n");
+  await client.add();
+  await client.commit("Add retry backoff", "Addresses #34.");
+  const recorded = await client.branchSha("aboard/34-one");
+  await git("checkout", "main");
+
+  // A ref that moved is no longer a branch this run can prove it created.
+  assert.equal(await client.deleteBranchAt("aboard/34-one", "0".repeat(40)), false);
+  assert.equal(await client.branchExists("aboard/34-one"), true);
+  // Absent entirely is the same answer, not a crash.
+  assert.equal(await client.deleteBranchAt("aboard/never-existed", "0".repeat(40)), false);
+
+  // The SHA check, not git's merge heuristic, is what makes this safe: the
+  // branch is unmerged, and deleting it is exactly what the user asked for.
+  assert.equal(await client.deleteBranchAt("aboard/34-one", recorded!), true);
+  assert.equal(await client.branchExists("aboard/34-one"), false);
+});
+
+test("remote branch deletion is guarded the same way, over a real remote", async () => {
+  const root = await repository();
+  const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
+  const client = new ProcessGitClient(root);
+  const remote = await mkdtemp(join(tmpdir(), "aboard-git-remote-"));
+  await run("git", ["init", "--bare", "--initial-branch", "main"], { cwd: remote, windowsHide: true });
+  await git("remote", "add", "origin", remote);
+  await git("push", "-u", "origin", "main");
+
+  await client.createBranch("aboard/34-one", "main");
+  await writeFile(join(root, "src.ts"), "export const a = 1;\n");
+  await client.add();
+  await client.commit("Add retry backoff", "Addresses #34.");
+  await client.push("aboard/34-one", true);
+  const recorded = await client.remoteBranchSha("aboard/34-one");
+  assert.match(recorded ?? "", /^[0-9a-f]{40}$/);
+
+  assert.equal(await client.deleteRemoteBranchAt("aboard/34-one", "0".repeat(40)), false);
+  assert.equal(await client.remoteBranchExists("aboard/34-one"), true);
+
+  assert.equal(await client.deleteRemoteBranchAt("aboard/34-one", recorded!), true);
+  await client.fetch();
+  assert.equal(await client.remoteBranchExists("aboard/34-one"), false);
+});

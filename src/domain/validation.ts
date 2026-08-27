@@ -25,7 +25,27 @@ import type {
   FleetPersistenceDto,
   MailboxEntry,
 } from "./fleet.js";
-import type { EndedSessionRecord, SessionLedgerDto } from "./session-ledger.js";
+import type {
+  ActivityDto,
+  ActivityEntry,
+  AgentOutcome,
+  LegacySessionRecord,
+  ReopenableSession,
+  RunOutcome,
+} from "./activity.js";
+
+/** The legacy `sessions.json` file, read once so it can be folded into activity. */
+export interface LegacySessionLedgerDto {
+  readonly version: 1;
+  readonly sessions: readonly LegacySessionRecord[];
+}
+
+const AGENT_OUTCOMES: readonly AgentOutcome[] = [
+  "succeeded", "failed", "cancelled", "ended", "killed", "launch-failed", "interrupted",
+];
+const RUN_OUTCOMES: readonly RunOutcome[] = [
+  "started", "resumed", "succeeded", "cancelled", "interrupted", "failed", "discarded",
+];
 
 export type ValidationResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -732,15 +752,100 @@ export function parseFleetPersistenceDto(
 }
 
 /**
- * Parses `.aboard/runtime/sessions.json`. A single unreadable entry is dropped
- * rather than failing the file: the ledger is a convenience — the way back into
- * a conversation the fleet has forgotten — so one malformed record must not cost
- * the user every other session they could still reopen. A file that is not a
- * ledger at all still fails, since that is a wrong file rather than a stale one.
+ * Parses `.aboard/runtime/activity.json`. A single unreadable entry is dropped
+ * rather than failing the file: history is a convenience, and one malformed row
+ * must not cost the user every other outcome they can still see or reopen. A
+ * file that is not an activity store at all still fails, since that is a wrong
+ * file rather than a stale one.
  */
-export function parseSessionLedgerDto(
+export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> {
+  const issues: string[] = [];
+  const record = readRecord(value, "activity", issues);
+  if (record === undefined) return { ok: false, issues };
+  if (record.version !== 1) issues.push("activity.version must be 1");
+  if (!Array.isArray(record.entries)) issues.push("activity.entries must be an array");
+  if (issues.length > 0) return { ok: false, issues };
+
+  const entries: ActivityEntry[] = [];
+  const seen = new Set<string>();
+  for (const value of record.entries as readonly unknown[]) {
+    const dropped: string[] = [];
+    const entry = readRecord(value, "activity.entry", dropped);
+    if (entry === undefined) continue;
+    const id = readNonEmptyString(entry.id, "id", dropped);
+    const at = readTimestamp(entry.at, "at", dropped);
+    if (id === undefined || at === undefined || seen.has(id)) continue;
+    const issueNumbers = readIssueNumbers(entry.issueNumbers, dropped);
+    const pullRequest = entry.pullRequest === undefined
+      ? undefined
+      : readNonNegativeInteger(entry.pullRequest, "pullRequest", dropped);
+    const reason = typeof entry.reason === "string" && entry.reason.trim().length > 0 ? entry.reason : undefined;
+
+    if (entry.kind === "run") {
+      const runId = readNonEmptyString(entry.runId, "runId", dropped);
+      const attempt = readNonNegativeInteger(entry.attempt, "attempt", dropped);
+      const outcome = RUN_OUTCOMES.includes(entry.outcome as RunOutcome) ? entry.outcome as RunOutcome : undefined;
+      if (dropped.length > 0 || runId === undefined || attempt === undefined || outcome === undefined) continue;
+      seen.add(id);
+      entries.push({
+        kind: "run", id, at, runId, attempt, outcome,
+        ...(reason === undefined ? {} : { reason }),
+        ...(issueNumbers === undefined ? {} : { issueNumbers }),
+        ...(pullRequest === undefined ? {} : { pullRequest }),
+      });
+      continue;
+    }
+    if (entry.kind !== "agent") continue;
+    const agentId = readNonEmptyString(entry.agentId, "agentId", dropped);
+    const type = parseAgentType(entry.type, "type", dropped);
+    const description = readNonEmptyString(entry.description, "description", dropped);
+    const outcome = AGENT_OUTCOMES.includes(entry.outcome as AgentOutcome) ? entry.outcome as AgentOutcome : undefined;
+    if (dropped.length > 0 || agentId === undefined || type === undefined || description === undefined || outcome === undefined) continue;
+    // A malformed reopen block costs the reopen action, not the row: the outcome
+    // is still worth showing.
+    const reopen = parseReopenable(entry.reopen);
+    seen.add(id);
+    entries.push({
+      kind: "agent", id, at, agentId: agentId as AgentId, type, description, outcome,
+      ...(reason === undefined ? {} : { reason }),
+      ...(issueNumbers === undefined ? {} : { issueNumbers }),
+      ...(pullRequest === undefined ? {} : { pullRequest }),
+      ...(typeof entry.terminalId === "string" && entry.terminalId.length > 0 ? { terminalId: entry.terminalId as TerminalId } : {}),
+      ...(reopen === undefined ? {} : { reopen }),
+    });
+  }
+  return { ok: true, value: { version: 1, entries } };
+}
+
+function readIssueNumbers(value: unknown, issues: string[]): readonly number[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) { issues.push("issueNumbers must be an array"); return undefined; }
+  const numbers = value.map((number, index) => readNonNegativeInteger(number, `issueNumbers[${index}]`, issues));
+  return numbers.some((number) => number === undefined) ? undefined : numbers as number[];
+}
+
+function parseReopenable(value: unknown): ReopenableSession | undefined {
+  if (!isRecord(value)) return undefined;
+  const dropped: string[] = [];
+  const sessionId = parseSessionId(value.sessionId, "reopen.sessionId", dropped);
+  if (sessionId === undefined) return undefined;
+  const issueNumbers = readIssueNumbers(value.issueNumbers, dropped);
+  return {
+    sessionId,
+    ...(issueNumbers === undefined ? {} : { issueNumbers }),
+    ...(value.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+    ...(typeof value.cwd === "string" && value.cwd.trim().length > 0 ? { cwd: value.cwd } : {}),
+    ...(value.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
+  };
+}
+
+/**
+ * Parses the legacy `.aboard/runtime/sessions.json`. Read only, and only until
+ * its entries have been folded into the activity store; nothing writes it again.
+ */
+export function parseLegacySessionLedger(
   value: unknown,
-): ValidationResult<SessionLedgerDto> {
+): ValidationResult<LegacySessionLedgerDto> {
   const issues: string[] = [];
   const record = readRecord(value, "sessions", issues);
   if (record === undefined) return { ok: false, issues };
@@ -748,7 +853,7 @@ export function parseSessionLedgerDto(
   if (!Array.isArray(record.sessions)) issues.push("sessions.sessions must be an array");
   if (issues.length > 0) return { ok: false, issues };
 
-  const parsed: EndedSessionRecord[] = [];
+  const parsed: LegacySessionRecord[] = [];
   for (const entry of record.sessions as readonly unknown[]) {
     const dropped: string[] = [];
     const session = readRecord(entry, "sessions.session", dropped);
@@ -757,7 +862,6 @@ export function parseSessionLedgerDto(
     const type = parseAgentType(session.type, "type", dropped);
     const sessionId = parseSessionId(session.sessionId, "sessionId", dropped);
     const description = readNonEmptyString(session.description, "description", dropped);
-    const startedAt = readTimestamp(session.startedAt, "startedAt", dropped);
     const endedAt = readTimestamp(session.endedAt, "endedAt", dropped);
     const issueNumbers = session.issueNumbers === undefined
       ? undefined
@@ -766,14 +870,13 @@ export function parseSessionLedgerDto(
         : (dropped.push("issueNumbers must be an array"), undefined);
     if (
       dropped.length > 0 || agentId === undefined || type === undefined || sessionId === undefined
-      || description === undefined || startedAt === undefined || endedAt === undefined
+      || description === undefined || endedAt === undefined
     ) continue;
     parsed.push({
       agentId: agentId as AgentId,
       type,
       sessionId,
       description,
-      startedAt,
       endedAt,
       ...(issueNumbers === undefined ? {} : { issueNumbers: issueNumbers as number[] }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),

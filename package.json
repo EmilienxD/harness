@@ -32,11 +32,6 @@
         "title": "Aboard: Resume Manager"
       },
       {
-        "command": "aboard.restoreFleet",
-        "title": "Aboard: Restore Fleet",
-        "icon": "$(refresh)"
-      },
-      {
         "command": "aboard.newManager",
         "title": "Aboard: New Manager"
       },
@@ -83,17 +78,70 @@
         "title": "Aboard: Kill Agent"
       },
       {
-        "command": "aboard.removePausedSession",
-        "title": "Aboard: Remove Interrupted Session",
-        "icon": "$(trash)"
-      },
-      {
         "command": "aboard.forceReleaseLease",
         "title": "Aboard: Force Release Write Lease"
       },
       {
         "command": "aboard.focusFleet",
         "title": "Aboard: Focus Fleet"
+      },
+      {
+        "command": "aboard.resumeAutoRun",
+        "title": "Aboard: Resume Auto Run",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "aboard.discardAutoRun",
+        "title": "Aboard: Discard Auto Run",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "aboard.autoRun.refresh",
+        "title": "Aboard: Auto Run — Check Now",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aboard.autoRun.openCurrentIssue",
+        "title": "Aboard: Auto Run — Open Current Issue",
+        "icon": "$(issues)"
+      },
+      {
+        "command": "aboard.autoRun.openPullRequest",
+        "title": "Aboard: Auto Run — Open Pull Request",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "aboard.openIssue",
+        "title": "Aboard: Open Issue"
+      },
+      {
+        "command": "aboard.openPullRequest",
+        "title": "Aboard: Open Pull Request"
+      },
+      {
+        "command": "aboard.activity.openTerminal",
+        "title": "Aboard: Open Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "aboard.activity.openIssue",
+        "title": "Aboard: Open Issue",
+        "icon": "$(issues)"
+      },
+      {
+        "command": "aboard.activity.openPullRequest",
+        "title": "Aboard: Open Pull Request",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "aboard.activity.reopen",
+        "title": "Aboard: Reopen Session",
+        "icon": "$(history)"
+      },
+      {
+        "command": "aboard.activity.clear",
+        "title": "Aboard: Clear Recent Activity",
+        "icon": "$(clear-all)"
       }
     ],
     "viewsContainers": {
@@ -116,6 +164,16 @@
           "id": "aboard.fleet",
           "name": "Agents",
           "when": "aboard.initialized"
+        },
+        {
+          "id": "aboard.autoRun",
+          "name": "Auto Run",
+          "when": "aboard.initialized"
+        },
+        {
+          "id": "aboard.recentActivity",
+          "name": "Recent Activity",
+          "when": "aboard.initialized"
         }
       ]
     },
@@ -130,13 +188,12 @@
       },
       {
         "view": "aboard.fleet",
-        "when": "aboard.managerResumable && !aboard.fleetRestoreAvailable",
+        "when": "aboard.managerResumable",
         "contents": "[↻ Resume Manager](command:aboard.resumeManager)"
       },
       {
-        "view": "aboard.fleet",
-        "when": "aboard.fleetRestoreAvailable",
-        "contents": "A previous aboard fleet is paused after VS Code restarted. [Restore Fleet](command:aboard.restoreFleet)"
+        "view": "aboard.recentActivity",
+        "contents": "What aboard's agents and runs did most recently shows up here, including sessions you can reopen."
       }
     ],
     "menus": {
@@ -157,14 +214,44 @@
           "group": "1_manager@2"
         },
         {
-          "command": "aboard.restoreFleet",
-          "when": "view == aboard.fleet && aboard.fleetRestoreAvailable && !aboard.fleetRestoreRunning",
-          "group": "navigation@2"
-        },
-        {
           "command": "aboard.reopenSession",
           "when": "view == aboard.fleet",
           "group": "navigation@3"
+        },
+        {
+          "command": "aboard.autoRun.refresh",
+          "when": "view == aboard.autoRun",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aboard.startAutoRun",
+          "when": "view == aboard.autoRun && aboard.autoRunCard == idle",
+          "group": "1_run@1"
+        },
+        {
+          "command": "aboard.startAutoRunWithChrome",
+          "when": "view == aboard.autoRun && aboard.autoRunCard == idle",
+          "group": "1_run@2"
+        },
+        {
+          "command": "aboard.stopAutoRun",
+          "when": "view == aboard.autoRun && (aboard.autoRunCard == active || aboard.autoRunCard == waiting)",
+          "group": "1_run@3"
+        },
+        {
+          "command": "aboard.resumeAutoRun",
+          "when": "view == aboard.autoRun && aboard.autoRunCard == recoverable",
+          "group": "1_run@4"
+        },
+        {
+          "command": "aboard.discardAutoRun",
+          "when": "view == aboard.autoRun && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken || aboard.autoRunCard == unsupported)",
+          "group": "1_run@5"
+        },
+        {
+          "command": "aboard.activity.clear",
+          "when": "view == aboard.recentActivity",
+          "group": "navigation@1"
         }
       ],
       "commandPalette": [
@@ -179,10 +266,6 @@
         {
           "command": "aboard.resumeManager",
           "when": "aboard.initialized && aboard.managerResumable && !aboard.managerLive"
-        },
-        {
-          "command": "aboard.restoreFleet",
-          "when": "aboard.initialized && aboard.fleetRestoreAvailable && !aboard.fleetRestoreRunning"
         },
         {
           "command": "aboard.newManager",
@@ -206,11 +289,11 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "aboard.initialized && !aboard.autoRunActive"
+          "when": "aboard.initialized && aboard.autoRunCard == idle"
         },
         {
           "command": "aboard.startAutoRunWithChrome",
-          "when": "aboard.initialized && !aboard.autoRunActive"
+          "when": "aboard.initialized && aboard.autoRunCard == idle"
         },
         {
           "command": "aboard.stopAutoRun",
@@ -229,23 +312,127 @@
           "when": "false"
         },
         {
-          "command": "aboard.removePausedSession",
+          "command": "aboard.resumeAutoRun",
+          "when": "aboard.initialized && aboard.autoRunCard == recoverable"
+        },
+        {
+          "command": "aboard.discardAutoRun",
+          "when": "aboard.initialized && aboard.autoRunCard != idle"
+        },
+        {
+          "command": "aboard.autoRun.refresh",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.activity.clear",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.openIssue",
+          "when": "false"
+        },
+        {
+          "command": "aboard.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "aboard.autoRun.openCurrentIssue",
+          "when": "false"
+        },
+        {
+          "command": "aboard.autoRun.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.openTerminal",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.openIssue",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.reopen",
           "when": "false"
         }
       ],
       "view/item/context": [
         {
           "command": "aboard.focusAgent",
-          "when": "viewItem =~ /aboard.agent.(active|finished)/"
+          "when": "viewItem == aboard.agent.active"
         },
         {
           "command": "aboard.killAgent",
           "when": "viewItem == aboard.agent.active"
         },
         {
-          "command": "aboard.removePausedSession",
-          "when": "viewItem =~ /aboard.agent.(paused|orphaned)/",
+          "command": "aboard.startAutoRun",
+          "when": "viewItem == aboard.autoRun.idle",
           "group": "inline@1"
+        },
+        {
+          "command": "aboard.startAutoRunWithChrome",
+          "when": "viewItem == aboard.autoRun.idle",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.autoRun.openCurrentIssue",
+          "when": "viewItem == aboard.autoRun.active",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.autoRun.openPullRequest",
+          "when": "viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.autoRun.refresh",
+          "when": "viewItem == aboard.autoRun.waiting",
+          "group": "inline@3"
+        },
+        {
+          "command": "aboard.stopAutoRun",
+          "when": "viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting",
+          "group": "inline@4"
+        },
+        {
+          "command": "aboard.resumeAutoRun",
+          "when": "viewItem == aboard.autoRun.recoverable",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.discardAutoRun",
+          "when": "viewItem =~ /aboard.autoRun.(recoverable|broken|unsupported)/",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.activity.openTerminal",
+          "when": "viewItem =~ /\\bterminal\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.activity.reopen",
+          "when": "viewItem =~ /\\breopen\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.resumeManager",
+          "when": "viewItem =~ /\\bmanager\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.activity.openIssue",
+          "when": "viewItem =~ /\\bissue\\b/",
+          "group": "inline@3"
+        },
+        {
+          "command": "aboard.activity.openPullRequest",
+          "when": "viewItem =~ /\\bpr\\b/",
+          "group": "inline@4"
         }
       ]
     },
@@ -358,6 +545,21 @@
           "minimum": 1,
           "maximum": 3600,
           "description": "How often auto-run checks a hitl pull request for resolution while waiting. Window focus and the Continue action poll immediately regardless."
+        },
+        "aboard.autoRun.discardBehavior": {
+          "type": "string",
+          "enum": [
+            "record-only",
+            "local-cleanup",
+            "full-cleanup"
+          ],
+          "default": "record-only",
+          "enumDescriptions": [
+            "Forget the run record only. Terminals, the checkout, branches, commits, pull requests, and issues are all left exactly as they are.",
+            "Also close the run's terminals, remove its own checkout when that checkout is clean, and delete its local branches when they still point where the run left them.",
+            "Local cleanup, plus close the run's still-open unmerged pull requests and delete its unmerged remote branches. Merged work, moved branches, and closed issues are never touched."
+          ],
+          "description": "What Discard removes besides the run record. Cleanup never deletes a dirty checkout, an artifact whose SHA or pull request identity changed, or anything that already merged."
         },
         "aboard.autoRun.worktree.enabled": {
           "type": "boolean",

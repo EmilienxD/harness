@@ -54,7 +54,6 @@ function detailFor(option: ReopenOption, now: Date): string {
   }
   switch (candidate.origin) {
     case "live": return `Running now — opens its terminal${chrome}`;
-    case "paused": return `Paused after VS Code restarted · started ${age(candidate.at, now)}${chrome}`;
     case "ended": return `Ended ${age(candidate.at, now)}${chrome}`;
   }
 }

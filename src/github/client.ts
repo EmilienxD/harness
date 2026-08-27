@@ -161,6 +161,9 @@ export interface PullRequestMergeFacts {
    */
   readonly mergeable: "mergeable" | "conflicting" | "unknown";
   readonly url: string;
+  readonly headSha: string;
+  /** GitHub's resulting commit once merged. */
+  readonly mergeCommitSha?: string;
 }
 
 function mergeability(value: unknown): PullRequestMergeFacts["mergeable"] {
@@ -419,7 +422,7 @@ const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){rep
 const ISSUE_LABELS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){labels(first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_BLOCKERS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_SUBISSUES_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100,after:$after){nodes{number} totalCount pageInfo{hasNextPage endCursor}}}}}`;
-const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged mergeable url headRefName baseRefName headRefOid closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
+const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged mergeable url headRefName baseRefName headRefOid mergeCommit{oid} closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
 export class GitHubClient implements GitHubPromptSource {
@@ -701,6 +704,13 @@ export class GitHubClient implements GitHubPromptSource {
     return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
   }
 
+  /** The newest pull request using this head branch, in any state. */
+  public async findPullRequestForBranch(branch: string): Promise<number | undefined> {
+    const output = await this.gh.run(["pr", "list", "--state", "all", "--head", branch, "--limit", "1", "--json", "number"]);
+    const items = array(json(output, "branch pull request lookup"), "branch pull request lookup");
+    return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
+  }
+
   /** The most recently opened pull request still open, for `review_pr`. */
   public async findLatestOpenPullRequest(): Promise<number | undefined> {
     const output = await this.gh.run(["pr", "list", "--state", "open", "--limit", "1", "--json", "number"]);
@@ -716,6 +726,35 @@ export class GitHubClient implements GitHubPromptSource {
    */
   public async mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase", deleteBranch: boolean): Promise<void> {
     await this.gh.run(["pr", "merge", String(number), `--${strategy}`, ...(deleteBranch ? ["--delete-branch"] : [])]);
+  }
+
+  /**
+   * Closes a pull request without merging it, but only when it is still the
+   * pull request the caller described. Discard cleanup is the only caller: it
+   * must never close something that was retargeted, already merged, or has
+   * become somebody else's, so identity is re-read here rather than trusted
+   * from a record written hours ago.
+   */
+  /**
+   * The web address of an issue or pull request, so a tree row can open the
+   * thing it names. GitHub serves `/issues/<n>` and `/pull/<n>` interchangeably
+   * — it redirects to whichever the number actually is — so one builder answers
+   * both and neither needs a round trip to find out which it got.
+   */
+  public async webUrl(number: number): Promise<string> {
+    const { owner, repo } = await this.#ownerRepo();
+    return `https://github.com/${owner}/${repo}/issues/${number}`;
+  }
+
+  public async closePullRequestIf(
+    number: number,
+    expected: { readonly head: string; readonly base: string },
+  ): Promise<boolean> {
+    const snapshot = await this.getPullRequest(number);
+    if (snapshot === undefined || snapshot.state !== "open") return false;
+    if (snapshot.headBranch !== expected.head || snapshot.baseBranch !== expected.base) return false;
+    await this.gh.run(["pr", "close", String(number)]);
+    return true;
   }
 
   public async getPullRequest(number: number): Promise<(PullRequestSnapshot & PullRequestMergeFacts) | undefined> {
@@ -734,6 +773,10 @@ export class GitHubClient implements GitHubPromptSource {
       state: parsedState,
       mergeable: mergeability(item.mergeable),
       url: string(item.url, "pullRequest.url"),
+      headSha: string(item.headRefOid, "pullRequest.headRefOid"),
+      ...(item.mergeCommit === null || item.mergeCommit === undefined
+        ? {}
+        : { mergeCommitSha: string(record(item.mergeCommit, "pullRequest.mergeCommit").oid, "pullRequest.mergeCommit.oid") }),
       ...(closing.length === 0 ? {} : { issueNumber: integer(record(closing[0], "closing issue").number, "closing issue.number") }),
     };
   }

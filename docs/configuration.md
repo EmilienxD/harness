@@ -24,6 +24,7 @@ Changes apply live. An unknown key or an invalid value is reported in Output →
 | `aboard.terminals.closeOnSessionEnd` | `false` | Close an agent's terminal when its Claude session ends. Off by default: quitting the session (`exit`, double Ctrl+C) and closing the terminal are separate gestures, so the shell is left for you to reuse. The agent leaves the fleet either way, and the leftover terminal never blocks a relaunch. |
 | `aboard.autoRun.review` | `false` | Launch a pr-doctor after each issue is addressed during an auto-run. Automated review stays opt-in; the explicit review action is always available. |
 | `aboard.autoRun.mergeRunPullRequest` | `false` | Merge the run's own pull request when the run ends. An auto-run addresses each issue on its own branch, merges those into one session branch (`aboard/run/<run id>`), and opens a single pull request from it into the branch you were on when the run started — never into the repository's default branch of its own accord. Off by default: that target is a branch you are working on, a conflict there is likely, and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, merges the target back in and retries if that resolves the conflict, and otherwise leaves the pull request open and tells you. |
+| `aboard.autoRun.discardBehavior` | `record-only` | What **Discard** removes besides the run record in the Auto Run view. See [Discarding a run](#discarding-a-run). |
 | `aboard.autoRun.worktree.enabled` | `false` | Give an auto-run a checkout of its own instead of working in your files. See [Running in a checkout of its own](#running-in-a-checkout-of-its-own). |
 | `aboard.launch.claudeCommand` | `claude` | The command aboard launches. Wrapper arguments come first and aboard's flags are appended unchanged. A path with spaces goes in quotes. |
 | `aboard.launch.maxInlinePromptChars` | `4000` | Longest prompt passed inline as a command-line argument. Longer prompts spill to `.aboard/runtime/prompts` and are referenced with `@path`. |
@@ -33,6 +34,20 @@ Changes apply live. An unknown key or an invalid value is reported in Output →
 | `aboard.manager.transcriptBackups` | `5` | How many Manager session transcripts aboard keeps under `.aboard/runtime/transcripts`. Claude Code deletes its own session files older than `cleanupPeriodDays` every time it starts, the minimum is one day and there is no way to turn the sweep off, so aboard copies the Manager's transcript at each turn boundary and restores it if a resume finds it gone. The copy is incremental — only the bytes the transcript gained — and a restore never overwrites a session Claude Code still has. `0` turns both the backup and the restore off; copies already on disk are left for you to delete. |
 
 The full list, with descriptions, is in VS Code Settings under **aboard**.
+
+## Discarding a run
+
+A run that was stopped, interrupted, or that failed stays in the Auto Run view with **Resume** and **Discard**. A run aboard can no longer make sense of — a branch force-pushed, an issue relabelled, a pull request retargeted — shows the reason and offers **Discard** only.
+
+Discard always forgets the run record, so a new run can start. `aboard.autoRun.discardBehavior` decides what else goes with it; whichever you choose, aboard shows the exact list before you confirm.
+
+| Value | What it removes |
+| :-- | :-- |
+| `record-only` *(default)* | Nothing else. Terminals, the run's checkout, branches, commits, pull requests, and issues are all left as they are. Discarding a broken run is usually the moment you want to go and read what it left. |
+| `local-cleanup` | Closes the run's terminals, removes its own checkout when that checkout is clean, and deletes its local branches when they still point exactly where the run left them. |
+| `full-cleanup` | Local cleanup, plus closes the run's still-open unmerged pull requests and deletes its unmerged remote branches. |
+
+Cleanup never deletes a dirty checkout, never touches a branch or pull request whose SHA or identity has changed since the run recorded it, never reverts a commit that merged, never reopens an issue, and never alters a merged pull request. Anything it declines to remove is listed afterwards rather than treated as a failure.
 
 ## Running in a checkout of its own
 

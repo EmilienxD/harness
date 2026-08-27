@@ -103,61 +103,53 @@ test("commands route focus and kill, and force release stays available as a reco
   const node = { kind: "agent" as const, session: worker, leaseHolder: true };
   await callbacks.get("aboard.focusAgent")?.(node); await callbacks.get("aboard.killAgent")?.(node); await callbacks.get("aboard.forceReleaseLease")?.();
   assert.deepEqual(calls, ["show", "kill"]); assert.equal(lease.current(), undefined);
-  assert.deepEqual([...callbacks.keys()], ["aboard.focusAgent", "aboard.killAgent", "aboard.removePausedSession", "aboard.forceReleaseLease"]);
+  assert.deepEqual([...callbacks.keys()], ["aboard.focusAgent", "aboard.killAgent", "aboard.forceReleaseLease"]);
   registration.dispose(); assert.equal(callbacks.size, 0);
 });
 
-test("paused rows explain restoration instead of controlling a missing terminal", async () => {
+test("a session whose terminal is gone leaves the view entirely", () => {
+  // The old view kept it as a "paused" row offering Restore Fleet. There is
+  // nothing to restore any more, and a row that can only produce a misleading
+  // Focus is worse than no row: what became of it belongs in Recent Activity.
   const fleet = new FleetRegistry(); const lease = new WriteLease(); fleet.register(worker, startedAt);
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => false);
-  const item = model.item(model.roots()[0]!);
-  assert.match(item.description, /^paused/);
-  assert.match(item.tooltip, /Restore Fleet/);
-  assert.equal(item.contextValue, "aboard.agent.paused");
-  assert.equal(item.command, undefined);
-  const callbacks = new Map<string, (...args: readonly unknown[]) => unknown>(); const info: string[] = []; const calls: string[] = [];
-  const registration = registerFleetCommands({ register: (name, callback) => { callbacks.set(name, callback); return { dispose: () => callbacks.delete(name) }; }, confirm: async () => true, info: (message) => info.push(message), error: () => {} }, { show: () => calls.push("show"), kill: () => calls.push("kill"), isOpen: () => false }, fleet, lease);
-  const node = { kind: "agent" as const, session: worker, leaseHolder: false };
-  await callbacks.get("aboard.focusAgent")?.(node); await callbacks.get("aboard.killAgent")?.(node); await callbacks.get("aboard.removePausedSession")?.(node);
-  assert.deepEqual(calls, []); assert.equal(info.length, 3); assert.equal(fleet.get(worker.identity.agentId), undefined);
-  registration.dispose(); model.dispose();
+  assert.deepEqual(model.roots(), []);
+  model.dispose();
 });
 
-test("interrupted automated research is orphaned rather than advertised as restorable", async () => {
-  const fleet = new FleetRegistry(); const lease = new WriteLease();
-  const explorer = { ...worker, identity: { agentId: agent("explorer"), type: "Explore" as const }, sessionId: session("explore-session") };
-  fleet.register(explorer, startedAt);
-  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => false);
-  const item = model.item(model.roots()[0]!);
-  assert.match(item.description, /interrupted.*result caller gone/);
-  assert.match(item.tooltip, /cannot be restored/i);
-  assert.match(item.tooltip, /Remove Interrupted Session/);
-  assert.doesNotMatch(item.tooltip, /Restore Fleet/);
-  assert.equal(item.contextValue, "aboard.agent.orphaned");
-  assert.equal(item.command, undefined);
-
-  const callbacks = new Map<string, (...args: readonly unknown[]) => unknown>(); const info: string[] = [];
-  const registration = registerFleetCommands({ register: (name, callback) => { callbacks.set(name, callback); return { dispose: () => callbacks.delete(name) }; }, confirm: async () => true, info: (message) => info.push(message), error: () => {} }, { show: () => assert.fail("orphan has no terminal"), kill: () => assert.fail("orphan has no terminal"), isOpen: () => false }, fleet, lease);
-  await callbacks.get("aboard.focusAgent")?.({ kind: "agent", session: explorer, leaseHolder: false });
-  assert.match(info[0] ?? "", /cannot be restored/i);
-  await callbacks.get("aboard.removePausedSession")?.({ kind: "agent", session: explorer, leaseHolder: false });
-  assert.equal(fleet.get(explorer.identity.agentId), undefined);
-  registration.dispose(); model.dispose();
-});
-
-test("a finished session whose terminal was closed is removable, not restorable", () => {
+test("a finished session never renders, even while its terminal is still open", () => {
+  // Completed and failed may exist in the domain for a moment while a result
+  // reaches its caller. Agents describes what is running, so neither shows here.
   const fleet = new FleetRegistry(); const lease = new WriteLease();
   fleet.register(worker, startedAt);
   const finishedAt = at("2026-07-30T10:05:00.000Z");
   fleet.transition(worker.identity.agentId, { status: "completed", startedAt, finishedAt, exitCode: 0, lastAssistantMessage: "done" }, finishedAt);
-  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => false);
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => true);
+  assert.deepEqual(model.roots(), []);
+  model.dispose();
+});
+
+test("a live row is focusable and says only what is true of a running agent", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease(); fleet.register(worker, startedAt);
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => true);
   const item = model.item(model.roots()[0]!);
-  assert.equal(item.description, "completed · terminal closed");
-  assert.equal(item.contextValue, "aboard.agent.orphaned");
-  assert.equal(item.command, undefined);
-  assert.match(item.tooltip, /cannot be restored/i);
-  assert.match(item.tooltip, /Remove Interrupted Session/);
+  assert.equal(item.contextValue, "aboard.agent.active");
+  assert.equal(item.command?.command, "aboard.focusAgent");
+  assert.doesNotMatch(item.description, /paused|terminal closed|interrupted/);
   assert.doesNotMatch(item.tooltip, /Restore Fleet/);
+  model.dispose();
+});
+
+test("only running children render under an agent", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease(); fleet.register(worker, startedAt);
+  const child = { parentAgentId: worker.identity.agentId, type: "Explore", startedAt, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } };
+  fleet.startChild({ ...child, agentId: "child-1", status: "running" }, startedAt);
+  fleet.startChild({ ...child, agentId: "child-2", status: "running" }, startedAt);
+  fleet.finishChild(worker.identity.agentId, "child-2", "done", startedAt);
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => true);
+  const root = model.roots()[0]!;
+  assert.deepEqual(model.children(root).map((node) => node.kind === "child" ? node.child.agentId : ""), ["child-1"]);
+  assert.equal(model.item(root).collapsible, true);
   model.dispose();
 });
 

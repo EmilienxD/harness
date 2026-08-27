@@ -41,6 +41,7 @@ function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: 
   const lease = new WriteLease();
   lease.acquire("write-capable", { agentId: agent("worker-10"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee") }, startedAt, "test launch");
   const delivered: WorkerResult[] = [];
+  const finished: { session: AgentSession; result: WorkerResult }[] = [];
   const reconciler = new WorkerLifecycleReconciler({
     fleet, lease, workingTree: { isClean: async () => clean },
     completions: {
@@ -56,18 +57,22 @@ function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: 
         return true;
       },
     },
+    onFinished: (session, result) => finished.push({ session, result }),
   });
-  return { fleet, lease, reconciler, delivered };
+  return { fleet, lease, reconciler, delivered, finished };
 }
 
 const identity = { agentId: agent("worker-10"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee") };
 
 test("clean Stop succeeds, uses the supplied last message, and releases the lease", async () => {
-  const { reconciler, lease, delivered } = setup();
+  const { reconciler, lease, delivered, finished } = setup();
   assert.equal(await reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "committed" }), true);
   assert.equal(delivered[0]?.outcome, "succeeded");
   assert.equal(delivered[0]?.outcome === "succeeded" && delivered[0].lastAssistantMessage, "committed");
   assert.equal(lease.current(), undefined);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0]?.session.identity.agentId, identity.agentId);
+  assert.equal(finished[0]?.result.outcome, "succeeded");
 });
 
 test("dirty write-capable Stop becomes no-commit and enters the Manager mailbox", async () => {

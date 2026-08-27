@@ -108,6 +108,14 @@ export function summarizeSourceFiles(paths: readonly string[]): Omit<CodebaseSur
   return { sourceFileCount, languages };
 }
 
+export interface CommitDetails {
+  readonly sha: string;
+  readonly parents: readonly string[];
+  readonly subject: string;
+  readonly message: string;
+  readonly treeSha: string;
+}
+
 export interface GitClient {
   /** Current branch name, or `undefined` on a detached HEAD. */
   currentBranch(): Promise<string | undefined>;
@@ -118,6 +126,31 @@ export interface GitClient {
   codebase(): Promise<CodebaseSurvey>;
   headSha(short?: boolean): Promise<string>;
   branchExists(branch: string): Promise<boolean>;
+  /**
+   * The full SHA a local branch points at, or `undefined` when it does not
+   * exist. Full rather than short because recovery compares it against a value
+   * recorded hours earlier, and an abbreviation that was unambiguous then can
+   * become ambiguous as the repository grows.
+   */
+  branchSha(branch: string): Promise<string | undefined>;
+  /** The same, for `origin/<branch>` as of the last fetch. */
+  remoteBranchSha(branch: string): Promise<string | undefined>;
+  /**
+   * Enough of one commit to recognise it again after a crash: its parents and
+   * its subject. Write-ahead recovery adopts a commit only when both match what
+   * the journal said the run was about to create.
+   */
+  commitDetails(ref: string): Promise<CommitDetails | undefined>;
+  /** The tree represented by the current index, used before creating a commit. */
+  stagedTreeSha(): Promise<string>;
+  /**
+   * Deletes a local branch only if it still points at `expectedSha`. Returns
+   * `false` when the ref has moved or is gone, which is how cleanup refuses to
+   * remove something it can no longer prove it created.
+   */
+  deleteBranchAt(branch: string, expectedSha: string): Promise<boolean>;
+  /** The same guard against `origin/<branch>`, then a delete-push. */
+  deleteRemoteBranchAt(branch: string, expectedSha: string): Promise<boolean>;
   /**
    * Whether `origin` has this branch, as of the last fetch. Distinct from
    * `isPushed`: a branch with local commits the remote has not seen still exists
@@ -218,6 +251,54 @@ export class ProcessGitClient implements GitClient {
 
   public async branchExists(branch: string): Promise<boolean> {
     return await this.tryRun(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) !== undefined;
+  }
+
+  public async branchSha(branch: string): Promise<string | undefined> {
+    return this.tryRun(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+  }
+
+  public async remoteBranchSha(branch: string): Promise<string | undefined> {
+    return this.tryRun(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]);
+  }
+
+  public async commitDetails(ref: string): Promise<CommitDetails | undefined> {
+    // One field per line, subject last: a commit subject can contain any
+    // printable character but never a newline, so nothing needs escaping.
+    const output = await this.tryRun(["show", "--no-patch", "--format=%H%n%P%n%T%n%B", ref]);
+    if (output === undefined) return undefined;
+    const [sha, parents, treeSha, ...messageLines] = output.split(/\r?\n/u);
+    if (sha === undefined || sha.length === 0) return undefined;
+    const message = messageLines.join("\n").trim();
+    return {
+      sha,
+      parents: (parents ?? "").split(" ").filter((entry) => entry.length > 0),
+      subject: messageLines[0] ?? "",
+      message,
+      treeSha: treeSha ?? "",
+    };
+  }
+
+  public async stagedTreeSha(): Promise<string> {
+    return this.run(["write-tree"]);
+  }
+
+  /**
+   * `-D` rather than `-d`, but only behind the SHA check: the point of cleanup
+   * is to remove a branch whose commits the user chose to discard, and `-d`
+   * would refuse exactly those. The guard, not git's merge heuristic, is what
+   * makes this safe.
+   */
+  public async deleteBranchAt(branch: string, expectedSha: string): Promise<boolean> {
+    if (await this.branchSha(branch) !== expectedSha) return false;
+    return await this.tryRun(["branch", "-D", branch]) !== undefined;
+  }
+
+  public async deleteRemoteBranchAt(branch: string, expectedSha: string): Promise<boolean> {
+    if (await this.remoteBranchSha(branch) !== expectedSha) return false;
+    // `--force-with-lease` names the SHA the delete is allowed to remove, so a
+    // push that landed between the check above and this line is refused by the
+    // remote rather than silently overwritten.
+    return await this.tryRun(["push", "--delete", `--force-with-lease=${branch}:${expectedSha}`, "origin", branch]) !== undefined;
   }
 
   public async remoteBranchExists(branch: string): Promise<boolean> {

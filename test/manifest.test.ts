@@ -39,28 +39,74 @@ test("every command except Initialize is gated out of an uninitialized project",
   }
 });
 
-test("the two activity-bar views are bound to opposite initialization states", async () => {
+test("the activity-bar views are bound to opposite initialization states", async () => {
   const { contributes } = await manifest();
   const views = new Map((contributes.views["aboard"] ?? []).map((view) => [view.id, view.when]));
   assert.equal(views.get("aboard.welcome"), "!aboard.initialized");
-  assert.equal(views.get("aboard.fleet"), "aboard.initialized");
+  // Three initialized views, each answering one question: what is running, what
+  // the run is doing, and what happened recently.
+  for (const id of ["aboard.fleet", "aboard.autoRun", "aboard.recentActivity"]) {
+    assert.equal(views.get(id), "aboard.initialized", id);
+  }
 });
 
-test("fleet recovery actions are visible where the stranded record is shown", async () => {
+test("reopening is always offered, and bulk fleet restoration no longer exists", async () => {
   const { contributes } = await manifest();
-  const titleRestore = (contributes.menus["view/title"] ?? []).find((entry) => entry.command === "aboard.restoreFleet");
-  assert.match(titleRestore?.group ?? "", /^navigation@/, "Restore Fleet must be a visible title action, not overflow-only");
-
-  // Reopening is not a recovery state like Restore Fleet, which appears only
-  // while a restorable fleet exists: an ended conversation is always something
-  // the user may want back, so the action is always on the view title.
+  // An ended conversation is always something the user may want back, so the
+  // action is unconditional on the view title.
   const titleReopen = (contributes.menus["view/title"] ?? []).find((entry) => entry.command === "aboard.reopenSession");
   assert.match(titleReopen?.group ?? "", /^navigation@/, "Reopen a Session must be a visible title action");
   assert.equal(titleReopen?.when, "view == aboard.fleet");
 
-  const rowRemove = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.removePausedSession");
-  assert.match(rowRemove?.when ?? "", /paused\|orphaned/, "both recoverable and orphaned disconnected rows need cleanup");
-  assert.match(rowRemove?.group ?? "", /^inline@/, "cleanup must be visible on the row without discovering its context menu");
-  const removeCommand = contributes.commands.find((entry) => entry.command === "aboard.removePausedSession");
-  assert.equal(removeCommand?.icon, "$(trash)");
+  // Restore Fleet relaunched write-capable agents into a workspace nobody had
+  // looked at since the crash. Its record survives in Recent Activity instead.
+  const gone = ["aboard.restoreFleet", "aboard.removePausedSession"];
+  for (const command of gone) {
+    assert.equal(contributes.commands.some((entry) => entry.command === command), false, command);
+    for (const menu of ["commandPalette", "view/title", "view/item/context"] as const) {
+      assert.equal((contributes.menus[menu] ?? []).some((entry) => entry.command === command), false, `${command} in ${menu}`);
+    }
+  }
+});
+
+test("the auto-run card offers exactly the actions its state allows", async () => {
+  const { contributes } = await manifest();
+  const title = (contributes.menus["view/title"] ?? []).filter((entry) => (entry.when ?? "").includes("aboard.autoRun"));
+  const when = (command: string) => title.find((entry) => entry.command === command)?.when ?? "";
+
+  // Start is offered only with nothing unresolved: two runs competing for the
+  // same branches is the failure this prevents.
+  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == idle/);
+  assert.match(when("aboard.startAutoRunWithChrome"), /aboard\.autoRunCard == idle/);
+  // Resume appears only once validation has said the run may continue — never
+  // while checking, and never when broken.
+  assert.match(when("aboard.resumeAutoRun"), /aboard\.autoRunCard == recoverable/);
+  for (const state of ["checking", "broken", "unsupported", "idle"]) {
+    assert.doesNotMatch(when("aboard.resumeAutoRun"), new RegExp(`== ${state}`), state);
+  }
+  // Discard is the one action a broken or unsupported record still has.
+  for (const state of ["recoverable", "broken", "unsupported"]) {
+    assert.match(when("aboard.discardAutoRun"), new RegExp(`== ${state}`), state);
+  }
+  assert.match(when("aboard.stopAutoRun"), /active|waiting/);
+
+  // The palette mirrors the same gating, so neither surface can offer a Start
+  // the other refuses.
+  const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
+  assert.match(palette.get("aboard.startAutoRun") ?? "", /aboard\.autoRunCard == idle/);
+  assert.match(palette.get("aboard.resumeAutoRun") ?? "", /aboard\.autoRunCard == recoverable/);
+});
+
+test("recent activity rows are offered only the actions their capabilities carry", async () => {
+  const { contributes } = await manifest();
+  const rows = (contributes.menus["view/item/context"] ?? []).filter((entry) => entry.command.startsWith("aboard.activity."));
+  const when = (command: string) => rows.find((entry) => entry.command === command)?.when ?? "";
+  assert.match(when("aboard.activity.openTerminal"), /terminal/);
+  assert.match(when("aboard.activity.reopen"), /reopen/);
+  assert.match(when("aboard.activity.openIssue"), /issue/);
+  assert.match(when("aboard.activity.openPullRequest"), /pr/);
+
+  const clear = (contributes.menus["view/title"] ?? []).find((entry) => entry.command === "aboard.activity.clear");
+  assert.equal(clear?.when, "view == aboard.recentActivity");
+  assert.match(clear?.group ?? "", /^navigation@/);
 });

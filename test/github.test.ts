@@ -444,6 +444,56 @@ test("branch deletion on merge is the caller's decision, not the boundary's", as
   assert.deepEqual(withoutDelete.calls, [["pr", "merge", "57", "--merge"]]);
 });
 
+test("branch pull request recovery can observe closed and merged records", async () => {
+  const gh = new FixtureGh(() => JSON.stringify([{ number: 58 }]));
+  assert.equal(await new GitHubClient(gh).findPullRequestForBranch("aboard/34-fix"), 58);
+  assert.deepEqual(gh.calls, [["pr", "list", "--state", "all", "--head", "aboard/34-fix", "--limit", "1", "--json", "number"]]);
+});
+
+test("closing a pull request checks its identity and state before mutating anything", async () => {
+  // Discard cleanup is the only caller. It must never close something that was
+  // retargeted, already merged, or has become somebody else's, so identity is
+  // re-read here rather than trusted from a record written hours ago.
+  const pullRequest = (overrides: Record<string, unknown>) => ({
+    number: 57, title: "PR", body: "", merged: false, state: "OPEN", mergeable: "MERGEABLE",
+    url: "https://github.com/acme/app/pull/57", headRefName: "aboard/35-two", baseRefName: "aboard/run/test",
+    headRefOid: "abc123", closingIssuesReferences: { nodes: [] }, reviewDecision: null, reviewThreads: { nodes: [] },
+    ...overrides,
+  });
+  const client = (overrides: Record<string, unknown>) => {
+    const gh = new FixtureGh((args) => args[0] === "repo" ? repo : graph({ pullRequest: pullRequest(overrides) }));
+    return { gh, github: new GitHubClient(gh) };
+  };
+  const closed = (gh: FixtureGh) => gh.calls.some((args: readonly string[]) => args[0] === "pr" && args[1] === "close");
+
+  const matching = client({});
+  assert.equal(await matching.github.closePullRequestIf(57, { head: "aboard/35-two", base: "aboard/run/test" }), true);
+  assert.ok(matching.gh.calls.some((args) => args.join(" ") === "pr close 57"));
+
+  const retargeted = client({ baseRefName: "main" });
+  assert.equal(await retargeted.github.closePullRequestIf(57, { head: "aboard/35-two", base: "aboard/run/test" }), false);
+  assert.equal(closed(retargeted.gh), false);
+
+  const rehomed = client({ headRefName: "somebody/else" });
+  assert.equal(await rehomed.github.closePullRequestIf(57, { head: "aboard/35-two", base: "aboard/run/test" }), false);
+  assert.equal(closed(rehomed.gh), false);
+
+  const merged = client({ merged: true });
+  assert.equal(await merged.github.closePullRequestIf(57, { head: "aboard/35-two", base: "aboard/run/test" }), false);
+  assert.equal(closed(merged.gh), false);
+
+  const gone = new FixtureGh((args) => args[0] === "repo" ? repo : graph({ pullRequest: null }));
+  assert.equal(await new GitHubClient(gone).closePullRequestIf(57, { head: "aboard/35-two", base: "aboard/run/test" }), false);
+  assert.equal(closed(gone), false);
+});
+
+test("a tree row can open the issue or pull request it names", async () => {
+  const gh = new FixtureGh(() => repo);
+  // GitHub serves /issues/<n> and /pull/<n> interchangeably, so one builder
+  // answers both without a round trip to find out which the number is.
+  assert.equal(await new GitHubClient(gh).webUrl(34), "https://github.com/EmilienxD/aboard/issues/34");
+});
+
 test("malformed gh JSON is a typed boundary failure", async () => {
   await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json")).readRoadmap(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
 });

@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { ProgressLocation, RelativePattern, Uri, commands, env, window, workspace } from "vscode";
+import { RelativePattern, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
 import { FileManagerMcpConfig } from "./bridge/mcp-config.js";
@@ -12,7 +12,7 @@ import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./claude/terminals.js";
-import { isNamedBuiltinAgentType, isNonRestorablePersistedAgentType, type TerminalId } from "./domain/contracts.js";
+import { isNamedBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerIdentity, ManagerLifecycle } from "./claude/manager.js";
 import { sessionIsResumable } from "./claude/sessions.js";
@@ -23,7 +23,7 @@ import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
 import { basename, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
-import { registerNativeFleetUi } from "./vscode/native-ui.js";
+import { registerNativeFleetUi, type NativeFleetUiRegistration } from "./vscode/native-ui.js";
 import {
   ABOARD_SETTINGS,
   EMPTY_PROJECT_SETTINGS,
@@ -35,9 +35,12 @@ import {
   readAboardConfiguration,
   type ProjectSettings,
 } from "./configuration.js";
-import { FileFleetStore, FileSessionLedgerStore, PersistOnChange } from "./runtime/persistence.js";
-import { endedSessionFrom, isLedgerRecordable, recordEndedSession } from "./domain/session-ledger.js";
-import { ReopenCoordinator } from "./claude/reopen.js";
+import { FileActivityStore, FileFleetStore, FileLegacySessionLedger, PersistOnChange } from "./runtime/persistence.js";
+import { ActivityRecorder } from "./runtime/activity-recorder.js";
+import { isReopenableSession } from "./domain/activity.js";
+import { isUnsupportedRecord } from "./domain/run-plan.js";
+import { isLiveSession } from "./vscode/fleet.js";
+import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
 import { registerReopenCommand } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
@@ -287,6 +290,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   if (initialDiagnostics.length > 0) void window.showWarningMessage(initialDiagnostics.map((item) => item.message).join(" "));
   let currentConfiguration = initialConfiguration.value;
   let bridgeEnvironment: { port: number; token: string } | undefined;
+  // Declared early so the auto-run engine's change callback can refresh the
+  // panel; assigned once the services it renders exist.
+  let fleetUi: NativeFleetUiRegistration | undefined;
   let lifecycle: WorkerLifecycleReconciler | undefined;
   let sessionLifecycle: SessionLifecycleService | undefined;
   const sessionProofs = new SessionStartupProofs();
@@ -372,34 +378,32 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(workspaceRoot, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
-  const sessionLedger = new FileSessionLedgerStore(workspaceRoot, runtimeAdmission);
-  // Writes are chained rather than concurrent: a session can settle from two
-  // sources within milliseconds — the terminal closing and the wrapper's marker
-  // vanishing — and two read-modify-writes racing on one file would drop an
-  // entry. `recordEndedSession` is idempotent per agent, so the second one
-  // simply refreshes the first.
-  let ledgerWrites: Promise<void> = Promise.resolve();
+  // Recent Activity replaces the ended-session ledger: the same reopen facts,
+  // plus every automated and run outcome the user needs to see after stepping
+  // away. Its writer is chained and idempotent, so the two sources that can
+  // settle one session milliseconds apart produce one row.
+  const activityListeners = new Set<() => void>();
+  const activity = new ActivityRecorder({
+    store: new FileActivityStore(workspaceRoot, runtimeAdmission),
+    legacy: new FileLegacySessionLedger(workspaceRoot, runtimeAdmission),
+    admission: () => initialized,
+    now: () => new Date(),
+    log: (message) => output.appendLine(message),
+    onDidChange: () => { for (const listener of activityListeners) listener(); },
+  });
+  if (initialized) await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
   /**
-   * Remembers a handed-off session on its way out of the fleet, so the user can
-   * get back into the conversation later. Only sessions that report no result
-   * qualify: an automated launch's result already reached its caller, while a
-   * brainstormer or an interactive general-purpose is a conversation the user
-   * was part of and the fleet is about to forget entirely.
-   *
-   * Best-effort by contract. This runs on the settlement path, where throwing
-   * would strand the lease or the fleet record; a failed write costs the ability
-   * to reopen one session and is logged.
+   * Remembers a session on its way out of the fleet. A conversation the user was
+   * part of carries the launch facts a reopen replays; an automated worker's
+   * row is history only, because its result already reached its caller.
    */
-  const rememberEndedSession = (session: AgentSession, endedAt: IsoTimestamp): void => {
-    // Writing here would recreate `.aboard/` behind the user's back, including
-    // right after they deleted it — the same reason fleet persistence is gated.
-    if (!initialized || !isLedgerRecordable(session)) return;
-    ledgerWrites = ledgerWrites
-      .then(async () => {
-        const current = await sessionLedger.load().catch(() => undefined);
-        await sessionLedger.save(recordEndedSession(current, endedSessionFrom(session, endedAt)));
-      })
-      .catch((error: unknown) => output.appendLine(`Session ledger write failed: ${error instanceof Error ? error.message : "unknown error"}`));
+  const rememberEndedSession = (session: AgentSession, endedAt: IsoTimestamp, outcome: "ended" | "killed" | "interrupted" = "ended"): void => {
+    if (!initialized) return;
+    const terminalId = terminals.liveTerminalForAgent(session.identity.agentId);
+    const classified = session.identity.type === "manager" || isReopenableSession(session)
+      ? outcome
+      : outcome === "ended" ? "succeeded" : outcome;
+    activity.recordAgent(session, classified, endedAt, terminalId === undefined ? {} : { terminalId });
   };
   const managerStore = new FileManagerStore(workspaceRoot, runtimeAdmission);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
@@ -442,7 +446,22 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
   const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId: () => managerIdentity.require(), shell: process.platform === "win32" ? "powershell" : "git-bash", disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
-  lifecycle = new WorkerLifecycleReconciler({ fleet, lease, completions: coordinator, workingTree: new GitWorkingTreeInspector() });
+  lifecycle = new WorkerLifecycleReconciler({
+    fleet,
+    lease,
+    completions: coordinator,
+    workingTree: new GitWorkingTreeInspector(),
+    onFinished: (session, result) => {
+      if (!initialized) return;
+      const at = new Date().toISOString() as IsoTimestamp;
+      activity.recordAgent(
+        session,
+        result.outcome === "succeeded" ? "succeeded" : result.failure.type === "killed" ? "cancelled" : "failed",
+        at,
+        result.outcome === "failed" ? { reason: result.failure.type } : {},
+      );
+    },
+  });
   // A settled session leaves its terminal to be collected: the record the
   // fleet dropped still names an open terminal, and the next launch for the
   // same agent fails the one-live-terminal invariant until it is closed —
@@ -478,8 +497,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // terminal whose error message is the whole point of keeping it.
     sessionProofs.cancel(agentId);
     const at = new Date().toISOString() as IsoTimestamp;
-    if (fleet.get(agentId) !== undefined) {
+    const failed = fleet.get(agentId);
+    if (failed !== undefined) {
       lease.releaseForTerminalOutcome(agentId, at, "launch failed before the session started");
+      // Recorded before the fleet forgets it: a launch that died on its way up
+      // leaves nothing else behind but the terminal holding the error text.
+      if (initialized) activity.recordAgent(failed, "launch-failed", at, { reason: cause });
       fleet.remove(agentId, at);
     }
     releaseAbandonedTerminal(agentId);
@@ -567,6 +590,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const git: GitClient = new ProcessGitClient(workspaceRoot);
   const autoRun = new AutoRunEngine({
     git,
+    gitFor: (cwd) => new ProcessGitClient(cwd),
+    workspaceRoot,
     // Where a run works. In its own checkout beside the project when the user
     // asked for one, in their files otherwise.
     workspaces: new WorktreeRunWorkspaces({
@@ -589,9 +614,33 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       notify: (message) => enqueueManagerNotification(message),
       alert: (message, pullRequestUrl) => { alertAboutAutoRun(message, pullRequestUrl); },
     },
+    activity: {
+      runStarted: (record, resumed) => activity.recordRun({
+        runId: record.runId,
+        attempt: record.attempt,
+        outcome: resumed ? "resumed" : "started",
+        issueNumbers: record.plan.map((issue) => issue.number),
+      }),
+      runEnded: (record, outcome) => activity.recordRun({
+        runId: record.runId,
+        attempt: record.attempt,
+        outcome: outcome === "succeeded" ? "succeeded" : outcome.kind,
+        ...(outcome !== "succeeded" && outcome.kind === "failed" ? { reason: outcome.reason } : {}),
+        issueNumbers: record.plan.map((issue) => issue.number),
+        ...(record.runPullRequest === undefined ? {} : { pullRequest: record.runPullRequest }),
+      }),
+      runDiscarded: (record) => activity.recordRun({
+        runId: record.runId,
+        attempt: record.version === 2 ? record.attempt : 1,
+        outcome: "discarded",
+        ...(record.version === 2 ? { issueNumbers: record.plan.map((issue) => issue.number) } : {}),
+      }),
+    },
     settings: () => currentConfiguration.autoRun,
+    discardBehavior: () => currentConfiguration.autoRun.discardBehavior,
     log: (message) => output.appendLine(message),
     onStateChange: (state) => void publishAutoRunState(state),
+    onRecordChange: () => fleetUi?.refresh(),
   });
   activeAutoRun = autoRun;
   const ownership: PullRequestOwnership = { owner: (prNumber) => autoRun.owner(prNumber) };
@@ -657,7 +706,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // and what the ledger remembers, merged and checked against the transcripts
   // Claude Code actually has.
   const reopen = new ReopenCoordinator({
-    ledger: sessionLedger,
+    activity: { entries: () => activity.store() },
     fleet,
     terminals: {
       isOpen: (terminalId) => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"),
@@ -762,7 +811,44 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     });
   };
   await startRuntimeBridge();
-  const fleetUi = registerNativeFleetUi(context, () => bridge?.port, fleet, lease, terminals, () => initialized);
+  const startAutoRun = async (chrome: boolean): Promise<void> => {
+    if (!requireInitialized()) return;
+    try {
+      const result = await autoRun.start(chrome ? { chrome: true } : {});
+      if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
+      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued on ${result.sessionBranch}, opening a pull request into ${result.sessionBase} at the end (${result.mergesItsOwnPullRequest ? "merged automatically" : "yours to merge"}), review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
+    } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
+  };
+  fleetUi = registerNativeFleetUi(context, {
+    port: () => bridge?.port,
+    fleet,
+    lease,
+    terminals,
+    isInitialized: () => initialized,
+    autoRun: {
+      engine: autoRun,
+      discardBehavior: () => currentConfiguration.autoRun.discardBehavior,
+      webUrl: (number) => github.webUrl(number),
+      start: (chrome) => startAutoRun(chrome),
+    },
+    activity: {
+      entries: () => activity.entries(),
+      store: () => activity.store(),
+      clear: () => activity.clear(),
+      reopen: async (entry) => {
+        if (entry.kind !== "agent") return;
+        const option = await reopen.find(entry.agentId);
+        if (option === undefined) { void window.showInformationMessage("aboard no longer has enough about that session to reopen it."); return; }
+        const outcome = await reopen.reopen(option.candidate);
+        void window.showInformationMessage(describeReopenOutcome(outcome));
+      },
+      showTerminal: (entry) => {
+        if (entry.kind !== "agent" || entry.terminalId === undefined) return;
+        try { terminals.show(entry.terminalId); } catch { void window.showInformationMessage("That terminal has closed."); }
+      },
+      onDidChange: (listener) => { activityListeners.add(listener); return { dispose: () => activityListeners.delete(listener) }; },
+    },
+  });
   // Progress is pull, not push: one bounded line per transition, drained by the
   // Manager's UserPromptSubmit hook on the user's next message. If the user is
   // away for a whole afk spec, they learn the outcome when they return — which
@@ -851,88 +937,34 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
     finally { await publishManagerState(); }
   };
-  let fleetRestoreRunning = false;
-  let autoRunResumeDeferred = false;
-  const pausedPersistedSessions = (): readonly AgentSession[] => {
+  /**
+   * Fleet rows whose terminal did not survive the previous extension host.
+   *
+   * Bulk restoration is gone: relaunching a fleet of write-capable agents into a
+   * workspace nobody has looked at since the crash is exactly the kind of
+   * unattended automation the visibility invariants exist to prevent, and it
+   * competed with auto-run recovery for the same branches. What survives is the
+   * record: each stale row becomes one Recent Activity entry, reopenable when
+   * there is a conversation to reopen, and leaves the fleet so Agents shows only
+   * agents you can actually go and look at.
+   */
+  const reconcileStaleSessions = (): void => {
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
-    return fleet.list().filter((session) =>
-      ["starting", "running", "awaiting-user"].includes(session.lifecycle.status) && !openTerminalIds.has(session.terminal.terminalId),
-    );
-  };
-  const restorablePersistedSessions = (): readonly AgentSession[] =>
-    pausedPersistedSessions().filter((session) => !isNonRestorablePersistedAgentType(session.identity.type));
-  const orphanedPersistedSessions = (): readonly AgentSession[] =>
-    pausedPersistedSessions().filter((session) => isNonRestorablePersistedAgentType(session.identity.type));
-  const publishFleetRestoreState = async (): Promise<void> => {
-    await commands.executeCommand("setContext", "aboard.fleetRestoreAvailable", !fleetRestoreRunning && restorablePersistedSessions().length > 0);
-    await commands.executeCommand("setContext", "aboard.fleetRestoreRunning", fleetRestoreRunning);
-  };
-  const restoreFleet = async (confirm = true): Promise<void> => {
-    if (fleetRestoreRunning) return;
-    if (!requireInitialized()) return;
-    const sessions = [...restorablePersistedSessions()];
-    if (sessions.length === 0) return;
-    if (confirm) {
-      const confirmation = await window.showInformationMessage(
-        `Restore ${sessions.length} aboard session${sessions.length === 1 ? "" : "s"}? New terminals will open and Claude will resume each saved conversation.`,
-        { modal: true, detail: "Restored workers are handed back to you; interrupted automatic workflows remain separate and explicit." },
-        "Restore Fleet",
-      );
-      if (confirmation !== "Restore Fleet") return;
+    const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
+    for (const session of stale) {
+      const at = new Date().toISOString() as IsoTimestamp;
+      if (initialized) {
+        activity.recordAgent(session, "interrupted", at, { reason: "the extension host restarted under it" });
+      }
+      // A lease held by an agent whose terminal is gone would block every later
+      // write-capable launch.
+      lease.releaseForTerminalOutcome(session.identity.agentId, at, "session did not survive the extension host");
+      fleet.remove(session.identity.agentId, at);
+      output.appendLine(`Removed interrupted ${session.identity.type} (agent ${session.identity.agentId}) from the fleet; it is in Recent Activity.`);
     }
-    fleetRestoreRunning = true;
-    await publishFleetRestoreState();
-    const failures: string[] = [];
-    try {
-      await window.withProgress({ location: ProgressLocation.Notification, title: "Restoring aboard fleet" }, async (progress) => {
-        let completed = 0;
-        const report = (session: AgentSession) => {
-          completed += 1;
-          progress.report({ message: `${session.identity.type} (${completed}/${sessions.length})` });
-        };
-        const managerSession = sessions.find((session) => session.identity.type === "manager");
-        if (managerSession !== undefined) {
-          try {
-            const terminal = await manager.start("resume");
-            const startedAt = new Date().toISOString() as IsoTimestamp;
-            fleet.reattach(managerSession.identity.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
-            fleet.transition(managerSession.identity.agentId, { status: "running", startedAt }, startedAt);
-          } catch (error) {
-            failures.push(`Manager: ${error instanceof Error ? error.message : "restore failed"}`);
-          }
-          report(managerSession);
-        }
-        for (const session of sessions) {
-          if (session.identity.type === "manager") continue;
-          try { await coordinator.resumePersisted(session); }
-          catch (error) { failures.push(`${session.identity.type}: ${error instanceof Error ? error.message : "restore failed"}`); }
-          report(session);
-        }
-      });
-    } finally {
-      fleetRestoreRunning = false;
-      await publishFleetRestoreState();
-    }
-    const restored = sessions.filter((session) => terminals.liveTerminalForAgent(session.identity.agentId) !== undefined);
-    const terminalToShow = restored.find((session) => session.identity.type === "manager") ?? restored[0];
-    if (terminalToShow !== undefined) terminals.show(fleet.get(terminalToShow.identity.agentId)!.terminal.terminalId);
-    if (failures.length > 0) void window.showWarningMessage(`aboard restored ${sessions.length - failures.length} of ${sessions.length} sessions. ${failures.join("; ")}`);
-    else void window.showInformationMessage(`aboard restored all ${sessions.length} sessions.`);
-    if (autoRunResumeDeferred) void offerAutoRunResume();
   };
-  void publishFleetRestoreState();
-  if (restorablePersistedSessions().length > 0) {
-    void window.showInformationMessage(
-      `aboard paused ${restorablePersistedSessions().length} restorable session${restorablePersistedSessions().length === 1 ? "" : "s"} when VS Code closed.`,
-      "Restore Fleet",
-    ).then((choice) => { if (choice === "Restore Fleet") void restoreFleet(false); });
-  }
-  if (orphanedPersistedSessions().length > 0) {
-    void window.showInformationMessage(
-      `aboard kept ${orphanedPersistedSessions().length} interrupted automated task${orphanedPersistedSessions().length === 1 ? "" : "s"} visible. Their result callers ended with the previous extension host, so they cannot be restored; remove them from the Agents view when you are done inspecting the record.`,
-      "Show Agents",
-    ).then((choice) => { if (choice === "Show Agents") void commands.executeCommand("aboard.fleet.focus"); });
-  }
+  reconcileStaleSessions();
+
   // `aboard.initialized` drives the welcome view and the Initialize/Update pair.
   // `aboard.managerLive` hides the launch actions while a Manager is running, and
   // `aboard.managerResumable` shows Resume only when a session exists to resume.
@@ -940,7 +972,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const recorded = await managerStore.load().catch(() => undefined);
     await commands.executeCommand("setContext", "aboard.managerLive", fleet.list().some((entry) => entry.identity.type === "manager"));
     await commands.executeCommand("setContext", "aboard.managerResumable", recorded !== undefined);
-    await publishFleetRestoreState();
   };
   const publishScaffoldState = async () => {
     const wasInitialized = initialized;
@@ -1016,14 +1047,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
     finally { await publishScaffoldState(); }
   };
-  const startAutoRun = async (chrome: boolean): Promise<void> => {
-    if (!requireInitialized()) return;
-    try {
-      const result = await autoRun.start(chrome ? { chrome: true } : {});
-      if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
-      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued on ${result.sessionBranch}, opening a pull request into ${result.sessionBase} at the end (${result.mergesItsOwnPullRequest ? "merged automatically" : "yours to merge"}), review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
-    } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
-  };
   context.subscriptions.push(
     commands.registerCommand("aboard.initializeProject", scaffold),
     commands.registerCommand("aboard.updateProject", async () => {
@@ -1040,55 +1063,25 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
-    commands.registerCommand("aboard.restoreFleet", restoreFleet),
     registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
     registerReopenCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined),
-      // `matchOnDetail` so "paused", "ended", or an age filters the list, which
-      // is how a user with a long history finds the one they mean.
+      // `matchOnDetail` so "ended", or an age, filters the list, which is how a
+      // user with a long history finds the one they mean.
       pick: async (items, placeHolder) => window.showQuickPick([...items], { placeHolder, matchOnDescription: true, matchOnDetail: true }),
       info: (message) => { void window.showInformationMessage(message); },
       warning: (message) => { void window.showWarningMessage(message); },
       error: (message) => { void window.showErrorMessage(message); },
     }, reopen),
-    commands.registerCommand("aboard.startAutoRun", () => startAutoRun(false)),
-    commands.registerCommand("aboard.startAutoRunWithChrome", () => startAutoRun(true)),
     commands.registerCommand("aboard.stopAutoRun", () => { if (requireInitialized()) autoRun.stop(); }),
     commands.registerCommand("aboard.continueAutoRun", () => { if (requireInitialized()) autoRun.continueNow(); }),
     // A wait outstanding when the window regains focus is polled immediately,
     // so returning to VS Code after merging does not cost a poll interval.
     window.onDidChangeWindowState((state) => { if (state.focused && autoRun.state()?.waiting === true) autoRun.continueNow(); }),
   );
-  // Resume is explicit, never automatic. Auto-resuming would launch a
-  // write-capable agent into a workspace nobody has looked at since the crash,
-  // with no human present — exactly what the visibility invariants prevent.
-  const offerAutoRunResume = async (): Promise<void> => {
-    if (!initialized) return;
-    const record = await new FileAutoRunStore(workspaceRoot).load().catch(() => undefined);
-    if (record === undefined) { autoRunResumeDeferred = false; return; }
-    const currentIssue = record.currentIssue;
-    if (currentIssue !== undefined && restorablePersistedSessions().some((session) => session.identity.type !== "manager" && session.issueNumbers?.includes(currentIssue) === true)) {
-      autoRunResumeDeferred = true;
-      output.appendLine(`Auto-run resume for issue #${record.currentIssue ?? "?"} is deferred until its paused fleet session is restored or closed.`);
-      return;
-    }
-    autoRunResumeDeferred = false;
-    const choice = await window.showWarningMessage(
-      `An aboard auto-run was interrupted at the ${record.phase} phase of issue #${record.currentIssue ?? "?"}. Resume it?`,
-      { modal: false },
-      "Resume", "Discard",
-    );
-    if (choice === "Resume") {
-      const result = await autoRun.resume(record).catch((error: unknown) => ({ started: false, reason: error instanceof Error ? error.message : "resume failed" }) as const);
-      if (!result.started) void window.showErrorMessage(`aboard could not resume the run: ${result.reason}.`);
-    } else if (choice === "Discard") {
-      await new FileAutoRunStore(workspaceRoot).clear();
-    }
-  };
-  context.subscriptions.push(fleet.onDidChange(() => {
-    if (autoRunResumeDeferred && !fleetRestoreRunning) void offerAutoRunResume();
-  }));
-  void offerAutoRunResume();
+  // Recovery has no notification: the Auto Run view is the place, and it
+  // revalidates on activation, on visibility, on focus, and on a timer.
+  void autoRun.refresh();
   const reloadConfiguration = (restartHint: (before: typeof currentConfiguration, after: typeof currentConfiguration) => boolean) => {
     const next = configuration(projectSettings.values);
     const previous = currentConfiguration;
@@ -1123,7 +1116,7 @@ export async function deactivate(): Promise<void> {
   // persisted record is what an explicit resume re-enters from.
   activeSessionMonitor?.stop();
   activeSessionMonitor = undefined;
-  activeAutoRun?.stop("the extension is shutting down");
+  activeAutoRun?.interrupt("the extension is shutting down");
   await activeAutoRun?.settle();
   activeAutoRun = undefined;
   await persistence?.dispose();

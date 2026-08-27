@@ -33,6 +33,12 @@ aboard ─ Agents                                       claude --agent implement
 
 You talk to the **Manager**. It plans, delegates, and reports — and it cannot edit your code. Each delegated task opens as its own terminal. Click a node and you're inside it. One agent at a time is the *lease holder*: no two delegated tasks touch your working tree at once, and the status bar always names the one that holds it.
 
+The panel has three views, and each answers exactly one question:
+
+- **Agents** — what is running right now. A row appears only while its terminal is open, so everything you see is something you can go and look at.
+- **Auto Run** — the current run's fixed plan and progress, or the recovery card for one that stopped. Resume appears only after aboard has checked that git and GitHub still match what the run recorded; when they don't, you get the reason and Discard.
+- **Recent Activity** — the last twenty agent and run outcomes, including the conversations you can reopen.
+
 ## Quick start
 
 **You need:** VS Code 1.125+, Claude Code, Git, the GitHub CLI (`gh`), and [`uv`](https://docs.astral.sh/uv/).
@@ -58,17 +64,19 @@ Then try one of these in the Manager terminal:
 
 `/auto` is the closest aboard gets to hands-off, and it's deliberately fenced in:
 
-- **Preview the whole bargain first.** `/auto --dry` reads git and GitHub but changes neither. It reports whether a real run can start, the forecast issue order and exact issue branches, the prospective `aboard/run/<run-id>` session branch and its target, skipped issues and dependency cycles, review/worktree/final-merge settings, and the user action required at HITL, conflict, failure, and final-PR gates. The queue remains a forecast because a real run re-reads GitHub after every issue. Add `--chrome` in either order to preview that launch choice too.
+- **Preview the whole bargain first.** `/auto --dry` reads git and GitHub but changes neither. It reports whether a real run can start, the issue order and exact issue branches, the prospective `aboard/run/<run-id>` session branch and its target, skipped issues and dependency cycles, review/worktree/final-merge settings, and the user action required at HITL, conflict, failure, and final-PR gates. It is a forecast only because GitHub may change before you start; once a run starts, that plan is what it works. Add `--chrome` in either order to preview that launch choice too.
 
 - **Add one guideline for the whole run.** Put free-form text after the optional flags, for example `/auto --chrome no unit tests needed`. aboard appends it under `# Additional User Guideline For this Session` at the very end of every implementer and pr-doctor prompt. The same text is kept in the run's gitignored runtime record so interrupted runs resume with it; `/auto --dry <guideline>` previews it without persisting anything.
 
 - **The extension does every git and GitHub side effect** — branch, commit, push, PR, merge. Agents only produce content. A branch name and a `Closes #N` trailer derived from the issue are correct by construction; an agent writing them is a sampling operation that drifts silently.
 - **Nothing lands on your branch behind your back.** A run cuts one session branch, `aboard/run/<id>`, from the branch you were on. Every issue branches off that, merges back into it, and the run closes the issue itself — GitHub only honours `Closes #N` on the default branch, and a run never merges there. When the queue drains, you get **one** pull request from the session branch into the branch you started on. `aboard.autoRun.mergeRunPullRequest` decides whether aboard tries to merge that one; it is off by default.
-- **One issue at a time.** No parallel fan-out. Merge conflicts and self-contradicting agents destroy more value than concurrency creates. Issues merge into a branch nobody else is touching, so conflicts collect at the one pull request a human looks at.
+- **One issue at a time, and one fixed list.** No parallel fan-out: merge conflicts and self-contradicting agents destroy more value than concurrency creates. The list of issues is settled once, when the run starts. Label something `afk` an hour in and it waits for the next run — a run does exactly the work you agreed to, and you can read that list in the Auto Run view while it works.
 - **Optionally, out of your way entirely.** With `aboard.autoRun.worktree.enabled`, the run takes a second checkout of the repository beside your project and works there — your files and your branch are untouched, a dirty tree of yours no longer refuses the run, and you can keep working while it does. It costs a full checkout plus whatever your `.aboard/session-setup.*` installs into it, so it is off by default. Agents get deny rules covering your checkout; that stops the accident, not a determined shell command.
 - **Labels decide how far it goes.** `afk` means an issue may be merged unattended. `hitl` means the run opens the PR and stops — your merge *is* the approval. Four labels, no hidden state: `spec`, `todo`, `afk`, `hitl`.
 - **And how much it costs.** A difficulty label on the issue — `routine`, `basic`, `advanced`, `expert` — picks the model and reasoning level its implementer and reviewer run at, so a rename is not addressed at the price of a redesign. It is the definition's own choice to ask: any agent whose `model:` or `effort:` names a value keeps it, and an unlabelled issue gets the most capable tier rather than the cheapest.
-- **Every phase is idempotent.** Close your laptop mid-run. Resume re-derives state from git and GitHub rather than trusting a file.
+- **Every phase is idempotent.** Close your laptop mid-run. Resume picks up at the first step that didn't finish, and every mutation is journalled beforehand so a crash between "the push succeeded" and "the record saved" is recognised rather than repeated.
+
+- **It refuses to guess.** Before each step, aboard checks the whole plan against git and GitHub. A run-owned branch that moved, an issue closed or relabelled under it, a pull request retargeted or merged by somebody else: any of these stops the run and says which. It doesn't roll anything back, and it doesn't quietly carry on with a plan that no longer describes reality. Stopping costs you a click; continuing costs you work you never approved.
 - **Review is opt-in.** LLM tokens are your money, not ours.
 - **Chrome is opt-in per run.** Browser tool definitions and signed-in browser access are loaded only when you type `/auto --chrome`, call `start_auto_run` with `chrome: true`, or use the dedicated palette command.
 

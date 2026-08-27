@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore } from "../src/runtime/persistence.js";
-import type { AutoRunRecord } from "../src/domain/auto-run.js";
+import type { AutoRunRecord } from "../src/domain/run-plan.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import { RuntimeAdmission, RuntimeStartup } from "../src/runtime/admission.js";
@@ -70,84 +70,129 @@ test("persistence drains queued writes and performs a final save on disposal", a
   assert.equal(listener, undefined);
 });
 
-test("the auto-run record round-trips its session guideline and clears on discard", async () => {
-  const root = await mkdtemp(join(tmpdir(), "aboard-autorun-"));
+/** A complete version-2 record, so each test states only what it is about. */
+function fixedPlanRecord(): AutoRunRecord {
+  return {
+    version: 2,
+    runId: "run_return",
+    startedAt: "2026-07-31T09:12:04.221Z",
+    updatedAt: "2026-07-31T10:00:00.000Z",
+    attempt: 2,
+    settings: {
+      review: true,
+      chromeEnabled: true,
+      mergeStrategy: "merge",
+      mergeRunPullRequest: true,
+      pauseAfterHitl: false,
+      pollSeconds: 45,
+      worktree: { enabled: true, root: "C:/checkouts", keep: false, setupTimeoutSeconds: 900 },
+      workspaceRoot: "C:/checkouts/run_return/aboard",
+      additionalGuideline: "keep fixtures small",
+    },
+    plan: [
+      { number: 34, title: "Add retry backoff", branch: "aboard/34-add-retry-backoff", disposition: "afk", difficulty: "advanced", dependsOn: [] },
+      { number: 35, title: "Migrate the queue", branch: "aboard/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
+    ],
+    progress: {
+      "34": { state: "done", result: "landed", prNumber: 56, issueClosed: true },
+      "35": { state: "current", phase: "await-approval", prNumber: 57, headSha: "b".repeat(40), reviewed: true },
+    },
+    sessionBranch: "aboard/run/return",
+    targetBranch: "feature/wip",
+    branchShas: { "aboard/run/return": "a".repeat(40), "aboard/35-migrate-the-queue": "b".repeat(40) },
+    currentIssue: 35,
+    checkpoint: "issue",
+    runPullRequest: 60,
+    reviewedIssues: [35],
+    pendingAction: { kind: "merge-issue-pr", prNumber: 57, head: "aboard/35-migrate-the-queue", base: "aboard/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    outcome: { kind: "failed", reason: "push rejected" },
+    workspaceCreated: true,
+  };
+}
+
+test("a version-2 record round-trips every discriminated state it can hold", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-autorun-record-"));
   const store = new FileAutoRunStore(root);
   assert.equal(await store.load(), undefined);
-  const record: AutoRunRecord = {
-    version: 1,
-    runId: "run_01H",
-    issueNumbers: [34, 35],
-    currentIssue: 35,
-    phase: "await-approval",
-    branch: "aboard/35-migrate-the-queue",
-    prNumber: 57,
-    reviewMode: false,
-    chromeEnabled: true,
-    additionalGuideline: "no unit tests needed",
-    reviewedIssues: [],
-    startedAt: "2026-07-31T09:12:04.221Z",
-  };
+  const record = fixedPlanRecord();
   await store.save(record);
-  // The record carries the branch the user was on when the run started, so a
-  // resumed run still knows where to return after a restart.
-  assert.deepEqual(await store.load(), { ...record, returnBranch: undefined });
+  assert.deepEqual(await store.load(), record);
   const raw = await readFile(join(root, ".aboard", "runtime", "auto-run.json"), "utf8");
-  assert.match(raw, /"additionalGuideline": "no unit tests needed"/);
-  assert.match(raw, /"chromeEnabled": true/);
+  assert.match(raw, /"additionalGuideline": "keep fixtures small"/);
   await store.clear();
   assert.equal(await store.load(), undefined);
 });
 
-test("an auto-run record preserves the branch to return to at end-of-run", async () => {
-  const root = await mkdtemp(join(tmpdir(), "aboard-autorun-return-"));
+test("every pending-action and progress shape survives a round trip", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-autorun-actions-"));
   const store = new FileAutoRunStore(root);
-  const record: AutoRunRecord = {
-    version: 1,
-    runId: "run_return",
-    issueNumbers: [34],
-    currentIssue: 34,
-    phase: "cleanup",
-    branch: "aboard/34-add-retry-backoff",
-    prNumber: 56,
-    reviewMode: false,
-    returnBranch: "feature/wip",
-    reviewedIssues: [],
-    startedAt: "2026-07-31T09:12:04.221Z",
-  };
-  await store.save(record);
-  assert.equal((await store.load())?.returnBranch, "feature/wip");
+  const actions = [
+    { kind: "create-branch", branch: "aboard/34-x", base: "aboard/run/return", baseSha: "c".repeat(40) },
+    { kind: "commit", branch: "aboard/34-x", parentSha: "d".repeat(40), message: "Add retry backoff", treeSha: "e".repeat(40), fingerprint: ["src/a.ts", "src/b.ts"] },
+    { kind: "push", branch: "aboard/34-x", sha: "e".repeat(40) },
+    { kind: "create-issue-pr", issue: 34, head: "aboard/34-x", base: "aboard/run/return" },
+    { kind: "merge-issue-pr", prNumber: 56, head: "aboard/34-x", base: "aboard/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    { kind: "create-run-pr", head: "aboard/run/return", base: "feature/wip" },
+    { kind: "merge-run-pr", prNumber: 60, head: "aboard/run/return", base: "feature/wip", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+  ] as const;
+  for (const pendingAction of actions) {
+    const record = { ...fixedPlanRecord(), pendingAction };
+    await store.save(record);
+    const loaded = await store.load();
+    assert.equal(loaded?.version, 2);
+    assert.deepEqual(loaded?.version === 2 ? loaded.pendingAction : undefined, pendingAction, pendingAction.kind);
+  }
+  for (const outcome of [{ kind: "cancelled" }, { kind: "interrupted" }, { kind: "failed", reason: "boom" }] as const) {
+    const record = { ...fixedPlanRecord(), outcome };
+    await store.save(record);
+    const loaded = await store.load();
+    assert.deepEqual(loaded?.version === 2 ? loaded.outcome : undefined, outcome, outcome.kind);
+  }
 });
 
-// The record is only a resume hint, so anything unusable degrades to "no run to
-// resume" rather than an error: the engine re-derives every fact anyway.
-test("an unusable auto-run record degrades to nothing to resume", () => {
-  const valid = { version: 1, runId: "r", issueNumbers: [34], currentIssue: 34, phase: "commit", branch: "b", prNumber: 1, reviewMode: true, startedAt: "2026-07-31T09:12:04.221Z" };
+// A malformed record is rejected rather than thrown on: that reads as "there is
+// no run to recover", which is the safe answer.
+test("an unusable auto-run record degrades to nothing to recover", () => {
+  const valid = fixedPlanRecord();
   assert.ok(parseAutoRunRecord(valid));
-  assert.equal(parseAutoRunRecord(valid)?.chromeEnabled, false);
-  assert.equal(parseAutoRunRecord({ ...valid, additionalGuideline: "  keep fixtures small  " })?.additionalGuideline, "keep fixtures small");
-  assert.equal(parseAutoRunRecord({ ...valid, additionalGuideline: 42 })?.additionalGuideline, undefined);
   for (const broken of [
     undefined, null, [], "run",
-    { ...valid, version: 2 },
-    { ...valid, phase: "publish" },
-    { ...valid, reviewMode: "yes" },
-    { ...valid, issueNumbers: [34, "x"] },
+    { ...valid, version: 3 },
+    { ...valid, runId: "" },
     { ...valid, startedAt: "yesterday" },
+    { ...valid, checkpoint: "publishing" },
+    { ...valid, attempt: 0 },
+    { ...valid, settings: { ...valid.settings, mergeStrategy: "fast-forward" } },
+    { ...valid, settings: undefined },
+    { ...valid, plan: [{ number: 34 }] },
+    { ...valid, branchShas: { "aboard/run/return": "short" } },
+    { ...valid, pendingAction: { kind: "push", branch: "aboard/run/return", sha: "short" } },
+    { ...valid, progress: { ...valid.progress, "35": { state: "current", phase: "commit", headSha: "short" } } },
+    { ...valid, outcome: { kind: "failed" } },
   ]) {
     assert.equal(parseAutoRunRecord(broken), undefined, JSON.stringify(broken));
   }
-  // A record an older version wrote still names a spec and a scope. Back-compat
-  // is by removal: the fields are ignored, and the run resumes off the
-  // repository exactly as a current record does.
-  const legacy = parseAutoRunRecord({ ...valid, specNumber: 12, scope: "all" });
-  assert.deepEqual(legacy, parseAutoRunRecord(valid));
-  // Optional fields legitimately absent, not malformed.
-  assert.equal(parseAutoRunRecord({ ...valid, currentIssue: undefined, branch: undefined, prNumber: undefined })?.currentIssue, undefined);
-  // A malformed returnBranch degrades to undefined rather than rejecting the record:
-  // a run that started on a detached HEAD recorded none, and so did older records.
-  assert.equal(parseAutoRunRecord({ ...valid, returnBranch: 42 })?.returnBranch, undefined);
-  assert.equal(parseAutoRunRecord({ ...valid, returnBranch: "feature/wip" })?.returnBranch, "feature/wip");
+  // An authoritative record is all-or-nothing: silently turning damaged
+  // progress into pending work could repeat an issue or a side effect.
+  const damaged = parseAutoRunRecord({ ...valid, progress: { ...valid.progress, "35": { state: "halfway" } } });
+  assert.equal(damaged, undefined);
+});
+
+test("a version-1 record surfaces as unsupported rather than disappearing or migrating", () => {
+  // It stored a forecast, not a plan, and none of the SHAs, dispositions, or
+  // per-issue outcomes recovery validation needs. Dropping it would leave the
+  // user's in-flight branches unaccounted for; resuming it would restore exactly
+  // the rediscovery this replaces.
+  const legacy = parseAutoRunRecord({
+    version: 1,
+    runId: "run_old",
+    issueNumbers: [34],
+    currentIssue: 34,
+    phase: "commit",
+    reviewMode: true,
+    startedAt: "2026-07-31T09:12:04.221Z",
+  });
+  assert.deepEqual(legacy, { version: 1, runId: "run_old", startedAt: "2026-07-31T09:12:04.221Z" });
 });
 
 test("combined bridge handlers stop at the first owned route", async () => {

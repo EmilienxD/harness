@@ -1,7 +1,7 @@
 import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, parseClaudeCommand, type EffortLevel } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 import { DEFAULT_TRANSCRIPT_BACKUPS } from "./claude/transcript-backup.js";
-import { MERGE_STRATEGIES, type AutoRunSettings, type MergeStrategy } from "./domain/auto-run.js";
+import { DISCARD_BEHAVIORS, MERGE_STRATEGIES, type AutoRunSettings, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";
 
 export interface ConfigurationReader { get(section: string): unknown; }
 export interface AboardConfiguration {
@@ -57,6 +57,7 @@ export const ABOARD_SETTINGS = [
   "aboard.autoRun.mergeStrategy",
   "aboard.autoRun.mergeRunPullRequest",
   "aboard.autoRun.pollSeconds",
+  "aboard.autoRun.discardBehavior",
   "aboard.autoRun.worktree.enabled",
   "aboard.autoRun.worktree.root",
   "aboard.autoRun.worktree.keep",
@@ -220,6 +221,10 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       // lands a batch of automated work on a branch a human is using.
       mergeRunPullRequest: flag(reader, "aboard.autoRun.mergeRunPullRequest", false, diagnostics),
       pollSeconds: integer(reader, "aboard.autoRun.pollSeconds", 30, 1, 3_600, diagnostics),
+      // Conservative by default: discarding a run is how a user gets out of the
+      // way of a broken one, and the branches and pull requests it left are
+      // usually the next thing they want to read.
+      discardBehavior: choice<DiscardBehavior>(reader, "aboard.autoRun.discardBehavior", DISCARD_BEHAVIORS, "record-only", diagnostics),
       worktree: {
         // Off by default: a checkout of its own costs a copy of the tree and
         // whatever the project's setup command installs into it, which only a

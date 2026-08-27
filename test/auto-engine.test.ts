@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AutoRunEngine, type AutoRunGitHub, type AutoRunLauncher, type AutoRunState } from "../src/auto/engine.js";
-import type { AutoRunRecord, AutoRunSettings } from "../src/domain/auto-run.js";
+import type { AutoRunSettings } from "../src/domain/auto-run.js";
+import type { AutoRunRecord } from "../src/domain/run-plan.js";
 import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
 import type { LaunchOrigin } from "../src/domain/lease.js";
 import type { GitClient, GitStatus } from "../src/git/client.js";
@@ -11,7 +12,7 @@ import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
-const SETTINGS: AutoRunSettings = { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
+const SETTINGS: AutoRunSettings = { review: false, discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "aboard/run/test";
@@ -19,6 +20,7 @@ const SESSION = "aboard/run/test";
 interface FakePullRequest {
   readonly state: "open" | "closed" | "merged";
   readonly mergeable?: "mergeable" | "conflicting" | "unknown";
+  readonly mergeCommitSha?: string;
 }
 
 interface Harness {
@@ -48,6 +50,20 @@ interface Harness {
   readonly workspaceGitCalls: string[];
   readonly released: RunWorkspaceOutcome[];
   readonly isolatedRoot: string;
+  readonly closedPullRequests: number[];
+  readonly recordedWorkspaceRemovals: string[];
+  /** The record as the store holds it now. */
+  readonly record: () => AutoRunRecord | undefined;
+  readonly seed: (record: AutoRunRecord) => void;
+  readonly branchExists: (branch: string) => boolean;
+  readonly remoteBranchExists: (branch: string) => boolean;
+  readonly sha: (branch: string) => string;
+  /** Moves a branch, as a force-push or somebody else's commit would. */
+  readonly advance: (branch: string) => void;
+  readonly closeIssue: (number: number) => void;
+  /** Puts a branch in place locally and on origin, as a previous attempt would have. */
+  readonly createBranch: (branch: string) => void;
+  readonly relabel: (number: number, labels: string[]) => void;
 }
 
 interface QueueIssue {
@@ -90,6 +106,8 @@ interface HarnessOptions {
   readonly baseNotOnRemote?: boolean;
   /** Runs with a checkout of its own instead of the user's working tree. */
   readonly worktree?: boolean;
+  /** Changes a frozen classification after the worker returns, before commit. */
+  readonly relabelAfterImplementer?: boolean;
 }
 
 function harness(options: HarnessOptions = {}): Harness {
@@ -117,6 +135,23 @@ function harness(options: HarnessOptions = {}): Harness {
   let dirty = options.startDirty === true;
   let nextPr = 56;
   let hitlPolls = 0;
+  /**
+   * A stable but movable SHA per branch. Full-length, because recovery compares
+   * against values the record wrote hours earlier and an abbreviation that was
+   * unambiguous then need not stay so.
+   */
+  const shas = new Map<string, number>();
+  const inheritedShas = new Map<string, string>();
+  function shaFor(branch: string): string {
+    const inherited = inheritedShas.get(branch);
+    if (inherited !== undefined) return inherited;
+    const revision = shas.get(branch) ?? 0;
+    return `${branch.replace(/[^a-z0-9]/gu, "")}${revision}`.padEnd(40, "0").slice(0, 40);
+  }
+  function advance(branch: string): void {
+    inheritedShas.delete(branch);
+    shas.set(branch, (shas.get(branch) ?? 0) + 1);
+  }
 
   const queue = options.issues ?? [
     { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open" as const, openBlockedByNumbers: [] },
@@ -128,13 +163,35 @@ function harness(options: HarnessOptions = {}): Harness {
     defaultBranch: async () => "main",
     status: async (): Promise<GitStatus> => ({ branch: currentBranch, entries: dirty ? [{ status: "M", path: "src/a.ts" }] : [] }),
     codebase: async () => ({ sourceFileCount: 12, languages: ["ts"], commitCount: 40 }),
-    headSha: async () => "a1b2c3d",
+    headSha: async () => shaFor(currentBranch),
     branchExists: async (branch) => branches.has(branch),
+    branchSha: async (branch) => branches.has(branch) ? shaFor(branch) : undefined,
+    remoteBranchSha: async (branch) => remoteBranches.has(branch) ? shaFor(branch) : undefined,
+    commitDetails: async (ref) => ({ sha: shaFor(ref), parents: ["parent0000000000000000000000000000000000"], subject: "subject", message: "subject", treeSha: "tree000000000000000000000000000000000000" }),
+    stagedTreeSha: async () => "tree000000000000000000000000000000000000",
+    deleteBranchAt: async (branch, expected) => {
+      gitCalls.push(`deleteBranchAt ${branch} ${expected}`);
+      if (!branches.has(branch) || shaFor(branch) !== expected) return false;
+      branches.delete(branch);
+      return true;
+    },
+    deleteRemoteBranchAt: async (branch, expected) => {
+      gitCalls.push(`deleteRemoteBranchAt ${branch} ${expected}`);
+      if (!remoteBranches.has(branch) || shaFor(branch) !== expected) return false;
+      remoteBranches.delete(branch);
+      return true;
+    },
     remoteBranchExists: async (branch) => remoteBranches.has(branch),
     fetch: async () => { gitCalls.push("fetch"); },
     checkout: async (branch) => { gitCalls.push(`checkout ${branch}`); currentBranch = branch; },
-    createBranch: async (branch, from) => { gitCalls.push(`createBranch ${branch} ${from}`); branches.add(branch); currentBranch = branch; },
-    deleteBranch: async (branch) => { gitCalls.push(`deleteBranch ${branch}`); branches.delete(branch); },
+    createBranch: async (branch, from) => {
+      gitCalls.push(`createBranch ${branch} ${from}`);
+      const source = from.startsWith("origin/") ? from.slice("origin/".length) : from;
+      inheritedShas.set(branch, branches.has(source) || remoteBranches.has(source) ? shaFor(source) : source);
+      branches.add(branch);
+      currentBranch = branch;
+    },
+    deleteBranch: async (branch) => { gitCalls.push(`deleteBranch ${branch}`); branches.delete(branch); inheritedShas.delete(branch); },
     fastForward: async (branch) => { gitCalls.push(`fastForward ${branch}`); },
     mergeFromRemote: async (base) => {
       gitCalls.push(`mergeFromRemote ${base}`);
@@ -145,7 +202,7 @@ function harness(options: HarnessOptions = {}): Harness {
       return true;
     },
     add: async () => { gitCalls.push("add"); },
-    commit: async () => { gitCalls.push("commit"); dirty = false; commits.add(issueForBranch(currentBranch)); pushed.delete(currentBranch); return "a1b2c3d"; },
+    commit: async () => { gitCalls.push("commit"); dirty = false; commits.add(issueForBranch(currentBranch)); pushed.delete(currentBranch); advance(currentBranch); return shaFor(currentBranch); },
     push: async (branch, setUpstream) => {
       gitCalls.push(`push ${branch}${setUpstream ? " -u" : ""}`);
       // The session branch's own push is infrastructure, not the issue's commit;
@@ -191,7 +248,10 @@ function harness(options: HarnessOptions = {}): Harness {
       }));
       return { candidates };
     },
-    getIssue: async (number) => ({ state: open.has(number) ? "open" : "closed" }),
+    getIssue: async (number) => ({
+      state: open.has(number) ? "open" as const : "closed" as const,
+      labels: queue.find((entry) => entry.number === number)?.labels ?? [],
+    }),
     addIssueComment: async (number, body) => {
       if (options.commentFails === true) throw new Error("gh issue comment failed");
       comments.push({ issue: number, body });
@@ -212,6 +272,7 @@ function harness(options: HarnessOptions = {}): Harness {
       }
       return undefined;
     },
+    findPullRequestForBranch: async (branch) => prForBranch(branch),
     getPullRequest: async (number) => {
       const pr = pullRequests.get(number);
       // Only reads issued from inside the wait count. `#observe` reads the same
@@ -225,7 +286,16 @@ function harness(options: HarnessOptions = {}): Harness {
         if (options.dirtyDuringWait === true && hitlPolls === 1) dirty = true;
         if (hitlPolls >= 2 && options.resolveHitl !== undefined) pullRequests.set(number, { ...pr, state: options.resolveHitl });
       }
-      return pr === undefined ? undefined : { ...pr, mergeable: pr.mergeable ?? "mergeable", url: `https://github.com/acme/app/pull/${number}` };
+      return pr === undefined ? undefined : {
+        ...pr,
+        number,
+        mergeable: pr.mergeable ?? "mergeable",
+        url: `https://github.com/acme/app/pull/${number}`,
+        headBranch: branchesByPr.get(number) ?? "",
+        baseBranch: basesByPr.get(number) ?? "",
+        headSha: shaFor(branchesByPr.get(number) ?? ""),
+        ...(pr.mergeCommitSha === undefined ? {} : { mergeCommitSha: pr.mergeCommitSha }),
+      };
     },
     getReviewState: async () => ({ decision: "unreviewed" }),
     mergePullRequest: async (number, _strategy, deleteBranch) => {
@@ -233,14 +303,27 @@ function harness(options: HarnessOptions = {}): Harness {
       merges.push({ pr: number, deleteBranch });
       if (options.mergeRefused === true) throw new Error("Protected branch rules not met");
       if (pr?.mergeable === "conflicting") throw new Error("Pull request is not mergeable");
-      pullRequests.set(number, { state: "merged" });
+      // The merge moves the base branch, exactly as a real one does.
+      const base = basesByPr.get(number);
+      if (base !== undefined) advance(base);
+      pullRequests.set(number, { state: "merged", ...(base === undefined ? {} : { mergeCommitSha: shaFor(base) }) });
       // Deliberately no `open.delete`: these merge into the session branch, and
       // GitHub only honours a closing keyword on the default branch. The issue
       // stays open until aboard closes it.
     },
+    closePullRequestIf: async (number, expected) => {
+      const pr = pullRequests.get(number);
+      if (pr?.state !== "open") return false;
+      if (branchesByPr.get(number) !== expected.head || basesByPr.get(number) !== expected.base) return false;
+      pullRequests.set(number, { state: "closed" });
+      closedPullRequests.push(number);
+      return true;
+    },
   };
 
   const branchesByPr = new Map<number, string>();
+  const basesByPr = new Map<number, string>();
+  const closedPullRequests: number[] = [];
   function prForBranch(branch: string): number | undefined {
     for (const [number, value] of branchesByPr) if (value === branch) return number;
     return undefined;
@@ -260,6 +343,9 @@ function harness(options: HarnessOptions = {}): Harness {
       launches.push(input);
       // Both agent types leave their work in the working tree; the engine commits.
       if (options.producesChanges !== false) dirty = true;
+      if (input.type === "implementer" && options.relabelAfterImplementer === true) {
+        queue.find((entry) => entry.number === input.issues?.[0])?.labels.splice(0, Infinity, "[AI]-hitl");
+      }
       const failed = input.type === "implementer" && options.implementerFails === true;
       return {
         agentId: `agent-${launches.length}` as AgentId,
@@ -289,6 +375,7 @@ function harness(options: HarnessOptions = {}): Harness {
     createPullRequest: async (input) => {
       const number = await github.createPullRequest(input);
       branchesByPr.set(number, input.head);
+      basesByPr.set(number, input.base);
       createdPullRequests.push({ ...input });
       return number;
     },
@@ -300,6 +387,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const userGitCalls: string[] = [];
   const workspaceGitCalls: string[] = [];
   const released: RunWorkspaceOutcome[] = [];
+  const recordedWorkspaceRemovals: string[] = [];
   const trace = (client: GitClient, into: string[]): GitClient => new Proxy(client, {
     get: (target, property, receiver) => {
       const value = Reflect.get(target, property, receiver) as unknown;
@@ -320,18 +408,28 @@ function harness(options: HarnessOptions = {}): Harness {
       isolated: true,
     }),
     release: async (_workspace, outcome) => { released.push(outcome); return undefined; },
+    removeRecorded: async (root) => { recordedWorkspaceRemovals.push(root); return true; },
   };
 
+  let stored: AutoRunRecord | undefined;
   const engine = new AutoRunEngine({
+    workspaceRoot: "C:/work/aboard",
     git: options.worktree === true ? trace(git, userGitCalls) : git,
+    gitFor: (cwd) => cwd === isolatedRoot ? trace(git, workspaceGitCalls) : trace(git, userGitCalls),
     ...(options.worktree === true ? { workspaces } : {}),
     github: wrappedGithub,
     launcher,
     terminals: { close: () => undefined },
     store: {
-      load: async () => undefined,
-      save: async (record) => { saved.push(record); },
-      clear: async () => { state.cleared = true; },
+      load: async () => stored,
+      // The store is a real one, not a sink: fixed-plan recovery re-reads what
+      // the engine wrote, so a fake that forgets would test nothing.
+      save: async (record) => {
+        if (record.version !== 2) throw new Error("the engine must only ever write version-2 records");
+        stored = record;
+        saved.push(record);
+      },
+      clear: async () => { stored = undefined; state.cleared = true; },
     },
     notifier: {
       notify: (message) => notifications.push(message),
@@ -343,6 +441,7 @@ function harness(options: HarnessOptions = {}): Harness {
     // would starve the event loop and never observe an abort.
     sleep: () => new Promise((resolve) => { setImmediate(resolve); }),
     onStateChange: (next) => { if (next !== undefined) states.push(next); },
+    pathExists: () => true,
   });
 
   return {
@@ -366,6 +465,53 @@ function harness(options: HarnessOptions = {}): Harness {
     workspaceGitCalls,
     released,
     isolatedRoot,
+    closedPullRequests,
+    recordedWorkspaceRemovals,
+    record: () => stored,
+    seed: (record: AutoRunRecord) => { stored = record; },
+    branchExists: (branch: string) => branches.has(branch),
+    remoteBranchExists: (branch: string) => remoteBranches.has(branch),
+    sha: (branch: string) => shaFor(branch),
+    advance,
+    closeIssue: (number: number) => open.delete(number),
+    createBranch: (branch: string) => { branches.add(branch); remoteBranches.add(branch); },
+    relabel: (number: number, labels: string[]) => {
+      const entry = queue.find((candidate) => candidate.number === number);
+      if (entry !== undefined) entry.labels.splice(0, entry.labels.length, ...labels);
+    },
+  };
+}
+
+/**
+ * A fixed plan for the harness's default queue, at whatever checkpoint a test
+ * needs. Recovery reads this rather than GitHub, which is the whole point: the
+ * plan is what the run agreed to, and the repository is only checked against it.
+ */
+function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
+  return {
+    version: 2,
+    runId: "run_test",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    attempt: 1,
+    settings: {
+      review: false,
+      chromeEnabled: false,
+      mergeStrategy: "squash",
+      mergeRunPullRequest: false,
+      pauseAfterHitl: false,
+      pollSeconds: 1,
+      worktree: WORKTREE_OFF,
+    },
+    plan: [{ number: 34, title: "Add retry backoff", branch: "aboard/34-add-retry-backoff", disposition: "afk", dependsOn: [] }],
+    progress: { "34": { state: "pending" } },
+    sessionBranch: SESSION,
+    targetBranch: "main",
+    branchShas: {},
+    currentIssue: undefined,
+    checkpoint: "planned",
+    reviewedIssues: [],
+    ...overrides,
   };
 }
 
@@ -378,22 +524,24 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   const result = await context.engine.start();
   assert.equal(result.started, true);
   await context.engine.settle();
-
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
   assert.equal(context.launches[0]?.expectsUncommittedTree, true);
   assert.equal(context.launches[0]?.description, "address issue 34");
   assert.match(context.launches[0]?.prompt ?? "", /^Address issue #34/);
-  assert.deepEqual(context.gitCalls, [
+  assert.deepEqual(context.gitCalls.filter((call) => call !== "fetch"), [
     // The session branch is cut from the remote's copy of the user's branch and
     // published before any issue starts, because it is a pull request base.
-    "fetch", `createBranch ${SESSION} origin/main`, `push ${SESSION} -u`,
-    "fetch", `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch aboard/34-add-retry-backoff ${SESSION}`,
+    `createBranch ${SESSION} origin/main`, `push ${SESSION} -u`,
+    `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch aboard/34-add-retry-backoff ${SESSION}`,
     "add", "commit", "push aboard/34-add-retry-backoff -u",
+    // After the merge, so the record carries the session branch tip the merge
+    // produced rather than the one it had before.
+    `checkout ${SESSION}`, `fastForward ${SESSION}`, "checkout aboard/34-add-retry-backoff",
     `checkout ${SESSION}`,
     "checkout main",
   ]);
   assert.equal(context.pullRequests.get(56)?.state, "merged");
-  assert.match(context.notifications.join("\n"), /issue #34 committed \(a1b2c3d\) and opened PR #56/);
+  assert.match(context.notifications.join("\n"), /issue #34 committed \([0-9a-z]+\) and opened PR #56/);
   assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
   assert.equal(context.state.cleared, true);
 });
@@ -433,7 +581,7 @@ test("an issue that cannot be closed is reported instead of failing work that me
 
   assert.equal(context.pullRequests.get(56)?.state, "merged");
   assert.match(context.notifications.join("\n"), /issue #34 merged but could not be closed .*Close it yourself/);
-  assert.match(context.notifications.join("\n"), /queue drained \(1 issue addressed\)/);
+  assert.match(context.notifications.join("\n"), /plan drained \(1 issue addressed\)/);
 });
 
 test("a dependent issue is unblocked within the run by the closure of the issue it waits on", async () => {
@@ -448,7 +596,7 @@ test("a dependent issue is unblocked within the run by the closure of the issue 
 
   assert.deepEqual(context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]), [34, 33]);
   assert.deepEqual(context.closures.map((closure) => closure.issue), [34, 33]);
-  assert.match(context.notifications.join("\n"), /queue drained \(2 issues addressed\)/);
+  assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
 });
 
 test("the run opens one pull request into the user's branch and leaves it for them by default", async () => {
@@ -514,9 +662,12 @@ test("a run's pull request that will not merge is left open with the reason", as
   await context.engine.start();
   await context.engine.settle();
 
-  // #34 parks on its own conflict, so nothing lands and there is no run pull
-  // request to merge — the run's alert is about the issue.
-  assert.match(context.alerts.at(-1)?.message ?? "", /issue #34 parked/);
+  // #34's conflict stops the whole run, so nothing lands and there is no run
+  // pull request to merge — the alert is about the issue that would not merge.
+  assert.match(
+    context.alerts.map((alert) => alert.message).join("\n"),
+    new RegExp(`PR #56 conflicts with ${SESSION} and the conflict is not one aboard can resolve`),
+  );
   assert.deepEqual(context.createdPullRequests.map((pr) => pr.base), [SESSION]);
 });
 
@@ -538,11 +689,11 @@ test("a target branch that is not on origin still leaves the work pushed and say
   assert.equal(context.gitCalls.includes(`createBranch ${SESSION} feature/wip`), true);
   assert.equal(context.gitCalls.includes("push feature/wip"), false);
   assert.match(context.notifications.join("\n"), /feature\/wip is not on origin/);
-  assert.match(context.alerts.at(-1)?.message ?? "", new RegExp(`work is committed and pushed on ${SESSION.replace("/", "\\/")}`));
+  assert.match(context.alerts.map((alert) => alert.message).join("\n"), new RegExp(`work is committed and pushed on ${SESSION.replace("/", "\\/")}`));
   assert.equal(context.createdPullRequests.filter((pr) => pr.head === SESSION).length, 0);
 });
 
-test("a stopped run still opens a pull request for the issues that did land", async () => {
+test("an externally closed hitl pull request creates no concluding side effect", async () => {
   const context = harness({
     issues: [
       { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
@@ -553,13 +704,13 @@ test("a stopped run still opens a pull request for the issues that did land", as
   await context.engine.start();
   await context.engine.settle();
 
-  // #35 was rejected and stopped the run; #34 had already merged, and work on
-  // the session branch is invisible until something points at it.
+  // Closing a known PR is a structural mismatch. Existing work stays put, but
+  // the run must not infer a new concluding side effect from a changed plan.
   assert.match(context.notifications.join("\n"), /stopped at issue #35/);
-  const runPr = context.createdPullRequests.at(-1);
-  assert.equal(runPr?.head, SESSION);
-  assert.match(runPr?.body ?? "", /- #34 Add retry backoff/);
-  assert.equal(/#35/u.test(runPr?.body ?? ""), false);
+  assert.deepEqual(context.createdPullRequests.map((pullRequest) => pullRequest.head), [
+    "aboard/34-add-retry-backoff",
+    "aboard/35-migrate-the-queue",
+  ]);
 });
 
 test("one Chrome choice is persisted for the run and reaches implementers only", async () => {
@@ -572,7 +723,7 @@ test("one Chrome choice is persisted for the run and reaches implementers only",
   assert.equal(context.launches[0]?.chrome, true);
   assert.equal(context.launches[1]?.type, "pr-doctor-afk");
   assert.equal(context.launches[1]?.chrome, undefined);
-  assert.equal(context.saved.every((record) => record.chromeEnabled === true), true);
+  assert.equal(context.saved.every((record) => record.settings.chromeEnabled), true);
   assert.match(context.notifications[0] ?? "", /Chrome on/);
 });
 
@@ -583,7 +734,7 @@ test("one additional guideline is persisted and reaches every auto agent", async
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
   assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["no unit tests needed", "no unit tests needed"]);
-  assert.equal(context.saved.every((record) => record.additionalGuideline === "no unit tests needed"), true);
+  assert.equal(context.saved.every((record) => record.settings.additionalGuideline === "no unit tests needed"), true);
 });
 
 test("a run started off the default branch returns there when it ends", async () => {
@@ -662,7 +813,7 @@ test("a conflicting pull request is reconciled with its base and then merged", a
   assert.deepEqual(context.alerts.map((alert) => alert.message.includes("is yours to merge")), [true]);
 });
 
-test("an unresolvable conflict parks its issue, alerts the user, and lets the run continue", async () => {
+test("an unresolvable conflict stops the whole run rather than skipping the issue", async () => {
   const context = harness({
     conflicting: true,
     reconcilable: false,
@@ -674,17 +825,14 @@ test("an unresolvable conflict parks its issue, alerts the user, and lets the ru
   await context.engine.start();
   await context.engine.settle();
 
-  assert.match(context.notifications.join("\n"), new RegExp(`issue #34 parked — PR #56 needs you \\(it conflicts with ${SESSION}`));
-  // The alert carries the pull request so the warning can offer to open it.
-  assert.deepEqual(context.alerts.map((alert) => alert.url), [
-    "https://github.com/acme/app/pull/56",
-    "https://github.com/acme/app/pull/57",
-  ]);
-  // A conflict is a fact about one branch, so the queue behind it still runs.
-  assert.deepEqual(context.launches.map((launch) => launch.issues), [[34], [35]]);
+  assert.match(context.notifications.join("\n"), new RegExp(`PR #56 conflicts with ${SESSION}`));
+  // The plan is ordered by dependency, so #35 is exactly the work that might
+  // build on the change that did not land. Nothing behind the conflict runs.
+  assert.deepEqual(context.launches.map((launch) => launch.issues), [[34]]);
   assert.equal([...context.pullRequests.values()].every((pr) => pr.state === "open"), true);
-  assert.match(context.notifications.join("\n"), /queue drained \(0 issues addressed, 2 parked for you\)/);
-  assert.equal(context.state.cleared, true);
+  // The record survives so the user can resume once they have resolved it.
+  assert.equal(context.state.cleared, false);
+  assert.deepEqual(context.record()?.outcome, { kind: "failed", reason: `PR #56 conflicts with ${SESSION} and the conflict is not one aboard can resolve` });
 });
 
 test("a merge refused for a reason other than a conflict still stops the whole run", async () => {
@@ -913,23 +1061,13 @@ test("an unauthenticated GitHub CLI refuses the run before querying or persistin
   assert.equal(context.saved.length, 0);
 });
 
-test("an unauthenticated GitHub CLI refuses resume without rejecting a dirty recovery tree", async () => {
+test("an unauthenticated GitHub CLI makes a recorded run broken rather than resumable", async () => {
   const context = harness({ githubAuthenticationFails: true, startDirty: true });
-  const result = await context.engine.resume({
-    version: 1,
-    runId: "run_interrupted",
-    issueNumbers: [34],
-    currentIssue: 34,
-    phase: "commit",
-    branch: "aboard/34-add-retry-backoff",
-    prNumber: undefined,
-    reviewMode: false,
-    reviewedIssues: [],
-    startedAt: "2026-01-01T00:00:00.000Z",
-  });
+  context.seed(plannedRecord());
+  const result = await context.engine.resume();
+
   assert.equal(result.started, false);
-  assert.match((result as { reason: string }).reason, /GitHub CLI cannot authenticate/);
-  assert.deepEqual(context.githubCalls, ["checkAuthentication"]);
+  assert.match((result as { reason: string }).reason, /GitHub CLI can no longer authenticate/);
   assert.equal(context.launches.length, 0);
 });
 
@@ -975,7 +1113,7 @@ test("issues are processed serially and re-derived after every merge", async () 
 
   const branchOrder = context.gitCalls.filter((call) => call.startsWith("createBranch aboard/3"));
   assert.deepEqual(branchOrder, [`createBranch aboard/34-add-retry-backoff ${SESSION}`, `createBranch aboard/37-later ${SESSION}`]);
-  assert.match(context.notifications.join("\n"), /queue drained \(2 issues addressed\)/);
+  assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
 });
 
 test("the queue drains a parentless issue and a spec child alike, in creation order", async () => {
@@ -997,7 +1135,7 @@ test("the queue drains a parentless issue and a spec child alike, in creation or
     context.gitCalls.filter((call) => call.startsWith("createBranch aboard/1") || call.startsWith("createBranch aboard/4")),
     [`createBranch aboard/40-fix-the-parser ${SESSION}`, `createBranch aboard/121-add-retry-backoff ${SESSION}`],
   );
-  assert.match(context.notifications.join("\n"), /queue drained \(2 issues addressed\)/);
+  assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
   assert.equal(/#12\b/u.test(context.notifications.join("\n")), false, "the spec is not queued and not reported");
   assert.equal(context.state.cleared, true);
 });
@@ -1053,43 +1191,80 @@ test("a dependency cycle is visible and drains in deterministic order", async ()
   assert.equal(context.notifications.some((entry) => entry.includes("dependency cycle") && entry.includes("#34, #37")), true);
 });
 
-test("resume re-derives from the repository rather than trusting the record", async () => {
+test("resume re-enters at the first unsatisfied checkpoint and keeps the run's frozen guidance", async () => {
   const context = harness();
-  // The record claims the run reached `merge`, but nothing exists in the
-  // repository yet, so the engine re-enters at `branch`.
-  const record: AutoRunRecord = {
-    version: 1,
-    runId: "run_old",
-    issueNumbers: [34],
-    currentIssue: 34,
-    phase: "merge",
-    branch: "aboard/34-add-retry-backoff",
-    prNumber: 56,
-    reviewMode: false,
-    additionalGuideline: "keep fixtures small",
-    reviewedIssues: [],
-    startedAt: "2026-01-01T00:00:00.000Z",
-  };
-  assert.equal((await context.engine.resume(record)).started, true);
+  // The record has a plan and nothing built yet, so the run starts from the
+  // session branch — and the guidance it froze reaches the fresh worker.
+  context.seed(plannedRecord({ settings: { ...plannedRecord().settings, additionalGuideline: "keep fixtures small" } }));
+  assert.equal((await context.engine.resume()).started, true);
   await context.engine.settle();
-  assert.equal(context.gitCalls[0], "fetch");
+
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
   assert.equal(context.launches[0]?.additionalGuideline, "keep fixtures small");
+  // Resuming is a second attempt on the same run, not a new run.
+  assert.equal(context.saved[0]?.runId, "run_test");
+  assert.equal(context.saved.some((record) => record.attempt === 2), true);
 });
 
-test("a record an older version wrote against one spec resumes onto the flat queue", async () => {
+test("a plan entry is never rediscovered: an issue labelled mid-run belongs to the next one", async () => {
   const context = harness({
     issues: [
       { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
-      // Unreachable under the old model — no parent spec — and processed now.
-      { number: 40, title: "Fix the parser", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+      // Unclassified at planning time, so it is not in the plan. Labelling it
+      // afterwards must not sneak it into a run the user already agreed to.
+      { number: 40, title: "Fix the parser", labels: [], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
     ],
   });
+  await context.engine.start();
+  context.relabel(40, ["[AI]-afk"]);
+  await context.engine.settle();
+
+  assert.deepEqual(
+    context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]),
+    [34],
+  );
+  assert.deepEqual(context.record()?.plan.map((issue) => issue.number) ?? [34], [34]);
+});
+
+test("recovered checkout validation and discard stay inside the recorded checkout", async () => {
+  const context = harness({ worktree: true });
+  const settings = plannedRecord().settings;
+  context.seed(plannedRecord({
+    settings: {
+      ...settings,
+      worktree: { ...settings.worktree, enabled: true },
+      workspaceRoot: context.isolatedRoot,
+    },
+    workspaceCreated: true,
+    outcome: { kind: "interrupted" },
+  }));
+
+  const result = await context.engine.discard("local-cleanup");
+  assert.equal(result.workspaceRemoved, true);
+  assert.deepEqual(context.recordedWorkspaceRemovals, [context.isolatedRoot]);
+  assert.ok(context.workspaceGitCalls.includes("status"), "cleanup observations use the run checkout");
+  assert.equal(context.userGitCalls.includes("status"), false, "the user's checkout is not validated as run state");
+});
+
+test("a frozen-plan mismatch after a worker returns stops before the next side effect", async () => {
+  const context = harness({ relabelAfterImplementer: true });
+  assert.equal((await context.engine.start()).started, true);
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
+  assert.equal(context.gitCalls.includes("add"), false, "validation runs again before staging the worker's edits");
+  assert.equal(context.comments.length, 0, "best-effort publication also waits for post-worker validation");
+  assert.equal(context.createdPullRequests.length, 0);
+  const outcome = context.record()?.outcome;
+  assert.equal(outcome?.kind, "failed");
+  assert.match(outcome?.kind === "failed" ? outcome.reason : "", /now hitl rather than afk/);
+});
+
+test("a version-1 record is unsupported: it is neither resumed nor silently dropped", async () => {
+  const context = harness();
   const legacy = parseAutoRunRecord({
     version: 1,
     runId: "run_legacy",
-    specNumber: 12,
-    scope: "spec",
     issueNumbers: [34],
     currentIssue: 34,
     phase: "branch",
@@ -1098,19 +1273,14 @@ test("a record an older version wrote against one spec resumes onto the flat que
     startedAt: "2026-01-01T00:00:00.000Z",
   });
   assert.ok(legacy);
-  assert.equal((await context.engine.resume(legacy)).started, true);
-  await context.engine.settle();
+  assert.equal(legacy.version, 1);
+  context.seed(legacy as never);
 
-  // The legacy record carries no return branch, so the run's target degrades to
-  // the default branch — and its session branch still comes from its own run id.
-  assert.deepEqual(
-    context.gitCalls.filter((call) => call.startsWith("createBranch")),
-    [
-      "createBranch aboard/run/legacy origin/main",
-      "createBranch aboard/34-add-retry-backoff aboard/run/legacy",
-      "createBranch aboard/40-fix-the-parser aboard/run/legacy",
-    ],
-  );
+  assert.equal((await context.engine.refresh())?.state, "broken");
+  const result = await context.engine.resume();
+  assert.equal(result.started, false);
+  assert.match((result as { reason: string }).reason, /predates fixed-plan recovery/);
+  assert.equal(context.launches.length, 0);
 });
 
 test("a hitl doctor's approved fixes are committed to the pull request before it merges", async () => {
@@ -1152,45 +1322,27 @@ test("a commit that failed to push resumes by pushing, not by reporting no chang
   assert.match(resumed.notifications.join("\n"), /issue #34 merged/);
 });
 
-test("a persisted pull request that no longer exists does not skip the pr phase", async () => {
+test("a recorded pull request that no longer exists makes the run broken rather than guessed at", async () => {
   const context = harness();
-  const record: AutoRunRecord = {
-    version: 1,
-    runId: "run_old",
-    issueNumbers: [34],
+  context.createBranch(SESSION);
+  context.seed(plannedRecord({
     currentIssue: 34,
-    phase: "await-approval",
-    branch: "aboard/34-add-retry-backoff",
-    prNumber: 999,
-    reviewMode: false,
-    reviewedIssues: [],
-    startedAt: "2026-01-01T00:00:00.000Z",
-  };
-  await context.engine.resume(record);
-  await context.engine.settle();
+    checkpoint: "issue",
+    branchShas: { [SESSION]: context.sha(SESSION) },
+    progress: { "34": { state: "current", phase: "await-approval", prNumber: 999 } },
+  }));
 
-  // #999 resolves to nothing, so it is not a pull request: the run opens a real
-  // one instead of trying to merge a number it read out of a stale record.
-  assert.equal(context.pullRequests.has(999), false);
-  assert.equal([...context.pullRequests.values()][0]?.state, "merged");
-  assert.match(context.notifications.join("\n"), /opened PR #56/);
+  const eligibility = await context.engine.refresh();
+  assert.equal(eligibility?.state, "broken");
+  assert.match((eligibility as { reason: string }).reason, /pull request #999 no longer exists/);
+  assert.equal((await context.engine.resume()).started, false);
+  assert.equal(context.launches.length, 0);
 });
 
-test("a resumed run keeps the review mode it started with, not the current setting", async () => {
+test("a resumed run uses the settings it froze, not the ones configured now", async () => {
   const context = harness({ settings: { review: false } });
-  const record: AutoRunRecord = {
-    version: 1,
-    runId: "run_old",
-    issueNumbers: [34],
-    currentIssue: 34,
-    phase: "branch",
-    branch: "aboard/34-add-retry-backoff",
-    prNumber: undefined,
-    reviewMode: true,
-    reviewedIssues: [],
-    startedAt: "2026-01-01T00:00:00.000Z",
-  };
-  await context.engine.resume(record);
+  context.seed(plannedRecord({ settings: { ...plannedRecord().settings, review: true } }));
+  await context.engine.resume();
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
@@ -1198,21 +1350,13 @@ test("a resumed run keeps the review mode it started with, not the current setti
 
 test("a review already recorded is not repeated after a restart", async () => {
   const context = harness({ settings: { review: true } });
-  const record: AutoRunRecord = {
-    version: 1,
-    runId: "run_old",
-    issueNumbers: [34],
-    currentIssue: 34,
-    phase: "review",
-    branch: "aboard/34-add-retry-backoff",
-    prNumber: undefined,
-    reviewMode: true,
+  context.seed(plannedRecord({
+    settings: { ...plannedRecord().settings, review: true },
     // The in-memory owner map is empty after a restart and a review that found
     // nothing leaves no commit, so the record is the only witness.
     reviewedIssues: [34],
-    startedAt: "2026-01-01T00:00:00.000Z",
-  };
-  await context.engine.resume(record);
+  }));
+  await context.engine.resume();
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);

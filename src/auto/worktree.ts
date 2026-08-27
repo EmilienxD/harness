@@ -32,7 +32,7 @@ import { copyFile, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { autoRunMessage, type WorktreeSettings } from "../domain/auto-run.js";
-import type { GitClient } from "../git/client.js";
+import { isWorkingTreeClean, type GitClient } from "../git/client.js";
 
 /**
  * The directory the run's checkouts are collected in, beside the project rather
@@ -180,6 +180,12 @@ export interface RunWorkspaceRequest {
   readonly runId: string;
   readonly sessionBranch: string;
   readonly base: string;
+  /**
+   * The worktree settings this run froze at start. Present so a resumed run
+   * gets the checkout it has been using rather than the one today's
+   * configuration would produce.
+   */
+  readonly worktree?: WorktreeSettings;
 }
 
 /** How a run ended, as far as its checkout is concerned. */
@@ -210,6 +216,8 @@ export interface RunWorkspaceProvider {
    * kept, so the caller can tell the user where their work is and why.
    */
   release(workspace: RunWorkspace, outcome: RunWorkspaceOutcome): Promise<KeptRunWorkspace | undefined>;
+  /** Removes a clean recorded checkout after restart, when no live workspace object exists. */
+  removeRecorded?(root: string): Promise<boolean>;
 }
 
 /**
@@ -406,7 +414,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   }
 
   public async prepare(request: RunWorkspaceRequest): Promise<RunWorkspace> {
-    const settings = this.options.settings();
+    const settings = request.worktree ?? this.options.settings();
     if (!settings.enabled) {
       return { root: this.options.workspaceRoot, git: this.options.git, denyTools: [], isolated: false };
     }
@@ -458,6 +466,15 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     // held it.
     await this.#directories.remove(dirname(workspace.root)).catch(() => undefined);
     return undefined;
+  }
+
+  public async removeRecorded(root: string): Promise<boolean> {
+    const registered = (await this.options.git.worktrees()).some((worktree) => samePath(worktree.path, root));
+    if (!registered) return false;
+    if (!isWorkingTreeClean(await this.options.gitFor(root).status())) return false;
+    await this.options.git.removeWorktree(root, true);
+    await this.#directories.remove(dirname(root)).catch(() => undefined);
+    return true;
   }
 
   /** Creates the checkout, or re-attaches to the one a previous attempt made. */

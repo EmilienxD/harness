@@ -9,9 +9,24 @@ import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
-import { recordEndedSession, type SessionLedgerDto } from "../src/domain/session-ledger.js";
+import { migrateLegacySessions, type LegacySessionRecord } from "../src/domain/activity.js";
 import { renderReopenItems, registerReopenCommand, type ReopenQuickPickItem } from "../src/vscode/reopen.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
+
+/**
+ * The superseded `sessions.json` shape. These tests describe reopening, which
+ * has to keep working for conversations recorded before the activity store
+ * existed, so they are written against the legacy records the migration folds in.
+ */
+interface LegacyLedger {
+  readonly version: 1;
+  readonly sessions: readonly LegacySessionRecord[];
+}
+
+function recordEndedSession(current: LegacyLedger | undefined, entry: LegacySessionRecord): LegacyLedger {
+  const previous = (current?.sessions ?? []).filter((session) => session.agentId !== entry.agentId);
+  return { version: 1, sessions: [entry, ...previous] };
+}
 
 const at = (value: string) => value as IsoTimestamp;
 const agent = (value: string) => value as AgentId;
@@ -43,7 +58,7 @@ class FakeHost implements TerminalHost {
 }
 
 function setup(options: {
-  readonly ledger?: SessionLedgerDto;
+  readonly ledger?: LegacyLedger;
   readonly resumable?: (sessionId: SessionId) => boolean;
   /** Every transcript lookup, so a test can assert *where* it was looked for. */
   readonly resumeChecks?: { sessionId: SessionId; cwd: string | undefined }[];
@@ -89,7 +104,9 @@ function setup(options: {
   const liveTerminals = new Map<AgentId, TerminalId>();
   const shown: TerminalId[] = [];
   const reopen = new ReopenCoordinator({
-    ledger: { load: async () => options.ledger },
+    // Production reads the activity store; a legacy ledger reaches it only
+    // through the one-time migration, which is exactly what these tests exercise.
+    activity: { entries: () => migrateLegacySessions(undefined, options.ledger?.sessions ?? []) },
     fleet,
     terminals: {
       // Mirrors production, which asks the terminal controller: a session
@@ -105,13 +122,12 @@ function setup(options: {
   return { fleet, lease, host, terminals, coordinator, reopen, openTerminals, liveTerminals, shown };
 }
 
-function ledgerWith(...entries: readonly { readonly agentId: string; readonly type: AgentSession["identity"]["type"]; readonly sessionId: SessionId; readonly endedAt: string }[]): SessionLedgerDto {
-  return entries.reduce<SessionLedgerDto | undefined>((current, entry) => recordEndedSession(current, {
+function ledgerWith(...entries: readonly { readonly agentId: string; readonly type: AgentSession["identity"]["type"]; readonly sessionId: SessionId; readonly endedAt: string }[]): LegacyLedger {
+  return entries.reduce<LegacyLedger | undefined>((current, entry) => recordEndedSession(current, {
     agentId: agent(entry.agentId),
     type: entry.type,
     sessionId: entry.sessionId,
     description: `${entry.type} conversation`,
-    startedAt: at("2026-07-30T09:00:00.000Z"),
     endedAt: at(entry.endedAt),
   }), undefined)!;
 }
@@ -153,7 +169,6 @@ test("a session that ran in an auto-run's own checkout is reopened there, not in
     type: "implementer",
     sessionId: BRAINSTORM_SESSION,
     description: "address issue 34",
-    startedAt: at("2026-07-30T09:00:00.000Z"),
     endedAt: at("2026-07-30T09:30:00.000Z"),
     cwd: CHECKOUT,
     autoRunRestricted: true,
@@ -186,7 +201,6 @@ test("a general-purpose session is reopened with its recorded Chrome intent", as
         type: "general-purpose",
         sessionId: GENERAL_SESSION,
         description: "general purpose interactive session",
-        startedAt: at("2026-07-30T09:00:00.000Z"),
         endedAt: at("2026-07-30T09:30:00.000Z"),
         chromeEnabled: true,
       }],
@@ -297,7 +311,7 @@ test("the picker names each row the way its session and fleet row are named", ()
       resumable: true,
     },
     {
-      candidate: { agentId: agent("9"), type: "general-purpose", sessionId: GENERAL_SESSION, description: "general purpose", origin: "paused", at: at("2026-07-30T09:30:00.000Z") },
+      candidate: { agentId: agent("9"), type: "general-purpose", sessionId: GENERAL_SESSION, description: "general purpose", origin: "ended", at: at("2026-07-30T09:30:00.000Z") },
       resumable: false,
       reason: "no-transcript",
     },

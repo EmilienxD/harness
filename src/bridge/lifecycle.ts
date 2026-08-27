@@ -53,6 +53,8 @@ export interface WorkerLifecycleReconcilerOptions {
   readonly lease: WriteLease;
   readonly completions: WorkerCompletionSink;
   readonly workingTree: WorkingTreeInspector;
+  /** Observes the classified terminal outcome before the fleet row is retired. */
+  readonly onFinished?: (session: AgentSession, result: WorkerResult) => void;
 }
 
 export interface StopObservation {
@@ -168,7 +170,10 @@ export class WorkerLifecycleReconciler {
 
   #finish(agentId: AgentId, result: WorkerResult): boolean {
     try {
-      return this.options.completions.complete(agentId, result);
+      const session = this.options.fleet.get(agentId);
+      const completed = this.options.completions.complete(agentId, result);
+      if (completed && session !== undefined) this.options.onFinished?.(session, result);
+      return completed;
     } finally {
       this.options.lease.releaseForTerminalOutcome(agentId, new Date().toISOString() as IsoTimestamp, "worker lifecycle reconciled");
     }

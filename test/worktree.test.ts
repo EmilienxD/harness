@@ -139,6 +139,13 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
       calls.push(`removeWorktree ${path}${force ? " --force" : ""}`);
       if (options.removeFails === true) throw new Error("the checkout is in use");
     },
+    // The SHA-aware surface belongs to recovery and cleanup, not to workspaces.
+    branchSha: async () => undefined,
+    remoteBranchSha: async () => undefined,
+    commitDetails: async () => undefined,
+    stagedTreeSha: async () => "tree000000000000000000000000000000000000",
+    deleteBranchAt: async () => false,
+    deleteRemoteBranchAt: async () => false,
   } satisfies GitClient;
   return { client, calls };
 }
@@ -432,4 +439,18 @@ test("an in-place run's release never touches anything", async () => {
   const workspace = await provider.prepare(REQUEST);
   assert.equal(await provider.release(workspace, "drained"), undefined);
   assert.deepEqual(git.calls, []);
+});
+
+test("recorded checkout removal requires a registered clean checkout", async () => {
+  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const clean = fixture({ git: { worktrees: [{ path, branch: "aboard/run/test" }] } });
+  assert.equal(await clean.provider.removeRecorded(path), true);
+  assert.ok(clean.git.calls.includes(`removeWorktree ${path} --force`));
+
+  const dirty = fixture({ git: { worktrees: [{ path, branch: "aboard/run/test" }], dirty: ["src/a.ts"] } });
+  assert.equal(await dirty.provider.removeRecorded(path), false);
+  assert.equal(dirty.git.calls.some((call) => call.startsWith("removeWorktree")), false);
+
+  const missing = fixture();
+  assert.equal(await missing.provider.removeRecorded(path), false);
 });

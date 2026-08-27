@@ -102,7 +102,8 @@ User <-> VS Code UI and terminals <-> extension host
 - The Manager orchestrates, maintains continuity, and delegates. It does not implement or edit application code and cannot use Claude Code's in-process agent or session-task tools.
 - At most one aboard-driven, write-capable agent may hold the write lease. Write capability is derived from tools.
 - The lease protects work aboard drives, not work the user drives. Automated Manager launches and every auto-run launch compete for it; ordinary interactive launches, restores, resumes, and hand-driven sessions do not.
-- Session completion releases aboard state without hiding the terminal by default. Users may keep, inspect, reuse, close, reopen, or restore sessions through visible VS Code controls.
+- Session completion releases aboard state without hiding the terminal by default. Users may keep, inspect, reuse, close, and reopen sessions through visible VS Code controls.
+- The panel is three views. **Agents** holds only sessions with a live lifecycle and an open terminal, so every row is one the user can go and look at. **Auto Run** holds one stateful card: the frozen plan, current progress, and the actions this state allows. **Recent Activity** holds the newest twenty agent and run outcomes, with reopen where a conversation survives. There is no bulk fleet restoration: relaunching write-capable agents into a workspace nobody has looked at since a crash is the unattended automation these invariants exist to prevent.
 - Automated review is opt-in. aboard never approves its own pull requests.
 
 ### Agent Roles
@@ -139,8 +140,11 @@ flowchart TD
   PREFLIGHT --> WORKSPACE["Extension + local Git<br/>opt-in: the run's own checkout beside the project,<br/>set up by the project's own session-setup script"]
   WORKSPACE --> SESSION["Extension + local Git<br/>cut and push the session branch<br/>from the branch the user was on"]
   SESSION --> GH["GitHub<br/>open issues, labels, dependencies"]
-  GH -->|read| SELECT["Extension selects the next ready leaf<br/>dependencies first, then oldest"]
-  SELECT -->|one issue at a time| BRANCH["Extension + local Git<br/>fast-forward the session branch and checkout/create aboard branch"]
+  GH -->|read once| PLAN["Extension freezes the whole plan<br/>classified leaves plus internally blocked ones,<br/>dependencies first, then oldest"]
+  PLAN --> SELECT["Extension takes the first unfinished plan entry"]
+  SELECT -->|one issue at a time| VALIDATE{"Does the repository still<br/>match the frozen plan?"}
+  VALIDATE -->|no| BREAK["Extension stops the run<br/>and shows it as broken"]
+  VALIDATE -->|yes| BRANCH["Extension + local Git<br/>fast-forward the session branch and checkout/create aboard branch"]
   BRANCH --> IMPLEMENTER["Visible implementer terminal"]
   IMPLEMENTER -->|final message| COMMENT["Extension + GitHub<br/>post the implementer's summary on the issue"]
   IMPLEMENTER -->|uncommitted working-tree edits only| COMMIT["Extension + local Git<br/>stage, commit, and push"]
@@ -162,18 +166,19 @@ flowchart TD
   MERGE -->|merged| CLOSE
   MERGE -->|conflicts with the session branch| RECONCILE["Extension + local Git<br/>merge the session branch back in and push"]
   RECONCILE -->|reconciled, retried once| MERGE
-  RECONCILE -->|the conflict needs a human| PARK["Extension parks the issue and alerts the user<br/>PR, branch, and terminals left in place"]
-  MERGE -->|refused for any other reason| STOP["Extension alerts the user<br/>and stops the whole run"]
+  RECONCILE -->|the conflict needs a human| STOP["Extension alerts the user<br/>and stops the whole run"]
+  MERGE -->|refused for any other reason| STOP
   CLOSE --> CLEANUP["Extension + local Git<br/>checkout the session branch and clean up terminals"]
-  PARK -->|re-read GitHub| SELECT
-  CLEANUP -->|re-read GitHub| SELECT
-  SELECT -->|no ready issues remain| RUNPR["Extension + GitHub<br/>open one PR from the session branch<br/>into the branch the user was on"]
+  CLEANUP -->|next frozen plan entry| SELECT
+  SELECT -->|the plan is drained| RUNPR["Extension + GitHub<br/>open one PR from the session branch<br/>into the branch the user was on"]
   STOP --> RUNPR
+  BREAK --> RECOVER["Auto Run view: reason plus Discard.<br/>Nothing new is created and nothing is rolled back"]
   RUNPR --> RUNMERGE{"aboard.autoRun.mergeRunPullRequest?"}
   RUNMERGE -->|on| RUNMERGED["Extension merges it,<br/>reconciling a conflict once"]
   RUNMERGE -->|off, or the run was stopped| RUNWAIT["Extension alerts the user<br/>PR left open for them"]
   RUNMERGED --> DONE["Restore the user's original branch<br/>and end the run"]
   RUNWAIT --> DONE
+  DONE --> RECORD["Record the attempt's outcome:<br/>succeeded, cancelled, interrupted, or failed"]
 ```
 
 - The extension owns every automatic git and GitHub side effect: branch, commit, push, issue comment, issue closure, pull request, and merge. Implementers and pr-doctors leave edits uncommitted and never run `gh` or mutating git workflow commands.
@@ -181,14 +186,21 @@ flowchart TD
 - The extension closes each issue as its pull request merges into the session branch. GitHub only honours a closing keyword for a merge into the default branch, so without this every issue would stay open — leaving dependents blocked, the roadmap wrong, and a resumed run free to implement the same issue twice. A closure that fails is reported and survived, never allowed to fail work that merged.
 - The run's own pull request is opened on every exit, including a stop or an abort, whenever at least one issue landed: work on the session branch is invisible until something points at it. Merging it is opt-in through `aboard.autoRun.mergeRunPullRequest` and is never attempted for a run the user interrupted. It merges without deleting the session branch, because parked and unmerged issue pull requests still target it.
 - An agent's final message is content, never a side effect. The extension is what publishes it: as the commit body, as the pull request body, and as a comment on the issue the implementer resolved. Publishing it is best-effort and carries no postcondition.
-- Auto-run re-observes git and GitHub before each phase and after every issue. The persisted record is only a resume hint; every phase is idempotent and skips an already-satisfied postcondition.
+- A run discovers its issue set exactly once. The frozen plan — issue numbers, titles, branch names, dispositions, difficulties, and dependency edges — is persisted before any workspace or branch exists, and nothing afterwards adds, removes, or reorders an entry. Issues opened, relabelled, or unblocked while a run is in flight belong to the next run. A blocked issue joins a plan when every open blocker joins it too; one whose dependency closure reaches outside is excluded recursively, with a reason.
+- The persisted record is authoritative, not a hint. The engine validates the repository *against* it rather than re-deriving a plan from it, and every phase is still idempotent and skips an already-satisfied postcondition.
+- Every mutating git or GitHub action is journalled before it happens, carrying the exact before/after facts it should produce. After a crash a postcondition is adopted only when it matches that entry exactly — one commit with that parent and that subject, one pull request with that head and base — so the "side effect succeeded, record save did not" window closes without ever adopting unrelated external work.
+- Recovery eligibility is derived, never stored: `checking`, `resumable`, or `broken` with one short reason. Validation covers the complete frozen plan before every phase side effect, and again on activation, on Auto Run view visibility, on window focus, on a 30-second timer while that view is showing, and immediately before Resume. Checks are serialized and generation-stamped so a stale result cannot overwrite a newer verdict.
+- Any mismatch aboard cannot explain by its own recorded actions fails the whole run rather than skipping an issue: a moved run-owned branch, a plan issue closed or relabelled or newly blocked, a pull request retargeted or closed, an externally merged AFK or run pull request, or uncommitted work on a branch that is not the current issue's. Two external transitions are allowed, because they are what the hitl disposition is for: another account approving, and the user merging. Title, body, comments, unrelated labels, assignments, milestones, and review discussion are ignored.
+- A structural failure creates no further side effects and rolls nothing back. The user gets the reason and Discard.
+- Cancellation, interruption, and ordinary operational failure stay recoverable and are recorded distinctly: an explicit Stop is `cancelled`, extension shutdown or a lost host is `interrupted`, and a worker or git/GitHub failure is `failed`. Resume continues at the first unsatisfied checkpoint under the run's frozen settings, never today's configuration, and starts a fresh worker after any failed or cancelled one — adding exactly one sentence to that worker's otherwise normal prompt when uncommitted edits from the previous attempt are on the issue's branch.
 - Review stays opt-in. An AFK pull request may be merged into the session branch directly; a HITL pull request requires the user's merge or another account's approval. The extension never attempts self-approval.
-- A merge conflict is a fact about one branch, so it parks that issue and the run continues. Anything else that refuses a merge — branch protection above all — is a fact about the repository, so it stops the run. Parking never closes or abandons anything: the pull request, branch, and terminals stay as they are for the user.
-- A run that needs the user's hands says so immediately rather than only queueing a line for the Manager, because a parked or stopped run no longer owns any visible progress indicator.
+- Anything that refuses a merge stops the whole run, conflicts included. A plan ordered by dependency cannot step over one entry: the issues behind it are precisely the ones that would build on work that did not land. Stopping abandons nothing — the pull request, branch, and terminals stay as they are, and the run is resumable once the human has dealt with it.
+- Discard always clears the recovery record, so a new run can start even when cleanup was partial. `aboard.autoRun.discardBehavior` decides what else goes: nothing (`record-only`, the default), local artifacts, or local plus remote branches and still-open unmerged pull requests. Every deletion is guarded by the SHA or pull request identity the run recorded; cleanup never touches a dirty checkout, a moved artifact, a merged pull request, a landed commit, or a closed issue, and reports what it declined to remove instead of failing.
+- A run that needs the user's hands says so immediately rather than only queueing a line for the Manager. Recovery and history never depend on a notification: the Auto Run view is where a stopped run and its actions live, and Recent Activity is where its outcome lands.
 - Opt-in, a run works in a checkout of its own instead of the user's: a git worktree created beside the project root, never inside it, with the leaf named after the repository so it reads as an ordinary clone from the inside. Nothing about the path announces what it is. In that mode the run's whole git surface is that checkout, the user's HEAD and working tree are never touched — so the clean-tree precondition and the end-of-run branch restore both fall away — and every agent is launched with it as its working directory. The path is derived from the run id, so it is never stored.
 - That isolation is a convention with a fence, not a sandbox. Launches carry `Read`/`Edit` deny rules covering the project root, which stops the accident; `Bash` reaches the whole filesystem and aboard does not try to police shell commands. Do not present it as a security boundary, and do not add command-level guessing to make it look like one.
 - A second checkout starts with what git tracks. On creation, aboard overlays missing files from the user's project `.claude/` and non-runtime `.aboard/` without replacing tracked entries, but only when every copied path is gitignored; `.claude/worktrees/`, `.aboard/runtime/`, and links are excluded. Any path tracked under `.aboard/runtime/` on the exact source tree is a hard preflight failure. The project's own `.aboard/session-setup.*` then makes the checkout usable. These are preconditions before any agent starts: a run must never discover missing configuration one dead worker at a time or let local/runtime configuration reach `git add -A`.
-- A checkout the run created is removed when its queue drains and kept whenever the user was sent to look at something in it — a stop, an abort, or a parked issue. Removal is best-effort: a shell still sitting in the directory is the normal reason it fails, and the path is reported rather than the failure escalated.
+- A checkout the run created is removed when its plan drains and kept whenever the user was sent to look at something in it — a stop or an abort. Removal is best-effort: a shell still sitting in the directory is the normal reason it fails, and the path is reported rather than the failure escalated.
 
 ### Scaffold and State Ownership
 
@@ -196,7 +208,7 @@ flowchart TD
 - Preserve user settings and unrelated MCP servers. aboard never writes project `.claude/` state or root `.gitignore`; it passes generated hook settings and copied aboard skills from a per-launch `.aboard/runtime/agents/<id>/` bundle.
 - The extension owns only files recorded by its scaffold manifest. Upgrade unchanged owned files and warn instead of overwriting locally edited files.
 - User-owned skills and hooks installed from upstream remain upstream-owned. Do not copy, rewrite, or silently replace them inside aboard.
-- Durable project state belongs in GitHub or committed files. Ephemeral fleet, session, auto-run, lock, prompt, agent-rewrite, event, and transcript state belongs under gitignored `.aboard/runtime/`. A launch's own runtime files are written under the directory that launch runs in, because its command line references them relatively.
+- Durable project state belongs in GitHub or committed files. Ephemeral fleet, activity, auto-run, lock, prompt, agent-rewrite, event, and transcript state belongs under gitignored `.aboard/runtime/`. Activity entries carry summary metadata only — identity, timing, issue and pull request numbers, a short reason, and the launch facts a reopen replays — never prompts, transcripts, assistant messages, tokens, or environments. A launch's own runtime files are written under the directory that launch runs in, because its command line references them relatively.
 
 ## Commands
 
