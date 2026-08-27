@@ -85,6 +85,18 @@ def test_spec_line_maps_to_canonical_label():
     assert body == "## Problem"
 
 
+def test_chrome_line_maps_to_canonical_label():
+    labels, body = _labels(
+        "> difficulty:advanced, mode:hitl, chrome\n\n## What\n"
+    )
+    assert labels == [
+        "[AI]-advanced-difficulty",
+        "[AI]-hitl",
+        "[AI]-chrome",
+    ]
+    assert body == "## What"
+
+
 def test_spec_with_extra_labels():
     # A spec declares labels like any other issue: "spec" is one token on
     # the list, everything else rides alongside it.

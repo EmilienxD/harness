@@ -177,11 +177,12 @@ At runtime the drafting skills create a gateway folder at the project root — `
   `> ` followed by a comma-separated list of label tokens —
   `difficulty:{routine|basic|advanced|expert}` and `mode:{afk|hitl}` are
   each optional (the user can ask the drafting skill to skip them), a spec's line always includes
-  `spec`, and extra labels the user asks for are listed alongside them after the skill verifies they
+  `spec`, `chrome` marks implementation work that needs a real browser to test a design change end
+  to end, and extra labels the user asks for are listed alongside them after the skill verifies they
   exist in the repo (`gh label list`) — multi-word labels included (`> spec, security`, `> good first
-  issue, difficulty:basic`). The hook maps the difficulty/mode/spec tokens to the workflow's own label
+  issue, difficulty:basic`). The hook maps the difficulty/mode/chrome/spec tokens to the workflow's own label
   names (`[AI]-routine-difficulty`, `[AI]-basic-difficulty`, `[AI]-advanced-difficulty`,
-  `[AI]-expert-difficulty`, `[AI]-afk`, `[AI]-hitl`, `[AI]-spec`), applies any extra
+  `[AI]-expert-difficulty`, `[AI]-afk`, `[AI]-hitl`, `[AI]-chrome`, `[AI]-spec`), applies any extra
   tokens as-is, strips the line from the published body, and creates the canonical labels in the
   repo only if they don't already exist — an existing label is never re-styled. The `[AI]-` prefix
   keeps these labels from colliding with a repo's own, and lets projects that share this workflow

@@ -217,11 +217,16 @@ CANONICAL_LABELS = {
         "Sensitive, touches frontend or UI design, or complex enough that a "
         "human should review it before it lands.",
     ),
+    "[AI]-chrome": (
+        "4285F4",
+        "Requires a real browser to test a design change end to end.",
+    ),
     "[AI]-spec": ("7057FF", "A spec synthesized from conversation."),
 }
 
-# The declaration line uses the "difficulty:{level}" / "mode:{mode}" / "spec"
-# tokens below; the labels actually created and applied are the names above.
+# The declaration line uses the "difficulty:{level}" / "mode:{mode}" / "chrome"
+# / "spec" tokens below; the labels actually created and applied are the names
+# above.
 # Any other token on the line is applied as-is (the drafting skills check
 # those exist with `gh label list` before writing them).
 LABEL_ALIASES = {
@@ -231,6 +236,7 @@ LABEL_ALIASES = {
     "difficulty:expert": "[AI]-expert-difficulty",
     "mode:afk": "[AI]-afk",
     "mode:hitl": "[AI]-hitl",
+    "chrome": "[AI]-chrome",
     "spec": "[AI]-spec",
 }
 

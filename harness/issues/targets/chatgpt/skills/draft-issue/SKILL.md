@@ -32,6 +32,7 @@ Decide the labels:
   - `advanced`: For multi-step work with expected outcomes, low chance of encountering bugs, easy UI design. 34% usage rate.
   - `expert`: For multi-step complex work, anything needing careful judgment, complex UI design, wide context and bug prone. 60% usage rate.
 - **Mode** (default, but optional): `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
+- **Browser**: add `chrome` when the task needs a real browser to test a design change end to end. Omit it when browser testing is unnecessary or a non-browser test is sufficient.
 - **Extra labels** (only if the user asks): any other labels the user explicitly requests.
 
 Both the difficulty and mode labels are defaults, not requirements: if the user explicitly says not to use one or both of them, leave them off the declaration line entirely rather than forcing a value.
@@ -74,11 +75,13 @@ A reference to each blocking issue (see instructions below), or "None — can st
 
 </issue-template>
 
-`{labels}` is a comma-separated list containing the difficulty and mode tokens decided above. All labels written will be automatically created by the system in GitHub if they don't exist.
+`{labels}` is a comma-separated list containing the difficulty and mode tokens decided above, plus `chrome` when required. All workflow labels written will be automatically created by the system in GitHub if they don't exist.
 
 Examples:
 ```
 > difficulty:advanced, mode:hitl
+# or
+> difficulty:advanced, mode:hitl, chrome
 # or
 > difficulty:basic
 # or
@@ -88,4 +91,3 @@ Examples:
 ### 3. Hand off to the user
 
 Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing.  Ask if they want you to make changes. Mention they can run `$publish-issues --dry` first to preview what would be created without touching the tracker, or `$publish-issues` to publish for real.
-
