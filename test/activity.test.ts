@@ -13,6 +13,7 @@ import {
   migrateLegacySessions,
   reopenCandidates,
   runActivity,
+  shouldRecordEndedSession,
   type ActivityDto,
   type AgentOutcome,
   type LegacySessionRecord,
@@ -66,6 +67,17 @@ test("reopenability follows the launch, not only the type", () => {
   assert.equal(isReopenableType("webresearcher"), false);
   assert.equal(isReopenableType("Explore"), false);
   assert.equal(isReopenableType("brainstormer"), true);
+});
+
+test("an interactive launch is retained only after its conversation starts", () => {
+  const interactive = fleetSession({ agentId: "9", type: "general-purpose" });
+  assert.equal(shouldRecordEndedSession(interactive, false), false);
+  assert.equal(shouldRecordEndedSession(interactive, true), true);
+
+  // Automated outcomes remain useful history and do not depend on a resumable
+  // user conversation.
+  const automated = fleetSession({ agentId: "12", type: "general-purpose", delivers: true });
+  assert.equal(shouldRecordEndedSession(automated, false), true);
 });
 
 test("an agent entry carries the launch facts a reopen replays, and nothing else", () => {

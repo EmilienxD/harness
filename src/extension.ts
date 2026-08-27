@@ -37,7 +37,7 @@ import {
 } from "./configuration.js";
 import { FileActivityStore, FileFleetStore, FileLegacySessionLedger, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
-import { isReopenableSession } from "./domain/activity.js";
+import { isReopenableSession, shouldRecordEndedSession } from "./domain/activity.js";
 import { isUnsupportedRecord } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
@@ -359,7 +359,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         // The reconciler would have released the lease; do it here for the paths
         // that skip it, or an interactive agent's lease outlives its terminal.
         lease.releaseForTerminalOutcome(event.agentId, occurredAt, "agent terminal closed");
-        rememberEndedSession(closed, occurredAt);
+        void rememberEndedSession(closed, occurredAt);
         fleet.remove(event.agentId, occurredAt);
       } else void lifecycle?.terminalClosed(event).catch((error: unknown) => output.appendLine(`Lifecycle reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
     },
@@ -395,15 +395,33 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   /**
    * Remembers a session on its way out of the fleet. A conversation the user was
    * part of carries the launch facts a reopen replays; an automated worker's
-   * row is history only, because its result already reached its caller.
+   * row is history only, because its result already reached its caller. Claude
+   * creates no resumable conversation when an interactive terminal is closed
+   * before its first exchange, so that empty launch leaves no activity row.
    */
-  const rememberEndedSession = (session: AgentSession, endedAt: IsoTimestamp, outcome: "ended" | "killed" | "interrupted" = "ended"): void => {
+  const rememberEndedSession = async (
+    session: AgentSession,
+    endedAt: IsoTimestamp,
+    outcome: "ended" | "killed" | "interrupted" = "ended",
+    reason?: string,
+  ): Promise<void> => {
     if (!initialized) return;
+    // Capture this before the async transcript read: process-end settlement may
+    // release the still-open terminal while the check is in flight.
     const terminalId = terminals.liveTerminalForAgent(session.identity.agentId);
+    const conversationStarted = !isReopenableSession(session)
+      || await sessionIsResumable(session.sessionId, session.cwd ?? workspaceRoot);
+    if (!shouldRecordEndedSession(session, conversationStarted)) {
+      output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no Claude conversation started.`);
+      return;
+    }
     const classified = session.identity.type === "manager" || isReopenableSession(session)
       ? outcome
       : outcome === "ended" ? "succeeded" : outcome;
-    activity.recordAgent(session, classified, endedAt, terminalId === undefined ? {} : { terminalId });
+    activity.recordAgent(session, classified, endedAt, {
+      ...(reason === undefined ? {} : { reason }),
+      ...(terminalId === undefined ? {} : { terminalId }),
+    });
   };
   const managerStore = new FileManagerStore(workspaceRoot, runtimeAdmission);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
@@ -530,7 +548,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const at = new Date().toISOString() as IsoTimestamp;
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(observation.agentId, at, "agent session process ended");
-        rememberEndedSession(session, at);
+        void rememberEndedSession(session, at);
         fleet.remove(observation.agentId, at);
         releaseAbandonedTerminal(observation.agentId);
         output.appendLine(`Session process for agent ${observation.agentId} ended`);
@@ -554,7 +572,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         // `/clear` and `/resume` end this conversation while the terminal lives
         // on. The session id stays reopenable — the transcript is untouched —
         // so it belongs in the ledger exactly like a closed terminal's.
-        rememberEndedSession(session, at);
+        void rememberEndedSession(session, at);
         fleet.remove(agentId, at);
         releaseAbandonedTerminal(agentId);
         return;
@@ -953,14 +971,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
     for (const session of stale) {
       const at = new Date().toISOString() as IsoTimestamp;
-      if (initialized) {
-        activity.recordAgent(session, "interrupted", at, { reason: "the extension host restarted under it" });
-      }
+      if (initialized) void rememberEndedSession(session, at, "interrupted", "the extension host restarted under it");
       // A lease held by an agent whose terminal is gone would block every later
       // write-capable launch.
       lease.releaseForTerminalOutcome(session.identity.agentId, at, "session did not survive the extension host");
       fleet.remove(session.identity.agentId, at);
-      output.appendLine(`Removed interrupted ${session.identity.type} (agent ${session.identity.agentId}) from the fleet; it is in Recent Activity.`);
+      output.appendLine(`Removed interrupted ${session.identity.type} (agent ${session.identity.agentId}) from the fleet.`);
     }
   };
   reconcileStaleSessions();

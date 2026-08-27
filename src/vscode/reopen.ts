@@ -92,7 +92,7 @@ export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoo
     const chosen = await host.pick(items, "Reopen an aboard session");
     if (chosen === undefined) return;
     if (!chosen.option.resumable) {
-      host.warning(`Claude Code no longer has the conversation for ${chosen.label}. It deletes session files older than its cleanupPeriodDays setting, and aboard backs up only the Manager's transcript.`);
+      host.warning(`Claude Code no longer has the conversation for ${chosen.label}, so it cannot be reopened.`);
       return;
     }
     try {

@@ -136,6 +136,11 @@ export function isReopenableSession(session: AgentSession): boolean {
   return session.resultDelivery.mode === "none" && isReopenableType(session.identity.type);
 }
 
+/** Empty interactive launches are neither conversations to reopen nor outcomes worth retaining. */
+export function shouldRecordEndedSession(session: AgentSession, conversationStarted: boolean): boolean {
+  return !isReopenableSession(session) || conversationStarted;
+}
+
 /** The description a terminal name carries, without aboard's own prefix. */
 export function describeTerminalName(name: string): string {
   return name.startsWith(TERMINAL_NAME_PREFIX) ? name.slice(TERMINAL_NAME_PREFIX.length) : name;

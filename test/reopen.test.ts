@@ -266,7 +266,7 @@ test("a swept transcript is listed with its reason rather than dropped, and refu
   const outcome = await reopen.reopen(options[0]!.candidate);
   assert.equal(outcome.action, "unresumable");
   assert.equal(host.created.length, 0);
-  assert.match(describeReopenOutcome(outcome), /no longer has the conversation/);
+  assert.equal(describeReopenOutcome(outcome), "Claude Code no longer has the conversation for agent 7, so it cannot be reopened.");
 });
 
 test("/reopen resolves to one session: the newest, or the newest matching a type or agent id", async () => {
