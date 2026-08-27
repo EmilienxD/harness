@@ -11,7 +11,8 @@ interface Manifest {
       "view/title"?: readonly { command: string; when?: string; group?: string }[];
       "view/item/context"?: readonly { command: string; when?: string; group?: string }[];
     };
-    views: Record<string, readonly { id: string; when?: string }[]>;
+    views: Record<string, readonly { id: string; name?: string; when?: string }[]>;
+    viewsWelcome?: readonly { view: string; when?: string; contents: string }[];
   };
 }
 
@@ -48,6 +49,21 @@ test("the activity-bar views are bound to opposite initialization states", async
   for (const id of ["aboard.fleet", "aboard.autoRun", "aboard.recentActivity"]) {
     assert.equal(views.get(id), "aboard.initialized", id);
   }
+  assert.equal((contributes.views["aboard"] ?? []).find((view) => view.id === "aboard.fleet")?.name, "Agent Fleet");
+});
+
+test("Agent Fleet keeps New Manager first and leaves Manager resume to Recent Activity", async () => {
+  const { contributes } = await manifest();
+  const fleetWelcome = (contributes.viewsWelcome ?? []).filter((entry) => entry.view === "aboard.fleet");
+  assert.deepEqual(fleetWelcome, [], "the fleet has no empty-state copy or duplicate launch actions");
+
+  const fleetTitle = (contributes.menus["view/title"] ?? []).filter((entry) => entry.when?.includes("view == aboard.fleet"));
+  for (const command of ["aboard.newManager", "aboard.resumeManager"]) {
+    assert.equal(fleetTitle.some((entry) => entry.command === command), false, `${command} must not render in the fleet header`);
+  }
+
+  const activityResume = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.resumeManager");
+  assert.match(activityResume?.when ?? "", /manager/, "Manager resume remains on its Recent Activity row");
 });
 
 test("reopening is always offered, and bulk fleet restoration no longer exists", async () => {

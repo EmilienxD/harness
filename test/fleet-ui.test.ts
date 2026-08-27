@@ -73,6 +73,36 @@ test("one section lists the Manager and its workers, with the Manager pinned fir
   model.dispose();
 });
 
+test("New Manager stays pinned above the fleet and disables while a Manager exists", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease();
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => true, () => fleet.list().some((entry) => entry.identity.type === "manager"));
+  fleet.register(worker, startedAt);
+  const action = model.roots()[0]!;
+  assert.equal(action.kind, "new-manager");
+  assert.deepEqual(model.item(action), {
+    label: "New Manager",
+    description: "",
+    tooltip: "Start a new Manager",
+    icon: "add",
+    contextValue: "aboard.action.newManager",
+    collapsible: false,
+    command: { command: "aboard.newManager", title: "New Manager", arguments: [] },
+  });
+
+  fleet.register({ ...worker, identity: { agentId: agent("manager-1"), type: "manager" }, sessionId: session("session-2"), resultDelivery: { mode: "none" } }, startedAt);
+  const disabled = model.roots()[0]!;
+  assert.equal(disabled.kind, "new-manager");
+  assert.deepEqual(model.item(disabled), {
+    label: "New Manager",
+    description: "Manager is running",
+    tooltip: "A Manager is already running",
+    icon: "circle-slash",
+    contextValue: "aboard.action.newManager",
+    collapsible: false,
+  });
+  model.dispose();
+});
+
 test("icons separate the Manager, interactive agents, and automated workers, never the lease", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });

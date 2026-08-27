@@ -58,9 +58,15 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const isTerminalOpen = (terminalId: string): boolean =>
     terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open");
 
-  // -- Agents -----------------------------------------------------------------
+  // -- Agent Fleet ------------------------------------------------------------
   const fleetChanges = new EventEmitter<FleetTreeNode | undefined>();
-  const fleetModel = new FleetTreeModel(fleet, lease, { refresh: () => fleetChanges.fire(undefined) }, (terminalId) => isTerminalOpen(terminalId));
+  const fleetModel = new FleetTreeModel(
+    fleet,
+    lease,
+    { refresh: () => fleetChanges.fire(undefined) },
+    (terminalId) => isTerminalOpen(terminalId),
+    () => fleet.list().some((session) => session.identity.type === "manager"),
+  );
   disposables.push(
     window.registerTreeDataProvider("aboard.fleet", {
       onDidChangeTreeData: fleetChanges.event,

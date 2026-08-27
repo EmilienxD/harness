@@ -162,7 +162,7 @@
         },
         {
           "id": "aboard.fleet",
-          "name": "Agents",
+          "name": "Agent Fleet",
           "when": "aboard.initialized"
         },
         {
@@ -183,15 +183,6 @@
         "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over — coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)"
       },
       {
-        "view": "aboard.fleet",
-        "contents": "Talk to the Manager, and every task it delegates shows up here as a terminal you can open, interrupt, or take over.\n[+ New Manager](command:aboard.newManager)"
-      },
-      {
-        "view": "aboard.fleet",
-        "when": "aboard.managerResumable",
-        "contents": "[↻ Resume Manager](command:aboard.resumeManager)"
-      },
-      {
         "view": "aboard.recentActivity",
         "contents": "What aboard's agents and runs did most recently shows up here, including sessions you can reopen."
       }
@@ -202,16 +193,6 @@
           "command": "aboard.updateProject",
           "when": "view == aboard.fleet",
           "group": "navigation@1"
-        },
-        {
-          "command": "aboard.newManager",
-          "when": "view == aboard.fleet && !aboard.managerLive",
-          "group": "1_manager@1"
-        },
-        {
-          "command": "aboard.resumeManager",
-          "when": "view == aboard.fleet && aboard.managerResumable && !aboard.managerLive",
-          "group": "1_manager@2"
         },
         {
           "command": "aboard.reopenSession",

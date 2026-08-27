@@ -4,6 +4,7 @@ import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
 
 export type FleetTreeNode =
+  | { readonly kind: "new-manager"; readonly enabled: boolean }
   | { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean }
   | { readonly kind: "child"; readonly child: ChildAgentNode };
 
@@ -12,9 +13,11 @@ export interface FleetTreeItem {
   readonly description: string;
   readonly tooltip: string;
   readonly icon: string;
-  readonly contextValue: "aboard.agent.active" | "aboard.child";
+  readonly contextValue: "aboard.action.newManager" | "aboard.agent.active" | "aboard.child";
   readonly collapsible: boolean;
-  readonly command?: { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
+  readonly command?:
+    | { readonly command: "aboard.newManager"; readonly title: string; readonly arguments: readonly [] }
+    | { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
 }
 
 export interface FleetTreeHost {
@@ -30,6 +33,7 @@ export class FleetTreeModel {
     private readonly lease: WriteLease,
     host: FleetTreeHost,
     private readonly isTerminalOpen: (terminalId: TerminalId) => boolean = () => true,
+    private readonly isManagerLive?: () => boolean,
   ) {
     this.#fleetRegistration = fleet.onDidChange(() => host.refresh());
     this.#leaseRegistration = lease.onDidChange(() => host.refresh());
@@ -48,21 +52,35 @@ export class FleetTreeModel {
    * down the worker list.
    */
   public roots(): readonly FleetTreeNode[] {
-    return this.fleet.list()
+    const agents = this.fleet.list()
       .filter((session) => isLiveSession(session) && this.isTerminalOpen(session.terminal.terminalId))
       .map((session): FleetTreeNode => ({ kind: "agent", session, leaseHolder: this.lease.current()?.agentId === session.identity.agentId }))
       .sort((left, right) => managerRank(left) - managerRank(right));
+    return this.isManagerLive === undefined
+      ? agents
+      : [{ kind: "new-manager", enabled: !this.isManagerLive() }, ...agents];
   }
 
   /** Only running children: a completed sub-agent is history, not fleet. */
   public children(node: FleetTreeNode): readonly FleetTreeNode[] {
-    if (node.kind === "child") return [];
+    if (node.kind !== "agent") return [];
     return this.fleet.listChildren(node.session.identity.agentId)
       .filter((child) => child.status === "running")
       .map((child) => ({ kind: "child", child }));
   }
 
   public item(node: FleetTreeNode): FleetTreeItem {
+    if (node.kind === "new-manager") {
+      return {
+        label: "New Manager",
+        description: node.enabled ? "" : "Manager is running",
+        tooltip: node.enabled ? "Start a new Manager" : "A Manager is already running",
+        icon: node.enabled ? "add" : "circle-slash",
+        contextValue: "aboard.action.newManager",
+        collapsible: false,
+        ...(node.enabled ? { command: { command: "aboard.newManager" as const, title: "New Manager", arguments: [] as const } } : {}),
+      };
+    }
     if (node.kind === "child") {
       return { label: node.child.type, description: node.child.status, tooltip: childTooltip(node.child), icon: "symbol-method", contextValue: "aboard.child", collapsible: false };
     }
