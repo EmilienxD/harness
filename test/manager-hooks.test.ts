@@ -457,7 +457,7 @@ test("/done closes the invoking Manager terminal without waking the model", asyn
   assert.match(String((await prompts.handle(managerId, "/done trailing text")).message), /text you typed after it was not sent/);
 });
 
-test("interactive commands preserve brainstorm topics as terminal handoff and reject mistyped Chrome options", async () => {
+test("interactive commands are argumentless terminal handoffs", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const launches: unknown[] = [];
   const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input) => {
@@ -471,14 +471,12 @@ test("interactive commands preserve brainstorm topics as terminal handoff and re
   // context is worse than declining to forward the topic.
   assert.deepEqual(launches, [{ type: "brainstormer", description: "interactive brainstorm session" }]);
 
-  const chrome = await prompts.handle(managerId, "/general-purpose --chrome");
-  assert.match(String(chrome.message), /Chrome is enabled/);
+  const general = await prompts.handle(managerId, "/general-purpose --chrome");
+  assert.match(String(general.message), /takes no arguments/);
   assert.deepEqual(launches, [
     { type: "brainstormer", description: "interactive brainstorm session" },
-    { type: "general-purpose", description: "general purpose interactive session", chrome: true },
+    { type: "general-purpose", description: "general purpose interactive session" },
   ]);
-  const typo = await prompts.handle(managerId, "/general-purpose --chrom");
-  assert.match(String(typo.message), /accepts only the optional --chrome flag/);
   assert.equal(launches.length, 2);
 });
 
@@ -497,7 +495,7 @@ test("/auto and /review-pr are performed by the extension, reported to the user,
   );
   const auto = await prompts.handle(managerId, "/auto");
   assert.equal(auto.intercepted, true);
-  assert.equal(auto.message, "auto-run started with 2 issues queued, Chrome off.");
+  assert.equal(auto.message, "auto-run started with 2 issues queued.");
   const review = await prompts.handle(managerId, "/review-pr");
   assert.equal(review.message, "Focused the implementer terminal for PR #56.");
   assert.deepEqual(started, ["auto", "review"]);
@@ -557,10 +555,10 @@ test("an extension action reports a refusal verbatim and rejects unknown option 
   const refused = await prompts.handle(managerId, "/auto");
   assert.match(String(refused.message), /auto-run did not start: the working tree is not clean: src\/a\.ts/);
   const invalid = await prompts.handle(managerId, "/auto --fast");
-  assert.match(String(invalid.message), /optional --dry and --chrome flags before an optional session guideline/);
+  assert.match(String(invalid.message), /optional --dry flag before an optional session guideline/);
 });
 
-test("/auto --chrome passes one explicit Chrome choice to the run", async () => {
+test("/auto rejects the removed --chrome option", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const starts: unknown[] = [];
   const prompts = new ManagerPromptService(
@@ -568,14 +566,14 @@ test("/auto --chrome passes one explicit Chrome choice to the run", async () => 
     { spawnInteractive: async () => assert.fail("no agent") },
     undefined,
     {
-      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }], chromeEnabled: true }; },
+      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }] }; },
       reviewPullRequest: async () => ({ action: "none" }),
       reopenSession: async () => assert.fail("no session reopen"),
     },
   );
   const result = await prompts.handle(managerId, "/auto --chrome");
-  assert.deepEqual(starts, [{ chrome: true }]);
-  assert.equal(result.message, "auto-run started with 1 issue queued, Chrome on.");
+  assert.deepEqual(starts, []);
+  assert.match(String(result.message), /optional --dry flag/);
 });
 
 test("/auto forwards trailing text as one run-wide agent guideline", async () => {
@@ -586,7 +584,7 @@ test("/auto forwards trailing text as one run-wide agent guideline", async () =>
     { spawnInteractive: async () => assert.fail("no agent") },
     undefined,
     {
-      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }], chromeEnabled: true }; },
+      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }] }; },
       reviewPullRequest: async () => ({ action: "none" }),
       reopenSession: async () => assert.fail("no session reopen"),
     },
@@ -615,7 +613,6 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
           blockers: [],
           reviewMode: true,
           pauseAfterHitl: false,
-          chromeEnabled: true,
           additionalGuideline: options?.additionalGuideline,
           isolatedWorkspace: false,
           keepsWorkspace: false,
@@ -623,7 +620,7 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
           sessionBase: "feature/wip",
           mergesItsOwnPullRequest: false,
           issues: [
-            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff" },
+            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff", chrome: true },
             { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "aboard/35-migrate-the-queue", difficulty: "advanced" },
           ],
           skipped: [{ number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" }],
@@ -635,11 +632,12 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
     },
   );
 
-  const result = await prompts.handle(managerId, "/auto --chrome --dry keep generated files out of commits");
+  const result = await prompts.handle(managerId, "/auto --dry keep generated files out of commits");
 
-  assert.deepEqual(starts, [{ chrome: true, dry: true, additionalGuideline: "keep generated files out of commits" }]);
+  assert.deepEqual(starts, [{ dry: true, additionalGuideline: "keep generated files out of commits" }]);
   assert.match(String(result.message), /no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed/);
   assert.match(String(result.message), /1\. #34 Add retry backoff.*aboard\/34-add-retry-backoff/);
+  assert.match(String(result.message), /#34 Add retry backoff.*\[AI\]-chrome/);
   assert.match(String(result.message), /2\. #35 Migrate the queue.*You must merge its PR/);
   assert.match(String(result.message), /interactive pr-doctor/);
   assert.match(String(result.message), /# Additional User Guideline For this Session\n\nkeep generated files out of commits/);
@@ -662,7 +660,6 @@ test("/auto --dry reports blockers while preserving the inspected issue plan", a
         blockers: ["the working tree is not clean: src/a.ts"],
         reviewMode: false,
         pauseAfterHitl: false,
-        chromeEnabled: false,
         isolatedWorkspace: false,
         keepsWorkspace: false,
         sessionBranch: "aboard/run/<run-id>",
@@ -682,7 +679,7 @@ test("/auto --dry reports blockers while preserving the inspected issue plan", a
   assert.match(String(result.message), /#34 Add retry backoff/);
 
   const invalid = await prompts.handle(managerId, "/auto --dry --dry");
-  assert.match(String(invalid.message), /optional --dry and --chrome flags/);
+  assert.match(String(invalid.message), /optional --dry flag/);
 });
 
 test("an unavailable extension action is reported instead of falling through to the Manager", async () => {
@@ -738,9 +735,9 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
   for (const name of ["brainstorm", "general-purpose", "done", "auto", "review-pr", "reopen"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
-    // Only the two launch commands advertise the explicit Chrome option;
-    // `/review-pr` advertises its forwarded focus. The other shims take none.
-    if (["general-purpose", "auto", "review-pr", "reopen"].includes(name)) assert.match(skill, /argument-hint:/);
+    // `/auto` advertises dry-run/guideline input; `/review-pr` and `/reopen`
+    // advertise their selectors. General-purpose is explicitly argumentless.
+    if (["auto", "review-pr", "reopen"].includes(name)) assert.match(skill, /argument-hint:/);
     else assert.doesNotMatch(skill, /argument-hint:/);
     // The body is reachable only when the hook failed to intercept, so it must
     // read as an error notice: an empty body leaves the model to invent a

@@ -1,7 +1,7 @@
 /**
- * aboard's GitHub labels: the four that classify an issue — `[AI]-spec`,
- * `[AI]-todo`, `[AI]-afk`, `[AI]-hitl` — and the four that rate one's
- * difficulty.
+ * aboard's GitHub labels: the five that classify or configure an issue —
+ * `[AI]-spec`, `[AI]-todo`, `[AI]-afk`, `[AI]-hitl`, `[AI]-chrome` — and the
+ * four that rate one's difficulty.
  *
  * The `[AI]-` prefix keeps these from colliding with a user's own labels — a
  * plainly-named `todo` would let aboard adopt (or, worse, strip the label from)
@@ -19,8 +19,9 @@ export const LABEL_SPEC = `${LABEL_PREFIX}spec`;
 export const LABEL_TODO = `${LABEL_PREFIX}todo`;
 export const LABEL_AFK = `${LABEL_PREFIX}afk`;
 export const LABEL_HITL = `${LABEL_PREFIX}hitl`;
+export const LABEL_CHROME = `${LABEL_PREFIX}chrome`;
 
-export const ABOARD_LABELS = [LABEL_SPEC, LABEL_TODO, LABEL_AFK, LABEL_HITL] as const;
+export const ABOARD_LABELS = [LABEL_SPEC, LABEL_TODO, LABEL_AFK, LABEL_HITL, LABEL_CHROME] as const;
 export type AboardLabel = (typeof ABOARD_LABELS)[number];
 
 /**

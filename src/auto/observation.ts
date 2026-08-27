@@ -18,7 +18,7 @@ import type {
 } from "../domain/run-validation.js";
 import { validateRun } from "../domain/run-validation.js";
 import type { RecoveryEligibility } from "../domain/run-plan.js";
-import { issueDifficulty, issueDisposition } from "../shared/labels.js";
+import { LABEL_CHROME, hasLabel, issueDifficulty, issueDisposition } from "../shared/labels.js";
 import type { AutoRunGitHub } from "./engine.js";
 
 export interface RunObservationSources {
@@ -112,6 +112,7 @@ async function observeIssues(record: AutoRunRecord, github: AutoRunGitHub): Prom
         state: "open",
         disposition: issueDisposition(candidate.labels),
         difficulty: issueDifficulty(candidate.labels),
+        chrome: hasLabel(candidate.labels, LABEL_CHROME),
         openBlockedByNumbers: candidate.openBlockedByNumbers,
       };
     }
@@ -121,6 +122,7 @@ async function observeIssues(record: AutoRunRecord, github: AutoRunGitHub): Prom
       state: snapshot === undefined ? "missing" : snapshot.state,
       disposition: snapshot === undefined ? "unclassified" : issueDisposition(snapshot.labels),
       difficulty: snapshot === undefined ? undefined : issueDifficulty(snapshot.labels),
+      chrome: snapshot === undefined ? false : hasLabel(snapshot.labels, LABEL_CHROME),
       openBlockedByNumbers: [],
     };
   }));

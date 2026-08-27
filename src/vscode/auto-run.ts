@@ -114,7 +114,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
   switch (card.kind) {
     case "idle":
       return {
-        label: "No run in progress",
+        label: "Run auto mode",
         description: "",
         tooltip: "Start an auto-run to work the labelled issue queue one issue at a time.",
         icon: "play-circle",
@@ -194,6 +194,7 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
       `Issue #${issue.number}`,
       `Disposition: ${issue.disposition}`,
       issue.difficulty === undefined ? "Difficulty: unrated" : `Difficulty: ${issue.difficulty}`,
+      issue.chrome === true ? "Claude in Chrome: enabled by [AI]-chrome" : "",
       `Branch: ${issue.branch}`,
       issue.dependsOn.length === 0 ? "" : `Depends on ${issue.dependsOn.map((number) => `#${number}`).join(", ")}`,
     ].filter(Boolean).join("\n"),
@@ -220,7 +221,7 @@ function runTooltip(record: AutoRunRecord, state?: AutoRunState): string {
     `Session branch: ${record.sessionBranch}`,
     `Target branch: ${record.targetBranch ?? "the repository default"}`,
     record.settings.workspaceRoot === undefined ? "Working in your checkout" : `Working in ${record.settings.workspaceRoot}`,
-    `Review ${record.settings.review ? "on" : "off"}, Chrome ${record.settings.chromeEnabled ? "on" : "off"}`,
+    `Review ${record.settings.review ? "on" : "off"}`,
     record.runPullRequest === undefined ? "" : `Run pull request: #${record.runPullRequest}`,
     state?.currentPullRequest === undefined ? "" : `Current pull request: #${state.currentPullRequest}`,
   ].filter(Boolean).join("\n");

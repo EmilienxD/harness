@@ -29,7 +29,7 @@ export interface AutoRunUiHost {
   readonly discardBehavior: () => DiscardBehavior;
   /** Opens an issue or pull request in the browser. */
   readonly webUrl: (number: number) => Promise<string>;
-  readonly start: (chrome: boolean) => Promise<void>;
+  readonly start: () => Promise<void>;
 }
 
 export interface ActivityUiHost {
@@ -172,8 +172,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     commands.registerCommand("aboard.autoRun.openPullRequest", () => {
       void openNumber(cardPullRequest(autoRunCard(autoRunSources), engine.state()));
     }),
-    commands.registerCommand("aboard.startAutoRun", () => options.autoRun.start(false)),
-    commands.registerCommand("aboard.startAutoRunWithChrome", () => options.autoRun.start(true)),
+    commands.registerCommand("aboard.startAutoRun", () => options.autoRun.start()),
     commands.registerCommand("aboard.resumeAutoRun", async () => {
       // Revalidated immediately before launching: the panel state may have gone
       // stale between the poll that enabled this action and the click.

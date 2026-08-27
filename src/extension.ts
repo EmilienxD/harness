@@ -213,7 +213,6 @@ function briefingSources(
         phase: state.phase,
         currentIssue: state.currentIssue,
         completedCount: state.completedCount,
-        chromeEnabled: state.chromeEnabled,
         ...(state.waiting && state.currentPullRequest !== undefined
           ? { waitingOnPullRequest: state.currentPullRequest }
           : {}),
@@ -769,11 +768,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
     startAutoRun: (options) => options?.dry === true
       ? autoRun.dryRun({
-          ...(options.chrome === true ? { chrome: true } : {}),
           ...(options.additionalGuideline === undefined ? {} : { additionalGuideline: options.additionalGuideline }),
         })
       : autoRun.start({
-          ...(options?.chrome === true ? { chrome: true } : {}),
           ...(options?.additionalGuideline === undefined ? {} : { additionalGuideline: options.additionalGuideline }),
         }),
     reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
@@ -829,12 +826,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     });
   };
   await startRuntimeBridge();
-  const startAutoRun = async (chrome: boolean): Promise<void> => {
+  const startAutoRun = async (): Promise<void> => {
     if (!requireInitialized()) return;
     try {
-      const result = await autoRun.start(chrome ? { chrome: true } : {});
+      const result = await autoRun.start();
       if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
-      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued on ${result.sessionBranch}, opening a pull request into ${result.sessionBase} at the end (${result.mergesItsOwnPullRequest ? "merged automatically" : "yours to merge"}), review ${result.reviewMode ? "on" : "off"}, Chrome ${result.chromeEnabled ? "on" : "off"}.`);
+      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued on ${result.sessionBranch}, opening a pull request into ${result.sessionBase} at the end (${result.mergesItsOwnPullRequest ? "merged automatically" : "yours to merge"}), review ${result.reviewMode ? "on" : "off"}.`);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
   };
   fleetUi = registerNativeFleetUi(context, {
@@ -847,7 +844,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       engine: autoRun,
       discardBehavior: () => currentConfiguration.autoRun.discardBehavior,
       webUrl: (number) => github.webUrl(number),
-      start: (chrome) => startAutoRun(chrome),
+      start: () => startAutoRun(),
     },
     activity: {
       entries: () => activity.entries(),
@@ -902,8 +899,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     } else {
       autoRunStatus.text = `$(sync~spin) Auto-run: issue #${state.currentIssue ?? "?"} (${state.completedCount + 1}/${state.totalCount})`;
       autoRunStatus.tooltip = state.waiting
-        ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Chrome ${state.chromeEnabled ? "on" : "off"}. Click to stop the run.`
-        : `${state.phase} — issue #${state.currentIssue ?? "?"}. Chrome ${state.chromeEnabled ? "on" : "off"}. Click to stop the run.`;
+        ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Click to stop the run.`
+        : `${state.phase} — issue #${state.currentIssue ?? "?"}. Click to stop the run.`;
       autoRunStatus.show();
     }
     await commands.executeCommand("setContext", "aboard.autoRunActive", state !== undefined);

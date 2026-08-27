@@ -496,7 +496,6 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 1,
     settings: {
       review: false,
-      chromeEnabled: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
@@ -713,18 +712,20 @@ test("an externally closed hitl pull request creates no concluding side effect",
   ]);
 });
 
-test("one Chrome choice is persisted for the run and reaches implementers only", async () => {
-  const context = harness({ settings: { review: true } });
-  const result = await context.engine.start({ chrome: true });
-  assert.equal(result.started && result.chromeEnabled, true);
+test("[AI]-chrome is frozen per issue and reaches that issue's implementer only", async () => {
+  const context = harness({
+    settings: { review: true },
+    issues: [{ number: 34, title: "Add retry backoff", labels: ["[AI]-afk", "[AI]-chrome"], state: "open", openBlockedByNumbers: [] }],
+  });
+  const result = await context.engine.start();
+  assert.equal(result.started && result.issues[0]?.chrome, true);
   await context.engine.settle();
 
   assert.equal(context.launches[0]?.type, "implementer");
   assert.equal(context.launches[0]?.chrome, true);
   assert.equal(context.launches[1]?.type, "pr-doctor-afk");
   assert.equal(context.launches[1]?.chrome, undefined);
-  assert.equal(context.saved.every((record) => record.settings.chromeEnabled), true);
-  assert.match(context.notifications[0] ?? "", /Chrome on/);
+  assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
 });
 
 test("one additional guideline is persisted and reaches every auto agent", async () => {
@@ -1003,13 +1004,13 @@ test("a dry run forecasts the exact queue and branches without creating run stat
     startDirty: true,
     settings: { review: true, pauseAfterHitl: true, mergeRunPullRequest: true },
     issues: [
-      { number: 41, title: "Ship the UI", labels: ["[AI]-hitl", "[AI]-advanced-difficulty"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [42], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 41, title: "Ship the UI", labels: ["[AI]-hitl", "[AI]-advanced-difficulty", "[AI]-chrome"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [42], createdAt: "2026-01-01T00:00:00.000Z" },
       { number: 42, title: "Build the API", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
       { number: 43, title: "Needs classification", labels: [], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
     ],
   });
 
-  const result = await context.engine.dryRun({ chrome: true, additionalGuideline: "  no unit tests needed  " });
+  const result = await context.engine.dryRun({ additionalGuideline: "  no unit tests needed  " });
 
   assert.equal(result.inspected, true);
   if (!result.inspected) return;
@@ -1019,13 +1020,13 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.equal(result.sessionBase, "feature/wip");
   assert.equal(result.reviewMode, true);
   assert.equal(result.pauseAfterHitl, true);
-  assert.equal(result.chromeEnabled, true);
   assert.equal(result.additionalGuideline, "no unit tests needed");
   assert.equal(result.mergesItsOwnPullRequest, true);
   assert.deepEqual(result.issues.map((issue) => [issue.number, issue.branch]), [
     [42, "aboard/42-build-the-api"],
     [41, "aboard/41-ship-the-ui"],
   ]);
+  assert.equal(result.issues.find((issue) => issue.number === 41)?.chrome, true);
   assert.deepEqual(result.skipped, [{ number: 43, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" }]);
   assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"]);
   assert.deepEqual(context.gitCalls, []);

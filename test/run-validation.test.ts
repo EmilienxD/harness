@@ -24,7 +24,6 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 2,
     settings: {
       review: false,
-      chromeEnabled: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
@@ -56,6 +55,7 @@ function issue(number: number, overrides: Partial<IssueObservation> = {}): Issue
     state: "open",
     disposition: number === 35 ? "hitl" : "afk",
     difficulty: number === 34 ? "basic" : undefined,
+    chrome: false,
     openBlockedByNumbers: [],
     ...overrides,
   };
@@ -138,6 +138,12 @@ test("a plan issue that closed, vanished, or changed classification fails the ru
   assert.match(reason(record(), observations({ issues: [issue(34, { disposition: "hitl" }), issue(35)] })) ?? "", /#34 is now hitl rather than afk/);
   assert.match(reason(record(), observations({ issues: [issue(34, { disposition: "unclassified" }), issue(35)] })) ?? "", /#34 is now unclassified/);
   assert.match(reason(record(), observations({ issues: [issue(34, { difficulty: "expert" }), issue(35)] })) ?? "", /#34 has a different difficulty/);
+});
+
+test("adding or removing [AI]-chrome after planning breaks recovery", () => {
+  assert.match(reason(record(), observations({ issues: [issue(34, { chrome: true }), issue(35)] })) ?? "", /#34 now has the \[AI\]-chrome label/);
+  const frozenWithChrome = record({ plan: [{ ...record().plan[0]!, chrome: true }, record().plan[1]!] });
+  assert.match(reason(frozenWithChrome, observations()) ?? "", /#34 no longer has the \[AI\]-chrome label/);
 });
 
 test("a title change never invalidates a plan", () => {

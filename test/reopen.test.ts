@@ -192,15 +192,15 @@ test("a session that ran in an auto-run's own checkout is reopened there, not in
   assert.match(host.created[0]!.terminal.sent[0] ?? "", /sessions/);
 });
 
-test("a general-purpose session is reopened with its recorded Chrome intent", async () => {
+test("an [AI]-chrome implementer is reopened with its recorded launch fact", async () => {
   const { reopen, host } = setup({
     ledger: {
       version: 1,
       sessions: [{
         agentId: agent("9"),
-        type: "general-purpose",
+        type: "implementer",
         sessionId: GENERAL_SESSION,
-        description: "general purpose interactive session",
+        description: "address issue 34",
         endedAt: at("2026-07-30T09:30:00.000Z"),
         chromeEnabled: true,
       }],
@@ -211,8 +211,7 @@ test("a general-purpose session is reopened with its recorded Chrome intent", as
   const line = host.created[0]!.terminal.sent.at(-1) ?? "";
   assert.match(line, /--resume af817a6c/);
   assert.match(line, /--chrome/);
-  // Claude Code's unmodified default session: no --agent, nothing to re-emit.
-  assert.doesNotMatch(line, /--agent/);
+  assert.match(line, /--agent aboard-implementer-9/);
 });
 
 test("a live session is focused rather than relaunched", async () => {

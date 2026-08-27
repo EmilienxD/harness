@@ -105,7 +105,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   // Start is offered only with nothing unresolved: two runs competing for the
   // same branches is the failure this prevents.
   assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == idle/);
-  assert.match(when("aboard.startAutoRunWithChrome"), /aboard\.autoRunCard == idle/);
+  assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
   // Resume appears only once validation has said the run may continue — never
   // while checking, and never when broken.
   assert.match(when("aboard.resumeAutoRun"), /aboard\.autoRunCard == recoverable/);

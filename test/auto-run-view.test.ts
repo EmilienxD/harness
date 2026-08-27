@@ -16,7 +16,6 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 1,
     settings: {
       review: false,
-      chromeEnabled: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
@@ -51,7 +50,6 @@ function state(overrides: Partial<AutoRunState> = {}): AutoRunState {
     completedCount: 1,
     totalCount: 3,
     waiting: false,
-    chromeEnabled: false,
     currentPullRequest: 57,
     ...overrides,
   };
@@ -78,7 +76,7 @@ const rootItem = (input: Parameters<typeof sources>[0]) => {
   return { model, root, item: model.item(root) };
 };
 
-test("no record offers only the two ways to start a run", () => {
+test("no record offers the one way to start a run", () => {
   const { item } = rootItem({});
   assert.equal(card({}).kind, "idle");
   assert.equal(item.contextValue, "aboard.autoRun.idle");
@@ -161,6 +159,15 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
   assert.deepEqual(rows[0]?.command, { command: "aboard.openIssue", title: "Open Issue", arguments: [34] });
 });
 
+test("an [AI]-chrome issue says so in its frozen plan row", () => {
+  const withChrome = record({ plan: [{ ...record().plan[0]!, chrome: true }, ...record().plan.slice(1)] });
+  const model = new AutoRunTreeModel(sources({ persisted: withChrome, eligibility: { state: "resumable" } }));
+  const first = model.children(model.roots()[0]!)[0];
+  assert.equal(first?.kind, "issue");
+  if (first?.kind !== "issue") return;
+  assert.match(model.item(first).tooltip, /Claude in Chrome: enabled by \[AI\]-chrome/);
+});
+
 test("a done row says whether it landed or correctly changed nothing", () => {
   const unchanged = record({ progress: { ...record().progress, "34": { state: "done", result: "no-changes" } } });
   const { model, root } = rootItem({ persisted: unchanged, eligibility: { state: "resumable" } });
@@ -181,12 +188,12 @@ test("a row shows the latest observed title while the plan keeps the one it froz
 });
 
 test("the tooltip names where the work goes and what the run froze", () => {
-  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", chromeEnabled: true, review: true } });
+  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true } });
   const { item } = rootItem({ persisted: isolated, state: state() });
   assert.match(item.tooltip, /Session branch: aboard\/run\/test/);
   assert.match(item.tooltip, /Target branch: feature\/wip/);
   assert.match(item.tooltip, /Working in C:\/checkouts\/run_test\/repo/);
-  assert.match(item.tooltip, /Review on, Chrome on/);
+  assert.match(item.tooltip, /Review on/);
 
   const inPlace = rootItem({ persisted: record(), state: state() });
   assert.match(inPlace.item.tooltip, /Working in your checkout/);

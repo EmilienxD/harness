@@ -87,6 +87,16 @@ test("a planned issue carries the difficulty its label rates it at, and nothing 
   assert.deepEqual(planRun([candidate({ number: 13, labels: ["[AI]-expert-difficulty"] })]).issues, []);
 });
 
+test("[AI]-chrome configures one planned implementer without admitting work", () => {
+  const plan = planRun([
+    candidate({ number: 10, labels: ["[AI]-afk", "[ai]-CHROME"] }),
+    candidate({ number: 11, labels: ["[AI]-hitl"] }),
+  ]);
+  assert.equal(plan.issues.find((issue) => issue.number === 10)?.chrome, true);
+  assert.equal(plan.issues.find((issue) => issue.number === 11)?.chrome, undefined);
+  assert.deepEqual(planRun([candidate({ number: 12, labels: ["[AI]-chrome"] })]).issues, []);
+});
+
 test("the plan is ordered by creation date, not by number, with ties on the lower number", () => {
   // The newer issue holds the lower number — filed later, numbered first is
   // impossible on GitHub, but a transferred issue reproduces exactly this.
@@ -178,7 +188,6 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 1,
     settings: {
       review: false,
-      chromeEnabled: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,

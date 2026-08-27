@@ -92,9 +92,9 @@ User <-> VS Code UI and terminals <-> extension host
 - The same definition is the authority for its own model and effort, including the choice not to decide: `by-difficulty` delegates one field to the difficulty label on the issue that launch is working, and any named value wins over the label. Precedence, most specific first, is definition, then difficulty, then `aboard.launch.effort`, then no flag. Unrated work resolves to the most capable tier, never to the user's global default.
 - `Explore` remains Claude Code's built-in read-only agent with metadata-only launch policy. `general-purpose` remains an unmodified default Claude Code session. Do not reconstruct either as an aboard definition.
 - The aboard MCP server is exposed only to the Manager through per-launch configuration stored outside the workspace. Never register it in `.mcp.json`, agent frontmatter, or another project-scoped location, and never widen the Manager-only caller check.
-- Start and resume must preserve the same launch policy, including isolated definitions, capability limits, model/effort policy, Chrome intent, and Manager MCP access.
+- Start and resume must preserve the same launch policy, including isolated definitions, capability limits, model/effort policy, issue-derived Chrome policy, and Manager MCP access.
 - Resolve an automated worker's context before launch and pass its first prompt as a CLI argument. Never inject an automated prompt by typing into a live TUI.
-- Claude in Chrome is explicit user intent, never an agent default. It is available only to `general-purpose` sessions and auto-run implementers, and that intent must survive resume.
+- Claude in Chrome is enabled only for an auto-run implementer whose frozen issue carries `[AI]-chrome`. The label-derived fact must survive resume; general-purpose and other sessions expose no Chrome launch option.
 - Every project-scoped hook first guards on `ABOARD_AGENT_ID`; role-specific hooks also guard on `ABOARD_AGENT_TYPE`. A hook not addressed to the current session exits successfully and silently.
 
 ### Human Control and Write Safety
@@ -124,8 +124,8 @@ The scaffolded definitions are the detailed authority for role prompts, tool all
 ### GitHub Work Model
 
 - GitHub issues and pull requests are the durable work-state source. Do not introduce a local `TODO.md` or duplicate issue/PR state.
-- Preserve exactly four classifying labels — `[AI]-spec`, `[AI]-todo`, `[AI]-afk`, `[AI]-hitl` — and exactly four rating ones: `[AI]-routine-difficulty`, `[AI]-basic-difficulty`, `[AI]-advanced-difficulty`, and `[AI]-expert-difficulty`. The former `ai:*` labels and unprefixed equivalents are ordinary user labels; do not recognize or migrate them.
-- A difficulty label rates work; it never admits it. Only the disposition labels decide what a run picks up, an unrated issue is ordinary rather than deficient, and aboard reads these labels without ever writing one — the issue-writing skill owns them.
+- Preserve exactly five classifying/configuration labels — `[AI]-spec`, `[AI]-todo`, `[AI]-afk`, `[AI]-hitl`, `[AI]-chrome` — and exactly four rating ones: `[AI]-routine-difficulty`, `[AI]-basic-difficulty`, `[AI]-advanced-difficulty`, and `[AI]-expert-difficulty`. The former `ai:*` labels and unprefixed equivalents are ordinary user labels; do not recognize or migrate them.
+- A difficulty label rates work and `[AI]-chrome` configures its implementer launch; neither admits it. Only the disposition labels decide what a run picks up, an unrated issue is ordinary rather than deficient, and aboard reads these labels without ever writing one — the issue-writing skill owns them.
 - The roadmap is an open GitHub issue labelled `[AI]-todo`, using a flat Markdown checkbox list whose order is priority. Other issue and PR states are derived from GitHub.
 - `[AI]-afk` work may merge unattended into a run's session branch. `[AI]-hitl` normally waits for the user's merge; approval from another account also permits the extension to merge. An issue with neither disposition is legitimate but must not be guessed.
 - GitHub closes a linked issue only when its pull request merges into the default branch. Nothing aboard automates merges there, so any closure aboard depends on is one aboard performs explicitly.

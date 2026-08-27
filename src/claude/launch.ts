@@ -651,12 +651,8 @@ interface CommonPlanRequest {
    * literal `${ABOARD_BRIDGE_PORT}` text and reporting an invalid URL.
    */
   readonly mcpConfigPath?: string | undefined;
-  /**
-   * Per-session Claude in Chrome intent. Only general-purpose sessions and
-   * auto-run implementers may carry it; `false` is explicit so a Claude-level
-   * "enabled by default" preference cannot silently widen an aboard launch.
-   */
-  readonly chrome?: boolean | undefined;
+  /** Set only for an auto-run implementer whose frozen issue has `[AI]-chrome`. */
+  readonly chrome?: true | undefined;
   readonly maxInlinePromptChars?: number | undefined;
   readonly runtimeDirectory?: string | undefined;
   /**
@@ -836,15 +832,15 @@ function slashCommandArguments(attended: boolean): readonly string[] {
   return attended ? [] : ["--disable-slash-commands"];
 }
 
-function chromeArguments(agentType: AgentType, enabled: boolean | undefined): readonly string[] {
-  if (enabled === undefined) return [];
-  if (agentType !== "general-purpose" && agentType !== "implementer") {
+function chromeArguments(agentType: AgentType, enabled: true | undefined): readonly string[] {
+  if (enabled !== true) return [];
+  if (agentType !== "implementer") {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      `Claude in Chrome is available only to general-purpose sessions and auto-run implementers: ${agentType}`,
+      `Claude in Chrome is available only to [AI]-chrome auto-run implementers: ${agentType}`,
     );
   }
-  return [enabled ? "--chrome" : "--no-chrome"];
+  return ["--chrome"];
 }
 
 function normalizePrompt(

@@ -60,11 +60,6 @@
         "icon": "$(play)"
       },
       {
-        "command": "aboard.startAutoRunWithChrome",
-        "title": "Aboard: Start Auto Run with Chrome",
-        "icon": "$(globe)"
-      },
-      {
         "command": "aboard.stopAutoRun",
         "title": "Aboard: Stop Auto Run",
         "icon": "$(debug-stop)"
@@ -217,11 +212,6 @@
           "group": "1_run@1"
         },
         {
-          "command": "aboard.startAutoRunWithChrome",
-          "when": "view == aboard.autoRun && aboard.autoRunCard == idle",
-          "group": "1_run@2"
-        },
-        {
           "command": "aboard.stopAutoRun",
           "when": "view == aboard.autoRun && (aboard.autoRunCard == active || aboard.autoRunCard == waiting)",
           "group": "1_run@3"
@@ -277,10 +267,6 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "aboard.initialized && aboard.autoRunCard == idle"
-        },
-        {
-          "command": "aboard.startAutoRunWithChrome",
           "when": "aboard.initialized && aboard.autoRunCard == idle"
         },
         {
@@ -361,11 +347,6 @@
           "command": "aboard.startAutoRun",
           "when": "viewItem == aboard.autoRun.idle",
           "group": "inline@1"
-        },
-        {
-          "command": "aboard.startAutoRunWithChrome",
-          "when": "viewItem == aboard.autoRun.idle",
-          "group": "inline@2"
         },
         {
           "command": "aboard.autoRun.openCurrentIssue",

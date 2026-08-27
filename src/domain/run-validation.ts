@@ -34,6 +34,7 @@ export interface IssueObservation {
   readonly state: "open" | "closed" | "missing";
   readonly disposition: IssueDisposition | "unclassified";
   readonly difficulty: IssueDifficulty | undefined;
+  readonly chrome: boolean;
   /** Open blockers as GitHub reports them now. */
   readonly openBlockedByNumbers: readonly number[];
 }
@@ -224,6 +225,9 @@ function validateIssues(record: AutoRunRecord, observations: RunObservations): R
     }
     if (observed.difficulty !== issue.difficulty) {
       return broken(`issue #${issue.number} has a different difficulty than when the run planned it`);
+    }
+    if (observed.chrome !== (issue.chrome === true)) {
+      return broken(`issue #${issue.number} ${observed.chrome ? "now has" : "no longer has"} the [AI]-chrome label`);
     }
     // Blockers may close as the run drains its plan, so the observed set only
     // has to be contained in the frozen one. A blocker that appeared is new

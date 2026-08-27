@@ -124,7 +124,6 @@ export interface AutoRunBriefing {
   readonly phase: string;
   readonly currentIssue: number | undefined;
   readonly completedCount: number;
-  readonly chromeEnabled?: boolean;
   /** The pull request a `hitl` issue is parked on, when the run is waiting. */
   readonly waitingOnPullRequest?: number | undefined;
 }
@@ -287,7 +286,7 @@ export class ManagerBriefings {
     const run = this.sources.autoRun();
     if (run === undefined) return "No run is active. `/auto` starts one over every open [AI]-afk / [AI]-hitl issue, dependencies first and then oldest first.";
     const lines = [
-      `Running - phase ${run.phase}, ${run.completedCount} issue(s) done, Chrome ${run.chromeEnabled ? "on" : "off"}.`,
+      `Running - phase ${run.phase}, ${run.completedCount} issue(s) done.`,
     ];
     if (run.currentIssue !== undefined) lines.push(`Current issue: #${run.currentIssue}.`);
     if (run.waitingOnPullRequest !== undefined) {
@@ -515,7 +514,7 @@ export interface InvokingTerminalKiller {
 
 /** The extension-owned actions `/auto`, `/review-pr`, and `/reopen` trigger. */
 export interface ManagerCommandActions {
-  startAutoRun(options?: { readonly chrome?: boolean; readonly dry?: boolean; readonly additionalGuideline?: string }): Promise<unknown>;
+  startAutoRun(options?: { readonly dry?: boolean; readonly additionalGuideline?: string }): Promise<unknown>;
   /** `focus` is the user's trailing text: what they want the session to look at. */
   reviewPullRequest(focus?: string): Promise<unknown>;
   /**
@@ -579,14 +578,12 @@ export class ManagerPromptService {
       return lines.length === 0 ? {} : { additionalContext: lines.join("\n") };
     }
 
-    if (command.invalidArguments) {
-      return { intercepted: true, message: "/general-purpose accepts only the optional --chrome flag." };
-    }
+    if (command.invalidArguments) return { intercepted: true, message: "/general-purpose does not accept arguments." };
     const launched = await this.launcher.spawnInteractive(command.input) as Record<string, unknown>;
     const occurredAt = this.#now().toISOString() as IsoTimestamp;
     const launchedAgentId = typeof launched.agentId === "string" ? launched.agentId : "unknown";
     const event = command.type === "general-purpose"
-      ? `you started a general-purpose session${command.input.chrome === true ? " with Chrome" : ""} (agent ${launchedAgentId}).`
+      ? `you started a general-purpose session (agent ${launchedAgentId}).`
       : `you started a brainstormer (agent ${launchedAgentId}).`;
     this.fleet.enqueueNotification(agentId, event, occurredAt);
     const opened = command.type === "general-purpose" ? "General-purpose session launched and focused." : "Brainstorm session launched and focused.";
@@ -594,7 +591,7 @@ export class ManagerPromptService {
       intercepted: true,
       message: command.ignoredArguments
         ? `${opened} It takes no arguments, so the text you typed after /${command.command} was not sent; type it in the new terminal.`
-        : command.input.chrome === true ? `${opened} Claude in Chrome is enabled.` : opened,
+        : opened,
     };
   }
 
@@ -630,7 +627,7 @@ export class ManagerPromptService {
       return {
         intercepted: true,
         message: action.type === "auto"
-          ? "/auto accepts optional --dry and --chrome flags before an optional session guideline."
+          ? "/auto accepts the optional --dry flag before an optional session guideline."
           : `/${action.command} does not accept those arguments.`,
       };
     }
@@ -638,7 +635,6 @@ export class ManagerPromptService {
     try {
       outcome = action.type === "auto"
         ? await this.actions.startAutoRun({
-            ...(action.chrome ? { chrome: true as const } : {}),
             ...(action.dry ? { dry: true as const } : {}),
             ...(action.additionalGuideline === undefined ? {} : { additionalGuideline: action.additionalGuideline }),
           })
@@ -683,7 +679,7 @@ function describeActionOutcome(type: ParsedActionCommand["type"], outcome: unkno
     if (value.started === false) return `auto-run did not start: ${typeof value.reason === "string" ? value.reason : "no reason given"}.`;
     const issues = Array.isArray(value.issues) ? value.issues.length : 0;
     const cycles = Array.isArray(value.dependencyCycles) ? value.dependencyCycles.length : 0;
-    return `auto-run started with ${issues} issue${issues === 1 ? "" : "s"} queued${cycles === 0 ? "" : `; ${cycles} dependency cycle${cycles === 1 ? "" : "s"} detected and safely relaxed`}, Chrome ${value.chromeEnabled === true ? "on" : "off"}.`;
+    return `auto-run started with ${issues} issue${issues === 1 ? "" : "s"} queued${cycles === 0 ? "" : `; ${cycles} dependency cycle${cycles === 1 ? "" : "s"} detected and safely relaxed`}.`;
   }
   switch (value.action) {
     case "none": return "No pull request is open, so nothing was launched.";
@@ -708,7 +704,7 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
     result.isolatedWorkspace
       ? `- Workspace: create a separate checkout; your checkout and branch stay untouched${result.keepsWorkspace ? ", and the checkout is kept when the run drains" : ", and the checkout is removed after a clean drain"}.`
       : "- Workspace: use this checkout; it must be clean, aboard moves HEAD during the run, and restores the current branch when the run ends.",
-    `- Agents: visible implementers run one at a time with Chrome ${result.chromeEnabled ? "on" : "off"}; pull-request review is ${result.reviewMode ? "on" : "off"}.`,
+    `- Agents: visible implementers run one at a time; [AI]-chrome issues enable Claude in Chrome; pull-request review is ${result.reviewMode ? "on" : "off"}.`,
     ...(result.additionalGuideline === undefined
       ? []
       : ["- Additional guideline: append this final section to every implementer and pr-doctor prompt:", "", "# Additional User Guideline For this Session", "", result.additionalGuideline]),
@@ -728,7 +724,7 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
       ? ` You must merge its PR, or another account must approve it so aboard may merge it, before the issue is closed and the run continues${result.pauseAfterHitl ? "; after it lands, the run pauses and you must run /auto again" : ""}.`
       : " Aboard merges its PR into the session branch and closes the issue; you act only if a conflict cannot be reconciled or the repository refuses the merge.";
     lines.push(
-      `${index + 1}. #${issue.number} ${issue.title} ([AI]-${issue.disposition}, ${difficulty}) -> ${issue.branch}. A visible implementer leaves edits; aboard comments on the issue, commits, pushes, and opens the PR.${review}${gate}`,
+      `${index + 1}. #${issue.number} ${issue.title} ([AI]-${issue.disposition}, ${difficulty}${issue.chrome ? ", [AI]-chrome" : ""}) -> ${issue.branch}. A visible implementer leaves edits; aboard comments on the issue, commits, pushes, and opens the PR.${review}${gate}`,
     );
   }
 
@@ -766,7 +762,6 @@ interface ParsedActionCommand {
   readonly type: "auto" | "review-pr" | "reopen";
   readonly command: string;
   readonly invalidArguments: boolean;
-  readonly chrome: boolean;
   readonly dry: boolean;
   /** `/auto` only: user-authored text appended to every auto agent prompt. */
   readonly additionalGuideline?: string;
@@ -787,7 +782,7 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
 }
 
 /**
- * `/auto` accepts the explicit `--dry` inspection and `--chrome` launch choice,
+ * `/auto` accepts the explicit `--dry` inspection,
  * followed by optional free-form guidance for every auto agent. Flags lead so
  * an unknown option is still rejected instead of silently becoming guidance.
  * `/review-pr` and `/reopen` also treat trailing text as a real parameter: the
@@ -805,10 +800,10 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   const command = match[1] as "auto" | "review-pr" | "reopen";
   const trailing = match[2]?.trim() ?? "";
   if (command === "review-pr") {
-    return { type: command, command, invalidArguments: false, chrome: false, dry: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
+    return { type: command, command, invalidArguments: false, dry: false, ...(trailing.length === 0 ? {} : { focus: trailing }) };
   }
   if (command === "reopen") {
-    return { type: command, command, invalidArguments: false, chrome: false, dry: false, ...(trailing.length === 0 ? {} : { selector: trailing }) };
+    return { type: command, command, invalidArguments: false, dry: false, ...(trailing.length === 0 ? {} : { selector: trailing }) };
   }
   const flags: string[] = [];
   let remainder = trailing;
@@ -816,8 +811,8 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
     const token = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(remainder);
     if (token === null) break;
     const flag = token[1]!;
-    if (flag !== "--chrome" && flag !== "--dry") {
-      return { type: command, command, invalidArguments: true, chrome: false, dry: false };
+    if (flag !== "--dry") {
+      return { type: command, command, invalidArguments: true, dry: false };
     }
     flags.push(flag);
     remainder = token[2]?.trim() ?? "";
@@ -826,15 +821,14 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
     type: command,
     command,
     invalidArguments: new Set(flags).size !== flags.length,
-    chrome: flags.includes("--chrome"),
     dry: flags.includes("--dry"),
     ...(remainder.length === 0 ? {} : { additionalGuideline: remainder }),
   };
 }
 
 /**
- * `/general-purpose` accepts only `--chrome`; `/brainstorm` keeps its existing
- * argumentless handoff and reports that trailing text was ignored. They open a
+ * `/general-purpose` and `/brainstorm` are argumentless handoffs and report
+ * that trailing text was ignored. They open a
  * terminal the user drives directly, so an opening message would only spend a
  * turn before the conversation starts. Nothing leaks into Manager context.
  */
@@ -853,9 +847,9 @@ function parseInteractiveCommand(prompt: string): {
     ? {
         type: "general-purpose",
         command,
-        invalidArguments: trailing !== "" && trailing !== "--chrome",
-        ignoredArguments: false,
-        input: { type: "general-purpose", description: "general purpose interactive session", ...(trailing === "--chrome" ? { chrome: true } : {}) },
+        invalidArguments: false,
+        ignoredArguments: trailing.length > 0,
+        input: { type: "general-purpose", description: "general purpose interactive session" },
       }
     : { type: "brainstormer", command, invalidArguments: false, ignoredArguments: trailing.length > 0, input: { type: "brainstormer", description: "interactive brainstorm session" } };
 }

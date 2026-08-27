@@ -80,7 +80,6 @@ function fixedPlanRecord(): AutoRunRecord {
     attempt: 2,
     settings: {
       review: true,
-      chromeEnabled: true,
       mergeStrategy: "merge",
       mergeRunPullRequest: true,
       pauseAfterHitl: false,
@@ -90,7 +89,7 @@ function fixedPlanRecord(): AutoRunRecord {
       additionalGuideline: "keep fixtures small",
     },
     plan: [
-      { number: 34, title: "Add retry backoff", branch: "aboard/34-add-retry-backoff", disposition: "afk", difficulty: "advanced", dependsOn: [] },
+      { number: 34, title: "Add retry backoff", branch: "aboard/34-add-retry-backoff", disposition: "afk", difficulty: "advanced", chrome: true, dependsOn: [] },
       { number: 35, title: "Migrate the queue", branch: "aboard/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
     ],
     progress: {

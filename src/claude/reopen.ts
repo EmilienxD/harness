@@ -140,7 +140,7 @@ export class ReopenCoordinator {
       sessionId: candidate.sessionId,
       terminalName: `aboard: ${candidate.description}`,
       ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
-      ...(candidate.chromeEnabled === undefined ? {} : { chromeEnabled: candidate.chromeEnabled }),
+      ...(candidate.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
       // Reopened where it ran: an auto-run's own checkout holds the transcript,
       // and the directory it names may no longer exist, which is what the
       // transcript test above has already settled.

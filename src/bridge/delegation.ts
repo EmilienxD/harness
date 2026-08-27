@@ -59,8 +59,8 @@ export interface DelegationLaunchInput {
   readonly issues?: readonly number[];
   readonly pullRequest?: number;
   readonly focus?: string;
-  /** Explicit launch intent; supported for general-purpose and implementer only. */
-  readonly chrome?: boolean;
+  /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */
+  readonly chrome?: true;
   /**
    * Set only by the auto-run engine. It records that this agent's contract ends
    * at "the working tree contains the change", so a dirty tree at Stop is
@@ -107,7 +107,7 @@ export interface ReopenTarget {
    * the fallback tier rather than at a stored one.
    */
   readonly difficulty?: IssueDifficulty;
-  readonly chromeEnabled?: boolean;
+  readonly chromeEnabled?: true;
   /** Default is the controller's; a bulk restore passes `false` explicitly. */
   readonly focus?: boolean;
   /** Replays the command fence carried by a session that originated in auto-run. */
@@ -277,7 +277,7 @@ export class DelegationCoordinator {
       sessionId: session.sessionId,
       terminalName: session.terminal.name,
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
-      chromeEnabled: session.chromeEnabled === true,
+      ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
       ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
       // Restoration opens several terminals at once, so none of them steals
@@ -318,9 +318,7 @@ export class DelegationCoordinator {
       // Reopening hands the session to the user whatever it was: an automated
       // launch's caller is long gone, and this terminal is theirs to type in.
       attended: true,
-      ...((target.type === "general-purpose" || target.type === "implementer")
-        ? { chrome: target.chromeEnabled === true }
-        : {}),
+      ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration,
       disallowedTools: [
         ...(this.options.disallowedTools ?? []),
@@ -450,9 +448,7 @@ export class DelegationCoordinator {
       agentType: input.type,
       shell: this.options.shell,
       attended: interactive,
-      ...((input.type === "general-purpose" || input.type === "implementer")
-        ? { chrome: input.chrome === true }
-        : {}),
+      ...(input.type === "implementer" && input.chrome === true ? { chrome: true } : {}),
       configuration,
       prompt,
       // Auto-run's git/GitHub fence and worktree isolation join the

@@ -10,7 +10,7 @@
  * Pure: no `vscode`, no process, no clock, no I/O.
  */
 
-import { LABEL_SPEC, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
+import { LABEL_CHROME, LABEL_SPEC, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
 import {
   branchName,
   type AutoRunPhase,
@@ -34,6 +34,8 @@ export interface FrozenIssue {
   readonly branch: string;
   readonly disposition: IssueDisposition;
   readonly difficulty?: IssueDifficulty;
+  /** Whether this issue's implementer launches with Claude in Chrome. */
+  readonly chrome?: true;
   /**
    * Open blockers, restricted to issues this same run admitted. An issue whose
    * closure reaches outside the plan is excluded rather than carried with a
@@ -45,7 +47,6 @@ export interface FrozenIssue {
 /** The settings a run is bound to for its whole life, including every resume. */
 export interface FrozenRunSettings {
   readonly review: boolean;
-  readonly chromeEnabled: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
   readonly pauseAfterHitl: boolean;
@@ -339,6 +340,7 @@ export function planRun(candidates: readonly CandidateIssue[]): RunPlanResult {
       branch: branchName(candidate.number, candidate.title),
       disposition: classify(candidate.labels)!,
       ...(difficulty === undefined ? {} : { difficulty }),
+      ...(hasLabel(candidate.labels, LABEL_CHROME) ? { chrome: true as const } : {}),
       dependsOn: candidate.openBlockedByNumbers.filter((blocker) => eligible.has(blocker)),
     };
   });

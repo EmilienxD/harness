@@ -135,7 +135,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     : undefined;
   const pollSeconds = positiveInteger(value.pollSeconds);
   if (
-    typeof value.review !== "boolean" || typeof value.chromeEnabled !== "boolean"
+    typeof value.review !== "boolean"
     || typeof value.mergeRunPullRequest !== "boolean" || typeof value.pauseAfterHitl !== "boolean"
     || mergeStrategy === undefined || pollSeconds === undefined
     || typeof worktree.enabled !== "boolean" || typeof worktree.root !== "string"
@@ -145,7 +145,6 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   if (value.additionalGuideline !== undefined && guideline === undefined) return undefined;
   return {
     review: value.review,
-    chromeEnabled: value.chromeEnabled,
     mergeStrategy,
     mergeRunPullRequest: value.mergeRunPullRequest,
     pauseAfterHitl: value.pauseAfterHitl,
@@ -168,7 +167,7 @@ function parseFrozenIssue(value: unknown): FrozenIssue | undefined {
   const branch = nonEmptyString(value.branch);
   const issueDisposition = disposition(value.disposition);
   const dependsOn = numbers(value.dependsOn ?? []);
-  if (number === undefined || title === undefined || branch === undefined || issueDisposition === undefined || dependsOn === undefined) {
+  if (number === undefined || title === undefined || branch === undefined || issueDisposition === undefined || (value.chrome !== undefined && value.chrome !== true) || dependsOn === undefined) {
     return undefined;
   }
   const tier = difficulty(value.difficulty);
@@ -179,6 +178,7 @@ function parseFrozenIssue(value: unknown): FrozenIssue | undefined {
     branch,
     disposition: issueDisposition,
     ...(tier === undefined ? {} : { difficulty: tier }),
+    ...(value.chrome === true ? { chrome: true as const } : {}),
     dependsOn,
   };
 }

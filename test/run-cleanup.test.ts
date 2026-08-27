@@ -22,7 +22,6 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 1,
     settings: {
       review: false,
-      chromeEnabled: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,

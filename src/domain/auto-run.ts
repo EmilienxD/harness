@@ -77,12 +77,14 @@ export interface PlannedIssue {
   readonly title: string;
   readonly disposition: IssueDisposition;
   readonly branch: string;
+  /** Whether the issue carries `[AI]-chrome`. */
+  readonly chrome?: true;
   /**
    * The tier the issue's difficulty label expresses, which decides the model and
    * effort of the agents that work it. Absent is the ordinary state of an issue
    * nobody rated, and resolves to the most capable tier at launch time. Derived
-   * here and never persisted: the run record re-reads GitHub on resume, so a
-   * relabelled issue is worked at its new tier rather than its recorded one.
+   * here and frozen into the run plan so relabelling breaks recovery instead of
+   * silently changing launch policy.
    */
   readonly difficulty?: IssueDifficulty;
 }
@@ -110,7 +112,6 @@ export type AutoRunDryRunResult =
       readonly blockers: readonly string[];
       readonly reviewMode: boolean;
       readonly pauseAfterHitl: boolean;
-      readonly chromeEnabled: boolean;
       /** User-authored guidance that would be appended to every auto agent. */
       readonly additionalGuideline?: string;
       readonly isolatedWorkspace: boolean;
@@ -409,8 +410,8 @@ export interface CandidateIssue {
 
 /** Notification lines. Kept terse on purpose; they are read in bulk. */
 export const autoRunMessage = {
-  started: (afk: number, hitl: number, review: boolean, chrome: boolean): string =>
-    `auto-run: started — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}, Chrome ${chrome ? "on" : "off"}.`,
+  started: (afk: number, hitl: number, review: boolean): string =>
+    `auto-run: started — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}.`,
   implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} addressed on ${branch}.`,
   unchanged: (issue: number): string =>
     `auto-run: issue #${issue} finished with no changes; deleted its empty branch and continuing.`,

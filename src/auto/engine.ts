@@ -179,7 +179,6 @@ export interface AutoRunState {
   readonly completedCount: number;
   readonly totalCount: number;
   readonly waiting: boolean;
-  readonly chromeEnabled: boolean;
   readonly currentPullRequest: number | undefined;
 }
 
@@ -188,7 +187,6 @@ export type AutoRunStartResult =
       readonly started: true;
       readonly runId: string;
       readonly reviewMode: boolean;
-      readonly chromeEnabled: boolean;
       readonly sessionBranch: string;
       readonly sessionBase: string;
       readonly mergesItsOwnPullRequest: boolean;
@@ -348,7 +346,7 @@ export class AutoRunEngine {
    * Inspects exactly the inputs a new run uses without reserving an id or
    * performing any write.
    */
-  public async dryRun(options: { readonly chrome?: boolean; readonly additionalGuideline?: string } = {}): Promise<AutoRunDryRunResult> {
+  public async dryRun(options: { readonly additionalGuideline?: string } = {}): Promise<AutoRunDryRunResult> {
     if (this.#state !== undefined) return { dryRun: true, inspected: false, reason: "a run is already active" };
 
     let status;
@@ -378,7 +376,6 @@ export class AutoRunEngine {
       blockers,
       reviewMode: settings.review,
       pauseAfterHitl: settings.pauseAfterHitl,
-      chromeEnabled: options.chrome === true,
       ...guidelineProperty(options.additionalGuideline),
       isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
       keepsWorkspace: settings.worktree.keep,
@@ -396,7 +393,7 @@ export class AutoRunEngine {
    * exists, so a crash between the two leaves a record describing exactly the
    * work that was agreed and nothing that was half-created.
    */
-  public async start(options: { readonly chrome?: boolean; readonly additionalGuideline?: string } = {}): Promise<AutoRunStartResult> {
+  public async start(options: { readonly additionalGuideline?: string } = {}): Promise<AutoRunStartResult> {
     if (this.#state !== undefined) return { started: false, reason: "a run is already active", active: this.#state };
     const existing = await this.options.store.load().catch(() => undefined);
     if (existing !== undefined) {
@@ -420,7 +417,6 @@ export class AutoRunEngine {
 
     const frozen: FrozenRunSettings = {
       review: settings.review,
-      chromeEnabled: options.chrome === true,
       mergeStrategy: settings.mergeStrategy,
       mergeRunPullRequest: settings.mergeRunPullRequest,
       pauseAfterHitl: settings.pauseAfterHitl,
@@ -452,7 +448,7 @@ export class AutoRunEngine {
     this.#persisted = record;
 
     const afk = plan.issues.filter((issue) => issue.disposition === "afk").length;
-    this.options.notifier.notify(autoRunMessage.started(afk, plan.issues.length - afk, frozen.review, frozen.chromeEnabled));
+    this.options.notifier.notify(autoRunMessage.started(afk, plan.issues.length - afk, frozen.review));
     for (const cycle of plan.dependencyCycles) {
       this.options.notifier.notify(`auto-run: dependency cycle detected among ${cycle.map((number) => `#${number}`).join(", ")}; ordering those issues oldest first.`);
     }
@@ -465,7 +461,6 @@ export class AutoRunEngine {
       started: true,
       runId,
       reviewMode: frozen.review,
-      chromeEnabled: frozen.chromeEnabled,
       sessionBranch: record.sessionBranch,
       sessionBase: record.targetBranch ?? await this.options.git.defaultBranch(),
       mergesItsOwnPullRequest: frozen.mergeRunPullRequest,
@@ -514,7 +509,6 @@ export class AutoRunEngine {
       started: true,
       runId: record.runId,
       reviewMode: record.settings.review,
-      chromeEnabled: record.settings.chromeEnabled,
       sessionBranch: record.sessionBranch,
       sessionBase: record.targetBranch ?? await this.options.git.defaultBranch(),
       mergesItsOwnPullRequest: record.settings.mergeRunPullRequest,
@@ -668,7 +662,6 @@ export class AutoRunEngine {
       completedCount: completedCount(record),
       totalCount: record.plan.length,
       waiting: false,
-      chromeEnabled: record.settings.chromeEnabled,
       currentPullRequest: currentPullRequest(record),
     });
     const homeBranch = record.targetBranch;
@@ -1041,7 +1034,6 @@ export class AutoRunEngine {
         completedCount: completedCount(this.#current),
         totalCount: this.#current.plan.length,
         waiting: step.action === "await-approval",
-        chromeEnabled: this.#current.settings.chromeEnabled,
         currentPullRequest: prNumber,
       });
       await this.#save(withProgress(this.#current, issue.number, {
@@ -1206,7 +1198,7 @@ export class AutoRunEngine {
       type: "implementer",
       issues: [issue.number],
       description: `address issue ${issue.number}`,
-      chrome: this.#current.settings.chromeEnabled,
+      ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
       prompt: `Address issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.`,
       ...(await this.#guidance(issue)),

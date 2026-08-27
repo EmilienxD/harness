@@ -320,7 +320,7 @@ test("plans general-purpose as Claude Code's unmodified default session", () => 
   assert.equal(plan.requiresWriteLease, true);
 });
 
-test("Chrome intent is explicit for eligible launches and is replayed on resume", () => {
+test("Chrome is available only to implementers and is replayed on resume", () => {
   const generalPurpose = {
     agentId,
     sessionId,
@@ -329,16 +329,15 @@ test("Chrome intent is explicit for eligible launches and is replayed on resume"
     configuration: resolveLaunchConfiguration({}),
     attended: true,
   };
-  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: true }).args, ["--session-id", sessionId, ...runtimeArgs, "--chrome"]);
-  assert.deepEqual(planLaunch({ ...generalPurpose, chrome: false }).args, ["--session-id", sessionId, ...runtimeArgs, "--no-chrome"]);
-  assert.deepEqual(planSessionResume({ ...generalPurpose, chrome: true }).args, ["--resume", sessionId, ...runtimeArgs, "--chrome"]);
-
   const implementer = planLaunch(request({ chrome: true }));
   assert.equal(implementer.args.includes("--chrome"), true);
   assert.equal(implementer.args.indexOf("--chrome") < implementer.args.indexOf("--disable-slash-commands"), true);
+  assert.equal(planLaunch(request()).args.includes("--no-chrome"), false);
+  const { prompt: _prompt, ...resumeRequest } = request({ chrome: true });
+  assert.equal(planSessionResume(resumeRequest).args.includes("--chrome"), true);
 
   assert.throws(
-    () => planLaunch(request({ agentType: "Explore", configuration: resolveLaunchConfiguration({ agentName: "Explore" }), chrome: true })),
+    () => planLaunch({ ...generalPurpose, chrome: true }),
     (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",
   );
 });

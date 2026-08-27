@@ -52,11 +52,10 @@ Then try one of these in the Manager terminal:
 | You type | What happens |
 | :-- | :-- |
 | `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
-| `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet. Add `--chrome` when this session needs visible browser debugging |
+| `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet |
 | `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, address, commit, PR, merge — one issue at a time, onto a branch of the run's own |
 | `/auto --dry` | Read-only forecast: show the issues found, their dependency-aware order and branches, settings-driven review/merge behavior, blockers, and every point where you will need to act |
 | `/auto no unit tests needed` | Start the same run and append that guideline to every implementer and pr-doctor prompt |
-| `/auto --chrome` | The same run, with Claude in Chrome enabled for every implementer in this run |
 | `/reopen` | The last session you were handed comes back — same conversation, same agent definition. `/reopen brainstorm` picks by type, `/reopen 7` by agent id, and **Aboard: Reopen a Session** lists them all |
 | *"Address issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
 
@@ -64,9 +63,9 @@ Then try one of these in the Manager terminal:
 
 `/auto` is the closest aboard gets to hands-off, and it's deliberately fenced in:
 
-- **Preview the whole bargain first.** `/auto --dry` reads git and GitHub but changes neither. It reports whether a real run can start, the issue order and exact issue branches, the prospective `aboard/run/<run-id>` session branch and its target, skipped issues and dependency cycles, review/worktree/final-merge settings, and the user action required at HITL, conflict, failure, and final-PR gates. It is a forecast only because GitHub may change before you start; once a run starts, that plan is what it works. Add `--chrome` in either order to preview that launch choice too.
+- **Preview the whole bargain first.** `/auto --dry` reads git and GitHub but changes neither. It reports whether a real run can start, the issue order and exact issue branches, which issues carry `[AI]-chrome`, the prospective `aboard/run/<run-id>` session branch and its target, skipped issues and dependency cycles, review/worktree/final-merge settings, and the user action required at HITL, conflict, failure, and final-PR gates. It is a forecast only because GitHub may change before you start; once a run starts, that plan is what it works.
 
-- **Add one guideline for the whole run.** Put free-form text after the optional flags, for example `/auto --chrome no unit tests needed`. aboard appends it under `# Additional User Guideline For this Session` at the very end of every implementer and pr-doctor prompt. The same text is kept in the run's gitignored runtime record so interrupted runs resume with it; `/auto --dry <guideline>` previews it without persisting anything.
+- **Add one guideline for the whole run.** Put free-form text after the optional `--dry` flag, for example `/auto no unit tests needed`. aboard appends it under `# Additional User Guideline For this Session` at the very end of every implementer and pr-doctor prompt. The same text is kept in the run's gitignored runtime record so interrupted runs resume with it; `/auto --dry <guideline>` previews it without persisting anything.
 
 - **The extension does every git and GitHub side effect** — branch, commit, push, PR, merge. Agents only produce content. A branch name and a `Closes #N` trailer derived from the issue are correct by construction; an agent writing them is a sampling operation that drifts silently.
 - **Nothing lands on your branch behind your back.** A run cuts one session branch, `aboard/run/<id>`, from the branch you were on. Every issue branches off that, merges back into it, and the run closes the issue itself — GitHub only honours `Closes #N` on the default branch, and a run never merges there. When the queue drains, you get **one** pull request from the session branch into the branch you started on. `aboard.autoRun.mergeRunPullRequest` decides whether aboard tries to merge that one; it is off by default.
@@ -78,7 +77,7 @@ Then try one of these in the Manager terminal:
 
 - **It refuses to guess.** Before each step, aboard checks the whole plan against git and GitHub. A run-owned branch that moved, an issue closed or relabelled under it, a pull request retargeted or merged by somebody else: any of these stops the run and says which. It doesn't roll anything back, and it doesn't quietly carry on with a plan that no longer describes reality. Stopping costs you a click; continuing costs you work you never approved.
 - **Review is opt-in.** LLM tokens are your money, not ours.
-- **Chrome is opt-in per run.** Browser tool definitions and signed-in browser access are loaded only when you type `/auto --chrome`, call `start_auto_run` with `chrome: true`, or use the dedicated palette command.
+- **Chrome is opt-in per issue.** Add `[AI]-chrome` to an implementable issue to launch that issue's implementer with Claude in Chrome. The choice is frozen with the plan, survives resume, and a later label change breaks recovery instead of silently changing the launch.
 
 ## Why you can leave it running
 
