@@ -249,6 +249,13 @@ test("a row offers only the actions it can actually perform", () => {
   const model = new ActivityTreeModel({ entries: () => entries, isTerminalOpen: (id) => openTerminals.has(id) });
   const items = model.roots().map((node) => model.item(node));
 
+  // Recent Activity stays compact: launch metadata remains available on hover
+  // instead of occupying VS Code's muted secondary-description column.
+  assert.deepEqual(items.map((item) => item.description), ["", "", "", ""]);
+  assert.match(items[0]?.tooltip ?? "", /brainstormer conversation/);
+  assert.match(items[2]?.tooltip ?? "", /#34, #35/);
+  assert.match(items[2]?.tooltip ?? "", /PR #60/);
+
   // Terminal still open: focus it, and do not offer to relaunch the same session.
   assert.match(items[0]?.contextValue ?? "", /terminal/);
   assert.doesNotMatch(items[0]?.contextValue ?? "", /reopen/);

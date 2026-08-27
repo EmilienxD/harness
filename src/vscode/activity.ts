@@ -53,7 +53,10 @@ export class ActivityTreeModel {
     if (entry.kind === "agent" && entry.type === "manager" && !live) capabilities.push("manager");
     return {
       label: describeActivity(entry),
-      description: describeDetail(entry),
+      // Activity rows already have an outcome label and an icon. Keeping the
+      // launch metadata in VS Code's muted description makes this dense view
+      // wrap quickly, so details live in the tooltip and row actions instead.
+      description: "",
       tooltip: tooltip(entry),
       icon: icon(entry),
       contextValue: capabilities.join("."),
@@ -80,6 +83,7 @@ function describeDetail(entry: ActivityEntry): string {
 function tooltip(entry: ActivityEntry): string {
   return [
     describeActivity(entry),
+    describeDetail(entry),
     entry.kind === "agent" ? `Agent ${entry.agentId} (${entry.type})` : `Run ${entry.runId}, attempt ${entry.attempt}`,
     `At ${entry.at}`,
     entry.reason === undefined ? "" : entry.reason,

@@ -64,6 +64,18 @@ test("Agent Fleet keeps New Manager first and leaves Manager resume to Recent Ac
 
   const activityResume = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.resumeManager");
   assert.match(activityResume?.when ?? "", /manager/, "Manager resume remains on its Recent Activity row");
+
+  const icons = new Map(contributes.commands.map((entry) => [entry.command, entry.icon]));
+  assert.equal(icons.get("aboard.resumeManager"), icons.get("aboard.activity.reopen"), "Manager resume uses the session-reopen icon");
+});
+
+test("every action rendered inline in a panel has an icon", async () => {
+  const { contributes } = await manifest();
+  const icons = new Map(contributes.commands.map((entry) => [entry.command, entry.icon]));
+  const inline = (contributes.menus["view/item/context"] ?? []).filter((entry) => entry.group?.startsWith("inline"));
+  for (const entry of inline) {
+    assert.match(icons.get(entry.command) ?? "", /^\$\(.+\)$/, `${entry.command} would render as text in the panel`);
+  }
 });
 
 test("reopening is always offered, and bulk fleet restoration no longer exists", async () => {

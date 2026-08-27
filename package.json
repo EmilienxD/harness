@@ -29,7 +29,8 @@
     "commands": [
       {
         "command": "aboard.resumeManager",
-        "title": "Aboard: Resume Manager"
+        "title": "Aboard: Resume Manager",
+        "icon": "$(history)"
       },
       {
         "command": "aboard.newManager",
@@ -55,27 +56,33 @@
       },
       {
         "command": "aboard.startAutoRun",
-        "title": "Aboard: Start Auto Run"
+        "title": "Aboard: Start Auto Run",
+        "icon": "$(play)"
       },
       {
         "command": "aboard.startAutoRunWithChrome",
-        "title": "Aboard: Start Auto Run with Chrome"
+        "title": "Aboard: Start Auto Run with Chrome",
+        "icon": "$(globe)"
       },
       {
         "command": "aboard.stopAutoRun",
-        "title": "Aboard: Stop Auto Run"
+        "title": "Aboard: Stop Auto Run",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "aboard.continueAutoRun",
-        "title": "Aboard: Auto Run — Continue Now"
+        "title": "Aboard: Auto Run — Continue Now",
+        "icon": "$(debug-continue)"
       },
       {
         "command": "aboard.focusAgent",
-        "title": "Aboard: Focus Agent"
+        "title": "Aboard: Focus Agent",
+        "icon": "$(terminal)"
       },
       {
         "command": "aboard.killAgent",
-        "title": "Aboard: Kill Agent"
+        "title": "Aboard: Kill Agent",
+        "icon": "$(close)"
       },
       {
         "command": "aboard.forceReleaseLease",
