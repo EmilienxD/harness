@@ -1,31 +1,43 @@
 # harness
 
 A collection of installable agent tools — skills, hooks, agents — each one
-independently installable into any project with a single command. Claude Code
-is the default target; the installer also has a native ChatGPT target ready for
-tool-specific implementations.
+independently installable into any project with a single command. The installer
+targets both Claude Code and ChatGPT by default, with native payloads and paths
+for each.
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness harness install commit
 ```
 
-That copies the tool's files into `./.claude/` and merges the settings it needs
-into `./.claude/settings.json`, without disturbing anything already there.
+That installs the tool's Claude Code payload under `./.claude/` and its ChatGPT
+payload under `./.agents/` and `./.codex/`, without disturbing anything already
+there.
 
 ## Usage
 
 ```bash
 harness list                      # available tools, and what's installed here
 harness info commit               # exactly what a tool will write
-harness install commit --dry  # file list + a settings.json diff, nothing written
+harness install commit --dry      # file lists + config diffs, nothing written
 harness install caveman zoom-out  # several at once ('all' installs everything)
 harness uninstall commit          # removes only what it added ('all' too)
 harness upgrade                   # reinstall everything at the shipped version
-harness list --platform chatgpt   # inspect ChatGPT availability/status
+harness install commit --platform claude  # install only for Claude Code
+harness list --platform chatgpt            # inspect only the ChatGPT target
 ```
 
-Every command accepts `--platform claude|chatgpt`; omitting it is exactly the
-same as `--platform claude`, preserving the original command behavior.
+Every command targets both platforms when `--platform` is omitted. Pass the flag
+once to select only one platform, or repeat it to select several explicitly:
+
+```bash
+harness install commit --platform chatgpt
+harness install commit --platform claude --platform chatgpt
+```
+
+Mutating commands that name tools require them to support every selected
+platform, and validate the whole selection before writing anything. `install
+all` instead installs every tool supported by each selected platform and skips
+unsupported/replacement-only tools for that platform.
 
 Shorten the command by aliasing it, since the `--from` prefix is the same every time:
 
@@ -42,8 +54,9 @@ tool lands in the project you're standing in, and can be committed so your
 whole team gets it.
 
 ```bash
-harness install commit                # this project:  ./.claude/
-harness install commit --user         # every project: ~/.claude/
+harness install commit                # this project: both platforms
+harness install commit --user         # every project: both platforms
+harness install commit --platform claude  # this project: ./.claude/ only
 ```
 
 `--global` is an alias for `--user` if that reads better. Both scopes are
@@ -53,13 +66,13 @@ leaves the other alone.
 | Flag | Effect |
 |---|---|
 | `--dir PATH` | project scope, but some project other than the cwd |
-| `--user`, `--global` | machine-wide `~/.claude/`, active in every project |
+| `--user`, `--global` | machine-wide platform roots, active in every project |
 | `--local` | write to `settings.local.json` (gitignored) — project scope only |
 
 For ChatGPT, project skills go to `.agents/skills/` and native hook payloads
 and `hooks.json` go under `.codex/`. User installs use the corresponding roots
-in the home directory. `--local` is Claude Code-specific and is rejected for a
-ChatGPT target.
+in the home directory. `--local` is Claude Code-specific, so use it together
+with `--platform claude`; it is rejected whenever ChatGPT is selected.
 
 Hook paths adapt to the scope automatically: a project install writes Claude
 Code's `${CLAUDE_PROJECT_DIR}` placeholder, while a machine-wide install writes
@@ -70,7 +83,8 @@ whichever project happens to be open rather than at the hook.
 Claude Code reads only `settings.json` at the user level, and `--dir` names a
 project.
 
-Restart Claude Code after installing so it picks up new hooks and skills.
+Restart the selected products after installing so they pick up new hooks and
+skills.
 
 ## Tools
 
@@ -162,11 +176,12 @@ becomes `${CLAUDE_PROJECT_DIR}/.claude` (or an absolute path for `--user` instal
 
 A tool that stores a secret next to itself lists it under `gitignore`, and the
 installer creates or extends the repo's root `.gitignore` accordingly. The
-patterns go in a fenced `# >>> harness:<tool> >>>` block, because `.gitignore`
-has no trailing-comment syntax — `commit-ai.key # harness` would make
-`# harness` part of the pattern and silently stop matching. A pattern you
-already had is left alone rather than duplicated, so uninstalling can't delete
-a line you wrote.
+patterns go in platform-owned fenced blocks such as
+`# >>> harness:<tool>:claude >>>` and
+`# >>> harness:<tool>:chatgpt >>>`, because `.gitignore` has no trailing-comment
+syntax — `commit-ai.key # harness` would make `# harness` part of the pattern
+and silently stop matching. A pattern you already had is left alone rather than
+duplicated, so uninstalling can't delete a line you wrote.
 
 **Installing leaves nothing behind but the tool's own files** — no lock file, no
 `.bak`, no metadata directory. Everything `uninstall` needs is already in the
@@ -197,12 +212,13 @@ The CLI lives in `src/harness_cli/`; the tool payload is the top-level
 
 ## ChatGPT support
 
-The platform architecture is in place, but individual ChatGPT equivalents are
-not implemented yet. `list`, `info`, `install`, `uninstall`, and `upgrade`
-understand `--platform chatgpt` and report current tools as unsupported or
-replacement-only instead of copying incompatible Claude payloads. Future ports
-can use shared skills alongside native `.codex/hooks.json` fragments and
-target-specific payloads without adding platform conditionals to the installer.
+The platform architecture is in place and many tools have native ChatGPT
+equivalents. `list`, `info`, `install`, `uninstall`, and `upgrade` target both
+platforms by default and accept repeatable `--platform` selections. They report
+unsupported or replacement-only tools instead of copying incompatible Claude
+payloads. Future ports can use shared skills alongside native
+`.codex/hooks.json` fragments and target-specific payloads without adding
+platform conditionals to the installer.
 See
 the [tool-by-tool compatibility assessment](docs/CHATGPT-COMPATIBILITY.md) and
 the mirrored [official ChatGPT references](docs/CHATGPT-REFERENCES/README.md).

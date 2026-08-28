@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -198,6 +199,102 @@ def test_all_cli_operations_use_the_selected_adapter(tmp_path, monkeypatch, caps
     capsys.readouterr()
     assert not (project / ".agents").exists()
     assert not (project / ".codex").exists()
+
+
+def test_cli_installs_both_platforms_when_platform_is_omitted(
+    tmp_path, monkeypatch, capsys
+):
+    tool = make_tool(tmp_path / "source")
+    project = tmp_path / "project"
+    monkeypatch.setattr(cli_module, "discover", lambda: {tool.name: tool})
+
+    assert main(["install", tool.name, "--dir", str(project)]) == 0
+    assert (project / ".claude/skills/portable/SKILL.md").is_file()
+    assert (project / ".claude/hooks/hook.py").read_text() == "claude"
+    assert (project / ".agents/skills/portable/SKILL.md").is_file()
+    assert (project / ".codex/hooks/hook.py").read_text() == "chatgpt"
+    output = capsys.readouterr().out
+    assert "Claude Code:" in output
+    assert "ChatGPT:" in output
+
+    assert main(["uninstall", tool.name, "--dir", str(project)]) == 0
+    assert not (project / ".claude").exists()
+    assert not (project / ".agents").exists()
+    assert not (project / ".codex").exists()
+
+
+def test_cli_installs_only_the_explicit_platform(tmp_path, monkeypatch):
+    tool = make_tool(tmp_path / "source")
+    project = tmp_path / "project"
+    monkeypatch.setattr(cli_module, "discover", lambda: {tool.name: tool})
+
+    assert main(
+        ["install", tool.name, "--platform", "claude", "--dir", str(project)]
+    ) == 0
+    assert (project / ".claude/skills/portable/SKILL.md").is_file()
+    assert not (project / ".agents").exists()
+    assert not (project / ".codex").exists()
+
+
+def test_cli_accepts_repeated_platform_flags(tmp_path, monkeypatch):
+    tool = make_tool(tmp_path / "source")
+    project = tmp_path / "project"
+    monkeypatch.setattr(cli_module, "discover", lambda: {tool.name: tool})
+
+    assert main(
+        [
+            "install",
+            tool.name,
+            "--platform",
+            "chatgpt",
+            "--platform",
+            "claude",
+            "--dir",
+            str(project),
+        ]
+    ) == 0
+    assert (project / ".claude/skills/portable/SKILL.md").is_file()
+    assert (project / ".agents/skills/portable/SKILL.md").is_file()
+
+
+def test_cross_platform_install_merges_each_gitignore_entry(tmp_path, monkeypatch):
+    tool = make_tool(tmp_path / "source")
+    tool = replace(tool, gitignore=("secret",))
+    project = tmp_path / "project"
+    monkeypatch.setattr(cli_module, "discover", lambda: {tool.name: tool})
+
+    assert main(["install", tool.name, "--dir", str(project)]) == 0
+    gitignore = (project / ".gitignore").read_text(encoding="utf-8")
+    assert ".claude/secret" in gitignore
+    assert ".codex/secret" in gitignore
+
+    assert main(["uninstall", tool.name, "--dir", str(project)]) == 0
+    assert not (project / ".gitignore").exists()
+
+
+@pytest.mark.parametrize(
+    ("platform", "prefix"), [("claude", ".claude"), ("chatgpt", ".codex")]
+)
+def test_platform_install_migrates_its_legacy_unqualified_gitignore_block(
+    tmp_path, monkeypatch, platform, prefix
+):
+    tool = replace(make_tool(tmp_path / "source"), gitignore=("secret",))
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".gitignore").write_text(
+        f"# >>> harness:portable >>>\n{prefix}/secret\n# <<< harness:portable <<<\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli_module, "discover", lambda: {tool.name: tool})
+
+    common = ["--platform", platform, "--dir", str(project)]
+    assert main(["install", tool.name, *common]) == 0
+    lines = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "# >>> harness:portable >>>" not in lines
+    assert f"# >>> harness:portable:{platform} >>>" in lines
+
+    assert main(["uninstall", tool.name, *common]) == 0
+    assert not (project / ".gitignore").exists()
 
 
 def test_manifest_requires_replacement_text(tmp_path):

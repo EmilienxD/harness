@@ -15,6 +15,13 @@ def test_apply_is_idempotent():
     assert gitignore.apply(once, "commit", PATTERNS) == once
 
 
+def test_block_patterns_returns_only_patterns_from_the_named_complete_block():
+    text = gitignore.apply("own-rule\n", "commit", PATTERNS)
+    assert gitignore.block_patterns(text, "commit") == PATTERNS
+    assert gitignore.block_patterns(text, "other") == []
+    assert gitignore.block_patterns("# >>> harness:commit >>>\npartial\n", "commit") == []
+
+
 def test_apply_keeps_a_separating_blank_line():
     out = gitignore.apply("*.pyc\n", "commit", PATTERNS)
     assert out.splitlines()[:2] == ["*.pyc", ""]

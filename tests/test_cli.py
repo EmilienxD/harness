@@ -105,6 +105,14 @@ def test_unknown_tool_is_reported(tmp_path, capsys):
     assert "unknown tool" in capsys.readouterr().err
 
 
+def test_named_tool_must_support_every_default_platform(tmp_path, capsys):
+    assert main(["install", "prefer-read-tool", "--dir", str(tmp_path)]) == 1
+    assert "unsupported for the ChatGPT target" in capsys.readouterr().err
+    assert not (tmp_path / ".claude").exists()
+    assert not (tmp_path / ".agents").exists()
+    assert not (tmp_path / ".codex").exists()
+
+
 def test_dry_run_writes_nothing(tmp_path, capsys):
     assert main(["install", "commit", "--dir", str(tmp_path), "--dry"]) == 0
     assert "dry run" in capsys.readouterr().out

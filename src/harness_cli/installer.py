@@ -116,6 +116,10 @@ class Target:
         """Manifest entries are install-dir-relative, exactly like `dest`."""
         return self.adapter.gitignore_pattern(entry, self.is_user)
 
+    def gitignore_block_name(self, tool_name: str) -> str:
+        """Identify one platform's entries in a potentially shared file."""
+        return tool_name if self.is_user else f"{tool_name}:{self.platform.value}"
+
     def read_gitignore(self) -> str:
         path = self.gitignore_path
         return path.read_text(encoding="utf-8-sig") if path.is_file() else ""
@@ -464,9 +468,19 @@ def plan_install(
     ignore_before = (
         target.read_gitignore() if gitignore_override is None else gitignore_override
     )
+    ignore_base = ignore_before
     patterns = [target.gitignore_pattern(entry) for entry in tool.gitignore]
+    block_name = target.gitignore_block_name(tool.name)
+    # Early installs used an unqualified block name. Migrate it only when its
+    # contents clearly belong to this target; another platform's legacy block
+    # in the same shared .gitignore must remain.
+    if not target.is_user:
+        legacy = gitignore.block_patterns(ignore_base, tool.name)
+        prefix = f"{target.adapter.project_platform_dir}/"
+        if legacy and all(pattern.startswith(prefix) for pattern in legacy):
+            ignore_base = gitignore.remove(ignore_base, tool.name)
     ignore_after = (
-        gitignore.apply(ignore_before, tool.name, patterns) if patterns else ignore_before
+        gitignore.apply(ignore_base, block_name, patterns) if patterns else ignore_base
     )
 
     missing = [c for c in tool.requires if shutil.which(c) is None]
@@ -575,7 +589,12 @@ def uninstall(tool: Tool, target: Target, force: bool = False) -> list[str]:
     # were never inside our fence, so they survive untouched.
     if tool.gitignore:
         before = target.read_gitignore()
-        after = gitignore.remove(before, tool.name)
+        after = gitignore.remove(before, target.gitignore_block_name(tool.name))
+        if not target.is_user:
+            legacy = gitignore.block_patterns(after, tool.name)
+            prefix = f"{target.adapter.project_platform_dir}/"
+            if legacy and all(pattern.startswith(prefix) for pattern in legacy):
+                after = gitignore.remove(after, tool.name)
         if after != before:
             removed_any = True
             if after.strip():

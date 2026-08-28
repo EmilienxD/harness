@@ -34,6 +34,23 @@ def existing_patterns(text: str) -> set[str]:
     }
 
 
+def block_patterns(text: str, name: str) -> list[str]:
+    """Return active patterns inside `name`'s complete fenced block."""
+    begin, end = _fence(name)
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == begin), None)
+    if start is None:
+        return []
+    stop = next((i for i in range(start + 1, len(lines)) if lines[i].strip() == end), None)
+    if stop is None:
+        return []
+    return [
+        line.strip()
+        for line in lines[start + 1 : stop]
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
 def strip_block(text: str, name: str) -> str:
     """Remove `name`'s fenced block, leaving everything else byte-identical."""
     begin, end = _fence(name)

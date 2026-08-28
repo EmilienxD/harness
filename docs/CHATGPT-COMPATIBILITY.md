@@ -83,13 +83,13 @@ replacement.
 
 ## Architecture foundation
 
-The prerequisite installer refactor is now implemented. Platform selection is
-explicit (`--platform claude|chatgpt`, defaulting to `claude`) and one adapter
-owns each target's physical roots, config path, placeholders, legacy handling,
-and restart guidance:
+The prerequisite installer refactor is now implemented. Platform selection
+defaults to both targets and can be narrowed with repeatable flags (for example,
+`--platform claude --platform chatgpt`). One adapter owns each target's physical
+roots, config path, placeholders, legacy handling, and restart guidance:
 
-1. A `Platform` value (`claude` or `chatgpt`) is selected by the CLI, with
-   `claude` retained as the backward-compatible default.
+1. One or more `Platform` values (`claude` and/or `chatgpt`) are selected by the
+   CLI, with both selected when no `--platform` flag is provided.
 2. Layout and configuration behavior sit behind one platform adapter. It owns
    skill roots, hook roots, config paths, placeholder substitution, config
    merging, and platform-specific post-install guidance.

@@ -23,8 +23,13 @@ from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform
 
 
-def _target_from_args(args: argparse.Namespace) -> Target:
-    platform = Platform.parse(args.platform)
+def _platforms_from_args(args: argparse.Namespace) -> tuple[Platform, ...]:
+    """Return explicit platforms, or every platform when the flag is omitted."""
+    selected = args.platforms or list(Platform)
+    return tuple(dict.fromkeys(Platform.parse(platform) for platform in selected))
+
+
+def _target_from_args(args: argparse.Namespace, platform: Platform) -> Target:
     if args.user:
         # Claude Code reads only settings.json at the user level, and --dir names
         # a project, so both flags are meaningless here rather than merely odd.
@@ -35,6 +40,10 @@ def _target_from_args(args: argparse.Namespace) -> Target:
         return Target.for_user(platform=platform)
     settings_name = "settings.local.json" if args.local else "settings.json"
     return Target.for_project(Path(args.dir or ".").resolve(), settings_name, platform=platform)
+
+
+def _targets_from_args(args: argparse.Namespace) -> tuple[Target, ...]:
+    return tuple(_target_from_args(args, platform) for platform in _platforms_from_args(args))
 
 
 def _resolve(names: list[str], available: dict[str, Tool]) -> list[Tool]:
@@ -96,142 +105,211 @@ def _print_plan(plan: Plan) -> None:
 
 def cmd_list(args: argparse.Namespace) -> int:
     available = discover()
-    target = _target_from_args(args)
+    targets = _targets_from_args(args)
     width = max((len(n) for n in available), default=0)
-    any_installed = False
-    for name, tool in available.items():
-        support = tool.support_for(target.platform)
-        installed = is_installed(tool, target)
-        any_installed = any_installed or installed
-        mark = "*" if installed else " "
-        suffix = ""
-        if support.status is SupportStatus.REPLACEMENT:
-            suffix = f"  [replacement: {support.replacement}]"
-        elif support.status is SupportStatus.UNSUPPORTED:
-            suffix = "  [unsupported]"
-        print(f"{mark} {name.ljust(width)}  {tool.description}{suffix}")
-    if any_installed:
-        if target.platform is Platform.CLAUDE:
-            print(f"\n* installed in {target.install_root}")
-        else:
-            print(f"\n* installed for {target.adapter.product_name} in {target.install_root}")
+    for index, target in enumerate(targets):
+        if len(targets) > 1:
+            if index:
+                print()
+            print(f"{target.adapter.product_name}:")
+        any_installed = False
+        for name, tool in available.items():
+            support = tool.support_for(target.platform)
+            installed = is_installed(tool, target)
+            any_installed = any_installed or installed
+            mark = "*" if installed else " "
+            suffix = ""
+            if support.status is SupportStatus.REPLACEMENT:
+                suffix = f"  [replacement: {support.replacement}]"
+            elif support.status is SupportStatus.UNSUPPORTED:
+                suffix = "  [unsupported]"
+            print(f"{mark} {name.ljust(width)}  {tool.description}{suffix}")
+        if any_installed:
+            if target.platform is Platform.CLAUDE:
+                print(f"\n* installed in {target.install_root}")
+            else:
+                print(
+                    f"\n* installed for {target.adapter.product_name} in {target.install_root}"
+                )
     return 0
 
 
 def cmd_info(args: argparse.Namespace) -> int:
     tool = _resolve([args.tool], discover())[0]
-    target = _target_from_args(args)
-    support = tool.support_for(target.platform)
+    targets = _targets_from_args(args)
     print(f"{tool.name} {tool.version}\n{tool.description}\n")
-    if target.platform is not Platform.CLAUDE or support.status is not SupportStatus.SUPPORTED:
-        print(f"{target.adapter.product_name}: {support.status.value}")
-    if support.replacement:
-        print(f"Replacement: {support.replacement}")
-    if support.reason:
-        print(f"Reason: {support.reason}")
-    if support.status is not SupportStatus.SUPPORTED:
-        if tool.docs:
-            print(f"\nDocs: {tool.docs}")
-        return 0
-    if tool.requires:
-        print(f"Requires: {', '.join(tool.requires)}")
-    print("Files:")
-    for payload in tool.expand(target.platform):
-        path = target.destination_path(payload.root, payload.dest)
-        shown = path.as_posix() if target.is_user else path.relative_to(target.scope_root).as_posix()
-        print(f"  {shown}{'  (executable)' if payload.executable else ''}")
-    if tool.gitignore:
-        print("\nAdded to .gitignore:")
-        for entry in tool.gitignore:
-            print(f"  {target.gitignore_pattern(entry)}")
-    fragment = tool.fragment_for(target.platform)
-    if fragment:
-        print(f"\n{target.settings_name} fragment:")
-        for line in settings_merge.dumps(substitute(fragment, target)).splitlines():
-            print(f"  {line}")
+    for index, target in enumerate(targets):
+        support = tool.support_for(target.platform)
+        if len(targets) > 1:
+            if index:
+                print()
+            print(f"{target.adapter.product_name}: {support.status.value}")
+        elif target.platform is not Platform.CLAUDE or support.status is not SupportStatus.SUPPORTED:
+            print(f"{target.adapter.product_name}: {support.status.value}")
+        if support.replacement:
+            print(f"Replacement: {support.replacement}")
+        if support.reason:
+            print(f"Reason: {support.reason}")
+        if support.status is not SupportStatus.SUPPORTED:
+            continue
+        if tool.requires:
+            print(f"Requires: {', '.join(tool.requires)}")
+        print("Files:")
+        for payload in tool.expand(target.platform):
+            path = target.destination_path(payload.root, payload.dest)
+            shown = (
+                path.as_posix()
+                if target.is_user
+                else path.relative_to(target.scope_root).as_posix()
+            )
+            print(f"  {shown}{'  (executable)' if payload.executable else ''}")
+        if tool.gitignore:
+            print("\nAdded to .gitignore:")
+            for entry in tool.gitignore:
+                print(f"  {target.gitignore_pattern(entry)}")
+        fragment = tool.fragment_for(target.platform)
+        if fragment:
+            print(f"\n{target.settings_name} fragment:")
+            for line in settings_merge.dumps(substitute(fragment, target)).splitlines():
+                print(f"  {line}")
     if tool.docs:
         print(f"\nDocs: {tool.docs}")
     return 0
 
 
-def cmd_install(args: argparse.Namespace) -> int:
-    available = discover()
-    target = _target_from_args(args)
-    tools = (
-        [tool for tool in available.values() if tool.support_for(target.platform).status is SupportStatus.SUPPORTED]
-        if args.tools == ["all"]
-        else _resolve(args.tools, available)
-    )
-    if not tools:
-        raise InstallError(f"no tools are installable for the {target.adapter.product_name} target")
-    # Validate the whole batch before planning or writing any member.
-    for tool in tools:
-        require_supported(tool, target)
+def _run_install(
+    args: argparse.Namespace, batches: list[tuple[Target, list[Tool]]]
+) -> int:
+    """Validate and install platform batches as one command."""
+    nonempty = [(target, tools) for target, tools in batches if tools]
+    if not nonempty:
+        products = ", ".join(target.adapter.product_name for target, _ in batches)
+        raise InstallError(f"no tools are installable for the selected target(s): {products}")
 
-    # Each tool's fragment must merge onto what the previous tool wrote, not
-    # onto the original file — otherwise the last install wins and silently
-    # drops the others' hooks. Same for the .gitignore block.
-    pending: dict | None = None
-    pending_ignore: str | None = None
-    for tool in tools:
-        plan = plan_install(
-            tool,
-            target,
-            settings_override=pending,
-            gitignore_override=pending_ignore,
-            force=getattr(args, "force", False),
-        )
-        _print_plan(plan)
-        if args.dry:
-            pending = plan.settings_after
-            pending_ignore = plan.gitignore_after
-            continue
-        for note in apply_install(plan):
-            print(f"  note: {note}")
+    # Validate and plan the whole cross-platform batch before writing anything.
+    for target, tools in nonempty:
+        for tool in tools:
+            require_supported(tool, target)
+
+    # Settings are platform-specific, while project .gitignore is shared. Maps
+    # let every plan build on prior virtual changes, including during --dry.
+    pending_settings: dict[Path, dict] = {}
+    pending_ignores: dict[Path, str] = {}
+    planned: list[tuple[Target, list[Plan]]] = []
+    for target, tools in nonempty:
+        target_plans = []
+        for tool in tools:
+            plan = plan_install(
+                tool,
+                target,
+                settings_override=pending_settings.get(target.settings_path),
+                gitignore_override=pending_ignores.get(target.gitignore_path),
+                force=getattr(args, "force", False),
+            )
+            pending_settings[target.settings_path] = plan.settings_after
+            pending_ignores[target.gitignore_path] = plan.gitignore_after
+            target_plans.append(plan)
+        planned.append((target, target_plans))
+
+    for index, (target, plans) in enumerate(planned):
+        if len(batches) > 1:
+            if index:
+                print()
+            print(f"{target.adapter.product_name}:")
+        for plan in plans:
+            _print_plan(plan)
+            if not args.dry:
+                for note in apply_install(plan):
+                    print(f"  note: {note}")
 
     if args.dry:
         print("\n(dry run — nothing written)")
-    elif tools:
-        print(f"\n{target.adapter.restart_guidance}")
+    else:
+        for target, _ in nonempty:
+            print(f"\n{target.adapter.restart_guidance}")
     return 0
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    available = discover()
+    targets = _targets_from_args(args)
+    requested = None if args.tools == ["all"] else _resolve(args.tools, available)
+    batches = [
+        (
+            target,
+            [
+                tool
+                for tool in available.values()
+                if tool.support_for(target.platform).status is SupportStatus.SUPPORTED
+            ]
+            if requested is None
+            else requested,
+        )
+        for target in targets
+    ]
+    return _run_install(args, batches)
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
     available = discover()
-    target = _target_from_args(args)
-    tools = (
-        [t for t in available.values() if is_installed(t, target)]
-        if args.tools == ["all"]
-        else _resolve(args.tools, available)
-    )
-    for tool in tools:
-        require_supported(tool, target)
-        print(f"{tool.name} -> {target.install_root}")
-        for note in uninstall(tool, target, force=args.force):
-            print(f"  note: {note}")
+    targets = _targets_from_args(args)
+    requested = None if args.tools == ["all"] else _resolve(args.tools, available)
+    batches = [
+        (
+            target,
+            [tool for tool in available.values() if is_installed(tool, target)]
+            if requested is None
+            else requested,
+        )
+        for target in targets
+    ]
+    # A named cross-platform removal is strict and validates before mutation.
+    for target, tools in batches:
+        for tool in tools:
+            require_supported(tool, target)
+    for index, (target, tools) in enumerate(batches):
+        if len(targets) > 1 and tools:
+            if index:
+                print()
+            print(f"{target.adapter.product_name}:")
+        for tool in tools:
+            print(f"{tool.name} -> {target.install_root}")
+            for note in uninstall(tool, target, force=args.force):
+                print(f"  note: {note}")
     return 0
 
 
 def cmd_upgrade(args: argparse.Namespace) -> int:
     available = discover()
-    target = _target_from_args(args)
-    installed = [name for name, tool in available.items() if is_installed(tool, target)]
-    if not args.tools and not installed:
-        if target.platform is Platform.CLAUDE:
-            print(f"nothing installed in {target.install_root}")
-        else:
-            print(f"nothing installed for {target.adapter.product_name} in {target.install_root}")
+    targets = _targets_from_args(args)
+    if args.tools:
+        tools = _resolve(args.tools, available)
+        return _run_install(args, [(target, tools) for target in targets])
+
+    batches = [
+        (target, [tool for tool in available.values() if is_installed(tool, target)])
+        for target in targets
+    ]
+    if not any(tools for _, tools in batches):
+        for target in targets:
+            if target.platform is Platform.CLAUDE:
+                print(f"nothing installed in {target.install_root}")
+            else:
+                print(
+                    f"nothing installed for {target.adapter.product_name} "
+                    f"in {target.install_root}"
+                )
         return 0
-    args.tools = args.tools or installed
-    return cmd_install(args)
+    return _run_install(args, batches)
 
 
 def _add_target_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--platform",
+        dest="platforms",
         choices=[platform.value for platform in Platform],
-        default=Platform.CLAUDE.value,
-        help="installation target (default: claude)",
+        action="append",
+        help="installation target; repeat to select multiple (default: all)",
     )
     parser.add_argument("--dir", help="project root to install into (default: cwd)")
     parser.add_argument(
@@ -239,7 +317,7 @@ def _add_target_flags(parser: argparse.ArgumentParser) -> None:
         "--global",
         dest="user",
         action="store_true",
-        help="install machine-wide for the selected platform, for every project",
+        help="install machine-wide for the selected platforms, for every project",
     )
     parser.add_argument(
         "--local", action="store_true", help="write to settings.local.json (project scope only)"
