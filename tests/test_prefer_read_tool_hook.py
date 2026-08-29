@@ -8,7 +8,7 @@ import pytest
 
 HOOK_DIR = (
     Path(__file__).resolve().parent.parent
-    / "harness" / "prefer-read-tool" / "hooks"
+    / "harness" / "prefer-read-tool" / "claude" / "hooks"
 )
 
 sys.path.insert(0, str(HOOK_DIR))

@@ -16,7 +16,7 @@ import pytest
 
 HOOK_DIR = (
     Path(__file__).resolve().parent.parent
-    / "harness" / "redirect-subagents" / "hooks"
+    / "harness" / "redirect-subagents" / "claude" / "hooks"
 )
 
 sys.path.insert(0, str(HOOK_DIR))

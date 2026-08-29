@@ -90,13 +90,13 @@ skills.
 
 | Tool | What it does |
 |---|---|
-| [`audit`](harness/audit/SKILL.md) | Audits a codebase and reports evidence-backed findings |
-| [`caveman`](harness/caveman/SKILL.md) | Ultra-compressed communication mode |
+| [`audit`](harness/audit/claude/skills/audit/SKILL.md) | Audits a codebase and reports evidence-backed findings |
+| [`caveman`](harness/caveman/claude/skills/caveman/SKILL.md) | Ultra-compressed communication mode |
 | [`commit`](harness/commit/README.md) | `/commit` that stages and commits with zero model calls |
-| [`create-skill`](harness/create-skill/SKILL.md) | Guide for authoring new Claude Skills |
-| [`grill-me`](harness/grill-me/SKILL.md) | Interviews you to stress-test a plan or design |
-| [`handoff`](harness/handoff/SKILL.md) | Compacts a conversation into a handoff doc |
-| [`improve-codebase-architecture`](harness/improve-codebase-architecture/SKILL.md) | Finds architectural friction, proposes refactors |
+| [`create-skill`](harness/create-skill/claude/skills/create-skill/SKILL.md) | Guide for authoring new Claude Skills |
+| [`grill-me`](harness/grill-me/claude/skills/grill-me/SKILL.md) | Interviews you to stress-test a plan or design |
+| [`handoff`](harness/handoff/claude/skills/handoff/SKILL.md) | Compacts a conversation into a handoff doc |
+| [`improve-codebase-architecture`](harness/improve-codebase-architecture/claude/skills/improve-codebase-architecture/SKILL.md) | Finds architectural friction, proposes refactors |
 | [`issues`](harness/issues/README.md) | Draft, spec and publish reviewed GitHub issues — one or a whole plan |
 | [`on-edit-block`](harness/on-edit-block/README.md) | Blocks edits to protected files until Claude reads the required files |
 | [`on-edit-reminder`](harness/on-edit-reminder/README.md) | Lets edits land, then makes Claude read the required files and fix what breaks them |
@@ -104,13 +104,13 @@ skills.
 | [`prefer-edit-tool`](harness/prefer-edit-tool/README.md) | Nudges Claude to use Write/Edit instead of heredocs, `>`, `sed -i` or inline `python` |
 | [`prefer-read-tool`](harness/prefer-read-tool/README.md) | Nudges Claude to use Read instead of `cat`/`sed` |
 | [`redirect-subagents`](harness/redirect-subagents/README.md) | Redirects Agent subagents to alternate providers, sparing subscription usage |
-| [`senior-advisor`](harness/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
+| [`senior-advisor`](harness/senior-advisor/claude/skills/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
 | [`usage-limit-wait`](harness/usage-limit-wait/README.md) | Warns as a subscription usage limit fills, then waits it out instead of failing the turn |
-| [`zoom-out`](harness/zoom-out/SKILL.md) | Higher-level map of a codebase area |
+| [`zoom-out`](harness/zoom-out/claude/skills/zoom-out/SKILL.md) | Higher-level map of a codebase area |
 
-Skill-only tools are just a `SKILL.md` — if you'd rather not use the installer,
-copying that file to `.claude/skills/<name>/SKILL.md` yourself is the whole
-installation.
+Skill-only tools keep native payloads under `claude/skills/` and `chatgpt/skills/`.
+If you'd rather not use the installer, copy the appropriate product variant to
+that product's skill directory.
 
 ## How installing works
 
@@ -134,23 +134,25 @@ src = "skills/commit"
 dest = "skills/commit"
 ```
 
-That original form remains valid and means a Claude Code-supported tool whose
-destinations are relative to `.claude/`. New manifests can declare target
-status, target-native fragments, logical destination roots, shared payloads,
-and target-specific payload variants:
+That original form remains valid for legacy manifests. First-party tools use
+explicit sibling payload layers and declare platform status and native fragments:
 
 ```toml
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
 [platforms.chatgpt]
 status = "supported" # or "replacement" / "unsupported"
-fragment = "targets/chatgpt/hooks.fragment.json"
+fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "skills/example/SKILL.md" # shared by every supported target
+src = "shared/skills/example/SKILL.md" # unchanged on every supported target
 dest = "example/SKILL.md"
 root = "skills"                 # .claude/skills or .agents/skills
 
 [[files]]
-src = "targets/chatgpt/hook.py"
+src = "chatgpt/hooks/example.py"
 dest = "example.py"
 root = "hooks"                  # .claude/hooks or .codex/hooks
 platforms = ["chatgpt"]
@@ -163,9 +165,9 @@ support Claude Code and are unsupported on ChatGPT until they explicitly
 declare a native implementation. A `replacement` declaration must name the
 capability users should choose instead.
 
-Claude Code settings live beside it in `settings.fragment.json`; a target's
-`fragment` declaration names that platform's native JSON fragment (for example,
-a ChatGPT `hooks.json` fragment). The JSON is merged as written, so it stays
+First-party fragments live inside their platform layer, such as
+`claude/settings.fragment.json` and `chatgpt/hooks.fragment.json`; each target's
+`fragment` declaration names its native JSON fragment. The JSON is merged as written, so it stays
 diffable against what each product expects. `${PLATFORM_DIR}`, `${SKILLS_DIR}`,
 and `${HOOKS_DIR}` are portable placeholders; ChatGPT resolves project paths
 absolutely because it has no documented project-root placeholder. `${PYTHON}`

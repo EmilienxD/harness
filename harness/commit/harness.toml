@@ -1,5 +1,5 @@
 name = "commit"
-version = "1.4.2"
+version = "1.4.3"
 description = "Zero-model-call /commit — stages and commits via native prompt hooks"
 requires = ["git"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/commit/README.md"
@@ -8,37 +8,42 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/commit/README.md"
 # platform directory, so project installs ignore `.claude/...` or `.codex/...`.
 gitignore = ["commit-ai.key", "settings.local.json"]
 
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
 [platforms.chatgpt]
 status = "supported"
-fragment = "targets/chatgpt/hooks.fragment.json"
+fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "hooks/commit_UserPromptSubmit_hook.py"
-dest = "hooks/commit_UserPromptSubmit_hook.py"
-executable = true
-platforms = ["claude"]
-
-[[files]]
-src = "skills/commit"
-dest = "skills/commit"
-platforms = ["claude"]
-
-[[files]]
-src = "hooks/commit_UserPromptSubmit_hook.py"
+src = "shared/hooks/commit_core.py"
 dest = "commit_core.py"
 root = "hooks"
 executable = true
-platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/hooks/commit_ChatGPT_hook.py"
+src = "claude/hooks/commit_UserPromptSubmit_hook.py"
+dest = "commit_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+platforms = ["claude"]
+
+[[files]]
+src = "claude/skills/commit"
+dest = "commit"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "chatgpt/hooks/commit_ChatGPT_hook.py"
 dest = "commit_ChatGPT_hook.py"
 root = "hooks"
 executable = true
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/skills/commit"
+src = "chatgpt/skills/commit"
 dest = "commit"
 root = "skills"
 platforms = ["chatgpt"]

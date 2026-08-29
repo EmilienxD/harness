@@ -23,11 +23,17 @@ import pytest
 
 HOOK = (
     Path(__file__).resolve().parent.parent
-    / "harness" / "commit" / "hooks" / "commit_UserPromptSubmit_hook.py"
+    / "harness" / "commit" / "shared" / "hooks" / "commit_core.py"
+)
+CLAUDE_ADAPTER = (
+    Path(__file__).resolve().parent.parent
+    / "harness" / "commit" / "claude" / "hooks" / "commit_UserPromptSubmit_hook.py"
 )
 
 sys.path.insert(0, str(HOOK.parent))
-import commit_UserPromptSubmit_hook as hook  # noqa: E402
+import commit_core as hook  # noqa: E402
+sys.path.insert(0, str(CLAUDE_ADAPTER.parent))
+import commit_UserPromptSubmit_hook as claude_adapter  # noqa: E402
 
 
 def _git(repo, *args):
@@ -159,13 +165,13 @@ def test_only_ignored_writes_stage_nothing(repo):
 
 def test_unhandled_hook_exception_blocks_prompt_with_exit_2(monkeypatch, capsys):
     monkeypatch.setattr(
-        hook,
+        claude_adapter,
         "main",
         lambda: (_ for _ in ()).throw(RuntimeError("thread failure")),
     )
 
     with pytest.raises(SystemExit) as stopped:
-        hook.entrypoint()
+        claude_adapter.entrypoint()
 
     assert stopped.value.code == 2
     stderr = capsys.readouterr().err

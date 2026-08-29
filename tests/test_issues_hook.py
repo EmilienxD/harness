@@ -13,6 +13,7 @@ publish_batch is exercised in --dry mode so no gh calls happen; gh_create_issue
 is monkeypatched for the one path that must prove labels reach `gh`.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,11 +22,15 @@ import portalocker
 
 HOOK = (
     Path(__file__).resolve().parent.parent
-    / "harness" / "issues" / "hooks" / "publish_issues_UserPromptSubmit_hook.py"
+    / "harness" / "issues" / "shared" / "hooks" / "issues_core.py"
+)
+CLAUDE_ADAPTER = (
+    Path(__file__).resolve().parent.parent
+    / "harness" / "issues" / "claude" / "hooks" / "publish_issues_UserPromptSubmit_hook.py"
 )
 
 sys.path.insert(0, str(HOOK.parent))
-import publish_issues_UserPromptSubmit_hook as hook  # noqa: E402
+import issues_core as hook  # noqa: E402
 
 SID = "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55"
 
@@ -1002,12 +1007,17 @@ def test_flush_notice_reads_legacy_notice_file(tmp_path):
 
 
 def _run_hook(tmp_path: Path, prompt: str):
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, (str(HOOK.parent), env.get("PYTHONPATH", "")))
+    )
     return subprocess.run(
-        [sys.executable, str(HOOK)],
+        [sys.executable, str(CLAUDE_ADAPTER)],
         input=json.dumps({"prompt": prompt, "session_id": SID}),
         capture_output=True,
         text=True,
         cwd=tmp_path,
+        env=env,
     )
 
 

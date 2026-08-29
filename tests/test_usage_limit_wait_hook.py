@@ -16,7 +16,7 @@ import pytest
 
 HOOK = (
     Path(__file__).resolve().parent.parent
-    / "harness" / "usage-limit-wait" / "hooks" / "usage_limit_wait_hook.py"
+    / "harness" / "usage-limit-wait" / "claude" / "hooks" / "usage_limit_wait_hook.py"
 )
 
 sys.path.insert(0, str(HOOK.parent))

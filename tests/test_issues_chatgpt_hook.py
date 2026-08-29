@@ -12,8 +12,8 @@ from harness_cli.installer import Target, apply_install, plan_install
 from harness_cli.manifest import discover
 
 ROOT = Path(__file__).resolve().parent.parent
-CORE = ROOT / "harness/issues/hooks/publish_issues_UserPromptSubmit_hook.py"
-ADAPTER = ROOT / "harness/issues/targets/chatgpt/hooks/issues_ChatGPT_hook.py"
+CORE = ROOT / "harness/issues/shared/hooks/issues_core.py"
+ADAPTER = ROOT / "harness/issues/chatgpt/hooks/issues_ChatGPT_hook.py"
 
 core_spec = importlib.util.spec_from_file_location("issues_core", CORE)
 core = importlib.util.module_from_spec(core_spec)

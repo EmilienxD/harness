@@ -270,7 +270,9 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy the `.claude/` folder into your repository root. If you already have a
+1. Copy `shared/hooks/issues_core.py` and
+   `claude/hooks/publish_issues_UserPromptSubmit_hook.py` into your repository's `.claude/hooks/`,
+   then copy the directories under `claude/skills/` into `.claude/skills/`. If you already have a
    `.claude/settings.json`, merge the `hooks.UserPromptSubmit` array below into your existing file
    instead of overwriting it — Claude Code merges hook arrays, not whole files, so an overwrite would
    silently drop any hooks you already had.

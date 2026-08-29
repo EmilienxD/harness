@@ -1,47 +1,50 @@
 name = "improve-codebase-architecture"
-version = "1.0.1"
+version = "1.0.2"
 description = "Finds architectural friction and proposes concrete refactors"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/improve-codebase-architecture/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/improve-codebase-architecture/claude/skills/improve-codebase-architecture/SKILL.md"
+
+[platforms.claude]
+status = "supported"
 
 [platforms.chatgpt]
 status = "supported"
 
 [[files]]
-src = "SKILL.md"
+src = "claude/skills/improve-codebase-architecture/SKILL.md"
 dest = "improve-codebase-architecture/SKILL.md"
 root = "skills"
 platforms = ["claude"]
 
 [[files]]
-src = "targets/chatgpt/SKILL.md"
+src = "chatgpt/skills/improve-codebase-architecture/SKILL.md"
 dest = "improve-codebase-architecture/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/agents/openai.yaml"
+src = "chatgpt/skills/improve-codebase-architecture/agents/openai.yaml"
 dest = "improve-codebase-architecture/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "DEEPENING.md"
+src = "shared/skills/improve-codebase-architecture/DEEPENING.md"
 dest = "improve-codebase-architecture/DEEPENING.md"
 root = "skills"
 
 [[files]]
-src = "INTERFACE-DESIGN.md"
+src = "claude/skills/improve-codebase-architecture/INTERFACE-DESIGN.md"
 dest = "improve-codebase-architecture/INTERFACE-DESIGN.md"
 root = "skills"
 platforms = ["claude"]
 
 [[files]]
-src = "targets/chatgpt/INTERFACE-DESIGN.md"
+src = "chatgpt/skills/improve-codebase-architecture/INTERFACE-DESIGN.md"
 dest = "improve-codebase-architecture/INTERFACE-DESIGN.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "LANGUAGE.md"
+src = "shared/skills/improve-codebase-architecture/LANGUAGE.md"
 dest = "improve-codebase-architecture/LANGUAGE.md"
 root = "skills"

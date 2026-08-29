@@ -1,114 +1,123 @@
 name = "issues"
-version = "1.13.4"
+version = "1.13.5"
 description = "Draft, spec and publish reviewed GitHub issues - one at a time or a whole plan"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/issues/README.md"
 
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
 [platforms.chatgpt]
 status = "supported"
-fragment = "targets/chatgpt/hooks.fragment.json"
+fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "hooks/publish_issues_UserPromptSubmit_hook.py"
-dest = "hooks/publish_issues_UserPromptSubmit_hook.py"
-executable = true
-platforms = ["claude"]
-
-[[files]]
-src = "skills/draft-issue"
-dest = "skills/draft-issue"
-platforms = ["claude"]
-
-[[files]]
-src = "skills/draft-issues"
-dest = "skills/draft-issues"
-platforms = ["claude"]
-
-[[files]]
-src = "skills/publish-issues"
-dest = "skills/publish-issues"
-platforms = ["claude"]
-
-[[files]]
-src = "skills/to-spec"
-dest = "skills/to-spec"
-platforms = ["claude"]
-
-[[files]]
-src = "skills/to-spec-draft-issue"
-dest = "skills/to-spec-draft-issue"
-platforms = ["claude"]
-
-[[files]]
-src = "hooks/publish_issues_UserPromptSubmit_hook.py"
+src = "shared/hooks/issues_core.py"
 dest = "issues_core.py"
 root = "hooks"
 executable = true
-platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/hooks/issues_ChatGPT_hook.py"
+src = "claude/hooks/publish_issues_UserPromptSubmit_hook.py"
+dest = "publish_issues_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+platforms = ["claude"]
+
+[[files]]
+src = "claude/skills/draft-issue"
+dest = "draft-issue"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "claude/skills/draft-issues"
+dest = "draft-issues"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "claude/skills/publish-issues"
+dest = "publish-issues"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "claude/skills/to-spec"
+dest = "to-spec"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "claude/skills/to-spec-draft-issue"
+dest = "to-spec-draft-issue"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "chatgpt/hooks/issues_ChatGPT_hook.py"
 dest = "issues_ChatGPT_hook.py"
 root = "hooks"
 executable = true
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/skills/draft-issue/SKILL.md"
+src = "chatgpt/skills/draft-issue/SKILL.md"
 dest = "draft-issue/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/skills/draft-issues/SKILL.md"
+src = "chatgpt/skills/draft-issues/SKILL.md"
 dest = "draft-issues/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/skills/publish-issues/SKILL.md"
+src = "chatgpt/skills/publish-issues/SKILL.md"
 dest = "publish-issues/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/skills/to-spec/SKILL.md"
+src = "chatgpt/skills/to-spec/SKILL.md"
 dest = "to-spec/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/skills/to-spec-draft-issue/SKILL.md"
+src = "chatgpt/skills/to-spec-draft-issue/SKILL.md"
 dest = "to-spec-draft-issue/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/agents/openai.yaml"
+src = "chatgpt/skills/draft-issue/agents/openai.yaml"
 dest = "draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/agents/openai.yaml"
+src = "chatgpt/skills/draft-issues/agents/openai.yaml"
 dest = "draft-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/agents/openai.yaml"
+src = "chatgpt/skills/publish-issues/agents/openai.yaml"
 dest = "publish-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/agents/openai.yaml"
+src = "chatgpt/skills/to-spec/agents/openai.yaml"
 dest = "to-spec/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/agents/openai.yaml"
+src = "chatgpt/skills/to-spec-draft-issue/agents/openai.yaml"
 dest = "to-spec-draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

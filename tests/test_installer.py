@@ -56,6 +56,8 @@ def test_install_leaves_no_lock_or_backup(target):
     install("issues", target)
     assert claude_files(target) == [
         "hooks/commit_UserPromptSubmit_hook.py",
+        "hooks/commit_core.py",
+        "hooks/issues_core.py",
         "hooks/publish_issues_UserPromptSubmit_hook.py",
         "settings.json",
         "skills/commit/SKILL.md",
@@ -72,9 +74,8 @@ def test_install_hook_tool_writes_settings(target):
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     # With uv available: command="uv", args=["run", "--no-project", "--no-managed-python", "<script>"]
     # Without uv: command="<python>", args=["<script>"]
-    uv_path = shutil.which("uv")
-    if uv_path:
-        assert entry["command"] == uv_path
+    if installer.python_command() and installer.python_command()[0] == "uv":
+        assert entry["command"] == "uv"
         assert entry["args"][0] == "run"
         assert entry["args"][1] == "--no-project"
         assert entry["args"][2] == "--no-managed-python"
@@ -90,7 +91,7 @@ def test_python_uses_uv_when_available(target):
     install("commit", target)
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     # When uv is available, prefer it over absolute Python paths
-    assert entry["command"] == shutil.which("uv")
+    assert entry["command"] == "uv"
     assert entry["args"][0] == "run"
     assert entry["args"][1] == "--no-project"
     assert entry["args"][2] == "--no-managed-python"
@@ -103,7 +104,7 @@ def test_python_command_prefers_uv_when_available(monkeypatch):
         "which",
         lambda name: {"uv": "/usr/bin/uv", "python3": "/usr/bin/python3"}.get(name),
     )
-    assert installer.python_command() == ("/usr/bin/uv", ["run", "--no-project", "--no-managed-python"])
+    assert installer.python_command() == ("uv", ["run", "--no-project", "--no-managed-python"])
 
 
 def test_python_command_falls_back_to_python_when_uv_unavailable(monkeypatch):
@@ -559,5 +560,8 @@ def test_force_overwrites_edited_starter_files(target):
     statuses = {a.dest: a.status for a in plan.files}
     assert statuses["harness-redirect-subagents/subagents.json"] == "overwrite"
     apply_install(plan)
-    source = TOOLS["redirect-subagents"].root / "subagents.example.json"
+    source = (
+        TOOLS["redirect-subagents"].root
+        / "claude/harness-redirect-subagents/subagents.example.json"
+    )
     assert config.read_bytes() == source.read_bytes()

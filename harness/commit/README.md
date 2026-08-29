@@ -234,9 +234,10 @@ wrote yourself untouched. See the [repo README](../../README.md) for `--user`,
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/commit_UserPromptSubmit_hook.py` into `.claude/hooks/` in your repo.
-2. Copy `skills/commit/SKILL.md` into `.claude/skills/commit/SKILL.md`.
-3. Make the hook executable: `chmod +x .claude/hooks/commit_UserPromptSubmit_hook.py`
+1. Copy `shared/hooks/commit_core.py` and
+   `claude/hooks/commit_UserPromptSubmit_hook.py` into `.claude/hooks/` in your repo.
+2. Copy `claude/skills/commit/SKILL.md` into `.claude/skills/commit/SKILL.md`.
+3. Make both hook files executable.
 4. Add (or merge) the following into your repo's `.claude/settings.json`:
 
 ```json

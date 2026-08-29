@@ -7,14 +7,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 "harness" is a collection of installable Claude Code tools (skills, hooks, agents, packages, scripts),
 primarily authored for Claude Code but intended to be portable to other agent CLIs later.
 
-Each tool lives under `harness/<tool-name>/`. Its `README.md` (or `SKILL.md` if no README exists) is the
-source of truth for what it does — this file only indexes them.
+Each tool lives under `harness/<tool-name>/`. Its root `README.md`, when present, is the product-neutral
+source of truth for what it does; otherwise consult the relevant platform's `SKILL.md`. This file only
+indexes them.
 
 Tools are installed individually with `uvx --from git+https://github.com/EmilienxD/harness harness
 install <tool>`, which copies files into the target project's `.claude/` and merges any settings the
 tool needs. The CLI is in `src/harness_cli/`; see the root `README.md`.
 
 ## Adding or changing a tool
+
+Every installable tool uses sibling `shared/`, `claude/`, and `chatgpt/` payload layers. `shared/`
+contains only files installed unchanged for both products; native adapters, fragments, skill variants,
+and metadata belong to their product directory. Omit empty layers. Never make one product the implicit
+source tree for another or reintroduce a `targets/` override directory. Keep `harness.toml` and
+product-neutral documentation at the tool root, and mirror logical roots such as `hooks/` and `skills/`
+inside each payload layer.
 
 Every installable tool needs a `harness.toml` in its directory declaring `name`, `version`,
 `description`, and one or more `[[files]]` entries (`src` relative to the tool dir and `dest` relative
@@ -39,8 +47,9 @@ Code's settings schema doesn't define don't belong in a fragment either — proj
 validated strictly, and a file that fails validation is rejected whole.
 
 The installer has explicit `claude` and `chatgpt` platform adapters. Commands default to Claude Code
-for backward compatibility and select ChatGPT with `--platform chatgpt`. A legacy manifest implicitly
-supports Claude Code only. New target support belongs in `[platforms.<name>]` with a `supported`,
+for backward compatibility and select ChatGPT with `--platform chatgpt`. Legacy external manifests may
+implicitly support Claude Code only; first-party manifests declare `[platforms.claude]` explicitly.
+Target support belongs in `[platforms.<name>]` with a `supported`,
 `replacement`, or `unsupported` status and, for native config, a target-specific `fragment`. File
 entries can use `root = "platform"`, `"skills"`, or `"hooks"`; omit `platforms` for a shared payload or
 set `platforms = ["chatgpt"]` (or `"claude"`) for a variant. The adapter maps those roots to `.claude`,
@@ -48,22 +57,22 @@ set `platforms = ["chatgpt"]` (or `"claude"`) for a variant. The adapter maps th
 Claude-relative `dest` entries and `settings.fragment.json` remain supported unchanged.
 
 ChatGPT skill payloads place a variant `SKILL.md` (plus reference doc variants) under
-`targets/chatgpt/` when the content diverges — Claude-only frontmatter keys such as
+`chatgpt/skills/<skill>/` when the content diverges — Claude-only frontmatter keys such as
 `disable-model-invocation` or `argument-hint`, Claude tool names, or `$ARGUMENTS` references.
-Claude's `disable-model-invocation: true` maps to `targets/chatgpt/agents/openai.yaml` with
+Claude's `disable-model-invocation: true` maps to `chatgpt/skills/<skill>/agents/openai.yaml` with
 `policy: allow_implicit_invocation: false`; ChatGPT has no documented argument substitution, so
 argument-taking skills read the invocation's surrounding user text instead of `$ARGUMENTS`.
 
 ## Tools
 
-- `harness/audit/` — audits a codebase and reports evidence-backed findings. See `SKILL.md`.
-- `harness/caveman/` — ultra-compressed communication mode skill. See `SKILL.md`.
+- `harness/audit/` — audits a codebase and reports evidence-backed findings. See the platform `SKILL.md`.
+- `harness/caveman/` — ultra-compressed communication mode skill. See the platform `SKILL.md`.
 - `harness/commit/` — zero-model-call `/commit` hook. See `README.md`.
-- `harness/create-skill/` — guide for authoring new Claude Skills. See `SKILL.md`.
-- `harness/grill-me/` — interviews the user to stress-test a plan/design. See `SKILL.md`.
-- `harness/handoff/` — compacts a conversation into a handoff doc for another agent. See `SKILL.md`.
+- `harness/create-skill/` — guide for authoring new Claude Skills. See its Claude `SKILL.md`.
+- `harness/grill-me/` — interviews the user to stress-test a plan/design. See the platform `SKILL.md`.
+- `harness/handoff/` — compacts a conversation into a handoff doc for another agent. See the platform `SKILL.md`.
 - `harness/improve-codebase-architecture/` — finds architectural friction and proposes refactors. See
-  `SKILL.md`.
+  the platform `SKILL.md`.
 - `harness/issues/` — one bundle for the whole issue workflow: `/draft-issue`, `/publish-issue`,
   `/draft-issues`, `/publish-issues`, `/to-spec`, `/to-spec-draft-issue`, plus the
   publishing hook. See `README.md`.
@@ -83,10 +92,10 @@ argument-taking skills read the invocation's surrounding user text instead of `$
 - `harness/redirect-subagents/` — PreToolUse/PostToolUse/Stop hooks redirecting Agent subagents
   to alternate providers (clauder, `claude -p`, custom CLIs) instead of consuming the Claude
   subscription. Config in `.claude/harness-redirect-subagents/subagents.json`. See `README.md`.
-- `harness/senior-advisor/` — read-only senior-developer advisory mode. See `SKILL.md`.
+- `harness/senior-advisor/` — read-only senior-developer advisory mode. See the platform `SKILL.md`.
 - `harness/usage-limit-wait/` — `UserPromptSubmit` + `PostToolBatch` hook that warns as a Claude
   subscription usage window fills and blocks the session until it resets. See `README.md`.
-- `harness/zoom-out/` — gives a higher-level map of a codebase area. See `SKILL.md`.
+- `harness/zoom-out/` — gives a higher-level map of a codebase area. See the platform `SKILL.md`.
 - `harness/itsclaudehistory/` — nested git repo; leave its internals alone unless asked.
 
 ## Other directories

@@ -1,25 +1,28 @@
 name = "zoom-out"
-version = "1.0.1"
+version = "1.0.2"
 description = "Gives a higher-level map of a codebase area"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/zoom-out/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/zoom-out/claude/skills/zoom-out/SKILL.md"
+
+[platforms.claude]
+status = "supported"
 
 [platforms.chatgpt]
 status = "supported"
 
 [[files]]
-src = "SKILL.md"
+src = "claude/skills/zoom-out/SKILL.md"
 dest = "zoom-out/SKILL.md"
 root = "skills"
 platforms = ["claude"]
 
 [[files]]
-src = "targets/chatgpt/SKILL.md"
+src = "chatgpt/skills/zoom-out/SKILL.md"
 dest = "zoom-out/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "targets/chatgpt/agents/openai.yaml"
+src = "chatgpt/skills/zoom-out/agents/openai.yaml"
 dest = "zoom-out/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
