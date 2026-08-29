@@ -12,6 +12,17 @@
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_UserPromptSubmit_hook.py"
             ],
             "timeout": 120
+          },
+          {
+            "type": "command",
+            "timeout": 300,
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "args": [
+              "run",
+              "--no-project",
+              "--no-managed-python",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"
+            ]
           }
         ]
       }
