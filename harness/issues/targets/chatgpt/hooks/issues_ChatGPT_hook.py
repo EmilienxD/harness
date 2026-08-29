@@ -78,7 +78,8 @@ def main() -> None:
 
     if PUBLISH_PATTERN.search(prompt):
         dry = "--dry" in prompt.split()
-        result = core.publish_issues(dry)
+        session_id = str(payload.get("session_id") or "")
+        result = core.publish_issues(dry, gateway_session_id(session_id))
         sys.stderr.write("\n\n" + result)
         # UserPromptSubmit exit 2 blocks the command prompt, so publishing
         # costs no model turn just as it does in Claude Code.

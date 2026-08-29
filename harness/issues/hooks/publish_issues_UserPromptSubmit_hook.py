@@ -645,16 +645,6 @@ def resolve_references(body: str, resolved: dict[str, str]) -> tuple[str, list[s
     return REF_PATTERN.sub(_sub, body), unresolved
 
 
-def gather_batch_dirs(gateway_dir: Path = GATEWAY_DIR) -> list[Path]:
-    """List batch directories under the gateway dir, sorted by name."""
-    if not gateway_dir.is_dir():
-        return []
-    return sorted(
-        d for d in gateway_dir.iterdir()
-        if d.is_dir() and SESSION_ID_PATTERN.match(d.name)
-    )
-
-
 def gather_draft_files(batch_dir: Path) -> list[Path]:
     """List draft files in a batch, in stable, dependency-safe order."""
     ordered = []
@@ -1244,10 +1234,8 @@ def publish_batch(
         return 0, 0
 
     gateway_dir = batch_dir.parent
-    # The seed map is used in place, not copied: entries published here are
-    # added to it as the run proceeds, so a caller looping over several
-    # batches (publish_issues) lets a later batch reference an earlier
-    # batch's freshly created issues without re-reading state.
+    # Entries published here are added as the run proceeds, so later drafts
+    # in this batch can resolve references without re-reading shared state.
     resolved = seed if seed is not None else seed_from_state(gateway_dir)
     batch_header = f"Batch: {len(files)} draft issue(s)"
     report.append(batch_header)
@@ -1442,13 +1430,17 @@ def publish_batch(
     return published, len(failed_entries)
 
 
-def publish_issues(dry: bool) -> str:
+def publish_issues(dry: bool, session_id: str) -> str:
+    """Publish drafts belonging to the current agent session only."""
     if not GATEWAY_DIR.is_dir():
         return "No .issues-gateway/ folder found. Run /draft-issue or /draft-issues first."
 
-    batch_dirs = gather_batch_dirs()
-    if not batch_dirs:
-        return "No draft batches found in .issues-gateway/. Nothing to publish."
+    if not SESSION_ID_PATTERN.fullmatch(session_id):
+        return "Invalid or missing issues session id. Nothing was published."
+
+    batch_dir = GATEWAY_DIR / session_id
+    if not batch_dir.is_dir():
+        return "No draft batch found for this session. Nothing to publish."
 
     header = "Dry run -- nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
@@ -1469,20 +1461,19 @@ def publish_issues(dry: bool) -> str:
     total_published = 0
     total_failed = 0
     created: list[dict] = []
-    for batch_dir in batch_dirs:
-        p, f = publish_batch(
-            batch_dir,
-            dry,
-            report,
-            created,
-            seed,
-            mutation_prelude=ensure_labels_once,
-        )
-        total_published += p
-        total_failed += f
-        if not dry and f == 0:
-            delete_empty_batch_dir(batch_dir)
-        report.append("")
+    p, f = publish_batch(
+        batch_dir,
+        dry,
+        report,
+        created,
+        seed,
+        mutation_prelude=ensure_labels_once,
+    )
+    total_published += p
+    total_failed += f
+    if not dry and f == 0:
+        delete_empty_batch_dir(batch_dir)
+    report.append("")
 
     if not dry:
         queue_notice(created, total_failed)
@@ -1510,7 +1501,8 @@ def main() -> None:
 
     if PROMPT_PATTERN.match(prompt):
         dry = "--dry" in prompt.split()
-        result = publish_issues(dry)
+        session_id = str(payload.get("session_id") or "")
+        result = publish_issues(dry, session_id)
         sys.stderr.write("\n\n" + result)
         # Exit 2 erases the prompt, so this run produces no model turn at
         # all. Whatever it published stays queued until the next prompt.

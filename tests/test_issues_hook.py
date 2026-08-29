@@ -1044,7 +1044,7 @@ def test_spec_then_breakdown_across_two_publish_runs(tmp_path, monkeypatch):
 
     _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     _draft(tmp_path, "issue-0.md", "# Spec\n\n> spec\n\n## Problem\n\nx\n")
-    assert "Published 1 issue(s) successfully" in hook.publish_issues(dry=False)
+    assert "Published 1 issue(s) successfully" in hook.publish_issues(False, SID)
 
     # What the agent is told on the next prompt.
     notice = hook.flush_notice()
@@ -1053,7 +1053,7 @@ def test_spec_then_breakdown_across_two_publish_runs(tmp_path, monkeypatch):
     # ...and what it writes with that number.
     created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/43"])
     _draft(tmp_path, "issue-1.md", "# Child\n\n> mode:afk\n\n## Parent\n\n#42\n")
-    hook.publish_issues(dry=False)
+    hook.publish_issues(False, SID)
 
     assert created[0]["parent"] == "42"
 
@@ -1064,10 +1064,29 @@ def test_successful_publish_removes_empty_session_folder(tmp_path, monkeypatch):
     _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
 
-    result = hook.publish_issues(dry=False)
+    result = hook.publish_issues(False, SID)
 
     assert "Published 1 issue(s) successfully" in result
     assert not draft.parent.exists()
+
+
+def test_publish_only_creates_issues_from_the_current_session(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(hook, "ensure_labels", lambda dry: [])
+    created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
+    current = _draft(tmp_path, "issue-0.md", "# Current\n\n> mode:afk\n\nbody\n")
+    other_sid = "11111111-2222-4333-8444-555555555555"
+    other_batch = tmp_path / ".issues-gateway" / other_sid
+    other_batch.mkdir(parents=True)
+    other = other_batch / "issue-0.md"
+    other.write_text("# Other\n\n> mode:afk\n\nbody\n", encoding="utf-8")
+
+    result = hook.publish_issues(False, SID)
+
+    assert "Published 1 issue(s) successfully" in result
+    assert [entry["title"] for entry in created] == ["Current"]
+    assert not current.exists()
+    assert other.exists()
 
 
 def test_publish_keeps_session_folder_when_any_draft_fails(tmp_path, monkeypatch):
@@ -1080,7 +1099,7 @@ def test_publish_keeps_session_folder_when_any_draft_fails(tmp_path, monkeypatch
     )
     draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
 
-    result = hook.publish_issues(dry=False)
+    result = hook.publish_issues(False, SID)
 
     assert "1 failed or were skipped" in result
     assert draft.exists()
@@ -1091,7 +1110,7 @@ def test_dry_run_keeps_session_folder(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
 
-    result = hook.publish_issues(dry=True)
+    result = hook.publish_issues(True, SID)
 
     assert "1 issue(s) ready to publish" in result
     assert draft.exists()
@@ -1107,5 +1126,20 @@ def test_a_publish_prompt_does_not_consume_the_notice(tmp_path):
     result = _run_hook(tmp_path, "/publish-issues")
 
     assert result.returncode == 2
-    assert "No draft batches found" in result.stderr
+    assert "No draft batch found for this session" in result.stderr
     assert "pending_notice" in _state(gateway)
+
+
+def test_publish_prompt_only_includes_the_current_session(tmp_path):
+    other_sid = "11111111-2222-4333-8444-555555555555"
+    _draft(tmp_path, "issue-0.md", "# Current\n\n> mode:afk\n\nbody\n")
+    other_batch = tmp_path / ".issues-gateway" / other_sid
+    other_batch.mkdir(parents=True)
+    (other_batch / "issue-0.md").write_text(
+        "# Other session\n\n> mode:afk\n\nbody\n", encoding="utf-8"
+    )
+
+    result = _run_hook(tmp_path, "/publish-issues --dry")
+
+    assert result.returncode == 2
+    assert "Dry run complete: 1 issue(s) ready to publish" in result.stderr

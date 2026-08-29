@@ -142,6 +142,38 @@ def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
     assert not (tmp_path / ".issues-gateway/.state.json").exists()
 
 
+def test_chatgpt_publish_is_scoped_to_the_current_session(
+    tmp_path, monkeypatch, capsys
+):
+    current = adapter.gateway_session_id("thr_current")
+    other = adapter.gateway_session_id("thr_other")
+    for batch_id, title in ((current, "Current"), (other, "Other")):
+        batch = tmp_path / ".issues-gateway" / batch_id
+        batch.mkdir(parents=True, exist_ok=True)
+        (batch / "issue-0.md").write_text(
+            f"# {title}\n\n> mode:afk\n\nbody\n", encoding="utf-8"
+        )
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "session_id": "thr_current",
+                    "cwd": str(tmp_path),
+                    "prompt": "$publish-issues --dry",
+                }
+            )
+        ),
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        adapter.main()
+
+    assert stopped.value.code == 2
+    assert "Dry run complete: 1 issue(s) ready to publish" in capsys.readouterr().err
+
+
 def test_pending_notice_and_drafting_context_are_combined(
     tmp_path, monkeypatch, capsys
 ):
