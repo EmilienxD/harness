@@ -54,11 +54,11 @@ const issue47: IssueSnapshot = {
   branch: "feat/47-token-refresh",
 };
 
-const issue31: IssueSnapshot = {
+const parent31: IssueSnapshot = {
   number: 31,
   title: "Auth rework",
   body: "The auth subsystem is replaced end to end.",
-  labels: ["[AI]-spec"],
+  labels: ["planning"],
   state: "open",
 };
 
@@ -72,8 +72,8 @@ const pull42: PullRequestSnapshot = {
   issueNumber: 47,
 };
 
-test("resolves an implementation prompt from issue, parent spec, branch, and labels", async () => {
-  const github = new FakeGitHub({ issues: [issue47, issue31] });
+test("resolves an implementation prompt from issue, parent issue, branch, and labels", async () => {
+  const github = new FakeGitHub({ issues: [issue47, parent31] });
   const resolver = new PromptResolver({ github });
 
   const prompt = await resolver.resolve({
@@ -90,7 +90,7 @@ test("resolves an implementation prompt from issue, parent spec, branch, and lab
   assert.ok(prompt.text.includes("Refresh the access token before it expires."));
   assert.deepEqual(
     prompt.sources.map((source) => `${source.kind}#${source.number}`),
-    ["issue#47", "parent-spec#31"],
+    ["issue#47", "parent-issue#31"],
   );
   // Everything the worker needs was fetched once, by the bridge.
   assert.deepEqual(github.issueRequests, [47, 31]);
@@ -105,7 +105,7 @@ test("carries the disposition each label implies", () => {
   // A contradictory pair resolves to hitl: only a human may close one.
   assert.equal(issueDisposition(["[AI]-afk", "[AI]-hitl"]), "hitl");
   assert.equal(issueDisposition(["[ai]-AFK"]), "afk");
-  assert.equal(issueDisposition(["[AI]-spec"]), "unclassified");
+  assert.equal(issueDisposition(["planning"]), "unclassified");
   // The former prefix has no compatibility path: those labels are ordinary
   // user labels now, just like the unprefixed spellings.
   assert.equal(issueDisposition(["ai:afk", "ai:hitl", "AI:AFK"]), "unclassified");
@@ -121,7 +121,7 @@ test("carries the difficulty each label implies", () => {
   assert.equal(issueDifficulty(["[ai]-EXPERT-Difficulty"]), "expert");
   // Unrated is not a guess and not an error; the caller resolves it to a tier.
   assert.equal(issueDifficulty([]), undefined);
-  assert.equal(issueDifficulty(["[AI]-afk", "[AI]-spec"]), undefined);
+  assert.equal(issueDifficulty(["[AI]-afk", "planning"]), undefined);
   // The unprefixed names are the user's own labels, never aboard's.
   assert.equal(issueDifficulty(["expert", "expert-difficulty"]), undefined);
   // A contradictory set resolves upward, whatever order it arrives in.
@@ -165,7 +165,7 @@ test("resolves a review prompt with the contract and the diff", async () => {
 
   const prompt = await resolver.resolve({
     kind: "review",
-    instruction: "Review against the spec.",
+    instruction: "Review against the issue contract.",
     pullRequestNumber: 42,
     focus: "error handling",
   });
@@ -215,7 +215,7 @@ test("resolves a fix prompt from unresolved threads only", async () => {
 });
 
 test("leaves a bare brainstorm launch with no prompt at all", async () => {
-  const resolver = new PromptResolver({ github: new FakeGitHub({ issues: [issue31] }) });
+  const resolver = new PromptResolver({ github: new FakeGitHub({ issues: [parent31] }) });
 
   assert.equal(await resolver.resolve({ kind: "brainstorm" }), undefined);
 
@@ -250,12 +250,12 @@ test("rejects an empty instruction and a missing issue or pull request", async (
   );
 });
 
-test("several issues each resolve in the caller's order and share one parent spec", async () => {
+test("several issues each resolve in the caller's order and share one parent issue", async () => {
   const issue52: IssueSnapshot = {
     number: 52, title: "Cache the refreshed token", body: "Keep the refreshed token warm.",
     labels: ["[AI]-afk"], state: "open", parentIssueNumber: 31,
   };
-  const github = new FakeGitHub({ issues: [issue47, issue52, issue31] });
+  const github = new FakeGitHub({ issues: [issue47, issue52, parent31] });
   const prompt = await new PromptResolver({ github }).resolve({
     kind: "issue-context",
     instruction: "Reconcile how these two describe the token lifetime.",
@@ -266,18 +266,18 @@ test("several issues each resolve in the caller's order and share one parent spe
   assert.ok(prompt.text.includes("Reconcile how these two describe the token lifetime."));
   assert.ok(prompt.text.includes("Keep the refreshed token warm."));
   assert.ok(prompt.text.includes("Refresh the access token before it expires."));
-  // One section per issue in the caller's order, then the spec both share — once.
-  assert.deepEqual(prompt.sources.map((source) => `${source.kind}#${source.number}`), ["issue#52", "issue#47", "parent-spec#31"]);
+  // One section per issue in the caller's order, then the parent both share — once.
+  assert.deepEqual(prompt.sources.map((source) => `${source.kind}#${source.number}`), ["issue#52", "issue#47", "parent-issue#31"]);
   assert.deepEqual(github.issueRequests, [52, 47, 31]);
   assert.equal(prompt.headline, "Use the resolved context for issues #52, #47.");
 });
 
 test("a repeated issue resolves once and a parent named among the issues is not resolved twice", async () => {
-  const github = new FakeGitHub({ issues: [issue47, issue31] });
+  const github = new FakeGitHub({ issues: [issue47, parent31] });
   const prompt = await new PromptResolver({ github }).resolve({
     kind: "issue-context",
-    instruction: "Read the spec alongside its child.",
-    // 31 is 47's parent spec, and 47 is repeated.
+    instruction: "Read the parent issue alongside its child.",
+    // 31 is 47's parent, and 47 is repeated.
     issueNumbers: [47, 31, 47],
   });
 
@@ -297,7 +297,7 @@ test("recursive issue context terminates across parent and reference cycles", as
   const github = new FakeGitHub({
     issues: [
       { ...issue47, dependencyIssueNumbers: [31] },
-      { ...issue31, dependencyIssueNumbers: [47, 52] },
+      { ...parent31, dependencyIssueNumbers: [47, 52] },
       issue52,
     ],
   });
@@ -310,7 +310,7 @@ test("recursive issue context terminates across parent and reference cycles", as
   assert.deepEqual(github.issueRequests, [47, 31, 52]);
   assert.deepEqual(
     prompt?.sources.map((source) => `${source.kind}#${source.number}`),
-    ["issue#47", "parent-spec#31", "related-issue#52"],
+    ["issue#47", "parent-issue#31", "related-issue#52"],
   );
 });
 
@@ -335,7 +335,7 @@ test("recursive issue context has a hard node bound even without a cycle", async
 });
 
 test("a single issue keeps today's headline and one bad number in the batch fails the whole prompt", async () => {
-  const github = new FakeGitHub({ issues: [issue47, issue31] });
+  const github = new FakeGitHub({ issues: [issue47, parent31] });
   const resolver = new PromptResolver({ github });
   const one = await resolver.resolve({ kind: "issue-context", instruction: "Go.", issueNumbers: [47] });
   assert.equal(one?.headline, "Use the resolved context for issue #47 — Add token refresh.");
@@ -375,10 +375,10 @@ test("summarizes a prompt without repeating its content", async () => {
   assert.equal(describeResolvedPrompt(undefined), "prompt=none");
 });
 
-test("an issue-bound webresearcher receives resolved issue and parent-spec context", async () => {
+test("an issue-bound webresearcher receives resolved issue and parent-issue context", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
-    github: new FakeGitHub({ issues: [issue47, issue31] }),
+    github: new FakeGitHub({ issues: [issue47, parent31] }),
   }));
   const prompt = await adapter.resolve({
     type: "webresearcher",
@@ -390,14 +390,14 @@ test("an issue-bound webresearcher receives resolved issue and parent-spec conte
   assert.ok(prompt?.text.includes("Verify whether the proposed token lifetime matches current guidance."));
   assert.deepEqual(prompt?.sources.map((source) => [source.kind, source.number]), [
     ["issue", 47],
-    ["parent-spec", 31],
+    ["parent-issue", 31],
   ]);
 });
 
 test("an issue-bound Explore receives resolved issue context with its instruction", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
-    github: new FakeGitHub({ issues: [issue47, issue31] }),
+    github: new FakeGitHub({ issues: [issue47, parent31] }),
   }));
   const prompt = await adapter.resolve({
     type: "Explore",
@@ -407,13 +407,13 @@ test("an issue-bound Explore receives resolved issue context with its instructio
   }, { interactive: false });
 
   assert.ok(prompt?.text.includes("Investigate whether the backlog is handled elsewhere."));
-  assert.deepEqual(prompt?.sources.map((source) => source.kind), ["issue", "parent-spec"]);
+  assert.deepEqual(prompt?.sources.map((source) => source.kind), ["issue", "parent-issue"]);
 });
 
 test("an issue-bound interactive general-purpose opens with the resolved contract, not an empty topic", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
-    github: new FakeGitHub({ issues: [issue47, issue31] }),
+    github: new FakeGitHub({ issues: [issue47, parent31] }),
   }));
   const prompt = await adapter.resolve({
     type: "general-purpose",
@@ -423,7 +423,7 @@ test("an issue-bound interactive general-purpose opens with the resolved contrac
   }, { interactive: true });
 
   assert.ok(prompt?.text.includes("Work with me to fix the session loss."));
-  assert.deepEqual(prompt?.sources.map((source) => source.kind), ["issue", "parent-spec"]);
+  assert.deepEqual(prompt?.sources.map((source) => source.kind), ["issue", "parent-issue"]);
   // Without an opening topic an interactive terminal opens empty; the issue
   // number alone is not a first message.
   assert.equal(await adapter.resolve({ type: "general-purpose", description: "d", issues: [47] }, { interactive: true }), undefined);
@@ -455,7 +455,7 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
 test("auto-agent guidance is the final section after resolved issue and pull-request context", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
-    github: new FakeGitHub({ issues: [issue47, issue31], pullRequests: [pull42], diff: "+ refreshEarly();" }),
+    github: new FakeGitHub({ issues: [issue47, parent31], pullRequests: [pull42], diff: "+ refreshEarly();" }),
   }));
   const guideline = "no unit tests needed";
   const expectedEnd = `# Additional User Guideline For this Session\n\n${guideline}`;

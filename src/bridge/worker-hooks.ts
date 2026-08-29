@@ -55,7 +55,7 @@ export class WorkerHookService {
       throw new Error("Compaction re-grounding requires a registered issue-bound worker");
     }
     const branch = await this.branches.current(cwd);
-    const contract = worker.issueNumbers.length === 1 ? "resolved issue and spec" : "resolved issues and specs";
+    const contract = worker.issueNumbers.length === 1 ? "resolved issue context" : "resolved issues and related context";
     return `You are aboard worker ${parentAgentId}, addressing ${describeIssueNumbers(worker.issueNumbers)} on branch ${branch}. Continue from the ${contract} supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.`;
   }
 

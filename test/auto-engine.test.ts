@@ -75,7 +75,6 @@ interface QueueIssue {
   readonly dependencyNumbers?: readonly number[];
   /** Defaults to the issue number's own order when a test does not care. */
   readonly createdAt?: string;
-  readonly hasChildren?: boolean;
 }
 
 interface HarnessOptions {
@@ -239,7 +238,6 @@ function harness(options: HarnessOptions = {}): Harness {
         dependencyNumbers: (entry.dependencyNumbers ?? entry.openBlockedByNumbers)
           .filter((number) => open.has(number)),
         createdAt: entry.createdAt ?? `2026-01-${String(entry.number % 28 + 1).padStart(2, "0")}T00:00:00.000Z`,
-        hasChildren: entry.hasChildren === true,
       }));
       return { candidates };
     },
@@ -1099,12 +1097,10 @@ test("issues are processed serially and re-derived after every merge", async () 
   assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
 });
 
-test("the queue drains a parentless issue and a spec child alike, in creation order", async () => {
+test("the queue drains standalone and child issues while reporting an unclassified parent", async () => {
   const context = harness({
     issues: [
-      // The spec itself is an umbrella and never enters the queue, even though
-      // it is open and older than everything else.
-      { number: 12, title: "Offline sync", labels: ["[AI]-spec"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z", hasChildren: true },
+      { number: 12, title: "Offline sync plan", labels: ["planning"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
       { number: 40, title: "Fix the parser", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
       { number: 121, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-03T00:00:00.000Z" },
     ],
@@ -1119,7 +1115,7 @@ test("the queue drains a parentless issue and a spec child alike, in creation or
     [`createBranch aboard/40-fix-the-parser ${SESSION}`, `createBranch aboard/121-add-retry-backoff ${SESSION}`],
   );
   assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
-  assert.equal(/#12\b/u.test(context.notifications.join("\n")), false, "the spec is not queued and not reported");
+  assert.match(context.notifications.join("\n"), /#12 skipped \(unclassified: neither \[AI\]-afk nor \[AI\]-hitl\)/);
   assert.equal(context.state.cleared, true);
 });
 

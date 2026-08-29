@@ -21,7 +21,7 @@ This is the one write in the project where guessing is expensive — the roadmap
 
 ### From a reference the user gave you
 
-The argument names a spec — a file path, an issue number, a URL. Read it in full, comments included, and derive the roadmap from it. The codebase survey below is redundant here: a spec already states the intent a survey exists to reconstruct. Ask only about what the spec leaves genuinely open, then write.
+The argument names source material — a file path, an issue number, or a URL. Read it in full, comments included, and derive the roadmap from it. The codebase survey below is redundant when that material already states the intent a survey exists to reconstruct. Ask only about what it leaves genuinely open, then write.
 
 ### From the code
 
@@ -35,6 +35,6 @@ The Repository section reports source files and commits. When there is real code
 
 The repository holds no code, or only a README, a licence, or an untouched framework scaffold — the Repository section says so outright, and one commit is the same signal in weaker form. There is nothing to survey, and a roadmap inferred from the project's name is fiction the user then has to delete. So do not run the survey, and do not write.
 
-Ask instead, in plain text: what they are building and for whom, and what the first working version has to do. Then recommend `/brainstorm` — a roadmap is a sequence of decisions, and on a project this early those decisions do not exist yet; that conversation is what creates them. Say what the loop is, so they can see they are being pointed somewhere rather than turned away: the brainstormer converges on a durable spec, then `/update-todo <that spec's issue or path>` turns it into the first roadmap.
+Ask instead, in plain text: what they are building and for whom, and what the first working version has to do. Then recommend `/brainstorm` — a roadmap is a sequence of decisions, and on a project this early those decisions do not exist yet; that conversation is what creates them. Say what the loop is, so they can see they are being pointed somewhere rather than turned away: the brainstormer converges on durable planning material, then `/update-todo <that issue or path>` turns it into the first roadmap.
 
 If they would rather skip the brainstorm, write it directly — but only once their answer carries what a roadmap needs: what is being built, the stack or platform wherever it constrains the order of work, and what the first milestone is. Below that bar, say plainly that anything you wrote would be guesswork, and ask for the missing piece instead of filling it in yourself. A roadmap written here is a build order — scaffold, then the first vertical slice, then the next capability — not a survey of unfinished work, so ten to twenty tasks may be more than this project can honestly support. Write the ones that are real.

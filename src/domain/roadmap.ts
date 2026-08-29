@@ -62,7 +62,7 @@ export function describeSubjectRejection(rejection: SubjectRejection): string {
   switch (rejection) {
     case "empty": return "--subject must not be empty";
     case "multiline": return "--subject must be a single line; one task is one checkbox";
-    case "too-long": return `--subject must be at most ${ROADMAP_SUBJECT_LIMIT} characters; put the detail in an [AI]-spec issue`;
+    case "too-long": return `--subject must be at most ${ROADMAP_SUBJECT_LIMIT} characters; put the detail in a dedicated issue`;
     case "markup": return "--subject must not start with list or heading markup; aboard writes the `- [ ]` itself";
   }
 }

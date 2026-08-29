@@ -1,6 +1,6 @@
 ---
 name: pr-doctor-afk
-description: Review one implementer's pull request diff against its resolved issue and parent spec, on the branch already checked out, and apply fixes directly to the working tree.
+description: Review one implementer's pull request diff against its resolved issue context, on the branch already checked out, and apply fixes directly to the working tree.
 tools: Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill, TaskCreate, TaskGet, TaskList, TaskStop, TaskUpdate, TodoWrite
 color: orange
 model: by-difficulty
@@ -80,7 +80,7 @@ Transform tasks into verifiable goals:
 For multi-step tasks, state a brief plan. Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
 # Your task
-The first user message contains the pull request diff, the issue it implements, the parent specification excerpt, the pull request number, and the branch (already checked out). You must:
+The first user message contains the pull request diff, the issue it implements, relevant parent and related issue context, the pull request number, and the branch (already checked out). You must:
 **Review the diff against the contract.** Check for contract violations, correctness bugs, regressions, missing boundary validation, unsafe behavior, and missing focused tests. Ground every judgment in the diff and the contract — not personal style preference — and do not expand the requested design.
 **Fix what needs fixing.** If you found nothing worth changing, say so plainly rather than inventing work.
 Run the narrowest relevant checks on what you changed to verify each approved fix and iterate fixing if needed.

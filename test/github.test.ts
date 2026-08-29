@@ -247,7 +247,7 @@ function openIssues(): string {
     { number: 16, title: "ready hitl", body: "Needs #18 and https://github.com/EmilienxD/aboard/issues/17; ignore https://github.com/other/repo/issues/99 and `#77`.", createdAt: "2026-01-01T00:00:00Z", labels: { nodes: [{ name: "[AI]-hitl" }], pageInfo: endPage }, subIssues: { nodes: [], totalCount: 0, pageInfo: endPage }, blockedBy: { nodes: [{ number: 15, state: "CLOSED" }], pageInfo: endPage } },
     { number: 17, title: "blocked afk", createdAt: "2026-01-02T00:00:00Z", labels: { nodes: [{ name: "[AI]-afk" }], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [{ number: 16, state: "OPEN" }], pageInfo: endPage } },
     { number: 18, title: "unclassified", createdAt: "2026-01-03T00:00:00Z", labels: { nodes: [], pageInfo: endPage }, subIssues: { totalCount: 0 }, blockedBy: { nodes: [], pageInfo: endPage } },
-    { number: 19, title: "umbrella", createdAt: "2026-01-04T00:00:00Z", labels: { nodes: [{ name: "[AI]-spec" }], pageInfo: endPage }, subIssues: { nodes: [{ number: 16 }], totalCount: 3, pageInfo: endPage }, blockedBy: { nodes: [], pageInfo: endPage } },
+    { number: 19, title: "parent issue", createdAt: "2026-01-04T00:00:00Z", labels: { nodes: [{ name: "planning" }], pageInfo: endPage }, subIssues: { nodes: [{ number: 16 }], totalCount: 3, pageInfo: endPage }, blockedBy: { nodes: [], pageInfo: endPage } },
   ];
   return graph({ issues: { nodes, pageInfo: endPage } });
 }
@@ -256,7 +256,7 @@ test("derives readiness solely from dependency closedness and flags classificati
   const gh = new FixtureGh((args) => args[0] === "repo" ? repo : openIssues());
   const issues = await new GitHubClient(gh).listRoadmapIssues();
   assert.deepEqual(issues.map((issue) => [issue.number, issue.ready, issue.disposition]), [
-    [16, true, "hitl"], [17, false, "afk"], [18, true, "unclassified"],
+    [16, true, "hitl"], [17, false, "afk"], [18, true, "unclassified"], [19, true, "unclassified"],
   ]);
 });
 
@@ -266,7 +266,6 @@ test("the queue and the briefing are projected from one open-issue read", async 
   const { candidates } = await github.listImplementableIssues();
 
   assert.deepEqual(candidates.map((issue) => issue.number), [16, 17, 18, 19]);
-  assert.deepEqual(candidates.map((issue) => issue.hasChildren), [false, false, false, true]);
   assert.deepEqual(candidates.map((issue) => issue.createdAt), [
     "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z", "2026-01-04T00:00:00Z",
   ]);
@@ -285,16 +284,16 @@ test("the queue and the briefing are projected from one open-issue read", async 
   // Ascending creation order establishes priority before cursor pagination.
   const query = gh.calls.flat().find((arg) => arg.startsWith("query=")) ?? "";
   assert.match(query, /orderBy:\{field:CREATED_AT,direction:ASC\}/);
-  assert.match(query, /subIssues\(first:100\)\{nodes\{number\} totalCount pageInfo/);
+  assert.match(query, /subIssues\(first:100\)\{nodes\{number\} pageInfo/);
   assert.match(query, /pageInfo\{hasNextPage endCursor\}/);
 });
 
-test("the queue paginates past one hundred permanently unprocessable issues", async () => {
-  const oldUmbrellas = Array.from({ length: 100 }, (_, index) => ({
+test("the queue paginates past one hundred unclassified issues", async () => {
+  const oldUnclassified = Array.from({ length: 100 }, (_, index) => ({
     number: index + 1,
-    title: `Spec ${index + 1}`,
+    title: `Unclassified ${index + 1}`,
     createdAt: new Date(Date.UTC(2025, 0, 1, 0, index)).toISOString(),
-    labels: { nodes: [{ name: "[AI]-spec" }], pageInfo: endPage },
+    labels: { nodes: [{ name: "planning" }], pageInfo: endPage },
     subIssues: { totalCount: 1 },
     blockedBy: { nodes: [], pageInfo: endPage },
   }));
@@ -311,7 +310,7 @@ test("the queue paginates past one hundred permanently unprocessable issues", as
     const secondPage = args.includes("after=issues-100");
     return graph({ issues: secondPage
       ? { nodes: [implementable], pageInfo: endPage }
-      : { nodes: oldUmbrellas, pageInfo: { hasNextPage: true, endCursor: "issues-100" } } });
+      : { nodes: oldUnclassified, pageInfo: { hasNextPage: true, endCursor: "issues-100" } } });
   });
   const { candidates } = await new GitHubClient(gh).listImplementableIssues();
   assert.equal(candidates.length, 101);

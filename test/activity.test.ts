@@ -142,7 +142,7 @@ test("outcomes read as roles rather than lifecycle names", () => {
 
 test("migrating the old session ledger is idempotent and never displaces a newer outcome", () => {
   const legacy: LegacySessionRecord[] = [
-    { agentId: agent("7"), type: "brainstormer", sessionId: SESSIONS[0] as SessionId, description: "spec", endedAt: at("2026-07-30T09:00:00.000Z") },
+    { agentId: agent("7"), type: "brainstormer", sessionId: SESSIONS[0] as SessionId, description: "plan", endedAt: at("2026-07-30T09:00:00.000Z") },
     { agentId: agent("9"), type: "general-purpose", sessionId: SESSIONS[1] as SessionId, description: "general", endedAt: at("2026-07-30T09:30:00.000Z") },
     // Never reopenable, so it has no business in the store.
     { agentId: agent("12"), type: "webresearcher", sessionId: SESSIONS[2] as SessionId, description: "research", endedAt: at("2026-07-30T09:40:00.000Z") },
@@ -218,7 +218,7 @@ test("a malformed reopen block costs the action, not the row", () => {
     version: 1,
     entries: [{
       kind: "agent", id: "agent:7:ended", at: "2026-07-30T09:30:00.000Z",
-      agentId: "7", type: "brainstormer", description: "spec", outcome: "ended",
+      agentId: "7", type: "brainstormer", description: "plan", outcome: "ended",
       reopen: { sessionId: "not-a-uuid" },
     }],
   });
@@ -230,8 +230,8 @@ test("the legacy ledger parser drops unreadable entries rather than the file", (
   const parsed = parseLegacySessionLedger({
     version: 1,
     sessions: [
-      { agentId: "7", type: "brainstormer", sessionId: SESSIONS[0], description: "spec", endedAt: "2026-07-30T09:30:00.000Z" },
-      { agentId: "8", type: "brainstormer", sessionId: "nope", description: "spec", endedAt: "2026-07-30T09:30:00.000Z" },
+      { agentId: "7", type: "brainstormer", sessionId: SESSIONS[0], description: "plan", endedAt: "2026-07-30T09:30:00.000Z" },
+      { agentId: "8", type: "brainstormer", sessionId: "nope", description: "plan", endedAt: "2026-07-30T09:30:00.000Z" },
     ],
   });
   assert.equal(parsed.ok, true);

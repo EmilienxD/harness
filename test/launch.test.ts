@@ -116,7 +116,7 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   );
   assert.equal(plan.promptDelivery, "none");
   // The Manager orchestrates and is never a lease holder, even though its
-  // tool list leaves unrestricted Bash in place (spec section 4.3.1).
+  // The tool list leaves unrestricted Bash in place by design.
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, false);
 });

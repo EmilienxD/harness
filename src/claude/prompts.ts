@@ -11,7 +11,7 @@ export interface IssueSnapshot {
   readonly body: string;
   readonly labels: readonly string[];
   readonly state: "open" | "closed";
-  /** The umbrella `spec` issue this issue implements, when there is one. */
+  /** The parent issue GitHub associates with this issue, when there is one. */
   readonly parentIssueNumber?: number | undefined;
   /** Sub-issues and same-repository issue references inferred from the body. */
   readonly dependencyIssueNumbers?: readonly number[] | undefined;
@@ -55,7 +55,7 @@ export type IssueDisposition = "afk" | "hitl" | "unclassified";
 
 export type PromptSourceKind =
   | "issue"
-  | "parent-spec"
+  | "parent-issue"
   | "related-issue"
   | "pull-request"
   | "pull-request-diff"
@@ -110,7 +110,7 @@ export type PromptResolutionRequest =
 
 export interface PromptResolutionLimits {
   readonly issueBodyChars: number;
-  readonly parentSpecChars: number;
+  readonly parentIssueChars: number;
   readonly relatedIssueChars: number;
   readonly diffChars: number;
   readonly reviewThreadChars: number;
@@ -120,7 +120,7 @@ export interface PromptResolutionLimits {
 
 export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
   issueBodyChars: 20_000,
-  parentSpecChars: 8_000,
+  parentIssueChars: 8_000,
   relatedIssueChars: 1_500,
   diffChars: 40_000,
   reviewThreadChars: 12_000,
@@ -305,15 +305,15 @@ export class PromptResolver {
     }
 
     const visited = new Set(issues.map((issue) => issue.number));
-    const pending: { readonly number: number; readonly kind: "parent-spec" | "related-issue" }[] = [];
-    const enqueue = (number: number | undefined, kind: "parent-spec" | "related-issue"): void => {
+    const pending: { readonly number: number; readonly kind: "parent-issue" | "related-issue" }[] = [];
+    const enqueue = (number: number | undefined, kind: "parent-issue" | "related-issue"): void => {
       if (number === undefined || visited.has(number)) return;
       // Mark on enqueue, not after the read: siblings can point at each other
       // (or themselves through a parent) and must still cost one fetch.
       visited.add(number);
       pending.push({ number, kind });
     };
-    for (const issue of issues) enqueue(issue.parentIssueNumber, "parent-spec");
+    for (const issue of issues) enqueue(issue.parentIssueNumber, "parent-issue");
     for (const issue of issues) {
       for (const number of issue.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
     }
@@ -326,8 +326,8 @@ export class PromptResolver {
       // A missing link may name a pull request or deleted issue. It stays in
       // `visited`, so a cycle through it still cannot trigger repeated reads.
       if (related === undefined) continue;
-      const limit = next.kind === "parent-spec"
-        ? this.#limits.parentSpecChars
+      const limit = next.kind === "parent-issue"
+        ? this.#limits.parentIssueChars
         : this.#limits.relatedIssueChars;
       const relatedBody = excerpt(
         related.body,
@@ -335,11 +335,11 @@ export class PromptResolver {
         pointers ? `gh issue view ${related.number}` : undefined,
       );
       builder.section(
-        `${next.kind === "parent-spec" ? "Parent spec" : "Dependency"} #${related.number} — ${related.title}`,
+        `${next.kind === "parent-issue" ? "Parent issue" : "Related issue"} #${related.number} — ${related.title}`,
         relatedBody.text,
       );
       builder.source(next.kind, related.number, relatedBody);
-      enqueue(related.parentIssueNumber, "parent-spec");
+      enqueue(related.parentIssueNumber, "parent-issue");
       for (const number of related.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
     }
   }
@@ -495,7 +495,7 @@ export class PromptResolver {
   ): Promise<ResolvedPrompt | undefined> {
     const topic = request.topic?.trim() ?? "";
     const relatedNumbers = request.relatedIssueNumbers ?? [];
-    // A bare `/brainstorm` opens an empty prompt for the user (spec section 5.4).
+    // A bare `/brainstorm` opens an empty prompt for the user.
     if (topic.length === 0 && relatedNumbers.length === 0) return undefined;
 
     const builder = new PromptBuilder();

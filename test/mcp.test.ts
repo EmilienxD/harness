@@ -464,7 +464,7 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["todo_update", { task: 1, status: "completed" }],
     ["todo_update", { task: 1, expect: "A task", status: "archived" }],
     ["review_pr", { pr: 0 }],
-    ["start_auto_run", { spec: 12 }],
+    ["start_auto_run", { issue: 12 }],
     ["start_auto_run", { chrome: "yes" }],
     ["start_auto_run", { chrome: true }],
   ] as const) {

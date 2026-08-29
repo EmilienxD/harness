@@ -172,8 +172,8 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     managerTranscriptBackups: integer(reader, "aboard.manager.transcriptBackups", DEFAULT_TRANSCRIPT_BACKUPS, 0, 100, diagnostics),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {
-      // Automated review stays opt-in: spec section 7.5's invariant is
-      // unchanged, only its shape is.
+      // Automated review stays opt-in so a run cannot silently expand its
+      // authority from implementation into review.
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),

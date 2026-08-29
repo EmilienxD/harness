@@ -167,7 +167,7 @@ test("the rewrite narrows a bare Agent allowance to Claude Code's native types",
     "Skill",
   ]);
   // Read-the-repository and a fresh full-tool context are the two a worker
-  // delegates. The configuration assistants are not granted on spec.
+  // delegates. Configuration assistants are deliberately excluded.
   assert.deepEqual(NATIVE_SUBAGENT_TYPES, ["Explore", "general-purpose"]);
   for (const excluded of ["Plan", "claude-code-guide", "statusline-setup"]) {
     assert.equal(NATIVE_SUBAGENT_TYPES.includes(excluded as never), false, excluded);

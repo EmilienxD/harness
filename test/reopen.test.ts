@@ -205,7 +205,7 @@ test("a live session is focused rather than relaunched", async () => {
   fleet.register({
     identity: { agentId: agent("4"), type: "brainstormer" },
     sessionId: BRAINSTORM_SESSION,
-    terminal: { terminalId: terminalId("live-terminal"), name: "aboard: spec for offline sync" },
+    terminal: { terminalId: terminalId("live-terminal"), name: "aboard: plan for offline sync" },
     lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
     resultDelivery: { mode: "none" },
     telemetry,
@@ -292,7 +292,7 @@ test("/reopen with nothing recorded launches nothing and says so", async () => {
 test("the picker names each row the way its session and fleet row are named", () => {
   const items = renderReopenItems([
     {
-      candidate: { agentId: agent("7"), type: "brainstormer", sessionId: BRAINSTORM_SESSION, description: "spec for offline sync", origin: "ended", at: at("2026-07-30T08:00:00.000Z"), issueNumbers: [19] },
+      candidate: { agentId: agent("7"), type: "brainstormer", sessionId: BRAINSTORM_SESSION, description: "plan for offline sync", origin: "ended", at: at("2026-07-30T08:00:00.000Z"), issueNumbers: [19] },
       resumable: true,
     },
     {
@@ -303,7 +303,7 @@ test("the picker names each row the way its session and fleet row are named", ()
   ], new Date("2026-07-30T10:00:00.000Z"));
 
   assert.deepEqual(items.map((item) => item.label), ["aboard-brainstormer-7", "aboard-general-purpose-9"]);
-  assert.equal(items[0]?.description, "spec for offline sync · issue #19");
+  assert.equal(items[0]?.description, "plan for offline sync · issue #19");
   assert.match(items[0]?.detail ?? "", /Ended 2h ago/);
   // A session Claude Code can no longer resume says why, rather than quietly
   // disappearing from a list the user expects it in.
@@ -352,7 +352,7 @@ test("/reopen is intercepted for the Manager and reported without waking it", as
       reviewPullRequest: async () => assert.fail("no review"),
       reopenSession: async (selector) => {
         selectors.push(selector);
-        return { action: "reopened", candidate: { agentId: agent("7"), type: "brainstormer", sessionId: BRAINSTORM_SESSION, description: "spec", origin: "ended", at: at("2026-07-30T09:00:00.000Z") } };
+        return { action: "reopened", candidate: { agentId: agent("7"), type: "brainstormer", sessionId: BRAINSTORM_SESSION, description: "plan", origin: "ended", at: at("2026-07-30T09:00:00.000Z") } };
       },
     },
   );

@@ -21,7 +21,6 @@ function candidate(overrides: Partial<CandidateIssue> & { readonly number: numbe
     openBlockedByNumbers: [],
     dependencyNumbers: [],
     createdAt: `2026-01-${String(overrides.number % 28 + 1).padStart(2, "0")}T00:00:00.000Z`,
-    hasChildren: false,
     ...overrides,
   };
 }
@@ -128,25 +127,25 @@ test("dependency cycles are detected, broken locally, and ordered deterministica
   assert.deepEqual(plan.dependencyCycles, [[10, 20]]);
 });
 
-test("an umbrella never enters the plan, silently unless it is classified", () => {
+test("parent issues follow the same disposition rules as every other issue", () => {
   const plan = planRun([
-    candidate({ number: 10, labels: ["[AI]-spec"], createdAt: "2026-01-01T00:00:00.000Z" }),
-    candidate({ number: 11, labels: [], hasChildren: true, createdAt: "2026-01-02T00:00:00.000Z" }),
-    candidate({ number: 12, labels: ["[AI]-afk"], hasChildren: true, createdAt: "2026-01-03T00:00:00.000Z" }),
+    candidate({ number: 10, labels: ["planning"], dependencyNumbers: [13], createdAt: "2026-01-01T00:00:00.000Z" }),
+    candidate({ number: 11, labels: [], dependencyNumbers: [13], createdAt: "2026-01-02T00:00:00.000Z" }),
+    candidate({ number: 12, labels: ["[AI]-afk"], dependencyNumbers: [13], createdAt: "2026-01-03T00:00:00.000Z" }),
     candidate({ number: 13, createdAt: "2026-01-04T00:00:00.000Z" }),
   ]);
-  assert.deepEqual(plan.issues.map((entry) => entry.number), [13]);
+  assert.deepEqual(plan.issues.map((entry) => entry.number), [13, 12]);
   assert.deepEqual(plan.skipped, [
-    { number: 12, reason: "umbrella: has sub-issues, which are the work" },
+    { number: 10, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
+    { number: 11, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
   ]);
 });
 
-test("a spec that is also labelled for implementation is reported as the contradiction it is", () => {
-  const plan = planRun([candidate({ number: 10, labels: ["[AI]-spec", "[AI]-hitl"] })]);
-  assert.equal(plan.issues.length, 0);
-  assert.deepEqual(plan.skipped, [
-    { number: 10, reason: "umbrella: labelled [AI]-spec, so its children are the work" },
-  ]);
+test("unrelated labels do not override an issue's implementation disposition", () => {
+  const plan = planRun([candidate({ number: 10, labels: ["planning", "[AI]-hitl"] })]);
+  assert.equal(plan.issues[0]?.number, 10);
+  assert.equal(plan.issues[0]?.disposition, "hitl");
+  assert.deepEqual(plan.skipped, []);
 });
 
 test("hitl wins a contradictory label pair because only a human may close it", () => {

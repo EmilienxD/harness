@@ -1,5 +1,5 @@
 
-import { LABEL_SPEC, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
+import type { IssueDifficulty } from "../shared/labels.js";
 
 export const AUTO_RUN_PHASES = [
   "branch",
@@ -283,8 +283,6 @@ export interface CandidateIssue {
   readonly dependencyNumbers: readonly number[];
   /** Creation time, which breaks ties between dependency-ready issues. */
   readonly createdAt: string;
-  /** Whether the issue has sub-issues of its own, which makes it an umbrella. */
-  readonly hasChildren: boolean;
 }
 
 /** Notification lines. Kept terse on purpose; they are read in bulk. */

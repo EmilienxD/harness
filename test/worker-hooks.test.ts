@@ -59,7 +59,7 @@ test("records compact summaries, repeat count, and precise re-grounding", async 
   service.compact(parentId, "first summary"); service.compact(parentId, "second summary");
   assert.equal(fleet.get(parentId)?.telemetry.compactionCount, 2);
   assert.deepEqual(fleet.get(parentId)?.compactSummaries, ["first summary", "second summary"]);
-  assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, addressing issue #15 on branch feat/issue-15. Continue from the resolved issue and spec supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.");
+  assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, addressing issue #15 on branch feat/issue-15. Continue from the resolved issue context supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.");
   const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
   assert.equal((await import("../src/domain/validation.js")).parseFleetPersistenceDto(serialized).ok, true);
 });

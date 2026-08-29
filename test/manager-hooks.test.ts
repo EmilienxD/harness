@@ -740,7 +740,7 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
 });
 
 test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
-  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/brainstorm", "/brainstorm caching layer", "/done", "/done close now", "/auto", "/review-pr", "/auto the next spec", "/reopen", "/reopen brainstorm"]) {
+  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/brainstorm", "/brainstorm caching layer", "/done", "/done close now", "/auto", "/review-pr", "/auto the next issue", "/reopen", "/reopen brainstorm"]) {
     const result = await runPromptHook(500, { error: "boom" }, prompt);
     assert.equal(result.status, 2, `${prompt} must erase the prompt even when the bridge fails`);
     assert.equal(result.stdout, "");

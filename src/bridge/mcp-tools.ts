@@ -117,7 +117,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
 
       "## Attaching issues\n\n" +
       "`issues` names GitHub issues whose contract the agent needs. " +
-      "Aboard merges each one and its parent spec into the opening prompt, " +
+      "Aboard merges each one, its parent issue, and related issue context into the opening prompt, " +
       "so do not spend a turn re-fetching that material. " +
       "Pass every issue the agent needs and no more: each arrives in full, " +
       "so a batch larger than one agent can hold and finish spends its context before it starts — " +
@@ -334,9 +334,8 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
     description:
       "Start Aboard's automatic issue-addressing workflow. " +
       "The queue is every open issue labelled [AI]-afk or [AI]-hitl, dependencies first, " +
-      "with creation date and issue number breaking ties between ready issues, " +
-      "whether or not the issue belongs to an [AI]-spec issue. " +
-      "An issue that does belong to one still reaches its implementer with that parent spec as context. " +
+      "with creation date and issue number breaking ties between ready issues. " +
+      "Parent and related issues still reach the implementer as context, regardless of their labels. " +
       "Use this only after the user has approved the work and the issues are ready to address. " +
       "Do not use `run_agent` to bypass this workflow: " +
       "the extension, not an agent, owns branch creation, commits, pushes, " +
@@ -361,8 +360,8 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "Issues are processed serially and the dependency graph is re-derived from GitHub at each boundary. " +
       "Native blocked-by links are hard gates; sub-issues and same-repository issue references in bodies " +
       "are best-effort ordering constraints. Cycles are reported and ordered oldest first within the cycle. " +
-      "Umbrella issues never enter the queue: an [AI]-spec issue, or any issue with sub-issues of its own, " +
-      "is represented by its children. " +
+      "Every issue is classified the same way: [AI]-afk and [AI]-hitl admit it, while an issue with neither " +
+      "label is skipped as unclassified even when it is a parent or has sub-issues. " +
       "The run works on one session branch of its own, cut from the branch the user was on. " +
       "Every issue branches off that session branch and merges back into it, " +
       "and the extension closes the issue itself, because GitHub only acts on a closing keyword " +

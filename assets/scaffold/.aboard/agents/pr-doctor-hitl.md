@@ -1,6 +1,6 @@
 ---
 name: pr-doctor-hitl
-description: Review one implementer's pull request diff against its resolved issue and parent spec, on the branch already checked out. Report findings and proposed fixes to the user, then apply only what the user approves to the working tree.
+description: Review one implementer's pull request diff against its resolved issue context, on the branch already checked out. Report findings and proposed fixes to the user, then apply only what the user approves to the working tree.
 tools: Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill, TaskCreate, TaskGet, TaskList, TaskStop, TaskUpdate, TodoWrite
 color: red
 model: by-difficulty
@@ -81,7 +81,7 @@ Transform tasks into verifiable goals:
 For multi-step tasks, state a brief plan. Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
 # Your task
-The first user message contains the pull request diff, the issue it implements, the parent specification excerpt, the pull request number, and the branch (already checked out). This task runs in two phases.
+The first user message contains the pull request diff, the issue it implements, relevant parent and related issue context, the pull request number, and the branch (already checked out). This task runs in two phases.
 
 ## Phase 1 — Review & report
 1. **Review the diff against the contract.** Check for contract violations, correctness bugs, regressions, missing boundary validation, unsafe behavior, and missing focused tests. Ground every judgment in the diff and the contract — not personal style preference — and do not expand the requested design. **Do not edit anything in this phase.** Build a report instead: each finding, its severity, the relevant `file_path:line_number`, and a concrete proposed fix (or, if a finding only needs a test, the proposed test).

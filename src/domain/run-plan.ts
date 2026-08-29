@@ -1,5 +1,5 @@
 
-import { LABEL_CHROME, LABEL_SPEC, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
+import { LABEL_CHROME, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
 import {
   branchName,
   type AutoRunPhase,
@@ -198,11 +198,6 @@ export function planRun(candidates: readonly CandidateIssue[]): RunPlanResult {
   const eligible = new Map<number, CandidateIssue>();
   for (const candidate of open) {
     const disposition = classify(candidate.labels);
-    const umbrella = umbrellaReason(candidate);
-    if (umbrella !== undefined) {
-      if (disposition !== undefined) skipped.push({ number: candidate.number, reason: umbrella });
-      continue;
-    }
     if (disposition === undefined) {
       skipped.push({ number: candidate.number, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" });
       continue;
@@ -248,13 +243,6 @@ export function planRun(candidates: readonly CandidateIssue[]): RunPlanResult {
 function classify(labels: readonly string[]): IssueDisposition | undefined {
   const disposition = issueDisposition(labels);
   return disposition === "unclassified" ? undefined : disposition;
-}
-
-function umbrellaReason(candidate: CandidateIssue): string | undefined {
-  if (hasLabel(candidate.labels, LABEL_SPEC)) {
-    return `umbrella: labelled ${LABEL_SPEC}, so its children are the work`;
-  }
-  return candidate.hasChildren ? "umbrella: has sub-issues, which are the work" : undefined;
 }
 
 function compareCandidates(left: CandidateIssue, right: CandidateIssue): number {

@@ -22,7 +22,7 @@ import {
 } from "../domain/roadmap.js";
 import type { CandidateIssue } from "../domain/auto-run.js";
 import { referencedIssueNumbers } from "../shared/issues.js";
-import { LABEL_HITL, LABEL_SPEC, LABEL_TODO, hasLabel, issueDisposition } from "../shared/labels.js";
+import { LABEL_HITL, LABEL_TODO, hasLabel, issueDisposition } from "../shared/labels.js";
 
 export { ABOARD_LABELS } from "../shared/labels.js";
 export type { AboardLabel } from "../shared/labels.js";
@@ -247,24 +247,20 @@ interface DependencyPage extends PageInfo {
 
 interface IssueNumberPage extends PageInfo {
   readonly numbers: readonly number[];
-  readonly totalCount: number;
 }
 
 function parseIssueNumberPage(value: unknown, context: string): IssueNumberPage {
   if (value === undefined || value === null) {
-    return { numbers: [], totalCount: 0, nextCursor: undefined };
+    return { numbers: [], nextCursor: undefined };
   }
   const connection = record(value, context);
   const nodes = connection.nodes === undefined ? [] : array(connection.nodes, `${context}.nodes`);
   const numbers = nodes.map((node, index) =>
     integer(record(node, `${context}.nodes[${index}]`).number, `${context}.nodes[${index}].number`));
-  const totalCount = Number.isInteger(connection.totalCount) && (connection.totalCount as number) >= 0
-    ? connection.totalCount as number
-    : numbers.length;
   const paging = connection.pageInfo === undefined
     ? { nextCursor: undefined }
     : pageInfo(connection.pageInfo, `${context}.pageInfo`);
-  return { numbers, totalCount, nextCursor: paging.nextCursor };
+  return { numbers, nextCursor: paging.nextCursor };
 }
 
 function parseDependencyPage(value: unknown, context: string): DependencyPage {
@@ -328,7 +324,6 @@ interface OpenIssueRow {
   readonly title: string;
   readonly createdAt: string;
   readonly labels: readonly string[];
-  readonly hasChildren: boolean;
   readonly dependencyNumbers: readonly number[];
   readonly openBlockedByNumbers: readonly number[];
   readonly orderingDependencyNumbers: readonly number[];
@@ -360,7 +355,6 @@ function parseOpenIssue(
       title: string(item.title, `${context}.title`),
       createdAt: string(item.createdAt, `${context}.createdAt`),
       labels: labelPage.labels,
-      hasChildren: subIssuePage.totalCount > 0,
       dependencyNumbers: dependencyPage.dependencies.map((dependency) => dependency.number),
       openBlockedByNumbers: dependencyPage.dependencies.flatMap((dependency) => dependency.state === "open" ? [dependency.number] : []),
       orderingDependencyNumbers: [...new Set([
@@ -392,11 +386,11 @@ function repositoryFromGraphql(value: unknown): Record<string, unknown> {
   return record(record(record(value, "GraphQL response").data, "data").repository, "data.repository");
 }
 
-const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} totalCount pageInfo{hasNextPage endCursor}} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
-const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){repository(owner:$owner,name:$repo){issues(first:100,after:$after,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title body createdAt labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} subIssues(first:100){nodes{number} totalCount pageInfo{hasNextPage endCursor}} blockedBy(first:100){nodes{number state} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}`;
+const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
+const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){repository(owner:$owner,name:$repo){issues(first:100,after:$after,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title body createdAt labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}} blockedBy(first:100){nodes{number state} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}`;
 const ISSUE_LABELS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){labels(first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_BLOCKERS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state} pageInfo{hasNextPage endCursor}}}}}`;
-const ISSUE_SUBISSUES_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100,after:$after){nodes{number} totalCount pageInfo{hasNextPage endCursor}}}}}`;
+const ISSUE_SUBISSUES_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100,after:$after){nodes{number} pageInfo{hasNextPage endCursor}}}}}`;
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged mergeable url headRefName baseRefName headRefOid mergeCommit{oid} closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
@@ -547,7 +541,7 @@ export class GitHubClient implements GitHubPromptSource {
   public async listRoadmapIssues(): Promise<readonly RoadmapIssue[]> {
     const page = await this.#scanOpenIssues();
     return page.rows.flatMap((row) => {
-      if (hasLabel(row.labels, LABEL_SPEC) || hasLabel(row.labels, LABEL_TODO)) return [];
+      if (hasLabel(row.labels, LABEL_TODO)) return [];
       return [{
         number: row.number,
         title: row.title,
@@ -569,7 +563,6 @@ export class GitHubClient implements GitHubPromptSource {
         openBlockedByNumbers: row.openBlockedByNumbers,
         dependencyNumbers: row.orderingDependencyNumbers,
         createdAt: row.createdAt,
-        hasChildren: row.hasChildren,
       })),
     };
   }
