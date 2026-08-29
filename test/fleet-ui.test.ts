@@ -73,7 +73,7 @@ test("one section lists the Manager and its workers, with the Manager pinned fir
   model.dispose();
 });
 
-test("New Manager stays pinned above the fleet and disables while a Manager exists", () => {
+test("New Manager stays pinned above workers and is replaced by the live Manager", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => true, () => fleet.list().some((entry) => entry.identity.type === "manager"));
   fleet.register(worker, startedAt);
@@ -90,16 +90,10 @@ test("New Manager stays pinned above the fleet and disables while a Manager exis
   });
 
   fleet.register({ ...worker, identity: { agentId: agent("manager-1"), type: "manager" }, sessionId: session("session-2"), resultDelivery: { mode: "none" } }, startedAt);
-  const disabled = model.roots()[0]!;
-  assert.equal(disabled.kind, "new-manager");
-  assert.deepEqual(model.item(disabled), {
-    label: "New Manager",
-    description: "Manager is running",
-    tooltip: "A Manager is already running",
-    icon: "circle-slash",
-    contextValue: "aboard.action.newManager",
-    collapsible: false,
-  });
+  const roots = model.roots();
+  assert.equal(roots.some((node) => node.kind === "new-manager"), false);
+  assert.equal(roots[0]?.kind === "agent" && roots[0].session.identity.type, "manager");
+  assert.deepEqual(roots.map((node) => model.item(node).label), ["Manager #19", "aboard-implementer-4 #19"]);
   model.dispose();
 });
 

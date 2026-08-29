@@ -535,8 +535,10 @@ test("the afk path runs branch to merge and performs every side effect itself", 
     "add", "commit", "push aboard/34-add-retry-backoff -u",
     // After the merge, so the record carries the session branch tip the merge
     // produced rather than the one it had before.
-    `checkout ${SESSION}`, `fastForward ${SESSION}`, "checkout aboard/34-add-retry-backoff",
+    `checkout ${SESSION}`, `fastForward ${SESSION}`,
     `checkout ${SESSION}`,
+    `deleteBranchAt aboard/34-add-retry-backoff ${context.sha("aboard/34-add-retry-backoff")}`,
+    `deleteRemoteBranchAt aboard/34-add-retry-backoff ${context.sha("aboard/34-add-retry-backoff")}`,
     "checkout main",
   ]);
   assert.equal(context.pullRequests.get(56)?.state, "merged");
@@ -554,7 +556,7 @@ test("the default branch is never a pull request base and never merged into", as
   // targets a branch a human owns, and it is the one aboard did not merge.
   assert.deepEqual(context.createdPullRequests.map((pr) => pr.base), [SESSION, "feature/wip"]);
   assert.equal(context.gitCalls.some((call) => call.startsWith("checkout main")), false);
-  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: true }]);
+  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: false }]);
 });
 
 test("an issue merged into the session branch is closed by aboard, because GitHub will not", async () => {
@@ -628,7 +630,7 @@ test("the run merges its own pull request only when the setting allows it", asyn
   assert.equal(context.pullRequests.get(57)?.state, "merged");
   // The session branch survives: parked or unmerged issue pull requests still
   // target it, and deleting a base branch closes them.
-  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: true }, { pr: 57, deleteBranch: false }]);
+  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: false }, { pr: 57, deleteBranch: false }]);
   assert.match(context.notifications.join("\n"), /PR #57 merged into feature\/wip\. Pull feature\/wip/);
 });
 

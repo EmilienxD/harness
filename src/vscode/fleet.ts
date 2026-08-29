@@ -4,7 +4,7 @@ import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
 
 export type FleetTreeNode =
-  | { readonly kind: "new-manager"; readonly enabled: boolean }
+  | { readonly kind: "new-manager" }
   | { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean }
   | { readonly kind: "child"; readonly child: ChildAgentNode };
 
@@ -56,9 +56,9 @@ export class FleetTreeModel {
       .filter((session) => isLiveSession(session) && this.isTerminalOpen(session.terminal.terminalId))
       .map((session): FleetTreeNode => ({ kind: "agent", session, leaseHolder: this.lease.current()?.agentId === session.identity.agentId }))
       .sort((left, right) => managerRank(left) - managerRank(right));
-    return this.isManagerLive === undefined
+    return this.isManagerLive === undefined || this.isManagerLive()
       ? agents
-      : [{ kind: "new-manager", enabled: !this.isManagerLive() }, ...agents];
+      : [{ kind: "new-manager" }, ...agents];
   }
 
   /** Only running children: a completed sub-agent is history, not fleet. */
@@ -73,12 +73,12 @@ export class FleetTreeModel {
     if (node.kind === "new-manager") {
       return {
         label: "New Manager",
-        description: node.enabled ? "" : "Manager is running",
-        tooltip: node.enabled ? "Start a new Manager" : "A Manager is already running",
-        icon: node.enabled ? "add" : "circle-slash",
+        description: "",
+        tooltip: "Start a new Manager",
+        icon: "add",
         contextValue: "aboard.action.newManager",
         collapsible: false,
-        ...(node.enabled ? { command: { command: "aboard.newManager" as const, title: "New Manager", arguments: [] as const } } : {}),
+        command: { command: "aboard.newManager" as const, title: "New Manager", arguments: [] as const },
       };
     }
     if (node.kind === "child") {

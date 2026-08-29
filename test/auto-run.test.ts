@@ -142,6 +142,17 @@ test("every already-satisfied postcondition short circuits", () => {
   );
 });
 
+test("a merged pull request reaches cleanup even when its disposable branch is gone", () => {
+  const outcome = step("merge", {
+    branchExists: false,
+    currentBranch: SESSION_BRANCH,
+    hasCommit: false,
+    commitPushed: false,
+    pullRequest: { number: 56, state: "merged", approvedByOther: false },
+  });
+  assert.deepEqual(outcome, { action: "cleanup", issue });
+});
+
 test("a branch with a pull request but nothing to commit is a failure, not a commit", () => {
   const outcome = step("commit", {
     workingTreeDirty: false,

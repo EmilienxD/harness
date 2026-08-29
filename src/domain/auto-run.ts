@@ -189,6 +189,10 @@ export function nextStep(input: ReducerInput): AutoRunStep {
   // pull request, or the user closed it by hand. Either way there is nothing
   // left to open or merge, so the only remaining step is to tidy up.
   if (facts.issueClosed) return { action: "cleanup", issue };
+  // A merged pull request is equally conclusive. Its head branch is disposable
+  // and may already have been removed, so requiring that branch before reaching
+  // cleanup would recreate completed work during recovery.
+  if (facts.pullRequest?.state === "merged") return { action: "cleanup", issue };
   for (const phase of AUTO_RUN_PHASES) {
     switch (phase) {
       case "branch":
@@ -230,7 +234,6 @@ export function nextStep(input: ReducerInput): AutoRunStep {
         const pr = requirePullRequest(facts, issue);
         if (pr.action === "stop") return pr;
         if (issue.disposition === "afk") continue;
-        if (facts.pullRequest?.state === "merged") continue;
         if (facts.pullRequest?.state === "closed") {
           return { action: "stop", reason: `pull request #${pr.number} was closed without merging, so issue #${issue.number} was rejected` };
         }
@@ -242,7 +245,6 @@ export function nextStep(input: ReducerInput): AutoRunStep {
       case "merge": {
         const pr = requirePullRequest(facts, issue);
         if (pr.action === "stop") return pr;
-        if (facts.pullRequest?.state === "merged") continue;
         if (facts.pullRequest?.state === "closed") {
           return { action: "stop", reason: `pull request #${pr.number} was closed without merging, so issue #${issue.number} was rejected` };
         }

@@ -978,7 +978,6 @@ export class AutoRunEngine {
         if (action.kind === "merge-issue-pr") {
           await this.#git.checkout(action.base);
           await this.#git.fastForward(action.base);
-          await this.#git.checkout(action.head);
         }
         await this.#save({ ...this.#current, ...this.#patchBranchSha(action.base, baseSha) });
         return;
@@ -1103,7 +1102,7 @@ export class AutoRunEngine {
             const landed = facts.pullRequest?.state === "merged" ? facts.pullRequest.number : undefined;
             let closed = facts.issueClosed;
             if (landed !== undefined && !facts.issueClosed) closed = await this.#closeIssue(issue, landed);
-            await this.#cleanup(this.#current.sessionBranch);
+            await this.#cleanup(this.#current.sessionBranch, issue.branch);
             await this.#finishIssue(issue, landed === undefined
               ? { state: "done", result: "no-changes" }
               : { state: "done", result: "landed", prNumber: landed, issueClosed: closed });
@@ -1417,7 +1416,11 @@ export class AutoRunEngine {
       if (headSha === undefined || baseShaBefore === undefined) throw new Error(`the branches for PR #${prNumber} no longer exist`);
       await this.#journal({ kind: "merge-issue-pr", prNumber, head: issue.branch, base, headSha, baseSha: baseShaBefore });
       try {
-        await this.options.github.mergePullRequest(prNumber, strategy, true);
+        // `gh pr merge --delete-branch` deletes the local branch too and may
+        // move HEAD behind the engine's back. Keep the CLI merge remote-only;
+        // cleanup removes the exact recorded local and remote refs through the
+        // SHA-guarded git boundary after the merge is adopted.
+        await this.options.github.mergePullRequest(prNumber, strategy, false);
       } catch (error) {
         const after = await this.options.github.getPullRequest(prNumber);
         if (after?.state === "merged") {
@@ -1438,7 +1441,6 @@ export class AutoRunEngine {
       }
       await this.#git.checkout(base);
       await this.#git.fastForward(base);
-      await this.#git.checkout(issue.branch);
       await this.#save({ ...this.#current, ...(baseSha === undefined ? {} : this.#patchBranchSha(base, baseSha)) });
     }
     this.options.notifier.notify(autoRunMessage.merged(issue.number, base));
@@ -1458,13 +1460,18 @@ export class AutoRunEngine {
     return true;
   }
 
-  async #cleanup(sessionBranch: string): Promise<void> {
+  async #cleanup(sessionBranch: string, issueBranch?: string): Promise<void> {
     for (const terminalId of this.#openTerminals) {
       try { this.options.terminals.close(terminalId); } catch { /* already closed */ }
     }
     this.#openTerminals.clear();
     try {
       await this.#git.checkout(sessionBranch);
+      const expectedSha = issueBranch === undefined ? undefined : this.#current.branchShas[issueBranch];
+      if (issueBranch !== undefined && expectedSha !== undefined) {
+        await this.#git.deleteBranchAt(issueBranch, expectedSha);
+        await this.#git.deleteRemoteBranchAt(issueBranch, expectedSha);
+      }
     } catch (error) {
       this.options.log?.(`auto-run cleanup could not return to ${sessionBranch}: ${message(error)}`);
     }

@@ -219,6 +219,28 @@ test("an afk pull request merged by somebody else fails the run", () => {
   assert.equal(reason(journalled, exactMerge), undefined);
 });
 
+test("a journalled merge explains the CLI having deleted its issue branch", () => {
+  const current = record({
+    currentIssue: 34,
+    checkpoint: "issue",
+    progress: { "34": { state: "current", phase: "merge", prNumber: 56 }, "35": { state: "pending" } },
+    branchShas: { [SESSION]: SHA("a"), "aboard/34-add-retry-backoff": SHA("c") },
+    pendingAction: {
+      kind: "merge-issue-pr",
+      prNumber: 56,
+      head: "aboard/34-add-retry-backoff",
+      base: SESSION,
+      headSha: SHA("c"),
+      baseSha: SHA("a"),
+    },
+  });
+  const observed = observations({
+    branches: [branch(SESSION, SHA("d")), branch("aboard/34-add-retry-backoff", undefined)],
+    pullRequests: [pullRequest({ number: 56, state: "merged", headSha: SHA("c"), mergeCommitSha: SHA("d") })],
+  });
+  assert.equal(reason(current, observed), undefined);
+});
+
 test("a hitl pull request the user merged or another account approved is allowed", () => {
   // These two are the whole point of the hitl disposition.
   const current = working({ state: "current", phase: "await-approval", prNumber: 57 }, 35);

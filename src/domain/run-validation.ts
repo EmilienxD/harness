@@ -153,6 +153,10 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
     const expected = record.branchShas[name];
     const merge = mergePostcondition(record.pendingAction, name, observations);
     if (observed?.localSha === undefined && observed?.remoteSha === undefined) {
+      const mergedHeadWasDeleted = record.pendingAction?.kind === "merge-issue-pr"
+        && record.pendingAction.head === name
+        && mergePostcondition(record.pendingAction, record.pendingAction.base, observations) !== undefined;
+      if (mergedHeadWasDeleted) continue;
       return broken(`the run's branch ${name} no longer exists`);
     }
     if (expected === undefined) continue;
