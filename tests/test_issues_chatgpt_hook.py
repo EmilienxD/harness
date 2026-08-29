@@ -132,12 +132,11 @@ def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
         ),
     )
 
-    with pytest.raises(SystemExit) as stopped:
-        adapter.main()
+    adapter.main()
 
-    assert stopped.value.code == 2
-    report = capsys.readouterr().err
-    assert "2 parts (1 continuation comment(s))" in report
+    response = json.loads(capsys.readouterr().out)
+    assert response["decision"] == "block"
+    assert "2 parts (1 continuation comment(s))" in response["reason"]
     assert (batch / "issue-0.md").is_file()
     assert not (tmp_path / ".issues-gateway/.state.json").exists()
 
@@ -167,11 +166,11 @@ def test_chatgpt_publish_is_scoped_to_the_current_session(
         ),
     )
 
-    with pytest.raises(SystemExit) as stopped:
-        adapter.main()
+    adapter.main()
 
-    assert stopped.value.code == 2
-    assert "Dry run complete: 1 issue(s) ready to publish" in capsys.readouterr().err
+    response = json.loads(capsys.readouterr().out)
+    assert response["decision"] == "block"
+    assert "Dry run complete: 1 issue(s) ready to publish" in response["reason"]
 
 
 def test_pending_notice_and_drafting_context_are_combined(

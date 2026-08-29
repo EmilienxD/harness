@@ -80,10 +80,8 @@ def main() -> None:
         dry = "--dry" in prompt.split()
         session_id = str(payload.get("session_id") or "")
         result = core.publish_issues(dry, gateway_session_id(session_id))
-        sys.stderr.write("\n\n" + result)
-        # UserPromptSubmit exit 2 blocks the command prompt, so publishing
-        # costs no model turn just as it does in Claude Code.
-        raise SystemExit(2)
+        json.dump({"decision": "block", "reason": result}, sys.stdout)
+        return
 
     contexts: list[str] = []
     try:
