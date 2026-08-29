@@ -690,6 +690,16 @@ def delete_published_draft(path: Path) -> None:
     path.unlink()
 
 
+def delete_empty_batch_dir(batch_dir: Path) -> None:
+    """Remove a completed batch, but preserve it if anything remains."""
+    try:
+        batch_dir.rmdir()
+    except OSError:
+        # A failed/unknown draft or a concurrently created file still needs
+        # the directory. Leaving it in place is the safe outcome.
+        pass
+
+
 _parent_flag_supported: bool | None = None
 
 
@@ -1470,6 +1480,8 @@ def publish_issues(dry: bool) -> str:
         )
         total_published += p
         total_failed += f
+        if not dry and f == 0:
+            delete_empty_batch_dir(batch_dir)
         report.append("")
 
     if not dry:

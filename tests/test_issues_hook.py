@@ -1058,6 +1058,46 @@ def test_spec_then_breakdown_across_two_publish_runs(tmp_path, monkeypatch):
     assert created[0]["parent"] == "42"
 
 
+def test_successful_publish_removes_empty_session_folder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(hook, "ensure_labels", lambda dry: [])
+    _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
+    draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
+
+    result = hook.publish_issues(dry=False)
+
+    assert "Published 1 issue(s) successfully" in result
+    assert not draft.parent.exists()
+
+
+def test_publish_keeps_session_folder_when_any_draft_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(hook, "ensure_labels", lambda dry: [])
+    monkeypatch.setattr(
+        hook,
+        "gh_create_issue",
+        lambda title, body, labels, parent=None: (False, "GitHub unavailable"),
+    )
+    draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
+
+    result = hook.publish_issues(dry=False)
+
+    assert "1 failed or were skipped" in result
+    assert draft.exists()
+    assert draft.parent.is_dir()
+
+
+def test_dry_run_keeps_session_folder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
+
+    result = hook.publish_issues(dry=True)
+
+    assert "1 issue(s) ready to publish" in result
+    assert draft.exists()
+    assert draft.parent.is_dir()
+
+
 def test_a_publish_prompt_does_not_consume_the_notice(tmp_path):
     # The publish path exits 2 and produces no model turn, so flushing there
     # would throw the notice away without anyone reading it.

@@ -53,7 +53,9 @@ as `$draft-issue`, `$draft-issues`, `$publish-issues`, `$to-spec`, and
 **Single issue.** `/draft-issue` pins down scope, difficulty, and mode with you in chat, then writes
 one markdown file under `.issues-gateway/{session-id}/issue-{n}.md`, where `{n}` is the next free
 index among pending drafts in that session. `/publish-issues` publishes every draft in that folder
-and deletes each draft file as soon as GitHub confirms creation, so a rerun never re-creates it.
+and deletes each draft file as soon as GitHub confirms creation, so a rerun never re-creates it. Once
+every draft in the session is published, it also removes the empty session folder; a later draft in
+the same session recreates it automatically.
 
 **Batch.** `/draft-issues` first proposes a breakdown in chat and iterates until granularity,
 dependencies, difficulty, and mode look right. Once you approve the mapping, it proceeds directly to
