@@ -89,13 +89,19 @@ export function isReopenableType(type: AgentType): type is Exclude<AgentType, "m
   return type !== "manager" && !isNonRestorablePersistedAgentType(type);
 }
 
-export function isReopenableSession(session: AgentSession): boolean {
+/** The original launch was handed to the user instead of a result caller. */
+export function isInteractiveLaunch(session: AgentSession): boolean {
   return session.resultDelivery.mode === "none" && isReopenableType(session.identity.type);
+}
+
+/** Claude can hand this conversation back to the user after its original caller is gone. */
+export function canReopenSession(session: AgentSession): boolean {
+  return isReopenableType(session.identity.type);
 }
 
 /** Empty interactive launches are neither conversations to reopen nor outcomes worth retaining. */
 export function shouldRecordEndedSession(session: AgentSession, conversationStarted: boolean): boolean {
-  return !isReopenableSession(session) || conversationStarted;
+  return !isInteractiveLaunch(session) || conversationStarted;
 }
 
 /** The description a terminal name carries, without aboard's own prefix. */
@@ -117,7 +123,7 @@ export function agentActivity(
   at: IsoTimestamp,
   options: { readonly reason?: string; readonly terminalId?: TerminalId } = {},
 ): AgentActivityEntry {
-  const reopenable = isReopenableSession(session);
+  const reopenable = canReopenSession(session);
   return {
     kind: "agent",
     id: agentEntryId(session.identity.agentId, outcome),
@@ -258,7 +264,7 @@ export function reopenCandidates(
   const candidates = new Map<AgentId, ReopenCandidate>();
   for (const session of fleetSessions) {
     const type = session.identity.type;
-    if (!isReopenableSession(session) || !isReopenableType(type)) continue;
+    if (!canReopenSession(session) || !isReopenableType(type)) continue;
     if (!isTerminalOpen(session.terminal.terminalId)) continue;
     candidates.set(session.identity.agentId, {
       agentId: session.identity.agentId,

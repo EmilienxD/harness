@@ -6,9 +6,10 @@ import {
   agentActivity,
   agentEntryId,
   appendActivity,
+  canReopenSession,
   describeActivity,
   hasReopenableEntries,
-  isReopenableSession,
+  isInteractiveLaunch,
   isReopenableType,
   migrateLegacySessions,
   reopenCandidates,
@@ -56,11 +57,14 @@ function fleetSession(overrides: {
   } as AgentSession;
 }
 
-test("reopenability follows the launch, not only the type", () => {
+test("result delivery does not decide whether a restorable conversation can reopen", () => {
   // `general-purpose` runs both ways, and only the handed-off launch is a
-  // conversation the user was part of.
-  assert.equal(isReopenableSession(fleetSession({ agentId: "9", type: "general-purpose" })), true);
-  assert.equal(isReopenableSession(fleetSession({ agentId: "9", type: "general-purpose", delivers: true })), false);
+  // conversation the user was already part of. Both conversations can be
+  // handed back to the user after they finish.
+  assert.equal(isInteractiveLaunch(fleetSession({ agentId: "9", type: "general-purpose" })), true);
+  assert.equal(isInteractiveLaunch(fleetSession({ agentId: "9", type: "general-purpose", delivers: true })), false);
+  assert.equal(canReopenSession(fleetSession({ agentId: "9", type: "general-purpose", delivers: true })), true);
+  assert.equal(canReopenSession(fleetSession({ agentId: "10", type: "implementer", delivers: true })), true);
   // The Manager has its own resume path; a second one here would compete with it.
   assert.equal(isReopenableType("manager"), false);
   // Automated-only, with no caller left to receive a result.
@@ -102,6 +106,17 @@ test("an automated launch is recorded without a way back into it", () => {
   const entry = agentActivity(fleetSession({ agentId: "12", type: "webresearcher", delivers: true }), "succeeded", at("2026-07-30T09:30:00.000Z"));
   assert.equal(entry.reopen, undefined);
   assert.equal(entry.outcome, "succeeded");
+});
+
+test("a completed automated implementer keeps the conversation needed to reopen it", () => {
+  const session = fleetSession({ agentId: "12", type: "implementer", delivers: true, issueNumbers: [34] });
+  const entry = agentActivity(session, "succeeded", at("2026-07-30T09:30:00.000Z"));
+  assert.deepEqual(entry.reopen, { sessionId: SESSIONS[0] as SessionId, issueNumbers: [34] });
+
+  const candidates = reopenCandidates(appendActivity(undefined, entry), [], () => false);
+  assert.deepEqual(candidates.map(({ agentId, type, origin }) => ({ agentId, type, origin })), [
+    { agentId: agent("12"), type: "implementer", origin: "ended" },
+  ]);
 });
 
 test("appends are newest first, idempotent by id, and capped", () => {
@@ -242,7 +257,7 @@ test("a row offers only the actions it can actually perform", () => {
   const openTerminals = new Set<string>(["terminal-7"]);
   const entries = [
     agentActivity(fleetSession({ agentId: "7", type: "brainstormer", issueNumbers: [34] }), "ended", at("2026-07-30T09:30:00.000Z"), { terminalId: terminal("terminal-7") }),
-    agentActivity(fleetSession({ agentId: "9", type: "general-purpose" }), "ended", at("2026-07-30T09:00:00.000Z"), { terminalId: terminal("terminal-9") }),
+    agentActivity(fleetSession({ agentId: "9", type: "implementer", delivers: true }), "succeeded", at("2026-07-30T09:00:00.000Z"), { terminalId: terminal("terminal-9") }),
     runActivity({ runId: "run_a", attempt: 1, outcome: "succeeded", at: at("2026-07-30T08:00:00.000Z"), issueNumbers: [34, 35], pullRequest: 60 }),
     agentActivity(fleetSession({ agentId: "1", type: "manager" }), "interrupted", at("2026-07-30T07:00:00.000Z")),
   ];
@@ -260,7 +275,8 @@ test("a row offers only the actions it can actually perform", () => {
   assert.match(items[0]?.contextValue ?? "", /terminal/);
   assert.doesNotMatch(items[0]?.contextValue ?? "", /reopen/);
   assert.equal(items[0]?.command?.command, "aboard.activity.openTerminal");
-  // Terminal gone, conversation intact: reopening is the way back.
+  // Terminal gone, conversation intact: even a finished result-delivering
+  // implementer can be handed back to the user.
   assert.match(items[1]?.contextValue ?? "", /reopen/);
   assert.equal(items[1]?.command?.command, "aboard.activity.reopen");
   // A run row names its issues and its pull request.

@@ -37,7 +37,7 @@ import {
 } from "./configuration.js";
 import { FileActivityStore, FileFleetStore, FileLegacySessionLedger, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
-import { isReopenableSession, shouldRecordEndedSession } from "./domain/activity.js";
+import { isInteractiveLaunch, shouldRecordEndedSession } from "./domain/activity.js";
 import { isUnsupportedRecord } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
@@ -351,13 +351,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // Capture this before the async transcript read: process-end settlement may
     // release the still-open terminal while the check is in flight.
     const terminalId = terminals.liveTerminalForAgent(session.identity.agentId);
-    const conversationStarted = !isReopenableSession(session)
+    const conversationStarted = !isInteractiveLaunch(session)
       || await sessionIsResumable(session.sessionId, session.cwd ?? workspaceRoot);
     if (!shouldRecordEndedSession(session, conversationStarted)) {
       output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no Claude conversation started.`);
       return;
     }
-    const classified = session.identity.type === "manager" || isReopenableSession(session)
+    const classified = session.identity.type === "manager" || isInteractiveLaunch(session)
       ? outcome
       : outcome === "ended" ? "succeeded" : outcome;
     activity.recordAgent(session, classified, endedAt, {
