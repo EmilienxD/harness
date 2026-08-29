@@ -105,6 +105,10 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   // Start is offered only with nothing unresolved: two runs competing for the
   // same branches is the failure this prevents.
   assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == idle/);
+  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == preview/);
+  assert.match(when("aboard.previewAutoRun"), /aboard\.autoRunCard == idle/);
+  assert.match(when("aboard.previewAutoRun"), /aboard\.autoRunCard == preview/);
+  assert.ok(contributes.commands.find((entry) => entry.command === "aboard.previewAutoRun")?.icon, "Preview has a visible icon");
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
   // Resume appears only once validation has said the run may continue — never
   // while checking, and never when broken.
@@ -122,6 +126,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   // the other refuses.
   const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
   assert.match(palette.get("aboard.startAutoRun") ?? "", /aboard\.autoRunCard == idle/);
+  assert.match(palette.get("aboard.previewAutoRun") ?? "", /aboard\.autoRunCard == idle/);
   assert.match(palette.get("aboard.resumeAutoRun") ?? "", /aboard\.autoRunCard == recoverable/);
 });
 

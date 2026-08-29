@@ -94,6 +94,18 @@ export class ActivityRecorder {
     });
   }
 
+  /**
+   * Drops the cache without touching the store, for a project whose `.aboard/`
+   * is gone. The entries describe a session that no longer exists, and the cache
+   * is written whole on every append: kept across an initialization it would
+   * resurrect the history the user deleted, out of memory rather than off disk.
+   */
+  public async reset(): Promise<void> {
+    await this.settle();
+    this.#cache = EMPTY_ACTIVITY;
+    this.options.onDidChange();
+  }
+
   #append(entry: ActivityEntry): void {
     // Writing into an uninitialized project would recreate `.aboard/` behind the
     // user's back — including right after they deleted it.

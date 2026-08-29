@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AutoRunTreeModel, autoRunCard, cardPullRequest, type AutoRunViewSources } from "../src/vscode/auto-run.js";
+import { AutoRunTreeModel, autoRunCard, cardPullRequest, type AutoRunPreview, type AutoRunViewSources } from "../src/vscode/auto-run.js";
 import type { AutoRunState } from "../src/auto/engine.js";
 import type { AutoRunRecord, PersistedAutoRunRecord, RecoveryEligibility } from "../src/domain/run-plan.js";
 
@@ -57,15 +57,41 @@ function state(overrides: Partial<AutoRunState> = {}): AutoRunState {
 
 function sources(overrides: {
   readonly state?: AutoRunState | undefined;
+  readonly starting?: boolean;
+  readonly previewing?: boolean;
+  readonly preview?: AutoRunPreview | undefined;
   readonly persisted?: PersistedAutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
 } = {}): AutoRunViewSources {
   return {
+    starting: () => overrides.starting ?? false,
+    previewing: () => overrides.previewing ?? false,
+    preview: () => overrides.preview,
     state: () => overrides.state,
     persisted: () => overrides.persisted,
     eligibility: () => overrides.eligibility,
     titles: () => overrides.titles ?? {},
+  };
+}
+
+function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
+  return {
+    dryRun: true,
+    inspected: true,
+    ready: true,
+    blockers: [],
+    reviewMode: false,
+    pauseAfterHitl: false,
+    isolatedWorkspace: false,
+    keepsWorkspace: false,
+    sessionBranch: "aboard/run/<run-id>",
+    sessionBase: "feature/wip",
+    mergesItsOwnPullRequest: false,
+    issues: record().plan,
+    skipped: [],
+    dependencyCycles: [],
+    ...overrides,
   };
 }
 
@@ -80,6 +106,45 @@ test("no record offers the one way to start a run", () => {
   const { item } = rootItem({});
   assert.equal(card({}).kind, "idle");
   assert.equal(item.contextValue, "aboard.autoRun.idle");
+  assert.equal(item.collapsible, false);
+});
+
+test("clicking Start immediately replaces the idle action with GitHub loading feedback", () => {
+  const { item } = rootItem({ starting: true });
+  assert.equal(card({ starting: true }).kind, "starting");
+  assert.equal(item.label, "Starting auto-run");
+  assert.equal(item.description, "loading issues from GitHub…");
+  assert.equal(item.icon, "loading~spin");
+  assert.equal(item.contextValue, "aboard.autoRun.starting");
+  assert.equal(item.collapsible, false);
+});
+
+test("Preview shows loading feedback, then the planned issues in execution order", () => {
+  const loading = rootItem({ previewing: true });
+  assert.equal(loading.item.label, "Previewing auto-run");
+  assert.equal(loading.item.icon, "loading~spin");
+
+  const result = preview();
+  const { model, root, item } = rootItem({ preview: result });
+  assert.equal(card({ preview: result }).kind, "preview");
+  assert.equal(item.description, "3 issues queued");
+  assert.equal(item.contextValue, "aboard.autoRun.preview");
+  assert.equal(item.collapsible, true);
+  const rows = model.children(root).map((node) => model.item(node));
+  assert.deepEqual(rows.map((row) => row.label), [
+    "#34 Add retry backoff",
+    "#35 Migrate the queue",
+    "#36 Trim the cache",
+  ]);
+  assert.deepEqual(rows.map((row) => row.description), ["1/3 · afk", "2/3 · hitl", "3/3 · afk"]);
+});
+
+test("a blocked preview explains why the run cannot start", () => {
+  const result = preview({ ready: false, blockers: ["the working tree is not clean: src/a.ts"], issues: [] });
+  const { item } = rootItem({ preview: result });
+  assert.equal(item.description, "cannot start · 1 blocker");
+  assert.equal(item.icon, "warning");
+  assert.match(item.tooltip, /Cannot start: the working tree is not clean/);
   assert.equal(item.collapsible, false);
 });
 

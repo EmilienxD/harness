@@ -99,7 +99,7 @@ function icon(entry: ActivityEntry): string {
       case "cancelled": return "circle-slash";
       case "interrupted": return "debug-pause";
       case "discarded": return "trash";
-      default: return "rocket";
+      default: return "robot";
     }
   }
   switch (entry.outcome) {

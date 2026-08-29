@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FleetRegistry } from "../src/domain/fleet.js";
-import { FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore } from "../src/runtime/persistence.js";
+import { ActivityRecorder } from "../src/runtime/activity-recorder.js";
+import type { ActivityDto } from "../src/domain/activity.js";
+import { FileActivityStore, FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore } from "../src/runtime/persistence.js";
 import type { AutoRunRecord } from "../src/domain/run-plan.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
@@ -68,6 +71,43 @@ test("persistence drains queued writes and performs a final save on disposal", a
   await persistence.dispose();
   assert.equal(saves, 3);
   assert.equal(listener, undefined);
+});
+
+test("removing the project state drops the activity cache instead of resurrecting it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-activity-"));
+  let initialized = true;
+  let changes = 0;
+  const admission = new RuntimeAdmission(true);
+  const recorder = new ActivityRecorder({
+    store: new FileActivityStore(root, admission),
+    admission: () => initialized,
+    now: () => new Date("2026-08-29T10:00:00.000Z"),
+    log: () => undefined,
+    onDidChange: () => { changes += 1; },
+  });
+  recorder.recordRun({ runId: "run_before", attempt: 1, outcome: "succeeded", issueNumbers: [7] });
+  await recorder.settle();
+  assert.equal(recorder.entries().length, 1);
+
+  // The user deletes `.aboard/`: admission closes, then the directory goes.
+  initialized = false;
+  await admission.close();
+  await rm(join(root, ".aboard"), { recursive: true, force: true });
+  const before = changes;
+  await recorder.reset();
+  assert.deepEqual(recorder.entries(), []);
+  assert.equal(changes, before + 1);
+  assert.equal(existsSync(join(root, ".aboard")), false);
+
+  // Initializing again starts from the store on disk, not from this process.
+  initialized = true;
+  admission.open();
+  await recorder.load();
+  assert.deepEqual(recorder.entries(), []);
+  recorder.recordRun({ runId: "run_after", attempt: 1, outcome: "started" });
+  await recorder.settle();
+  const persisted = JSON.parse(await readFile(join(root, ".aboard", "runtime", "activity.json"), "utf8")) as ActivityDto;
+  assert.deepEqual(persisted.entries.map((entry) => entry.kind === "run" ? entry.runId : entry.kind), ["run_after"]);
 });
 
 /** A complete version-2 record, so each test states only what it is about. */

@@ -1011,6 +1011,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const at = new Date().toISOString() as IsoTimestamp;
       if (lease.current() !== undefined) lease.forceRelease(at, "project state was removed");
       fleet.clear(at);
+      // Recent Activity is cached in memory and rewritten whole on every append.
+      // Without this the deleted history comes back on the next initialization,
+      // out of this process rather than off disk.
+      await activity.reset();
       managerIdentity.reset();
       recordedManager = undefined;
       bridgeEnvironment = undefined;
@@ -1027,6 +1031,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (initialized && !wasInitialized) {
       runtimeAdmission.open();
       agentIdCounter = WorkspaceAgentIdCounter.load(workspaceRoot, undefined, runtimeAdmission.isOpen);
+      // The store on disk is the only history a newly initialized project has.
+      await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
     }
     if (initialized) await startRuntimeBridge();
     await commands.executeCommand("setContext", "aboard.initialized", next);

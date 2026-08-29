@@ -4,7 +4,7 @@ import type { TerminalController } from "../claude/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning, type FleetTreeNode } from "./fleet.js";
-import { AutoRunTreeModel, autoRunCard, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunViewSources } from "./auto-run.js";
+import { AutoRunTreeModel, autoRunCard, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunPreview, type AutoRunViewSources } from "./auto-run.js";
 import { ActivityTreeModel, clearActivityWarning, type ActivityNode } from "./activity.js";
 import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
 import type { AutoRunEngine } from "../auto/engine.js";
@@ -90,7 +90,13 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   // -- Auto Run ---------------------------------------------------------------
   const engine = options.autoRun.engine;
+  let autoRunStarting = false;
+  let autoRunPreviewing = false;
+  let autoRunPreview: AutoRunPreview | undefined;
   const autoRunSources: AutoRunViewSources = {
+    starting: () => autoRunStarting,
+    previewing: () => autoRunPreviewing,
+    preview: () => autoRunPreview,
     state: () => engine.state(),
     persisted: () => engine.persisted(),
     eligibility: () => engine.eligibility(),
@@ -124,6 +130,9 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     await commands.executeCommand("setContext", "aboard.autoRunCard", card.kind);
   };
   const refreshAutoRun = (): void => {
+    // A real record makes an earlier read-only snapshot obsolete. Clearing it
+    // here also prevents it resurfacing after that run eventually concludes.
+    if (engine.state() !== undefined || engine.persisted() !== undefined) autoRunPreview = undefined;
     autoRunChanges.fire(undefined);
     void publishAutoRunContext();
   };
@@ -172,7 +181,39 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     commands.registerCommand("aboard.autoRun.openPullRequest", () => {
       void openNumber(cardPullRequest(autoRunCard(autoRunSources), engine.state()));
     }),
-    commands.registerCommand("aboard.startAutoRun", () => options.autoRun.start()),
+    commands.registerCommand("aboard.startAutoRun", async () => {
+      // GitHub issue discovery happens before the engine has a record or live
+      // state to publish. Reflect the click locally so the card responds at
+      // once and the action cannot be invoked twice during that gap.
+      if (autoRunStarting || autoRunPreviewing) return;
+      autoRunPreview = undefined;
+      autoRunStarting = true;
+      refreshAutoRun();
+      try { await options.autoRun.start(); }
+      finally {
+        autoRunStarting = false;
+        refreshAutoRun();
+      }
+    }),
+    commands.registerCommand("aboard.previewAutoRun", async () => {
+      if (autoRunPreviewing || autoRunStarting) return;
+      autoRunPreviewing = true;
+      autoRunPreview = undefined;
+      refreshAutoRun();
+      try {
+        const result = await engine.dryRun();
+        if (!result.inspected) {
+          void window.showWarningMessage(`aboard cannot preview an auto-run: ${result.reason}.`);
+          return;
+        }
+        autoRunPreview = result;
+      } catch (error) {
+        void window.showErrorMessage(error instanceof Error ? error.message : "Unable to preview the auto-run");
+      } finally {
+        autoRunPreviewing = false;
+        refreshAutoRun();
+      }
+    }),
     commands.registerCommand("aboard.resumeAutoRun", async () => {
       // Revalidated immediately before launching: the panel state may have gone
       // stale between the poll that enabled this action and the click.

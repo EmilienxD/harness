@@ -20,10 +20,18 @@ import {
 } from "../domain/run-plan.js";
 import type { AutoRunState } from "../auto/engine.js";
 import { currentPhase } from "../auto/engine.js";
+import type { AutoRunDryRunResult, PlannedIssue } from "../domain/auto-run.js";
+
+export type AutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: true }>;
 
 export type AutoRunCard =
   /** No record at all: the only thing to offer is a new run. */
   | { readonly kind: "idle" }
+  /** Start was clicked and the engine is still discovering the GitHub queue. */
+  | { readonly kind: "starting" }
+  /** Preview was clicked and the read-only plan is still being discovered. */
+  | { readonly kind: "previewing" }
+  | { readonly kind: "preview"; readonly preview: AutoRunPreview }
   | { readonly kind: "active"; readonly state: AutoRunState; readonly record: AutoRunRecord }
   | { readonly kind: "waiting"; readonly state: AutoRunState; readonly record: AutoRunRecord }
   /** A record exists and its eligibility is still being computed. */
@@ -35,7 +43,8 @@ export type AutoRunCard =
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
-  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string };
+  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string }
+  | { readonly kind: "preview-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number };
 
 export interface AutoRunTreeItem {
   readonly label: string;
@@ -48,6 +57,9 @@ export interface AutoRunTreeItem {
 }
 
 export interface AutoRunViewSources {
+  readonly starting: () => boolean;
+  readonly previewing: () => boolean;
+  readonly preview: () => AutoRunPreview | undefined;
   readonly state: () => AutoRunState | undefined;
   readonly persisted: () => PersistedAutoRunRecord | undefined;
   readonly eligibility: () => RecoveryEligibility | undefined;
@@ -72,7 +84,12 @@ export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
   if (state !== undefined && persisted !== undefined) {
     return { kind: state.waiting ? "waiting" : "active", state, record: persisted };
   }
-  if (persisted === undefined) return { kind: "idle" };
+  if (sources.starting()) return { kind: "starting" };
+  if (persisted === undefined) {
+    if (sources.previewing()) return { kind: "previewing" };
+    const preview = sources.preview();
+    return preview === undefined ? { kind: "idle" } : { kind: "preview", preview };
+  }
   const eligibility = sources.eligibility();
   if (eligibility === undefined || eligibility.state === "checking") return { kind: "checking", record: persisted };
   if (eligibility.state === "broken") return { kind: "broken", record: persisted, reason: eligibility.reason };
@@ -81,7 +98,9 @@ export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
 
 /** The record behind the card, when there is one. */
 export function cardRecord(card: AutoRunCard): AutoRunRecord | undefined {
-  return card.kind === "idle" || card.kind === "unsupported" ? undefined : card.record;
+  return card.kind === "idle" || card.kind === "starting" || card.kind === "previewing" || card.kind === "preview" || card.kind === "unsupported"
+    ? undefined
+    : card.record;
 }
 
 export class AutoRunTreeModel {
@@ -94,6 +113,15 @@ export class AutoRunTreeModel {
   /** The frozen plan, in its immutable order. Never re-sorted by progress. */
   public children(node: AutoRunNode): readonly AutoRunNode[] {
     if (node.kind !== "card") return [];
+    if (node.card.kind === "preview") {
+      const issues = node.card.preview.issues;
+      return issues.map((issue, index): AutoRunNode => ({
+        kind: "preview-issue",
+        issue,
+        position: index + 1,
+        total: issues.length,
+      }));
+    }
     const record = cardRecord(node.card);
     if (record === undefined) return [];
     const titles = this.sources.titles();
@@ -106,7 +134,8 @@ export class AutoRunTreeModel {
   }
 
   public item(node: AutoRunNode): AutoRunTreeItem {
-    return node.kind === "card" ? cardItem(node.card) : issueItem(node);
+    if (node.kind === "card") return cardItem(node.card);
+    return node.kind === "issue" ? issueItem(node) : previewIssueItem(node);
   }
 }
 
@@ -121,6 +150,38 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         contextValue: "aboard.autoRun.idle",
         collapsible: false,
       };
+    case "starting":
+      return {
+        label: "Starting auto-run",
+        description: "loading issues from GitHub…",
+        tooltip: "aboard is loading and ordering the GitHub issues this run will process.",
+        icon: "loading~spin",
+        contextValue: "aboard.autoRun.starting",
+        collapsible: false,
+      };
+    case "previewing":
+      return {
+        label: "Previewing auto-run",
+        description: "loading issues from GitHub…",
+        tooltip: "aboard is loading and ordering the GitHub issues without starting a run.",
+        icon: "loading~spin",
+        contextValue: "aboard.autoRun.previewing",
+        collapsible: false,
+      };
+    case "preview": {
+      const { preview } = card;
+      const count = preview.issues.length;
+      return {
+        label: "Auto-run preview",
+        description: preview.ready
+          ? `${count} issue${count === 1 ? "" : "s"} queued`
+          : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
+        tooltip: previewTooltip(preview),
+        icon: preview.ready ? "list-tree" : "warning",
+        contextValue: "aboard.autoRun.preview",
+        collapsible: count > 0,
+      };
+    }
     case "active": {
       const { state, record } = card;
       return {
@@ -203,6 +264,39 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
     collapsible: false,
     command: { command: "aboard.openIssue", title: "Open Issue", arguments: [issue.number] },
   };
+}
+
+function previewIssueItem(node: Extract<AutoRunNode, { kind: "preview-issue" }>): AutoRunTreeItem {
+  const { issue, position, total } = node;
+  return {
+    label: `#${issue.number} ${issue.title}`,
+    description: `${position}/${total} · ${issue.disposition}`,
+    tooltip: [
+      `Issue #${issue.number}`,
+      `Execution order: ${position} of ${total}`,
+      `Disposition: ${issue.disposition}`,
+      issue.difficulty === undefined ? "Difficulty: unrated" : `Difficulty: ${issue.difficulty}`,
+      issue.chrome === true ? "Claude in Chrome: enabled by [AI]-chrome" : "",
+      `Planned branch: ${issue.branch}`,
+    ].filter(Boolean).join("\n"),
+    icon: "issue-opened",
+    contextValue: "aboard.autoRun.previewIssue",
+    collapsible: false,
+    command: { command: "aboard.openIssue", title: "Open Issue", arguments: [issue.number] },
+  };
+}
+
+function previewTooltip(preview: AutoRunPreview): string {
+  return [
+    "Read-only snapshot; Preview again to refresh it before starting.",
+    `Target branch: ${preview.sessionBase}`,
+    preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
+    `Review ${preview.reviewMode ? "on" : "off"}`,
+    preview.ready ? "Ready to start" : `Cannot start: ${preview.blockers.join("; ")}`,
+    preview.skipped.length === 0
+      ? ""
+      : `Skipped: ${preview.skipped.map((issue) => `#${issue.number} (${issue.reason})`).join("; ")}`,
+  ].filter(Boolean).join("\n");
 }
 
 function describeOutcome(record: AutoRunRecord): string {
