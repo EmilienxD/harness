@@ -70,13 +70,15 @@ def test_install_leaves_no_lock_or_backup(target):
 def test_install_hook_tool_writes_settings(target):
     install("commit", target)
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
-    # With uv available: command="uv", args=["run", "--no-project", "<script>"]
+    # With uv available: command="uv", args=["run", "--no-project", "--no-managed-python", "<script>"]
     # Without uv: command="<python>", args=["<script>"]
-    if installer.python_command() and installer.python_command()[0] == "uv":
-        assert entry["command"] == "uv"
+    uv_path = shutil.which("uv")
+    if uv_path:
+        assert entry["command"] == uv_path
         assert entry["args"][0] == "run"
         assert entry["args"][1] == "--no-project"
-        assert entry["args"][2].endswith("/hooks/commit_UserPromptSubmit_hook.py")
+        assert entry["args"][2] == "--no-managed-python"
+        assert entry["args"][3].endswith("/hooks/commit_UserPromptSubmit_hook.py")
     else:
         assert entry["args"][0].endswith("/hooks/commit_UserPromptSubmit_hook.py")
     assert "${PYTHON}" not in entry["command"]
@@ -88,10 +90,11 @@ def test_python_uses_uv_when_available(target):
     install("commit", target)
     entry = settings(target)["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     # When uv is available, prefer it over absolute Python paths
-    assert entry["command"] == "uv"
+    assert entry["command"] == shutil.which("uv")
     assert entry["args"][0] == "run"
     assert entry["args"][1] == "--no-project"
-    assert entry["args"][2].endswith("/hooks/commit_UserPromptSubmit_hook.py")
+    assert entry["args"][2] == "--no-managed-python"
+    assert entry["args"][3].endswith("/hooks/commit_UserPromptSubmit_hook.py")
 
 
 def test_python_command_prefers_uv_when_available(monkeypatch):
@@ -100,7 +103,7 @@ def test_python_command_prefers_uv_when_available(monkeypatch):
         "which",
         lambda name: {"uv": "/usr/bin/uv", "python3": "/usr/bin/python3"}.get(name),
     )
-    assert installer.python_command() == ("uv", ["run", "--no-project"])
+    assert installer.python_command() == ("/usr/bin/uv", ["run", "--no-project", "--no-managed-python"])
 
 
 def test_python_command_falls_back_to_python_when_uv_unavailable(monkeypatch):

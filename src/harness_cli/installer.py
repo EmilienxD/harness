@@ -183,15 +183,18 @@ def python_command() -> tuple[str, list[str]] | None:
     """Command and args to run Python 3 scripts, or None.
 
     When `uv` is installed (which it is if the user installed via uvx), prefer
-    `uv run --no-project` over an absolute Python path — it's more portable and
-    doesn't point into uv's cache directories.
+    `uv run --no-project --no-managed-python` over a Python interpreter.  Keep the
+    resolved absolute uv path: GUI hosts such as ChatGPT can inherit a different
+    (or stale) PATH from the shell that ran the installer, especially on Windows.
 
     Returns (command, args_prefix) where args_prefix goes before the script path.
-    For `uv run`: ("uv", ["run", "--no-project"]), for direct python: (path, []).
+    For `uv run`: (uv_path, ["run", "--no-project", "--no-managed-python"]), for
+    direct python: (python_path, []).
     """
     # Prefer uv run when available (user installed with uvx → uv is present)
-    if shutil.which("uv"):
-        return ("uv", ["run", "--no-project"])
+    uv_path = shutil.which("uv")
+    if uv_path:
+        return (uv_path, ["run", "--no-project", "--no-managed-python"])
 
     # Fallback to direct Python interpreter
     for candidate in ("python3", "python", "py"):

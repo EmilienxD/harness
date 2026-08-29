@@ -106,7 +106,7 @@ def test_chatgpt_keeps_python_launcher_and_script_in_native_command(tmp_path, mo
     tool = load_tool(tool.root)
     monkeypatch.setattr(
         "harness_cli.installer.python_command",
-        lambda: ("uv", ["run", "--no-project"]),
+        lambda: ("uv", ["run", "--no-project", "--no-managed-python"]),
     )
 
     target = Target.for_project(tmp_path / "project", platform=Platform.CHATGPT)
@@ -115,7 +115,7 @@ def test_chatgpt_keeps_python_launcher_and_script_in_native_command(tmp_path, mo
     config = json.loads(target.settings_path.read_text(encoding="utf-8"))
     entry = config["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     script = (target.scope_root / ".codex/hooks/hook.py").as_posix()
-    assert entry["command"] == f'uv run --no-project "{script}" --flag'
+    assert entry["command"] == f'uv run --no-project --no-managed-python "{script}" --flag'
     assert "args" not in entry
 
 

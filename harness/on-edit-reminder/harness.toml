@@ -1,5 +1,5 @@
 name = "on-edit-reminder"
-version = "1.0.0"
+version = "1.0.1"
 description = "PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/on-edit-reminder/README.md"
 

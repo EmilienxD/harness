@@ -21,7 +21,7 @@ Every installable tool needs a `harness.toml` in its directory declaring `name`,
 to its logical destination root). Claude Code settings default to a sibling `settings.fragment.json`;
 platform-specific native JSON fragments are named by `[platforms.<name>].fragment`. They are merged
 as-is, with `${PYTHON}` and platform placeholders resolved at install time. `${PYTHON}` becomes
-`uv run --no-project`
+`uv run --no-project --no-managed-python`
 when `uv` is installed (which it is if you used `uvx`), otherwise falls back to the first working
 interpreter among `python3`, `python`, `py` (the Windows Store alias passes `which` without being a
 real interpreter, so actual execution is tested). A file the user is meant to edit after install —

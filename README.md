@@ -169,7 +169,7 @@ a ChatGPT `hooks.json` fragment). The JSON is merged as written, so it stays
 diffable against what each product expects. `${PLATFORM_DIR}`, `${SKILLS_DIR}`,
 and `${HOOKS_DIR}` are portable placeholders; ChatGPT resolves project paths
 absolutely because it has no documented project-root placeholder. `${PYTHON}`
-becomes `uv run --no-project`
+becomes `uv run --no-project --no-managed-python`
 when `uv` is installed (which it is if you used `uvx`), otherwise falls back to
 the first working interpreter among `python3`/`python`/`py`. `${CLAUDE_DIR}`
 becomes `${CLAUDE_PROJECT_DIR}/.claude` (or an absolute path for `--user` installs).
