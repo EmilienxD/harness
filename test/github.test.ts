@@ -364,22 +364,20 @@ test("an issue prompt receives labels beyond the first connection page", async (
       state: "OPEN",
       labels: { nodes: [{ name: "enhancement" }], pageInfo: { hasNextPage: true, endCursor: "labels-100" } },
       parent: null,
-      closedByPullRequestsReferences: { nodes: [] },
     } });
   });
   assert.deepEqual((await new GitHubClient(gh).getIssue(17))?.labels, ["enhancement", "[AI]-hitl"]);
   assert.equal(gh.calls.some((args) => args.includes("after=labels-100")), true);
 });
 
-test("resolves issue parent, PR state, threads, diff, and publishes line comments", async () => {
+test("resolves issue parent, PR state, diff, and publishes line comments", async () => {
   const gh = new FixtureGh((args) => {
     if (args[0] === "repo") return repo;
     if (args[0] === "pr" && args[1] === "diff") return "diff --git a/a.ts b/a.ts";
     if (args[0] === "api" && args[1]?.startsWith("repos/")) return "{}";
     const query = args.find((arg) => arg.startsWith("query=")) ?? "";
-    if (query.includes("reviewThreads(first:100){nodes{id")) return graph({ pullRequest: { reviewThreads: { nodes: [{ id: "T1", isResolved: false, path: "src/a.ts", line: 7, comments: { nodes: [{ body: "Bug", author: { login: "emb" } }] } }] } } });
     if (query.includes("subIssues(first:100,after:$after)")) return graph({ issue: { subIssues: { nodes: [{ number: 24 }], totalCount: 2, pageInfo: endPage } } });
-    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract depends on #23.", state: "OPEN", labels: { nodes: [{ name: "[AI]-hitl" }], pageInfo: endPage }, parent: { number: 9 }, subIssues: { nodes: [{ number: 22 }], totalCount: 2, pageInfo: { hasNextPage: true, endCursor: "children-100" } }, closedByPullRequestsReferences: { nodes: [{ headRefName: "feat/17" }] } } });
+    if (query.includes("issue(number")) return graph({ issue: { number: 17, title: "Review", body: "Contract depends on #23.", state: "OPEN", labels: { nodes: [{ name: "[AI]-hitl" }], pageInfo: endPage }, parent: { number: 9 }, subIssues: { nodes: [{ number: 22 }], totalCount: 2, pageInfo: { hasNextPage: true, endCursor: "children-100" } } } });
     return graph({ pullRequest: { number: 42, title: "PR", body: "Body", state: "OPEN", merged: false, mergeable: "CONFLICTING", url: "https://github.com/acme/app/pull/42", headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [{ number: 17 }] }, reviewDecision: null, reviewThreads: { nodes: [{ isResolved: false }] } } });
   });
   const github = new GitHubClient(gh);
@@ -390,7 +388,6 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
   assert.equal((await github.getPullRequest(42))?.mergeable, "conflicting");
   assert.equal((await github.getPullRequest(42))?.url, "https://github.com/acme/app/pull/42");
   assert.equal(await github.getPullRequestDiff(42), "diff --git a/a.ts b/a.ts");
-  assert.equal((await github.listReviewThreads(42))[0]?.comments[0]?.author, "emb");
   assert.deepEqual(await github.getReviewState(42), { decision: "unreviewed", unresolvedThreadCount: 1 });
   await github.publishReviewFinding(42, { body: "Null crash", path: "src/a.ts", line: 7 });
   assert.equal(gh.calls.some((args) => args.includes("path=src/a.ts") && args.includes("line=7")), true);

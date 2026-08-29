@@ -5,7 +5,6 @@ import type {
   GitHubPromptSource,
   IssueSnapshot,
   PullRequestSnapshot,
-  ReviewThreadSnapshot,
 } from "../claude/prompts.js";
 import {
   ROADMAP_BODY_LIMIT,
@@ -292,12 +291,6 @@ function parseIssue(
   const parent = item.parent === null || item.parent === undefined
     ? undefined
     : integer(record(item.parent, `${context}.parent`).number, `${context}.parent.number`);
-  const branches = item.closedByPullRequestsReferences === undefined
-    ? []
-    : array(record(item.closedByPullRequestsReferences, `${context}.closedByPullRequestsReferences`).nodes, `${context}.closedByPullRequestsReferences.nodes`);
-  const branch = branches.length === 0
-    ? undefined
-    : string(record(branches[0], `${context}.closedByPullRequestsReferences.nodes[0]`).headRefName, `${context}.closedByPullRequestsReferences.nodes[0].headRefName`);
   const body = string(item.body ?? "", `${context}.body`);
   return {
     snapshot: {
@@ -311,7 +304,6 @@ function parseIssue(
         ...subIssuePage.numbers,
         ...referencedIssueNumbers(body, repository),
       ])],
-      ...(branch === undefined ? {} : { branch }),
     },
     nextLabelCursor: labelPage.nextCursor,
     nextSubIssueCursor: subIssuePage.nextCursor,
@@ -386,13 +378,12 @@ function repositoryFromGraphql(value: unknown): Record<string, unknown> {
   return record(record(record(value, "GraphQL response").data, "data").repository, "data.repository");
 }
 
-const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
+const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}}}}}`;
 const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){repository(owner:$owner,name:$repo){issues(first:100,after:$after,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title body createdAt labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}} blockedBy(first:100){nodes{number state} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}`;
 const ISSUE_LABELS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){labels(first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_BLOCKERS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_SUBISSUES_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100,after:$after){nodes{number} pageInfo{hasNextPage endCursor}}}}}`;
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged mergeable url headRefName baseRefName headRefOid mergeCommit{oid} closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
-const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:100){nodes{body author{login}}}}}}}}`;
 
 export class GitHubClient implements GitHubPromptSource {
   #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
@@ -660,21 +651,6 @@ export class GitHubClient implements GitHubPromptSource {
       : string(item.reviewDecision, "pullRequest.reviewDecision").toLowerCase().replace("_", "-") as ReviewState["decision"];
     const threads = array(record(item.reviewThreads, "pullRequest.reviewThreads").nodes, "pullRequest.reviewThreads.nodes");
     return { decision, unresolvedThreadCount: threads.filter((thread, index) => !boolean(record(thread, `thread[${index}]`).isResolved, `thread[${index}].isResolved`)).length };
-  }
-
-  public async listReviewThreads(number: number): Promise<readonly ReviewThreadSnapshot[]> {
-    const data = await this.#graphql(THREAD_QUERY, { number });
-    const pullRequest = repositoryFromGraphql(data).pullRequest;
-    if (pullRequest === null) return [];
-    const nodes = array(record(record(pullRequest, "pullRequest").reviewThreads, "pullRequest.reviewThreads").nodes, "pullRequest.reviewThreads.nodes");
-    return nodes.map((value, index) => {
-      const thread = record(value, `thread[${index}]`);
-      const comments = array(record(thread.comments, `thread[${index}].comments`).nodes, `thread[${index}].comments.nodes`).map((value, commentIndex) => {
-        const comment = record(value, `comment[${commentIndex}]`);
-        return { author: string(record(comment.author, `comment[${commentIndex}].author`).login, `comment[${commentIndex}].author.login`), body: string(comment.body, `comment[${commentIndex}].body`) };
-      });
-      return { id: string(thread.id, `thread[${index}].id`), path: string(thread.path, `thread[${index}].path`), line: nullableInteger(thread.line, `thread[${index}].line`), isResolved: boolean(thread.isResolved, `thread[${index}].isResolved`), comments };
-    });
   }
 
   public async listOpenPullRequests(): Promise<readonly OpenPullRequest[]> {

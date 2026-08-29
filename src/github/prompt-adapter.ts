@@ -3,7 +3,7 @@ import { PromptResolver, type ResolvedPrompt } from "../claude/prompts.js";
 import { isInteractiveAgentType } from "../domain/contracts.js";
 
 const PR_DOCTOR_INSTRUCTION =
-  "Review this pull request against its issue contract. Apply the fixes yourself rather than describing them; aboard commits what you leave in the working tree. Do not commit, push, merge, or post review comments.";
+  "Review this pull request against its issue contract and follow your role's review and approval workflow. Leave any approved changes uncommitted in the working tree. Do not use git or gh to change the working tree, index, branches, remotes, issues, pull requests, reviews, or repository configuration; aboard owns those actions.";
 
 export class GitHubDelegationPromptResolver implements DelegationPromptResolver {
   public constructor(private readonly prompts: PromptResolver) {}

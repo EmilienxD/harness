@@ -10,7 +10,6 @@ import {
   type GitHubPromptSource,
   type IssueSnapshot,
   type PullRequestSnapshot,
-  type ReviewThreadSnapshot,
 } from "../src/claude/prompts.js";
 import { issueDifficulty } from "../src/shared/labels.js";
 
@@ -18,7 +17,6 @@ interface FakeData {
   readonly issues?: readonly IssueSnapshot[];
   readonly pullRequests?: readonly PullRequestSnapshot[];
   readonly diff?: string;
-  readonly threads?: readonly ReviewThreadSnapshot[];
 }
 
 class FakeGitHub implements GitHubPromptSource {
@@ -39,9 +37,6 @@ class FakeGitHub implements GitHubPromptSource {
     return this.data.diff ?? "";
   }
 
-  public async listReviewThreads(): Promise<readonly ReviewThreadSnapshot[]> {
-    return this.data.threads ?? [];
-  }
 }
 
 const issue47: IssueSnapshot = {
@@ -51,7 +46,6 @@ const issue47: IssueSnapshot = {
   labels: ["[AI]-afk"],
   state: "open",
   parentIssueNumber: 31,
-  branch: "feat/47-token-refresh",
 };
 
 const parent31: IssueSnapshot = {
@@ -72,7 +66,7 @@ const pull42: PullRequestSnapshot = {
   issueNumber: 47,
 };
 
-test("resolves an implementation prompt from issue, parent issue, branch, and labels", async () => {
+test("resolves an implementation prompt from issue, parent issue, and labels", async () => {
   const github = new FakeGitHub({ issues: [issue47, parent31] });
   const resolver = new PromptResolver({ github });
 
@@ -129,16 +123,6 @@ test("carries the difficulty each label implies", () => {
   assert.equal(issueDifficulty(["[AI]-expert-difficulty", "[AI]-basic-difficulty"]), "expert");
 });
 
-test("the prompt differs when GitHub knows no branch for the issue", async () => {
-  const resolve = (branch: string | undefined) =>
-    new PromptResolver({
-      github: new FakeGitHub({ issues: [{ ...issue47, branch, parentIssueNumber: undefined }] }),
-    }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47] });
-  const withBranch = await resolve("feat/47-token-refresh");
-  const withoutBranch = await resolve(undefined);
-  assert.notEqual(withoutBranch?.text, withBranch?.text);
-});
-
 test("truncates long bodies and marks the source truncated", async () => {
   const resolver = new PromptResolver({
     github: new FakeGitHub({ issues: [{ ...issue47, body: "x".repeat(500) }] }),
@@ -178,40 +162,6 @@ test("resolves a review prompt with the contract and the diff", async () => {
     prompt?.sources.map((source) => source.kind),
     ["pull-request", "issue", "pull-request-diff"],
   );
-});
-
-test("resolves a fix prompt from unresolved threads only", async () => {
-  const resolver = new PromptResolver({
-    github: new FakeGitHub({
-      pullRequests: [pull42],
-      threads: [
-        {
-          id: "T1",
-          path: "src/auth.ts",
-          line: 12,
-          isResolved: false,
-          comments: [{ author: "emb", body: "This retries forever." }],
-        },
-        {
-          id: "T2",
-          path: "src/token.ts",
-          line: null,
-          isResolved: true,
-          comments: [{ author: "emb", body: "Already handled." }],
-        },
-      ],
-    }),
-  });
-
-  const prompt = await resolver.resolve({
-    kind: "fix",
-    instruction: "Address the feedback.",
-    pullRequestNumber: 42,
-  });
-
-  // The unresolved thread's content is in; the resolved thread's is out.
-  assert.ok(prompt?.text.includes("This retries forever."));
-  assert.equal((prompt?.text ?? "").includes("Already handled."), false);
 });
 
 test("leaves a bare brainstorm launch with no prompt at all", async () => {

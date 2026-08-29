@@ -15,8 +15,6 @@ export interface IssueSnapshot {
   readonly parentIssueNumber?: number | undefined;
   /** Sub-issues and same-repository issue references inferred from the body. */
   readonly dependencyIssueNumbers?: readonly number[] | undefined;
-  /** A branch GitHub already associates with the issue, when there is one. */
-  readonly branch?: string | undefined;
 }
 
 export interface PullRequestSnapshot {
@@ -30,24 +28,10 @@ export interface PullRequestSnapshot {
   readonly issueNumber?: number | undefined;
 }
 
-export interface ReviewComment {
-  readonly author: string;
-  readonly body: string;
-}
-
-export interface ReviewThreadSnapshot {
-  readonly id: string;
-  readonly path: string;
-  readonly line: number | null;
-  readonly isResolved: boolean;
-  readonly comments: readonly ReviewComment[];
-}
-
 export interface GitHubPromptSource {
   getIssue(number: number): Promise<IssueSnapshot | undefined>;
   getPullRequest(number: number): Promise<PullRequestSnapshot | undefined>;
   getPullRequestDiff(number: number): Promise<string>;
-  listReviewThreads(number: number): Promise<readonly ReviewThreadSnapshot[]>;
 }
 
 /** The `afk`/`hitl` classification of the work-model section. Absence is legitimate. */
@@ -58,8 +42,7 @@ export type PromptSourceKind =
   | "parent-issue"
   | "related-issue"
   | "pull-request"
-  | "pull-request-diff"
-  | "review-threads";
+  | "pull-request-diff";
 
 /** A record of what was resolved. Carries counts, never content, so it is loggable. */
 export interface PromptSource {
@@ -82,8 +65,6 @@ export type PromptResolutionRequest =
       readonly kind: "implementation";
       readonly instruction: string;
       readonly issueNumbers: readonly number[];
-      /** Overrides the branch GitHub reports, when the caller knows better. */
-      readonly branch?: string | undefined;
     }
   | {
       readonly kind: "issue-context";
@@ -97,11 +78,6 @@ export type PromptResolutionRequest =
       readonly focus?: string | undefined;
     }
   | {
-      readonly kind: "fix";
-      readonly instruction: string;
-      readonly pullRequestNumber: number;
-    }
-  | {
       readonly kind: "brainstorm";
       readonly topic?: string | undefined;
       readonly relatedIssueNumbers?: readonly number[] | undefined;
@@ -113,7 +89,6 @@ export interface PromptResolutionLimits {
   readonly parentIssueChars: number;
   readonly relatedIssueChars: number;
   readonly diffChars: number;
-  readonly reviewThreadChars: number;
   /** Hard bound on recursively resolved parents/dependencies. */
   readonly relatedIssueCount: number;
 }
@@ -123,7 +98,6 @@ export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
   parentIssueChars: 8_000,
   relatedIssueChars: 1_500,
   diffChars: 40_000,
-  reviewThreadChars: 12_000,
   relatedIssueCount: 50,
 };
 
@@ -248,8 +222,6 @@ export class PromptResolver {
         return this.#resolveIssueContext(request);
       case "review":
         return this.#resolveReview(request);
-      case "fix":
-        return this.#resolveFix(request);
       case "brainstorm":
         return this.#resolveBrainstorm(request);
       case "free-form": {
@@ -352,14 +324,6 @@ export class PromptResolver {
     const [primary] = issues;
     const builder = new PromptBuilder();
 
-    const named = describeIssueNumbers(issues.map((issue) => issue.number));
-    const branch = request.branch ?? primary.branch;
-    builder.section(
-      undefined,
-      branch === undefined
-        ? `You are addressing ${named}. Create or switch to a dedicated branch before making changes.`
-        : `You are addressing ${named} on branch \`${branch}\`.`,
-    );
     builder.section(undefined, instruction);
 
     await this.#issueSections(builder, issues, true);
@@ -443,50 +407,6 @@ export class PromptResolver {
 
     return builder.build(
       `Review pull request #${pullRequest.number} — ${pullRequest.title}.`,
-    );
-  }
-
-  async #resolveFix(
-    request: Extract<PromptResolutionRequest, { kind: "fix" }>,
-  ): Promise<ResolvedPrompt> {
-    const instruction = requireInstruction(request.instruction);
-    const pullRequest = await this.#requirePullRequest(request.pullRequestNumber);
-    const threads = (
-      await this.#github.listReviewThreads(pullRequest.number)
-    ).filter((thread) => !thread.isResolved);
-    const builder = new PromptBuilder();
-
-    builder.section(
-      undefined,
-      `You are addressing review feedback on pull request #${pullRequest.number}, branch \`${pullRequest.headBranch}\`. Commit your changes and reply to each thread you address.`,
-    );
-    builder.section(undefined, instruction);
-
-    const rendered = threads
-      .map((thread) => {
-        const location =
-          thread.line === null ? thread.path : `${thread.path}:${thread.line}`;
-        const comments = thread.comments
-          .map((comment) => `> **${comment.author}**: ${comment.body.trim()}`)
-          .join("\n>\n");
-        return `### ${location} (thread \`${thread.id}\`)\n\n${comments}`;
-      })
-      .join("\n\n");
-    const threadExcerpt = excerpt(
-      rendered,
-      this.#limits.reviewThreadChars,
-      `gh pr view ${pullRequest.number} --comments`,
-    );
-    builder.section(
-      `Unresolved review threads (${threads.length})`,
-      threads.length === 0
-        ? "None are unresolved. Confirm this before changing anything."
-        : threadExcerpt.text,
-    );
-    builder.source("review-threads", pullRequest.number, threadExcerpt);
-
-    return builder.build(
-      `Address review feedback on pull request #${pullRequest.number} — ${pullRequest.title}.`,
     );
   }
 
