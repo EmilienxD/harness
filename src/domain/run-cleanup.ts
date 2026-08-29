@@ -1,15 +1,3 @@
-/**
- * What Discard is allowed to remove.
- *
- * Discard always means the same thing to the run record — forget it — and three
- * different things to what the run built. The default is the conservative one:
- * a user who discards a broken run is usually about to go and look at its
- * branches, and a cleanup that ran first would have taken the evidence with it.
- *
- * Every deletion below is guarded by the exact SHA or pull request identity the
- * run recorded. Anything that moved since is left alone and reported, because a
- * branch somebody else pushed to is no longer a branch this run owns.
- */
 
 import { issueProgress, type AutoRunRecord } from "./run-plan.js";
 import type { RunObservations } from "./run-validation.js";
@@ -41,11 +29,6 @@ export interface DiscardPlan {
   readonly retained: readonly string[];
 }
 
-/**
- * Plans the cleanup for one discard. Pure, so the modal summary the user
- * confirms and the work the boundary performs are the same list rather than two
- * descriptions that can drift apart.
- */
 export function planDiscard(
   record: AutoRunRecord,
   behavior: DiscardBehavior,

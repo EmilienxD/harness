@@ -1,18 +1,3 @@
-/**
- * Shell commands an auto-run worker must never perform itself.
- *
- * Auto-run owns the repository workflow: workers may inspect git and GitHub,
- * but only the extension may change the working tree through git, the index,
- * refs, remotes, issues, pull requests, or repository configuration. Keep these
- * as command-specific Bash rules rather than denying `Bash(git *)` or
- * `Bash(gh *)`: status, diff, log, issue/PR views, checks, and other read-only
- * commands are useful evidence for implementers and reviewers.
- *
- * A leading git/gh option is denied wholesale. Otherwise `git -C ... commit`
- * or `gh --repo ... pr merge` would bypass the corresponding verb rule. Auto
- * workers start in the repository they own and can put read-only flags after
- * the subcommand, so they do not need either leading form.
- */
 export const AUTO_RUN_DISALLOWED_TOOLS: readonly string[] = [
   "Bash(git -*)",
   "Bash(git add*)",

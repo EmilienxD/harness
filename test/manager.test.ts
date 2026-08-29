@@ -23,11 +23,6 @@ const DEFINITION_FLAGS = `--add-dir ${RUNTIME_DIRECTORY} --settings ${RUNTIME_DI
 /** The pre-approval list the Manager's command line carries. */
 const ABOARD_ALLOW = "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr";
 
-/**
- * The Manager definition, rewritten per launch into a directory only that
- * launch's `--add-dir` reaches, rather than a workspace-discoverable
- * `--agent manager`.
- */
 function managerDefinition(
   extra: { readonly declaredModel?: string; readonly declaredEffort?: "low" | "medium" | "high" | "xhigh" | "max" } = {},
 ): ManagerLaunchDefinition {
@@ -151,12 +146,6 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   assert.equal(saved[0].sessionId, sessionId);
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
-  // The Manager's tool set still lives in manager.md, but it now reaches Claude
-  // Code through a definition rewritten under this launch's own `--add-dir`:
-  // nothing is registered on a path another session scans, so no other session
-  // in the workspace can discover or spawn the Manager.
-  // A new Manager is a new agent id, so it gets its own runtime directory and
-  // its own agent name: one launch's definition is never visible to another's.
   assert.ok((records[1] as any).request.initialCommand.includes(
     "--add-dir .aboard/runtime/agents/manager-2 --settings .aboard/runtime/agents/manager-2/settings.json --agent aboard-manager-manager-2",
   ));
@@ -173,13 +162,6 @@ test("the lifecycle never puts a permission flag on a Manager launch, start or r
     create: (request: unknown) => { records.push(request); return snapshot("terminal"); },
     resume: (request: unknown) => { records.push(request); return snapshot("terminal"); },
   } as unknown as TerminalController;
-  // Permissions are the user's own Claude Code configuration, never aboard's
-  // command line — with one deliberate carve-out: the aboard MCP tools aboard
-  // itself serves are pre-approved so the Manager never stalls behind a prompt
-  // on its own delegation surface. That is not overriding the user's policy:
-  // the user configured "I run aboard", and a user deny or ask still outranks
-  // the allow. What aboard never emits is a flag that widens or skips the
-  // user's permission model itself.
   const lifecycle = new ManagerLifecycle({ store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell", files: recordingFiles().store, definition, isResumable: async () => true });
   await lifecycle.start("new");
   assert.doesNotMatch(records[0].initialCommand, /--dangerously-skip-permissions/);
@@ -203,9 +185,6 @@ test("the Manager's own model and effort reach the command line on start and on 
     create: (request: unknown) => { records.push(request); return snapshot("terminal"); },
     resume: (request: unknown) => { records.push(request); return snapshot("terminal"); },
   } as unknown as TerminalController;
-  // `--agent manager` honors neither field in manager.md and `--resume` reads no
-  // definition at all, so both have to travel as flags or the Manager silently
-  // runs at the user's global model and effort.
   const options = { store: { load: async () => recorded, save: async () => undefined }, terminals, workspaceRoot: "C:\\work", shell: "powershell" as const, files: recordingFiles().store, isResumable: async () => true, effort: () => "low" as const };
   const lifecycle = new ManagerLifecycle({ ...options, definition: async () => managerDefinition({ declaredModel: "opus", declaredEffort: "medium" }) });
   await lifecycle.start("new");
@@ -221,11 +200,6 @@ test("the Manager's own model and effort reach the command line on start and on 
 });
 
 test("a resume restores the backed-up transcript before asking whether it can be resumed", async () => {
-  // Claude Code deletes session files older than `cleanupPeriodDays` at startup
-  // and offers no way to disable that sweep, so the recorded transcript may be
-  // gone by the time the user resumes. Order is the whole point: a
-  // resumability check that ran first would answer "no" and silently downgrade
-  // a months-old Manager to a fresh conversation under a new id.
   const order: string[] = [];
   const records: any[] = [];
   const recorded: any = { version: 1, agentId, sessionId, terminalId: "old-terminal", updatedAt: "2026-07-30T09:00:00.000Z" };
@@ -252,10 +226,6 @@ test("a resume restores the backed-up transcript before asking whether it can be
 });
 
 test("a failed preflight refuses the launch before a terminal exists", async () => {
-  // The launch command is typed into a shell aboard cannot read the exit
-  // status of, so a command it already knows cannot run must never open a
-  // terminal — that terminal would only ever show a shell error while the
-  // fleet believed a Manager was starting.
   const created: unknown[] = [];
   const saved: unknown[] = [];
   const terminals = {
@@ -282,9 +252,6 @@ test("an unresumable recorded session starts afresh under a new id, keeping the 
     create: (request: unknown) => { records.push({ kind: "create", request }); return snapshot("fresh-terminal"); },
     resume: (request: unknown) => { records.push({ kind: "resume", request }); return snapshot("resumed-terminal"); },
   } as unknown as TerminalController;
-  // The recorded session holds no conversation, so --resume refuses it. Reusing
-  // the id would be refused too — Claude rejects --session-id for any id that
-  // already has a transcript, and this one does; that is why --resume failed.
   const saved: any[] = [];
   const lifecycle = new ManagerLifecycle({
     store: { load: async () => recorded, save: async (value) => { saved.push(value); } },

@@ -135,11 +135,6 @@ function harness(options: HarnessOptions = {}): Harness {
   let dirty = options.startDirty === true;
   let nextPr = 56;
   let hitlPolls = 0;
-  /**
-   * A stable but movable SHA per branch. Full-length, because recovery compares
-   * against values the record wrote hours earlier and an abbreviation that was
-   * unambiguous then need not stay so.
-   */
   const shas = new Map<string, number>();
   const inheritedShas = new Map<string, string>();
   function shaFor(branch: string): string {
@@ -275,10 +270,6 @@ function harness(options: HarnessOptions = {}): Harness {
     findPullRequestForBranch: async (branch) => prForBranch(branch),
     getPullRequest: async (number) => {
       const pr = pullRequests.get(number);
-      // Only reads issued from inside the wait count. `#observe` reads the same
-      // pull request every iteration, so counting those would resolve it before
-      // the run ever reaches the gate — and with review on, before the doctor
-      // has been launched at all.
       const waiting = notifications.some((entry) => entry.includes("is hitl — PR"));
       if (pr?.state === "open" && waiting && isHitl(number)) {
         hitlPolls += 1;
@@ -307,9 +298,6 @@ function harness(options: HarnessOptions = {}): Harness {
       const base = basesByPr.get(number);
       if (base !== undefined) advance(base);
       pullRequests.set(number, { state: "merged", ...(base === undefined ? {} : { mergeCommitSha: shaFor(base) }) });
-      // Deliberately no `open.delete`: these merge into the session branch, and
-      // GitHub only honours a closing keyword on the default branch. The issue
-      // stays open until aboard closes it.
     },
     closePullRequestIf: async (number, expected) => {
       const pr = pullRequests.get(number);
@@ -381,9 +369,6 @@ function harness(options: HarnessOptions = {}): Harness {
     },
   };
 
-  // Worktree mode as the engine sees it: the run's git effects go to a client
-  // bound elsewhere, and the user's own client must be left alone. Both wrap the
-  // same repository fake, so the two recorders are what tell them apart.
   const userGitCalls: string[] = [];
   const workspaceGitCalls: string[] = [];
   const released: RunWorkspaceOutcome[] = [];
@@ -482,11 +467,6 @@ function harness(options: HarnessOptions = {}): Harness {
   };
 }
 
-/**
- * A fixed plan for the harness's default queue, at whatever checkpoint a test
- * needs. Recovery reads this rather than GitHub, which is the whole point: the
- * plan is what the run agreed to, and the repository is only checked against it.
- */
 function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
     version: 2,
@@ -564,9 +544,6 @@ test("an issue merged into the session branch is closed by aboard, because GitHu
   await context.engine.start();
   await context.engine.settle();
 
-  // GitHub only honours `Closes #N` on a merge into the default branch. Without
-  // this the issue stays open, its dependents stay blocked, and a resumed run
-  // implements it again.
   assert.deepEqual(context.closures.map((closure) => closure.issue), [34]);
   assert.match(context.closures[0]?.body ?? "", new RegExp(SESSION.replace("/", "\\/")));
   // The closure is aboard's own doing, so it is said out loud rather than
@@ -644,9 +621,6 @@ test("the run's own pull request is reconciled when it conflicts with the user's
   await context.engine.start();
   await context.engine.settle();
 
-  // The local session branch is caught up with its own merged issues first: the
-  // issue merges happened on GitHub, so a push after reconciling would be
-  // rejected without it.
   const calls = context.gitCalls;
   assert.ok(calls.lastIndexOf(`fastForward ${SESSION}`) < calls.lastIndexOf("mergeFromRemote feature/wip"));
   assert.equal(calls.includes(`push ${SESSION}`), true);
@@ -771,9 +745,6 @@ test("a stop restores the original branch when the tree is clean", async () => {
 });
 
 test("a stop with uncommitted work does not check out over it", async () => {
-  // The failed implementer still dirtied the tree before the engine noticed the
-  // failure, so the run stops on the issue branch holding uncommitted work —
-  // exactly when a checkout would strand it. The restore must stay home.
   const context = harness({ startBranch: "feature/wip", implementerFails: true });
   await context.engine.start();
   await context.engine.settle();
@@ -973,11 +944,6 @@ test("a run with its own checkout works there, launches there, and never moves t
 });
 
 test("a run with its own checkout does not care what is in the user's working tree", async () => {
-  // The clean-tree precondition exists because the engine stages with
-  // `git add -A`; in this mode it stages somewhere else entirely, so the user
-  // keeps their uncommitted work and the run starts anyway. Only the refusal is
-  // asserted: the harness has one repository fake, so the run's checkout cannot
-  // be clean here while the user's is dirty.
   const context = harness({ worktree: true, startDirty: true });
   const result = await context.engine.start();
   assert.equal(result.started, true, "the user's own uncommitted work is not this run's business");
@@ -1050,6 +1016,20 @@ test("a dry run in worktree mode treats the user's dirty checkout as read-only",
   assert.deepEqual(result.blockers, []);
   assert.equal(context.userGitCalls.includes("status"), true);
   assert.equal(context.workspaceGitCalls.length, 0, "dry-run never prepares or reads a second checkout");
+  assert.deepEqual(context.saved, []);
+  assert.deepEqual(context.launches, []);
+});
+
+test("a dry run reports the same run-owned branch conflict that Start would refuse", async () => {
+  const context = harness();
+  context.createBranch("aboard/34-add-retry-backoff");
+
+  const result = await context.engine.dryRun();
+
+  assert.equal(result.inspected, true);
+  if (!result.inspected) return;
+  assert.equal(result.ready, false);
+  assert.match(result.blockers.join("\n"), /aboard\/34-add-retry-backoff already exists/);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
 });

@@ -1,12 +1,3 @@
-/**
- * The auto-run phase reducer (`AGENTS.md`).
- *
- * Pure: no `vscode`, no process, no clock, no I/O. Given a run record and the
- * repository facts the engine observed, it returns the next step or the terminal
- * outcome. Every phase is postcondition-checked here rather than in the driver,
- * because resume correctness is exactly "re-enter at the first unsatisfied
- * postcondition" and that decision must be testable without fakes.
- */
 
 import { LABEL_SPEC, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
 
@@ -28,31 +19,14 @@ export type IssueDisposition = "afk" | "hitl";
 export const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 export type MergeStrategy = (typeof MERGE_STRATEGIES)[number];
 
-/**
- * Whether a run works in the user's own checkout or in a private one of its own.
- *
- * Off by default: a separate checkout costs a full copy of the tree and whatever
- * the project's setup command installs into it, which is a price only a user who
- * wants their own working tree left alone should pay.
- */
 export interface WorktreeSettings {
   readonly enabled: boolean;
-  /**
-   * Where the run's checkout is created. Empty means the derived default, a
-   * sibling of the project root — never inside it, or the run would be
-   * addressing issues in a directory the repository itself contains.
-   */
   readonly root: string;
   /** Keep the checkout after a run that would otherwise remove it. */
   readonly keep: boolean;
   readonly setupTimeoutSeconds: number;
 }
 
-/**
- * What Discard removes besides the run record. The default leaves everything in
- * place: a user discarding a broken run is usually about to go and look at its
- * branches, and a cleanup that ran first would take the evidence with it.
- */
 export const DISCARD_BEHAVIORS = ["record-only", "local-cleanup", "full-cleanup"] as const;
 export type DiscardBehavior = (typeof DISCARD_BEHAVIORS)[number];
 
@@ -62,12 +36,6 @@ export interface AutoRunSettings {
   readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly pollSeconds: number;
-  /**
-   * Whether the run merges its own pull request into the branch the user was on
-   * when it started. Off by default: that branch is one a human is actively
-   * working on, and landing a batch of automated work on it is exactly the kind
-   * of decision the user has to be able to see and refuse.
-   */
   readonly mergeRunPullRequest: boolean;
   readonly worktree: WorktreeSettings;
 }
@@ -79,13 +47,6 @@ export interface PlannedIssue {
   readonly branch: string;
   /** Whether the issue carries `[AI]-chrome`. */
   readonly chrome?: true;
-  /**
-   * The tier the issue's difficulty label expresses, which decides the model and
-   * effort of the agents that work it. Absent is the ordinary state of an issue
-   * nobody rated, and resolves to the most capable tier at launch time. Derived
-   * here and frozen into the run plan so relabelling breaks recovery instead of
-   * silently changing launch policy.
-   */
   readonly difficulty?: IssueDifficulty;
 }
 
@@ -94,11 +55,6 @@ export interface SkippedIssue {
   readonly reason: string;
 }
 
-/**
- * A read-only forecast of the next run. The session branch uses a placeholder
- * because a dry run deliberately does not mint or persist a run id; every issue
- * branch and the final target are exact for the repository state inspected.
- */
 export type AutoRunDryRunResult =
   | {
       readonly dryRun: true;
@@ -159,47 +115,19 @@ export type AutoRunStep =
 
 export interface ReducerInput {
   readonly issue: PlannedIssue;
-  /**
-   * The run's session branch: what every issue branch is cut from and merged
-   * into. Never the repository's default branch — a run leaves the default
-   * branch alone and reaches the user's own branch through one pull request at
-   * the end.
-   */
   readonly baseBranch: string;
   readonly reviewMode: boolean;
   readonly facts: RepositoryFacts;
 }
 
-/**
- * Decides the next step for the current issue. `advance` means this issue is
- * finished; `stop` is terminal for the whole run, never a skip — a failing
- * implementer usually means the issue, or the spec it came from, is wrong, and
- * the issues queued behind it are likely to share that premise.
- *
- * The walk always starts at the first phase and skips every already-satisfied
- * postcondition, so the observed repository — not a persisted phase — decides
- * where the run is. That is what makes resume and normal progress the same code
- * path, and it is why a record that disagrees with the repository loses:
- * a record claiming `merge` on a branch that does not exist re-enters at
- * `branch` rather than stopping on a pull request that was never opened.
- */
 export function nextStep(input: ReducerInput): AutoRunStep {
   const { issue, facts, reviewMode } = input;
-  // A closed issue is finished work, however it got that way: the run merged its
-  // pull request, or the user closed it by hand. Either way there is nothing
-  // left to open or merge, so the only remaining step is to tidy up.
   if (facts.issueClosed) return { action: "cleanup", issue };
-  // A merged pull request is equally conclusive. Its head branch is disposable
-  // and may already have been removed, so requiring that branch before reaching
-  // cleanup would recreate completed work during recovery.
   if (facts.pullRequest?.state === "merged") return { action: "cleanup", issue };
   for (const phase of AUTO_RUN_PHASES) {
     switch (phase) {
       case "branch":
         if (facts.branchExists && facts.currentBranch === issue.branch) continue;
-        // The implementer is told not to touch git, but it has `Bash`. Work left
-        // uncommitted somewhere other than the issue's branch is not something to
-        // silently correct by checking out over it.
         if (facts.workingTreeDirty) {
           return {
             action: "stop",
@@ -266,32 +194,16 @@ function requirePullRequest(facts: RepositoryFacts, issue: PlannedIssue): PullRe
   return { action: "found", number: facts.pullRequest.number };
 }
 
-/**
- * `aboard/<issue-number>-<slug>`. The number is part of the name because
- * slugs collide and because a branch must be greppable back to its issue.
- */
 export function branchName(issueNumber: number, title: string): string {
   return `aboard/${issueNumber}-${slugify(title)}`;
 }
 
-/**
- * `aboard/run/<run id>` — the branch a whole run merges into, one level below
- * the branch the user was on. Derived from the run id rather than persisted:
- * the record already carries the id, and a stored copy could disagree with it.
- * The `run/` segment keeps it out of the `aboard/<issue>-<slug>` namespace.
- */
 export function sessionBranchName(runId: string): string {
   return `aboard/run/${slugify(runId.replace(/^run_/u, ""))}`;
 }
 
 const SLUG_MAX_CHARS = 40;
 
-/**
- * Lowercase, every run of non-`[a-z0-9]` collapsed to `-`, trimmed, truncated to
- * 40 characters at a `-` boundary rather than mid-word. An empty result becomes
- * `issue`, so a title of pure punctuation or non-Latin script still names a
- * branch that is legal and readable.
- */
 export function slugify(title: string): string {
   const normalized = title
     .toLowerCase()
@@ -317,19 +229,6 @@ export function commitSubject(title: string): string {
 
 export const PR_BODY_MAX_CHARS = 4_000;
 
-/**
- * The implementer's final message is already a summary of what it did, so the
- * extension uses it verbatim rather than asking an agent for a second one. The
- * `Closes #N` trailer lives here and not in the commit message: it is what
- * `closingIssuesReferences` reads, which is how a pull request is traced back to
- * its issue.
- *
- * It no longer *closes* anything. GitHub only acts on a closing keyword when the
- * pull request merges into the repository's default branch, and these merge into
- * the run's session branch, so the extension closes the issue itself. The
- * trailer stays for the link, and because the run's own pull request eventually
- * carries the same work to a branch where the keyword may well apply.
- */
 export function pullRequestBody(summary: string, issueNumber: number): string {
   const trimmed = summary.trim();
   const bounded = trimmed.length <= PR_BODY_MAX_CHARS ? trimmed : `${trimmed.slice(0, PR_BODY_MAX_CHARS - 1).trimEnd()}…`;
@@ -349,12 +248,6 @@ export function runPullRequestTitle(landed: readonly LandedIssue[]): string {
     : `aboard auto-run: ${landed.length} issues`;
 }
 
-/**
- * The run's own pull request: an index of what landed on the session branch and
- * where each piece came from. Deliberately carries no closing keyword — every
- * issue listed here is already closed, and a second closing reference on a
- * branch where GitHub *would* honour it only invites reopen/close churn.
- */
 export function runPullRequestBody(landed: readonly LandedIssue[], sessionBranch: string, base: string): string {
   const lines = landed.map((issue) => `- #${issue.number} ${commitSubject(issue.title)} (PR #${issue.prNumber})`);
   const body = [
@@ -367,28 +260,12 @@ export function runPullRequestBody(landed: readonly LandedIssue[], sessionBranch
   return body.length <= PR_BODY_MAX_CHARS ? body : `${body.slice(0, PR_BODY_MAX_CHARS - 1).trimEnd()}…`;
 }
 
-/**
- * Why aboard is closing an issue that no merge closed by itself. Worth stating
- * on the issue: a reader who knows GitHub's rule would otherwise wonder what
- * closed it, and the work is not on the user's branch yet.
- */
 export function issueClosedComment(prNumber: number, sessionBranch: string, base: string): string {
   return `Merged into \`${sessionBranch}\` by aboard auto-run (#${prNumber}), and closed here because a merge outside the default branch does not close its issue. The work reaches \`${base}\` when the run's pull request merges.`;
 }
 
-/**
- * GitHub rejects a comment body over 65536 characters outright, so the bound is
- * the API's and not a judgement about length.
- */
 export const ISSUE_COMMENT_MAX_CHARS = 65_536;
 
-/**
- * The implementer's account of its own change, as it is posted on the issue.
- * Verbatim: the agent wrote it for a reader, and an extension that reformats it
- * is guessing at what that reader wants. `undefined` means there is nothing
- * worth posting, which is not a failure — an agent that ended silently has
- * simply said nothing.
- */
 export function issueCommentBody(summary: string): string | undefined {
   const trimmed = summary.trim();
   if (trimmed.length === 0) return undefined;

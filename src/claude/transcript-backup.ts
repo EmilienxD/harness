@@ -1,32 +1,3 @@
-/**
- * Manager transcript backups.
- *
- * Claude Code sweeps its own session files at startup: every transcript older
- * than `cleanupPeriodDays` is deleted, the default is 30 days, the minimum is
- * `1`, and `0` fails validation — so the sweep cannot be turned off, and aboard
- * launches new sessions often enough that it runs constantly. Every worker is
- * disposable, but the Manager is the one session aboard resumes for the
- * project's whole life: its continuity *is* its value, and `--resume` against a
- * swept id fails outright, silently downgrading a months-old Manager to a fresh
- * conversation under a new id.
- *
- * So aboard keeps its own copy under `.aboard/runtime/transcripts/` — gitignored,
- * because a transcript is conversation content and never belongs in the
- * repository — and puts it back before a resume that would otherwise start over.
- *
- * Two properties keep this cheap and safe:
- *
- * - Transcripts are append-only JSONL, so a checkpoint copies only the bytes
- *   added since the last one. The overlap window is compared first, so a live
- *   file that is *not* a continuation of the backup falls back to a full copy
- *   rather than producing a splice of two different conversations.
- * - Restore only ever writes a transcript Claude Code no longer has, or one it
- *   has and would refuse to resume. A live conversation always wins over the
- *   copy, and a backup holding no conversation is not worth restoring.
- *
- * Nothing here throws: a failed backup must never refuse a Manager launch. Every
- * path reports its outcome instead, and the caller logs it.
- */
 
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
@@ -42,11 +13,6 @@ export const TRANSCRIPT_BACKUP_DIRECTORY = join(".aboard", "runtime", "transcrip
 /** Manager transcripts retained by default; older ones are pruned as sessions turn over. */
 export const DEFAULT_TRANSCRIPT_BACKUPS = 5;
 
-/**
- * Bytes compared either side of the overlap before an incremental append. Large
- * enough to span several transcript records, small enough that the check costs
- * one read per file however large the transcript has grown.
- */
 export const OVERLAP_VERIFY_BYTES = 4_096;
 
 export type TranscriptCheckpointOutcome =
@@ -82,12 +48,6 @@ export interface TranscriptBackupOptions {
   readonly log?: (message: string) => void;
 }
 
-/**
- * Keeps aboard's copy of a session transcript in step with Claude Code's, and
- * restores it when Claude Code's is gone. Operations are serialized per store,
- * so a checkpoint fired by a Stop hook cannot interleave with the one an
- * activation started.
- */
 export class TranscriptBackupStore {
   readonly #options: TranscriptBackupOptions;
   readonly #directory: string;
@@ -108,20 +68,10 @@ export class TranscriptBackupStore {
     return sessionTranscriptPath(sessionId, this.#options.workspaceRoot, this.#configDirectory());
   }
 
-  /**
-   * Bring the backup up to date with the live transcript. Called at every
-   * Manager turn boundary, so the common case must stay a stat and a short
-   * append rather than a copy of a multi-megabyte file.
-   */
   public async checkpoint(sessionId: SessionId): Promise<TranscriptCheckpointOutcome> {
     return this.#serialize(() => this.#checkpoint(sessionId), "failed");
   }
 
-  /**
-   * Put the backup back when Claude Code's retention sweep has taken the live
-   * transcript. Returns without writing whenever the live transcript still
-   * holds a conversation: the session Claude Code has is always the truth.
-   */
   public async restore(sessionId: SessionId): Promise<TranscriptRestoreOutcome> {
     return this.#serialize(() => this.#restore(sessionId), "failed");
   }
@@ -168,11 +118,6 @@ export class TranscriptBackupStore {
     return "restored";
   }
 
-  /**
-   * Copy through a temporary file in the destination directory, so a crash
-   * mid-copy can never leave a truncated transcript that looks complete —
-   * on either side, since restore uses this too.
-   */
   async #copy(source: string, target: string, bytes: number): Promise<void> {
     await mkdir(dirname(target), { recursive: true });
     const temporary = `${target}.${process.pid}.tmp`;
@@ -191,11 +136,6 @@ export class TranscriptBackupStore {
     await pipeline(createReadStream(source, { start: from, end: to - 1 }), createWriteStream(target, { flags: "a" }));
   }
 
-  /**
-   * Keep the newest `retain` copies. Manager sessions turn over — `/clear`, an
-   * unresumable id, an explicit New Manager — and each one is a whole transcript,
-   * so an unbounded directory is the one way this feature costs real disk.
-   */
   async #prune(retain: number, keepPath: string): Promise<void> {
     let entries: readonly string[];
     try { entries = await readdir(this.#directory); }
@@ -241,12 +181,6 @@ async function size(path: string): Promise<number | undefined> {
   } catch { return undefined; }
 }
 
-/**
- * Whether the two files still describe one append-only stream, judged from the
- * window ending at the shorter one's length. Comparing the whole overlap would
- * cost the copy this check exists to avoid; comparing the *end* of it catches
- * both a rewrite and a truncation, which are the only ways an append can lie.
- */
 async function continues(source: string, target: string, liveSize: number, backupSize: number): Promise<boolean> {
   const overlap = Math.min(liveSize, backupSize);
   // One side is empty: whichever holds bytes is trivially a continuation of it.

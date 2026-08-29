@@ -49,9 +49,6 @@ test("a non-zero exit reports the code and the first line of the CLI's complaint
 });
 
 test("a Python traceback reports its actual error line, not the banner", async () => {
-  // A broken wrapper (here a shim whose package was uninstalled underneath it)
-  // fails the same way on every invocation; the banner line alone would leave
-  // the user to open a terminal just to learn the real reason.
   const stderr = [
     "Traceback (most recent call last):",
     "  File \"<frozen runpy>\", line 198, in _run_module_as_main",

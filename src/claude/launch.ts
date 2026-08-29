@@ -1,37 +1,3 @@
-/**
- * Claude Code launch planning (spec sections 4.3, 5.1-5.4, 5.7, 5.8, 8.3).
- *
- * A launch plan is a pure value: argv, a shell-quoted command line, an optional
- * prompt spill file, and the derived write capability. Nothing here touches the
- * filesystem, VS Code, or a process, so every launch shape is snapshot-testable.
- *
- * Two invariants shape the whole module:
- *
- * - An agent's persona and tool set live in one `.aboard/agents/<name>.md`
- *   definition, and the launch carries that whole document (5.1.1). aboard
- *   definitions are never placed on a session-discovered path: a file under
- *   `.claude/agents/` is a registered subagent type seen by *every* session in
- *   the workspace, including a user's own `claude`, which would then see
- *   `implementer` and the pr-doctors as spawnable types — outside the bridge and
- *   outside the write lease.
- *
- *   So each launch rewrites its definition into a private runtime directory and
- *   points at it with `--add-dir`: the agent is registered inside exactly that
- *   one session, under a per-launch name, and discoverable by nothing else. The
- *   session runs as that agent through `--agent`, which replaces Claude Code's
- *   default system prompt entirely and applies the file's `tools:` — one file,
- *   one authority, and the write-lease derivation reads the same list the file
- *   grants. It also restores the native session UI the flag pair could not: the
- *   `@<name>` banner and the agent's color.
- *
- *   `--agent` names Claude Code's own `Explore` type as well. Its metadata-only
- *   aboard profile may select the command, model, and effort, but its system
- *   prompt and tool set belong to Claude Code, so aboard writes no definition
- *   for it and adds no competing `--tools` flag.
- * - The first message and every later message travel as CLI arguments (5.1.2,
- *   5.1.3). aboard never types into a running TUI, so a message that cannot be
- *   represented on a command line spills to a file and is `@`-referenced.
- */
 
 import { deriveWriteCapability, type WriteCapability } from "../domain/capability.js";
 import {
@@ -51,32 +17,11 @@ import {
 } from "./prompts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
 
-/**
- * `aboard.launch.claudeCommand`. The launch command is a token list rather than
- * a single executable so a wrapper can carry its own fixed arguments — a
- * profile switcher launches as `wrapper run MyProfile --`, where everything after
- * `--` is Claude Code's. aboard appends its flags to these tokens and changes
- * nothing else about how they are passed.
- */
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 export const DEFAULT_RUNTIME_DIRECTORY = ".aboard/runtime";
 /** `aboard.launch.maxInlinePromptChars` — conservative, below every known ceiling. */
 export const DEFAULT_MAX_INLINE_PROMPT_CHARS = 4000;
 
-/**
- * The longest command line each shell will carry, as a whole line rather than
- * per argument.
- *
- * - `cmd.exe` hard-fails past 8191 characters, and there is no escape from it.
- * - PowerShell and Git Bash are bounded instead by `CreateProcess`, whose
- *   `lpCommandLine` caps at 32767 for the process the shell ultimately spawns.
- *
- * Both figures are taken well below the documented ceiling because the line is
- * delivered as terminal input, where a console's own line-editing buffer can
- * truncate before the shell ever parses it — and a truncated launch command is
- * far worse than a spilled prompt, because it fails silently or launches
- * something subtly different from what was planned.
- */
 export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
   cmd: 8_000,
   powershell: 24_000,
@@ -90,16 +35,6 @@ export type ClaudeCommandResult =
   | { readonly ok: true; readonly value: readonly string[] }
   | { readonly ok: false; readonly reason: string };
 
-/**
- * Reads the launch command setting, accepting either a token array or a command
- * string. The string form is split on whitespace with `'...'` and `"..."`
- * grouping a token that contains spaces, which is what lets a quoted program
- * path coexist with a wrapper's arguments (`"C:\\tools\\my claude.exe" run --`).
- *
- * This is deliberately not a shell parser: the result is a program plus its
- * arguments, each quoted individually at build time, so `&&`, `|`, and `>` are
- * literal argument text rather than operators.
- */
 export function parseClaudeCommand(value: unknown): ClaudeCommandResult {
   if (Array.isArray(value)) {
     if (!value.every((token): token is string => typeof token === "string")) {
@@ -143,19 +78,6 @@ export function parseClaudeCommand(value: unknown): ClaudeCommandResult {
     : { ok: true, value: tokens };
 }
 
-/**
- * `aboard.launch.effort` — the session-wide reasoning effort, the `--effort`
- * levels `claude --help` documents. It is the session floor rather than the last
- * word: an agent definition's `effort:` frontmatter overrides it, and the
- * planner puts that value on the command line itself, because a main-thread
- * `--agent` launch does not honor the field (see `LaunchConfiguration`). The
- * setting is what reaches launches whose definition or builtin profile declines
- * to choose its own level.
- *
- * Unset means "inherit", exactly as an absent `effort:` field does; aboard
- * passes no flag and Claude Code keeps whatever the user's own `effortLevel`
- * setting says.
- */
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
@@ -166,16 +88,6 @@ export function isEffortLevel(value: unknown): value is EffortLevel {
   return typeof value === "string" && EFFORT_LEVEL_SET.has(value);
 }
 
-/**
- * The `model:`/`effort:` value that defers to the difficulty label on the issue
- * a launch is working (`src/shared/labels.ts`).
- *
- * It is the definition delegating, not aboard overriding: a definition that
- * names a model or a level keeps it, and only this sentinel hands the choice to
- * the label. That keeps one rule for both fields — the definition is the
- * authority for its own launch policy, and one of the things it may declare is
- * which tier decides.
- */
 export const BY_DIFFICULTY = "by-difficulty";
 export type ByDifficulty = typeof BY_DIFFICULTY;
 
@@ -187,12 +99,6 @@ export interface DifficultyLaunchPolicy {
   readonly effort: EffortLevel;
 }
 
-/**
- * What each difficulty tier costs to work. The point is to stop paying the
- * expert rate for a rename, so the cheap tiers are genuinely cheap; the
- * expensive ones split on effort rather than model, because a multi-step change
- * with a known shape needs the good model more than it needs the long think.
- */
 export const DIFFICULTY_LAUNCH_POLICIES: { readonly [K in IssueDifficulty]: DifficultyLaunchPolicy } = {
   routine: { model: "haiku", effort: "medium" },
   basic: { model: "sonnet", effort: "high" },
@@ -200,23 +106,11 @@ export const DIFFICULTY_LAUNCH_POLICIES: { readonly [K in IssueDifficulty]: Diff
   expert: { model: "opus", effort: "high" },
 };
 
-/**
- * Unrated work is expert work. A launch reaches this with no difficulty
- * whenever the issue carries no label, whenever the agent is not working an
- * issue at all, and whenever a session is restored without one — and in every
- * one of those cases the failure worth avoiding is a capable job done by a
- * model too small for it, not a cheap job done too well.
- */
 export function difficultyLaunchPolicy(difficulty: IssueDifficulty | undefined): DifficultyLaunchPolicy {
   return DIFFICULTY_LAUNCH_POLICIES[difficulty ?? "expert"];
 }
 
 interface ResolvedLaunchPolicy {
-  /**
-   * What the definition declares, once `by-difficulty` has been resolved. This
-   * is what the rewritten file records: the file describes the agent, and an
-   * agent that declined to choose still declines in writing.
-   */
   readonly declaredModel: string | undefined;
   readonly declaredEffort: EffortLevel | undefined;
   /** What the command line carries — the declaration, or the session default behind it. */
@@ -224,14 +118,6 @@ interface ResolvedLaunchPolicy {
   readonly effort: EffortLevel | undefined;
 }
 
-/**
- * The model and effort a launch actually runs under, resolved once so the
- * command line and the rewritten definition cannot disagree.
- *
- * Precedence, most specific first: a value the definition names, then the
- * issue's difficulty when the definition defers to it, then the session-wide
- * setting, then no flag at all.
- */
 function launchPolicy(
   declared: { readonly declaredModel?: string | undefined; readonly declaredEffort?: DeclaredEffort | undefined },
   request: { readonly model?: string | undefined; readonly effort?: EffortLevel | undefined; readonly difficulty?: IssueDifficulty | undefined },
@@ -248,64 +134,19 @@ function launchPolicy(
 }
 
 export type LaunchConfiguration =
-  /**
-   * An aboard agent definition (`.aboard/agents/<name>.md`), rewritten into a
-   * per-launch runtime directory and launched from it with `--add-dir` plus
-   * `--agent`. Nothing lands on a path another session scans — see the module
-   * header.
-   */
   | {
       readonly shape: "agent-defined";
       readonly agentName: string;
       /** The definition body, written as the rewritten file's markdown body. */
       readonly systemPrompt: string;
-      /**
-       * `tools:` read from the same definition, after `sanitizeAgentDefinition`
-       * has narrowed a bare `Agent` allowance. Never empty. This list is both
-       * what the rewritten file grants and what capability is derived from, so
-       * there is no gap between the two to keep in sync.
-       */
       readonly declaredTools: readonly string[];
       /** `description:` from the same definition; a required frontmatter field. */
       readonly declaredDescription?: string;
-      /**
-       * Frontmatter lines for keys aboard does not resolve, copied into the
-       * rewritten file verbatim. The user owns these files; an unknown key is
-       * theirs to add, and Claude Code skips one it does not recognize. This is
-       * also how `color:` reaches the rewrite: the scaffolded definitions ship
-       * one per role and the launcher never looks at the value.
-       */
       readonly extraFrontmatter?: readonly string[];
-      /**
-       * `model:` and `effort:` read from the same definition, carried onto the
-       * command line because no flag short of these two applies them.
-       *
-       * Claude Code applies the *full* frontmatter only when an agent is spawned
-       * as a subagent; a main-thread launch honors a smaller subset, and one
-       * launched from a system-prompt file has no frontmatter to read at all. So
-       * aboard reads both fields itself and passes `--model`/`--effort`
-       * explicitly. `inherit` is normalized away at resolve time, because
-       * "inherit" is the frontmatter spelling of "pass no flag"; `by-difficulty`
-       * survives to `launchPolicy`, which is where the issue is known.
-       */
       readonly declaredModel?: string;
       readonly declaredEffort?: DeclaredEffort;
-      /**
-       * `command:` read from the same definition, in the same token form as
-       * `aboard.launch.claudeCommand`. It replaces the configured launch command
-       * for this agent alone, so one agent can run through a wrapper — a
-       * provider switcher such as `wrapper run MyProfile --` — while the rest of the
-       * fleet keeps the configured default. Absent means "use the setting",
-       * which is the only reason it is optional rather than resolved here: the
-       * setting is read per launch, and baking it in would freeze it.
-       */
       readonly declaredCommand?: readonly string[];
     }
-  /**
-   * Claude Code's named `Explore` builtin. Its aboard profile carries launch
-   * policy only; `--agent` still selects Claude's prompt and tools, and aboard
-   * deliberately passes neither a system-prompt flag nor `--tools`.
-   */
   | {
       readonly shape: "builtin";
       readonly agentName: string;
@@ -365,11 +206,6 @@ const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/**
- * Rejects the `--agent` plus `--tools` combination: a named builtin's prompt and
- * tool set remain Claude Code's. aboard may layer only launch policy (command,
- * model, effort) over that opaque definition.
- */
 export function resolveLaunchConfiguration(
   input: LaunchConfigurationInput,
 ): LaunchConfiguration {
@@ -386,9 +222,6 @@ export function resolveLaunchConfiguration(
         `Invalid agent definition name: ${input.agentName}`,
       );
     }
-    // Normalize the launch-policy fields for both complete definitions and
-    // metadata-only builtin profiles. `inherit` and an empty command both mean
-    // the fleet-wide setting remains in charge.
     const declaredModel =
       input.declaredModel === undefined || input.declaredModel === "inherit"
         ? undefined
@@ -419,9 +252,6 @@ export function resolveLaunchConfiguration(
           `The ${input.agentName} builtin profile must not declare tools`,
         );
       }
-      // aboard writes no definition file for a builtin, so there is nothing for
-      // a description or carried-through frontmatter to be written into.
-      // Accepting them would silently drop them.
       if (
         input.declaredDescription !== undefined ||
         input.extraFrontmatter !== undefined
@@ -440,9 +270,6 @@ export function resolveLaunchConfiguration(
       };
     }
 
-    // The name becomes a file name under the runtime directory, so it must be a
-    // single path segment. A plugin-scoped name (`plugin:agent`) is a legal
-    // `--agent` value but can never name an aboard definition.
     if (!AGENT_ID_PATTERN.test(input.agentName)) {
       throw new LaunchPlanError(
         "invalid-agent-name",
@@ -450,9 +277,6 @@ export function resolveLaunchConfiguration(
       );
     }
     if (input.systemPrompt.trim().length === 0) {
-      // An empty file is the one failure Claude Code does not report: it starts
-      // the session on its own default persona, which for a definition-launched
-      // agent means full default behavior under a tool list it never chose.
       throw new LaunchPlanError(
         "missing-system-prompt",
         `The ${input.agentName} agent definition has an empty system prompt`,
@@ -466,12 +290,6 @@ export function resolveLaunchConfiguration(
         `The ${input.agentName} agent definition declares no tools`,
       );
     }
-    // Carried-through frontmatter is emitted verbatim inside the generated
-    // document's `---` fence, so the only thing checked is that a line cannot
-    // close that fence or forge a second one. A key aboard does not understand
-    // is the author's business and Claude Code skips it — `color:` travels this
-    // path, where an unknown value renders grey — and a fence in the middle
-    // would silently move the rest of the frontmatter into the system prompt.
     for (const line of input.extraFrontmatter ?? []) {
       if (line.includes("\n") || line.includes("\r") || /^\s*(?:---|\.\.\.)\s*$/.test(line)) {
         throw new LaunchPlanError(
@@ -518,13 +336,6 @@ export function resolveLaunchConfiguration(
   return { shape: "default" };
 }
 
-/**
- * Capability is derived from an aboard definition's effective tool set, never
- * declared separately. Builtin capabilities are fixed by Claude Code itself:
- * Explore is read-only and general-purpose has the full tool set. aboard has no
- * definition file from which either could be derived
- * (`docs/CLAUDE-REFERENCES/subagents.md`).
- */
 export function launchWriteCapability(
   agentType: AgentType,
   configuration: LaunchConfiguration,
@@ -543,11 +354,6 @@ export function launchWriteCapability(
   }
 }
 
-/**
- * The Manager is launched, not delegated, and it is long-lived: a permanent
- * lease holder would deadlock every worker. Its residual `Bash` write vector is
- * addressed by `--disallowedTools` (section 4.3.1), not by the lease.
- */
 export function requiresWriteLease(
   agentType: AgentType,
   capability: WriteCapability,
@@ -566,14 +372,6 @@ export interface RuntimeFile {
 /** The relative path is the exact text after `@`, so it carries no whitespace. */
 export type PromptSpillFile = RuntimeFile;
 
-/**
- * The rewritten definition, written under the gitignored runtime directory at
- * `<runtime>/agents/<agentId>/.claude/agents/aboard-<type>-<agentId>.md`. That
- * shape is load-bearing in three ways: the `.claude/agents/` suffix is what
- * Claude Code scans inside an `--add-dir` directory, the `<agentId>` segment is
- * what keeps one launch's directory from containing another's definition, and
- * the whole path is somewhere no session reaches without the flag.
- */
 export type AgentDefinitionFile = RuntimeFile;
 
 export type PromptDelivery = "none" | "inline" | "spilled";
@@ -584,12 +382,6 @@ export interface LaunchPlan {
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
   readonly shell: ShellKind;
-  /**
-   * The launch command tokens actually used, program first: the definition's
-   * `command:` where it declares one, `aboard.launch.claudeCommand` otherwise.
-   * Preflight probes this rather than the setting, so a per-agent override is
-   * verified as the command that will really run.
-   */
   readonly command: readonly string[];
   readonly args: readonly string[];
   readonly commandLine: string;
@@ -597,13 +389,6 @@ export interface LaunchPlan {
   readonly requiresWriteLease: boolean;
   readonly promptDelivery: PromptDelivery;
   readonly spill?: PromptSpillFile;
-  /**
-   * Present for every agent-defined launch *and resume*. Claude Code restores
-   * an `--agent` selection with the conversation, but only by name: if the
-   * definition is gone at resume time the session silently continues on the
-   * default persona and the full default tool set. So the file is re-emitted
-   * and `--add-dir`/`--agent` re-passed on every command line.
-   */
   readonly agentDefinition?: AgentDefinitionFile;
   /** Per-launch directory selected with `--settings` and `--add-dir`. */
   readonly runtimeDirectory: string;
@@ -614,52 +399,16 @@ interface CommonPlanRequest {
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
   readonly shell: ShellKind;
-  /**
-   * Whether the launch lives under the user's eye — the Manager itself, a
-   * type that can only ever be handed over, or an explicit interactive handoff.
-   * It gates
-   * `--disable-slash-commands` (see `slashCommandArguments`): an unattended
-   * launch's first message is the only one it will ever get and nobody is
-   * watching to catch a hijack, while an attended terminal is exactly where the
-   * user types real slash commands. Absent means "derive from the type", which
-   * the launch sites that know better override.
-   */
   readonly attended?: boolean | undefined;
   readonly model?: string | undefined;
   readonly effort?: EffortLevel | undefined;
-  /**
-   * The difficulty of the issue this launch is working, when it works one. It
-   * decides `model:`/`effort:` for a definition that declared `by-difficulty`
-   * and is ignored by every definition that named its own — so it is passed
-   * whenever it is known rather than only when it will be used.
-   */
   readonly difficulty?: IssueDifficulty | undefined;
   readonly command?: readonly string[] | undefined;
-  /**
-   * Absolute path of the per-launch MCP registration, carried as
-   * `--mcp-config`. Set only for the Manager: the aboard delegation surface
-   * belongs to that one session, and a session-scoped flag is what keeps it out
-   * of every worker's context — a `.mcp.json` entry is project-scoped, so every
-   * worker, every `Explore`, and the user's own hand-started `claude` would
-   * connect it and pay for tool descriptions the bridge refuses them anyway.
-   *
-   * The file holds a resolved bearer token, so it lives in the extension's own
-   * storage rather than under the workspace (`FileManagerMcpConfig`). Resolved
-   * rather than `${ABOARD_BRIDGE_*}` references: those expand in
-   * `.mcp.json`-shaped configuration but *not* in agent frontmatter, where an
-   * earlier attempt to declare the same server left Claude Code reading the
-   * literal `${ABOARD_BRIDGE_PORT}` text and reporting an invalid URL.
-   */
   readonly mcpConfigPath?: string | undefined;
   /** Set only for an auto-run implementer whose frozen issue has `[AI]-chrome`. */
   readonly chrome?: true | undefined;
   readonly maxInlinePromptChars?: number | undefined;
   readonly runtimeDirectory?: string | undefined;
-  /**
-   * When set, the command line launches `uv run --no-project <script> <lockFile> -- <original line>`:
-   * aboard's wrapper owns a marker file for exactly the child's lifetime, and
-   * the bridge polls that file for liveness instead of scraping process ids.
-   */
   readonly wrapper?: SessionWrapperLayout | undefined;
 }
 
@@ -687,12 +436,6 @@ export interface SessionResumePlanRequest extends CommonPlanRequest {
   readonly disallowedTools?: readonly string[] | undefined;
 }
 
-/**
- * A leading `-` normally means the value was mistaken for a flag and would be
- * parsed as one. A launch command's tokens are the exception: `--` is how a
- * wrapper separates its own arguments from Claude Code's (`wrapper run MyProfile --`),
- * so there the check is emptiness alone.
- */
 function assertFlagValue(
   value: string,
   code: LaunchPlanErrorCode,
@@ -706,30 +449,6 @@ function assertFlagValue(
   return trimmed;
 }
 
-/**
- * `claude --help` documents tool lists as comma-separated values ("Bash,Edit,
- * Read"), and the flags are variadic. Variadic means the option consumes every
- * following argument until the next one starting with `-`, so `--tools a,b`
- * followed by the positional prompt swallows the prompt as another tool name —
- * verified against Claude Code 2.1.229, which then refuses the launch with
- * "Input must be provided either through stdin or as a prompt argument".
- *
- * Keep the option and its value as separate arguments. Claude Code's documented
- * form is `--tools "Bash,Edit,Read"`; the shell quoting layer will quote the
- * value as needed when it builds the command line.
- */
-/**
- * `--mcp-config` is variadic (`<configs...>`), so it carries the same hazard as
- * `--add-dir`: it must never end the line, or the positional prompt is read as a
- * second config path. It is emitted immediately before the `--add-dir`/`--agent`
- * pair, and the caller-side restriction to an agent-defined shape is what
- * guarantees a flag always follows it.
- *
- * `--strict-mcp-config` is deliberately never emitted with it: that would drop
- * every MCP server the *user* configured from the Manager's session. aboard's
- * claim is that its own server reaches no other session, not that the Manager
- * loses the user's.
- */
 function assertMcpConfigShape(
   path: string | undefined,
   configuration: LaunchConfiguration,
@@ -748,33 +467,6 @@ function mcpConfigArguments(path: string | undefined): readonly string[] {
   return ["--mcp-config", assertFlagValue(path, "invalid-mcp-config", "MCP config path")];
 }
 
-/**
- * Pre-approve the aboard MCP delegation surface on the one command line that
- * connects it, so the Manager never stalls behind a per-tool approval prompt.
- *
- * The user configured "I run aboard"; "I run aboard's own MCP tools" is not a
- * second decision, and `mcp__aboard__*` in the definition's allowlist decides
- * reachability, not permission. The allows are permission rules rather than
- * capability grants — a user deny or ask still outranks them (rules evaluate
- * deny, then ask, then allow) — and they attach only to the aboard server,
- * never to the user's tools. So this is the deliberate exception to "aboard
- * puts no permission flag on any command line", scoped to tools aboard itself
- * serves and to a session the bridge already names as the sole caller.
- *
- * Three load-bearing choices:
- * - The agent-defined shape, not the agent type, gates the flag — a launch
- *   carries it when its definition declares the `mcp__<server>__*` rule, which
- *   is `manager.md` alone among the shipped definitions. No other shape
- *   launches with an aboard server registration behind it (a `--mcp-config`
- *   path and the rule could not both reach a worker), so there is no
- *   type check to keep in sync with the wiring.
- * - The server name is derived from the definition's rule rather than
- *   hardcoded, so a rename of the bridge server renames the allow with it;
- *   a definition that declares no such rule emits no flag.
- * - The tools are enumerated rather than allowing the `mcp__aboard__*`
- *   pattern, so a tool the boundary serves but the permission list forgot
- *   surfaces as a prompt instead of being silently approved.
- */
 function aboardMcpAllowRules(configuration: LaunchConfiguration): readonly string[] {
   if (configuration.shape !== "agent-defined") return [];
   const declaresAboard = configuration.declaredTools.some(
@@ -792,13 +484,6 @@ function toolListArguments(
   return [flag, list];
 }
 
-/**
- * Effort is a closed set rather than free text like `--model`, whose value may
- * be a full model id. The check is kept even though the type says the same
- * thing: the value arrives from a settings file, where a typo is a user's
- * mistake rather than a compile error, and an unknown level would make Claude
- * Code refuse the whole launch.
- */
 function modelArguments(model: string | undefined): readonly string[] {
   if (model === undefined) return [];
   return ["--model", assertFlagValue(model, "invalid-model", "model")];
@@ -815,19 +500,6 @@ function effortArguments(effort: EffortLevel | undefined): readonly string[] {
   return ["--effort", effort];
 }
 
-/**
- * An unattended launch's first message is attacker-reachable text — an issue
- * body, a PR diff, a roadmap subject — delivered as the only message the
- * session will ever get, with no human present to notice a hijack. Claude
- * Code parses that message for slash commands before aboard's prompt is "just
- * text" to it, so a prompt that happens to open with `/clear` or the name of
- * any project skill fires that command instead of being read as a task.
- * `--disable-slash-commands` turns the parser off for the whole session,
- * which is exactly what an unattended launch needs and an attended one must
- * never get: the user types real slash commands into those terminals
- * (`/compact`, `/auto`, aboard's own skills), and disabling the parser would
- * silently break that.
- */
 function slashCommandArguments(attended: boolean): readonly string[] {
   return attended ? [] : ["--disable-slash-commands"];
 }
@@ -865,24 +537,11 @@ function spillRelativePath(runtimeDirectory: string, stem: string): string {
   return path;
 }
 
-/**
- * Unlike a spill reference these are ordinary arguments rather than `@path`
- * text, so the shell quoting handles whitespace and only the separators need
- * normalizing.
- */
 function agentRuntimeDirectory(runtimeDirectory: string, agentId: AgentId): string {
   const directory = runtimeDirectory.replaceAll("\\", "/").replace(/\/+$/, "");
   return `${directory}/agents/${agentId}`;
 }
 
-/**
- * The name the rewritten definition is registered under, and the name the
- * session banner shows. It carries the agent id because the directory holding
- * it is per-launch: a role-named file would still be unique inside its own
- * directory, but the id makes the banner say *which* implementer this terminal
- * is, and makes a clash with a project or user subagent of the same role name
- * impossible rather than merely unlikely.
- */
 export function runtimeAgentName(agentName: string, agentId: AgentId): string {
   return `aboard-${agentName}-${agentId}`;
 }
@@ -892,18 +551,6 @@ function frontmatterLine(key: string, value: string | undefined): readonly strin
   return value === undefined ? [] : [`${key}: ${value}`];
 }
 
-/**
- * The rewritten definition: aboard's resolved fields first, every key aboard
- * does not resolve copied through verbatim after them, then the body.
- *
- * `tools:` is emitted as the documented comma-separated scalar. `model:` and
- * `effort:` are emitted even though the command line also carries them — the
- * two always agree because both are the one resolved policy this launch was
- * planned with, and a file that describes the agent completely is the one that
- * survives `--resume`. The resolved value is written rather than the
- * `by-difficulty` the definition may have declared: the sentinel means nothing
- * to Claude Code, and the rewritten file has to describe this launch.
- */
 function renderAgentDefinition(
   configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
   name: string,
@@ -911,10 +558,6 @@ function renderAgentDefinition(
 ): string {
   const frontmatter = [
     `name: ${name}`,
-    // Required by Claude Code. The fallback is never the interesting case — both
-    // launch sites read a definition that must declare one — but an agent file
-    // missing it is refused, and refusing the launch over a cosmetic field the
-    // main-session agent never uses for delegation would be the worse trade.
     `description: ${configuration.declaredDescription ?? `aboard ${configuration.agentName} agent`}`,
     `tools: ${configuration.declaredTools.join(", ")}`,
     ...frontmatterLine("model", policy.declaredModel),
@@ -924,18 +567,6 @@ function renderAgentDefinition(
   return `---\n${frontmatter.join("\n")}\n---\n\n${configuration.systemPrompt.trim()}\n`;
 }
 
-/**
- * The flags that carry an aboard definition, and the file they point at.
- * Emitted identically by `planLaunch` and by both resume planners, because a
- * definition Claude Code cannot find at resume time drops the session back to
- * the default persona and the full default tool set — silently widening a
- * read-only agent past the lease it was granted under.
- *
- * `--add-dir` and `--agent` stay adjacent and never end the line: `--add-dir`
- * takes a list, and a variadic option consumes every following argument up to
- * the next one starting with `-`, which is how `--tools` used to swallow the
- * positional prompt.
- */
 function agentRuntimeArguments(
   configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
   agentId: AgentId,
@@ -954,13 +585,6 @@ function agentRuntimeArguments(
   };
 }
 
-/**
- * Launch-level deny rules are deduplicated, since the same rule twice says
- * nothing more than once. An agent definition declares no denials of its own:
- * its `tools:` allowlist is the whole tool authority (spec section 5.1.1), and
- * there is no project-scoped MCP server whose tools an allowlist could fail to
- * exclude.
- */
 function denyRules(requested: readonly string[] | undefined): readonly string[] {
   return [...new Set(requested ?? [])];
 }
@@ -1003,14 +627,6 @@ function planPrompt(
   };
 }
 
-/**
- * The command tokens this launch actually runs. A definition's `command:` wins
- * over `aboard.launch.claudeCommand`, for the same reason its `model:` and
- * `effort:` do: it is the agent's own declaration, and the setting is the
- * fleet-wide default for the launches that declare nothing. `--resume` reads no
- * definition, so a resumed session gets the override re-applied here exactly as
- * it gets `--add-dir` and `--agent` re-passed.
- */
 function effectiveCommand(
   configuration: LaunchConfiguration,
   configured: readonly string[] | undefined,
@@ -1053,10 +669,6 @@ function commonPreconditions(
     );
   }
   const command = effectiveCommand(configuration, request.command);
-  // A wrapper's own arguments reach argv, so they are checked here rather than
-  // trusted from a setting or an agent definition: an empty token would launch
-  // the wrong program, and an unquotable one would be silently mangled into the
-  // command line.
   for (const token of command) {
     if (token.trim().length === 0 || !canQuoteArgument(request.shell, token)) {
       throw new LaunchPlanError(
@@ -1076,9 +688,6 @@ function commonPreconditions(
       }
     }
   }
-  // The caller knows who will be driving; when it says nothing, the type
-  // answers: the Manager always works with the user watching, and the
-  // interactive types exist solely to be handed over.
   const attended =
     request.attended ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType));
   return {
@@ -1134,9 +743,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     );
   }
   if (isNamedBuiltinAgentType(agentType) !== (configuration.shape === "builtin")) {
-    // `--agent` names Claude Code's own definitions and nothing else: aboard
-    // ships no file a builtin name could resolve to, and its own agents are
-    // deliberately undiscoverable, so neither can borrow the other's shape.
     throw new LaunchPlanError(
       "shape-not-allowed",
       `Only Claude Code's builtin agent types launch with --agent: ${agentType}`,
@@ -1159,9 +765,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--add-dir", launchRuntimeDirectory,
     "--settings", `${launchRuntimeDirectory}/settings.json`,
   ];
-  // A complete definition or builtin profile wins over the session settings.
-  // Explore's profile affects only these launch flags; its prompt and tools
-  // still come exclusively from Claude Code through `--agent`.
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
 
   let agentDefinition: AgentDefinitionFile | undefined;
@@ -1204,14 +807,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     return { plan, args, commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args) };
   };
 
-  // The prompt threshold alone cannot decide this. It measures the prompt text,
-  // while the shell's limit applies to the whole assembled line — which also
-  // carries the wrapper command, any tool-list flags, and quoting that expands
-  // rather than preserves length (PowerShell doubles every `'`, Git Bash turns
-  // one into four characters). A prompt comfortably under the threshold can
-  // still produce a command line that the shell truncates or refuses, so the
-  // line itself is measured and the prompt spilled if it is too long. Spilling
-  // is always safe, so an unsure implementation spills.
   const limit = MAX_COMMAND_LINE_CHARS[request.shell];
   let built = planFor(threshold);
   if (built.commandLine.length > limit && built.plan.delivery === "inline") built = planFor(0);
@@ -1242,19 +837,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   };
 }
 
-/**
- * Manager resume (spec 4.4): relaunch with `--resume <session-id>`. Never
- * keystrokes into a live TUI. The long-lived Manager resumes without an
- * automated message.
- *
- * Every flag that shaped the original launch is passed again. `--resume`
- * restores the conversation and nothing else it is not told about, and while
- * an `--agent` selection *is*
- * restored, it is restored by name — a session whose definition is no longer
- * discoverable continues on Claude Code's default persona and its full default
- * tool set. For the Manager that would mean resuming an orchestrator that can
- * implement, so the runtime definition is re-emitted and re-pointed at.
- */
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
   const { command, wrapper, runtimeDirectory, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
   if (
@@ -1272,10 +854,6 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
   const args = [
     "--resume",
     request.sessionId,
-    // Re-passed like every other launch flag: a resumed Manager holding
-    // `mcp__aboard__*` in its allowlist with no server behind it has nothing to
-    // delegate through, and the file is rewritten per launch so the port and
-    // token are this activation's rather than the dead one's.
     ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, request.configuration)),
     "--add-dir", launchRuntimeDirectory,
     "--settings", `${launchRuntimeDirectory}/settings.json`,
@@ -1306,18 +884,6 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
   };
 }
 
-/**
- * Reopens a worker's recorded session (`AGENTS.md`),
- * re-passing the same flags as the Manager's resume and for the same reason:
- * `--resume` restores the conversation, not a definition it can no longer find.
- * A read-only worker resumed without its runtime definition comes back holding
- * `Edit`, `Write`, and an unrestricted `Bash`, which the lease it was granted at
- * launch does not cover.
- *
- * Capability is therefore derived here from the configuration rather than
- * accepted from the caller: it must describe the session this command line
- * actually produces.
- */
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
   const { command, wrapper, runtimeDirectory, attended } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
@@ -1362,10 +928,6 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
   };
 }
 
-/**
- * A redacted, loggable description. The command line is deliberately excluded:
- * it contains the prompt whenever the prompt is inline.
- */
 export function describeLaunchPlan(
   plan: LaunchPlan,
   prompt?: ResolvedPrompt,

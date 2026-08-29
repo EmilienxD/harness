@@ -1,12 +1,3 @@
-/**
- * Write-capability derivation (spec section 8.1).
- *
- * Capability is *derived* from the effective tool set, never declared. The
- * derivation is only sound because `--agent` and `--tools` are mutually
- * exclusive (spec section 5.1.1): complete definitions own their tool list,
- * while the named Explore builtin owns its opaque list upstream. Unknown
- * capability always resolves to the restrictive answer, which is write-capable.
- */
 
 export type WriteCapability = "write-capable" | "read-only";
 
@@ -26,11 +17,6 @@ export type AgentDefinitionToolsResult =
   | { readonly ok: true; readonly tools: readonly string[] }
   | { readonly ok: false; readonly reason: string };
 
-/**
- * Reads the load-bearing `tools` field from an agent definition boundary.
- * Claude documents it as a comma-separated scalar; a YAML sequence is also
- * accepted so scaffold formatting can evolve without changing domain policy.
- */
 export function parseAgentDefinitionTools(
   definition: unknown,
 ): AgentDefinitionToolsResult {
@@ -112,11 +98,6 @@ export function deriveAgentDefinitionWriteCapability(definition: unknown): Write
   return deriveWriteCapability(parsed.ok ? parsed.tools : undefined);
 }
 
-/**
- * Parses one `ToolName` or `ToolName(specifier)` rule. Returns `undefined` for
- * a rule we cannot understand, which callers must treat as unknown capability
- * rather than as an absent capability.
- */
 export function parseToolRule(rule: string): ToolRule | undefined {
   const trimmed = rule.trim();
   if (trimmed.length === 0) return undefined;
@@ -134,13 +115,6 @@ function isUnrestricted(specifier: string | undefined): boolean {
   return specifier === undefined || specifier.length === 0 || specifier === "*";
 }
 
-/**
- * Derives capability from an effective tool set.
- *
- * `undefined` means there is no tool set to read — for example a built-in agent
- * or an agent definition we failed to parse — and is write-capable by the
- * conservative rule above.
- */
 export function deriveWriteCapability(
   tools: readonly string[] | undefined,
 ): WriteCapability {

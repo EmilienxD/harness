@@ -32,9 +32,6 @@ test("a fresh activation resumes past the persisted counter, so ids are never re
 });
 
 test("upgrade seeds from the fleet's numeric ceiling instead of restarting at 1", () => {
-  // An earlier run of the numeric scheme already launched agents 1, 2, and 3;
-  // their runtime residue (locks, exit records, spilled prompts) lives at
-  // number-keyed paths a restart to 1 would collide against.
   const counter = WorkspaceAgentIdCounter.load(tempRoot(), () => ["1", "2", "3"]);
   assert.equal(counter.next(), "4");
 });

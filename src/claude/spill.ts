@@ -4,20 +4,7 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { LaunchPlan, RuntimeFile } from "./launch.js";
 import { RuntimeAdmission } from "../runtime/admission.js";
 
-/**
- * Persists the files a launch command line reads, under the gitignored runtime
- * directory (spec section 5.1.4): spilled prompts, retained for the session
- * lifetime so a later `--resume` can still resolve their `@` references, and
- * the system prompt file each agent-defined launch and resume points at.
- */
 export interface PromptSpillStore {
-  /**
-   * Writes the file and returns its absolute path. `root` overrides the
-   * workspace: a launch's paths are relative to the directory the session runs
-   * in, so an auto-run working in its own checkout writes them there — the
-   * session resolves `--add-dir` and `@` references against that directory and
-   * nowhere else.
-   */
   write(file: RuntimeFile, root?: string): Promise<string>;
   prepare(plan: LaunchPlan, root?: string): Promise<void>;
 }

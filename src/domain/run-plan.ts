@@ -1,14 +1,3 @@
-/**
- * The fixed auto-run plan and its persisted record (`AGENTS.md`).
- *
- * A run discovers its issue set exactly once. Everything downstream — resume,
- * recovery validation, the Auto Run view, discard cleanup — reads the frozen
- * plan rather than GitHub, so a repository that changes underneath a run makes
- * that run visibly broken instead of quietly working on different issues than
- * the user agreed to.
- *
- * Pure: no `vscode`, no process, no clock, no I/O.
- */
 
 import { LABEL_CHROME, LABEL_SPEC, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
 import {
@@ -21,12 +10,6 @@ import {
   type WorktreeSettings,
 } from "./auto-run.js";
 
-/**
- * One issue as the run froze it. Title, branch, disposition, difficulty, and
- * dependency edges are all captured at planning time: the branch a commit lands
- * on and the tier an agent runs at must not change because somebody relabelled
- * or renamed an issue mid-run.
- */
 export interface FrozenIssue {
   readonly number: number;
   /** The title as it was when the run started. Branches and commits use this. */
@@ -36,11 +19,6 @@ export interface FrozenIssue {
   readonly difficulty?: IssueDifficulty;
   /** Whether this issue's implementer launches with Claude in Chrome. */
   readonly chrome?: true;
-  /**
-   * Open blockers, restricted to issues this same run admitted. An issue whose
-   * closure reaches outside the plan is excluded rather than carried with a
-   * dangling edge, so this is always a subset of the plan's own numbers.
-   */
   readonly dependsOn: readonly number[];
 }
 
@@ -52,20 +30,11 @@ export interface FrozenRunSettings {
   readonly pauseAfterHitl: boolean;
   readonly pollSeconds: number;
   readonly worktree: WorktreeSettings;
-  /**
-   * Where an isolated run works, resolved once at planning time. Absent for a
-   * run working in the user's own checkout.
-   */
   readonly workspaceRoot?: string;
   /** Appended to every implementer and pr-doctor prompt for this run. */
   readonly additionalGuideline?: string;
 }
 
-/**
- * How far the run has got, independent of any single issue. The per-issue phase
- * lives on that issue's progress entry; this is the outer sequence a resume
- * re-enters at.
- */
 export const RUN_CHECKPOINTS = [
   /** The plan is persisted; nothing has been created yet. */
   "planned",
@@ -83,12 +52,6 @@ export const RUN_CHECKPOINTS = [
 
 export type RunCheckpoint = (typeof RUN_CHECKPOINTS)[number];
 
-/**
- * One plan entry's state. A discriminated union rather than a bag of optional
- * fields: "done with a landed pull request" and "done because the implementer
- * correctly changed nothing" are different facts, and recovery validation asks
- * different questions of each.
- */
 export type IssueProgress =
   | { readonly state: "pending" }
   | {
@@ -108,25 +71,11 @@ export type IssueProgress =
     }
   | { readonly state: "done"; readonly result: "no-changes" };
 
-/**
- * How an attempt ended. Distinguished because recovery treats them differently
- * in what it tells the user, and because "the user stopped this" must never be
- * reported as "the extension crashed".
- */
 export type RunAttemptOutcome =
   | { readonly kind: "cancelled" }
   | { readonly kind: "interrupted" }
   | { readonly kind: "failed"; readonly reason: string };
 
-/**
- * A mutating git/GitHub action that had begun when the record was last written.
- *
- * Persisted *before* the side effect, carrying the exact before/after facts the
- * effect is meant to produce. After a crash the postcondition is adopted only
- * when it matches this journal entry exactly, which closes the "side effect
- * succeeded but the record save did not" window without ever adopting unrelated
- * external work as the run's own.
- */
 export type PendingAction =
   | { readonly kind: "create-branch"; readonly branch: string; readonly base: string; readonly baseSha: string }
   | {
@@ -146,12 +95,6 @@ export type PendingAction =
   | { readonly kind: "create-run-pr"; readonly head: string; readonly base: string }
   | { readonly kind: "merge-run-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string };
 
-/**
- * The version-2 authoritative run record. Unlike the version-1 resume hint it
- * replaces, this is the source of truth for what the run is doing: the engine
- * validates the repository *against* it rather than re-deriving a plan from the
- * repository.
- */
 export interface AutoRunRecord {
   readonly version: 2;
   readonly runId: string;
@@ -164,11 +107,6 @@ export interface AutoRunRecord {
   /** Keyed by issue number as a string, because JSON has no integer keys. */
   readonly progress: Readonly<Record<string, IssueProgress>>;
   readonly sessionBranch: string;
-  /**
-   * The branch the user was on when the run started, and where the run's own
-   * pull request goes. `undefined` only for a detached HEAD, where the default
-   * branch stands in.
-   */
   readonly targetBranch: string | undefined;
   /** Run-owned branch name to the full SHA this run last pushed there. */
   readonly branchShas: Readonly<Record<string, string>>;
@@ -183,11 +121,6 @@ export interface AutoRunRecord {
   readonly workspaceCreated?: true;
 }
 
-/**
- * Whether a recorded run can be continued. Derived from the record plus fresh
- * observations, never stored: a run that was resumable a minute ago is broken
- * the moment somebody force-pushes its branch.
- */
 export type RecoveryEligibility =
   | { readonly state: "checking" }
   | { readonly state: "resumable" }
@@ -196,14 +129,6 @@ export type RecoveryEligibility =
 /** The reason a version-1 record is shown as broken rather than migrated. */
 export const UNSUPPORTED_RECORD_REASON = "run predates fixed-plan recovery";
 
-/**
- * A version-1 record cannot become a fixed plan: it stored issue numbers as a
- * forecast, re-derived from GitHub on every resume, and carries none of the
- * SHAs, dispositions, or per-issue outcomes recovery validation needs. Rather
- * than disappear (losing the user's only pointer at in-flight work) or resume
- * dynamically (the behavior this replaces), it surfaces as an unsupported
- * interrupted run offering Discard.
- */
 export interface UnsupportedAutoRunRecord {
   readonly version: 1;
   readonly runId: string;
@@ -242,12 +167,6 @@ export function landedIssues(record: AutoRunRecord): readonly { readonly number:
   });
 }
 
-/**
- * Whether the run reached its own definition of success: every plan entry done,
- * and — when anything landed — the run's pull request opened, plus merged if
- * that was frozen on. A run whose every issue needed no change succeeds with no
- * pull request at all, because there is nothing to carry anywhere.
- */
 export function runSucceeded(record: AutoRunRecord, runPullRequestMerged: boolean): boolean {
   if (remainingIssues(record).length > 0) return false;
   if (landedIssues(record).length === 0) return true;
@@ -267,30 +186,12 @@ export function runOwnedBranches(record: AutoRunRecord): readonly string[] {
   return branches;
 }
 
-/**
- * The exclusion reasons planning can report. Short by design: they are read in
- * bulk at start, one line per skipped issue.
- */
 export interface RunPlanResult {
   readonly issues: readonly FrozenIssue[];
   readonly skipped: readonly SkippedIssue[];
   readonly dependencyCycles: readonly (readonly number[])[];
 }
 
-/**
- * Plans a run over the whole open issue graph, once.
- *
- * Admission is closed under dependencies: a blocked issue joins the plan when
- * every open blocker is also in the plan, because this run will address those
- * blockers before reaching it. An issue whose dependency closure reaches
- * something this run cannot address is excluded recursively — implementing it
- * against an unmet premise is worse than deferring it to a later run.
- *
- * Unclassified is reported, never guessed at. An umbrella — `[AI]-spec`, or any
- * issue with sub-issues — never enters the plan, silently unless it is also
- * classified, because an umbrella asking to be addressed autonomously is a
- * genuine contradiction rather than ordinary noise.
- */
 export function planRun(candidates: readonly CandidateIssue[]): RunPlanResult {
   const open = candidates.filter((candidate) => candidate.state === "open");
   const skipped: SkippedIssue[] = [];
@@ -309,9 +210,6 @@ export function planRun(candidates: readonly CandidateIssue[]): RunPlanResult {
     eligible.set(candidate.number, candidate);
   }
 
-  // Fixpoint: drop anything blocked by work this run will not do, then drop
-  // whatever that decision in turn strands. Terminates because every pass either
-  // removes at least one member or stops.
   const excluded = new Map<number, string>();
   for (;;) {
     let changed = false;
@@ -363,12 +261,6 @@ function compareCandidates(left: CandidateIssue, right: CandidateIssue): number 
   return Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.number - right.number;
 }
 
-/**
- * Stable Kahn sort with surgical cycle breaking. When no node is ready, a DFS
- * identifies one actual directed cycle; removing only the edges inside it keeps
- * every acyclic constraint around it intact. Both walks carry explicit visited
- * state and therefore terminate for every finite input graph.
- */
 function orderByDependencies(candidates: readonly CandidateIssue[]): {
   readonly ordered: readonly CandidateIssue[];
   readonly cycles: readonly (readonly number[])[];

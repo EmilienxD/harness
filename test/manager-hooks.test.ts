@@ -86,9 +86,6 @@ test("the state block carries the facts a Manager would otherwise fetch", async 
   assert.match(rendered, /#14 Rotate bridge tokens \(hitl\) - waits on #12/);
   assert.match(rendered, /#21 Fix lease recovery \(no review yet\)/);
   assert.match(rendered, /2 pull request\(s\) merged without review/);
-  // The roadmap itself, with the positions that address it, so no tool call is
-  // needed to read or edit it — and the completed history included, because
-  // session start is one of the two moments the Manager's context is empty.
   assert.match(rendered, /## Roadmap\n<aboard-roadmap>\nIssue #9/);
   assert.match(rendered, /^1\. \[ \] Ship the bridge$/m);
   assert.match(rendered, /^2\. \[x\] Rotate the tokens$/m);
@@ -166,9 +163,6 @@ test("an idle project renders every section without a failure note", async () =>
   assert.match(rendered, /Nothing is ready\./);
   assert.match(rendered, /## Pull requests\nNone open\./);
   assert.match(rendered, /No live agents/);
-  // No carrier is a fact about the repository and the normal first-run state,
-  // so it reads as work to do — deliberately not the "Unavailable" that a
-  // failed fetch produces.
   assert.match(rendered, /No open issue carries `\[AI\]-todo`, so this project has no roadmap yet/);
   assert.match(rendered, /Recommend `\/update-todo`/);
   assert.doesNotMatch(rendered, /Unavailable/);
@@ -281,10 +275,6 @@ test("the reminder carries pending tasks only, is self-dating, and leads with th
   // rule, and so the hook's tail search finds it wherever the block is cut.
   assert.ok(context.startsWith(ROADMAP_MARKER));
   assert.match(context, /Roadmap as of 2026-07-30T14:32:00\.000Z/);
-  // Pending only: the completed history is still verbatim in the window, and
-  // repeating it would make the reminder grow with the project's age. The
-  // position stays absolute — 2, not 1 — so it names the same task the
-  // session-start briefing did.
   assert.match(context, /^2\. \[ \] Pace the reminders$/m);
   assert.doesNotMatch(context, /Replace the locator/);
 
@@ -739,12 +729,6 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
     // advertise their selectors. General-purpose is explicitly argumentless.
     if (["auto", "review-pr", "reopen"].includes(name)) assert.match(skill, /argument-hint:/);
     else assert.doesNotMatch(skill, /argument-hint:/);
-    // The body is reachable only when the hook failed to intercept, so it must
-    // read as an error notice: an empty body leaves the model to invent a
-    // response, and any instruction resembling the command would have it
-    // simulate work the extension alone can perform. Equally, the reader is a
-    // user of aboard, not its developer: the notice must steer them to the
-    // extension's own controls rather than into debugging the installation.
     const body = skill.replace(/^---\n[\s\S]*?\n---\n/u, "").replace(/<!--[\s\S]*?-->/gu, "").trim();
     assert.notEqual(body, "", `${name} SKILL.md must explain the hook failure rather than leave an empty body`);
     assert.match(body, /is broken — report that to the user and stop/, `${name} SKILL.md body must announce it is an error state`);

@@ -73,9 +73,6 @@ test("later checkpoints append only the bytes the transcript gained", async () =
   assert.equal(await fake.store.checkpoint(sessionId), "copied");
   assert.ok((await stat(fake.backup)).size > OVERLAP_VERIFY_BYTES, "the fixture must outgrow the overlap window");
 
-  // Mark the copy outside the compared window. A checkpoint that re-copies the
-  // whole file erases the mark; one that appends leaves it, which is the only
-  // way to observe incrementality from outside.
   const marked = "@" + (await readFile(fake.backup, "utf8")).slice(1);
   await writeFile(fake.backup, marked, "utf8");
 

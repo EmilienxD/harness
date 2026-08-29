@@ -18,12 +18,6 @@ import {
   type WorkerAgentName,
 } from "../src/scaffold/agent-definition.js";
 
-// Deliberately not under `.claude/agents/`: a definition there is a registered
-// subagent type that every session in the workspace can see and spawn — the
-// user's own `claude` included — which would put aboard agents outside the
-// bridge and outside the write lease. Each launch rewrites the one it needs
-// into its own runtime directory instead, reachable only through that launch's
-// `--add-dir`.
 const agentsRoot = join(process.cwd(), "assets", "scaffold", ".aboard", "agents");
 const taskTools = ["TaskCreate", "TaskGet", "TaskList", "TaskStop", "TaskUpdate", "TodoWrite"] as const;
 
@@ -167,11 +161,6 @@ test("an agent definition may declare an effort level, and an unknown one is ref
 });
 
 test("the rewrite narrows a bare Agent allowance to Claude Code's native types", () => {
-  // A rewritten definition is a registered project subagent *inside its own
-  // session*, so a bare `Agent` would let the agent spawn itself — and any
-  // subagent the user's repository happens to define. Each type is its own rule
-  // rather than one rule listing both, so no reader has to split on commas
-  // inside parentheses to get the allowlist right.
   assert.deepEqual(rewriteAgentTools(["Read", "Agent", "Skill"]), [
     "Read",
     ...NATIVE_SUBAGENT_TYPES.map((type) => `Agent(${type})`),
@@ -193,11 +182,6 @@ test("the rewrite narrows a bare Agent allowance to Claude Code's native types",
 });
 
 test("the rewrite copies unresolved frontmatter verbatim, including the color", async () => {
-  // aboard resolves six keys. Everything else is the author's: Claude Code
-  // silently skips a key it does not know, so copying an unrecognized one
-  // through costs nothing and refusing it would make the definition files less
-  // editable than they are meant to be. `color:` travels the same path — aboard
-  // assigns no color of its own.
   const source = [
     "---",
     "name: implementer",
@@ -244,9 +228,6 @@ test("the rewrite copies unresolved frontmatter verbatim, including the color", 
 });
 
 test("the authored definitions declare the fleet colors, carried through rather than resolved", async () => {
-  // The color lives in the definition files as ordinary frontmatter, shipped
-  // with one distinct color per role. aboard assigns nothing: a user's edit to
-  // a file changes their fleet, and that is the point.
   const colors: Record<string, string> = {};
   for (const name of [...WORKER_AGENT_NAMES, "manager"] as const) {
     const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");
@@ -268,9 +249,6 @@ test("the authored definitions declare the fleet colors, carried through rather 
 });
 
 test("a color a user writes travels verbatim, and a blank one stays one line", () => {
-  // An unrecognized color renders grey in the session UI; refusing the launch
-  // over one would trade a cosmetic default for a dead terminal, so the value
-  // travels exactly as written.
   const parsed = parseAgentDefinition(
     "---\nname: implementer\ndescription: d\ntools: Read\nmodel: opus\ncolor: chartreuse\n---\nImplement.",
   );

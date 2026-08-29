@@ -29,18 +29,7 @@ import { sessionIsResumable } from "../claude/sessions.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
-/**
- * Where an automated launch runs when that is not the workspace itself, and what
- * fences it there. Set only by the auto-run engine in worktree mode: the session
- * runs in the run's own checkout, and its file tools are denied the user's
- * (`src/auto/worktree.ts`).
- */
 export interface LaunchIsolation {
-  /**
-   * Absolute path the terminal starts in. Every relative path on the launch
-   * command line — the rewritten agent definition, a spilled prompt — resolves
-   * against it, so the runtime files go there too.
-   */
   readonly cwd: string;
   /** Permission deny rules added to this launch's `--disallowedTools`. */
   readonly denyTools: readonly string[];
@@ -49,10 +38,6 @@ export interface LaunchIsolation {
 export interface DelegationLaunchInput {
   readonly type: Exclude<AgentType, "manager">;
   readonly prompt?: string;
-  /**
-   * Set only by auto-run. Kept separate from the task instruction so prompt
-   * resolution can append it after all issue, pull-request, and diff context.
-   */
   readonly additionalGuideline?: string;
   readonly description: string;
   /** Every issue whose resolved contract belongs in the opening prompt, in the caller's order. */
@@ -61,21 +46,9 @@ export interface DelegationLaunchInput {
   readonly focus?: string;
   /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */
   readonly chrome?: true;
-  /**
-   * Set only by the auto-run engine. It records that this agent's contract ends
-   * at "the working tree contains the change", so a dirty tree at Stop is
-   * success rather than a `no-commit` failure — the engine commits
-   * (`AGENTS.md`).
-   */
   readonly expectsUncommittedTree?: boolean;
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
   readonly isolation?: LaunchIsolation;
-  /**
-   * The difficulty of the issue this agent is being sent at. It selects model
-   * and effort for a definition that declared `by-difficulty` and is ignored by
-   * one that named either itself, so the caller passes whatever it knows rather
-   * than deciding whether it will be used.
-   */
   readonly difficulty?: IssueDifficulty;
 }
 
@@ -87,12 +60,6 @@ export interface AutomatedLaunchOutcome {
   readonly result: WorkerResult;
 }
 
-/**
- * One recorded conversation to reopen. It is deliberately not an `AgentSession`:
- * the sessions this exists for are the ones the fleet no longer holds, so the
- * ledger's identity is all there is, and requiring a live record would rule out
- * every case that motivated the surface.
- */
 export interface ReopenTarget {
   readonly agentId: AgentId;
   readonly type: Exclude<AgentType, "manager">;
@@ -100,24 +67,12 @@ export interface ReopenTarget {
   /** The terminal name, already carrying aboard's own prefix. */
   readonly terminalName: string;
   readonly issueNumbers?: readonly number[];
-  /**
-   * The difficulty the session was launched under, when the caller still knows
-   * it. The ledger does not record it — it is a fact about the issue, not about
-   * the session — so a restore that has lost the run it belonged to reopens at
-   * the fallback tier rather than at a stored one.
-   */
   readonly difficulty?: IssueDifficulty;
   readonly chromeEnabled?: true;
   /** Default is the controller's; a bulk restore passes `false` explicitly. */
   readonly focus?: boolean;
   /** Replays the command fence carried by a session that originated in auto-run. */
   readonly autoRunRestricted?: true;
-  /**
-   * Where the session ran, when that was not the workspace root. Claude Code
-   * keys a transcript by the directory its session ran in, so a resume from
-   * anywhere else finds no conversation at all — the session has to be reopened
-   * where it happened (`src/claude/sessions.ts`).
-   */
   readonly cwd?: string;
 }
 
@@ -132,11 +87,6 @@ export interface DelegationConfigurationSource {
 }
 
 export interface DelegationPromptResolver {
-  /**
-   * `interactive` is the launch's mode, not the type's: a type launched
-   * interactively needs no opening message any more than a brainstormer does,
-   * and an automated launch always needs one.
-   */
   resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined>;
 }
 
@@ -149,16 +99,7 @@ export interface DelegationCoordinatorOptions {
   readonly fleet: FleetRegistry;
   readonly lease: WriteLease;
   readonly terminals: TerminalController;
-  /**
-   * Marker-file liveness for the write lease's stale check. Omitted, the
-   * session half of the observation is unknown and no lease is ever reclaimed,
-   * so a caller that leaves it out gets today's refuse-always behavior.
-   */
   readonly sessions?: { observe(agentId: AgentId): SessionObservation };
-  /**
-   * Reclaiming a lease is a coordination fact the user should see: the fleet
-   * showed an agent holding the lock and the next launch took it anyway.
-   */
   readonly onStaleLeaseRecovered?: (holder: WriteLeaseHolder, observation: LeaseHolderObservation) => void;
   readonly configurations: DelegationConfigurationSource;
   readonly prompts: DelegationPromptResolver;
@@ -168,34 +109,15 @@ export interface DelegationCoordinatorOptions {
   readonly shell: ShellKind;
   /** Infrastructure-level denials applied to every delegated launch and resume. */
   readonly disallowedTools?: readonly string[];
-  /**
-   * `aboard.launch.claudeCommand` tokens. Read at launch time so a settings
-   * change applies to the next agent without reloading the window.
-   */
   readonly command?: () => readonly string[] | undefined;
   /** Verifies the Claude command runs at all; throws to refuse the launch. */
   readonly preflight?: (command: readonly string[] | undefined) => Promise<void>;
-  /**
-   * `aboard.launch.effort`, read at launch time for the same reason as
-   * `command`. It is the session level; a worker whose definition declares
-   * `effort:` overrides it from its own frontmatter.
-   */
   readonly effort?: () => EffortLevel | undefined;
   readonly agentIdFactory: () => AgentId;
   readonly sessionIdFactory: () => SessionId;
   readonly now?: () => Date;
   readonly maxInlinePromptChars?: number;
-  /**
-   * Proof-of-life window for every delegated launch. If no SessionStart hook
-   * fires inside this window the terminal is killed as a failed start; the
-   * write lease is released by the launch-failure path on timeout.
-   */
   readonly startupTimeoutMs?: number;
-  /**
-   * Launch-through-wrapper layout: the wrapper owns a lock-marker file per
-   * agent for the child's exact lifetime, which the bridge polls for liveness
-   * instead of scraping process ids. Absent = launch unwrapped.
-   */
   readonly wrapper?: SessionWrapperLayout;
 }
 
@@ -234,26 +156,12 @@ export class DelegationCoordinator {
     return this.#foregroundResult(launched.agentId, result);
   }
 
-  /**
-   * The auto-run engine's launch path. It is `run` plus the terminal id, which
-   * the engine needs to close the terminal at cleanup; `tool-result` delivery is
-   * correct because the engine is in-process async code and genuinely is the
-   * blocked caller that mode describes (`AGENTS.md`).
-   */
   public async runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome> {
     const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run");
     const result = await this.#waitForResult(launched.agentId, signal);
     return { ...launched, result };
   }
 
-  /**
-   * Interactive launch for the engine and for `review_pr`, typed to the handles
-   * they actually use. The origin decides the lease, which an interactive
-   * launch otherwise never takes: an auto-run `pr-doctor-hitl` is leased
-   * because the run commits behind it, while the doctor `review_pr` opens
-   * against a pull request nobody is running is a plain handoff
-   * (`leaseRequired`).
-   */
   public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles> {
     return this.#launch(input, { mode: "none" }, origin);
   }
@@ -286,22 +194,7 @@ export class DelegationCoordinator {
     });
   }
 
-  /**
-   * Reopens one recorded conversation and hands it to the user, whether the
-   * fleet still holds it (paused by a host restart) or the session ledger is the
-   * only thing that remembers it (ended normally, so the fleet dropped it).
-   *
-   * The identity is the whole input because it is the whole problem: a resume
-   * must re-emit the agent's definition and re-pass `--add-dir`/`--agent`, and
-   * `--resume` restores that selection only by name — reopening without them
-   * would silently return a brainstormer as default Claude holding every default
-   * tool. `planSessionResume` handles that, given the agent id, type, and
-   * session id this target carries.
-   */
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
-    // The definition is required, not merely useful: a resume re-passes the
-    // system prompt and tool list, and reopening the session without them
-    // yields Claude Code's default persona holding every default tool.
     const configuration = await this.options.configurations.get(target.type);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
@@ -329,14 +222,8 @@ export class DelegationCoordinator {
       ...(target.difficulty === undefined ? {} : { difficulty: target.difficulty }),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    // `plan.command`, not the setting: an agent whose definition declares
-    // `command:` runs that program, so probing the configured default would
-    // clear a command this launch never uses.
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    // No lease is taken: reopening is the user returning to their own
-    // conversation, and an interactive launch is never leased. A run that still
-    // needs the lease relaunches through the auto-run engine.
     await this.options.spills.prepare(plan, target.cwd);
     if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
     const terminal = this.options.terminals.create({
@@ -347,16 +234,10 @@ export class DelegationCoordinator {
       name: target.terminalName,
       ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
       initialCommand: plan.commandLine,
-      // Whatever this session once was, nothing is waiting on its result now:
-      // the caller ended with the previous conversation. Reporting one would
-      // resolve a wait nobody is holding.
       deliversResult: false,
       ...(target.focus === undefined ? {} : { focus: target.focus }),
       ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
     });
-    // A paused session still has its record; an ended one was removed from the
-    // fleet when its conversation finished, so it is registered afresh under the
-    // same identity — same agent id, same session id, same definition path.
     if (this.options.fleet.get(target.agentId) === undefined) {
       this.options.fleet.register({
         identity: { agentId: target.agentId, type: target.type },
@@ -434,9 +315,6 @@ export class DelegationCoordinator {
   }> {
     const agentId = this.options.agentIdFactory();
     const sessionId = this.options.sessionIdFactory();
-    // Interactive is the launch's delivery mode, derivable from nothing else:
-    // `general-purpose` runs in either mode. It also settles who the launch
-    // lives with: a handed-off terminal is driven by the user.
     const interactive = resultDelivery.mode === "none";
     const [configuration, prompt] = await Promise.all([
       this.options.configurations.get(input.type),
@@ -451,10 +329,6 @@ export class DelegationCoordinator {
       ...(input.type === "implementer" && input.chrome === true ? { chrome: true } : {}),
       configuration,
       prompt,
-      // Auto-run's git/GitHub fence and worktree isolation join the
-      // infrastructure denials rather than replacing them. All three are
-      // launch-level facts about what this session may not touch, and the
-      // definition's own `tools:` allowlist is untouched.
       disallowedTools: [
         ...(this.options.disallowedTools ?? []),
         ...(origin === "auto-run" ? AUTO_RUN_DISALLOWED_TOOLS : []),
@@ -466,16 +340,8 @@ export class DelegationCoordinator {
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    // Before anything is registered or leased: a command that cannot run is a
-    // refused launch, not a terminal full of shell errors and a fleet entry
-    // waiting on a session that will never start. The plan's command is what
-    // actually runs — a definition's `command:` where it declares one.
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    // An unleased launch is not a weaker writer, it is a terminal aboard is not
-    // driving: an interactive launch is a conversation the user drives, and
-    // `--prompt` there only opens it on a topic. Concurrency in one of those is
-    // the user's to allow (`leaseRequired`).
     if (leaseRequired(origin, interactive)) {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
     }
@@ -512,9 +378,6 @@ export class DelegationCoordinator {
         // This policy is not derivable from the role: a fresh pr-doctor launched
         // by `review_pr` is user-driven and deliberately unrestricted.
         ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
-        // Recorded because it cannot be re-derived once the run is over: the
-        // transcript lives under this directory, so reopening the conversation
-        // later means knowing where it happened.
         ...(cwd === undefined ? {} : { cwd }),
       }, occurredAt);
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
@@ -528,12 +391,6 @@ export class DelegationCoordinator {
   #acquire(capability: WriteCapability, agentId: AgentId, sessionId: SessionId, occurredAt: IsoTimestamp, reason: string): void {
     const acquisition = this.options.lease.acquire(capability, { agentId, sessionId }, occurredAt, reason);
     if (acquisition.acquired) return;
-    // The holder may be a ghost. Every ordinary exit releases the lease, but a
-    // release that never ran — a marker watch that missed its deletion, a
-    // terminal handle dropped over a host restart — leaves a lock with nothing
-    // behind it, and the next writer is refused by a dead agent forever. This
-    // is the recovery: reclaim only when both observable sources agree the
-    // holder is gone, then retry the acquisition once.
     if (this.#recoverStaleLease(acquisition.holder, occurredAt)) {
       const retried = this.options.lease.acquire(capability, { agentId, sessionId }, occurredAt, reason);
       if (retried.acquired) return;
@@ -545,13 +402,6 @@ export class DelegationCoordinator {
     );
   }
 
-  /**
-   * `isStaleLease` is the whole decision and it is deliberately conservative:
-   * an open terminal *or* a live session marker keeps the lease. Uncertainty
-   * resolves to "not stale" — a false reclaim hands a second writer the tree
-   * the first one is still editing, which is exactly the corruption the lease
-   * exists to prevent, while a false refusal costs one palette command.
-   */
   #recoverStaleLease(holder: WriteLeaseHolder, occurredAt: IsoTimestamp): boolean {
     const observation: LeaseHolderObservation = {
       terminal: this.options.terminals.liveTerminalForAgent(holder.agentId) === undefined ? "closed" : "open",

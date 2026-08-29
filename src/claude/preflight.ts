@@ -1,19 +1,3 @@
-/**
- * Pre-launch check on the configured Claude command.
- *
- * aboard types its launch into a VS Code terminal it does not own, so it never
- * sees the command's exit status: a missing binary or a mistyped
- * `aboard.launch.claudeCommand` produces a shell error the extension cannot
- * read, and the launch looks alive until the startup proof gives up on it.
- * Running the same command with `--version` in a child process aboard *does*
- * own answers the question directly, before a terminal exists — no model call,
- * no session, no tokens.
- *
- * The probe verifies that the command runs, nothing more. Everything downstream
- * of that — a rejected flag, an auth wall, an unresumable session id — dies
- * with the CLI's own message in the terminal and is caught by the wrapper's
- * exit record instead.
- */
 
 import { exec, execFile } from "node:child_process";
 
@@ -50,11 +34,6 @@ export class ClaudePreflightError extends Error {
   }
 }
 
-/**
- * Caches per command, so only the first launch after a configuration change
- * pays for the probe. The in-flight promise is cached too: several launches
- * fired at once share one child process.
- */
 export class ClaudeCommandProbe {
   readonly #results = new Map<string, Promise<PreflightResult>>();
 
@@ -101,12 +80,6 @@ function firstLine(text: string): string {
   return text.split(/\r?\n/, 1)[0]?.trim() ?? "";
 }
 
-/**
- * The single line of a failure's output worth putting in a dialog. Normally
- * the first; a Python traceback is the exception — its banner is the first
- * line and the error the user needs (`ModuleNotFoundError: ...`) is the last,
- * behind the frame dump.
- */
 function complaintLine(text: string): string {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
   const first = lines[0] ?? "";
@@ -114,13 +87,6 @@ function complaintLine(text: string): string {
   return first;
 }
 
-/**
- * The process boundary. Windows needs a shell, not as a shortcut but because
- * the usual `claude` is a `.cmd` shim that `execFile` cannot resolve on its
- * own; the command line is built through the same quoting rules as a real
- * launch, so a program path with spaces survives and no token can become an
- * operator. POSIX passes arguments directly and needs no shell at all.
- */
 export function spawnCommandRunner(cwd: string): CommandRunner {
   const windows = process.platform === "win32";
   return (program, args, timeoutMs) => new Promise<CommandExecution>((resolve, reject) => {

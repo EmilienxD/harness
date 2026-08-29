@@ -39,18 +39,6 @@ export class FleetTreeModel {
     this.#leaseRegistration = lease.onDidChange(() => host.refresh());
   }
 
-  /**
-   * Agents you can actually go and look at: live lifecycle, open terminal.
-   *
-   * Everything else belongs in Recent Activity. A row for a session whose
-   * terminal is gone can offer nothing but a misleading Focus, and a row for a
-   * finished agent describes history rather than a fleet. Completed and failed
-   * states may still exist in the domain for a moment while a result reaches its
-   * caller; they never render here.
-   *
-   * The Manager is pinned to the top so the row the user talks to never drifts
-   * down the worker list.
-   */
   public roots(): readonly FleetTreeNode[] {
     const agents = this.fleet.list()
       .filter((session) => isLiveSession(session) && this.isTerminalOpen(session.terminal.terminalId))
@@ -88,9 +76,6 @@ export class FleetTreeModel {
     const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
     const markers = [session.lifecycle.status, node.leaseHolder ? "lease holder" : ""].filter(Boolean);
     return {
-      // The label matches the per-launch Claude session name — aboard-<type>-<id>,
-      // the `@<name>` banner in the terminal head — so a row in the tree is
-      // greppable straight back to the running session and its definition file.
       label: `${agentLabel(session)}${goal}`,
       description: markers.join(" · "),
       tooltip: agentTooltip(session, node.leaseHolder),
@@ -136,22 +121,11 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
       if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("That session's terminal has already closed.");
       if (await host.confirm(`Kill ${session.identity.type}?`, "Kill")) terminals.kill(session.terminal.terminalId);
     }),
-    // Recovery hatch only, reachable from the Command Palette: a worker that dies
-    // without releasing the write lease would otherwise block every later
-    // write-capable launch.
     host.register("aboard.forceReleaseLease", async () => { const holder = lease.current(); if (holder === undefined) return host.info("No write lease is held."); if (await host.confirm(`Force release the write lease held by ${holder.agentId}?`, "Release")) lease.forceRelease(now().toISOString() as IsoTimestamp, "user force release from VS Code"); }),
   ];
   return { dispose: () => registrations.forEach((entry) => entry.dispose()) };
 }
 
-/**
- * The icon separates agents you may talk to from agents that run to completion
- * on their own: the Manager coordinates, interactive agents are handed to the
- * user, and automated workers are closed to input. Handed-to-the-user is per
- * launch (`resultDelivery.mode === "none"`), not only per type, since the
- * builtin types run either way. It deliberately does not encode the write
- * lease — that is orthogonal and already shown in the row description.
- */
 function agentIcon(session: AgentSession): string {
   if (session.identity.type === "manager") return "organization";
   return isInteractiveAgentType(session.identity.type) || session.resultDelivery.mode === "none"
@@ -166,14 +140,6 @@ export function isLiveSession(session: AgentSession): boolean {
 
 function managerRank(node: FleetTreeNode): number { return node.kind === "agent" && node.session.identity.type === "manager" ? 0 : 1; }
 function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "agent" }> { return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "agent"; }
-/**
- * The fleet row names a session the way the running terminal names it: the
- * rewritten definition aboard launches under — `aboard-<type>-<id>` — is the
- * `@<name>` banner and the `--agent` argument the launch passed, so the row is
- * greppable straight back to the session and its definition file. A pre-numeric
- * UUID id renders in full; truncating it would invent a name no terminal shows.
- * The Manager keeps one fixed name per workspace, so its row is just "Manager".
- */
 function agentLabel(session: AgentSession): string {
   if (session.identity.type === "manager") return "Manager";
   return `aboard-${session.identity.type}-${session.identity.agentId}`;

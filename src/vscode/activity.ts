@@ -1,11 +1,3 @@
-/**
- * The Recent Activity view's model.
- *
- * Pure and VS Code free. It renders what aboard's agents and runs did, newest
- * first, with the actions each row can actually offer — a terminal that is still
- * open, an issue, a pull request, a conversation that can be reopened. Detailed
- * errors stay in the output channel; a history row says what happened, not how.
- */
 
 import { describeActivity, type ActivityDto, type ActivityEntry } from "../domain/activity.js";
 import { formatIssueNumbers } from "../shared/issues.js";
@@ -21,10 +13,6 @@ export interface ActivityTreeItem {
   readonly description: string;
   readonly tooltip: string;
   readonly icon: string;
-  /**
-   * Dot-separated capability flags, so `view/item/context` can match on what a
-   * row can do rather than on what kind of row it is.
-   */
   readonly contextValue: string;
   readonly command?: { readonly command: string; readonly title: string; readonly arguments: readonly unknown[] };
 }
@@ -53,9 +41,6 @@ export class ActivityTreeModel {
     if (entry.kind === "agent" && entry.type === "manager" && !live) capabilities.push("manager");
     return {
       label: describeActivity(entry),
-      // Activity rows already have an outcome label and an icon. Keeping the
-      // launch metadata in VS Code's muted description makes this dense view
-      // wrap quickly, so details live in the tooltip and row actions instead.
       description: "",
       tooltip: tooltip(entry),
       icon: icon(entry),

@@ -28,11 +28,6 @@ interface HookOutcome {
   readonly requests: readonly unknown[];
 }
 
-/**
- * The shipped hook against a real transcript file, in a real child process. It
- * must be spawned asynchronously: the server it may call runs in *this*
- * process, so a synchronous spawn would block the event loop that answers it.
- */
 async function runHook(options: HookRun): Promise<HookOutcome> {
   const requests: unknown[] = [];
   const server = createServer((request, response) => {

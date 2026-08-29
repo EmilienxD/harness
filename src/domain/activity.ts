@@ -1,17 +1,3 @@
-/**
- * Recent activity: the bounded history of what aboard's agents and runs did.
- *
- * It replaces the narrow ended-session ledger. That file existed for exactly one
- * question — "how do I get back into that conversation?" — and answered nothing
- * about the automated work the user actually wants to see after stepping away.
- * A history the user can read is also what lets recovery stop depending on a
- * notification: a notification is a moment, and a moment is not a place to look.
- *
- * Only safe summary metadata is ever stored: identity, timing, issue and pull
- * request numbers, a short failure reason, and the launch facts a reopen has to
- * replay. Never prompts, transcripts, assistant messages, tokens, or
- * environments.
- */
 
 import {
   isNonRestorablePersistedAgentType,
@@ -23,26 +9,11 @@ import {
   type TerminalId,
 } from "./contracts.js";
 
-/**
- * How many entries are kept. Claude Code sweeps its own transcripts older than
- * `cleanupPeriodDays`, so an unbounded history would mostly list conversations
- * that no longer exist to reopen; the cap keeps the view short and the file
- * small rather than trying to outlive the transcripts.
- */
 export const ACTIVITY_LIMIT = 20;
 
 /** The `aboard: ` prefix every terminal aboard creates carries. */
 const TERMINAL_NAME_PREFIX = "aboard: ";
 
-/**
- * How an agent's time in the fleet ended.
- *
- * `succeeded`/`failed`/`cancelled` describe an automated worker, whose result
- * went to a caller. `ended`/`killed`/`interrupted`/`launch-failed` describe a
- * session a human was in or would have been: the conversation finished, the
- * user killed it, the extension host went away under it, or Claude Code never
- * started at all.
- */
 export type AgentOutcome =
   | "succeeded"
   | "failed"
@@ -114,24 +85,10 @@ export interface ActivityDto {
 
 export const EMPTY_ACTIVITY: ActivityDto = { version: 1, entries: [] };
 
-/**
- * Types a user can be handed back. The Manager is excluded because it has its
- * own lifecycle — `Resume Manager` resumes the recorded session and restores its
- * transcript backup — and reopening it from here would create a second Manager
- * record competing with that one. `webresearcher` and `Explore` are automated
- * only, with no conversation to hand over and no caller left to receive a
- * result.
- */
 export function isReopenableType(type: AgentType): type is Exclude<AgentType, "manager"> {
   return type !== "manager" && !isNonRestorablePersistedAgentType(type);
 }
 
-/**
- * Whether a session leaving the fleet leaves a conversation behind.
- * `resultDelivery` decides it rather than the type: `general-purpose` runs
- * automated or handed off, and only the handed-off launch is a conversation the
- * user was part of and may want back.
- */
 export function isReopenableSession(session: AgentSession): boolean {
   return session.resultDelivery.mode === "none" && isReopenableType(session.identity.type);
 }
@@ -146,21 +103,10 @@ export function describeTerminalName(name: string): string {
   return name.startsWith(TERMINAL_NAME_PREFIX) ? name.slice(TERMINAL_NAME_PREFIX.length) : name;
 }
 
-/**
- * An agent's entry id. Keyed by agent and outcome rather than by timestamp, so
- * the same settlement observed twice — the terminal closing and the wrapper's
- * marker vanishing land within milliseconds of each other — refreshes one entry
- * instead of producing two.
- */
 export function agentEntryId(agentId: AgentId, outcome: AgentOutcome): string {
   return `agent:${agentId}:${outcome}`;
 }
 
-/**
- * A run's entry id. `started`/`resumed` and the terminal outcome are separate
- * entries, and both are keyed by attempt: a resumed run keeps its run id, so
- * without the attempt a second attempt's start would overwrite the first's.
- */
 export function runEntryId(runId: string, attempt: number, outcome: RunOutcome): string {
   return `run:${runId}:${attempt}:${outcome}`;
 }
@@ -221,11 +167,6 @@ export function runActivity(
   };
 }
 
-/**
- * Appends an entry, newest first, capped. Idempotent by id: activation
- * reconciliation runs on every window reload and must not turn one interrupted
- * session into a growing pile of identical rows.
- */
 export function appendActivity(
   store: ActivityDto | undefined,
   entry: ActivityEntry,
@@ -240,11 +181,6 @@ export function hasReopenableEntries(store: ActivityDto | undefined): boolean {
   return (store ?? EMPTY_ACTIVITY).entries.some((entry) => entry.kind === "agent" && entry.reopen !== undefined);
 }
 
-/**
- * One legacy `sessions.json` record, as the migration reads it. Deliberately
- * structural rather than an import of the removed ledger types: this exists to
- * drain a file that will not be written again.
- */
 export interface LegacySessionRecord {
   readonly agentId: AgentId;
   readonly type: AgentType;
@@ -257,11 +193,6 @@ export interface LegacySessionRecord {
   readonly autoRunRestricted?: true;
 }
 
-/**
- * Folds the old ledger into the activity store, once. An entry already present
- * for the same agent wins: it was written by this version and knows the real
- * outcome, while the ledger only ever recorded "ended".
- */
 export function migrateLegacySessions(
   store: ActivityDto | undefined,
   sessions: readonly LegacySessionRecord[],
@@ -319,15 +250,6 @@ export interface ReopenCandidate {
   readonly autoRunRestricted?: true;
 }
 
-/**
- * Everything the user could ask to be taken back to, newest first.
- *
- * Two sources, because "I closed it yesterday" and "it is running right now"
- * are the same wish and should not be two commands: the activity store supplies
- * sessions the fleet has already forgotten, and the fleet supplies the ones it
- * still holds. The fleet wins a collision — it is the live record, and an
- * activity entry for an agent that is running again is stale by definition.
- */
 export function reopenCandidates(
   store: ActivityDto | undefined,
   fleetSessions: readonly AgentSession[],
@@ -337,9 +259,6 @@ export function reopenCandidates(
   for (const session of fleetSessions) {
     const type = session.identity.type;
     if (!isReopenableSession(session) || !isReopenableType(type)) continue;
-    // Only a session with a terminal the user can be sent to counts as live.
-    // Agents whose terminal is gone are reconciled into activity at activation,
-    // so they reach this list through the store instead.
     if (!isTerminalOpen(session.terminal.terminalId)) continue;
     candidates.set(session.identity.agentId, {
       agentId: session.identity.agentId,
@@ -376,11 +295,6 @@ export function reopenCandidates(
   return [...candidates.values()].sort((left, right) => right.at.localeCompare(left.at));
 }
 
-/**
- * How a row reads. Role-aware rather than a lifecycle name: "review finished"
- * and "conversation ended" are the same internal state and different events to
- * a person.
- */
 export function describeActivity(entry: ActivityEntry): string {
   if (entry.kind === "run") {
     switch (entry.outcome) {

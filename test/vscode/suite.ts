@@ -25,7 +25,7 @@ export async function run(): Promise<void> {
   const available = await commands.getCommands(true);
   for (const command of [
     "aboard.focusFleet", "aboard.focusAgent", "aboard.killAgent", "aboard.initializeProject", "aboard.updateProject", "aboard.reopenSession",
-    "aboard.startAutoRun", "aboard.previewAutoRun", "aboard.resumeAutoRun", "aboard.discardAutoRun", "aboard.autoRun.refresh",
+    "aboard.startAutoRun", "aboard.resumeAutoRun", "aboard.discardAutoRun", "aboard.autoRun.refresh",
     "aboard.autoRun.openCurrentIssue", "aboard.autoRun.openPullRequest", "aboard.openIssue", "aboard.openPullRequest",
     "aboard.activity.reopen", "aboard.activity.clear",
   ]) {
@@ -37,9 +37,6 @@ export async function run(): Promise<void> {
 
   const root = workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.ok(root, "integration workspace is open");
-  // Activation is inert before initialization: no bridge or command
-  // endpoint is published. Initialize through the same command the UI uses,
-  // then wait for the lazily started runtime.
   await commands.executeCommand("aboard.initializeProject");
   await eventually(() => workspace.workspaceFolders !== undefined, "workspace stayed available");
 

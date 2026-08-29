@@ -34,10 +34,6 @@ function facts(overrides: Partial<RepositoryFacts> = {}): RepositoryFacts {
   };
 }
 
-/**
- * `expected` names the phase the facts should select; the reducer takes no phase
- * of its own, because the observed repository is what decides where the run is.
- */
 function step(_expected: AutoRunPhase, overrides: Partial<RepositoryFacts> = {}, options: { readonly reviewMode?: boolean; readonly issue?: PlannedIssue } = {}) {
   return nextStep({
     issue: options.issue ?? issue,

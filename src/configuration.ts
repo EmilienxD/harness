@@ -12,27 +12,8 @@ export interface AboardConfiguration {
   /** `aboard.launch.effort`; absent means aboard passes no `--effort` and Claude Code's own setting stands. */
   readonly launchEffort?: EffortLevel;
   readonly managerDisallowedTools: readonly string[];
-  /**
-   * Transcript bytes that may pass with no roadmap injection before the Manager
-   * is reminded. Zero disables the reminder. Bytes rather than turns because
-   * turn counts vary too much to be meaningful, and bytes rather than
-   * accumulated hook payloads because thinking blocks and intermediate
-   * assistant text appear in no payload and would be systematically undercounted.
-   */
   readonly managerRoadmapReminderBytes: number;
-  /**
-   * Manager session transcripts aboard keeps under `.aboard/runtime/transcripts/`.
-   * Claude Code deletes its own session files older than `cleanupPeriodDays` at
-   * startup and offers no way to disable that sweep, so without a copy a
-   * long-lived Manager eventually loses the conversation `--resume` restores.
-   * `0` turns both the backup and the restore off.
-   */
   readonly managerTranscriptBackups: number;
-  /**
-   * Whether a session's death also closes the terminal it ran in. Off by
-   * default: ending the Claude session and closing the shell are two different
-   * user gestures, and aboard settles the agent either way.
-   */
   readonly closeTerminalOnSessionEnd: boolean;
   readonly autoRun: AutoRunSettings;
   readonly managerStopTimeoutSeconds: number;
@@ -83,11 +64,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Flattens nested objects into dotted keys so `{"aboard":{"bridge":{"port":1}}}`
- * and `{"aboard.bridge.port":1}` describe the same setting. Recursion stops at a
- * recognised key, because a setting's own value may legitimately be an object.
- */
 function flatten(source: Record<string, unknown>, prefix: string, into: Map<string, unknown>): void {
   for (const [key, value] of Object.entries(source)) {
     const path = prefix === "" ? key : `${prefix}.${key}`;
@@ -96,11 +72,6 @@ function flatten(source: Record<string, unknown>, prefix: string, into: Map<stri
   }
 }
 
-/**
- * Parses `.aboard/settings.json`. Values are not validated here: they flow
- * through the same per-setting validation as VS Code settings, so a bad project
- * value produces the same diagnostic and the same fallback.
- */
 export function parseProjectSettings(text: string): ProjectSettings {
   const diagnostics: ConfigurationDiagnostic[] = [];
   const fail = (message: string): ProjectSettings => ({ values: new Map(), diagnostics: [{ setting: PROJECT_SETTINGS_PATH, severity: "error", message: `${PROJECT_SETTINGS_PATH}: ${message} Project overrides are ignored.` }] });
@@ -131,11 +102,6 @@ export interface LayeredConfigurationSources {
   readonly project?: ReadonlyMap<string, unknown>;
 }
 
-/**
- * Precedence, highest first: `.vscode/settings.json`, `.aboard/settings.json`,
- * then user or default scope. A developer's explicit VS Code workspace setting
- * therefore still wins over the checked-in, team-shared project file.
- */
 export function createLayeredReader(sources: LayeredConfigurationSources): ConfigurationReader {
   return { get: (section) => sources.workspace?.get(section) ?? sources.project?.get(section) ?? sources.user.get(section) };
 }
@@ -168,12 +134,6 @@ function choice<T extends string>(reader: ConfigurationReader, setting: string, 
   return fallback;
 }
 
-/**
- * `aboard.launch.effort`. `"inherit"` is spelled out rather than left as an
- * empty value, matching the `model: inherit` an agent definition already
- * accepts, and resolves to no `--effort` flag at all so Claude Code's own
- * `effortLevel` setting keeps deciding.
- */
 function launchEffort(reader: ConfigurationReader, diagnostics: ConfigurationDiagnostic[]): EffortLevel | undefined {
   const setting = "aboard.launch.effort";
   const value = reader.get(setting);
@@ -221,14 +181,8 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       // lands a batch of automated work on a branch a human is using.
       mergeRunPullRequest: flag(reader, "aboard.autoRun.mergeRunPullRequest", false, diagnostics),
       pollSeconds: integer(reader, "aboard.autoRun.pollSeconds", 30, 1, 3_600, diagnostics),
-      // Conservative by default: discarding a run is how a user gets out of the
-      // way of a broken one, and the branches and pull requests it left are
-      // usually the next thing they want to read.
       discardBehavior: choice<DiscardBehavior>(reader, "aboard.autoRun.discardBehavior", DISCARD_BEHAVIORS, "record-only", diagnostics),
       worktree: {
-        // Off by default: a checkout of its own costs a copy of the tree and
-        // whatever the project's setup command installs into it, which only a
-        // user who wants their own working tree left alone should pay.
         enabled: flag(reader, "aboard.autoRun.worktree.enabled", false, diagnostics),
         root: text(reader, "aboard.autoRun.worktree.root", "", diagnostics),
         keep: flag(reader, "aboard.autoRun.worktree.keep", false, diagnostics),
@@ -251,10 +205,6 @@ export const MANAGER_RESTART_SETTINGS = new Set([
   "aboard.launch.effort",
 ]);
 
-/**
- * Value-level equivalent of `MANAGER_RESTART_SETTINGS`, for reload paths such as
- * the project settings file where VS Code raises no configuration event.
- */
 export function managerLaunchChanged(before: AboardConfiguration, after: AboardConfiguration): boolean {
   const list = (values: readonly string[]) => values.join(" ");
   return list(before.claudeCommand) !== list(after.claudeCommand)

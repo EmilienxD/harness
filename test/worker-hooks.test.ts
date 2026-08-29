@@ -90,9 +90,6 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
     {},
     { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" },
     { ABOARD_AGENT_ID: "research-1", ABOARD_AGENT_TYPE: "webresearcher" },
-    // Explore is automated-only and read-only: like webresearcher it has no
-    // implementation contract to re-ground and spawns no subagents, so every
-    // route but its stop and the lifecycle pair is guarded off.
     { ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" },
   ]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
@@ -128,9 +125,6 @@ test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and tr
     const address = server.address();
     assert.ok(address !== null && typeof address !== "string");
 
-    // Spawned asynchronously — a synchronous spawn would block the event loop
-    // that has to answer the hook's POST. A reporting hook stays silent on both
-    // streams: its output is the bridge call, never terminal text.
     const report = async (env: NodeJS.ProcessEnv): Promise<void> => {
       const child = spawn("uv", ["run", "--no-project", "python", script, "worker-stop"], {
         // Force the Windows failure mode on every platform. The hook must use
@@ -240,12 +234,6 @@ test("scaffold registers lifecycle, Agent telemetry, and compact re-grounding", 
   assert.ok(regrounding?.hooks.some((hook) => hook.args.includes("worker-reground")));
 });
 
-/**
- * Registered hooks address the script by opaque route name, never by URL path,
- * so Git Bash on Windows cannot rewrite the argument into a filesystem path.
- * The script owns the name-to-endpoint table and exposes it with `--routes`;
- * reading it back keeps this test on the same source of truth.
- */
 function scaffoldedRoutes(): { readonly names: readonly string[]; readonly table: Readonly<Record<string, string>> } {
   const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   const printed = spawnSync("uv", ["run", "--no-project", "python", script, "--routes"], { encoding: "utf8" });
@@ -275,9 +263,6 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
   for (const name of names) assert.doesNotMatch(name, /[/\\]/u, "hook route names must not look like paths");
   const registered = new Set(names.map((name) => table[name]!));
 
-  // The composed handler chain from the extension composition root. A route the
-  // scaffold POSTs to but nothing serves is a 404 at runtime, which is exactly
-  // how the Manager briefings and worker results were silently lost before.
   const fleet = new FleetRegistry();
   const lease = new WriteLease();
   const briefings = new ManagerBriefings(

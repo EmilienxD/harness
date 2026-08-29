@@ -1,18 +1,3 @@
-/**
- * The auto-run driver (`AGENTS.md`).
- *
- * The extension owns the loop; agents only produce content. Every git and GitHub
- * side effect below is performed here, never by an agent, so a branch name, a
- * commit message, a PR title and its `Closes #N` trailer are correct by
- * construction and recoverable after a crash.
- *
- * Two invariants shape everything here. The plan is fixed: it is discovered once
- * at start and never rediscovered, so a run works exactly the issues the user
- * agreed to. And every mutation is write-ahead journalled and postcondition
- * checked, so resume re-enters at the first unsatisfied checkpoint rather than
- * repeating work — while a repository that changed in a way the record cannot
- * explain stops the whole run instead of quietly continuing.
- */
 
 import { existsSync } from "node:fs";
 
@@ -62,11 +47,6 @@ import { runWorkspacePath, type RunWorkspace, type RunWorkspaceOutcome, type Run
 import { checkRun, type RunObservationSources } from "./observation.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
-/**
- * A pull request as the run observes it. `mergeable` is carried because a merge
- * that fails has many causes and only one of them — a conflict — is something
- * the run can act on rather than surrender to.
- */
 export interface PullRequestObservation {
   readonly number: number;
   readonly state: "open" | "closed" | "merged";
@@ -82,10 +62,6 @@ export interface PullRequestObservation {
 export interface AutoRunGitHub {
   /** Proves that gh can authenticate to and resolve the workspace repository. */
   checkAuthentication(): Promise<void>;
-  /**
-   * Every open issue and its inferred dependencies. Read once to plan a run, and
-   * afterwards only to observe the plan's own issues.
-   */
   listImplementableIssues(): Promise<{ readonly candidates: readonly CandidateIssue[] }>;
   getIssue(number: number): Promise<{ readonly state: "open" | "closed"; readonly labels: readonly string[] } | undefined>;
   addIssueComment(number: number, body: string): Promise<void>;
@@ -118,11 +94,6 @@ export interface AutoRunStore {
 /** One bounded line per phase transition, drained on the user's next message. */
 export interface AutoRunNotifier {
   notify(message: string): void;
-  /**
-   * Something is waiting on the user's hands. Queued progress reaches whoever
-   * next talks to the Manager, which is the wrong channel for a run that has
-   * stopped: the user may not be talking to the Manager at all.
-   */
   alert(message: string, pullRequestUrl?: string): void;
 }
 
@@ -279,14 +250,6 @@ export class AutoRunEngine {
     return this.#owners.get(prNumber);
   }
 
-  /**
-   * Reads the record from disk and revalidates it. Called on activation, when
-   * the Auto Run view becomes visible, on window focus, on a timer while that
-   * view is showing, and immediately before Resume.
-   *
-   * Checks are serialized and generation-stamped: a slow check started under an
-   * older record must never overwrite the verdict of a newer one.
-   */
   public async refresh(): Promise<RecoveryEligibility | undefined> {
     if (this.#checking !== undefined) return this.#checking;
     const generation = ++this.#generation;
@@ -342,10 +305,6 @@ export class AutoRunEngine {
     };
   }
 
-  /**
-   * Inspects exactly the inputs a new run uses without reserving an id or
-   * performing any write.
-   */
   public async dryRun(options: { readonly additionalGuideline?: string } = {}): Promise<AutoRunDryRunResult> {
     if (this.#state !== undefined) return { dryRun: true, inspected: false, reason: "a run is already active" };
 
@@ -368,6 +327,10 @@ export class AutoRunEngine {
       blockers.push(`the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`);
     }
     if (plan.issues.length === 0) blockers.push(emptyQueueReason(plan.skipped));
+    else {
+      const conflict = await this.#findPlanConflict(plan.issues);
+      if (conflict !== undefined) blockers.push(conflict);
+    }
 
     return {
       dryRun: true,
@@ -388,11 +351,6 @@ export class AutoRunEngine {
     };
   }
 
-  /**
-   * Starts a run. The complete plan is persisted before any workspace or branch
-   * exists, so a crash between the two leaves a record describing exactly the
-   * work that was agreed and nothing that was half-created.
-   */
   public async start(options: { readonly additionalGuideline?: string } = {}): Promise<AutoRunStartResult> {
     if (this.#state !== undefined) return { started: false, reason: "a run is already active", active: this.#state };
     const existing = await this.options.store.load().catch(() => undefined);
@@ -409,9 +367,6 @@ export class AutoRunEngine {
     const runId = this.#runId();
     const isolated = this.options.workspaces?.isolates() ?? settings.worktree.enabled;
 
-    // A branch or pull request that already exists under a planned name is not
-    // this run's: adopting it would mean committing onto work aboard cannot
-    // prove it created.
     const conflict = await this.#findPlanConflict(plan.issues);
     if (conflict !== undefined) return { started: false, reason: conflict };
 
@@ -482,11 +437,6 @@ export class AutoRunEngine {
     return undefined;
   }
 
-  /**
-   * Resumes the persisted run. Revalidates first and refuses if broken, then
-   * continues at the first unsatisfied checkpoint under the run's own frozen
-   * settings — never today's configuration.
-   */
   public async resume(): Promise<AutoRunStartResult> {
     if (this.#state !== undefined) return { started: false, reason: "a run is already active", active: this.#state };
     const eligibility = await this.refresh();
@@ -496,9 +446,6 @@ export class AutoRunEngine {
     if (eligibility?.state !== "resumable") {
       return { started: false, reason: eligibility?.state === "broken" ? eligibility.reason : "the run's state is still being checked" };
     }
-    // The previous attempt's outcome is dropped rather than overwritten: the run
-    // is in flight again, and a record still claiming it failed would show a
-    // stale Resume/Discard card for as long as this attempt lasts.
     const { outcome: _previous, ...rest } = persisted;
     const record: AutoRunRecord = { ...rest, attempt: persisted.attempt + 1 };
     await this.options.store.save(record);
@@ -518,10 +465,6 @@ export class AutoRunEngine {
     };
   }
 
-  /**
-   * Stops the run at the user's request. A pause with no resume promise, not an
-   * undo: the current agent's terminal is left open and nothing is rolled back.
-   */
   public stop(reason = "stopped by the user"): void {
     if (this.#state === undefined) return;
     this.options.notifier.notify(autoRunMessage.stopped(this.#state.currentIssue, reason));
@@ -530,11 +473,6 @@ export class AutoRunEngine {
     this.#wake?.();
   }
 
-  /**
-   * The extension is shutting down. Recorded as interrupted rather than
-   * cancelled: nobody chose to stop this run, and the two mean different things
-   * to the user reading their history tomorrow.
-   */
   public interrupt(reason = "the extension is shutting down"): void {
     if (this.#state === undefined) return;
     this.options.notifier.notify(autoRunMessage.stopped(this.#state.currentIssue, reason));
@@ -553,12 +491,6 @@ export class AutoRunEngine {
     await this.#loop;
   }
 
-  /**
-   * Forgets the recorded run, and — depending on `aboard.autoRun.discardBehavior`
-   * — removes what it built. The record is always cleared, even when cleanup was
-   * partial: a discard that leaves the user unable to start a new run because a
-   * branch would not delete has failed at the one thing it must do.
-   */
   public async discard(behavior?: DiscardBehavior): Promise<DiscardResult> {
     const persisted = this.#persisted ?? await this.options.store.load().catch(() => undefined);
     const chosen = behavior ?? this.options.discardBehavior?.() ?? "record-only";
@@ -679,11 +611,6 @@ export class AutoRunEngine {
       });
   }
 
-  /**
-   * Returns the checkout to the branch the user was on when the run started.
-   * Best-effort and quiet on failure. A run with its own checkout has nothing to
-   * restore: it never touched the user's HEAD.
-   */
   async #restoreOriginalBranch(branch: string | undefined): Promise<void> {
     if (branch === undefined || this.#workspace?.isolated === true) return;
     try {
@@ -700,9 +627,6 @@ export class AutoRunEngine {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Record bookkeeping
-  // ---------------------------------------------------------------------------
 
   get #current(): AutoRunRecord {
     if (this.#record === undefined) throw new Error("auto-run has no active record");
@@ -716,12 +640,6 @@ export class AutoRunEngine {
     await this.options.store.save(stamped);
   }
 
-  /**
-   * Persists the intended before/after facts of a mutation *before* performing
-   * it. Everything between this line and `#settled` is a crash window, and the
-   * journal is what makes that window recoverable without ever adopting work the
-   * run did not do.
-   */
   async #journal(action: PendingAction): Promise<void> {
     await this.#save({ ...this.#current, pendingAction: action });
   }
@@ -736,9 +654,6 @@ export class AutoRunEngine {
     return { branchShas: { ...this.#current.branchShas, [branch]: sha } };
   }
 
-  // ---------------------------------------------------------------------------
-  // The loop
-  // ---------------------------------------------------------------------------
 
   async #run(signal: AbortSignal): Promise<void> {
     let end: AttemptEnd = { outcome: { kind: "interrupted" } };
@@ -750,9 +665,6 @@ export class AutoRunEngine {
     } catch (error) {
       if (error instanceof StructuralError) {
         end = { outcome: { kind: "failed", reason: error.eligibilityReason } };
-        // Nothing new is created after a structural failure: the repository is
-        // not the one the record describes, so a concluding pull request would
-        // be aboard's own guess about work it no longer understands.
         await this.#conclude(end, signal, { sideEffects: false });
         return;
       }
@@ -797,11 +709,6 @@ export class AutoRunEngine {
     }
   }
 
-  /**
-   * Re-enters the plan at the first unfinished entry, in the plan's own order.
-   * Nothing is ever rediscovered: an issue somebody labelled `[AI]-afk` while
-   * the run was in flight belongs to the next run, not this one.
-   */
   async #drive(signal: AbortSignal): Promise<AttemptEnd> {
     while (!signal.aborted) {
       const record = this.#current;
@@ -841,9 +748,6 @@ export class AutoRunEngine {
     return observations;
   }
 
-  // ---------------------------------------------------------------------------
-  // Checkpoints
-  // ---------------------------------------------------------------------------
 
   async #advance(checkpoint: RunCheckpoint, patch: Partial<AutoRunRecord> = {}): Promise<void> {
     await this.#save({ ...this.#current, checkpoint, ...patch });
@@ -867,11 +771,6 @@ export class AutoRunEngine {
     await this.#advance("workspace-ready", workspace.isolated ? { workspaceCreated: true } : {});
   }
 
-  /**
-   * Creates and publishes the session branch. Idempotent: a resumed run finds it
-   * already there, and a run with its own checkout arrives with it created and
-   * checked out already, so only the push is left.
-   */
   async #ensureSessionBranch(): Promise<void> {
     const record = this.#current;
     const base = record.targetBranch ?? await this.#git.defaultBranch();
@@ -896,15 +795,6 @@ export class AutoRunEngine {
     await this.#settled({ checkpoint: "session-branch-ready", ...(sha === undefined ? {} : this.#patchBranchSha(record.sessionBranch, sha)) });
   }
 
-  /**
-   * Adopts a mutation that succeeded across a crash, or clears a journal entry
-   * whose effect never happened.
-   *
-   * The match has to be exact. A branch at some other SHA, a commit with a
-   * different parent, a pull request opened against a different base: none of
-   * these are the effect the run was about to perform, and treating them as
-   * such is how an automated loop builds on a stranger's work.
-   */
   async #recoverPendingAction(): Promise<void> {
     const record = this.#current;
     const action = record.pendingAction;
@@ -991,9 +881,6 @@ export class AutoRunEngine {
     return withProgress(this.#current, issueNumber, { ...progress, prNumber }) as Partial<AutoRunRecord>;
   }
 
-  // ---------------------------------------------------------------------------
-  // One issue
-  // ---------------------------------------------------------------------------
 
   async #processIssue(
     issue: FrozenIssue,
@@ -1052,9 +939,6 @@ export class AutoRunEngine {
             implementationSummary = await this.#implement(issue, signal);
             const produced = await this.#git.status();
             if (produced.entries.length === 0) {
-              // A successful agent may correctly conclude the issue needs no
-              // edit. Nothing to commit or review: discard the empty branch and
-              // record the outcome as a legitimate one.
               await this.#discardEmptyBranch(issue.branch, this.#current.sessionBranch);
               this.#pending.delete(issue.number);
               this.options.notifier.notify(autoRunMessage.unchanged(issue.number));
@@ -1092,9 +976,6 @@ export class AutoRunEngine {
           }
           case "merge": {
             const merged = await this.#merge(issue, step.prNumber);
-            // A conflict is a fact about one branch, but a run whose plan is
-            // ordered by dependency cannot skip past it: the issues behind it
-            // are the ones that would build on the work that will not land.
             if (merged !== "merged") return { kind: "stopped", reason: merged.reason };
             break;
           }
@@ -1177,13 +1058,6 @@ export class AutoRunEngine {
     return issue.difficulty === undefined ? {} : { difficulty: issue.difficulty };
   }
 
-  /**
-   * The run-wide guidance a worker receives, plus — only when this issue already
-   * carries uncommitted edits from a worker that failed or was interrupted — one
-   * sentence telling it not to trust them. Exactly one: a recovery prompt that
-   * explains the whole crash invites the agent to investigate the crash rather
-   * than finish the issue.
-   */
   async #guidance(issue: FrozenIssue): Promise<{ readonly additionalGuideline?: string }> {
     const base = this.#current.settings.additionalGuideline;
     const status = await this.#git.status().catch(() => undefined);
@@ -1212,10 +1086,6 @@ export class AutoRunEngine {
     return outcome.result.lastAssistantMessage;
   }
 
-  /**
-   * Posts the implementer's own account of the change on the issue it resolved.
-   * Best-effort: no phase's postcondition depends on a comment.
-   */
   async #comment(issueNumber: number, summary: string): Promise<void> {
     const body = issueCommentBody(summary);
     if (body === undefined) return;
@@ -1226,12 +1096,6 @@ export class AutoRunEngine {
     }
   }
 
-  /**
-   * Closes the issue its pull request just merged, and reports whether that
-   * worked. GitHub only honours a closing keyword on a merge into the default
-   * branch, and nothing here merges there, so without this every issue would
-   * stay open — leaving its dependents blocked and the roadmap wrong.
-   */
   async #closeIssue(issue: FrozenIssue, prNumber: number): Promise<boolean> {
     const record = this.#current;
     const base = record.targetBranch ?? "the branch you started on";
@@ -1379,11 +1243,6 @@ export class AutoRunEngine {
     return "aborted";
   }
 
-  /**
-   * Commits and pushes whatever is in the working tree while a hitl pull request
-   * waits, so the user does not merge a pull request missing the fixes they just
-   * approved. Always announced: a commit nobody asked for must not be silent.
-   */
   async #captureOpenWork(issue: FrozenIssue, prNumber: number): Promise<void> {
     const status = await this.#git.status();
     if (status.entries.length === 0) return;
@@ -1396,10 +1255,6 @@ export class AutoRunEngine {
     this.options.notifier.notify(autoRunMessage.captured(issue.number, prNumber, paths));
   }
 
-  /**
-   * Merges the pull request, or reports why the run cannot. A conflict is the
-   * one failure worth attempting to repair here, because the run creates it.
-   */
   async #merge(issue: FrozenIssue, prNumber: number): Promise<"merged" | { readonly reason: string; readonly pullRequestUrl: string | undefined }> {
     const base = this.#current.sessionBranch;
     const strategy = this.#current.settings.mergeStrategy;
@@ -1416,10 +1271,6 @@ export class AutoRunEngine {
       if (headSha === undefined || baseShaBefore === undefined) throw new Error(`the branches for PR #${prNumber} no longer exist`);
       await this.#journal({ kind: "merge-issue-pr", prNumber, head: issue.branch, base, headSha, baseSha: baseShaBefore });
       try {
-        // `gh pr merge --delete-branch` deletes the local branch too and may
-        // move HEAD behind the engine's back. Keep the CLI merge remote-only;
-        // cleanup removes the exact recorded local and remote refs through the
-        // SHA-guarded git boundary after the merge is adopted.
         await this.options.github.mergePullRequest(prNumber, strategy, false);
       } catch (error) {
         const after = await this.options.github.getPullRequest(prNumber);
@@ -1486,18 +1337,7 @@ export class AutoRunEngine {
     await this.#git.deleteBranch(issueBranch);
   }
 
-  // ---------------------------------------------------------------------------
-  // Conclusion
-  // ---------------------------------------------------------------------------
 
-  /**
-   * Opens — and, when the user allowed it, merges — the run's own pull request.
-   * This is the only place a run touches a branch the user owns.
-   *
-   * It runs on every controlled exit, including a stop or a failure, because
-   * work already merged onto the session branch is invisible until something
-   * points at it. It never throws: the run is over.
-   */
   async #concludeRun(end: AttemptEnd, signal: AbortSignal): Promise<AttemptEnd> {
     const record = this.#current;
     const landed = landedIssues(record);
@@ -1597,9 +1437,6 @@ export class AutoRunEngine {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Preconditions and bookkeeping
-  // ---------------------------------------------------------------------------
 
   async #checkPreconditions(): Promise<string | undefined> {
     let status;
@@ -1730,11 +1567,6 @@ function guidelineProperty(value: string | undefined): { readonly additionalGuid
   return trimmed === undefined || trimmed.length === 0 ? {} : { additionalGuideline: trimmed };
 }
 
-/**
- * Why nothing can run. "Nothing is labelled" and "everything is unclassified or
- * blocked" are different problems with different fixes, so the skip reasons are
- * named rather than collapsed into one refusal.
- */
 function emptyQueueReason(skipped: readonly SkippedIssue[]): string {
   if (skipped.length === 0) return "no open issue is labelled [AI]-afk or [AI]-hitl";
   const listed = skipped.slice(0, 20).map((entry) => `#${entry.number} (${entry.reason})`).join(", ");

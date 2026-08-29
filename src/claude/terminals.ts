@@ -57,15 +57,6 @@ export interface TerminalHandle {
   dispose(): void;
 }
 
-/**
- * `name` is left unset for every agent launch: aboard deliberately leaves those
- * VS Code terminals with their default shell name. An "aboard: manager" tab
- * keeps that label after the session dies, and a stale name that claims a live
- * agent misleads worse than a generic one informs. The aboard label lives on the
- * fleet record instead, which is where the user looks for agent state and which
- * settles the moment the session does. A plain command terminal has no fleet row
- * to carry its label and claims no liveness, so it names its tab.
- */
 export interface TerminalCreationOptions {
   readonly cwd: string;
   readonly name?: string;
@@ -83,19 +74,7 @@ export interface BridgeTerminalEnvironment {
   readonly port: number;
   readonly token: string;
   readonly workspaceRoot: string;
-  /**
-   * Hard wall-clock timeout for a foreground Manager MCP tool call. The Manager
-   * receives this as `MCP_TOOL_TIMEOUT`; worker terminals do not need it because
-   * the aboard MCP tools are denied there.
-   */
   readonly managerMcpTimeoutMs: number;
-  /**
-   * `ABOARD_ROADMAP_REMINDER_BYTES` for the Manager's terminal, from
-   * `aboard.manager.roadmapReminderBytes`. The reminder hooks read the span
-   * from the environment rather than from the bridge, so the common path — a
-   * roadmap injection already inside the tail window — never opens a connection.
-   * Zero disables the reminder.
-   */
   readonly managerRoadmapReminderBytes: number;
 }
 
@@ -105,33 +84,13 @@ export interface CreateAboardTerminalRequest {
   readonly agentType: AgentType;
   readonly issueNumbers?: readonly number[];
   readonly name?: string;
-  /**
-   * Where the session runs. Defaults to the workspace root, which is what every
-   * launch the user drives wants. An auto-run in worktree mode passes its own
-   * checkout instead: the session's whole world is this directory, including the
-   * relative `--add-dir` and `@` paths its command line carries, and the
-   * transcript Claude Code files under it.
-   */
   readonly cwd?: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
   readonly initialCommand?: string;
   /** Overrides the default focus behavior for bulk restoration. */
   readonly focus?: boolean;
-  /**
-   * Whether this session reports its result over the bridge. It is a property
-   * of the launch, not of the type: dual-mode sessions
-   * (`general-purpose`) report exactly when their launch is
-   * result-delivering. The hooks read it as `ABOARD_DELIVERS_RESULT`, and its
-   * absence means the session is handed to the user and stays hook-silent.
-   */
   readonly deliversResult?: boolean;
-  /**
-   * Proof-of-life timeout: if the SessionStart hook has not reported the TUI's
-   * process id within this many milliseconds, the launch failed (bad command,
-   * CLI error printed and exited) and the terminal is killed so the normal
-   * terminal-close settlement fires. Absent = no startup proof was requested.
-   */
   readonly startupTimeoutMs?: number;
 }
 
@@ -161,11 +120,6 @@ export interface TerminalSnapshot {
   readonly issueNumbers?: readonly number[];
   readonly name: string;
   readonly cwd: string;
-  /**
-   * `detached` means the Claude session died but the shell survived it: the VS
-   * Code terminal may well still be open, and aboard has given it back to the
-   * user. It is never killed, never controlled, and never blocks a relaunch.
-   */
   readonly status: "open" | "detached" | "closed";
   readonly createdAt: string;
   readonly closedAt: string | null;
@@ -195,22 +149,11 @@ export class TerminalControlError extends Error {
   }
 }
 
-/**
- * Proof-of-life port implemented by the bridge's session-start tracker. The
- * controller owns the arming point — terminal creation is the one moment every
- * launch path (delegated workers, the Manager, PR resumes) passes through — so
- * a failed `claude` invocation (bad flag, missing binary) is detected even in
- * the window before the fleet registers the session.
- */
 export interface StartupProofTracker {
   awaitStarted(agentId: AgentId, sessionId: SessionId, timeoutMs: number): Promise<unknown>;
   cancel(agentId: AgentId): void;
 }
 
-/**
- * Matched by name rather than by class: the proof tracker lives in the bridge
- * layer, which depends on this module and must not be imported back.
- */
 function isStartupTimeout(error: unknown): boolean {
   return error instanceof Error && error.name === "SessionStartTimeoutError";
 }
@@ -226,21 +169,9 @@ export interface TerminalControllerOptions {
   readonly processIdTimeoutMs?: number;
   /** When set with `startupTimeoutMs` on a launch, arms the proof-of-life watch. */
   readonly startupProofs?: StartupProofTracker;
-  /**
-   * Fires once, just before the terminal is killed, when no SessionStart hook
-   * arrived in time. This is the last-resort launch verdict — there is no exit
-   * record to quote — so the callback is the place to tell the user why their
-   * terminal is disappearing.
-   */
   readonly onStartupTimeout?: (agentId: AgentId, sessionId: SessionId, timeoutMs: number) => void;
 }
 
-/**
- * The Manager and every session handed to the user are shown on creation;
- * automated workers are not stolen focus for. Handed-to-the-user is per launch
- * (`deliversResult: false`), not only per type: a builtin type launched
- * interactively is shown exactly like an interactive-only one.
- */
 function isUserFacing(request: CreateAboardTerminalRequest): boolean {
   return request.focus ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType) || request.deliversResult === false);
 }
@@ -258,12 +189,6 @@ export class TerminalController {
     this.#closeRegistration = options.host.onDidCloseTerminal((terminal) => this.#onClosed(terminal));
   }
 
-  /**
-   * Opens a terminal for an agent. The invariants are that an agent and a
-   * session each have at most one *live* terminal, and that a session id never
-   * migrates to a different agent. A closed terminal is spent history: the same
-    * agent may be launched again, which is what a Manager restart relies on.
-   */
   public create(request: CreateAboardTerminalRequest): TerminalSnapshot {
     return this.#create(request);
   }
@@ -291,10 +216,6 @@ export class TerminalController {
       ABOARD_AGENT_ID: request.agentId,
       ABOARD_SESSION_ID: request.sessionId,
       ABOARD_AGENT_TYPE: request.agentType,
-      // The root of the tree *this session* works in, which is the workspace for
-      // every ordinary launch and the run's own checkout for an isolated one.
-      // Naming the user's checkout here would hand an isolated agent the one
-      // path the isolation exists to keep out of its reach.
       ABOARD_WORKSPACE_ROOT: cwd,
     };
     if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
@@ -303,9 +224,6 @@ export class TerminalController {
     if (request.deliversResult === true) env.ABOARD_DELIVERS_RESULT = "1";
     if (request.agentType === "manager") {
       env.MCP_TOOL_TIMEOUT = String(environment.managerMcpTimeoutMs);
-      // A foreground run_agent call intentionally waits for the worker. Disable
-      // Claude Code's automatic MCP backgrounding and idle cutoff so only the
-      // configured wall-clock timeout decides when that wait ends.
       env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS = "0";
       env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT = "0";
       env.ABOARD_ROADMAP_REMINDER_BYTES = String(environment.managerRoadmapReminderBytes);
@@ -351,19 +269,10 @@ export class TerminalController {
     handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
 
-    // Startup security pass: a failed launch (bad flag, missing binary) exits
-    // before the TUI writes a transcript and produces no SessionStart hook, so
-    // the absence of proof within the timeout is the failure signal itself.
-    // The terminal is killed, which routes every settlement through the same
-    // terminal-close path a user kill would take.
     const startupTimeoutMs = request.startupTimeoutMs;
     if (startupTimeoutMs !== undefined && this.options.startupProofs !== undefined) {
       void this.options.startupProofs.awaitStarted(request.agentId, request.sessionId, startupTimeoutMs)
         .then(undefined, (error: unknown) => {
-          // Only the timeout is a verdict. A cancellation means something else
-          // already settled this launch — a closed terminal, or a CLI that
-          // exited and was diagnosed from its exit record — and that path has
-          // decided the terminal's fate, including leaving an error on screen.
           if (!isStartupTimeout(error)) return;
           const current = this.#records.get(terminalId);
           if (current === undefined || current.status !== "open") return;
@@ -378,23 +287,11 @@ export class TerminalController {
     return [...this.#records.values()].map((record) => this.#snapshot(record));
   }
 
-  /**
-   * The agent's open terminal, if any. Settlement paths need this *after* they
-   * have dropped the fleet record, so the terminal id cannot be read back from
-   * the fleet — and an uncollected terminal is exactly what makes the next
-   * launch fail the one-live-terminal invariant.
-   */
   public liveTerminalForAgent(agentId: AgentId): TerminalId | undefined {
     const record = this.#latest((candidate) => candidate.agentId === agentId);
     return record?.status === "open" ? record.terminalId : undefined;
   }
 
-  /**
-   * Hand the terminal back to the user without closing it. Used when a session
-   * dies inside a surviving shell: the native handle is dropped, so a later
-   * close emits no lifecycle event — by then the agent may have been relaunched
-   * into a new terminal, and a stale close would settle the wrong session.
-   */
   public release(terminalId: TerminalId): void {
     const record = this.#requireRecord(terminalId);
     if (record.status !== "open") return;

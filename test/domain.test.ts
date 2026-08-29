@@ -169,9 +169,6 @@ test("enforces result and lifecycle invariants for agent roles", () => {
   (exploreWithoutResult.resultDelivery as Record<string, unknown>).mode = "none";
   assert.equal(parseAgentSession(exploreWithoutResult).ok, false);
 
-  // general-purpose is neither automated nor interactive-only: handed to the
-  // user it legally persists with no delivery, and rejecting it here would
-  // discard the whole fleet snapshot on restore.
   const interactiveGeneralPurpose = structuredClone(validSession) as unknown as Record<
     string,
     unknown

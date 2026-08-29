@@ -68,9 +68,6 @@ test("one label query resolves the locator and the document, with no cache and n
   assert.deepEqual(roadmap?.tasks.map((task) => [task.subject, task.completed]), [["Ship the bridge", false], ["Rotate the tokens", true]]);
   assert.equal(roadmap?.carrierCount, 1);
 
-  // `--search` would move the query onto GitHub's asynchronously indexed search
-  // API, where an issue created seconds ago can be missing — and a missing
-  // carrier mints a duplicate roadmap. The sort is done client-side instead.
   const lookup = gh.calls.find((args) => args[0] === "issue" && args[1] === "list");
   assert.equal(lookup?.includes("--search"), false);
   assert.deepEqual(lookup, ["issue", "list", "--state", "open", "--label", "[AI]-todo", "--limit", "50", "--json", "number,body,createdAt"]);
@@ -159,9 +156,6 @@ test("roadmap issue pinning is best effort after minting", async () => {
   assert.equal(created.issue, 44);
   assert.match(created.notices.join(" "), /could not pin #44/);
 
-  // The issue was already created, so the seed is still live and an immediate
-  // follow-up edit must target it instead of minting a duplicate after pinning
-  // failed.
   await github.updateRoadmapTask({ task: 1, expect: "Write the first task", status: "completed" });
   assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
   assert.deepEqual(gh.calls.find((args) => args[0] === "issue" && args[1] === "edit")?.slice(0, 3), ["issue", "edit", "44"]);
@@ -224,9 +218,6 @@ test("an expect mismatch writes nothing and returns the current list", async () 
     if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
     throw new Error(`unexpected ${args.join(" ")}`);
   });
-  // Position 1 exists, but it is not the task the caller was holding — the
-  // roadmap moved under it. Without the guard this would silently complete the
-  // wrong work; with it the caller pays one call and gets what a retry needs.
   await assert.rejects(
     () => new GitHubClient(gh).updateRoadmapTask({ task: 1, expect: "Rotate the tokens", status: "completed" }),
     (error: unknown) => {
@@ -274,9 +265,6 @@ test("the queue and the briefing are projected from one open-issue read", async 
   const github = new GitHubClient(gh);
   const { candidates } = await github.listImplementableIssues();
 
-  // The umbrella and the unclassified issue are the queue's to judge, so the
-  // boundary hands them over rather than filtering: selection lives in the
-  // domain, and both reads must agree about the rows they share.
   assert.deepEqual(candidates.map((issue) => issue.number), [16, 17, 18, 19]);
   assert.deepEqual(candidates.map((issue) => issue.hasChildren), [false, false, false, true]);
   assert.deepEqual(candidates.map((issue) => issue.createdAt), [
@@ -410,9 +398,6 @@ test("resolves issue parent, PR state, threads, diff, and publishes line comment
 });
 
 test("mergeability GitHub has not computed yet reads as unknown rather than as a failure", async () => {
-  // GitHub computes `mergeable` in a background job, so the answer for a head
-  // pushed seconds ago is `UNKNOWN`. Treating that as a parse failure would
-  // fail the merge phase for every pull request the run has just opened.
   const gh = new FixtureGh((args) => {
     if (args[0] === "repo") return repo;
     return graph({ pullRequest: { number: 42, title: "PR", body: "", state: "OPEN", merged: false, mergeable: "UNKNOWN", url: "https://github.com/acme/app/pull/42", headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [] }, reviewDecision: null, reviewThreads: { nodes: [] } } });
@@ -451,9 +436,6 @@ test("branch pull request recovery can observe closed and merged records", async
 });
 
 test("closing a pull request checks its identity and state before mutating anything", async () => {
-  // Discard cleanup is the only caller. It must never close something that was
-  // retargeted, already merged, or has become somebody else's, so identity is
-  // re-read here rather than trusted from a record written hours ago.
   const pullRequest = (overrides: Record<string, unknown>) => ({
     number: 57, title: "PR", body: "", merged: false, state: "OPEN", mergeable: "MERGEABLE",
     url: "https://github.com/acme/app/pull/57", headRefName: "aboard/35-two", baseRefName: "aboard/run/test",
@@ -529,9 +511,6 @@ test("an update straight after a mint resolves the new issue the label index has
   const github = new GitHubClient(gh);
   assert.equal((await github.createRoadmapTasks({ subjects: ["Write the first task"] })).issue, 44);
 
-  // The label query still comes back empty seconds later; without the seed this
-  // is the `missing-todo` an existing roadmap answered, and the caller's call
-  // was spent for nothing.
   const updated = await github.updateRoadmapTask({ task: 1, expect: "Write the first task", status: "completed" });
   assert.equal(updated.issue, 44);
   assert.deepEqual(gh.calls.find((args) => args[1] === "edit")?.slice(0, 3), ["issue", "edit", "44"]);
@@ -578,9 +557,6 @@ test("a seeded mint re-enters the candidate set without winning it", async () =>
   const github = new GitHubClient(gh);
   await github.createRoadmapTasks({ subjects: ["Minted"] });
 
-  // The index caught up, and it also carries a roadmap created after ours. The
-  // resolution rule is unchanged by the seed: newest createdAt, ties on the
-  // lowest number — and a listed seed costs no point lookup.
   listed = carriers(
     { number: 44, body: "- [ ] Minted", createdAt: "2026-07-09T00:00:00Z" },
     { number: 60, body: "- [ ] Newer", createdAt: "2026-07-10T00:00:00Z" },

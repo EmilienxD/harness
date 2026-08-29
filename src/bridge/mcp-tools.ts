@@ -11,12 +11,6 @@ export interface McpTool {
 /** The server name the Manager's `mcp__aboard__*` tool rules are namespaced by. */
 export const ABOARD_MCP_SERVER_NAME = "aboard";
 
-/**
- * `after` names either a task position or the top of the list. The two-branch
- * schema keeps the anchor a real integer rather than a stringly-typed position,
- * and the string case uses `enum` rather than `const` because more MCP clients
- * support it. Runtime validation in `parseAfter` remains authoritative.
- */
 function ANCHOR_SCHEMA(description: string): Readonly<Record<string, unknown>> {
   return {
     oneOf: [
@@ -214,7 +208,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "Add one or more new tasks to the project's durable roadmap, " +
       "which is a flat checkbox list on the GitHub issue labelled [AI]-todo. " +
       "Use this only to record newly identified project-level work or priorities; " +
-      "implementation detail belongs in an [AI]-spec issue. " +
+      "implementation detail belongs in other issues. " +
       "The current roadmap is supplied in context, " +
       "so there is deliberately no roadmap read tool and no full-body replacement operation.\n\n" +
 
@@ -432,13 +426,6 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   },
 ];
 
-/**
- * The fully namespaced allow rules for every tool the boundary serves, which is
- * what `--allowedTools` carries on the Manager's command line so the delegation
- * surface never stalls behind an approval prompt. The names stay enumerated
- * rather than collapsing to `mcp__aboard__*`: a tool the server serves but
- * this list forgot surfaces as a prompt instead of silently pre-approving.
- */
 export const MANAGER_TOOL_NAMES: readonly string[] = CORE_MCP_TOOLS.map(
   (tool) => `mcp__${ABOARD_MCP_SERVER_NAME}__${tool.name}`,
 );

@@ -1,11 +1,3 @@
-/**
- * The boundary half of recovery validation.
- *
- * It gathers git, GitHub, and filesystem facts about one recorded run and hands
- * them to the pure validator. Nothing here judges: a validator that could reach
- * a process would be a validator nobody can test, and every rule this feeds is
- * in `domain/run-validation.ts` where it can be.
- */
 
 import type { GitClient } from "../git/client.js";
 import type { AutoRunRecord } from "../domain/run-plan.js";
@@ -29,14 +21,6 @@ export interface RunObservationSources {
   readonly workspacePresent?: () => Promise<boolean>;
 }
 
-/**
- * Reads everything the validator needs, in one pass.
- *
- * The remote refs are fetched and pruned first. Without that, a branch somebody
- * deleted on GitHub still resolves locally and a force-push looks like no change
- * at all — which would make validation confirm exactly the situations it exists
- * to catch.
- */
 export async function observeRun(record: AutoRunRecord, sources: RunObservationSources): Promise<RunObservations> {
   const { git, github } = sources;
   let repositoryUsable = true;
@@ -92,11 +76,6 @@ export async function observeRun(record: AutoRunRecord, sources: RunObservationS
   };
 }
 
-/**
- * The open-issue scan answers the plan's questions in one call — state, labels,
- * and blockers together. Anything the scan does not list is closed or gone, and
- * only those few need a point lookup.
- */
 async function observeIssues(record: AutoRunRecord, github: AutoRunGitHub): Promise<{
   readonly issues: readonly IssueObservation[];
   readonly titles: Readonly<Record<string, string>>;
@@ -142,9 +121,6 @@ async function observePullRequests(record: AutoRunRecord, github: AutoRunGitHub)
     if (snapshot === undefined) {
       return { number, state: "missing", head: "", base: "", approvedByOther: false };
     }
-    // The extension opens every pull request with the user's own credentials and
-    // GitHub refuses self-approval, so an `approved` decision can only have come
-    // from another account.
     const review = await github.getReviewState(number).catch(() => ({ decision: "unreviewed" as const }));
     return {
       number,

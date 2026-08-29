@@ -1,19 +1,3 @@
-/**
- * Where a script that aboard did not launch finds the command endpoint.
- *
- * The bridge's port and full token are deliberately hard to find: they live in
- * memory, and every process aboard starts inherits them.
- * That is right for the agent surface and useless for the case `/commands`
- * exists to serve — a script the user runs from any shell in an initialized
- * project, which has no way to discover the in-memory bridge runtime.
- *
- * So the endpoint publishes itself: one small record per open window, in a
- * per-user directory outside every workspace, carrying the port and the
- * command-scoped token — never the full one. A script reads the directory, picks
- * the record whose `workspaceRoot` contains its own working directory, and
- * calls. Nothing is written into the user's tree, so nothing can be committed,
- * and the record exists only while that workspace's aboard runtime is active.
- */
 
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -33,11 +17,6 @@ export interface CommandEndpointRecord {
 
 export const COMMAND_ENDPOINT_DIRECTORY_NAME = "endpoints";
 
-/**
- * A single deterministic path per platform. Script authors have to reproduce
- * this in whatever language they wrote their setup command in, so the rule they
- * copy stays one line long per platform rather than a search order.
- */
 export function commandEndpointDirectory(
   platform: NodeJS.Platform,
   environment: Readonly<Record<string, string | undefined>>,
@@ -53,12 +32,6 @@ export function commandEndpointDirectory(
   return join(state === undefined || state === "" ? join(homeDirectory, ".local", "state") : state, "aboard", COMMAND_ENDPOINT_DIRECTORY_NAME);
 }
 
-/**
- * The file name only has to be stable for one workspace, so a window that
- * reopens replaces its own record instead of accumulating them. Readers match on
- * the record's `workspaceRoot` field and never reproduce this, which keeps path
- * normalization out of the cross-language contract.
- */
 function recordFileName(workspaceRoot: string): string {
   const normalized = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
   const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -120,13 +93,6 @@ export class FileCommandEndpointRegistry {
     await rm(join(this.#directory, recordFileName(workspaceRoot)), { force: true });
   }
 
-  /**
-   * A crashed or force-killed window leaves a record naming a port that is gone
-   * or, worse, one another process has since been given. Removing records whose
-   * extension host is dead is cheap here and impossible for a script to do
-   * safely, so this side does it. Best-effort throughout: a directory that
-   * cannot be read is a reason to skip pruning, never to fail the activation.
-   */
   async #pruneAbandoned(ownFileName: string): Promise<void> {
     let entries: readonly string[];
     try {

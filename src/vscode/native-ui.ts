@@ -4,24 +4,20 @@ import type { TerminalController } from "../claude/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning, type FleetTreeNode } from "./fleet.js";
-import { AutoRunTreeModel, autoRunCard, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunPreview, type AutoRunViewSources } from "./auto-run.js";
+import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunViewSources } from "./auto-run.js";
 import { ActivityTreeModel, clearActivityWarning, type ActivityNode } from "./activity.js";
 import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
 import type { AutoRunEngine } from "../auto/engine.js";
 import type { DiscardBehavior } from "../domain/run-cleanup.js";
 import { describeDiscard } from "../domain/run-cleanup.js";
 
-/**
- * How often the Auto Run view revalidates a recorded run while it is on screen.
- * Frequent enough that a user who has just merged a pull request in the browser
- * does not sit looking at a stale card, and cheap enough to run indefinitely:
- * one fetch and a handful of `gh` reads.
- */
-const RECOVERY_POLL_MS = 30_000;
+const AUTO_RUN_POLL_MS = 30_000;
 
 export interface NativeFleetUiRegistration extends Disposable {
   /** Re-renders status-bar visibility; call it whenever the project's initialized state changes. */
   readonly refresh: () => void;
+  /** Rechecks the visible Auto Run view after configuration changes. */
+  readonly checkAutoRun: () => void;
 }
 
 export interface AutoRunUiHost {
@@ -91,12 +87,10 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   // -- Auto Run ---------------------------------------------------------------
   const engine = options.autoRun.engine;
   let autoRunStarting = false;
-  let autoRunPreviewing = false;
-  let autoRunPreview: AutoRunPreview | undefined;
+  const forecast = new AutoRunForecastController(() => renderAutoRun());
   const autoRunSources: AutoRunViewSources = {
     starting: () => autoRunStarting,
-    previewing: () => autoRunPreviewing,
-    preview: () => autoRunPreview,
+    forecast: () => forecast.snapshot(),
     state: () => engine.state(),
     persisted: () => engine.persisted(),
     eligibility: () => engine.eligibility(),
@@ -124,40 +118,48 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   const publishAutoRunContext = async (): Promise<void> => {
     const card = autoRunCard(autoRunSources);
-    // One key per state rather than a family of booleans: menu `when` clauses
-    // then read as the state machine they describe, and no combination of flags
-    // can produce a card offering both Start and Resume.
     await commands.executeCommand("setContext", "aboard.autoRunCard", card.kind);
   };
-  const refreshAutoRun = (): void => {
-    // A real record makes an earlier read-only snapshot obsolete. Clearing it
-    // here also prevents it resurfacing after that run eventually concludes.
-    if (engine.state() !== undefined || engine.persisted() !== undefined) autoRunPreview = undefined;
+  const renderAutoRun = (): void => {
+    // A frozen record supersedes the live forecast. Generation invalidation
+    // prevents a slower GitHub read from putting that forecast back afterwards.
+    if (engine.state() !== undefined || engine.persisted() !== undefined) {
+      forecast.invalidate();
+    }
     autoRunChanges.fire(undefined);
     void publishAutoRunContext();
   };
-  refreshAutoRun();
+  renderAutoRun();
 
-  /**
-   * Revalidation is serialized by the engine itself, so overlapping triggers —
-   * a visibility change arriving with the timer — collapse into one check.
-   */
+  const checkAutoRun = async (): Promise<void> => {
+    if (autoRunStarting) return;
+    if (engine.state() !== undefined || engine.persisted() !== undefined) {
+      await engine.refresh();
+      return;
+    }
+    await forecast.refresh(() => engine.dryRun());
+  };
+
+  /** Engine recovery checks and live forecasts each serialize overlapping triggers. */
   let poll: ReturnType<typeof setInterval> | undefined;
   const stopPolling = (): void => { if (poll !== undefined) { clearInterval(poll); poll = undefined; } };
   const startPolling = (): void => {
     if (poll !== undefined) return;
-    poll = setInterval(() => { void engine.refresh(); }, RECOVERY_POLL_MS);
+    poll = setInterval(() => { void checkAutoRun(); }, AUTO_RUN_POLL_MS);
   };
   disposables.push({ dispose: stopPolling });
   disposables.push(autoRunView.onDidChangeVisibility((event) => {
     if (!event.visible) { stopPolling(); return; }
-    void engine.refresh();
+    void checkAutoRun();
     startPolling();
   }));
   disposables.push(window.onDidChangeWindowState((state) => {
-    if (state.focused && autoRunView.visible) void engine.refresh();
+    if (state.focused && autoRunView.visible) void checkAutoRun();
   }));
-  if (autoRunView.visible) startPolling();
+  if (autoRunView.visible) {
+    void checkAutoRun();
+    startPolling();
+  }
 
   const openNumber = async (number: number | undefined): Promise<void> => {
     if (number === undefined) return;
@@ -169,10 +171,10 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     commands.registerCommand("aboard.openIssue", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
     commands.registerCommand("aboard.openPullRequest", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
     commands.registerCommand("aboard.autoRun.refresh", async () => {
-      await engine.refresh();
+      await checkAutoRun();
       // A waiting run polls GitHub on its own interval; "Check Now" is the user
       // saying they have just merged and would rather not wait for it.
-      engine.continueNow();
+      if (engine.state()?.waiting === true) engine.continueNow();
     }),
     commands.registerCommand("aboard.autoRun.openCurrentIssue", () => {
       const record = cardRecord(autoRunCard(autoRunSources));
@@ -182,36 +184,15 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       void openNumber(cardPullRequest(autoRunCard(autoRunSources), engine.state()));
     }),
     commands.registerCommand("aboard.startAutoRun", async () => {
-      // GitHub issue discovery happens before the engine has a record or live
-      // state to publish. Reflect the click locally so the card responds at
-      // once and the action cannot be invoked twice during that gap.
-      if (autoRunStarting || autoRunPreviewing) return;
-      autoRunPreview = undefined;
+      if (autoRunStarting) return;
+      forecast.invalidate();
       autoRunStarting = true;
-      refreshAutoRun();
+      renderAutoRun();
       try { await options.autoRun.start(); }
       finally {
         autoRunStarting = false;
-        refreshAutoRun();
-      }
-    }),
-    commands.registerCommand("aboard.previewAutoRun", async () => {
-      if (autoRunPreviewing || autoRunStarting) return;
-      autoRunPreviewing = true;
-      autoRunPreview = undefined;
-      refreshAutoRun();
-      try {
-        const result = await engine.dryRun();
-        if (!result.inspected) {
-          void window.showWarningMessage(`aboard cannot preview an auto-run: ${result.reason}.`);
-          return;
-        }
-        autoRunPreview = result;
-      } catch (error) {
-        void window.showErrorMessage(error instanceof Error ? error.message : "Unable to preview the auto-run");
-      } finally {
-        autoRunPreviewing = false;
-        refreshAutoRun();
+        renderAutoRun();
+        if (autoRunView.visible && engine.state() === undefined && engine.persisted() === undefined) void checkAutoRun();
       }
     }),
     commands.registerCommand("aboard.resumeAutoRun", async () => {
@@ -320,11 +301,8 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   const status = window.createStatusBarItem(undefined, 100);
   status.command = "aboard.focusFleet";
-  // An uninitialized project shows only the welcome view with its Initialize
-  // button: the bridge status is aboard state, and none of it may surface
-  // before the user has asked for a `.aboard/`.
   const render = () => {
-    refreshAutoRun();
+    renderAutoRun();
     if (!isInitialized()) { status.hide(); return; }
     const snapshot = renderFleetStatus(options.port() ?? 0, fleet, lease, (terminalId) => isTerminalOpen(terminalId));
     status.text = snapshot.text;
@@ -342,6 +320,13 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   const registration: NativeFleetUiRegistration = {
     refresh: render,
+    checkAutoRun: () => {
+      if (!autoRunView.visible) return;
+      if (engine.state() === undefined && engine.persisted() === undefined) {
+        forecast.invalidate();
+      }
+      void checkAutoRun();
+    },
     dispose: () => { for (const disposable of [...disposables].reverse()) disposable.dispose(); },
   };
   context.subscriptions.push(registration);

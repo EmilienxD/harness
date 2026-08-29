@@ -19,10 +19,6 @@ interface Manifest {
 const manifest = async (): Promise<Manifest> =>
   JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as Manifest;
 
-// The uninitialized workspace shows exactly one aboard gesture: the welcome
-// view's Initialize button. Every other feature waits for `aboard.initialized`
-// — a palette command without an explicit rule is shown unconditionally by
-// VS Code, so absence is a leak, not a default.
 test("every command except Initialize is gated out of an uninitialized project", async () => {
   const { contributes } = await manifest();
   const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
@@ -105,10 +101,9 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   // Start is offered only with nothing unresolved: two runs competing for the
   // same branches is the failure this prevents.
   assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == idle/);
-  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == preview/);
-  assert.match(when("aboard.previewAutoRun"), /aboard\.autoRunCard == idle/);
-  assert.match(when("aboard.previewAutoRun"), /aboard\.autoRunCard == preview/);
-  assert.ok(contributes.commands.find((entry) => entry.command === "aboard.previewAutoRun")?.icon, "Preview has a visible icon");
+  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == forecast/);
+  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == unavailable/);
+  assert.equal(contributes.commands.some((entry) => entry.command === "aboard.previewAutoRun"), false);
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
   // Resume appears only once validation has said the run may continue — never
   // while checking, and never when broken.
@@ -126,7 +121,6 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   // the other refuses.
   const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
   assert.match(palette.get("aboard.startAutoRun") ?? "", /aboard\.autoRunCard == idle/);
-  assert.match(palette.get("aboard.previewAutoRun") ?? "", /aboard\.autoRunCard == idle/);
   assert.match(palette.get("aboard.resumeAutoRun") ?? "", /aboard\.autoRunCard == recoverable/);
 });
 

@@ -94,11 +94,6 @@ let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
 let persistence: PersistOnChange | undefined;
 let activeAutoRun: AutoRunEngine | undefined;
 
-/**
- * Reads the effective configuration. `inspect` rather than `get` is deliberate:
- * `get` collapses every scope into one value, which would leave the project file
- * unable to override a global while a contributed default is present.
- */
 function configuration(project: ReadonlyMap<string, unknown>) {
   const scope = workspace.getConfiguration();
   return readAboardConfiguration(createLayeredReader({
@@ -116,12 +111,6 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
   }
 }
 
-/**
- * The project's own baseline commands, so a Manager can name the check a worker
- * should run instead of guessing at one. Read from `package.json` because that
- * is where this project keeps them; an unreadable or scriptless project simply
- * contributes nothing, which the briefing renders as "no baseline checks".
- */
 async function repositoryChecks(workspaceRoot: string): Promise<readonly string[]> {
   const preferred = ["check", "lint", "test", "build"];
   try {
@@ -134,13 +123,6 @@ async function repositoryChecks(workspaceRoot: string): Promise<readonly string[
   } catch { return []; }
 }
 
-/**
- * The roadmap as both the session-start briefing and the periodic reminder need
- * it. One definition, because the two must render the same ids from the same
- * document: a second resolve path is exactly the sync bug the derived-id design
- * exists to avoid. No carrier is a fact about the repository, not a failure, so
- * it resolves to `undefined` rather than throwing.
- */
 function roadmapBriefing(github: GitHubClient): (signal: AbortSignal) => Promise<RoadmapBriefing | undefined> {
   return async () => {
     const snapshot = await github.readRoadmap();
@@ -155,12 +137,6 @@ function roadmapBriefing(github: GitHubClient): (signal: AbortSignal) => Promise
   };
 }
 
-/**
- * Sources for the Manager's single SessionStart briefing. Each is independently
- * fallible by design: `ManagerBriefings` converts a rejection into a one-line
- * "unavailable" note, so one broken `gh` call degrades one section instead of
- * losing the whole block.
- */
 function briefingSources(
   git: GitClient,
   github: GitHubClient,
@@ -224,9 +200,6 @@ function briefingSources(
 function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
   return { get: async (type) => {
     if (type === "general-purpose") return { shape: "default" };
-    // Named builtins resolve their prompt and tools from Claude Code. aboard's
-    // metadata-only profile contributes only command, model, and effort.
-    // Capability remains fixed by the upstream Explore contract.
     if (isNamedBuiltinAgentType(type)) {
       let source: string;
       try {
@@ -248,12 +221,6 @@ function workerConfigurations(workspaceRoot: string): DelegationConfigurationSou
     }
     const result = parseAgentDefinition(await readFile(agentDefinitionPath(workspaceRoot, type), "utf8"));
     if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
-    // The whole definition is carried into the launch: sanitized here, rewritten
-    // by the planner into the per-launch runtime directory `--add-dir` points
-    // at, and selected with `--agent`. One file, no second authority (see
-    // `LaunchConfiguration`). `command:` is the one field that shapes the line's
-    // *program* rather than its flags, replacing `aboard.launch.claudeCommand`
-    // for this agent alone.
     const sanitized = sanitizeAgentDefinition(result.value);
     return resolveLaunchConfiguration({
       agentName: type,
@@ -297,10 +264,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const sessionProofs = new SessionStartupProofs();
   let initialized = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const) === "initialized";
   const runtimeAdmission = new RuntimeAdmission(initialized);
-  // A `when` clause hides a palette command; it does not disable it. An invoked
-  // side effect on an uninitialized project would launch agents into
-  // unscaffolded state or recreate `.aboard/` behind the user's back — the very
-  // thing the persistence layer refuses to do — so those handlers refuse too.
   const requireInitialized = (): boolean => {
     if (initialized) return true;
     void window.showInformationMessage("aboard is not initialized in this workspace. Initialize it from the Get Started view first.");
@@ -325,17 +288,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     onStartupTimeout: (agentId, sessionId, timeoutMs) => {
       const label = fleet.get(agentId)?.terminal.name ?? `agent ${agentId}`;
       output.appendLine(`${label} (agent ${agentId}, session ${sessionId}) did not produce a SessionStart hook in time; closing the terminal as a failed launch.`);
-      // The terminal is being killed under the user and takes any shell error
-      // text with it — silence here was the original "extension believes the
-      // manager is running" experience, just deferred by the timeout.
       void window.showWarningMessage(
         `aboard closed "${label}": Claude Code reported no session start within ${Math.round(timeoutMs / 1000)}s. The launch failed before Claude Code could begin, or the SessionStart hook never fired. Check aboard.launch.claudeCommand and the project's hook configuration; the aboard output channel has details.`,
       );
     },
     onLifecycleEvent: (event) => {
-      // Watch the marker from the launch itself, not from SessionStart: the
-      // window in between is exactly where a CLI that rejects its arguments
-      // dies, and nothing else observes it.
       if (event.type === "terminal-created") {
         sessionMonitor.trackLaunch({
           agentId: event.agentId,
@@ -364,9 +321,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
   });
   context.subscriptions.push({ dispose: () => terminals.dispose() });
-  // Terminals for automated scripts, not for agents: no fleet row, no lease,
-  // and no bridge credentials. The route exposing them exists only while the
-  // project is initialized, like every other runtime surface.
   const commandTerminals = new CommandTerminalService({
     host: createVsCodeTerminalHost(),
     defaultCwd: () => workspaceRoot,
@@ -377,10 +331,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(workspaceRoot, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
-  // Recent Activity replaces the ended-session ledger: the same reopen facts,
-  // plus every automated and run outcome the user needs to see after stepping
-  // away. Its writer is chained and idempotent, so the two sources that can
-  // settle one session milliseconds apart produce one row.
   const activityListeners = new Set<() => void>();
   const activity = new ActivityRecorder({
     store: new FileActivityStore(workspaceRoot, runtimeAdmission),
@@ -391,13 +341,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     onDidChange: () => { for (const listener of activityListeners) listener(); },
   });
   if (initialized) await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
-  /**
-   * Remembers a session on its way out of the fleet. A conversation the user was
-   * part of carries the launch facts a reopen replays; an automated worker's
-   * row is history only, because its result already reached its caller. Claude
-   * creates no resumable conversation when an interactive terminal is closed
-   * before its first exchange, so that empty launch leaves no activity row.
-   */
   const rememberEndedSession = async (
     session: AgentSession,
     endedAt: IsoTimestamp,
@@ -425,40 +368,23 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const managerStore = new FileManagerStore(workspaceRoot, runtimeAdmission);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   let recordedManager = initialized ? await managerStore.load() : undefined;
-  // Agent labels are strictly increasing within one initialized runtime. The
-  // Manager is stored separately from the fleet, so it contributes to the
-  // active runtime's ceiling too.
   let agentIdCounter = WorkspaceAgentIdCounter.load(workspaceRoot, () => [
     ...fleet.list().map((session) => session.identity.agentId as string),
     ...(recordedManager === undefined ? [] : [recordedManager.agentId as string]),
   ], runtimeAdmission.isOpen);
   const lease = new WriteLease();
-  // A recorded Manager keeps its id across restarts (identity stability). A
-  // first-ever Manager mints its number only when it actually launches: merely
-  // activating or reloading an untouched project must not consume agent 1.
   const managerIdentity = new ManagerIdentity(recordedManager?.agentId, () => agentIdCounter.next());
-  // Claude Code sweeps session files older than `cleanupPeriodDays` every time
-  // it starts and offers no way to disable that, so the one session aboard
-  // resumes for the project's whole life needs a copy of its own.
   const transcripts = new TranscriptBackupStore({
     workspaceRoot,
     retain: () => currentConfiguration.managerTranscriptBackups,
     log: (message) => output.appendLine(message),
   });
-  // A restart is the other moment the sweep may have run unobserved: back up
-  // whatever the recorded Manager still has before aboard launches anything
-  // that triggers the next one. No `.aboard/` is created behind the user's
-  // back — a recorded Manager means the runtime directory already exists.
   if (initialized && recordedManager !== undefined) void runtimeAdmission.run(() => transcripts.checkpoint(recordedManager!.sessionId));
   const launchConfigurations = workerConfigurations(workspaceRoot);
   // Every command line that reads a file — a spilled prompt, an agent's system
   // prompt — gets it from here, so all of them land under `.aboard/runtime/`.
   const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot, runtimeAdmission);
   const wrapperLayout = sessionWrapperLayout(workspaceRoot);
-  // aboard types its launch into a shell it does not own and never sees the
-  // command's exit status. Asking `claude --version` in a child process aboard
-  // does own turns "the terminal is full of shell errors" into a refused launch
-  // with a reason. Cached per command, so only the first launch pays.
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
@@ -479,16 +405,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       );
     },
   });
-  // A settled session leaves its terminal to be collected: the record the
-  // fleet dropped still names an open terminal, and the next launch for the
-  // same agent fails the one-live-terminal invariant until it is closed —
-  // "agent already has a live aboard terminal" on relaunch was exactly that
-  // leak. Releasing the record clears the invariant without touching the
-  // terminal: ending the session and closing the shell are separate gestures,
-  // and a user who pressed Ctrl+C twice kept the shell on purpose. Closing it
-  // as well is opt-in. The terminal id comes from the terminal controller, not
-  // the fleet: every caller here settles the fleet record first, so a fleet
-  // lookup would find nothing and silently leak the terminal.
   const releaseAbandonedTerminal = (agentId: AgentId): void => {
     const terminalId = terminals.liveTerminalForAgent(agentId);
     if (terminalId === undefined) return;
@@ -498,13 +414,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }
     terminals.release(terminalId);
   };
-  /**
-   * A launch that died on its way up. The Claude CLI printed its reason into
-   * the terminal and exited before any session existed, so nothing downstream
-   * would ever settle this agent: the fleet record would sit at `starting`
-   * forever and the write lease with it. The terminal is left alone by default
-   * precisely because it holds the error text the user needs to read.
-   */
   const reportFailedLaunch = (agentId: AgentId, sessionId: SessionId, exit: SessionExitRecord | undefined): void => {
     const cause = exit?.error !== undefined
       ? `could not be started (${exit.error})`
@@ -525,12 +434,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     releaseAbandonedTerminal(agentId);
     void window.showWarningMessage(`aboard could not start Claude: it ${cause}. Check the terminal for the error.`);
   };
-  // The wrapper's marker file is the strongest liveness source aboard owns:
-  // the user can kill the TUI from inside while keeping the shell (`exit`,
-  // double Ctrl+C), and only the marker poll spots them — the wrapper removes
-  // the marker the moment its Claude child exits for any reason. Terminal
-  // close still wins when it happens first; untracking there lets the monitor
-  // skip agents the shell already reclaimed.
   const sessionMonitor = new SessionProcessMonitor({
     probe: lockMarkerPresent,
     debug: (message) => output.appendLine(`[liveness] ${message}`),
@@ -563,22 +466,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (session === undefined) return;
     const at = new Date().toISOString() as IsoTimestamp;
     output.appendLine(`Conversation for agent ${agentId} ended (${reason}); the terminal stays open`);
-    // `/clear` ends the conversation and an interactive `/resume` switches the
-    // TUI to a different one, both while the terminal keeps running. Either way
-    // the agent record is spent history; the user deliberately kept the TUI.
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(agentId, at, `agent session ended (${reason})`);
-        // `/clear` and `/resume` end this conversation while the terminal lives
-        // on. The session id stays reopenable — the transcript is untouched —
-        // so it belongs in the ledger exactly like a closed terminal's.
         void rememberEndedSession(session, at);
         fleet.remove(agentId, at);
         releaseAbandonedTerminal(agentId);
         return;
       }
-      // Result-delivering sessions settle with a graceful completed outcome: the
-      // conversation ended on the user's terms, and any pending run completes
-      // rather than hangs waiting for a Stop hook the departed TUI cannot fire.
       void lifecycle?.processEnded({ agentId, sessionId: session.sessionId })
         .then(() => releaseAbandonedTerminal(agentId))
         .catch((error: unknown) => output.appendLine(`Session-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
@@ -593,9 +487,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
   });
   context.subscriptions.push({ dispose: () => sessionLifecycle?.dispose() });
-  // The watch is the fast path — a marker deletion settles the agent within
-  // milliseconds — and the interval only covers filesystems where watching is
-  // unreliable, so it can stay coarse.
   sessionMonitor.start(SESSION_LIVENESS_POLL_MS);
   try {
     const markerWatch = watchLockMarkers(lockMarkerDirectory(workspaceRoot), () => sessionMonitor.poll());
@@ -621,10 +512,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }),
     github,
     launcher: coordinator,
-    // By the time auto-run cleans up a result-delivering terminal, its caller
-    // has consumed the result. Closing that terminal therefore also retires the
-    // completed fleet row; leaving it behind creates a terminal-less row that
-    // cannot be restored and can only produce a misleading Focus action.
     terminals: { close: (terminalId) => closeSettledAutoRunTerminal(terminals, fleet, terminalId) },
     store: new FileAutoRunStore(workspaceRoot, runtimeAdmission),
     notifier: {
@@ -666,11 +553,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const reviewTerminals: ReviewTerminals = {
     focus: (terminalId) => { try { terminals.show(terminalId); return true; } catch { return false; } },
     resume: async (owner: PullRequestOwner) => {
-      // The definition is a precondition for reopening the session, not a
-      // refinement of it: a resume re-passes the system prompt and the tool
-      // list, so resuming without them would put a stock Claude Code session,
-      // holding every default tool, in a pr-doctor's terminal. Failing here is
-      // worse for the user than it used to be, and still better than that.
       const configuration = await launchConfigurations.get(owner.type);
       const plan = planSessionResume({
         agentId: owner.agentId,
@@ -694,10 +576,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       await runtimeFiles.prepare(plan, owner.cwd);
       if (!runtimeAdmission.isOpen()) throw new Error("aboard runtime reset while preparing review resume");
       const at = new Date().toISOString() as IsoTimestamp;
-      // No lease: `review_pr` reopens the session for the user to drive, with
-      // no first message sent into it. Whatever the run held it released when
-      // the agent finished, and re-taking it here would block the user's own
-      // parallel work on the branch they asked to look at.
       const terminal = terminals.create({
         agentId: owner.agentId,
         sessionId: owner.sessionId,
@@ -719,9 +597,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
   };
   const reviews = new ReviewCoordinator(github, coordinator, ownership, reviewTerminals);
-  // The way back into a conversation aboard started: what the fleet still holds
-  // and what the ledger remembers, merged and checked against the transcripts
-  // Claude Code actually has.
   const reopen = new ReopenCoordinator({
     activity: { entries: () => activity.store() },
     fleet,
@@ -731,9 +606,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       show: (terminalId) => terminals.show(terminalId),
     },
     launcher: coordinator,
-    // A session that ran in an auto-run's own checkout filed its transcript
-    // under that directory, so the workspace is the fallback rather than the
-    // answer.
     isResumable: (sessionId, cwd) => sessionIsResumable(sessionId, cwd ?? workspaceRoot),
   });
   const briefings = new ManagerBriefings(
@@ -761,9 +633,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       signal.addEventListener("abort", onAbort, { once: true });
     }),
   });
-  // The reminder reads GitHub live at delivery time rather than from a bridge
-  // copy: at this span the calls are minutes apart, and a reminder must reflect
-  // an edit the user made on their phone.
   const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
     startAutoRun: (options) => options?.dry === true
@@ -794,19 +663,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
     handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId: () => managerIdentity.current(), services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
-      // The fleet is what knows which session the Manager is currently on, and
-      // an agent it no longer holds (the user deleted `.aboard/`, or this is
-      // not the Manager) gets no copy — which is also what keeps a checkpoint
-      // from recreating the runtime directory behind the user's back.
       const session = fleet.get(agentId);
       if (session?.identity.type === "manager") void runtimeAdmission.run(() => transcripts.checkpoint(session.sessionId));
     }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
     bridgeEnvironment = { port: bridge.port, token: bridge.token };
-  // Published so a script nobody launched from aboard can still reach
-  // `/commands`. Only the command-scoped token goes here; the full one stays in
-  // in memory and in the environment of processes aboard started.
     try {
     const published = await commandEndpoint.publish({
       version: 1,
@@ -864,11 +726,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       onDidChange: (listener) => { activityListeners.add(listener); return { dispose: () => activityListeners.delete(listener) }; },
     },
   });
-  // Progress is pull, not push: one bounded line per transition, drained by the
-  // Manager's UserPromptSubmit hook on the user's next message. If the user is
-  // away for a whole afk spec, they learn the outcome when they return — which
-  // is what "afk" means. With no Manager alive there is nobody to tell, so the
-  // line goes to the output channel instead of being lost silently.
   const enqueueManagerNotification = (message: string): void => {
     output.appendLine(message);
     const managerAgentId = managerIdentity.current();
@@ -877,11 +734,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     try { fleet.enqueueNotification(managerAgentId, message, new Date().toISOString() as IsoTimestamp); }
     catch (error) { output.appendLine(`Unable to queue auto-run notification: ${error instanceof Error ? error.message : "unknown error"}`); }
   };
-  /**
-   * A run that parked or stopped needs the user, and by then it owns no status
-   * bar item to say so. The queue still gets the line — the Manager has to know
-   * too — but the user is told now rather than on their next Manager message.
-   */
   const alertAboutAutoRun = (message: string, pullRequestUrl?: string): void => {
     enqueueManagerNotification(message);
     const actions = pullRequestUrl === undefined ? ["Show Log"] : ["Open Pull Request", "Show Log"];
@@ -934,9 +786,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!requireInitialized()) return;
     try {
       const terminal = await manager.start(mode);
-      // Registration is only ever valid in `starting`; a relaunch of the same
-      // Manager identity goes through `restart`, carrying the new session id so
-      // hook routing by session keeps resolving.
       const startedAt = new Date().toISOString() as IsoTimestamp;
       if (fleet.get(terminal.agentId) === undefined) {
         fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
@@ -952,17 +801,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
     finally { await publishManagerState(); }
   };
-  /**
-   * Fleet rows whose terminal did not survive the previous extension host.
-   *
-   * Bulk restoration is gone: relaunching a fleet of write-capable agents into a
-   * workspace nobody has looked at since the crash is exactly the kind of
-   * unattended automation the visibility invariants exist to prevent, and it
-   * competed with auto-run recovery for the same branches. What survives is the
-   * record: each stale row becomes one Recent Activity entry, reopenable when
-   * there is a conversation to reopen, and leaves the fleet so Agents shows only
-   * agents you can actually go and look at.
-   */
   const reconcileStaleSessions = (): void => {
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
@@ -978,9 +816,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   reconcileStaleSessions();
 
-  // `aboard.initialized` drives the welcome view and the Initialize/Update pair.
-  // `aboard.managerLive` hides the launch actions while a Manager is running, and
-  // `aboard.managerResumable` shows Resume only when a session exists to resume.
   const publishManagerState = async () => {
     const recorded = await managerStore.load().catch(() => undefined);
     await commands.executeCommand("setContext", "aboard.managerLive", fleet.list().some((entry) => entry.identity.type === "manager"));
@@ -990,16 +825,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const wasInitialized = initialized;
     const state = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const);
     const next = state === "initialized";
-    // `.aboard/` is the project's state root. When it disappears the aboard
-    // session it described is gone: live terminals are closed and the fleet is
-    // discarded, rather than leaving the tree showing agents whose backing state
-    // no longer exists. The auto-run is stopped first: its loop persists a
-    // resume record as it advances, and left running it would recreate the
-    // `.aboard/` the user just removed.
     if (initialized && !next) {
-      // Close admission before awaiting any cleanup. Every command and
-      // persistence callback observes this flag, so stale work cannot recreate
-      // the directory the user deliberately removed.
       initialized = false;
       const runtimeDrained = runtimeAdmission.close();
       autoRun.stop("project state was removed");
@@ -1011,9 +837,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const at = new Date().toISOString() as IsoTimestamp;
       if (lease.current() !== undefined) lease.forceRelease(at, "project state was removed");
       fleet.clear(at);
-      // Recent Activity is cached in memory and rewritten whole on every append.
-      // Without this the deleted history comes back on the next initialization,
-      // out of this process rather than off disk.
       await activity.reset();
       managerIdentity.reset();
       recordedManager = undefined;
@@ -1040,9 +863,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     await publishManagerState();
   };
   await publishScaffoldState();
-  // Watch the whole directory, not just the manifest: deleting `.aboard/` in the
-  // explorer does not reliably raise a per-file delete for its contents. The
-  // window-focus re-check covers a deletion made entirely outside VS Code.
   const scaffoldWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, ".aboard/**"));
   for (const event of [scaffoldWatcher.onDidCreate, scaffoldWatcher.onDidChange, scaffoldWatcher.onDidDelete]) {
     context.subscriptions.push(event(() => void publishScaffoldState()));
@@ -1105,6 +925,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const next = configuration(projectSettings.values);
     const previous = currentConfiguration;
     currentConfiguration = next.value;
+    fleetUi?.checkAutoRun();
     for (const diagnostic of [...projectSettings.diagnostics, ...next.diagnostics]) output.appendLine(`Configuration: ${diagnostic.message}`);
     if (restartHint(previous, next.value)) void window.showInformationMessage("Manager launch settings changed. Restart the Manager to apply them.");
   };
@@ -1112,9 +933,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!ABOARD_SETTINGS.some((setting) => event.affectsConfiguration(setting))) return;
     reloadConfiguration(() => [...MANAGER_RESTART_SETTINGS].some((setting) => event.affectsConfiguration(setting)));
   }));
-  // `.aboard/settings.json` is outside VS Code's settings model, so it needs its
-  // own watcher; the broader `.aboard/**` scaffold watcher is not reused because
-  // runtime writes would reload the file constantly.
   const settingsWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, PROJECT_SETTINGS_PATH));
   const reloadProjectSettings = async () => {
     projectSettings = await readProjectSettings(workspaceRoot);

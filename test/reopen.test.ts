@@ -13,11 +13,6 @@ import { migrateLegacySessions, type LegacySessionRecord } from "../src/domain/a
 import { renderReopenItems, registerReopenCommand, type ReopenQuickPickItem } from "../src/vscode/reopen.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 
-/**
- * The superseded `sessions.json` shape. These tests describe reopening, which
- * has to keep working for conversations recorded before the activity store
- * existed, so they are written against the legacy records the migration folds in.
- */
 interface LegacyLedger {
   readonly version: 1;
   readonly sessions: readonly LegacySessionRecord[];
@@ -109,9 +104,6 @@ function setup(options: {
     activity: { entries: () => migrateLegacySessions(undefined, options.ledger?.sessions ?? []) },
     fleet,
     terminals: {
-      // Mirrors production, which asks the terminal controller: a session
-      // reopened a moment ago is live, and asking for it again must focus that
-      // terminal rather than launch a second one for the same agent.
       isOpen: (id) => openTerminals.has(id) || terminals.list().some((entry) => entry.terminalId === id && entry.status === "open"),
       liveTerminalFor: (id) => liveTerminals.get(id) ?? terminals.liveTerminalForAgent(id),
       show: (id) => { shown.push(id); },
@@ -141,9 +133,6 @@ test("an ended brainstormer is reopened with its own definition re-emitted, not 
   const outcome = await reopen.reopen(options[0]!.candidate);
   assert.equal(outcome.action, "reopened");
 
-  // The whole point: `--resume` restores an `--agent` selection only by name, so
-  // reopening without the per-launch definition would return the brainstormer as
-  // default Claude holding every default tool.
   const line = host.created[0]!.terminal.sent.at(-1) ?? "";
   assert.match(line, /--resume 4db0ed4c/);
   assert.match(line, /--add-dir/);
@@ -179,9 +168,6 @@ test("a session that ran in an auto-run's own checkout is reopened there, not in
   const outcome = await reopen.reopen(options[0]!.candidate);
   assert.equal(outcome.action, "reopened");
 
-  // Claude Code files a transcript under the directory the session ran in, so
-  // asking the workspace would report a conversation that plainly exists as
-  // missing — and then relaunch it as a fresh session under the same id.
   assert.ok(resumeChecks.length > 0);
   assert.ok(resumeChecks.every((check) => check.cwd === CHECKOUT), JSON.stringify(resumeChecks));
   assert.equal(host.created[0]?.options.cwd, CHECKOUT);

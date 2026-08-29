@@ -18,17 +18,6 @@ export function isAuthorized(
   return timingSafeEqual(digest(suppliedToken), digest(expectedToken));
 }
 
-/**
- * Two credentials, because they are discoverable in very different ways.
- *
- * `full` reaches every route and is only ever handed to processes aboard itself
- * launched. `command` reaches
- * `/commands` and nothing else, and is published where an unrelated script can
- * find it. Scripts need to be able to find a credential; nothing about that need
- * justifies letting whatever finds it drive the Manager, create agents, or read
- * fleet and session state. So the discoverable one carries only the capability
- * the discoverable endpoint exists to offer.
- */
 export interface BridgeTokens {
   readonly full: string;
   readonly command: string;

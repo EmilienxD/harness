@@ -210,11 +210,6 @@ export class FleetRegistry {
     this.record({ type: "agent-registered", agentId, sessionId: session.sessionId }, occurredAt);
   }
 
-  /**
-   * Forgets an agent completely. A dead terminal is not a fleet member: the
-   * session, its children, and any undelivered results go with it, so nothing
-   * in the tree or the persisted snapshot outlives the process it described.
-   */
   public remove(agentId: AgentId, occurredAt: IsoTimestamp): void {
     const session = this.sessionsByAgent.get(agentId);
     if (session === undefined) return;
@@ -311,12 +306,6 @@ export class FleetRegistry {
     this.record({ type: "lifecycle-transitioned", agentId, from, to: lifecycle.status }, occurredAt);
   }
 
-  /**
-   * Relaunches a finished agent under its existing identity. `sessionId` is
-   * passed only when the relaunch starts a fresh conversation rather than
-   * resuming the recorded one — "New Manager" keeps the agent id but replaces
-   * the session, and hook routing resolves by session id.
-   */
   public restart(
     agentId: AgentId,
     terminal: AgentSession["terminal"],

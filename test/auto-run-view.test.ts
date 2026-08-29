@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AutoRunTreeModel, autoRunCard, cardPullRequest, type AutoRunPreview, type AutoRunViewSources } from "../src/vscode/auto-run.js";
+import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, cardPullRequest, type AutoRunForecast, type AutoRunPreview, type AutoRunViewSources } from "../src/vscode/auto-run.js";
 import type { AutoRunState } from "../src/auto/engine.js";
+import type { AutoRunDryRunResult } from "../src/domain/auto-run.js";
 import type { AutoRunRecord, PersistedAutoRunRecord, RecoveryEligibility } from "../src/domain/run-plan.js";
 
 const SESSION = "aboard/run/test";
@@ -58,16 +59,14 @@ function state(overrides: Partial<AutoRunState> = {}): AutoRunState {
 function sources(overrides: {
   readonly state?: AutoRunState | undefined;
   readonly starting?: boolean;
-  readonly previewing?: boolean;
-  readonly preview?: AutoRunPreview | undefined;
+  readonly forecast?: AutoRunForecast;
   readonly persisted?: PersistedAutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
 } = {}): AutoRunViewSources {
   return {
     starting: () => overrides.starting ?? false,
-    previewing: () => overrides.previewing ?? false,
-    preview: () => overrides.preview,
+    forecast: () => overrides.forecast ?? { preview: undefined, checking: false, checkedAt: undefined, error: undefined },
     state: () => overrides.state,
     persisted: () => overrides.persisted,
     eligibility: () => overrides.eligibility,
@@ -91,6 +90,16 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     issues: record().plan,
     skipped: [],
     dependencyCycles: [],
+    ...overrides,
+  };
+}
+
+function forecast(result: AutoRunPreview | undefined, overrides: Partial<AutoRunForecast> = {}): AutoRunForecast {
+  return {
+    preview: result,
+    checking: false,
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    error: undefined,
     ...overrides,
   };
 }
@@ -119,16 +128,17 @@ test("clicking Start immediately replaces the idle action with GitHub loading fe
   assert.equal(item.collapsible, false);
 });
 
-test("Preview shows loading feedback, then the planned issues in execution order", () => {
-  const loading = rootItem({ previewing: true });
-  assert.equal(loading.item.label, "Previewing auto-run");
+test("the live forecast shows loading feedback, then the planned issues in execution order", () => {
+  const loading = rootItem({ forecast: forecast(undefined, { checking: true }) });
+  assert.equal(loading.item.label, "Checking next auto-run");
   assert.equal(loading.item.icon, "loading~spin");
 
   const result = preview();
-  const { model, root, item } = rootItem({ preview: result });
-  assert.equal(card({ preview: result }).kind, "preview");
+  const live = forecast(result);
+  const { model, root, item } = rootItem({ forecast: live });
+  assert.equal(card({ forecast: live }).kind, "forecast");
   assert.equal(item.description, "3 issues queued");
-  assert.equal(item.contextValue, "aboard.autoRun.preview");
+  assert.equal(item.contextValue, "aboard.autoRun.forecast");
   assert.equal(item.collapsible, true);
   const rows = model.children(root).map((node) => model.item(node));
   assert.deepEqual(rows.map((row) => row.label), [
@@ -139,13 +149,68 @@ test("Preview shows loading feedback, then the planned issues in execution order
   assert.deepEqual(rows.map((row) => row.description), ["1/3 · afk", "2/3 · hitl", "3/3 · afk"]);
 });
 
-test("a blocked preview explains why the run cannot start", () => {
+test("a blocked forecast explains why the run cannot start", () => {
   const result = preview({ ready: false, blockers: ["the working tree is not clean: src/a.ts"], issues: [] });
-  const { item } = rootItem({ preview: result });
+  const { item } = rootItem({ forecast: forecast(result) });
   assert.equal(item.description, "cannot start · 1 blocker");
   assert.equal(item.icon, "warning");
   assert.match(item.tooltip, /Cannot start: the working tree is not clean/);
   assert.equal(item.collapsible, false);
+});
+
+test("a refresh keeps the last successful issue list visible", () => {
+  const result = preview();
+  const { item, model, root } = rootItem({ forecast: forecast(result, { checking: true }) });
+  assert.equal(item.description, "3 issues queued · refreshing…");
+  assert.equal(item.icon, "sync~spin");
+  assert.equal(model.children(root).length, 3);
+});
+
+test("a failed refresh keeps the last result and reports that it is stale", () => {
+  const result = preview();
+  const { item } = rootItem({ forecast: forecast(result, { error: "GitHub is unavailable" }) });
+  assert.equal(item.description, "3 issues queued");
+  assert.match(item.tooltip, /Last refresh failed: GitHub is unavailable/);
+
+  const unavailable = rootItem({ forecast: forecast(undefined, { checkedAt: undefined, error: "not authenticated" }) });
+  assert.equal(unavailable.item.contextValue, "aboard.autoRun.forecastUnavailable");
+  assert.match(unavailable.item.tooltip, /Use Check Now to try again/);
+});
+
+test("forecast refreshes are single-flight and invalidation rejects a stale result", async () => {
+  let resolve: ((result: AutoRunDryRunResult) => void) | undefined;
+  let calls = 0;
+  const changes: AutoRunForecast[] = [];
+  const controller = new AutoRunForecastController(
+    () => changes.push(controller.snapshot()),
+    () => new Date("2026-01-01T00:00:00.000Z"),
+  );
+  const inspect = () => {
+    calls += 1;
+    return new Promise<AutoRunDryRunResult>((done) => { resolve = done; });
+  };
+
+  const first = controller.refresh(inspect);
+  assert.equal(controller.refresh(inspect), first);
+  assert.equal(calls, 1);
+  assert.equal(controller.snapshot().checking, true);
+
+  controller.invalidate();
+  resolve?.(preview());
+  await first;
+
+  assert.equal(controller.snapshot().preview, undefined);
+  assert.equal(changes.at(-1)?.checking, true, "the invalidated result emits no stale completion");
+});
+
+test("a forecast refresh failure retains the last successful result", async () => {
+  const controller = new AutoRunForecastController(() => undefined, () => new Date("2026-01-01T00:00:00.000Z"));
+  await controller.refresh(async () => preview());
+  await controller.refresh(async () => { throw new Error("GitHub is unavailable"); });
+
+  assert.equal(controller.snapshot().preview?.issues.length, 3);
+  assert.equal(controller.snapshot().error, "GitHub is unavailable");
+  assert.equal(controller.snapshot().checkedAt, "2026-01-01T00:00:00.000Z");
 });
 
 test("an unresolved record suppresses Start, whatever state it is in", () => {

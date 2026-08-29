@@ -447,9 +447,6 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
     const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { interactive: true });
     assert.equal(withTopic?.text.includes("caching layer"), true);
   }
-  // Automated types fall back to a default instruction: a worker with no first
-  // message would sit at an empty TUI forever. The fallback's wording is free
-  // to change; what matters is that a launchable prompt exists.
   const doctor = await adapter.resolve({ type: "pr-doctor-afk", description: "d" }, { interactive: false });
   assert.notEqual(doctor, undefined);
   assert.ok(doctor!.text.length > 0);

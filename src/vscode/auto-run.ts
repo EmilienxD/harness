@@ -1,12 +1,3 @@
-/**
- * The Auto Run view's model.
- *
- * Pure and VS Code free, like the fleet model beside it. Its whole job is to
- * turn "what does the record say, and may it continue?" into one card with the
- * right actions on it — which is the surface that replaces the activation-time
- * Resume/Discard notification. A notification is a moment; recovery has to be a
- * place the user can go back to.
- */
 
 import {
   completedCount,
@@ -24,14 +15,71 @@ import type { AutoRunDryRunResult, PlannedIssue } from "../domain/auto-run.js";
 
 export type AutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: true }>;
 
+export interface AutoRunForecast {
+  readonly preview: AutoRunPreview | undefined;
+  readonly checking: boolean;
+  readonly checkedAt: string | undefined;
+  readonly error: string | undefined;
+}
+
+export class AutoRunForecastController {
+  #value: AutoRunForecast = { preview: undefined, checking: false, checkedAt: undefined, error: undefined };
+  #generation = 0;
+  #inFlight: Promise<void> | undefined;
+
+  public constructor(
+    private readonly onDidChange: () => void,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  public snapshot(): AutoRunForecast {
+    return this.#value;
+  }
+
+  public invalidate(): void {
+    this.#generation += 1;
+    this.#inFlight = undefined;
+    this.#value = { preview: undefined, checking: false, checkedAt: undefined, error: undefined };
+  }
+
+  public refresh(inspect: () => Promise<AutoRunDryRunResult>): Promise<void> {
+    if (this.#inFlight !== undefined) return this.#inFlight;
+    const generation = ++this.#generation;
+    this.#value = { ...this.#value, checking: true, error: undefined };
+    this.onDidChange();
+    const check = (async () => {
+      try {
+        const result = await inspect();
+        if (generation !== this.#generation) return;
+        this.#value = result.inspected
+          ? { preview: result, checking: false, checkedAt: this.now().toISOString(), error: undefined }
+          : { ...this.#value, checking: false, error: result.reason };
+      } catch (error) {
+        if (generation !== this.#generation) return;
+        this.#value = {
+          ...this.#value,
+          checking: false,
+          error: error instanceof Error ? error.message : "Unable to inspect the next auto-run",
+        };
+      } finally {
+        if (generation === this.#generation) this.onDidChange();
+      }
+    })();
+    this.#inFlight = check;
+    void check.finally(() => { if (this.#inFlight === check) this.#inFlight = undefined; });
+    return check;
+  }
+}
+
 export type AutoRunCard =
   /** No record at all: the only thing to offer is a new run. */
   | { readonly kind: "idle" }
   /** Start was clicked and the engine is still discovering the GitHub queue. */
   | { readonly kind: "starting" }
-  /** Preview was clicked and the read-only plan is still being discovered. */
-  | { readonly kind: "previewing" }
-  | { readonly kind: "preview"; readonly preview: AutoRunPreview }
+  /** The view is discovering the next run for the first time. */
+  | { readonly kind: "checking-next" }
+  | { readonly kind: "forecast"; readonly forecast: AutoRunForecast & { readonly preview: AutoRunPreview } }
+  | { readonly kind: "unavailable"; readonly error: string }
   | { readonly kind: "active"; readonly state: AutoRunState; readonly record: AutoRunRecord }
   | { readonly kind: "waiting"; readonly state: AutoRunState; readonly record: AutoRunRecord }
   /** A record exists and its eligibility is still being computed. */
@@ -44,7 +92,7 @@ export type AutoRunCard =
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
   | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string }
-  | { readonly kind: "preview-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number };
+  | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number };
 
 export interface AutoRunTreeItem {
   readonly label: string;
@@ -58,8 +106,7 @@ export interface AutoRunTreeItem {
 
 export interface AutoRunViewSources {
   readonly starting: () => boolean;
-  readonly previewing: () => boolean;
-  readonly preview: () => AutoRunPreview | undefined;
+  readonly forecast: () => AutoRunForecast;
   readonly state: () => AutoRunState | undefined;
   readonly persisted: () => PersistedAutoRunRecord | undefined;
   readonly eligibility: () => RecoveryEligibility | undefined;
@@ -67,14 +114,6 @@ export interface AutoRunViewSources {
   readonly titles: () => Readonly<Record<string, string>>;
 }
 
-/**
- * Resolves the one card the view renders.
- *
- * The order matters: a live run outranks any recovery question about its own
- * record, and an unresolved record outranks the Start actions — offering Start
- * beside an unfinished run is how a user ends up with two runs competing for
- * the same branches.
- */
 export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
   const persisted = sources.persisted();
   const state = sources.state();
@@ -86,9 +125,11 @@ export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
   }
   if (sources.starting()) return { kind: "starting" };
   if (persisted === undefined) {
-    if (sources.previewing()) return { kind: "previewing" };
-    const preview = sources.preview();
-    return preview === undefined ? { kind: "idle" } : { kind: "preview", preview };
+    const forecast = sources.forecast();
+    if (forecast.preview !== undefined) return { kind: "forecast", forecast: { ...forecast, preview: forecast.preview } };
+    if (forecast.checking) return { kind: "checking-next" };
+    if (forecast.error !== undefined) return { kind: "unavailable", error: forecast.error };
+    return { kind: "idle" };
   }
   const eligibility = sources.eligibility();
   if (eligibility === undefined || eligibility.state === "checking") return { kind: "checking", record: persisted };
@@ -98,7 +139,7 @@ export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
 
 /** The record behind the card, when there is one. */
 export function cardRecord(card: AutoRunCard): AutoRunRecord | undefined {
-  return card.kind === "idle" || card.kind === "starting" || card.kind === "previewing" || card.kind === "preview" || card.kind === "unsupported"
+  return card.kind === "idle" || card.kind === "starting" || card.kind === "checking-next" || card.kind === "forecast" || card.kind === "unavailable" || card.kind === "unsupported"
     ? undefined
     : card.record;
 }
@@ -113,10 +154,10 @@ export class AutoRunTreeModel {
   /** The frozen plan, in its immutable order. Never re-sorted by progress. */
   public children(node: AutoRunNode): readonly AutoRunNode[] {
     if (node.kind !== "card") return [];
-    if (node.card.kind === "preview") {
-      const issues = node.card.preview.issues;
+    if (node.card.kind === "forecast") {
+      const issues = node.card.forecast.preview.issues;
       return issues.map((issue, index): AutoRunNode => ({
-        kind: "preview-issue",
+        kind: "forecast-issue",
         issue,
         position: index + 1,
         total: issues.length,
@@ -135,7 +176,7 @@ export class AutoRunTreeModel {
 
   public item(node: AutoRunNode): AutoRunTreeItem {
     if (node.kind === "card") return cardItem(node.card);
-    return node.kind === "issue" ? issueItem(node) : previewIssueItem(node);
+    return node.kind === "issue" ? issueItem(node) : forecastIssueItem(node);
   }
 }
 
@@ -143,10 +184,10 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
   switch (card.kind) {
     case "idle":
       return {
-        label: "Run auto mode",
-        description: "",
-        tooltip: "Start an auto-run to work the labelled issue queue one issue at a time.",
-        icon: "play-circle",
+        label: "Next auto-run",
+        description: "not checked yet",
+        tooltip: "Open this view or use Check Now to load the issues the next auto-run would process.",
+        icon: "list-tree",
         contextValue: "aboard.autoRun.idle",
         collapsible: false,
       };
@@ -159,29 +200,40 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         contextValue: "aboard.autoRun.starting",
         collapsible: false,
       };
-    case "previewing":
+    case "checking-next":
       return {
-        label: "Previewing auto-run",
+        label: "Checking next auto-run",
         description: "loading issues from GitHub…",
-        tooltip: "aboard is loading and ordering the GitHub issues without starting a run.",
+        tooltip: "aboard is loading and ordering the GitHub issues the next run would process.",
         icon: "loading~spin",
-        contextValue: "aboard.autoRun.previewing",
+        contextValue: "aboard.autoRun.checkingNext",
         collapsible: false,
       };
-    case "preview": {
-      const { preview } = card;
+    case "forecast": {
+      const { preview } = card.forecast;
       const count = preview.issues.length;
       return {
-        label: "Auto-run preview",
-        description: preview.ready
-          ? `${count} issue${count === 1 ? "" : "s"} queued`
-          : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
-        tooltip: previewTooltip(preview),
-        icon: preview.ready ? "list-tree" : "warning",
-        contextValue: "aboard.autoRun.preview",
+        label: "Next auto-run",
+        description: card.forecast.checking
+          ? `${count} issue${count === 1 ? "" : "s"} queued · refreshing…`
+          : preview.ready
+            ? `${count} issue${count === 1 ? "" : "s"} queued`
+            : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
+        tooltip: forecastTooltip(card.forecast),
+        icon: card.forecast.checking ? "sync~spin" : preview.ready ? "list-tree" : "warning",
+        contextValue: "aboard.autoRun.forecast",
         collapsible: count > 0,
       };
     }
+    case "unavailable":
+      return {
+        label: "Next auto-run",
+        description: "check failed",
+        tooltip: `aboard could not inspect the next auto-run: ${card.error}. Use Check Now to try again.`,
+        icon: "warning",
+        contextValue: "aboard.autoRun.forecastUnavailable",
+        collapsible: false,
+      };
     case "active": {
       const { state, record } = card;
       return {
@@ -266,7 +318,7 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
   };
 }
 
-function previewIssueItem(node: Extract<AutoRunNode, { kind: "preview-issue" }>): AutoRunTreeItem {
+function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }>): AutoRunTreeItem {
   const { issue, position, total } = node;
   return {
     label: `#${issue.number} ${issue.title}`,
@@ -280,15 +332,17 @@ function previewIssueItem(node: Extract<AutoRunNode, { kind: "preview-issue" }>)
       `Planned branch: ${issue.branch}`,
     ].filter(Boolean).join("\n"),
     icon: "issue-opened",
-    contextValue: "aboard.autoRun.previewIssue",
+    contextValue: "aboard.autoRun.forecastIssue",
     collapsible: false,
     command: { command: "aboard.openIssue", title: "Open Issue", arguments: [issue.number] },
   };
 }
 
-function previewTooltip(preview: AutoRunPreview): string {
+function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRunPreview }): string {
+  const { preview } = forecast;
   return [
-    "Read-only snapshot; Preview again to refresh it before starting.",
+    `Live forecast${forecast.checkedAt === undefined ? "" : `; last checked ${forecast.checkedAt}`}. Start performs one final fresh check before freezing the run.`,
+    forecast.error === undefined ? "" : `Last refresh failed: ${forecast.error}. The list below is the last successful result.`,
     `Target branch: ${preview.sessionBase}`,
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
     `Review ${preview.reviewMode ? "on" : "off"}`,

@@ -54,12 +54,6 @@ export class FileFleetStore extends AtomicJsonFile<FleetPersistenceDto> {
   }
 }
 
-/**
- * `.aboard/runtime/activity.json` — the newest agent and run outcomes, and the
- * launch facts a reopen replays. Gitignored with the rest of the runtime
- * directory: it names sessions and describes launches, which is live state
- * rather than project history.
- */
 export class FileActivityStore extends AtomicJsonFile<ActivityDto> {
   public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
     super(join(workspaceRoot, ".aboard", "runtime", "activity.json"), (value) => {
@@ -73,11 +67,6 @@ export class FileActivityStore extends AtomicJsonFile<ActivityDto> {
   }
 }
 
-/**
- * The superseded `.aboard/runtime/sessions.json`. Read once at activation so its
- * reopenable sessions survive into the activity store, then deleted. Nothing
- * writes it again.
- */
 export class FileLegacySessionLedger extends AtomicJsonFile<LegacySessionLedgerDto> {
   public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
     super(join(workspaceRoot, ".aboard", "runtime", "sessions.json"), (value) => {
@@ -263,15 +252,6 @@ function parseOutcome(value: unknown): RunAttemptOutcome | undefined {
   return reason === undefined ? undefined : { kind: "failed", reason };
 }
 
-/**
- * Parses `.aboard/runtime/auto-run.json`.
- *
- * A malformed record is rejected without throwing, which reads as "there is no
- * run to recover". A version-1 record is neither rejected nor migrated: it is
- * surfaced as an unsupported interrupted run, because a plan cannot be
- * reconstructed from a file that never stored one, and silently dropping it
- * would leave the user's in-flight branches and pull requests unaccounted for.
- */
 export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | undefined {
   if (!isRecord(value)) return undefined;
   const runId = nonEmptyString(value.runId);

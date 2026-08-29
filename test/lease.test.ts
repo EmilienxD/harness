@@ -40,9 +40,6 @@ test("only launches aboard drives are leased: automated Manager work and every a
   const interactive = true;
   // The agent works alone and reports back to aboard.
   assert.equal(leaseRequired("manager", !interactive), true);
-  // A conversation handed to the user — /general-purpose, /brainstorm, any --interactive
-  // launch. An opening --prompt only names the topic; the user drives from
-  // there, and parallel work is theirs to allow.
   assert.equal(leaseRequired("manager", interactive), false);
   // The run commits, pushes, and merges behind its terminals, so even the
   // interactive pr-doctor-hitl is leased.

@@ -74,12 +74,6 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-/**
- * `issues` is validated here rather than left to the JSON Schema, which the
- * caller is free to ignore. Duplicates are deduped rather than refused: a
- * repeated number is wrong, not ambiguous, and the caller's intent is
- * unmistakable (`AGENTS.md`).
- */
 function parseIssues(value: unknown): { readonly issues: readonly number[]; readonly notices: readonly string[] } | string {
   if (!Array.isArray(value)) return "issues must be an array of positive integers";
   if (value.length === 0) return "issues must contain at least one issue number";
@@ -105,12 +99,6 @@ interface ParsedLaunch {
 const MIN_DESCRIPTION_WORDS = 3;
 const MAX_DESCRIPTION_WORDS = 6;
 
-/**
- * Coerces the user-facing label into the 3-6 word range. A malformed label is a
- * cosmetic problem, not a launch-blocking one, so overlong labels are truncated
- * and short ones are extended from the prompt, with the type as the last-resort
- * filler. Returns the label plus a notice when it had to be adjusted.
- */
 function normalizeDescription(raw: string, prompt: string | undefined, type: string): { description: string; notice?: string } {
   const words = raw.trim().split(/\s+/);
   if (words.length >= MIN_DESCRIPTION_WORDS && words.length <= MAX_DESCRIPTION_WORDS) {

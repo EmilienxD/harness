@@ -1,11 +1,3 @@
-/**
- * The git boundary (`AGENTS.md`).
- *
- * Every git side effect in the auto-run loop is performed by the extension, so
- * git needs a real seam rather than the ad-hoc `execFile("git", …)` calls it
- * replaces. The interface is what the engine and the hook paths actually need;
- * a fake implementing it is enough to test the whole loop without a repository.
- */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -36,28 +28,11 @@ export interface GitStatus {
   readonly entries: readonly GitStatusEntry[];
 }
 
-/**
- * One checkout of this repository. `branch` is absent for a detached or bare
- * entry, neither of which a run ever creates but both of which `git worktree
- * list` reports.
- */
 export interface GitWorktree {
   readonly path: string;
   readonly branch: string | undefined;
 }
 
-/**
- * What the repository contains, for the question every recommendation rests on
- * and that no other briefing section answers: is there a project here yet?
- *
- * A repository with no source file cannot be surveyed, so a roadmap, an
- * estimate, or a "what's left" answer derived from it is invention. The Manager
- * would otherwise pay a turn to find that out — and the cheap version of that
- * turn (`ls`) is also the wrong one, because a README and a licence look like
- * content while carrying no intent. Counting *source* files is what separates
- * the two, which is why documentation, configuration, and data extensions are
- * deliberately not in the set below.
- */
 export interface CodebaseSurvey {
   /** Source files present, tracked or not, excluding anything gitignored. */
   readonly sourceFileCount: number;
@@ -67,14 +42,6 @@ export interface CodebaseSurvey {
   readonly commitCount: number;
 }
 
-/**
- * Extensions that count as code. The list decides one thing — whether this
- * repository can be surveyed at all — so it errs towards inclusion for anything
- * a project is written *in*, and excludes everything a project is described in
- * (`.md`), configured by (`.json`, `.yml`, `.toml`), or ships as data. A
- * README-only repository must read as "no code yet", because that is exactly
- * what it is.
- */
 export const SOURCE_EXTENSIONS: ReadonlySet<string> = new Set([
   "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "svelte", "astro",
   "py", "rb", "go", "rs", "java", "kt", "kts", "scala", "clj", "cljs", "groovy",
@@ -126,36 +93,15 @@ export interface GitClient {
   codebase(): Promise<CodebaseSurvey>;
   headSha(short?: boolean): Promise<string>;
   branchExists(branch: string): Promise<boolean>;
-  /**
-   * The full SHA a local branch points at, or `undefined` when it does not
-   * exist. Full rather than short because recovery compares it against a value
-   * recorded hours earlier, and an abbreviation that was unambiguous then can
-   * become ambiguous as the repository grows.
-   */
   branchSha(branch: string): Promise<string | undefined>;
   /** The same, for `origin/<branch>` as of the last fetch. */
   remoteBranchSha(branch: string): Promise<string | undefined>;
-  /**
-   * Enough of one commit to recognise it again after a crash: its parents and
-   * its subject. Write-ahead recovery adopts a commit only when both match what
-   * the journal said the run was about to create.
-   */
   commitDetails(ref: string): Promise<CommitDetails | undefined>;
   /** The tree represented by the current index, used before creating a commit. */
   stagedTreeSha(): Promise<string>;
-  /**
-   * Deletes a local branch only if it still points at `expectedSha`. Returns
-   * `false` when the ref has moved or is gone, which is how cleanup refuses to
-   * remove something it can no longer prove it created.
-   */
   deleteBranchAt(branch: string, expectedSha: string): Promise<boolean>;
   /** The same guard against `origin/<branch>`, then a delete-push. */
   deleteRemoteBranchAt(branch: string, expectedSha: string): Promise<boolean>;
-  /**
-   * Whether `origin` has this branch, as of the last fetch. Distinct from
-   * `isPushed`: a branch with local commits the remote has not seen still exists
-   * there, and existence is the question a pull request base has to answer.
-   */
   remoteBranchExists(branch: string): Promise<boolean>;
   fetch(): Promise<void>;
   checkout(branch: string): Promise<void>;
@@ -164,35 +110,18 @@ export interface GitClient {
   deleteBranch(branch: string): Promise<void>;
   /** Fast-forwards `branch`, which must be checked out, to its upstream. */
   fastForward(branch: string): Promise<void>;
-  /**
-   * Merges `origin/<base>` into the checked-out branch. Returns `false` when the
-   * merge conflicts, having first put the tree back exactly as it was: a
-   * reconciliation attempt that could strand the user in a half-merged checkout
-   * is not an attempt worth making automatically.
-   */
   mergeFromRemote(base: string): Promise<boolean>;
   add(): Promise<void>;
   commit(subject: string, body: string): Promise<string>;
   push(branch: string, setUpstream: boolean): Promise<void>;
   /** Whether HEAD carries a commit whose message references this issue. */
   hasCommitFor(issueNumber: number, base: string): Promise<boolean>;
-  /**
-   * Whether the local branch and its remote tracking ref point at the same
-   * commit. The `commit` phase's postcondition is "committed **and** pushed", and
-   * those are two effects that can fail independently: a push that fails after a
-   * successful commit must resume by retrying the push, not by trying to open a
-   * pull request for a branch the remote has never seen.
-   */
   isPushed(branch: string): Promise<boolean>;
   /** Which repository-relative paths are excluded by the checkout's ignore rules. */
   ignoredPaths(paths: readonly string[]): Promise<readonly string[]>;
   /** Tracked entries at `ref` beneath a repository-relative directory. */
   trackedPathsUnder(ref: string, directory: string): Promise<readonly string[]>;
   worktrees(): Promise<readonly GitWorktree[]>;
-  /**
-   * Adds a worktree at `path`. With `startPoint`, `branch` is created there;
-   * without one, an existing `branch` is checked out into it.
-   */
   addWorktree(path: string, branch: string, startPoint?: string): Promise<void>;
   removeWorktree(path: string, force: boolean): Promise<void>;
 }
@@ -206,9 +135,6 @@ export class ProcessGitClient implements GitClient {
   }
 
   public async defaultBranch(): Promise<string> {
-    // `origin/HEAD` is the authoritative answer but is only present when the
-    // clone recorded it; refreshing it costs a network round trip, so fall back
-    // to the conventional names before failing.
     const symbolic = await this.tryRun(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
     if (symbolic !== undefined && symbolic.startsWith("origin/")) return symbolic.slice("origin/".length);
     for (const candidate of ["main", "master"]) {
@@ -226,15 +152,6 @@ export class ProcessGitClient implements GitClient {
     return { branch: await this.currentBranch(), entries };
   }
 
-  /**
-   * One `ls-files` and one `rev-list`. `--cached --others --exclude-standard`
-   * is the right file set for this question: it sees work the user has not
-   * committed yet — a fresh project's normal state — while `--exclude-standard`
-   * drops everything `.gitignore` covers, so a `node_modules` or a build
-   * directory cannot make an empty repository look like a codebase. Both calls
-   * are probes: an unborn branch has no HEAD to count, and neither absence is a
-   * failure worth degrading the section for.
-   */
   public async codebase(): Promise<CodebaseSurvey> {
     const listed = await this.tryRun(["ls-files", "--cached", "--others", "--exclude-standard"]) ?? "";
     const paths = listed.split(/\r?\n/u).filter((line) => line.trim().length > 0);
@@ -282,12 +199,6 @@ export class ProcessGitClient implements GitClient {
     return this.run(["write-tree"]);
   }
 
-  /**
-   * `-D` rather than `-d`, but only behind the SHA check: the point of cleanup
-   * is to remove a branch whose commits the user chose to discard, and `-d`
-   * would refuse exactly those. The guard, not git's merge heuristic, is what
-   * makes this safe.
-   */
   public async deleteBranchAt(branch: string, expectedSha: string): Promise<boolean> {
     if (await this.branchSha(branch) !== expectedSha) return false;
     return await this.tryRun(["branch", "-D", branch]) !== undefined;
@@ -295,9 +206,6 @@ export class ProcessGitClient implements GitClient {
 
   public async deleteRemoteBranchAt(branch: string, expectedSha: string): Promise<boolean> {
     if (await this.remoteBranchSha(branch) !== expectedSha) return false;
-    // `--force-with-lease` names the SHA the delete is allowed to remove, so a
-    // push that landed between the check above and this line is refused by the
-    // remote rather than silently overwritten.
     return await this.tryRun(["push", "--delete", `--force-with-lease=${branch}:${expectedSha}`, "origin", branch]) !== undefined;
   }
 
@@ -332,9 +240,6 @@ export class ProcessGitClient implements GitClient {
       await this.run(["merge", "--no-edit", `origin/${base}`]);
       return true;
     } catch {
-      // A conflicted merge leaves markers in the tree and `MERGE_HEAD` behind.
-      // Aborting is what makes the attempt free; it is a probe, so a failure to
-      // abort is reported by the caller's next status read rather than here.
       await this.tryRun(["merge", "--abort"]);
       return false;
     }
@@ -356,9 +261,6 @@ export class ProcessGitClient implements GitClient {
   }
 
   public async hasCommitFor(issueNumber: number, base: string): Promise<boolean> {
-    // Only commits this branch adds over its base count. A commit reachable from
-    // the base mentioning the same issue is somebody else's work, not this run's
-    // postcondition.
     const log = await this.tryRun(["log", `${base}..HEAD`, "--format=%B"]);
     if (log === undefined || log.length === 0) return false;
     return new RegExp(`(?:^|\\s)#${issueNumber}(?![0-9])`, "u").test(log);
@@ -393,11 +295,6 @@ export class ProcessGitClient implements GitClient {
     return listed.split("\0").filter((path) => path.length > 0);
   }
 
-  /**
-   * `--porcelain` rather than the human listing: a path with a space in it is
-   * unparseable in the default output, and this repository's paths are the
-   * user's, not aboard's.
-   */
   public async worktrees(): Promise<readonly GitWorktree[]> {
     const output = await this.tryRun(["worktree", "list", "--porcelain"]);
     if (output === undefined) return [];

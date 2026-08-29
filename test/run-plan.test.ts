@@ -13,11 +13,6 @@ import {
   type FrozenIssue,
 } from "../src/domain/run-plan.js";
 
-/**
- * A candidate with the queue's facts defaulted, so each test states only what it
- * is about. Creation time defaults to the issue number's own order, and a
- * candidate is a leaf unless it says otherwise.
- */
 function candidate(overrides: Partial<CandidateIssue> & { readonly number: number }): CandidateIssue {
   return {
     title: `Issue ${overrides.number}`,
@@ -46,9 +41,6 @@ test("planning skips unclassified and closed work and orders by creation", () =>
 });
 
 test("an issue blocked by work this run will also do joins the plan behind it", () => {
-  // The old behavior deferred every blocked issue and re-read GitHub after each
-  // merge. A fixed plan cannot do that, so admission is closed under
-  // dependencies instead: the blocker is in, therefore the dependent is too.
   const plan = planRun([
     candidate({ number: 37, title: "Later", openBlockedByNumbers: [35], dependencyNumbers: [35], createdAt: "2026-01-04T00:00:00.000Z" }),
     candidate({ number: 35, title: "Migrate the queue", createdAt: "2026-01-02T00:00:00.000Z" }),
@@ -143,10 +135,6 @@ test("an umbrella never enters the plan, silently unless it is classified", () =
     candidate({ number: 12, labels: ["[AI]-afk"], hasChildren: true, createdAt: "2026-01-03T00:00:00.000Z" }),
     candidate({ number: 13, createdAt: "2026-01-04T00:00:00.000Z" }),
   ]);
-  // The plain spec and the plain parent are dropped without a line — every
-  // repository has those, and a skip line each on every start is noise. Only
-  // #12, which asks to be addressed autonomously *and* has children, is a
-  // contradiction worth surfacing.
   assert.deepEqual(plan.issues.map((entry) => entry.number), [13]);
   assert.deepEqual(plan.skipped, [
     { number: 12, reason: "umbrella: has sub-issues, which are the work" },

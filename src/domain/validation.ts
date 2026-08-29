@@ -458,10 +458,6 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
         `session.resultDelivery.mode must be none for ${identity.type} agents`,
       );
     }
-    // Only the automated types owe a result. `general-purpose` is neither
-    // automated nor interactive-only, so an interactive launch of it legally
-    // persists with `mode: "none"`; flagging that here discarded the whole
-    // `fleet.json`, because a session that fails to parse fails the snapshot.
     if (
       isAutomatedAgentType(identity.type) &&
       resultDelivery.mode === "none"
@@ -751,13 +747,6 @@ export function parseFleetPersistenceDto(
   };
 }
 
-/**
- * Parses `.aboard/runtime/activity.json`. A single unreadable entry is dropped
- * rather than failing the file: history is a convenience, and one malformed row
- * must not cost the user every other outcome they can still see or reopen. A
- * file that is not an activity store at all still fails, since that is a wrong
- * file rather than a stale one.
- */
 export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> {
   const issues: string[] = [];
   const record = readRecord(value, "activity", issues);
@@ -839,10 +828,6 @@ function parseReopenable(value: unknown): ReopenableSession | undefined {
   };
 }
 
-/**
- * Parses the legacy `.aboard/runtime/sessions.json`. Read only, and only until
- * its entries have been folded into the activity store; nothing writes it again.
- */
 export function parseLegacySessionLedger(
   value: unknown,
 ): ValidationResult<LegacySessionLedgerDto> {

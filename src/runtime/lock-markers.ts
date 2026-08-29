@@ -3,13 +3,6 @@ import { join } from "node:path";
 import type { LockMarkerProbe } from "../bridge/session-lifecycle.js";
 import type { SessionWrapperLayout } from "../claude/launch.js";
 
-/**
- * Liveness probe for the SessionProcessMonitor: the wrapper's marker exists
- * while its Claude child runs and is removed the moment the child exits for
- * any reason. A missing wrapper (crash before spawn) leaves no marker, which
- * reads as ended — matching the startup-proof failure the launch path turns
- * into a killed terminal.
- */
 export const lockMarkerPresent: LockMarkerProbe = (lockFile) => existsSync(lockFile);
 
 /** `.aboard/scripts/aboard_wrapper.py` is extension-owned scaffold state; markers live under gitignored runtime state. */
@@ -32,12 +25,6 @@ export interface SessionExitRecord {
   readonly error?: string;
 }
 
-/**
- * Reads and consumes the wrapper's exit record for a marker. Consuming it keeps
- * a stale record from being attributed to a later launch of the same agent, and
- * the absence of a record is normal — an unwrapped launch, or a wrapper killed
- * outright — so it answers `undefined` rather than throwing.
- */
 export function takeSessionExitRecord(lockFile: string): SessionExitRecord | undefined {
   const path = `${lockFile.replace(/\.lock$/, "")}.exit`;
   let raw: string;
@@ -54,23 +41,6 @@ export function takeSessionExitRecord(lockFile: string): SessionExitRecord | und
   } catch { return undefined; }
 }
 
-/**
- * Marker removal as an event rather than a poll interval. Polling alone made a
- * session death take up to a full interval to surface — long enough for the
- * user to see a dead agent still listed and be refused a relaunch. The wrapper
- * deletes its marker the instant its Claude child exits, so a directory watch
- * turns double-Ctrl+C into a sub-second settlement and leaves the poll as the
- * fallback for filesystems where `fs.watch` is unreliable (network shares, some
- * containers).
- *
- * Events are coalesced: an editor or the wrapper can produce several per write,
- * and the sweep they trigger is a handful of `existsSync` calls.
- *
- * The watch never creates the directory: `.aboard/` exists only once the user
- * scaffolds the project, and an activation in an uninitialized workspace must
- * leave the tree untouched. Until the directory appears the watch simply
- * retries, and the poll fallback covers liveness in the meantime.
- */
 export function watchLockMarkers(directory: string, onChanged: () => void, debounceMs = 40, retryMs = 2000): { dispose(): void } {
   let pending: NodeJS.Timeout | undefined;
   let retry: NodeJS.Timeout | undefined;

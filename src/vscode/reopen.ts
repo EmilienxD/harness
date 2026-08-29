@@ -19,13 +19,6 @@ export interface ReopenCommandHost {
   error(message: string): void;
 }
 
-/**
- * One row per recorded session. The label is the name the session runs under —
- * `aboard-<type>-<id>`, the `--agent` argument and the `@<name>` banner the
- * terminal prints — so the picker, the fleet tree, and the TUI head all name the
- * same conversation identically, and a row is greppable straight back to its
- * definition file.
- */
 export function renderReopenItems(
   options: readonly ReopenOption[],
   now: Date = new Date(),
@@ -47,9 +40,6 @@ function detailFor(option: ReopenOption, now: Date): string {
   const { candidate } = option;
   const chrome = candidate.chromeEnabled === true ? " · Chrome" : "";
   if (!option.resumable) {
-    // Named plainly rather than hidden: Claude Code sweeps its own transcripts
-    // after `cleanupPeriodDays`, and a row that vanished without saying so would
-    // read as aboard losing the session.
     return `Cannot be reopened — Claude Code no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
   }
   switch (candidate.origin) {
@@ -70,12 +60,6 @@ export function age(at: string, now: Date): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-/**
- * `aboard.reopenSession`. The command asks rather than guesses: unlike
- * `review_pr`, which has exactly one pull request in flight to reopen, there is
- * no single obvious conversation to return to, and reopening the wrong one costs
- * a terminal and the user's attention.
- */
 export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoordinator): Disposable {
   return host.registerCommand("aboard.reopenSession", async () => {
     let items: readonly ReopenQuickPickItem[];

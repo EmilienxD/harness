@@ -8,11 +8,6 @@ import type { RunObservations } from "../src/domain/run-validation.js";
 const SESSION = "aboard/run/test";
 const SHA = (seed: string) => seed.repeat(40).slice(0, 40);
 
-/**
- * A run that landed #34, is mid-flight on #35, has not started #36, and has its
- * own checkout. That is every ownership case cleanup has to reason about in one
- * record.
- */
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
     version: 2,
@@ -104,9 +99,6 @@ test("local cleanup takes terminals, a clean checkout, and unchanged local branc
 test("full cleanup adds remote branches and still-open unmerged pull requests", () => {
   const result = plan("full-cleanup");
   assert.deepEqual(result.remoteBranches.map((branch) => branch.name), [SESSION, "aboard/35-two"]);
-  // #57 and the run's own #60 are still open. #56 belongs to a landed issue, so
-  // it is never a candidate at all — a merged pull request is not something
-  // cleanup weighs and then spares.
   assert.deepEqual(result.pullRequests.map((pullRequest) => pullRequest.number), [57, 60]);
 });
 

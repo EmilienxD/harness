@@ -135,9 +135,6 @@ test("a launch given its own directory starts there, cds there, and calls it the
 
   assert.equal(created.cwd, "C:\\sessions\\run_test\\aboard");
   assert.equal(host.created[0]?.options.cwd, "C:\\sessions\\run_test\\aboard");
-  // Relative launch paths — the rewritten agent definition, a spilled prompt —
-  // resolve against this directory, so the visible `cd` is what makes the
-  // command line mean what it says.
   assert.deepEqual(host.created[0]?.terminal.sent[0], {
     text: "cd -LiteralPath 'C:\\sessions\\run_test\\aboard'",
     addNewLine: true,
@@ -148,9 +145,6 @@ test("a launch given its own directory starts there, cds there, and calls it the
 });
 
 test("an agent's live terminal is findable without the fleet, so settlement can collect it", () => {
-  // Session-death settlement drops the fleet record before closing the
-  // terminal; a fleet-based lookup leaked the terminal and made the next launch
-  // fail with "already has a live aboard terminal".
   const { controller, host } = setup();
   const agentId = agent("manager-1");
   const created = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
@@ -416,9 +410,6 @@ test("a launch with no SessionStart inside its window is reported once, then kil
   assert.deepEqual(proofs.armed, [{ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
 
   await flush();
-  // The callback is the launch verdict delivered to the user: it names the
-  // agent, the session, and the waiting window so the notification can say
-  // *why* the terminal is disappearing.
   assert.deepEqual(notified, [{ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
   assert.equal(host.created[0]!.terminal.disposed, true);
 });

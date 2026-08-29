@@ -32,16 +32,6 @@ export interface WorkerCompletionSink {
   complete(agentId: AgentId, result: WorkerResult): boolean;
 }
 
-/**
- * Whether a closed terminal owes anyone a result. The Manager and sessions
- * handed to the user do not: their Stop hook is guarded off (by type for the
- * interactive-only types, by `ABOARD_DELIVERS_RESULT` for a `general-purpose`
- * launched interactively), so no result can ever arrive and there is nothing to
- * reconcile — they are simply forgotten. The type half of the test still
- * matters, so a mis-routed launch (an interactive type handed to a
- * result-delivering tool) still cannot leave a dead agent stuck in the fleet;
- * `general-purpose` reports exactly when its launch asked for one.
- */
 export function reportsResult(session: AgentSession): boolean {
   return session.resultDelivery.mode !== "none"
     && session.identity.type !== "manager"
@@ -93,9 +83,6 @@ export class WorkerLifecycleReconciler {
       if (exitCode !== 0) {
         return this.#finish(observation.agentId, failure("crashed", exitCode, observation.lastAssistantMessage));
       }
-      // An auto-run implementer's contract ends at "the working tree contains
-      // the change": the engine commits, so a dirty tree here is the expected
-      // success state and an empty diff is the failure the engine detects.
       const expectsUncommittedTree = this.options.fleet.get(observation.agentId)?.expectsUncommittedTree === true;
       if (!expectsUncommittedTree && this.options.lease.current()?.agentId === observation.agentId) {
         let clean = false;
@@ -145,12 +132,6 @@ export class WorkerLifecycleReconciler {
     });
   }
 
-  /**
-   * The TUI process died while its terminal stayed open (user typed `exit` or
-   * double Ctrl+C at the shell). It settles exactly like a terminal close:
-   * from the fleet's perspective the worker is gone either way. `#once` makes
-   * the race with a real terminal close and with a Stop hook benign.
-   */
   public processEnded(observation: { readonly agentId: AgentId; readonly sessionId: SessionId }): Promise<boolean> {
     return this.#once(observation.agentId, async () => {
       this.#requireIdentity(observation.agentId, observation.sessionId);

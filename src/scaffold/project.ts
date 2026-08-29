@@ -2,13 +2,6 @@ import { createHash } from "node:crypto";
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-/**
- * The scaffolder deliberately creates no roadmap issue. A repository with no
- * `[AI]-todo` carrier is the normal first-run state, and an empty placeholder
- * issue is worse than none: it looks like a roadmap, so nothing prompts anyone
- * to write one. The Manager's briefing reports the absence as something to do,
- * and `/update-todo` surveys the codebase and writes the first one.
- */
 export interface ScaffoldOptions {
   readonly projectRoot: string;
   readonly assetRoot: string;
@@ -66,11 +59,6 @@ async function files(root: string): Promise<readonly string[]> {
 
 function portable(path: string): string { return path.split(sep).join("/"); }
 
-/**
- * A damaged manifest degrades to "nothing installed" rather than failing the
- * scaffold: the manifest is only an upgrade hint, and every asset still falls
- * back to the preserve-on-local-edit path when it is missing.
- */
 async function loadManifest(path: string): Promise<Manifest> {
   if (!await exists(path)) return { version: 1, assets: {} };
   let parsed: Record<string, unknown>;
@@ -82,12 +70,6 @@ async function loadManifest(path: string): Promise<Manifest> {
 
 export type ScaffoldState = "uninitialized" | "initialized";
 
-/**
- * Distinguishes a first install from a re-run so the UI can offer "Initialize"
- * or "Update" rather than the ambiguous "Install or Upgrade". The manifest is
- * the marker: only a completed scaffold writes it, and it is what drives the
- * upgrade-versus-preserve decision on the next run.
- */
 export async function readScaffoldState(projectRoot: string): Promise<ScaffoldState> {
   const manifestPath = join(resolve(projectRoot), ...MANIFEST_PATH.split("/"));
   return Object.keys((await loadManifest(manifestPath)).assets).length > 0 ? "initialized" : "uninitialized";
@@ -117,9 +99,6 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
       } else if (previousAsset !== undefined && hash(current) === previousAsset.sourceHash) {
         await writeFile(destination, content, "utf8"); updated.push(path);
       } else {
-        // Preserving a local edit needs no warning: nothing is overwritten and
-        // no action is required. The info message counts preserved files, and
-        // the upgrade's modal already promises local edits are kept.
         preserved.push(path);
       }
     }

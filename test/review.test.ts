@@ -88,9 +88,6 @@ test("an unknown owner falls back to a fresh pr-doctor-hitl and says so", async 
 });
 
 test("a focus that lands on an existing session is reported unused, never silently dropped", async () => {
-  // Neither branch can apply it — showing a terminal sends nothing and
-  // `--resume` re-passes the original flags with no new prompt — and the caller
-  // cannot predict which branch it gets, so the discard has to be visible.
   const live = setup({ latest: 42, owner: owner() });
   assert.deepEqual(await live.coordinator.review({ focus: "boundary validation" }), {
     action: "focused", prNumber: 42, agentId: "agent-1", type: "implementer", unusedFocus: "boundary validation",

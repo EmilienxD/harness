@@ -1,30 +1,3 @@
-/**
- * The checkout a run works in (`AGENTS.md`).
- *
- * By default a run implements issues in the user's own working tree, which is
- * why it has to move HEAD, why it demands a clean tree before it starts, and why
- * the user cannot touch the repository while it works. This module is the other
- * option: the run gets a checkout of its own, outside the project directory
- * entirely, and the user's tree is never written or moved. Preparation reads
- * its setup script and snapshots missing local project configuration before
- * any agent starts.
- *
- * Three things make that checkout worth having:
- *
- * - It is a *sibling* of the project root, never a directory inside it. A
- *   checkout nested in the repository is one the run would then address issues
- *   into, and one `git add -A` would try to commit.
- * - It is not named after what it is. An agent that recognizes a second checkout
- *   can reason its way back to "the real repository is elsewhere"; one that sees
- *   an ordinary project directory has no reason to look. This is the cheapest and
- *   most effective part of the isolation, and it is why nothing in the path says
- *   worktree.
- * - Its launches carry `Read`/`Edit` deny rules covering the project root, so the
- *   file tools refuse the user's checkout even if an agent goes looking. That is
- *   defence in depth and nothing more: `Bash` reaches the whole filesystem, and
- *   fencing off shell commands would mean guessing at every command that can
- *   write a file. An agent that means to escape can; this stops the accident.
- */
 
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
@@ -34,10 +7,6 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { autoRunMessage, type WorktreeSettings } from "../domain/auto-run.js";
 import { isWorkingTreeClean, type GitClient } from "../git/client.js";
 
-/**
- * The directory the run's checkouts are collected in, beside the project rather
- * than inside it. Its name is deliberately dull.
- */
 export const RUN_WORKSPACE_CONTAINER = ".aboard-sessions";
 
 const PROJECT_OVERLAY_MARKER = ".aboard/runtime/project-overlay-v2";
@@ -55,13 +24,6 @@ export interface ProjectConfigurationOverlayRequest {
   readonly git: GitClient;
 }
 
-/**
- * Carries local aboard and Claude project configuration into a checkout Git
- * cannot supply. Existing entries win, so committed configuration from the
- * session branch is never replaced by the user's checkout. The marker makes
- * this a creation-time snapshot even when a run later resumes in the same
- * checkout.
- */
 export async function overlayProjectConfiguration(request: ProjectConfigurationOverlayRequest): Promise<void> {
   const marker = join(request.worktreeRoot, ...PROJECT_OVERLAY_MARKER.split("/"));
   if (await pathStat(marker) !== undefined) return;
@@ -80,9 +42,6 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
     await planProjectOverlay(sourceRoot, targetRoot, [root.name], root.excludedDirectory, files);
   }
 
-  // The snapshot marker is local runtime state too. Validate it alongside the
-  // copied files so a missing scaffold ignore rule cannot turn a successful
-  // prepare into something the next `git add -A` would publish.
   const paths = [PROJECT_OVERLAY_MARKER, ...files.map((file) => file.repositoryPath)];
   const ignored = new Set(await request.git.ignoredPaths(paths));
   const exposed = paths.filter((path) => !ignored.has(path));
@@ -167,10 +126,6 @@ export interface RunWorkspace {
   readonly root: string;
   /** git bound to `root`. Every phase's side effects go through it. */
   readonly git: GitClient;
-  /**
-   * Permission deny rules fencing this run's agents out of the user's checkout.
-   * Empty when the run works in that checkout itself.
-   */
   readonly denyTools: readonly string[];
   /** Whether `root` is a checkout this run created and may remove. */
   readonly isolated: boolean;
@@ -180,11 +135,6 @@ export interface RunWorkspaceRequest {
   readonly runId: string;
   readonly sessionBranch: string;
   readonly base: string;
-  /**
-   * The worktree settings this run froze at start. Present so a resumed run
-   * gets the checkout it has been using rather than the one today's
-   * configuration would produce.
-   */
   readonly worktree?: WorktreeSettings;
 }
 
@@ -202,32 +152,14 @@ export interface KeptRunWorkspace {
 }
 
 export interface RunWorkspaceProvider {
-  /**
-   * Whether the next run would get a checkout of its own. Asked before one
-   * exists, by the preconditions — which is the difference between "the tree the
-   * run stages from must be clean" and "the user's tree is none of its
-   * business".
-   */
   isolates(): boolean;
   /** Creates or re-attaches the run's checkout, with the session branch on it. */
   prepare(request: RunWorkspaceRequest): Promise<RunWorkspace>;
-  /**
-   * Best-effort teardown. Never throws, and describes the checkout when it was
-   * kept, so the caller can tell the user where their work is and why.
-   */
   release(workspace: RunWorkspace, outcome: RunWorkspaceOutcome): Promise<KeptRunWorkspace | undefined>;
   /** Removes a clean recorded checkout after restart, when no live workspace object exists. */
   removeRecorded?(root: string): Promise<boolean>;
 }
 
-/**
- * The run's own checkout path, derived from the run id rather than stored: a
- * resumed run finds the same directory by computing it again, and a second copy
- * of it could only disagree with the record's run id.
- *
- * The leaf is named after the repository, so the checkout looks like an ordinary
- * clone of the project from the inside.
- */
 export function runWorkspacePath(options: {
   readonly workspaceRoot: string;
   readonly runId: string;
@@ -239,9 +171,6 @@ export function runWorkspacePath(options: {
     ? join(dirname(workspaceRoot), RUN_WORKSPACE_CONTAINER)
     : isAbsolute(configured) ? resolve(configured) : resolve(workspaceRoot, configured);
   const path = join(container, options.runId, basename(workspaceRoot));
-  // A checkout inside the project is one the run would address issues in and
-  // `git add -A` would then try to commit. The setting is the user's, so this is
-  // checked rather than assumed.
   if (!isOutside(path, workspaceRoot)) {
     throw new RunWorkspaceError(
       `The run's checkout would be created at ${path}, inside the project at ${workspaceRoot}. Point aboard.autoRun.worktree.root somewhere outside the project.`,
@@ -264,16 +193,6 @@ export function samePath(left: string, right: string): boolean {
   return normalize(left) === normalize(right);
 }
 
-/**
- * Deny rules covering the user's checkout, in the `//absolute` spelling
- * `Read`/`Edit` rules use (`docs/CLAUDE-REFERENCES/settings.md`). A `Read` denial
- * also covers Grep, Glob, and the Edit tool on the same path, so the pair is
- * belt and braces across Claude Code versions rather than two separate fences.
- *
- * A path containing a comma is skipped: the rules travel as one comma-separated
- * `--disallowedTools` value, so such a rule would arrive split in half and could
- * deny something else entirely. Losing a best-effort fence beats that.
- */
 export function isolationDenyRules(projectRoot: string): readonly string[] {
   const path = resolve(projectRoot).replaceAll("\\", "/").replace(/\/+$/u, "");
   if (path.length === 0 || path.includes(",")) return [];
@@ -285,12 +204,6 @@ export function setupCommandPath(platform: NodeJS.Platform = process.platform): 
   return platform === "win32" ? ".aboard/session-setup.ps1" : ".aboard/session-setup.sh";
 }
 
-/**
- * Whether the setup file asks for anything. The scaffolded copies ship as
- * comments only, so "empty" — the default — must mean "run nothing" rather than
- * "run an empty script", which on PowerShell is a process spawn and an execution
- * policy away from being an error the user never asked for.
- */
 export function hasSetupCommands(source: string): boolean {
   let inBlockComment = false;
   for (const raw of source.split(/\r?\n/u)) {
@@ -315,9 +228,6 @@ export function setupCommandLine(script: string, platform: NodeJS.Platform = pro
   readonly args: readonly string[];
 } {
   return platform === "win32"
-    // `-File` rather than `-Command`: the script's own path is then a single
-    // argument rather than text PowerShell parses, and `Bypass` is what lets an
-    // unsigned local file run at all on a default Windows policy.
     ? { command: "powershell.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script] }
     : { command: "bash", args: [script] };
 }
@@ -385,14 +295,6 @@ const nodeDirectories: RunWorkspaceDirectories = {
   remove: (path) => rm(path, { recursive: true, force: true }),
 };
 
-/**
- * Resolves a run's workspace: the user's own checkout when worktree mode is off,
- * a private one beside the project when it is on.
- *
- * Every step is idempotent, because a resumed run re-enters here with its
- * checkout already created, its dependencies already installed, and its session
- * branch already on it.
- */
 export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   readonly #directories: RunWorkspaceDirectories;
   readonly #platform: NodeJS.Platform;
@@ -425,9 +327,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     });
     const created = await this.#checkout(path, request);
     if (!created) await this.#requireRuntimeUntracked(this.options.gitFor(path), "HEAD");
-    // The gitignored runtime directory does not come with a checkout, and every
-    // launch writes its rewritten agent definition and any spilled prompt under
-    // it — as paths relative to the session's own directory.
     await this.#directories.create(join(path, ".aboard", "runtime", "agents"));
     await this.#directories.create(join(path, ".aboard", "runtime", "prompts"));
     await this.#overlayProjectConfiguration({
@@ -450,9 +349,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     if (!workspace.isolated) return undefined;
     const settings = this.options.settings();
     if (settings.keep) return { path: workspace.root, reason: "kept-by-setting" };
-    // An interrupted run leaves terminals open in there and work the user is
-    // being asked to look at. Removing it would delete exactly what they were
-    // told to go and see.
     if (outcome === "interrupted") return { path: workspace.root, reason: "left-for-the-user" };
     try {
       await this.options.git.removeWorktree(workspace.root, true);
@@ -511,12 +407,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     );
   }
 
-  /**
-   * Runs the project's own setup file, which is where a checkout that needs an
-   * `.env`, a virtualenv, or an install becomes usable. A failure refuses the
-   * run: half-installed dependencies surface three phases later as an
-   * implementer that cannot explain itself.
-   */
   async #runSetup(path: string, request: RunWorkspaceRequest): Promise<void> {
     const relativePath = setupCommandPath(this.#platform);
     // The project root's copy, not the checkout's: the user edits the former,
@@ -545,11 +435,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     }
   }
 
-  /**
-   * The run stages with `git add -A`, so anything the setup file left untracked
-   * and ungitignored would land in the first issue's commit and its pull request.
-   * That is the user's `.env` in a branch, so it refuses rather than warns.
-   */
   async #requireCleanCheckout(path: string, created: boolean): Promise<void> {
     // Only a checkout this attempt created has to be clean. A resumed run's may
     // legitimately hold an implementer's uncommitted work.

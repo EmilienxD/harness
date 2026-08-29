@@ -46,10 +46,6 @@ const ABOARD_ALLOW_ARGS = [
   "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
 ];
 
-/**
- * An aboard definition, which the launch rewrites into a per-agent runtime
- * directory and selects with `--add-dir` plus `--agent`.
- */
 function definition(
   agentName: string,
   declaredTools: readonly string[],
@@ -98,12 +94,6 @@ test("plans the Manager from its definition rather than a discoverable agent", (
     }),
   );
 
-  // Persona, model, and tool set all live in .aboard/agents/manager.md, and all
-  // three reach Claude Code through a definition rewritten into this launch's
-  // own runtime directory: nothing is registered under a path another session
-  // scans, so no other session in the workspace can see or spawn the Manager.
-  // The allowlist's contents (no Agent, no session-task tools, the aboard MCP
-  // delegation surface) are pinned in agent-definitions.test.ts.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
@@ -119,9 +109,6 @@ test("plans the Manager from its definition rather than a discoverable agent", (
     plan.commandLine,
     `& claude --session-id ${sessionId} ${definitionFlags("manager")} --allowedTools 'mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr' --disallowedTools 'Bash(git push*)' --model opus`,
   );
-  // The file `--agent` resolves is part of the plan, because a launch that
-  // cannot write it is a launch that would silently start on Claude Code's own
-  // default persona.
   assert.equal(plan.agentDefinition?.relativePath, runtimePath("manager"));
   assert.equal(
     plan.agentDefinition?.contents,
@@ -139,9 +126,6 @@ test("the aboard MCP server is registered per Manager launch and nowhere else", 
   const configuration = definition("manager", MANAGER_TOOLS);
   const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined, mcpConfigPath }));
 
-  // Session-scoped by construction: the flag belongs to this command line, where
-  // a `.mcp.json` entry is project-scoped and would be connected — and paid for
-  // in tool descriptions — by every worker and the user's own `claude`.
   assert.deepEqual(plan.args, [
     "--session-id", sessionId, "--mcp-config", mcpConfigPath, ...definitionArgs("manager"),
     "--allowedTools",
@@ -179,12 +163,6 @@ test("the Manager's command line pre-approves the aboard MCP tools and nothing e
   const allowed = "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr";
   const configuration = definition("manager", MANAGER_TOOLS);
 
-  // aboard's tools are infrastructure aboard itself serves, so they are the one
-  // deliberate exception to "no permission flag on any command line": without
-  // the pre-approval the Manager stalls behind a prompt on its own delegation
-  // surface. The flag is derived from the definition's `mcp__aboard__*` rule —
-  // the same rule that grants the tools — so it cannot be forgotten when the
-  // definition and the serve list agree.
   const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined }));
   assert.equal(plan.args[plan.args.indexOf("--allowedTools") + 1], allowed);
   // A resume re-passes it exactly.
@@ -195,18 +173,10 @@ test("the Manager's command line pre-approves the aboard MCP tools and nothing e
   // tool the boundary later adds without a matching permission rule.
   assert.equal(allowed.includes("*"), false);
 
-  // No other launch shape carries a permission flag: a worker has no aboard
-  // server behind it (its `--mcp-config` is absent), a builtin launches with no
-  // rewritten definition to derive the rule from, and the default session has
-  // no tools list at all. Granting anything there would be a worker-side
-  // permission grant aboard must never make.
   assert.equal(planLaunch(request()).args.includes("--allowedTools"), false);
   assert.equal(planLaunch(request({ agentType: "Explore", configuration: { shape: "builtin", agentName: "Explore" } })).args.includes("--allowedTools"), false);
   assert.equal(planLaunch(request({ agentType: "general-purpose", configuration: resolveLaunchConfiguration({}) })).args.includes("--allowedTools"), false);
 
-  // A definition that does not declare the aboard server — a user-replaced
-  // manager.md, or any other agent-defined launch — gets no permission flag,
-  // because there is no server behind it to pre-approve.
   const withoutServer = definition("manager", ["Read", "Grep", "Glob", "Bash", "Skill"]);
   assert.equal(planLaunch(request({ agentType: "manager", configuration: withoutServer, prompt: undefined })).args.includes("--allowedTools"), false);
 });
@@ -216,10 +186,6 @@ test("the Manager MCP registration resolves the live port and token", () => {
     managerMcpConfigDocument({ port: 51234, token: "t0ken", agentId: "m1" }),
   ) as { mcpServers: Record<string, { url: string; alwaysLoad: boolean; headers: Record<string, string> }> };
 
-  // Resolved, not `${ABOARD_BRIDGE_*}`: Claude Code expands those in
-  // `.mcp.json`-shaped files, but the earlier attempt to carry the same
-  // references in the Manager's agent frontmatter reached it as literal text and
-  // failed with "'url' is not a valid URL".
   assert.deepEqual(document.mcpServers.aboard, {
     type: "http",
     url: "http://127.0.0.1:51234/mcp",
@@ -343,12 +309,6 @@ test("Chrome is available only to implementers and is replayed on resume", () =>
 });
 
 test("the builtin types carry Claude Code's own capabilities and Explore accepts policy-only overrides", () => {
-  // No aboard-owned tool list exists to derive from: general-purpose is Claude
-  // Code's full-tool agent, and Explore is its read-only search agent — the
-  // conservative fallback for an unreadable definition would wrongly put
-  // Explore on the write lease.
-  // A builtin is the only shape that still carries `--agent`: its aboard
-  // profile may add policy flags, but Claude Code owns prompt and tools.
   const builtin = (name: string) => resolveLaunchConfiguration({ agentName: name });
   assert.equal(builtin("Explore").shape, "builtin");
   assert.equal(launchWriteCapability("Explore", builtin("Explore")), "read-only");
@@ -432,9 +392,6 @@ test("passes the session effort level on every launch shape and refuses an unkno
     assert.equal(isEffortLevel(level), true);
     assert.deepEqual(planLaunch(request({ effort: level })).args.slice(8, 10), ["--effort", level]);
   }
-  // The value reaches the planner from a settings file, where a typo is a user
-  // mistake rather than a compile error, and Claude Code refuses the launch on
-  // an unknown level.
   for (const invalid of ["ultracode", "highest", "", "--max"]) {
     assert.equal(isEffortLevel(invalid), false);
     assert.throws(
@@ -446,10 +403,6 @@ test("passes the session effort level on every launch shape and refuses an unkno
 });
 
 test("puts the definition's model and effort on the command line, overriding the session settings", () => {
-  // Claude Code honors the full frontmatter only for a subagent spawn. A
-  // main-thread `--agent` launch — every launch aboard makes — ignores `model:`
-  // and `effort:`, so the planner reads them from the definition and passes the
-  // flags itself, or the session silently runs at the user's global defaults.
   const configuration = definition("implementer", IMPLEMENTER_TOOLS, {
     declaredModel: "opus",
     declaredEffort: "high",
@@ -547,9 +500,6 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
     );
   }
 
-  // Unrated work is expert work: the launch must never quietly drop to the
-  // user's global default, which is the one outcome a missing label could make
-  // invisible.
   assert.deepEqual(
     planLaunch(request({ configuration: routed })).args.slice(8),
     ["--model", "opus", "--effort", "high", "--disable-slash-commands", "Address issue #47."],
@@ -586,9 +536,6 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
     false,
   );
 
-  // The rewritten definition describes the session that is actually starting:
-  // the sentinel means nothing to Claude Code, so the resolved tier is what
-  // survives into the file `--resume` reads back.
   const file = planLaunch(request({ configuration: routed, difficulty: "basic" })).agentDefinition;
   assert.match(file?.contents ?? "", /^model: sonnet$/mu);
   assert.match(file?.contents ?? "", /^effort: high$/mu);
@@ -621,9 +568,6 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
 });
 
 test("rejects every tool override beside a builtin --agent but accepts launch policy", () => {
-  // `--agent` names a builtin, whose tool set is Claude Code's; a `--tools`
-  // flag beside it would be a second authority over the same session, which is
-  // exactly what the write lease cannot survive (spec section 5.1.1).
   for (const input of [
     { agentName: "Explore", tools: ["Read"] },
     { agentName: "general-purpose", tools: ["Read", "Grep"] },
@@ -661,10 +605,6 @@ test("rejects every tool override beside a builtin --agent but accepts launch po
 });
 
 test("refuses a definition that cannot produce a complete command line", () => {
-  // An empty system prompt is the one failure Claude Code does not report: it
-  // starts the session on its own default persona instead (verified against
-  // 2.1.229), which for an aboard agent means default behavior under a tool
-  // list it never chose.
   for (const empty of ["", "   ", "\n\n"]) {
     assert.throws(
       () => resolveLaunchConfiguration({ agentName: "implementer", systemPrompt: empty, declaredTools: ["Read"] }),
@@ -697,9 +637,6 @@ test("an agent-defined launch registers its definition where only that launch ca
   });
   const plan = planLaunch(request({ configuration, prompt: "Go." }));
 
-  // The definition no longer travels as flags: `--add-dir` points at a
-  // directory this launch alone carries, and `--agent` names the file inside
-  // it. Nothing else in the workspace scans that path.
   assert.deepEqual(plan.args, [
     "--session-id", sessionId, ...definitionArgs("implementer"),
     "--model", "opus", "--effort", "high", "--disable-slash-commands", "Go.",
@@ -734,9 +671,6 @@ test("an agent-defined launch registers its definition where only that launch ca
     ].join("\n"),
   );
 
-  // A resume re-passes both flags and re-emits the same file: `--agent` is
-  // restored by name, and a name that resolves to nothing silently drops the
-  // session to the default persona and the full default tool set.
   const resumed = planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
     configuration,
@@ -755,10 +689,6 @@ test("an agent-defined launch registers its definition where only that launch ca
 });
 
 test("model and effort ride the command line as well as the rewritten file, on start and resume", () => {
-  // Belt and braces on purpose. The rewritten file declares `model:`/`effort:`,
-  // but Claude Code has not been reliable about reading them for a main-thread
-  // launch: the values saved from the previous session can win instead. The
-  // flags are unambiguous, so both carry the same value and the flag decides.
   const configuration = definition("implementer", ["Read"], {
     declaredDescription: "d", declaredModel: "opus", declaredEffort: "high",
   });
@@ -780,9 +710,6 @@ test("model and effort ride the command line as well as the rewritten file, on s
     ["--model", "opus", "--effort", "medium"],
   );
 
-  // Explore is deliberately not rewritten: `--agent Explore` is Claude Code's
-  // own registration, and aboard reconstructs neither its prompt nor its tools.
-  // Its profile contributes exactly these two flags and the launch command.
   const explore = resolveLaunchConfiguration({ agentName: "Explore", declaredModel: "haiku", declaredEffort: "low" });
   const exploreLaunch = planLaunch(request({
     agentType: "Explore", configuration: explore, prompt: "Map the auth flow.",
@@ -802,10 +729,6 @@ test("model and effort ride the command line as well as the rewritten file, on s
 });
 
 test("passes carried-through frontmatter through and refuses a line that would close the fence", () => {
-  // Claude Code reads the keys it knows — `color:` rendering grey when it does
-  // not match its palette — and skips the rest. The value travels exactly as
-  // written; refusing the launch over it would trade a cosmetic default for a
-  // dead terminal, so only unwritable YAML fails.
   for (const color of ["color: chartreuse", "color: #00ff00"]) {
     const configuration = definition("implementer", ["Read"], { extraFrontmatter: [color] });
     const plan = planLaunch(request({ configuration, prompt: "Go." }));
@@ -850,9 +773,6 @@ test("pins each launch shape to the agent types allowed to use it", () => {
     rejects({ agentType, configuration: resolveLaunchConfiguration({ agentName: "Explore" }) });
   }
 
-  // `--agent` and an aboard definition cannot borrow each other's shape: only
-  // Claude Code's builtins are named on the command line, and only aboard's own
-  // agents are carried on it.
   rejects({ agentType: "Explore", configuration: definition("Explore", ["Read"]) });
   rejects({ agentType: "implementer", configuration: resolveLaunchConfiguration({ agentName: "implementer" }) });
   rejects({ agentType: "general-purpose", configuration: resolveLaunchConfiguration({ agentName: "general-purpose" }) });
@@ -877,12 +797,6 @@ test("pins each launch shape to the agent types allowed to use it", () => {
 });
 
 test("a resume re-passes every flag that shaped the launch", () => {
-  // `--resume` restores the conversation and, by name, the `--agent`
-  // selection — but a definition Claude Code can no longer find drops the
-  // session back to the default persona holding the *full* default tool set:
-  // Edit, Write, unrestricted Bash. A read-only worker resumed that way would
-  // hold powers its lease never covered, so the runtime directory and the agent
-  // name are re-passed and the file re-emitted.
   const configuration = definition("webresearcher", READ_ONLY_TOOLS);
   const resumed = planSessionResume({
     agentId,
@@ -900,9 +814,6 @@ test("a resume re-passes every flag that shaped the launch", () => {
   // The definition is rewritten on every resume, since nothing guarantees the
   // runtime directory survived between sessions.
   assert.equal(resumed.agentDefinition?.relativePath, runtimePath("webresearcher"));
-  // Capability is derived from the configuration the command line actually
-  // carries rather than accepted from the caller, so it cannot describe a
-  // session other than this one.
   assert.equal(resumed.writeCapability, "read-only");
   assert.equal(resumed.requiresWriteLease, false);
 
@@ -1040,9 +951,6 @@ test("uses a launch executable path with spaces without breaking the plan", () =
 });
 
 test("a wrapper command keeps its own arguments ahead of every aboard flag", () => {
-  // `wrapper run MyProfile --` starts Claude Code on a named profile, where the
-  // tokens before `--` are the wrapper's. aboard appends to them and changes
-  // nothing about how its own flags are passed.
   const plan = planLaunch(request({ command: ["wrapper", "run", "MyProfile", "--"], prompt: "Go." }));
   assert.deepEqual(plan.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.equal(
@@ -1064,10 +972,6 @@ test("refuses a launch command that is empty or unrepresentable, and defaults to
 });
 
 test("a definition's command replaces the configured launch command for that agent alone", () => {
-  // The per-agent override of `aboard.launch.claudeCommand`: one agent behind a
-  // provider wrapper while the rest of the fleet keeps the setting. Wrapper
-  // arguments come first and aboard's flags are appended unchanged, exactly as
-  // the setting behaves.
   const configuration = definition("implementer", IMPLEMENTER_TOOLS, {
     declaredCommand: ["wrapper", "run", "MyProfile", "--"],
   });
@@ -1258,10 +1162,6 @@ test("quoting expansion counts toward the limit, not the raw prompt length", () 
 });
 
 test("a command line too long even with the prompt spilled is a typed refusal", () => {
-  // Nothing is left to spill: the length is in the deny list. The allowlist can
-  // no longer overflow a line at all — it travels inside the rewritten
-  // definition file rather than as a `--tools` argument — so an agent's tool
-  // list is not the lever this failure points at any more.
   const denied = Array.from({ length: 900 }, (_, index) => `Bash(tool${index}-x *)`);
   let error: LaunchPlanError | undefined;
   try {
@@ -1318,10 +1218,6 @@ test("no launch carries a permission flag", () => {
 });
 
 test("--disable-slash-commands guards every unattended launch and never reaches an attended one", () => {
-  // An automated worker's first message is the only one it will ever get, and
-  // it is attacker-reachable text (an issue body, a PR diff). Without this flag
-  // a prompt that happens to open with a slash would be parsed as a Claude Code
-  // command instead of read as the task.
   const unattended = planLaunch(request());
   assert.ok(unattended.args.includes("--disable-slash-commands"));
 

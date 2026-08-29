@@ -2,17 +2,6 @@ import type { AgentId, SessionId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import { protocolError, type BridgeRequestHandler } from "./protocol.js";
 
-/**
- * Liveness for aboard sessions. Terminal-close used to be the only death
- * signal: it catches a killed terminal, but not the user closing the TUI from
- * inside (`exit`, double Ctrl+C) while the shell underneath lives on — those
- * left a zombie fleet entry holding the write lease. Every launch now goes
- * through aboard's wrapper, which owns a lock-marker file for exactly the
- * Claude child's lifetime, and this monitor polls the marker's existence.
- * Marker removal and terminal-close settle identically; `/clear` and an
- * interactive `/resume` switch fire SessionEnd while the process (and marker)
- * stay alive, so they are handled as graceful conversation ends instead.
- */
 export type LockMarkerProbe = (lockFile: string) => boolean;
 
 export interface SessionRegistration {
@@ -45,13 +34,6 @@ export interface SessionEndObservation {
   readonly reason: SessionEndReason;
 }
 
-/**
- * `launching` means the wrapper's child exited before any SessionStart hook
- * fired: the Claude CLI died on its way up — a rejected flag, an auth wall, a
- * session id it refuses to resume — and printed its reason into the terminal.
- * `live` is an ordinary session ending. The distinction matters because a
- * failed launch has to be reported, while a session ending is routine.
- */
 export type SessionEndPhase = "launching" | "live";
 
 export interface ProcessEndedObservation {
@@ -72,12 +54,6 @@ export interface SessionProcessMonitorOptions {
   readonly debug?: (message: string) => void;
 }
 
-/**
- * Retry ladder for a reported-but-not-yet-visible exit. A SessionEnd hook runs
- * *inside* the dying process, so its marker still exists when the hook lands;
- * these delays cover the gap between the report and the wrapper's cleanup
- * without waiting for the next interval sweep.
- */
 const EXIT_CONFIRMATION_DELAYS_MS = [50, 150, 400, 1_000, 2_500] as const;
 
 interface WatchedSession {
@@ -114,12 +90,6 @@ export class SessionProcessMonitor {
     this.#timer = undefined;
   }
 
-  /**
-   * Watch a launch that has no session yet. Until the marker first appears the
-   * agent cannot die — the wrapper is still starting — so a missing marker here
-   * means "not yet", not "gone". Once it has appeared, its removal without an
-   * intervening SessionStart is a failed launch.
-   */
   public trackLaunch(registration: SessionRegistration): void {
     this.#options.debug?.(`launch agent=${registration.agentId} lock=${registration.lockFile}`);
     this.#watched.set(registration.agentId, { registration, proven: false, appeared: false });
@@ -149,12 +119,6 @@ export class SessionProcessMonitor {
     return this.#watched.has(agentId);
   }
 
-  /**
-   * Liveness observation for lease stale-recovery. "live" only while the
-   * marker file exists; untracked agents (session not started, or settled)
-   * report "missing" so a dead terminal cannot be masked by a hook that never
-   * fired.
-   */
   public observe(agentId: AgentId): "live" | "ended" | "missing" {
     const watched = this.#watched.get(agentId);
     if (watched === undefined || !watched.proven) return "missing";
@@ -169,10 +133,6 @@ export class SessionProcessMonitor {
         watched.appeared = true;
         continue;
       }
-      // Never seen, and no hook has proved otherwise: the wrapper is still
-      // starting up. Its failure to ever appear is the startup proof's
-      // business, not a death to report. A SessionStart hook settles it the
-      // other way — the marker precedes the TUI, so it existed.
       if (!watched.proven && !watched.appeared) continue;
       const phase: SessionEndPhase = watched.proven ? "live" : "launching";
       this.#options.debug?.(`marker gone agent=${registration.agentId} phase=${phase} lock=${registration.lockFile}`);
@@ -181,11 +141,6 @@ export class SessionProcessMonitor {
     }
   }
 
-  /**
-   * Sweep repeatedly over the next few seconds. Used when something reports an
-   * exit that the filesystem has not shown yet; each sweep is a stat per tracked
-   * agent, and an agent that settles early simply drops out of the map.
-   */
   public pollSoon(): void {
     const schedule = this.#options.setTimeout ?? ((callback: () => void, ms: number) => setTimeout(callback, ms));
     for (const delay of EXIT_CONFIRMATION_DELAYS_MS) {
@@ -198,12 +153,6 @@ export class SessionProcessMonitor {
 }
 
 export interface SessionEndSettlement {
-  /**
-   * Settle a conversation that ended while its process and terminal live on:
-   * `/clear`, or an interactive `/resume` that switched the TUI to a different
-   * conversation. Releases the lease and removes the agent from the fleet; the
-   * terminal itself is left to the user, who deliberately kept it.
-   */
   settleConversationEnded(agentId: AgentId, reason: SessionEndReason): void;
 }
 
@@ -220,15 +169,6 @@ export interface SessionLifecycleServiceOptions {
   readonly resumeGraceMs?: number;
 }
 
-/**
- * Grace window between SessionEnd(`resume`) and the SessionStart that follows
- * it inside the same process. Interactive `/resume` usually switches the TUI to
- * another conversation — aboard's session is over even though the process and
- * marker live on — but the picker may also land back on the session aboard
- * launched, which never ended. Only the following SessionStart's id tells the
- * two apart, so the settlement waits for it. Short, because the agent still
- * holds the write lease until it elapses.
- */
 const RESUME_GRACE_MS = 3_000;
 
 export class SessionLifecycleService {
@@ -241,9 +181,6 @@ export class SessionLifecycleService {
     const pending = this.#pendingResume.get(observation.agentId);
     if (pending !== undefined) {
       this.#cancelPendingResume(observation.agentId);
-      // A different id proves the TUI switched conversations, so settle now
-      // instead of waiting out the rest of the window. The same id means the
-      // picker returned to aboard's own session and nothing ended.
       if (pending.sessionId !== observation.sessionId) this.#settle(observation.agentId, pending.sessionId, "resume");
     }
     const session = this.options.fleet.get(observation.agentId);
@@ -257,18 +194,6 @@ export class SessionLifecycleService {
     return true;
   }
 
-  /**
-   * SessionEnd is a conversation-level event with a 1.5s hook budget, so this
-   * must stay cheap. Only conversation-level reasons settle here: the process
-   * demonstrably lives on (it fired the hook inside a kept-alive TUI), so
-   * marker polling will never settle these. `clear` settles immediately;
-   * `resume` waits for the next SessionStart to say whether the TUI actually
-   * moved to another session. Process-exit reasons (`prompt_input_exit`,
-   * `logout`, ...) still belong to the marker, which is authoritative — the
-   * hook runs inside the process it is announcing the death of — but they are
-   * an early warning, so they kick off a short confirmation ladder instead of
-   * waiting for the next interval sweep.
-   */
   public sessionEnded(observation: SessionEndObservation): boolean {
     if (observation.reason === "resume") return this.#scheduleResumeSettlement(observation);
     if (observation.reason !== "clear") {
@@ -340,14 +265,6 @@ interface PendingProof {
   timer: unknown;
 }
 
-/**
- * Startup security pass. The extension types the launch command into a shell
- * it does not own, so a CLI failure (unknown flag, missing binary, auth wall)
- * exits before any TUI exists and the terminal-close signal cannot tell a slow
- * start from a failed one. The SessionStart hook is the first signal that only
- * a live TUI can produce, so each launch arms a timeout here and the
- * session-start route discharges it.
- */
 export class SessionStartupProofs implements SessionStartupProof {
   readonly #pending = new Map<AgentId, PendingProof>();
   readonly #setTimeout: (callback: () => void, ms: number) => unknown;

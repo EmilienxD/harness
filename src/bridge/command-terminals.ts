@@ -1,19 +1,3 @@
-/**
- * Plain command terminals: the bridge's one surface that is deliberately *not*
- * an agent.
- *
- * An automated script — a project's own setup command, a backend or frontend
- * bootstrap, a task runner living in another repository — asks the extension to
- * run a shell command, and the extension opens a real VS Code terminal for it so
- * the user watches the output where they watch everything else. Nothing here
- * registers a fleet member, takes the write lease, receives `ABOARD_*`
- * credentials, or resumes: a command terminal is an ordinary shell the user owns
- * from the moment it appears, and its whole lifecycle is the terminal's own.
- *
- * The terminal host types come from the Claude launch boundary because that is
- * where the abstraction over `window.createTerminal()` already lives; this
- * module uses only that abstraction and knows nothing about Claude Code.
- */
 
 import type { TerminalHandle, TerminalHost } from "../claude/terminals.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
@@ -67,11 +51,6 @@ export interface CommandTerminalServiceOptions {
   readonly defaultCwd: () => string;
   readonly idFactory: () => CommandTerminalId;
   readonly now?: () => Date;
-  /**
-   * Rejects a directory that does not exist. A caller here is a script with no
-   * eyes on the screen, so a bad path has to come back as a failed request
-   * rather than as a terminal that flashes a shell error and sits there.
-   */
   readonly directoryExists?: (path: string) => boolean;
 }
 
@@ -179,12 +158,6 @@ function invalid(message: string): BridgeResponse {
   return protocolError(400, "invalid-request", message);
 }
 
-/**
- * A terminal receives one line, so a newline in either the command or the tab
- * label is unrepresentable rather than escapable — the same rule the Claude
- * launch command lines follow. A caller that wants several steps chains them
- * with its own shell's operator.
- */
 const CONTROL_CHARACTERS = /[\p{Cc}]/u;
 
 function parseRun(body: unknown): RunCommandRequest | BridgeResponse {

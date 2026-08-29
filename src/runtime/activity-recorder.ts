@@ -1,16 +1,3 @@
-/**
- * The write side of the activity store.
- *
- * Appends are chained rather than concurrent: a session can settle from two
- * sources within milliseconds — the terminal closing and the wrapper's marker
- * vanishing — and two read-modify-writes racing on one file would drop an
- * entry. Appends are idempotent per entry id, so the second observation simply
- * refreshes the first.
- *
- * Every write is best-effort by contract. This runs on settlement paths where
- * throwing would strand the lease or the fleet record; a failed write costs one
- * history row and is logged.
- */
 
 import {
   EMPTY_ACTIVITY,
@@ -51,11 +38,6 @@ export class ActivityRecorder {
     return this.#cache;
   }
 
-  /**
-   * Loads the store and folds the superseded session ledger into it, once. The
-   * migration is idempotent because it skips any agent already represented, so
-   * a reload that happens before the old file is removed changes nothing.
-   */
   public async load(): Promise<void> {
     const current = await this.options.store.load().catch(() => undefined) ?? EMPTY_ACTIVITY;
     const legacy = await this.options.legacy?.load().catch(() => undefined);
@@ -94,12 +76,6 @@ export class ActivityRecorder {
     });
   }
 
-  /**
-   * Drops the cache without touching the store, for a project whose `.aboard/`
-   * is gone. The entries describe a session that no longer exists, and the cache
-   * is written whole on every append: kept across an initialization it would
-   * resurrect the history the user deleted, out of memory rather than off disk.
-   */
   public async reset(): Promise<void> {
     await this.settle();
     this.#cache = EMPTY_ACTIVITY;

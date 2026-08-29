@@ -1,15 +1,3 @@
-/**
- * Recovery validation (`AGENTS.md`).
- *
- * One pure function decides whether a recorded run may continue. The boundary
- * gathers observations; every judgement lives here, so "is this run still the
- * run the user agreed to?" is answerable in a unit test without a repository.
- *
- * The bias is deliberate and one-directional: anything that cannot be explained
- * by aboard's own recorded actions makes the whole run broken. A run that stops
- * because somebody force-pushed a branch costs the user a resume; a run that
- * continues over an unexplained change costs them work they never approved.
- */
 
 import type { IssueDifficulty } from "../shared/labels.js";
 import type { IssueDisposition } from "./auto-run.js";
@@ -55,10 +43,6 @@ export interface RunObservations {
   readonly repositoryUsable: boolean;
   readonly gitHubAuthenticated: boolean;
   readonly targetBranchExists: boolean;
-  /**
-   * Whether the run's own checkout is present. `undefined` when the run works
-   * in the user's checkout, where there is nothing of the kind to lose.
-   */
   readonly workspacePresent: boolean | undefined;
   readonly branches: readonly BranchObservation[];
   readonly issues: readonly IssueObservation[];
@@ -67,11 +51,6 @@ export interface RunObservations {
     readonly branch: string | undefined;
     readonly dirtyPaths: readonly string[];
   };
-  /**
-   * Issue titles as GitHub reports them now, keyed by issue number. Displayed
-   * only: the plan froze the title it uses for branches and commits, and a
-   * retitled issue is still the same work.
-   */
   readonly titles: Readonly<Record<string, string>>;
 }
 
@@ -81,12 +60,6 @@ function broken(reason: string): RecoveryEligibility {
 
 const RESUMABLE: RecoveryEligibility = { state: "resumable" };
 
-/**
- * Validates the complete frozen plan, including issues the run has not reached
- * yet. Checking only the current issue would let a run walk into a plan entry
- * that was relabelled or closed hours ago and discover it one dead worker at a
- * time.
- */
 export function validateRun(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility {
   if (!observations.repositoryUsable) return broken("the workspace is no longer a usable git repository");
   if (!observations.gitHubAuthenticated) return broken("the GitHub CLI can no longer authenticate to this repository");
@@ -113,11 +86,6 @@ export function validateRun(record: AutoRunRecord, observations: RunObservations
   return validateWorkingTree(record, observations);
 }
 
-/**
- * A checkout the run created must still be there. Before that checkpoint there
- * is nothing to have lost, so a run that died while preparing one simply retries
- * — which is why this asks about `workspaceCreated` and not about the setting.
- */
 function validateWorkspace(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility | undefined {
   if (record.workspaceCreated !== true) return undefined;
   if (observations.workspacePresent === false) {
@@ -130,13 +98,6 @@ function branchOf(observations: RunObservations, name: string): BranchObservatio
   return observations.branches.find((branch) => branch.name === name);
 }
 
-/**
- * Run-owned branches must be exactly where this run left them. A branch the run
- * pushed and something else moved — a force-push, an extra commit, a deletion —
- * is the clearest possible signal that the run's record no longer describes
- * reality, and it is also the case where continuing would quietly build on
- * somebody else's work.
- */
 function validateBranches(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility | undefined {
   const required = new Set<string>();
   if (record.checkpoint !== "planned" && record.checkpoint !== "workspace-ready") required.add(record.sessionBranch);
@@ -168,9 +129,6 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
     }
   }
 
-  // A branch belonging to a plan entry the run has not started is a branch this
-  // run did not create. Adopting it would mean committing onto somebody else's
-  // work under this issue's name.
   for (const issue of record.plan) {
     if (required.has(issue.branch)) continue;
     if (issueProgress(record, issue.number).state !== "pending") continue;
@@ -200,11 +158,6 @@ function issueOf(observations: RunObservations, number: number): IssueObservatio
   return observations.issues.find((issue) => issue.number === number);
 }
 
-/**
- * The plan's issues must still be the issues the plan describes. Title and body
- * are deliberately not compared: the run froze the title it needs for branches
- * and commits, and an issue somebody clarified in prose is still the same work.
- */
 function validateIssues(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility | undefined {
   const planned = new Set(record.plan.map((issue) => issue.number));
   for (const issue of record.plan) {
@@ -233,9 +186,6 @@ function validateIssues(record: AutoRunRecord, observations: RunObservations): R
     if (observed.chrome !== (issue.chrome === true)) {
       return broken(`issue #${issue.number} ${observed.chrome ? "now has" : "no longer has"} the [AI]-chrome label`);
     }
-    // Blockers may close as the run drains its plan, so the observed set only
-    // has to be contained in the frozen one. A blocker that appeared is new
-    // work the plan never accounted for.
     const frozen = new Set(issue.dependsOn);
     for (const blocker of observed.openBlockedByNumbers) {
       if (!frozen.has(blocker)) {
@@ -272,15 +222,6 @@ function journalMerges(action: PendingAction | undefined, pullRequest: PullReque
     && pullRequest.mergeCommitSha !== undefined;
 }
 
-/**
- * Every pull request the record knows about must still be the pull request it
- * recorded, and in a state this checkpoint can explain.
- *
- * Two external transitions are allowed, because they are the whole point of the
- * hitl disposition: another account approving, and the user merging. Everything
- * else — an afk pull request merged by somebody else, a closed one, a retargeted
- * one — means the run's next step would act on something it no longer describes.
- */
 function validatePullRequests(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility | undefined {
   for (const issue of record.plan) {
     const progress = issueProgress(record, issue.number);
@@ -331,13 +272,6 @@ function validatePullRequestIdentity(
   return undefined;
 }
 
-/**
- * Uncommitted work is trusted on exactly one branch: the one the current issue
- * belongs to. That is where a failed or interrupted worker leaves its edits, and
- * a fresh worker will be told to review them critically before the run commits
- * anything. Anywhere else it is somebody's work the run has no claim on, and the
- * run stages with `git add -A`.
- */
 function validateWorkingTree(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility {
   if (observations.workingTree.dirtyPaths.length === 0) return RESUMABLE;
   const current = currentIssue(record);
@@ -353,22 +287,11 @@ export function currentIssue(record: AutoRunRecord): FrozenIssue | undefined {
   return record.plan.find((issue) => issue.number === record.currentIssue);
 }
 
-/**
- * Whether uncommitted work in the checkout belongs to the run's current issue.
- * The engine asks this to decide whether a fresh worker needs the one extra
- * sentence warning it about half-finished edits.
- */
 export function hasTrustedDirtyWork(record: AutoRunRecord, observations: RunObservations): boolean {
   const current = currentIssue(record);
   if (current === undefined || observations.workingTree.dirtyPaths.length === 0) return false;
   return observations.workingTree.branch === current.branch;
 }
 
-/**
- * The one sentence added to an otherwise normal worker prompt when the run is
- * re-entering an issue that already has uncommitted edits. Exactly one, because
- * a recovery prompt that explains the whole crash invites the agent to
- * investigate the crash rather than finish the issue.
- */
 export const DIRTY_RECOVERY_SENTENCE =
   "Existing uncommitted changes may be incomplete or incorrect; review them critically before finishing the issue.";

@@ -118,10 +118,6 @@ function setup() {
     agentIdFactory: () => agent(`worker-${++agentId}`),
     sessionIdFactory: () => session(ids[sessionId++]!),
     configurations: {
-      // Mirrors the production source: an aboard definition carries its body and
-      // tool list onto the command line, while a builtin type launches as
-      // `--agent <name>` against Claude Code's own definition — there being no
-      // file for aboard to read, and none for any session to discover.
       get: async (type) => type === "general-purpose"
         ? resolveLaunchConfiguration({})
         : isNamedBuiltinAgentType(type)
@@ -204,10 +200,6 @@ test("a terminal handed to the user takes no lease and runs beside the holder", 
   await coordinator.spawn({ type: "implementer", prompt: "Address issue nine", description: "address issue nine" });
   const holder = lease.current()?.agentId;
   assert.notEqual(holder, undefined);
-  // Both are write-capable, but both
-  // are conversations the user drives, so neither takes the lease nor conflicts
-  // with the one already held. An opening prompt names the topic; it does not
-  // make the session aboard's to serialize.
   const generalPurpose = await launch({ type: "general-purpose", description: "open general purpose session", interactive: true });
   assert.equal(generalPurpose.status, 200, JSON.stringify(generalPurpose.body));
   const withTopic = await launch({
@@ -262,9 +254,6 @@ test("an out-of-range description is coerced, not refused", async () => {
 });
 
 test("keeps the automated-only research types paused after their result caller is gone", async () => {
-  // Neither has a user conversation to hand off, so restoration would open a
-  // terminal nobody can use. Explore belongs here for the same reason as
-  // webresearcher: it is automated only.
   for (const [type, agentId, sessionId] of [
     ["webresearcher", "persisted-researcher", "c15badb6-d6c8-45a6-a59f-e931cd364332"],
     ["Explore", "persisted-explorer", "2f2f0f4c-1c3e-4c0a-9d2e-3f5f0a1b2c3d"],
@@ -333,18 +322,12 @@ test("the todo verbs pass their arguments through and reject an unknown status",
 
   const created = await call("todo_create", { subjects: ["First task", "Second task"], after: "top" });
   assert.equal(created.status, 200);
-  // The minimum on success: the new positions, which are what a follow-up update
-  // in the same turn needs, plus the refreshed pending list this insert-at-top
-  // renumbered. An append would carry no list at all.
   assert.deepEqual(body(created).result, {
     positions: [1, 2],
     issue: 9,
     tasks: ["1. [ ] First task", "2. [ ] Second task"],
   });
 
-  // There is no in-progress status — live work is derived from issues, pull
-  // requests, and auto-run state — so the enum is the strict authority and an
-  // out-of-enum value is rejected rather than guessed at.
   const updated = await call("todo_update", { task: 1, expect: "First task", status: "completed" });
   assert.equal(updated.status, 200);
   const result = (body(updated).result as Record<string, unknown>);
@@ -406,20 +389,12 @@ test("serves exactly the current delegation tools and no duplicate state-fetch s
     "start_auto_run",
     "review_pr",
   ]);
-  // Roadmap and fleet state arrive through hooks, so there is deliberately no
-  // read/list/focus tool and no full-body todo replacement tool. release_lease
-  // is absent for a different reason: the Manager is the party a lease conflict
-  // blocks, cannot observe staleness, and has a strictly better remedy for a
-  // live holder (kill it). Recovery is structural, plus a palette command.
   for (const absent of ["get_todo", "update_todo", "list_agents", "focus_agent", "send_to_agent", "release_lease"]) {
     assert.equal(CORE_MCP_TOOLS.some((tool) => tool.name === absent), false);
   }
 });
 
 test("MCP definitions carry a self-contained description for every tool and field", () => {
-  // Presence and substance, not content: the descriptions are the Manager's
-  // only usage contract, so none may be missing or a stub — but their wording
-  // is free to change without touching this test.
   for (const tool of CORE_MCP_TOOLS) {
     assert.equal(typeof tool.description, "string", `${tool.name} needs a description`);
     assert.equal(tool.description.trim().length >= 200, true, `${tool.name}'s description is too terse to stand alone`);
@@ -551,9 +526,6 @@ test("run_agent cannot launch an implementation agent", async () => {
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
 });
 
-// The implementation types are absent from run_agent, but both delivery modes are
-// still load-bearing for the auto-run engine, so they are exercised on the
-// coordinator.
 test("foreground delegation blocks until a result lands, background returns at once", async () => {
   const { call, fleet, coordinator } = setup();
   let foregroundSettled = false;
@@ -589,9 +561,6 @@ test("reclaims a lease whose holder left no terminal and no live session", async
   const { coordinator, host, lease, sessionLiveness, reclaimed } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement first task", description: "implement first task" });
   const ghost = lease.current()!.agentId;
-  // The holder is gone but nothing settled it — the terminal closed with no
-  // lifecycle listener attached and the marker vanished unobserved. That is
-  // precisely the ghost lease that used to block every later writer forever.
   host.close(0);
   sessionLiveness.set(ghost, "missing");
 
@@ -631,9 +600,6 @@ test("an unobservable session is not a gone one: no liveness source never reclai
   await context.coordinator.spawn({ type: "implementer", prompt: "Implement first task", description: "implement first task" });
   const holder = context.lease.current()!.agentId;
   context.host.close(0);
-  // With no `sessions` observer the session half of the observation is unknown,
-  // and unknown must resolve to "still holding": a false reclaim puts two
-  // writers in one tree, where a false refusal costs one palette command.
   const unobserved = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
     fleet: context.fleet, lease: context.lease, terminals: context.terminals,

@@ -77,11 +77,6 @@ test("deleteBranch removes only a fully merged local branch", async () => {
   assert.equal(await client.branchExists("aboard/35-has-work"), true);
 });
 
-/**
- * A remote-tracking ref without a remote. `git merge origin/main` reads the ref
- * and nothing else, so the boundary can be exercised against real git without a
- * network or a second clone.
- */
 async function trackRemote(root: string, branch: string): Promise<void> {
   await run("git", ["update-ref", `refs/remotes/origin/${branch}`, branch], { cwd: root, windowsHide: true });
 }

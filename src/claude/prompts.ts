@@ -1,11 +1,3 @@
-/**
- * Prompt resolution before launch (spec section 5.8).
- *
- * The bridge resolves everything a worker needs and hands it over in the first
- * prompt: workers do not spend a tool call and a context window of `gh` output
- * fetching their own instructions. GitHub access is an injected port so this
- * layer stays testable without a repository or the `gh` CLI.
- */
 
 import { describeIssueNumbers } from "../shared/issues.js";
 import { issueDisposition } from "../shared/labels.js";
@@ -89,13 +81,6 @@ export type PromptResolutionRequest =
   | {
       readonly kind: "implementation";
       readonly instruction: string;
-      /**
-       * The first issue is the primary one: it supplies the branch, the
-       * disposition, and the headline. The auto-run engine is this arm's only
-       * caller and always passes exactly one, so the array exists to spare the
-       * adapter a lossy narrowing rather than to invite multi-issue
-       * implementers (`AGENTS.md`: one implementation agent per child issue).
-       */
       readonly issueNumbers: readonly number[];
       /** Overrides the branch GitHub reports, when the caller knows better. */
       readonly branch?: string | undefined;
@@ -185,12 +170,6 @@ function requireInstruction(instruction: string): string {
   return trimmed;
 }
 
-/**
- * The disposition tells the worker what will happen to its change, not what to
- * do about it: the extension owns every git and GitHub side effect, so no
- * disposition ever asks an agent to commit, open, or merge anything
- * (`AGENTS.md`).
- */
 function dispositionGuidance(disposition: IssueDisposition): string {
   switch (disposition) {
     case "afk":
@@ -259,11 +238,6 @@ export class PromptResolver {
     this.#limits = { ...DEFAULT_PROMPT_RESOLUTION_LIMITS, ...options.limits };
   }
 
-  /**
-   * Resolves a complete first prompt. Returns `undefined` only when there is
-   * genuinely nothing to say — an interactive agent the user will type into
-   * (spec section 5.4).
-   */
   public async resolve(
     request: PromptResolutionRequest,
   ): Promise<ResolvedPrompt | undefined> {
@@ -304,11 +278,6 @@ export class PromptResolver {
     return pullRequest;
   }
 
-  /**
-   * Every requested issue, deduped, in the caller's order. The tuple return
-   * types the non-emptiness the callers rely on for the primary issue, so no
-   * arm needs a cast or a second guard.
-   */
   async #fetchIssues(issueNumbers: readonly number[]): Promise<readonly [IssueSnapshot, ...IssueSnapshot[]]> {
     const [first, ...rest] = [...new Set(issueNumbers)];
     if (first === undefined) {
@@ -320,14 +289,6 @@ export class PromptResolver {
     return [primary, ...others];
   }
 
-  /**
-   * Renders one section per issue, then one per distinct parent spec.
-   *
-   * `pointers` keeps the existing split: automated paths tell the worker how to
-   * read the rest of a truncated body, while a context launch says to work from
-   * what it was given. A spec shared by several siblings is fetched once, and a
-   * spec the caller listed among the issues themselves is never rendered twice.
-   */
   async #issueSections(
     builder: PromptBuilder,
     issues: readonly IssueSnapshot[],
@@ -416,9 +377,6 @@ export class PromptResolver {
     const [primary] = issues;
     const named = describeIssueNumbers(issues.map((issue) => issue.number));
     const builder = new PromptBuilder();
-    // Named up front only when there are several, so a worker cannot read the
-    // first section and treat the rest as background. One issue needs no such
-    // line: its single heading already says what it is.
     if (issues.length > 1) builder.section(undefined, `You have the resolved context for ${named}.`);
     builder.section(undefined, instruction);
 

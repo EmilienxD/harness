@@ -84,9 +84,6 @@ test("dirty write-capable Stop becomes no-commit and enters the Manager mailbox"
   assert.equal(lease.current(), undefined);
 });
 
-// For an auto-run implementer a dirty tree is the expected success state: the
-// engine commits, and an empty diff is the failure it detects. The flag is a
-// property of the agent's contract, not of where its result goes.
 test("no-commit is not raised when the launch expected an uncommitted tree", async () => {
   const expected = setup(false, { mode: "tool-result" }, true);
   await expected.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "left the change in the tree" });

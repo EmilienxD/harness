@@ -53,25 +53,8 @@ export class ManagerIdentity {
   }
 }
 
-/**
- * The rewritten Manager definition, plus the `model:` and `effort:` it declares.
- * Those two are also passed as `--model`/`--effort`, because `--resume` reads no
- * definition of its own and a resumed session must not silently fall back to the
- * session defaults (see `LaunchConfiguration`).
- */
 export type ManagerLaunchDefinition = Extract<LaunchConfiguration, { shape: "agent-defined" }>;
 
-/**
- * Reads `.aboard/agents/manager.md` into the configuration every Manager
- * command line is built from.
- *
- * A missing or invalid definition is fatal, where it used to be survivable. The
- * definition is no longer a refinement of the configured defaults: it carries
- * the persona and the tool allowlist themselves, so a launch without it is not
- * a Manager with default settings but a stock Claude Code session holding
- * `Edit`, `Write`, and an unrestricted `Bash` in the Manager's terminal — the
- * one agent the spec forbids from implementing anything.
- */
 export async function readManagerLaunchDefinition(workspaceRoot: string): Promise<ManagerLaunchDefinition> {
   let contents: string;
   try { contents = await readFile(agentDefinitionPath(workspaceRoot, MANAGER_AGENT_NAME), "utf8"); }
@@ -97,14 +80,6 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
 
 /** `command` and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
 export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly admission?: () => boolean; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout;
-  /**
-   * Writes the per-launch aboard MCP registration and returns the path
-   * `--mcp-config` names. It runs on every start and resume so the port and
-   * token are the live bridge's, and it is a callback because the bridge is not
-   * listening when this lifecycle is constructed. Absent — as in tests — simply
-   * launches a Manager with no aboard server, which is visible immediately
-   * rather than silently wrong.
-   */
   readonly mcpConfig?: () => Promise<string>; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
@@ -115,23 +90,10 @@ export class ManagerLifecycle {
     if (mode === "resume" && !prior) throw new Error("No recorded Manager session exists");
     const agentId = mode === "resume" && prior ? prior.agentId : (this.options.agentIdFactory ?? (() => randomUUID() as AgentId))();
     const recorded = mode === "resume" && prior ? prior.sessionId : undefined;
-    // Claude Code deletes session files older than `cleanupPeriodDays` at
-    // startup and the sweep cannot be disabled, so the recorded transcript may
-    // simply be gone. Put aboard's copy back first; the resumability check
-    // below is what reads it, and a restore that fails or finds nothing just
-    // leaves that check to answer "not resumable" as it always would.
     if (recorded !== undefined) await this.options.restoreTranscript?.(recorded);
     // --resume fails when the recorded session holds no conversation yet, which
     // a transcript file's existence does not rule out.
     const resumable = recorded !== undefined && await (this.options.isResumable ?? sessionIsResumable)(recorded, this.options.workspaceRoot);
-    // An id that cannot be resumed cannot be reused either: Claude Code refuses
-    // `--session-id` for any id that already has a transcript ("Session ID … is
-    // already in use"), and an unresumable recorded session has one by
-    // definition — that is why `--resume` rejected it. Relaunching under the
-    // same id therefore fails both ways, so the recovery is a new conversation
-    // under a new id. Nothing is lost: the id was refused precisely because it
-    // holds no conversation, and Manager identity is the agent id, which is
-    // stable across every restart.
     const sessionId = resumable && recorded !== undefined
       ? recorded
       : (this.options.sessionIdFactory ?? (() => randomUUID() as SessionId))();
@@ -145,17 +107,10 @@ export class ManagerLifecycle {
     const level = this.options.effort?.();
     const effort = level === undefined ? {} : { effort: level };
     const wrapper = this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper };
-    // Written before planning, because the plan carries the path on the command
-    // line and a launch pointing at a file that does not exist would start a
-    // Manager whose whole delegation surface is missing.
     const mcpConfigPath = await this.options.mcpConfig?.();
     const mcpConfig = mcpConfigPath === undefined ? {} : { mcpConfigPath };
     const shared = { agentId, sessionId, shell: this.options.shell, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper, ...mcpConfig };
     const plan = resumable ? planManagerResume(shared) : planLaunch({ ...shared, agentType: "manager" });
-    // Refuse a launch aboard already knows cannot run, rather than opening a
-    // terminal that will only ever show a shell error. The plan is probed rather
-    // than the setting because manager.md may declare its own `command:`, and
-    // planning is pure — nothing has been created yet.
     await this.options.preflight?.(plan.command);
     // `--agent` names this file; a missing one is a refused launch rather than a
     // Manager on Claude Code's default persona.

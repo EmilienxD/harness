@@ -13,56 +13,11 @@ export const MANAGER_SESSION_START_TIMEOUT_SECONDS = 120;
 export const MANAGER_STOP_TIMEOUT_SECONDS = 3_600;
 export const MANAGER_PROMPT_TIMEOUT_SECONDS = 60;
 
-/**
- * The Manager's session-start orientation.
- *
- * One hook, one block. Four separate slices cost four `uv` process spawns and
- * four bridge round trips to deliver four unlabeled `additionalContext`
- * fragments; the Manager then had to reassemble them into a picture of the
- * project. Fetching them together also lets the slow boundaries — git and
- * GitHub — overlap instead of running in series.
- *
- * The content rule is that a fact the Manager would otherwise spend a turn
- * fetching belongs here. Issue titles, not bare numbers; the roadmap body, not
- * a pointer to a tool that returns it. `--agent` replaces Claude Code's own
- * system prompt (`docs/CLAUDE-REFERENCES/subagents.md`), which takes the
- * environment and git-status blocks with it, so the repository card restores
- * the orientation every other Claude Code session starts with.
- */
-/**
- * How much of the roadmap renders inline. It is not the storage bound — GitHub
- * holds the whole document, up to `ROADMAP_BODY_LIMIT` — but the share of the
- * 10,000-character hook cap the roadmap may take while every other section
- * still renders in full.
- */
 export const ROADMAP_INLINE_LIMIT = 6_000;
 const ISSUE_LIST_LIMIT = 15;
 
-/**
- * Leads every roadmap injection, on the session-start briefing and on the
- * periodic reminder alike.
- *
- * It is what the reminder hook looks for in the transcript's tail: "is there a
- * reminder within the last `span` bytes" is answerable with one seek and one
- * read, where "when was the last reminder" would need a counter to persist,
- * re-seed on resume, and lose in a crash. Because the session-start and compact
- * briefings carry the same marker, they reset the window for free and there is
- * no separate reset rule.
- *
- * Plain ASCII with no quotes, backslashes, or newlines, so it matches
- * identically inside the JSON-escaped `stdout` string and the unescaped
- * `content` array the transcript records — and it leads the block so it survives
- * the >10,000-character preview rule.
- */
 export const ROADMAP_MARKER = "<aboard-roadmap>";
 
-/**
- * How long the bridge refuses to serve a second reminder to the same agent. The
- * transcript is written asynchronously, so the tail search comes up empty most
- * readily right after a reminder was emitted and before it flushed: duplicates
- * cluster rather than scatter. In-memory is enough — a bridge restart costs at
- * most one duplicate reminder.
- */
 export const ROADMAP_REMINDER_DEBOUNCE_MS = 30_000;
 
 export type BriefingDisposition = "afk" | "hitl" | "unclassified";
@@ -80,10 +35,6 @@ export interface RepositoryBriefing {
   readonly defaultBranch: string;
   /** The project's own baseline commands, in the order a worker should run them. */
   readonly checks: readonly string[];
-  /**
-   * What the repository holds. Absent when the survey could not be taken, which
-   * degrades this one line rather than the Repository section.
-   */
   readonly codebase?: CodebaseBriefing;
 }
 
@@ -167,18 +118,6 @@ async function section(
   }
 }
 
-/**
- * The one line that says whether there is a project here yet.
- *
- * Two facts, and a reading of them only where the reading is not obvious. No
- * source file means the repository cannot answer anything, so the line says so
- * outright: every other section of this briefing describes work, and without
- * this one the Manager reads "no roadmap, no issues, no PRs" as a project
- * between milestones rather than one that has not started. A lone commit is the
- * weaker signal and is phrased as one — it is what an untouched scaffold looks
- * like, and also what a real project looks like on its first afternoon, so it
- * is offered as a possibility to check rather than a conclusion.
- */
 export function codebaseLine(codebase: CodebaseBriefing): string {
   const commits = codebase.commitCount === 1 ? "1 commit" : `${codebase.commitCount} commits`;
   if (codebase.sourceFileCount === 0) {
@@ -309,27 +248,14 @@ export class ManagerBriefings {
       : `${agents.join("\n")}\nWrite lease: ${holder === undefined ? "unheld" : holder.agentId}`;
   }
 
-  /**
-   * The roadmap section, full history included. A missing carrier is a fact
-   * about the repository — the ordinary first-run state — and is phrased as
-   * something to do, deliberately unlike the "Unavailable" a failed fetch
-   * produces.
-   */
   async #roadmap(signal: AbortSignal): Promise<string> {
     const roadmap = await this.sources.roadmap(signal);
     if (roadmap === undefined) {
-      // Deliberately silent on how the first roadmap gets written: that branches
-      // on whether the repository holds anything to derive it from, which the
-      // Repository section states and `/update-todo` acts on. Two sections
-      // giving the procedure is two places to disagree.
       return marked("No open issue carries `[AI]-todo`, so this project has no roadmap yet. That is the normal state of a fresh repository, not a deletion. Recommend `/update-todo` to the user: it works out what the first roadmap can be derived from, settles the rest with them, and writes it.");
     }
     const notes = roadmapNotes(roadmap);
     const inline = roadmapBlock(roadmap.tasks, "full", `Issue #${roadmap.number} - the whole roadmap follows, so do not fetch it again. The leading number is a task's position: pass it as \`task\`, with its subject as \`expect\`, to edit that task.`, notes);
     if (inline.length <= ROADMAP_INLINE_LIMIT || this.files === undefined) return inline;
-    // Only the roadmap spills. Today's whole-block spill would demote
-    // Repository, Auto-run, Issues, Pull requests, and Fleet to a file
-    // reference for a reason that belongs to none of them.
     const path = await this.files.write("roadmap", inline);
     const heading = `Issue #${roadmap.number} - the full roadmap, completed history included, is pre-rendered with its positions at ${path}; one Read gets it. The head of the pending list follows inline.`;
     // What stays inline is the head of the pending list: the tasks most likely
@@ -352,12 +278,6 @@ function bounded(tasks: readonly RoadmapTask[], budget: number): readonly Roadma
   return kept;
 }
 
-/**
- * Wraps an injection in the marker the reminder hook searches the transcript's
- * tail for, so a session-start or post-compact briefing resets the reminder
- * window with no separate rule. A briefing large enough to spill whole leaves no
- * marker inline, which is correct: the roadmap was not delivered, only a path.
- */
 function marked(content: string): string {
   return `${ROADMAP_MARKER}\n${content}\n</aboard-roadmap>`;
 }
@@ -378,15 +298,6 @@ function roadmapBlock(tasks: readonly RoadmapTask[], mode: "full" | "pending", h
   return marked(parts.join("\n\n"));
 }
 
-/**
- * The periodic reminder. Pending items only: the completed history is still
- * verbatim in the window at this point, and repeating it would make the
- * reminder the largest recurring line item two years into a project instead of
- * a flat cost.
- *
- * Self-dating because a mid-session injection is replayed rather than re-run on
- * resume; phrased as standing truth it would present a stale list as current.
- */
 export function renderRoadmapReminder(roadmap: RoadmapBriefing | undefined, at: IsoTimestamp): string {
   if (roadmap === undefined) {
     return marked(`Roadmap as of ${at}: no open issue carries \`[AI]-todo\`, so there is still no roadmap. Recommend \`/update-todo\` when the project has a direction worth recording.`);
@@ -402,11 +313,6 @@ export interface RoadmapReminderSource {
   roadmap(signal: AbortSignal): Promise<RoadmapBriefing | undefined>;
 }
 
-/**
- * Serves the reminder, at most once per agent per debounce window. The hook has
- * already decided the reminder is due from the transcript itself; this refuses
- * the duplicate that the transcript's write lag makes likely.
- */
 export class RoadmapReminderService {
   readonly #served = new Map<AgentId, number>();
   readonly #now: () => Date;
@@ -426,15 +332,9 @@ export class RoadmapReminderService {
     if (previous !== undefined && at.getTime() - previous < this.#debounceMs) return {};
     this.#served.set(agentId, at.getTime());
     try {
-      // Live `gh`, no cache: at this span the calls are minutes apart, and a
-      // reminder must be truthful about an edit the user made on their phone —
-      // which is the whole reason the roadmap lives on GitHub.
       const roadmap = await this.source.roadmap(signal);
       return { additionalContext: renderRoadmapReminder(roadmap, at.toISOString() as IsoTimestamp) };
     } catch {
-      // A failed reminder is a non-event: the roadmap is not the turn's subject,
-      // and the next trigger point retries. The debounce stamp stays so a broken
-      // `gh` cannot turn every tool call into a failed fetch.
       return {};
     }
   }
@@ -517,14 +417,6 @@ export interface ManagerCommandActions {
   startAutoRun(options?: { readonly dry?: boolean; readonly additionalGuideline?: string }): Promise<unknown>;
   /** `focus` is the user's trailing text: what they want the session to look at. */
   reviewPullRequest(focus?: string): Promise<unknown>;
-  /**
-   * `selector` is the user's trailing text: an agent id or an agent type.
-   * Omitted, the most recent reopenable session is taken. The action resolves to
-   * exactly one session rather than offering a picker: this runs inside a
-   * `UserPromptSubmit` hook, which blocks the Manager's prompt and times out in
-   * 60s, so waiting on a UI choice would let the raw command through to the
-   * model. The palette command is where the full list lives.
-   */
   reopenSession(selector?: string): Promise<unknown>;
 }
 
@@ -542,12 +434,6 @@ export class ManagerPromptService {
     this.#now = now ?? (() => new Date());
   }
 
-  /**
-   * `roadmapDue` is the hook's own tail-window verdict on the transcript. It
-   * rides along with the prompt rather than being a second hook call, so the
-   * common path — a user turn with no reminder owing — costs no extra spawn and
-   * no extra round trip.
-   */
   public async handle(agentId: AgentId, prompt: string, roadmapDue = false, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const done = parseDoneCommand(prompt);
     if (done !== undefined) return this.#done(agentId, done);
@@ -613,12 +499,6 @@ export class ManagerPromptService {
     }
   }
 
-  /**
-   * `/auto` and `/review-pr` are thin triggers for extension behavior, so the
-   * bridge performs them and tells the user directly. Waking the Manager to
-   * narrate a mechanical action costs a turn and risks it acting on the command
-   * a second time; it is told what happened in the next prompt's drain instead.
-   */
   async #runAction(agentId: AgentId, action: ParsedActionCommand): Promise<Record<string, unknown>> {
     if (this.actions === undefined) {
       return { intercepted: true, message: `aboard cannot handle /${action.command} right now: the extension action is unavailable.` };
@@ -651,9 +531,6 @@ export class ManagerPromptService {
       && record(outcome)?.started === true
       ? `${summary} The additional session guideline will be appended to every implementer and pr-doctor prompt.`
       : summary;
-    // A dry run is an inspection, not an event the Manager needs replayed on
-    // the user's next real prompt. Keeping the full forecast out of the fleet
-    // mailbox is also part of its promise not to change runtime state.
     const isDryRun = action.type === "auto" && record(outcome)?.dryRun === true;
     if (!isDryRun) {
       const occurredAt = this.#now().toISOString() as IsoTimestamp;
@@ -747,11 +624,6 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
   return lines.join("\n");
 }
 
-/**
- * A focus only steers a fallback doctor's first pass. When the owning session
- * already exists there is nothing to steer, and saying so is what keeps
- * `/review-pr <text>` from looking like it was honored.
- */
 function unusedFocusNote(focus: unknown): string {
   return typeof focus === "string" && focus.length > 0
     ? " The focus you typed was not applied — that session is already loaded; type it in the terminal."
@@ -781,19 +653,6 @@ function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
   return { ignoredArguments: (match[1]?.trim() ?? "").length > 0 };
 }
 
-/**
- * `/auto` accepts the explicit `--dry` inspection,
- * followed by optional free-form guidance for every auto agent. Flags lead so
- * an unknown option is still rejected instead of silently becoming guidance.
- * `/review-pr` and `/reopen` also treat trailing text as a real parameter: the
- * focus for a fallback doctor's first pass over the diff, and which recorded
- * session to come back to.
- *
- * The name is `/reopen` rather than `/resume` because `/resume` is a Claude Code
- * builtin: the TUI handles it locally and it never reaches `UserPromptSubmit`,
- * so a skill of that name could not be intercepted at all. `/review-pr` avoids
- * the builtin `/review` for the same reason.
- */
 function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   const match = /^\s*\/(auto|review-pr|reopen)(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
@@ -826,12 +685,6 @@ function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
   };
 }
 
-/**
- * `/general-purpose` and `/brainstorm` are argumentless handoffs and report
- * that trailing text was ignored. They open a
- * terminal the user drives directly, so an opening message would only spend a
- * turn before the conversation starts. Nothing leaks into Manager context.
- */
 function parseInteractiveCommand(prompt: string): {
   readonly type: "brainstormer" | "general-purpose";
   readonly command: string;
@@ -854,12 +707,6 @@ function parseInteractiveCommand(prompt: string): {
     : { type: "brainstormer", command, invalidArguments: false, ignoredArguments: trailing.length > 0, input: { type: "brainstormer", description: "interactive brainstorm session" } };
 }
 
-/**
- * The Manager's turn just ended, which is the moment its transcript is complete
- * and quiet — the natural point to bring aboard's backup copy of it up to date.
- * Fire-and-forget by contract: the long poll below must not wait on a file copy,
- * and a failed backup must never delay a result the Manager is waiting for.
- */
 export type ManagerTranscriptCheckpoint = (agentId: AgentId) => void;
 
 export function createManagerHookRoutes(
@@ -879,9 +726,6 @@ export function createManagerHookRoutes(
       if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "" || typeof (body.stopHookActive ?? body.stop_hook_active) !== "boolean") {
         return protocolError(400, "invalid-request", "agentId and stopHookActive are required");
       }
-      // Before the poll, not after: the poll can block for the whole hour the
-      // Stop timeout allows, and the transcript to copy is the one this turn
-      // just finished writing.
       checkpoint?.(body.agentId as AgentId);
       return { status: 200, body: await stop.poll({ agentId: body.agentId as AgentId, stopHookActive: (body.stopHookActive ?? body.stop_hook_active) as boolean }, request.signal) };
     }

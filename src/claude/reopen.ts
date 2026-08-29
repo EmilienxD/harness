@@ -1,19 +1,3 @@
-/**
- * Reopening a conversation aboard started.
- *
- * `review_pr` covers one case — the session that owns the pull request in
- * flight. It does not cover the ordinary one: a brainstormer or an interactive
- * general-purpose the user finished with yesterday and now wants back. That
- * session left the fleet when its conversation ended, so nothing offered it,
- * and resuming it by hand loses the agent definition — `--resume` restores an
- * `--agent` selection by name, and aboard's names live in a per-launch
- * directory no bare `claude` is pointed at.
- *
- * This coordinator is the way back for both: it merges what the fleet still
- * holds with what recent activity remembers, checks each candidate against
- * the transcript on disk, and reopens the chosen one through the same
- * `planSessionResume` path the other two use.
- */
 
 import type { InteractiveLaunchHandles, ReopenTarget } from "../bridge/delegation.js";
 import type { AgentId, AgentType, SessionId, TerminalId } from "../domain/contracts.js";
@@ -26,12 +10,6 @@ import {
 
 /** Why a recorded session cannot be reopened, as the user is told it. */
 export type UnresumableReason =
-  /**
-   * Claude Code holds no conversation under that id. Almost always its own
-   * cleanup sweep: it deletes session files older than `cleanupPeriodDays` (30
-   * by default) at every start, and aboard backs up the Manager's transcript
-   * only. A conversation abandoned before its first exchange looks the same.
-   */
   "no-transcript";
 
 /** A candidate plus the answer to "would `--resume` actually find it?". */
@@ -57,12 +35,6 @@ export interface ReopenSessionLauncher {
 
 export interface ReopenTerminals {
   isOpen(terminalId: TerminalId): boolean;
-  /**
-   * The agent's live terminal right now, if it has one. Asked again at reopen
-   * time rather than trusted from the listing: the picker is open for as long as
-   * the user takes over it, and a session that came back to life meanwhile must
-   * be focused rather than launched a second time under the same identity.
-   */
   liveTerminalFor(agentId: AgentId): TerminalId | undefined;
   show(terminalId: TerminalId): void;
 }
@@ -72,19 +44,9 @@ export interface ReopenCoordinatorOptions {
   readonly fleet: FleetRegistry;
   readonly terminals: ReopenTerminals;
   readonly launcher: ReopenSessionLauncher;
-  /**
-   * Transcript test; the same one the Manager's resume uses.
-   * `cwd` is the directory the session ran in, which is where Claude Code filed
-   * its transcript — absent for every session that ran in the workspace itself.
-   */
   readonly isResumable: (sessionId: SessionId, cwd?: string) => Promise<boolean>;
 }
 
-/**
- * Matches `/reopen <selector>`: an agent id, or a type. Both spellings of the
- * brainstormer are accepted because the skill is `/brainstorm` while the agent
- * type is `brainstormer`, and a user who types either means the same thing.
- */
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
   brainstorm: "brainstormer",
   brainstormer: "brainstormer",
@@ -96,16 +58,6 @@ const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
 export class ReopenCoordinator {
   public constructor(private readonly options: ReopenCoordinatorOptions) {}
 
-  /**
-   * Everything reopenable, newest first, each carrying whether Claude Code still
-   * has its conversation. An unresumable candidate is kept rather than filtered:
-   * a session the user remembers, silently missing from the list, tells them
-   * nothing, while one that says its transcript was swept explains itself.
-   *
-   * The transcript checks run together — each stops at the first conversation
-   * record, so they cost a few lines of JSONL apiece — and the list is bounded
-   * by the activity store's own retention.
-   */
   public async list(): Promise<readonly ReopenOption[]> {
     const candidates = reopenCandidates(
       this.options.activity.entries(),
@@ -123,9 +75,6 @@ export class ReopenCoordinator {
 
   /** Reopens one candidate: focus if it is live, relaunch through `--resume` otherwise. */
   public async reopen(candidate: ReopenCandidate): Promise<ReopenOutcome> {
-    // Liveness is re-read rather than taken from the candidate: relaunching an
-    // agent that already holds a terminal is refused downstream, and focusing is
-    // what the user meant anyway.
     const live = this.options.terminals.liveTerminalFor(candidate.agentId);
     if (live !== undefined) {
       this.options.terminals.show(live);
@@ -141,22 +90,12 @@ export class ReopenCoordinator {
       terminalName: `aboard: ${candidate.description}`,
       ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
       ...(candidate.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
-      // Reopened where it ran: an auto-run's own checkout holds the transcript,
-      // and the directory it names may no longer exist, which is what the
-      // transcript test above has already settled.
       ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
       ...(candidate.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
     });
     return { action: "reopened", candidate, handles };
   }
 
-  /**
-   * The `/reopen [selector]` path, which has no picker to offer: a hook blocks
-   * the Manager's prompt while it runs, so waiting on a UI choice would burn the
-   * hook's timeout and let the raw command through to the model. It resolves to
-   * one session instead — the most recent resumable one, or the most recent
-   * matching an agent id or type — which is predictable enough to type blind.
-   */
   public async reopenLatest(selector?: string): Promise<ReopenOutcome> {
     const options = await this.list();
     if (options.length === 0) return { action: "none", reason: "no-recorded-sessions" };
@@ -182,11 +121,6 @@ export class ReopenCoordinator {
   }
 }
 
-/**
- * One wording for both callers — the palette command's notification and the
- * `/reopen` message the hook prints in place of the user's prompt. They describe
- * the same four outcomes, and two spellings would drift.
- */
 export function describeReopenOutcome(outcome: ReopenOutcome): string {
   switch (outcome.action) {
     case "none":

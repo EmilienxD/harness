@@ -75,11 +75,6 @@ export class ProcessGhExecutor implements GhExecutor {
   }
 }
 
-/**
- * The roadmap issue as one label query returns it. `carrierCount` is reported,
- * never repaired: aboard does not modify an issue it did not create, so extra
- * carriers become inert rather than ambiguous.
- */
 export interface RoadmapSnapshot {
   readonly number: number;
   readonly body: string;
@@ -95,11 +90,6 @@ export interface RoadmapWriteResult {
   readonly positions?: readonly number[];
   /** The edited task's position after the edit, absent when it was deleted. */
   readonly task?: number | undefined;
-  /**
-   * The current pending list, present only when the edit renumbered other tasks.
-   * An append or an in-place edit shifts nothing and omits it, which keeps the
-   * common call cheap.
-   */
   readonly tasks?: readonly string[];
   readonly notices: readonly string[];
 }
@@ -149,16 +139,7 @@ export interface CreatePullRequestInput {
   readonly base: string;
 }
 
-/**
- * What auto-run needs about a pull request beyond the prompt-facing snapshot:
- * whether it can be merged at all, and where to send the user when it cannot.
- */
 export interface PullRequestMergeFacts {
-  /**
-   * GitHub's own verdict. `unknown` is an answer rather than a parse failure —
-   * mergeability is computed by a background job, so a pull request whose head
-   * was just pushed reports `UNKNOWN` until that job lands.
-   */
   readonly mergeable: "mergeable" | "conflicting" | "unknown";
   readonly url: string;
   readonly headSha: string;
@@ -412,12 +393,6 @@ function repositoryFromGraphql(value: unknown): Record<string, unknown> {
 }
 
 const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} totalCount pageInfo{hasNextPage endCursor}} closedByPullRequestsReferences(first:1){nodes{headRefName}}}}}`;
-/**
- * Open issues, oldest first, carrying everything both read paths need. Every
- * connection exposes its cursor: the top-level queue is fully paginated, and
- * the normally single-page label/dependency connections are completed by
- * focused follow-up queries when GitHub says another page exists.
- */
 const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){repository(owner:$owner,name:$repo){issues(first:100,after:$after,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title body createdAt labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} subIssues(first:100){nodes{number} totalCount pageInfo{hasNextPage endCursor}} blockedBy(first:100){nodes{number state} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}`;
 const ISSUE_LABELS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){labels(first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_BLOCKERS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state} pageInfo{hasNextPage endCursor}}}}}`;
@@ -428,45 +403,15 @@ const THREAD_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repositor
 export class GitHubClient implements GitHubPromptSource {
   #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
 
-  /**
-   * The roadmap issue this process minted, if any. `gh issue list --label` reads
-   * an index that lags creation by seconds, so the issue `todo_create` just made
-   * can be absent from the very next resolution — which is how a `todo_create`
-   * followed immediately by `todo_update` failed with `missing-todo` against an
-   * issue that already existed, costing the Manager a wasted call and a retry.
-   *
-   * This is not the rejected number cache: it holds only aboard's own write, it
-   * saves no round trip on the common path, and it is never trusted on its own.
-   * When the label query comes back without it, the issue is read directly by
-   * number — a point lookup is consistent where the list is not — and the seed
-   * is dropped the moment that read says it is closed, unlabelled, or gone.
-   */
   #minted: number | undefined;
 
   public constructor(private readonly gh: GhExecutor) {}
 
-  /**
-   * Proves the capability auto-run actually needs: the active gh account can
-   * authenticate to and resolve this workspace's repository. The probe always
-   * runs: a cached repository identity must not hide that the user logged out.
-   * Its successful identity is reused by the next GraphQL query, avoiding an
-   * extra subprocess and an all-host `gh auth status` false failure.
-   */
   public async checkAuthentication(): Promise<void> {
     const identity = await this.#resolveOwnerRepo();
     this.#identity = Promise.resolve(identity);
   }
 
-  /**
-   * The roadmap, or `undefined` when no open issue carries the label — the
-   * ordinary first-run state of a repository, distinct from a failed fetch.
-   *
-   * One query answers both halves of the question: `--json number,body` returns
-   * the locator *and* the document, so there is nothing a cached number could
-   * have saved. The previous session cache saved zero round trips, because
-   * every use of it had to revalidate and revalidation costs exactly what
-   * resolving from scratch costs.
-   */
   public async readRoadmap(): Promise<RoadmapSnapshot | undefined> {
     const carriers = await this.#scanTodoCarriers();
     const chosen = carriers[0];
@@ -482,11 +427,6 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
-  /**
-   * Appends tasks, minting the roadmap issue when no carrier exists. Minting is
-   * the only creation path and happens only here: `updateTask` against an empty
-   * candidate set is a failure, because there is no document its id could name.
-   */
   public async createRoadmapTasks(input: RoadmapCreateInput): Promise<RoadmapWriteResult> {
     const carriers = await this.#scanTodoCarriers();
     const chosen = carriers[0];
@@ -523,12 +463,6 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
-  /**
-   * An edit that renumbered other tasks hands back the current pending list, so
-   * the caller's next address is right the first time rather than after a guard
-   * failure teaches it so. Completed tasks are omitted: they are the bulk of a
-   * mature roadmap and are almost never the target of a follow-up edit.
-   */
   #shift(body: string, shifted: boolean): { readonly result: { readonly tasks?: readonly string[] }; readonly notices: readonly string[] } {
     if (!shifted) return { result: {}, notices: [] };
     const pending = parseRoadmap(body).tasks.filter((task) => !task.completed);
@@ -538,12 +472,6 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
-  /**
-   * Turns a rejected edit into a typed failure. Both addressing failures carry
-   * the current list, because that is exactly the data a retry needs and it
-   * costs one already-fetched parse — the alternative, matching a subject
-   * fuzzily, writes silently to the wrong task when it guesses wrong.
-   */
   #applied<T>(edit: RoadmapEdit<T>, tasks: readonly RoadmapTask[]): { readonly body: string; readonly value: T } {
     if (edit.ok) return { body: edit.body, value: edit.value };
     if (edit.failure.reason === "invalid-subject") {
@@ -564,11 +492,6 @@ export class GitHubClient implements GitHubPromptSource {
     );
   }
 
-  /**
-   * The bound is advisory. A one-sentence `create` that crosses it means the
-   * roadmap was already there, and deletion needs the user's explicit request,
-   * so refusing the write would deadlock the Manager with no way out.
-   */
   #boundNotices(body: string): readonly string[] {
     if (body.length > ROADMAP_BODY_LIMIT) return [`The roadmap is now ${body.length} characters, past the ${ROADMAP_BODY_LIMIT} bound. The write was accepted; ask the user whether to prune completed items.`];
     return nearBodyLimit(body) ? [`The roadmap is ${body.length} characters, near its ${ROADMAP_BODY_LIMIT} bound; consider asking the user about pruning.`] : [];
@@ -588,9 +511,6 @@ export class GitHubClient implements GitHubPromptSource {
     const match = /\/issues\/(\d+)\/?$/.exec(output);
     if (match === null) throw new GitHubBoundaryError("malformed-output", "gh issue create did not return an issue URL");
     const number = integer(Number(match[1]), "created roadmap number");
-    // Seed the resolver before returning: the caller's next roadmap operation is
-    // typically the immediate follow-up write, which is exactly when the label
-    // index has not caught up with this creation.
     this.#minted = number;
     return { number, notices: await this.#pinRoadmap(number) };
   }
@@ -624,11 +544,6 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
-  /**
-   * The briefing's ready/blocked list. `[AI]-spec` and `[AI]-todo` carriers are
-   * dropped: the roadmap is rendered separately and a spec is an umbrella, not
-   * a task. Oldest first, which reads as priority.
-   */
   public async listRoadmapIssues(): Promise<readonly RoadmapIssue[]> {
     const page = await this.#scanOpenIssues();
     return page.rows.flatMap((row) => {
@@ -643,12 +558,6 @@ export class GitHubClient implements GitHubPromptSource {
     });
   }
 
-  /**
-   * The auto-run graph: every open issue and its inferred ordering edges,
-   * projected into the domain's candidate shape. Selection — dispositions,
-   * umbrellas, blocking, sorting — happens in `selectIssues`, so this boundary
-   * reports and never judges.
-   */
   public async listImplementableIssues(): Promise<ImplementableIssues> {
     const page = await this.#scanOpenIssues();
     return {
@@ -665,21 +574,10 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
-  /**
-   * Posts a comment on an issue. Used by auto-run to leave the implementer's own
-   * account of the change where the issue's readers are, rather than only on the
-   * pull request that will be squashed away.
-   */
   public async addIssueComment(number: number, body: string): Promise<void> {
     await this.gh.run(["issue", "comment", String(number), "--body", body]);
   }
 
-  /**
-   * Closes an issue as completed. Auto-run needs this because GitHub only acts
-   * on a `Closes #N` keyword when the pull request merges into the default
-   * branch, and aboard's pull requests merge into a run's session branch. The
-   * comment is posted with the closure so the issue says who closed it and why.
-   */
   public async closeIssue(number: number, comment: string): Promise<void> {
     await this.gh.run(["issue", "close", String(number), "--reason", "completed", "--comment", comment]);
   }
@@ -693,11 +591,6 @@ export class GitHubClient implements GitHubPromptSource {
     return integer(Number(match[1]), "created pull request number");
   }
 
-  /**
-   * The open pull request whose head is this branch, if any. This is the `pr`
-   * phase's postcondition, so it must answer from the repository rather than
-   * from the run record.
-   */
   public async findOpenPullRequestForBranch(branch: string): Promise<number | undefined> {
     const output = await this.gh.run(["pr", "list", "--state", "open", "--head", branch, "--limit", "1", "--json", "number"]);
     const items = array(json(output, "branch pull request lookup"), "branch pull request lookup");
@@ -718,29 +611,10 @@ export class GitHubClient implements GitHubPromptSource {
     return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
   }
 
-  /**
-   * `deleteBranch` is a caller's decision because deleting a base branch closes
-   * every open pull request still targeting it. An issue branch has no such
-   * dependents and is deleted; a run's session branch is the base of any parked
-   * or unmerged issue pull request, so it is kept.
-   */
   public async mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase", deleteBranch: boolean): Promise<void> {
     await this.gh.run(["pr", "merge", String(number), `--${strategy}`, ...(deleteBranch ? ["--delete-branch"] : [])]);
   }
 
-  /**
-   * Closes a pull request without merging it, but only when it is still the
-   * pull request the caller described. Discard cleanup is the only caller: it
-   * must never close something that was retargeted, already merged, or has
-   * become somebody else's, so identity is re-read here rather than trusted
-   * from a record written hours ago.
-   */
-  /**
-   * The web address of an issue or pull request, so a tree row can open the
-   * thing it names. GitHub serves `/issues/<n>` and `/pull/<n>` interchangeably
-   * — it redirects to whichever the number actually is — so one builder answers
-   * both and neither needs a round trip to find out which it got.
-   */
   public async webUrl(number: number): Promise<string> {
     const { owner, repo } = await this.#ownerRepo();
     return `https://github.com/${owner}/${repo}/issues/${number}`;
@@ -847,16 +721,6 @@ export class GitHubClient implements GitHubPromptSource {
     await this.gh.run(["api", `repos/{owner}/{repo}/pulls/${pr}/comments`, "--method", "POST", "-f", `body=${finding.body.trim()}`, "-f", `commit_id=${string(item.headRefOid, "pullRequest.headRefOid")}`, "-f", `path=${finding.path.trim()}`, "-F", `line=${finding.line}`, "-f", `side=${finding.side ?? "RIGHT"}`]);
   }
 
-  /**
-   * Open issues carrying the roadmap label, newest first and ties on the lowest
-   * number. Read and write resolve through this one rule, so they converge on
-   * the same issue with no mutation and no healing pass.
-   *
-   * There is deliberately no `--search sort:created-desc`. Passing `--search`
-   * moves the query off the deterministic label filter onto GitHub's
-   * asynchronously indexed search API, where an issue created seconds ago can be
-   * missing — which would mint a duplicate roadmap. The sort is done here.
-   */
   async #scanTodoCarriers(): Promise<readonly TodoCarrier[]> {
     const output = await this.gh.run(["issue", "list", "--state", "open", "--label", LABEL_TODO, "--limit", "50", "--json", "number,body,createdAt"]);
     const items = array(json(output, "roadmap lookup"), "roadmap lookup");
@@ -871,14 +735,6 @@ export class GitHubClient implements GitHubPromptSource {
     return sortedCarriers(await this.#withMinted(listed));
   }
 
-  /**
-   * Adds the issue this process minted back to a candidate set the index has
-   * not caught up with yet, at the cost of one point lookup and only while the
-   * lag lasts. The lookup is authoritative in both directions: it supplies the
-   * current body rather than the one aboard wrote (the user may have edited the
-   * issue meanwhile), and a closed, unlabelled, or deleted issue clears the seed
-   * instead of resurrecting a roadmap the repository no longer has.
-   */
   async #withMinted(listed: readonly TodoCarrier[]): Promise<readonly TodoCarrier[]> {
     const minted = this.#minted;
     if (minted === undefined || listed.some((carrier) => carrier.number === minted)) return listed;
@@ -910,11 +766,6 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
-  /**
-   * The one open-issue read. Both public projections are built from this, so
-   * the briefing and the auto-run queue cannot disagree about what is open,
-   * what blocks it, or what order it is in.
-   */
   async #scanOpenIssues(): Promise<{ readonly rows: readonly OpenIssueRow[] }> {
     const rows = new Map<number, OpenIssueRow>();
     const repository = await this.#ownerRepo();
@@ -1011,12 +862,6 @@ export class GitHubClient implements GitHubPromptSource {
     return found;
   }
 
-  /**
-   * The repository's identity does not change for the lifetime of a workspace,
-   * and every GraphQL call needs it. Resolving it per call meant an extra `gh`
-   * subprocess on every query, which the auto-run loop makes several of per
-   * phase and once per poll tick while a hitl pull request waits.
-   */
   async #ownerRepo(): Promise<{ readonly owner: string; readonly repo: string }> {
     this.#identity ??= this.#resolveOwnerRepo().catch((error: unknown) => {
       // A failed lookup must not be cached, or a transient `gh` outage would

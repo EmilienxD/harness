@@ -36,9 +36,6 @@ test("parsing keeps order, completion, and every line the user wrote", () => {
   ]);
   assert.deepEqual(parsed.duplicateSubjects, []);
 
-  // Round trip: an edit that changes one task leaves the heading, the blank
-  // lines, and the trailing note exactly where they were. The user owns this
-  // issue, so a note they added must survive a roadmap tool call.
   const edited = updateTask(BODY, { task: 2, expect: "Pace the reminders", status: "completed" });
   assert.ok(edited.ok);
   assert.equal(edited.body, BODY.replace("- [ ] Pace the reminders", "- [x] Pace the reminders"));
@@ -51,9 +48,6 @@ test("positions are absolute over the whole document and never renumbered per vi
   const pendingPositions = renderTasks(tasks, "pending")
     .split("\n")
     .map((line) => Number(line.split(".")[0]));
-  // The completed first task keeps position 1, so the pending view starts at 2
-  // and is deliberately non-contiguous. If it renumbered from 1, the reminder
-  // and the session-start briefing would name different tasks by the same id.
   assert.deepEqual(pendingPositions, [2, 3]);
   for (const task of tasks) {
     assert.match(renderTasks(tasks, "full"), new RegExp(`^${task.position}\\. \\[[ x]\\] ${task.subject}$`, "mu"));

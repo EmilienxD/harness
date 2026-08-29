@@ -60,11 +60,6 @@
         "icon": "$(play)"
       },
       {
-        "command": "aboard.previewAutoRun",
-        "title": "Aboard: Preview Auto Run",
-        "icon": "$(list-tree)"
-      },
-      {
         "command": "aboard.stopAutoRun",
         "title": "Aboard: Stop Auto Run",
         "icon": "$(debug-stop)"
@@ -213,13 +208,8 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "view == aboard.autoRun && (aboard.autoRunCard == idle || aboard.autoRunCard == preview)",
+          "when": "view == aboard.autoRun && (aboard.autoRunCard == idle || aboard.autoRunCard == forecast || aboard.autoRunCard == unavailable)",
           "group": "1_run@1"
-        },
-        {
-          "command": "aboard.previewAutoRun",
-          "when": "view == aboard.autoRun && (aboard.autoRunCard == idle || aboard.autoRunCard == preview)",
-          "group": "1_run@2"
         },
         {
           "command": "aboard.stopAutoRun",
@@ -277,11 +267,7 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "aboard.initialized && (aboard.autoRunCard == idle || aboard.autoRunCard == preview)"
-        },
-        {
-          "command": "aboard.previewAutoRun",
-          "when": "aboard.initialized && (aboard.autoRunCard == idle || aboard.autoRunCard == preview)"
+          "when": "aboard.initialized && (aboard.autoRunCard == idle || aboard.autoRunCard == forecast || aboard.autoRunCard == unavailable)"
         },
         {
           "command": "aboard.stopAutoRun",
@@ -359,13 +345,8 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "viewItem == aboard.autoRun.idle || viewItem == aboard.autoRun.preview",
+          "when": "viewItem == aboard.autoRun.idle || viewItem == aboard.autoRun.forecast || viewItem == aboard.autoRun.forecastUnavailable",
           "group": "inline@1"
-        },
-        {
-          "command": "aboard.previewAutoRun",
-          "when": "viewItem == aboard.autoRun.idle || viewItem == aboard.autoRun.preview",
-          "group": "inline@2"
         },
         {
           "command": "aboard.autoRun.openCurrentIssue",

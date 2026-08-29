@@ -218,10 +218,6 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
 });
 
 test("a version-1 record surfaces as unsupported rather than disappearing or migrating", () => {
-  // It stored a forecast, not a plan, and none of the SHAs, dispositions, or
-  // per-issue outcomes recovery validation needs. Dropping it would leave the
-  // user's in-flight branches unaccounted for; resuming it would restore exactly
-  // the rediscovery this replaces.
   const legacy = parseAutoRunRecord({
     version: 1,
     runId: "run_old",

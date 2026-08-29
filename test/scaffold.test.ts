@@ -17,10 +17,6 @@ test("fresh scaffold installs every aboard-owned asset under .aboard only", asyn
   await assert.rejects(readFile(join(root, ".gitignore")));
   assert.equal(await readFile(join(root, ".aboard", ".gitignore"), "utf8"), "runtime/\n");
   await assert.rejects(readFile(join(root, ".aboard", "scripts", "aboard_cli.py")));
-  // The aboard MCP server is declared inline in the Manager's per-launch
-  // definition, so it reaches that session and no other. A `.mcp.json` entry
-  // would be project-scoped: every worker, and the user's own hand-started
-  // `claude`, would connect it and pay for its tool descriptions.
   await assert.rejects(readFile(join(root, ".mcp.json")));
   await assert.rejects(readFile(join(root, ".claude", "settings.json")));
   assert.equal((await json(join(root, ".aboard", "aboard-hooks.json"))).UserPromptSubmit !== undefined, true);
@@ -30,20 +26,12 @@ test("fresh scaffold installs every aboard-owned asset under .aboard only", asyn
   // CLAUDE.md is the user's file: aboard's Manager persona ships as an agent
   // definition instead, so no scaffolded instruction applies to every session.
   await assert.rejects(readFile(join(root, "CLAUDE.md")));
-  // Definitions land outside `.claude/`, where Claude Code does not scan for
-  // subagents: a file there would make every session in the workspace â€” an
-  // aboard terminal or the user's own `claude` â€” able to spawn aboard's agents
-  // behind the bridge and outside the write lease.
   assert.match(await readFile(join(root, ".aboard", "agents", "manager.md"), "utf8"), /name: manager/);
   const explore = await readFile(join(root, ".aboard", "agents", "Explore.md"), "utf8");
   assert.match(explore, /name: Explore/);
   assert.doesNotMatch(explore, /^tools\s*:/mu);
   await assert.rejects(readFile(join(root, ".claude", "agents", "manager.md")));
   for (const name of ["general-purpose", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
-  // The scaffolder reaches no GitHub boundary at all: a repository with no
-  // `[AI]-todo` carrier is the normal first-run state, and an empty placeholder
-  // issue is worse than none because it looks like a roadmap. The briefing
-  // reports the absence as work to do, and `/update-todo` writes the first one.
   assert.equal("todo" in report, false);
   // An existing installation upgrades the same way, with nothing to reconcile.
   assert.equal("todo" in await scaffoldProject({ projectRoot: root, assetRoot: assets }), false);

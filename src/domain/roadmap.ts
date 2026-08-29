@@ -1,27 +1,3 @@
-/**
- * The project roadmap's document model: a flat markdown checkbox list held in
- * the body of the open issue labelled `[AI]-todo`.
- *
- * The model is pure so that the two places that need it agree by construction.
- * The GitHub boundary parses a body, applies one operation, and serializes it
- * back; the Manager's briefing parses the same body and renders the same
- * positions. A second implementation of the addressing rule in the renderer
- * would be a sync bug the moment either side changed.
- *
- * **A task's address is its position, confirmed by its text.** A mutation names
- * a 1-based position and an `expect` string; the position addresses and `expect`
- * is the ETag, so writing through a stale address is structurally impossible
- * rather than merely discouraged. Positions are absolute over every task line,
- * completed ones included, and are never renumbered per view — the pending-only
- * reminder and the full briefing must name the same task by the same number.
- *
- * This replaces a 4-hex hash of the subject, which changed whenever a subject
- * was edited — the most common operation after completion — and whose
- * collision-resolution pass made an id depend on document order, so reordering
- * two colliding subjects silently repointed a still-valid id at a different
- * task. Position is the natural address here because order *is* this document's
- * semantics: list order is priority and the first unchecked item is next.
- */
 
 /** The document's storage bound. Exceeding it warns rather than refuses. */
 export const ROADMAP_BODY_LIMIT = 60_000;
@@ -32,13 +8,6 @@ const NEAR_BOUND_RATIO = 0.9;
 /** A subject is a point of reference, not a specification. */
 export const ROADMAP_SUBJECT_LIMIT = 200;
 
-/**
- * How much of a subject a caller must reproduce to confirm an address. Long
- * enough that reproducing it is real evidence the caller is looking at the task
- * it means, short enough that a 200-character subject does not have to be
- * transcribed in full. Comparing fixed-length truncations is what stops the
- * guard degrading: a caller cannot match with fewer characters than this.
- */
 export const EXPECT_PREFIX_CHARS = 40;
 
 export const ROADMAP_TASK_STATUSES = ["pending", "completed", "deleted"] as const;
@@ -54,18 +23,8 @@ export interface RoadmapTask {
 /** Where an insertion or a move lands: after a given position, or before them all. */
 export type RoadmapAnchor = number | "top";
 
-/**
- * A parsed body. Non-checkbox lines are carried through verbatim and in place:
- * the user owns this issue, and a heading or a note they added must survive a
- * roadmap tool call untouched.
- */
 export interface ParsedRoadmap {
   readonly tasks: readonly RoadmapTask[];
-  /**
-   * Subjects appearing more than once. No longer an addressing hazard now that
-   * position is the address, but still a defect in the document worth telling
-   * the user about, so it is reported and never repaired.
-   */
   readonly duplicateSubjects: readonly string[];
 }
 
@@ -91,12 +50,6 @@ const LEADING_MARKUP = /^\s*(?:[-*+]|#{1,6}|\d+[.)]|\[[ xX]\])(?:\s|$)/u;
 
 export type SubjectRejection = "empty" | "multiline" | "too-long" | "markup";
 
-/**
- * Structural validation only. "One sentence" is instruction in the skill; the
- * character cap makes the failure mode unreachable without the CLI trying to
- * judge prose. The newline rule is correctness rather than preference: a second
- * line breaks the one-checkbox-per-task parse on the next read.
- */
 export function validateSubject(subject: string): SubjectRejection | undefined {
   if (subject.trim().length === 0) return "empty";
   if (/[\r\n]/u.test(subject)) return "multiline";
@@ -114,22 +67,10 @@ export function describeSubjectRejection(rejection: SubjectRejection): string {
   }
 }
 
-/**
- * Whitespace is normalized before comparison because a body round trips through
- * GitHub's editor and a phone keyboard, where a doubled space is noise rather
- * than an edit. Case is not normalized: a case change is a real edit, and the
- * cost of being strict is one loud, self-explaining failure.
- */
 function expectationKey(subject: string): string {
   return subject.replace(/\s+/gu, " ").trim().slice(0, EXPECT_PREFIX_CHARS);
 }
 
-/**
- * True when `expect` reproduces the stored subject, or exactly its first
- * {@link EXPECT_PREFIX_CHARS} characters. Comparing truncations of both sides
- * means a shorter `expect` cannot match a longer subject, so the guard has a
- * floor rather than accepting any prefix.
- */
 export function expectationMatches(stored: string, expect: string): boolean {
   return expectationKey(stored) === expectationKey(expect);
 }
@@ -216,13 +157,6 @@ export type RoadmapEdit<T> =
   | { readonly ok: true; readonly body: string; readonly value: T }
   | { readonly ok: false; readonly failure: RoadmapEditFailure };
 
-/**
- * `shifted` reports whether the edit moved any *other* task's position, which is
- * what decides whether the caller is handed a fresh list. An append and an
- * in-place edit shift nothing and stay cheap; an insert, a move, and a delete
- * renumber everything after them and would otherwise leave the Manager holding
- * stale addresses until the next guard failure taught it so.
- */
 export interface RoadmapCreateResult {
   readonly positions: readonly number[];
   readonly shifted: boolean;
@@ -234,11 +168,6 @@ export interface RoadmapUpdateResult {
   readonly shifted: boolean;
 }
 
-/**
- * Appends or inserts new tasks in one edit. A batch is all-or-nothing because
- * the issue edit is a single write: there is no partial application to fall
- * back to, so a subject that trips validation fails the whole call.
- */
 export function createTasks(body: string, input: RoadmapCreateInput): RoadmapEdit<RoadmapCreateResult> {
   for (const subject of input.subjects) {
     const rejection = validateSubject(subject);
@@ -261,16 +190,6 @@ function countTasksBefore(entries: readonly Entry[], index: number): number {
   return entries.slice(0, index).filter((entry) => entry.kind === "task").length;
 }
 
-/**
- * Edits one task in place. `--after` is the reprioritize operation rather than
- * a third verb: moving a task and editing it are the same write to the same
- * document, and splitting them would double the round trips for no gain.
- *
- * `expect` guards the task being changed but deliberately not the `after`
- * anchor: a stale anchor misplaces a task in the priority order, which is
- * visible in the next render and cheap to fix, while a stale `task` would check
- * off or retitle work the user never touched.
- */
 export function updateTask(body: string, input: RoadmapUpdateInput): RoadmapEdit<RoadmapUpdateResult> {
   if (input.subject !== undefined) {
     const rejection = validateSubject(input.subject);
@@ -299,11 +218,6 @@ export function updateTask(body: string, input: RoadmapUpdateInput): RoadmapEdit
   entries.splice(index, 1, edited);
 
   if (input.after !== undefined) {
-    // The anchor is resolved against the document the caller was looking at,
-    // *before* the moved task is lifted out, then shifted down by one if it sat
-    // after it. Resolving against the remaining list instead would make the last
-    // position unreachable and would read `after: <its own position>` as "after
-    // my successor" rather than the no-op it plainly means.
     const target = insertionIndex(entries, input.after);
     if (target === "unknown") return { ok: false, failure: { reason: "unknown-position", field: "after", position: input.after as number } };
     const remaining = entries.filter((_, position) => position !== index);
@@ -319,11 +233,6 @@ export function nearBodyLimit(body: string): boolean {
   return body.length >= ROADMAP_BODY_LIMIT * NEAR_BOUND_RATIO;
 }
 
-/**
- * One task, in the single format the whole system uses. The briefing, the
- * reminder, and the list a failed lookup returns all render this, so the data a
- * retry reads looks exactly like the data the call was written against.
- */
 function taskLine(task: RoadmapTask): string {
   return `${task.position}. [${task.completed ? "x" : " "}] ${task.subject}`;
 }
@@ -333,15 +242,6 @@ export function numberedTasks(tasks: readonly RoadmapTask[]): readonly string[] 
   return tasks.map(taskLine);
 }
 
-/**
- * The roadmap as it appears wherever the Manager reads it. `mode: "pending"` is
- * the periodic reminder's shape: the completed history is still verbatim in the
- * window at that point, so repeating it would make the reminder the largest
- * recurring line item in a long-lived project instead of a flat cost.
- *
- * Filtering happens after positions are assigned, so a pending-only rendering
- * shows the same — deliberately non-contiguous — numbers as the full one.
- */
 export function renderTasks(tasks: readonly RoadmapTask[], mode: "full" | "pending"): string {
   const selected = mode === "full" ? tasks : tasks.filter((task) => !task.completed);
   return selected.map(taskLine).join("\n");

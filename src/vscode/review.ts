@@ -8,12 +8,6 @@ export interface ReviewCommandHost {
   error(message: string): void;
 }
 
-/**
- * The panel entry point for `review_pr` (`AGENTS.md`). It
- * asks for nothing: the action is "reopen the session for the pull request
- * currently in flight", and the extension already knows which that is. A number
- * may still be passed positionally from a tree item.
- */
 export function registerReviewCommand(host: ReviewCommandHost, reviews: ReviewCoordinator): Disposable {
   return host.registerCommand("aboard.reviewPr", async (...args) => {
     const pr = typeof args[0] === "number" && Number.isInteger(args[0]) && args[0] > 0 ? args[0] : undefined;

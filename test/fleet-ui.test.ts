@@ -110,9 +110,6 @@ test("icons separate the Manager, interactive agents, and automated workers, nev
   assert.equal(icon("implementer", "i", "s-i"), "lock");
   assert.equal(icon("pr-doctor-afk", "v", "s-v"), "lock");
   assert.equal(icon("pr-doctor-hitl", "f", "s-f"), "comment-discussion");
-  // The dual-mode builtin types follow the launch: an automated one is closed
-  // to input, an interactive one (delivery mode "none") is something the user
-  // talks to.
   assert.equal(icon("general-purpose", "g", "s-g"), "lock");
   assert.equal(icon("Explore", "e", "s-e"), "lock");
   fleet.register({ ...worker, identity: { agentId: agent("e2"), type: "Explore" }, sessionId: session("s-e2"), resultDelivery: { mode: "none" } }, startedAt);
@@ -132,9 +129,6 @@ test("commands route focus and kill, and force release stays available as a reco
 });
 
 test("a session whose terminal is gone leaves the view entirely", () => {
-  // The old view kept it as a "paused" row offering Restore Fleet. There is
-  // nothing to restore any more, and a row that can only produce a misleading
-  // Focus is worse than no row: what became of it belongs in Recent Activity.
   const fleet = new FleetRegistry(); const lease = new WriteLease(); fleet.register(worker, startedAt);
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => false);
   assert.deepEqual(model.roots(), []);
