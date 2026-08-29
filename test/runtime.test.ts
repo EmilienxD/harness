@@ -120,6 +120,7 @@ function fixedPlanRecord(): AutoRunRecord {
     attempt: 2,
     settings: {
       review: true,
+      recursiveIssueReferences: true,
       mergeStrategy: "merge",
       mergeRunPullRequest: true,
       pauseAfterHitl: false,
@@ -202,6 +203,7 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, checkpoint: "publishing" },
     { ...valid, attempt: 0 },
     { ...valid, settings: { ...valid.settings, mergeStrategy: "fast-forward" } },
+    { ...valid, settings: { ...valid.settings, recursiveIssueReferences: "yes" } },
     { ...valid, settings: undefined },
     { ...valid, plan: [{ number: 34 }] },
     { ...valid, branchShas: { "aboard/run/return": "short" } },
@@ -211,6 +213,11 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
   ]) {
     assert.equal(parseAutoRunRecord(broken), undefined, JSON.stringify(broken));
   }
+  const priorRecord = parseAutoRunRecord({
+    ...valid,
+    settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "recursiveIssueReferences")),
+  });
+  assert.equal(priorRecord?.version === 2 ? priorRecord.settings.recursiveIssueReferences : undefined, false);
   // An authoritative record is all-or-nothing: silently turning damaged
   // progress into pending work could repeat an issue or a side effect.
   const damaged = parseAutoRunRecord({ ...valid, progress: { ...valid.progress, "35": { state: "halfway" } } });

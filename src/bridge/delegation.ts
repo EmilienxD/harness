@@ -42,6 +42,8 @@ export interface DelegationLaunchInput {
   readonly description: string;
   /** Every issue whose resolved contract belongs in the opening prompt, in the caller's order. */
   readonly issues?: readonly number[];
+  /** Whether resolved issue context follows references found in directly related issues. */
+  readonly recursiveIssueReferences?: boolean;
   readonly pullRequest?: number;
   readonly focus?: string;
   /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */

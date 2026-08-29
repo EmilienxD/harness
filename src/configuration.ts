@@ -34,6 +34,7 @@ export const ABOARD_SETTINGS = [
   "aboard.manager.roadmapReminderBytes",
   "aboard.manager.transcriptBackups",
   "aboard.autoRun.review",
+  "aboard.autoRun.recursiveIssueReferences",
   "aboard.autoRun.pauseAfterHitl",
   "aboard.autoRun.mergeStrategy",
   "aboard.autoRun.mergeRunPullRequest",
@@ -175,6 +176,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       // Automated review stays opt-in so a run cannot silently expand its
       // authority from implementation into review.
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
+      recursiveIssueReferences: flag(reader, "aboard.autoRun.recursiveIssueReferences", false, diagnostics),
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),
       // Off by default for the same reason review is: the run's own pull request

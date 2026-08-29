@@ -33,7 +33,12 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
     }
     if (input.type === "implementer" && input.issues !== undefined) {
       return appendAdditionalGuideline(
-        await this.prompts.resolve({ kind: "implementation", instruction: input.prompt ?? "Address the issue.", issueNumbers: input.issues }),
+        await this.prompts.resolve({
+          kind: "implementation",
+          instruction: input.prompt ?? "Address the issue.",
+          issueNumbers: input.issues,
+          ...(input.recursiveIssueReferences === undefined ? {} : { recursiveIssueReferences: input.recursiveIssueReferences }),
+        }),
         input.additionalGuideline,
       );
     }

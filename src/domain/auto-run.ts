@@ -32,6 +32,8 @@ export type DiscardBehavior = (typeof DISCARD_BEHAVIORS)[number];
 
 export interface AutoRunSettings {
   readonly review: boolean;
+  /** Whether issue context follows references beyond the primary issue's direct references. */
+  readonly recursiveIssueReferences: boolean;
   readonly discardBehavior: DiscardBehavior;
   readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;

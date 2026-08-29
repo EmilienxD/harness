@@ -11,6 +11,7 @@ test("configuration validates untrusted values and reports actionable fallbacks"
     ["aboard.manager.disallowedTools", ["Read", ""]],
     ["aboard.autoRun.mergeStrategy", "cherry-pick"],
     ["aboard.autoRun.review", "yes"],
+    ["aboard.autoRun.recursiveIssueReferences", "yes"],
     ["aboard.autoRun.discardBehavior", "delete-everything"],
     ["aboard.timeouts.managerStop", 0],
   ]);
@@ -20,9 +21,9 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   assert.deepEqual(result.value.managerDisallowedTools, []);
   // Discard falls back to the conservative behavior, not to the destructive one
   // an unrecognised value happens to look like.
-  assert.deepEqual(result.value.autoRun, { review: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30, discardBehavior: "record-only", worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } });
+  assert.deepEqual(result.value.autoRun, { review: false, recursiveIssueReferences: false, pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30, discardBehavior: "record-only", worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
-  assert.equal(result.diagnostics.length, 7);
+  assert.equal(result.diagnostics.length, 8);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
 });
 
@@ -32,6 +33,7 @@ test("configuration accepts every supported launch and review setting", () => {
     "aboard.launch.maxInlinePromptChars": 12_000,
     "aboard.manager.disallowedTools": ["Bash", "Read(./src/**)"],
     "aboard.autoRun.review": true,
+    "aboard.autoRun.recursiveIssueReferences": true,
     "aboard.autoRun.pauseAfterHitl": true,
     "aboard.autoRun.mergeStrategy": "rebase",
     "aboard.autoRun.mergeRunPullRequest": true,
@@ -50,7 +52,7 @@ test("configuration accepts every supported launch and review setting", () => {
   assert.equal(result.value.bridgePort, 0);
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash", "Read(./src/**)"]);
   assert.deepEqual(result.value.autoRun, {
-    review: true, pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15,
+    review: true, recursiveIssueReferences: true, pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15,
     discardBehavior: "full-cleanup",
     // The root is trimmed: it becomes a path, and a stray space in a settings
     // file would produce a directory nobody meant to create.
@@ -170,4 +172,3 @@ test("the claude command setting accepts a wrapper, and a broken one falls back 
   assert.deepEqual(broken.value.claudeCommand, ["claude"]);
   assert.deepEqual(broken.diagnostics.map((item) => item.setting), ["aboard.launch.claudeCommand"]);
 });
-

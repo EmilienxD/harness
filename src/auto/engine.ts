@@ -372,6 +372,7 @@ export class AutoRunEngine {
 
     const frozen: FrozenRunSettings = {
       review: settings.review,
+      recursiveIssueReferences: settings.recursiveIssueReferences,
       mergeStrategy: settings.mergeStrategy,
       mergeRunPullRequest: settings.mergeRunPullRequest,
       pauseAfterHitl: settings.pauseAfterHitl,
@@ -1070,6 +1071,7 @@ export class AutoRunEngine {
     const outcome = await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
+      recursiveIssueReferences: this.#current.settings.recursiveIssueReferences,
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),

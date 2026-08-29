@@ -264,6 +264,36 @@ test("recursive issue context terminates across parent and reference cycles", as
   );
 });
 
+test("implementation context can stop after the primary issue's direct references", async () => {
+  const issue52: IssueSnapshot = {
+    number: 52,
+    title: "Cache the token",
+    body: "Only the recursively referenced body.",
+    labels: ["[AI]-afk"],
+    state: "open",
+  };
+  const github = new FakeGitHub({
+    issues: [
+      { ...issue47, dependencyIssueNumbers: [31] },
+      { ...parent31, dependencyIssueNumbers: [52] },
+      issue52,
+    ],
+  });
+  const prompt = await new PromptResolver({ github }).resolve({
+    kind: "implementation",
+    instruction: "Go.",
+    issueNumbers: [47],
+    recursiveIssueReferences: false,
+  });
+
+  assert.deepEqual(github.issueRequests, [47, 31]);
+  assert.deepEqual(
+    prompt?.sources.map((source) => `${source.kind}#${source.number}`),
+    ["issue#47", "parent-issue#31"],
+  );
+  assert.equal(prompt?.text.includes(issue52.body), false);
+});
+
 test("recursive issue context has a hard node bound even without a cycle", async () => {
   const issues = Array.from({ length: 10 }, (_, index): IssueSnapshot => ({
     number: index + 1,

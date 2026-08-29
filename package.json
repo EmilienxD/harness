@@ -488,6 +488,11 @@
           "default": false,
           "description": "Launch a pr-doctor after each issue is addressed during an auto-run. Automated review stays opt-in; the explicit review action is always available."
         },
+        "aboard.autoRun.recursiveIssueReferences": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include issue bodies referenced by the primary issue's directly related issues in an auto-run implementer's initial context. Direct references are always included. Off by default, so traversal stops after that first level. This changes loaded issue bodies only, not the implementer's instructions."
+        },
         "aboard.autoRun.pauseAfterHitl": {
           "type": "boolean",
           "default": false,

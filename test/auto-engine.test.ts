@@ -12,7 +12,7 @@ import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
-const SETTINGS: AutoRunSettings = { review: false, discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
+const SETTINGS: AutoRunSettings = { review: false, recursiveIssueReferences: false, discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "aboard/run/test";
@@ -474,6 +474,7 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 1,
     settings: {
       review: false,
+      recursiveIssueReferences: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
@@ -503,6 +504,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   await context.engine.settle();
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
   assert.equal(context.launches[0]?.expectsUncommittedTree, true);
+  assert.equal(context.launches[0]?.recursiveIssueReferences, false);
   assert.equal(context.launches[0]?.description, "address issue 34");
   assert.match(context.launches[0]?.prompt ?? "", /^Address issue #34/);
   assert.deepEqual(context.gitCalls.filter((call) => call !== "fetch"), [
@@ -523,6 +525,17 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.match(context.notifications.join("\n"), /issue #34 committed \([0-9a-z]+\) and opened PR #56/);
   assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
   assert.equal(context.state.cleared, true);
+});
+
+test("auto-run freezes recursive issue context and passes it only as launch data", async () => {
+  const context = harness({ settings: { recursiveIssueReferences: true } });
+  const result = await context.engine.start();
+  assert.equal(result.started, true);
+  await context.engine.settle();
+
+  assert.equal(context.saved.some((record) => record.settings.recursiveIssueReferences), true);
+  assert.equal(context.launches[0]?.recursiveIssueReferences, true);
+  assert.equal(context.launches[0]?.prompt?.includes("recursive"), false);
 });
 
 test("the default branch is never a pull request base and never merged into", async () => {

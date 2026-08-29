@@ -25,6 +25,7 @@ export interface FrozenIssue {
 /** The settings a run is bound to for its whole life, including every resume. */
 export interface FrozenRunSettings {
   readonly review: boolean;
+  readonly recursiveIssueReferences: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
   readonly pauseAfterHitl: boolean;

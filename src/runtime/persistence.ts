@@ -125,6 +125,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   const pollSeconds = positiveInteger(value.pollSeconds);
   if (
     typeof value.review !== "boolean"
+    || (value.recursiveIssueReferences !== undefined && typeof value.recursiveIssueReferences !== "boolean")
     || typeof value.mergeRunPullRequest !== "boolean" || typeof value.pauseAfterHitl !== "boolean"
     || mergeStrategy === undefined || pollSeconds === undefined
     || typeof worktree.enabled !== "boolean" || typeof worktree.root !== "string"
@@ -134,6 +135,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   if (value.additionalGuideline !== undefined && guideline === undefined) return undefined;
   return {
     review: value.review,
+    recursiveIssueReferences: value.recursiveIssueReferences ?? false,
     mergeStrategy,
     mergeRunPullRequest: value.mergeRunPullRequest,
     pauseAfterHitl: value.pauseAfterHitl,

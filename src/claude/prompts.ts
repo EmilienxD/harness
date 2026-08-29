@@ -65,6 +65,8 @@ export type PromptResolutionRequest =
       readonly kind: "implementation";
       readonly instruction: string;
       readonly issueNumbers: readonly number[];
+      /** Defaults to recursive resolution for callers outside auto-run. */
+      readonly recursiveIssueReferences?: boolean;
     }
   | {
       readonly kind: "issue-context";
@@ -265,6 +267,7 @@ export class PromptResolver {
     builder: PromptBuilder,
     issues: readonly IssueSnapshot[],
     pointers: boolean,
+    recursiveIssueReferences = true,
   ): Promise<void> {
     for (const issue of issues) {
       const body = excerpt(
@@ -311,8 +314,10 @@ export class PromptResolver {
         relatedBody.text,
       );
       builder.source(next.kind, related.number, relatedBody);
-      enqueue(related.parentIssueNumber, "parent-issue");
-      for (const number of related.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
+      if (recursiveIssueReferences) {
+        enqueue(related.parentIssueNumber, "parent-issue");
+        for (const number of related.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
+      }
     }
   }
 
@@ -326,7 +331,7 @@ export class PromptResolver {
 
     builder.section(undefined, instruction);
 
-    await this.#issueSections(builder, issues, true);
+    await this.#issueSections(builder, issues, true, request.recursiveIssueReferences);
     // The disposition is the primary issue's: it decides what happens to the
     // change, and the engine launches one implementer per issue.
     builder.section("Disposition", dispositionGuidance(issueDisposition(primary.labels)));
