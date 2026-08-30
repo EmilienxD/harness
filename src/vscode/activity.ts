@@ -40,7 +40,6 @@ export class ActivityTreeModel {
     if (canOpenActivityIssue(entry)) capabilities.push("issue");
     if (entry.pullRequest !== undefined) capabilities.push("pr");
     if (entry.kind === "agent" && entry.reopen !== undefined && !live) capabilities.push("reopen");
-    if (entry.kind === "agent" && entry.type === "manager" && !live) capabilities.push("manager");
     return {
       label: describeActivity(entry),
       description: describeDetail(entry),
@@ -49,9 +48,7 @@ export class ActivityTreeModel {
       contextValue: capabilities.join("."),
       ...(live
         ? { command: { command: "aboard.activity.openTerminal", title: "Open Terminal", arguments: [node] } }
-        : entry.kind === "agent" && entry.type === "manager"
-          ? { command: { command: "aboard.resumeManager", title: "Resume Manager", arguments: [] } }
-          : entry.kind === "agent" && entry.reopen !== undefined
+        : entry.kind === "agent" && entry.reopen !== undefined
           ? { command: { command: "aboard.activity.reopen", title: "Reopen Session", arguments: [node] } }
           : {}),
     };

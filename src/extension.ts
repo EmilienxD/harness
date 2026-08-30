@@ -11,7 +11,7 @@ import {
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
-import { TerminalController } from "./claude/terminals.js";
+import { TerminalController, type TerminalSnapshot } from "./claude/terminals.js";
 import { isNamedBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { FileManagerStore, ManagerIdentity, ManagerLifecycle } from "./claude/manager.js";
@@ -618,6 +618,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
   };
   const reviews = new ReviewCoordinator(github, coordinator, ownership, reviewTerminals);
+  // Assigned once the Manager lifecycle exists below; the coordinator only calls
+  // it when a manager is reopened, which cannot happen before activation ends.
+  let resumeManager: (() => Promise<void>) | undefined;
   const reopen = new ReopenCoordinator({
     activity: { entries: () => activity.store() },
     fleet,
@@ -628,6 +631,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
     launcher: coordinator,
     isResumable: (sessionId, cwd) => sessionIsResumable(sessionId, cwd ?? workspaceRoot),
+    reopenManager: async () => { await resumeManager?.(); },
   });
   const briefings = new ManagerBriefings(
     briefingSources(git, github, workspaceRoot, () => recordedManager?.updatedAt, () => autoRun.state()),
@@ -821,27 +825,33 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // project, so no catalog-less worker and no hand-started `claude` connects it.
     mcpConfig: () => agentMcpConfigs.write({ port: bridge!.port, token: bridge!.token, agentId: managerIdentity.require() }),
   });
+  // A launched Manager reuses its recorded identity: an unknown one registers,
+  // a live one reattaches to its new terminal, an ended one restarts.
+  const absorbLaunchedManager = (terminal: TerminalSnapshot): void => {
+    const startedAt = new Date().toISOString() as IsoTimestamp;
+    if (fleet.get(terminal.agentId) === undefined) {
+      fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, attended: true, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
+    } else {
+      const prior = fleet.get(terminal.agentId)!;
+      if (["starting", "running", "awaiting-user"].includes(prior.lifecycle.status)) {
+        fleet.reattach(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
+      } else {
+        fleet.restart(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
+      }
+    }
+    fleet.transition(terminal.agentId, { status: "running", startedAt }, startedAt);
+  };
   // The UI offers resume and new as separate actions, so the launch path never
   // has to interrupt with a "which did you mean?" prompt.
   const launch = async (mode: "resume" | "new") => {
     if (!requireInitialized()) return;
     try {
-      const terminal = await manager.start(mode);
-      const startedAt = new Date().toISOString() as IsoTimestamp;
-      if (fleet.get(terminal.agentId) === undefined) {
-        fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, attended: true, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
-      } else {
-        const prior = fleet.get(terminal.agentId)!;
-        if (["starting", "running", "awaiting-user"].includes(prior.lifecycle.status)) {
-          fleet.reattach(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
-        } else {
-          fleet.restart(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
-        }
-      }
-      fleet.transition(terminal.agentId, { status: "running", startedAt }, startedAt);
+      absorbLaunchedManager(await manager.start(mode));
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
     finally { await publishManagerState(); }
   };
+  // Reopening the Manager from a session-reopen surface is a resume under the hood.
+  resumeManager = async () => { await launch("resume"); };
   const reconcileStaleSessions = (): void => {
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
@@ -858,9 +868,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   reconcileStaleSessions();
 
   const publishManagerState = async () => {
-    const recorded = await managerStore.load().catch(() => undefined);
     await commands.executeCommand("setContext", "aboard.managerLive", fleet.list().some((entry) => entry.identity.type === "manager"));
-    await commands.executeCommand("setContext", "aboard.managerResumable", recorded !== undefined);
   };
   const publishScaffoldState = async () => {
     const wasInitialized = initialized;
@@ -942,7 +950,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       );
       if (confirmed === "Update") await scaffold();
     }),
-    commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
     registerBranchCleanupCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, async () => {

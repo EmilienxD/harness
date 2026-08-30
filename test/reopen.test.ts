@@ -60,6 +60,8 @@ function setup(options: {
   readonly resumable?: (sessionId: SessionId) => boolean;
   /** Every transcript lookup, so a test can assert *where* it was looked for. */
   readonly resumeChecks?: { sessionId: SessionId; cwd: string | undefined }[];
+  /** Records each Manager resume the reopen path delegates instead of launching. */
+  readonly managerResumes?: string[];
 } = {}) {
   const record = (sessionId: SessionId, cwd: string | undefined): boolean => {
     options.resumeChecks?.push({ sessionId, cwd });
@@ -113,6 +115,7 @@ function setup(options: {
     },
     launcher: coordinator,
     isResumable: async (sessionId, cwd) => record(sessionId, cwd),
+    reopenManager: async () => { options.managerResumes?.push("resumed"); },
   });
   return { fleet, lease, host, terminals, coordinator, reopen, openTerminals, liveTerminals, shown };
 }
@@ -423,6 +426,73 @@ test("the picker names each row the way its session and fleet row are named", ()
   // A session Claude Code can no longer resume says why, rather than quietly
   // disappearing from a list the user expects it in.
   assert.match(items[1]?.detail ?? "", /Cannot be reopened/);
+});
+
+test("reopening the Manager resumes it through its own path, never the generic launcher", async () => {
+  const managerResumes: string[] = [];
+  const { reopen, host } = setup({
+    ledger: ledgerWith({ agentId: "1", type: "manager", sessionId: BRAINSTORM_SESSION, endedAt: "2026-07-30T09:30:00.000Z" }),
+    managerResumes,
+  });
+
+  const options = await reopen.list();
+  const manager = options.find((option) => option.candidate.type === "manager");
+  assert.ok(manager, "the recorded Manager appears among the sessions that can be reopened");
+
+  const outcome = await reopen.reopen(manager.candidate);
+  assert.equal(outcome.action, "reopened");
+  // The Manager's own lifecycle ran; no generic terminal was created for it.
+  assert.deepEqual(managerResumes, ["resumed"]);
+  assert.equal(host.created.length, 0);
+});
+
+test("a live Manager is focused, not resumed a second time", async () => {
+  const managerResumes: string[] = [];
+  const { reopen, liveTerminals } = setup({
+    ledger: ledgerWith({ agentId: "1", type: "manager", sessionId: BRAINSTORM_SESSION, endedAt: "2026-07-30T09:30:00.000Z" }),
+    managerResumes,
+  });
+  liveTerminals.set(agent("1"), terminalId("manager-terminal"));
+
+  const options = await reopen.list();
+  const manager = options.find((option) => option.candidate.type === "manager")!;
+  const outcome = await reopen.reopen(manager.candidate);
+  assert.equal(outcome.action, "focused");
+  assert.deepEqual(managerResumes, []);
+});
+
+test("/reopen never reopens the Manager, even when it is the only recorded session", async () => {
+  const managerResumes: string[] = [];
+  const { reopen } = setup({
+    ledger: ledgerWith({ agentId: "1", type: "manager", sessionId: BRAINSTORM_SESSION, endedAt: "2026-07-30T09:30:00.000Z" }),
+    managerResumes,
+  });
+  // The Manager drives /reopen through its MCP tool to reopen workers it handed
+  // off; it can never reopen itself this way.
+  const outcome = await reopen.reopenLatest();
+  assert.equal(outcome.action, "none");
+  assert.equal(outcome.action === "none" ? outcome.reason : "", "no-recorded-sessions");
+  assert.deepEqual(managerResumes, []);
+});
+
+test("the picker pins the Manager above every other session", () => {
+  const items = renderReopenItems([
+    {
+      candidate: { agentId: agent("9"), type: "general-purpose", sessionId: GENERAL_SESSION, description: "general purpose", origin: "ended", at: at("2026-07-30T09:30:00.000Z") },
+      resumable: true,
+    },
+    {
+      candidate: { agentId: agent("1"), type: "manager", sessionId: BRAINSTORM_SESSION, description: "Manager", origin: "ended", at: at("2026-07-30T08:00:00.000Z") },
+      resumable: true,
+    },
+    {
+      candidate: { agentId: agent("7"), type: "brainstormer", sessionId: BRAINSTORM_SESSION, description: "plan", origin: "ended", at: at("2026-07-30T09:00:00.000Z") },
+      resumable: true,
+    },
+  ], new Date("2026-07-30T10:00:00.000Z"));
+
+  // The Manager leads even though it is the oldest; the rest keep recency order.
+  assert.deepEqual(items.map((item) => item.label), ["aboard-manager-1", "aboard-general-purpose-9", "aboard-brainstormer-7"]);
 });
 
 test("the command refuses an unresumable pick, and reopens a resumable one", async () => {

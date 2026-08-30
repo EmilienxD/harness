@@ -48,21 +48,24 @@ test("the activity-bar views are bound to opposite initialization states", async
   assert.equal((contributes.views["aboard"] ?? []).find((view) => view.id === "aboard.fleet")?.name, "Agent Fleet");
 });
 
-test("Agent Fleet keeps New Manager first and leaves Manager resume to Recent Activity", async () => {
+test("Agent Fleet keeps New Manager first, and the Manager reopens through the shared reopen action", async () => {
   const { contributes } = await manifest();
   const fleetWelcome = (contributes.viewsWelcome ?? []).filter((entry) => entry.view === "aboard.fleet");
   assert.deepEqual(fleetWelcome, [], "the fleet has no empty-state copy or duplicate launch actions");
 
   const fleetTitle = (contributes.menus["view/title"] ?? []).filter((entry) => entry.when?.includes("view == aboard.fleet"));
-  for (const command of ["aboard.newManager", "aboard.resumeManager"]) {
-    assert.equal(fleetTitle.some((entry) => entry.command === command), false, `${command} must not render in the fleet header`);
-  }
+  assert.equal(fleetTitle.some((entry) => entry.command === "aboard.newManager"), false, "aboard.newManager must not render in the fleet header");
 
-  const activityResume = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.resumeManager");
-  assert.match(activityResume?.when ?? "", /manager/, "Manager resume remains on its Recent Activity row");
-
-  const icons = new Map(contributes.commands.map((entry) => [entry.command, entry.icon]));
-  assert.equal(icons.get("aboard.resumeManager"), icons.get("aboard.activity.reopen"), "Manager resume uses the session-reopen icon");
+  // There is one word for getting a session back. No separate Manager-resume
+  // command, palette entry, or activity-row button survives; a Manager row uses
+  // the same reopen action as every other session.
+  const all = [
+    ...(contributes.menus["view/title"] ?? []),
+    ...(contributes.menus["view/item/context"] ?? []),
+    ...(contributes.menus.commandPalette ?? []),
+  ];
+  assert.equal(all.some((entry) => entry.command === "aboard.resumeManager"), false, "aboard.resumeManager must not survive anywhere");
+  assert.equal((contributes.commands ?? []).some((entry) => entry.command === "aboard.resumeManager"), false, "aboard.resumeManager must not be a contributed command");
 });
 
 test("every action rendered inline in a panel has an icon", async () => {

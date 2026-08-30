@@ -95,8 +95,8 @@ export interface ActivityDto {
 
 export const EMPTY_ACTIVITY: ActivityDto = { version: 1, entries: [] };
 
-export function isReopenableType(type: AgentType): type is Exclude<AgentType, "manager"> {
-  return type !== "manager" && !isNonRestorablePersistedAgentType(type);
+export function isReopenableType(type: AgentType): boolean {
+  return !isNonRestorablePersistedAgentType(type);
 }
 
 /** The original launch was handed to the user; reporting is an independent axis. */
@@ -276,7 +276,7 @@ export type ReopenOrigin =
 
 export interface ReopenCandidate {
   readonly agentId: AgentId;
-  readonly type: Exclude<AgentType, "manager">;
+  readonly type: AgentType;
   readonly sessionId: SessionId;
   readonly description: string;
   readonly origin: ReopenOrigin;

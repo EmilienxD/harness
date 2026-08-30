@@ -20,10 +20,19 @@ export interface ReopenOption {
   readonly reason?: UnresumableReason;
 }
 
+/** A reopen option narrowed to the continuable roles, which are never the Manager. */
+export interface ContinuationOption {
+  readonly candidate: ReopenCandidate & { readonly type: Exclude<AgentType, "manager"> };
+  readonly resumable: boolean;
+  readonly reason?: UnresumableReason;
+}
+
 export type ReopenOutcome =
   | { readonly action: "none"; readonly reason: "no-recorded-sessions" | "no-match"; readonly selector?: string }
   | { readonly action: "focused"; readonly candidate: ReopenCandidate }
-  | { readonly action: "reopened"; readonly candidate: ReopenCandidate; readonly handles: InteractiveLaunchHandles }
+  // `handles` is absent only for a Manager resume, which owns its terminal and
+  // fleet reattach internally rather than returning interactive launch handles.
+  | { readonly action: "reopened"; readonly candidate: ReopenCandidate; readonly handles?: InteractiveLaunchHandles }
   | { readonly action: "unresumable"; readonly candidate: ReopenCandidate; readonly reason: UnresumableReason };
 
 export interface ReopenActivitySource {
@@ -33,6 +42,9 @@ export interface ReopenActivitySource {
 export interface ReopenSessionLauncher {
   reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles>;
 }
+
+/** The Manager has its own resume path; reopening one delegates to it rather than to the generic launcher. */
+export type ReopenManager = () => Promise<unknown>;
 
 export interface ReopenTerminals {
   isOpen(terminalId: TerminalId): boolean;
@@ -46,6 +58,8 @@ export interface ReopenCoordinatorOptions {
   readonly terminals: ReopenTerminals;
   readonly launcher: ReopenSessionLauncher;
   readonly isResumable: (sessionId: SessionId, cwd?: string) => Promise<boolean>;
+  /** Resumes the recorded Manager through its own lifecycle; required for reopening a manager candidate. */
+  readonly reopenManager?: ReopenManager;
 }
 
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
@@ -83,6 +97,16 @@ export class ReopenCoordinator {
       this.options.terminals.show(live);
       return { action: "focused", candidate };
     }
+    // The Manager resumes through its own lifecycle, which reuses its recorded
+    // identity and re-runs its full launch policy; the generic launcher would
+    // mint a fresh agent and lose that continuity.
+    if (candidate.type === "manager") {
+      if (this.options.reopenManager === undefined) {
+        return { action: "unresumable", candidate, reason: "no-transcript" };
+      }
+      await this.options.reopenManager();
+      return { action: "reopened", candidate };
+    }
     if (!await this.options.isResumable(candidate.sessionId, candidate.cwd).catch(() => false)) {
       return { action: "unresumable", candidate, reason: "no-transcript" };
     }
@@ -100,7 +124,9 @@ export class ReopenCoordinator {
   }
 
   public async reopenLatest(selector?: string): Promise<ReopenOutcome> {
-    const options = await this.list();
+    // The Manager drives this through its MCP reopen tool; it reopens workers it
+    // handed off, never itself, so manager candidates stay out of this path.
+    const options = (await this.list()).filter((option) => option.candidate.type !== "manager");
     if (options.length === 0) return { action: "none", reason: "no-recorded-sessions" };
     const wanted = selector?.trim().toLowerCase();
     const matching = wanted === undefined || wanted.length === 0
@@ -124,9 +150,11 @@ export class ReopenCoordinator {
   }
 
   /** Includes automated research retained only for an MCP follow-up, not for the user-facing reopen list. */
-  public async findContinuation(agentId: AgentId): Promise<ReopenOption | undefined> {
+  public async findContinuation(agentId: AgentId): Promise<ContinuationOption | undefined> {
     const ordinary = await this.find(agentId);
-    if (ordinary !== undefined && isContinuableAgentType(ordinary.candidate.type)) return ordinary;
+    if (ordinary !== undefined && isContinuableAgentType(ordinary.candidate.type)) {
+      return { ...ordinary, candidate: { ...ordinary.candidate, type: ordinary.candidate.type } };
+    }
     const live = this.options.fleet.get(agentId);
     if (live !== undefined && live.identity.type !== "manager" && isContinuableAgentType(live.identity.type)) {
       return {
@@ -147,7 +175,7 @@ export class ReopenCoordinator {
     const entry = this.options.activity.entries().entries.find((item) =>
       item.kind === "agent" && item.agentId === agentId && item.continuation !== undefined);
     if (entry?.kind !== "agent" || entry.continuation === undefined || !isContinuableAgentType(entry.type)) return undefined;
-    const candidate: ReopenCandidate = {
+    const candidate: ContinuationOption["candidate"] = {
       agentId: entry.agentId,
       type: entry.type,
       sessionId: entry.continuation.sessionId,

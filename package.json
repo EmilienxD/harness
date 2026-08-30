@@ -28,11 +28,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "aboard.resumeManager",
-        "title": "Aboard: Resume Manager",
-        "icon": "$(debug-continue)"
-      },
-      {
         "command": "aboard.newManager",
         "title": "Aboard: New Manager"
       },
@@ -252,10 +247,6 @@
           "when": "aboard.initialized"
         },
         {
-          "command": "aboard.resumeManager",
-          "when": "aboard.initialized && aboard.managerResumable && !aboard.managerLive"
-        },
-        {
           "command": "aboard.newManager",
           "when": "aboard.initialized && !aboard.managerLive"
         },
@@ -400,11 +391,6 @@
         {
           "command": "aboard.activity.reopen",
           "when": "viewItem =~ /\\breopen\\b/",
-          "group": "inline@2"
-        },
-        {
-          "command": "aboard.resumeManager",
-          "when": "viewItem =~ /\\bmanager\\b/",
           "group": "inline@2"
         },
         {

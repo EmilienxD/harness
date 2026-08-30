@@ -23,7 +23,11 @@ export function renderReopenItems(
   options: readonly ReopenOption[],
   now: Date = new Date(),
 ): readonly ReopenQuickPickItem[] {
-  return options.map((option) => {
+  // The Manager is the session the user most often wants back, so it leads the
+  // list; everything else keeps the coordinator's recency order.
+  const ordered = [...options].sort((left, right) =>
+    Number(right.candidate.type === "manager") - Number(left.candidate.type === "manager"));
+  return ordered.map((option) => {
     const { candidate } = option;
     const described = candidate.issueNumbers === undefined ? "" : describeIssueNumbers(candidate.issueNumbers);
     const issues = described.length === 0 ? "" : ` · ${described}`;

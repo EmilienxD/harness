@@ -66,8 +66,9 @@ test("result delivery does not decide whether a restorable conversation can reop
   assert.equal(isInteractiveLaunch(fleetSession({ agentId: "9", type: "general-purpose", delivers: true })), false);
   assert.equal(canReopenSession(fleetSession({ agentId: "9", type: "general-purpose", delivers: true })), true);
   assert.equal(canReopenSession(fleetSession({ agentId: "10", type: "implementer", delivers: true })), true);
-  // The Manager has its own resume path; a second one here would compete with it.
-  assert.equal(isReopenableType("manager"), false);
+  // The Manager reopens like any other session; under the hood its reopen rides
+  // its own resume path, but that is a routing detail, not a separate word.
+  assert.equal(isReopenableType("manager"), true);
   // Automated-only, with no caller left to receive a result.
   assert.equal(isReopenableType("webresearcher"), false);
   assert.equal(isReopenableType("Explore"), false);
@@ -288,7 +289,8 @@ test("a row offers only the actions it can actually perform", () => {
   assert.doesNotMatch(items[2]?.contextValue ?? "", /issue/);
   assert.match(items[2]?.contextValue ?? "", /pr/);
   assert.equal(items[2]?.label, "auto-run finished");
-  // Manager continuity has its own command rather than the generic session reopen path.
-  assert.match(items[3]?.contextValue ?? "", /manager/);
-  assert.equal(items[3]?.command?.command, "aboard.resumeManager");
+  // The Manager reopens through the same surface as every other session; the
+  // resume path it rides is a routing detail the row does not expose.
+  assert.match(items[3]?.contextValue ?? "", /reopen/);
+  assert.equal(items[3]?.command?.command, "aboard.activity.reopen");
 });
