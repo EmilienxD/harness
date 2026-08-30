@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DelegationCoordinator } from "../src/bridge/delegation.js";
+import { DelegationCoordinator, DelegationError } from "../src/bridge/delegation.js";
 import { ManagerPromptService } from "../src/bridge/manager-hooks.js";
 import { ReopenCoordinator, describeReopenOutcome } from "../src/claude/reopen.js";
 import { resolveLaunchConfiguration } from "../src/claude/launch.js";
@@ -35,11 +35,12 @@ const GENERAL_SESSION = session("af817a6c-cd41-41e2-a4db-44d3f43cd560");
 class FakeTerminal implements TerminalHandle {
   public processId = Promise.resolve(1);
   public exitStatus: { code: number | undefined } | undefined;
+  public disposed = false;
   public readonly shown: Array<boolean | undefined> = [];
   public readonly sent: string[] = [];
   public sendText(text: string): void { this.sent.push(text); }
   public show(preserveFocus?: boolean): void { this.shown.push(preserveFocus); }
-  public dispose(): void {}
+  public dispose(): void { this.disposed = true; }
 }
 
 class FakeHost implements TerminalHost {
@@ -55,6 +56,7 @@ class FakeHost implements TerminalHost {
 function setup(options: {
   readonly ledger?: LegacyLedger;
   readonly activity?: ActivityDto;
+  readonly fleet?: FleetRegistry;
   readonly resumable?: (sessionId: SessionId) => boolean;
   /** Every transcript lookup, so a test can assert *where* it was looked for. */
   readonly resumeChecks?: { sessionId: SessionId; cwd: string | undefined }[];
@@ -63,7 +65,7 @@ function setup(options: {
     options.resumeChecks?.push({ sessionId, cwd });
     return options.resumable?.(sessionId) ?? true;
   };
-  const fleet = new FleetRegistry();
+  const fleet = options.fleet ?? new FleetRegistry();
   const lease = new WriteLease();
   const host = new FakeHost();
   let nextTerminal = 0;
@@ -150,6 +152,92 @@ function ledgerWith(...entries: readonly { readonly agentId: string; readonly ty
     endedAt: at(entry.endedAt),
   }), undefined)!;
 }
+
+function retainFinishedImplementer(fleet: FleetRegistry, status: "completed" | "failed"): void {
+  const agentId = agent("4");
+  const startedAt = at("2026-07-30T09:00:00.000Z");
+  const finishedAt = at("2026-07-30T09:30:00.000Z");
+  fleet.register({
+    identity: { agentId, type: "implementer" },
+    sessionId: BRAINSTORM_SESSION,
+    terminal: { terminalId: terminalId("spent-terminal"), name: "aboard: address issue 34" },
+    lifecycle: { status: "starting", startedAt },
+    resultDelivery: { mode: "tool-result" },
+    telemetry,
+    issueNumbers: [34],
+    autoRunRestricted: true,
+  }, startedAt);
+  fleet.transition(agentId, { status: "running", startedAt }, startedAt);
+  if (status === "completed") {
+    fleet.transition(agentId, { status, startedAt, finishedAt, exitCode: 0, lastAssistantMessage: "done" }, finishedAt);
+    fleet.recordResult(agentId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "done", telemetry }, finishedAt);
+    return;
+  }
+  const failure = { type: "crashed" as const, exitCode: 1, lastAssistantMessage: "failed" };
+  fleet.transition(agentId, { status, startedAt, finishedAt, failure }, finishedAt);
+  fleet.recordResult(agentId, { outcome: "failed", failure, telemetry }, finishedAt);
+}
+
+for (const status of ["completed", "failed"] as const) {
+  test(`a retained ${status} implementer restarts as an attended session`, async () => {
+    const fleet = new FleetRegistry();
+    retainFinishedImplementer(fleet, status);
+    const { reopen, host } = setup({
+      fleet,
+      ledger: ledgerWith({ agentId: "4", type: "implementer", sessionId: BRAINSTORM_SESSION, endedAt: "2026-07-30T09:30:00.000Z" }),
+    });
+
+    const outcome = await reopen.reopenLatest();
+    assert.equal(outcome.action, "reopened");
+    assert.equal(fleet.list().length, 1);
+    const restored = fleet.get(agent("4"));
+    assert.equal(restored?.sessionId, BRAINSTORM_SESSION);
+    assert.equal(restored?.terminal.terminalId, "terminal-1");
+    assert.equal(restored?.lifecycle.status, "running");
+    assert.equal(restored?.attended, true);
+    assert.deepEqual(restored?.resultDelivery, { mode: "none" });
+    assert.equal(restored?.lastResult, undefined);
+    assert.equal(host.created[0]?.options.env.ABOARD_ATTENDED, "1");
+  });
+}
+
+test("reopen refuses an incompatible retained identity before creating a terminal", async () => {
+  const fleet = new FleetRegistry();
+  fleet.register({
+    identity: { agentId: agent("4"), type: "brainstormer" },
+    sessionId: BRAINSTORM_SESSION,
+    terminal: { terminalId: terminalId("spent-terminal"), name: "aboard: brainstorm" },
+    lifecycle: { status: "starting", startedAt: at("2026-07-30T09:00:00.000Z") },
+    resultDelivery: { mode: "none" },
+    telemetry,
+  }, at("2026-07-30T09:00:00.000Z"));
+  const { reopen, host } = setup({
+    fleet,
+    ledger: ledgerWith({ agentId: "4", type: "implementer", sessionId: BRAINSTORM_SESSION, endedAt: "2026-07-30T09:30:00.000Z" }),
+  });
+
+  await assert.rejects(
+    () => reopen.reopenLatest(),
+    (error) => error instanceof DelegationError && error.code === "unknown-agent",
+  );
+  assert.equal(host.created.length, 0);
+});
+
+test("reopen disposes its new terminal when fleet binding unexpectedly fails", async () => {
+  class RejectingRestartFleet extends FleetRegistry {
+    public override restart(): void { throw new Error("binding failed"); }
+  }
+  const fleet = new RejectingRestartFleet();
+  retainFinishedImplementer(fleet, "completed");
+  const { reopen, host } = setup({
+    fleet,
+    ledger: ledgerWith({ agentId: "4", type: "implementer", sessionId: BRAINSTORM_SESSION, endedAt: "2026-07-30T09:30:00.000Z" }),
+  });
+
+  await assert.rejects(() => reopen.reopenLatest(), /binding failed/);
+  assert.equal(host.created.length, 1);
+  assert.equal(host.created[0]?.terminal.disposed, true);
+});
 
 test("an ended brainstormer is reopened with its own definition re-emitted, not as a bare --resume", async () => {
   const { reopen, host, fleet, lease } = setup({

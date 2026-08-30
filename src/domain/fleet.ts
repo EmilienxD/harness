@@ -325,6 +325,7 @@ export class FleetRegistry {
     startedAt: IsoTimestamp,
     sessionId?: SessionId,
     attended?: boolean,
+    resultDelivery?: AgentSession["resultDelivery"],
   ): void {
     const session = this.requireSession(agentId);
     if (session.lifecycle.status !== "completed" && session.lifecycle.status !== "failed") {
@@ -344,6 +345,7 @@ export class FleetRegistry {
       ...withoutResult,
       ...(attended === undefined ? (session.attended === true ? { attended: true as const } : {}) : attended ? { attended: true as const } : {}),
       ...(sessionId === undefined ? {} : { sessionId }),
+      ...(resultDelivery === undefined ? {} : { resultDelivery }),
       terminal,
       lifecycle: { status: "starting", startedAt },
     });

@@ -249,6 +249,17 @@ export class DelegationCoordinator {
     await this.options.spills.prepare(plan, target.cwd);
     if (plan.spill !== undefined) await this.options.spills.write(plan.spill, target.cwd);
     if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
+    const existing = this.options.fleet.get(target.agentId);
+    if (existing !== undefined && (
+      existing.identity.type !== target.type
+      || existing.sessionId !== target.sessionId
+    )) {
+      throw new DelegationError(
+        "unknown-agent",
+        `Agent ${target.agentId} is registered to a different ${existing.identity.type} session`,
+      );
+    }
+    const resultDelivery = target.resultDelivery ?? { mode: "none" } as const;
     const terminal = this.options.terminals.create({
       agentId: target.agentId,
       sessionId: target.sessionId,
@@ -261,31 +272,46 @@ export class DelegationCoordinator {
       ...(target.focus === undefined ? {} : { focus: target.focus }),
       ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
     });
-    if (this.options.fleet.get(target.agentId) === undefined) {
-      this.options.fleet.register({
-        identity: { agentId: target.agentId, type: target.type },
-        sessionId: target.sessionId,
-        terminal: { terminalId: terminal.terminalId, name: terminal.name },
-        lifecycle: { status: "starting", startedAt: occurredAt },
-        resultDelivery: target.resultDelivery ?? { mode: "none" },
-        ...(attended ? { attended: true as const } : {}),
-        telemetry: EMPTY_TELEMETRY,
-        ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
-        ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
-        ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
-        ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-      }, occurredAt);
-    } else {
-      this.options.fleet.reattach(
-        target.agentId,
-        { terminalId: terminal.terminalId, name: terminal.name },
-        occurredAt,
-        undefined,
-        target.resultDelivery ?? { mode: "none" },
-        attended,
-      );
+    try {
+      const fleetTerminal = { terminalId: terminal.terminalId, name: terminal.name };
+      if (existing === undefined) {
+        this.options.fleet.register({
+          identity: { agentId: target.agentId, type: target.type },
+          sessionId: target.sessionId,
+          terminal: fleetTerminal,
+          lifecycle: { status: "starting", startedAt: occurredAt },
+          resultDelivery,
+          ...(attended ? { attended: true as const } : {}),
+          telemetry: EMPTY_TELEMETRY,
+          ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+          ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
+          ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
+          ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
+        }, occurredAt);
+      } else if (existing.lifecycle.status === "completed" || existing.lifecycle.status === "failed") {
+        this.options.fleet.restart(
+          target.agentId,
+          fleetTerminal,
+          occurredAt,
+          target.sessionId,
+          attended,
+          resultDelivery,
+        );
+      } else {
+        this.options.fleet.reattach(
+          target.agentId,
+          fleetTerminal,
+          occurredAt,
+          target.sessionId,
+          resultDelivery,
+          attended,
+        );
+      }
+      this.options.fleet.transition(target.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
+    } catch (error) {
+      try { this.options.terminals.kill(terminal.terminalId); } catch { /* already closed */ }
+      throw error;
     }
-    this.options.fleet.transition(target.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
     return { agentId: target.agentId, sessionId: target.sessionId, terminalId: terminal.terminalId };
   }
 
