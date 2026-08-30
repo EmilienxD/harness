@@ -11,7 +11,6 @@ import type { FleetRegistry } from "../domain/fleet.js";
 import { ROADMAP_TASK_STATUSES, type RoadmapAnchor, type RoadmapTaskStatus } from "../domain/roadmap.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
 import type { ReviewCoordinator } from "../github/review.js";
-import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
 import { CORE_MCP_TOOLS, mcpToolsForRole } from "./mcp-tools.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
@@ -86,21 +85,6 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function parseIssues(value: unknown): { readonly issues: readonly number[]; readonly notices: readonly string[] } | string {
-  if (!Array.isArray(value)) return "issues must be an array of positive integers";
-  if (value.length === 0) return "issues must contain at least one issue number";
-  for (const entry of value) {
-    if (!Number.isInteger(entry) || (entry as number) <= 0) return "every entry of issues must be a positive integer";
-  }
-  const issues = [...new Set(value as readonly number[])];
-  return {
-    issues,
-    notices: issues.length === value.length
-      ? []
-      : [`issues contained repeated numbers, which were resolved once each: ${formatIssueNumbers(issues)}.`],
-  };
-}
-
 interface ParsedLaunch {
   readonly input: DelegationLaunchInput;
   readonly interactive: boolean;
@@ -137,7 +121,7 @@ function normalizeDescription(raw: string, prompt: string | undefined, type: str
 
 function parseLaunch(value: unknown): ParsedLaunch | string {
   if (!isRecord(value)) return "arguments must be an object";
-  if (!exactKeys(value, ["type", "prompt", "description", "issues", "interactive", "run_in_background"])) {
+  if (!exactKeys(value, ["type", "prompt", "description", "interactive", "run_in_background"])) {
     return "arguments contain an unknown property";
   }
   if (value.type !== undefined && (!nonEmptyString(value.type) || !MCP_LAUNCHABLE_AGENT_TYPES.includes(value.type as AgentType))) {
@@ -149,20 +133,13 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
   if (!nonEmptyString(value.description)) return "description must be a non-empty string";
   if (value.prompt !== undefined && !nonEmptyString(value.prompt)) return "prompt must be non-empty when provided";
-  const parsedIssues = value.issues === undefined ? undefined : parseIssues(value.issues);
-  if (typeof parsedIssues === "string") return parsedIssues;
-
-  const notices: string[] = [...(parsedIssues?.notices ?? [])];
+  const notices: string[] = [];
   const label = normalizeDescription(value.description, value.prompt === undefined ? undefined : value.prompt as string, type);
   if (label.notice !== undefined) notices.push(label.notice);
   let interactive = value.interactive === true;
-  if (!interactive && isInteractiveAgentType(type)) {
+  if (!interactive && type === "brainstormer") {
     interactive = true;
     notices.push(`${type} is an interactive type and was launched interactively; its report will arrive after the user runs /done.`);
-  }
-  if (interactive && parsedIssues !== undefined && (isInteractiveAgentType(type) || !nonEmptyString(value.prompt))) {
-    const ignored = parsedIssues.issues.length === 1 ? "was ignored" : "were ignored";
-    notices.push(`${describeIssueNumbers(parsedIssues.issues)} ${ignored}: an interactive session opens with only the opening topic. To hand the session an issue's context, pass it in \`prompt\`.`);
   }
   if (!interactive && !nonEmptyString(value.prompt)) return "prompt is required unless interactive is true";
   const background = value.run_in_background === true;
@@ -171,11 +148,39 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
       type: type as DelegationLaunchInput["type"],
       description: label.description,
       ...(value.prompt === undefined ? {} : { prompt: (value.prompt as string).trim() }),
-      ...(parsedIssues === undefined ? {} : { issues: parsedIssues.issues }),
     },
     interactive,
     background,
     notices,
+  };
+}
+
+function parseBrainstormerLaunch(value: unknown): ParsedLaunch | string {
+  if (!isRecord(value)) return "arguments must be an object";
+  if (!exactKeys(value, ["type", "prompt", "description", "interactive", "run_in_background"])) {
+    return "arguments contain an unknown property";
+  }
+  if (!nonEmptyString(value.type) || !BRAINSTORMER_LAUNCHABLE_AGENT_TYPES.includes(value.type as never)) {
+    return `type must be one of: ${BRAINSTORMER_LAUNCHABLE_AGENT_TYPES.join(", ")}`;
+  }
+  const type = value.type as (typeof BRAINSTORMER_LAUNCHABLE_AGENT_TYPES)[number];
+  if (value.interactive !== undefined && typeof value.interactive !== "boolean") return "interactive must be a boolean";
+  if (value.interactive === true && isAutomatedAgentType(type)) return `${type} is automated and cannot be launched interactively`;
+  if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
+  if (!nonEmptyString(value.description)) return "description must be a non-empty string";
+  if (value.prompt !== undefined && !nonEmptyString(value.prompt)) return "prompt must be non-empty when provided";
+  const interactive = value.interactive === true;
+  if (!interactive && !nonEmptyString(value.prompt)) return "prompt is required unless interactive is true";
+  const label = normalizeDescription(value.description, value.prompt === undefined ? undefined : value.prompt as string, type);
+  return {
+    input: {
+      type,
+      description: label.description,
+      ...(value.prompt === undefined ? {} : { prompt: (value.prompt as string).trim() }),
+    },
+    interactive,
+    background: value.run_in_background === true,
+    notices: label.notice === undefined ? [] : [label.notice],
   };
 }
 
@@ -218,21 +223,16 @@ async function callTool(
   switch (name) {
     case "run_agent": {
       if (caller.type === "brainstormer") {
-        if (!isRecord(args) || !exactKeys(args, ["type", "prompt", "description"])) {
-          throw new TypeError("arguments contain an unknown property");
-        }
-        if (!nonEmptyString(args.type) || !BRAINSTORMER_LAUNCHABLE_AGENT_TYPES.includes(args.type as never)) {
-          throw new TypeError(`type must be one of: ${BRAINSTORMER_LAUNCHABLE_AGENT_TYPES.join(", ")}`);
-        }
-        if (!nonEmptyString(args.prompt)) throw new TypeError("prompt must be a non-empty string");
-        if (!nonEmptyString(args.description)) throw new TypeError("description must be a non-empty string");
-        const type = args.type as (typeof BRAINSTORMER_LAUNCHABLE_AGENT_TYPES)[number];
-        const label = normalizeDescription(args.description, args.prompt, type);
-        const input: DelegationLaunchInput = { type, prompt: args.prompt.trim(), description: label.description };
-        const launched = type === "prototyper"
-          ? await coordinator.spawnInteractive(input, caller.agentId)
-          : await coordinator.spawn(input, caller.agentId);
-        return withNotices(launched, label.notice === undefined ? [] : [label.notice]);
+        const parsed = parseBrainstormerLaunch(args);
+        if (typeof parsed === "string") throw new TypeError(parsed);
+        const launched = parsed.interactive
+          ? parsed.background
+            ? coordinator.spawnInteractive(parsed.input, caller.agentId)
+            : coordinator.runInteractive(parsed.input, signal)
+          : parsed.background
+            ? coordinator.spawn(parsed.input, caller.agentId)
+            : coordinator.run(parsed.input, signal);
+        return withNotices(await launched, parsed.notices);
       }
       const parsed = parseLaunch(args);
       if (typeof parsed === "string") throw new TypeError(parsed);

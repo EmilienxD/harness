@@ -516,7 +516,7 @@ export class ManagerPromptService {
     }
     try {
       const recipientAgentId = session.resultDelivery.mode === "mailbox" ? session.resultDelivery.recipientAgentId : undefined;
-      const report = command.report ?? session.lastObservedAssistantMessage;
+      const report = composeDoneReport(session.lastObservedAssistantMessage, command.furtherNotes);
       let reporting: string;
       if (session.resultDelivery.mode === "tool-result" && report !== undefined && this.launcher.submitReport !== undefined) {
         this.launcher.submitReport(agentId, report);
@@ -719,7 +719,7 @@ interface ParsedActionCommand {
 }
 
 interface ParsedDoneCommand {
-  readonly report?: string;
+  readonly furtherNotes?: string;
 }
 
 interface ParsedPrototypeCommand {
@@ -729,8 +729,15 @@ interface ParsedPrototypeCommand {
 function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
   const match = /^\s*\/done(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
-  const report = match[1]?.trim();
-  return report === undefined || report.length === 0 ? {} : { report };
+  const furtherNotes = match[1]?.trim();
+  return furtherNotes === undefined || furtherNotes.length === 0 ? {} : { furtherNotes };
+}
+
+function composeDoneReport(lastAssistantMessage: string | undefined, furtherNotes: string | undefined): string | undefined {
+  if (lastAssistantMessage === undefined) return undefined;
+  return furtherNotes === undefined
+    ? lastAssistantMessage
+    : `${lastAssistantMessage}\n\nFurther notes:\n${furtherNotes}`;
 }
 
 function parsePrototypeCommand(prompt: string): ParsedPrototypeCommand | undefined {

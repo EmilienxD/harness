@@ -102,7 +102,6 @@ function setup() {
   const reclaimed: AgentId[] = [];
   /** Runtime files a launch wrote, and the directory they were rooted at. */
   const spills: { path: string; root: string | undefined }[] = [];
-  const writtenPromptContents: string[] = [];
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
     isResumable: async () => true,
@@ -113,7 +112,6 @@ function setup() {
     onStaleLeaseRecovered: (holder) => { reclaimed.push(holder.agentId); },
     managerAgentId: () => MANAGER,
     mcpConfig: async (agentId, type) => type === "brainstormer" ? `C:\\storage\\agent-mcp\\${agentId}.json` : undefined,
-    prototypeFolders: { allocate: async (agentId, description) => `C:\\repo\\.aboard\\prototypes\\${agentId}-${description.replaceAll(" ", "-")}` },
     shell: "powershell",
     disallowedTools: ["mcp__aboard__*"],
     // aboard.launch.claudeCommand: a wrapper that takes its own arguments.
@@ -129,7 +127,7 @@ function setup() {
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
     spills: {
-      write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); writtenPromptContents.push(spill.contents); return spill.relativePath; },
+      write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); return spill.relativePath; },
       prepare: async (plan, root) => { if (plan.agentDefinition !== undefined) spills.push({ path: plan.agentDefinition.relativePath, root }); },
     },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
@@ -138,7 +136,7 @@ function setup() {
   const call = (name: string, args: unknown = {}, caller: readonly [string | undefined] = [MANAGER]) =>
     mcpCall(handler, name, args, caller[0]);
   const launch = (args: unknown = {}) => call("run_agent", args);
-  return { fleet, lease, host, terminals, coordinator, handler, call, launch, sessionLiveness, reclaimed, spills, writtenPromptContents };
+  return { fleet, lease, host, terminals, coordinator, handler, call, launch, sessionLiveness, reclaimed, spills };
 }
 
 async function mcpCall(
@@ -493,8 +491,8 @@ test("MCP catalogs are role-scoped and roles without a catalog are refused", asy
   assert.equal((await mcpList(handler, leaf)).status, 403);
 });
 
-test("brainstormer run_agent forces research to mailbox and prototyping to an attended scratch session", async () => {
-  const { handler, fleet, lease, writtenPromptContents } = setup();
+test("brainstormer run_agent supports background research and automated or attended prototypes", async () => {
+  const { handler, fleet, lease, host } = setup();
   const brainstormer = agent("brain-2");
   fleet.register({
     ...managerSession(),
@@ -507,19 +505,55 @@ test("brainstormer run_agent forces research to mailbox and prototyping to an at
 
   const refused = await mcpCall(handler, "run_agent", { type: "general-purpose", prompt: "Edit it", description: "edit the application code" }, brainstormer);
   assert.equal(refused.status, 400);
-  const explored = await mcpCall(handler, "run_agent", { type: "Explore", prompt: "Map the cache boundary", description: "map cache boundary code" }, brainstormer);
+  const explored = await mcpCall(handler, "run_agent", {
+    type: "Explore", prompt: "Map the cache boundary", description: "map cache boundary code", run_in_background: true,
+  }, brainstormer);
   assert.equal(explored.status, 200, JSON.stringify(explored.body));
   const exploreSession = fleet.list().find((entry) => entry.identity.type === "Explore");
   assert.deepEqual(exploreSession?.resultDelivery, { mode: "mailbox", recipientAgentId: brainstormer });
   assert.equal(exploreSession?.attended, undefined);
 
-  const prototyped = await mcpCall(handler, "run_agent", { type: "prototyper", prompt: "Try the parser API", description: "test parser api behavior" }, brainstormer);
+  const prototyped = await mcpCall(handler, "run_agent", {
+    type: "prototyper", prompt: "Try the parser API", description: "test parser api behavior", run_in_background: true,
+  }, brainstormer);
   assert.equal(prototyped.status, 200, JSON.stringify(prototyped.body));
   const prototypeSession = fleet.list().find((entry) => entry.identity.type === "prototyper");
   assert.deepEqual(prototypeSession?.resultDelivery, { mode: "mailbox", recipientAgentId: brainstormer });
-  assert.equal(prototypeSession?.attended, true);
-  assert.match(writtenPromptContents.at(-1)!, /\.aboard\\prototypes\\worker-2-test-parser-api-behavior/u);
+  assert.equal(prototypeSession?.attended, undefined);
+  const prototypeCommand = host.created.at(-1)!.terminal.sent.at(-1)!;
+  assert.match(prototypeCommand, /Try the parser API/u);
+  assert.doesNotMatch(prototypeCommand, /\.aboard[\\/]prototypes/u);
+
+  const attended = await mcpCall(handler, "run_agent", {
+    type: "prototyper", description: "direct parser api experiment", interactive: true, run_in_background: true,
+  }, brainstormer);
+  assert.equal(attended.status, 200, JSON.stringify(attended.body));
+  const attendedSession = fleet.list().filter((entry) => entry.identity.type === "prototyper").at(-1);
+  assert.equal(attendedSession?.attended, true);
   assert.equal(lease.current(), undefined);
+});
+
+test("brainstormer research can run in the foreground", async () => {
+  const { handler, fleet, coordinator } = setup();
+  const brainstormer = agent("brain-foreground");
+  fleet.register({
+    ...managerSession(),
+    identity: { agentId: brainstormer, type: "brainstormer" },
+    sessionId: session("448e378a-f09f-47cf-8822-0fb7844c13c6"),
+    terminal: { terminalId: terminal("brain-terminal-foreground"), name: "Brainstormer" },
+    resultDelivery: { mode: "mailbox", recipientAgentId: MANAGER },
+    attended: true,
+  }, at("2026-07-30T10:00:00.000Z"));
+
+  let settled = false;
+  const response = mcpCall(handler, "run_agent", {
+    type: "webresearcher", prompt: "Check the current API", description: "check current api behavior",
+  }, brainstormer).then((value) => { settled = true; return value; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  const researcher = fleet.list().find((entry) => entry.identity.type === "webresearcher")!;
+  coordinator.complete(researcher.identity.agentId, success);
+  assert.equal((await response).status, 200);
 });
 
 test("continue_agent reopens the same supported session, re-points its report, and refuses live or one-shot targets", async () => {
@@ -637,13 +671,8 @@ test("runtime-validates every tool boundary and rejects unknown fields", async (
     ["run_agent", { type: "general-purpose", description: "open browser debugging session", interactive: true, chrome: true }],
     ["run_agent", { type: "webresearcher", description: "research current API pricing" }],
     ["run_agent", { type: "webresearcher", prompt: "Find current pricing", description: "research current API pricing", interactive: true }],
-    // `issues` is a list of positive integers or absent; nothing else resolves.
+    // The former `issues` parameter is no longer accepted.
     ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: 47 }],
-    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [] }],
-    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [0] }],
-    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [-3] }],
-    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: [1.5] }],
-    ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issues: ["47"] }],
     ["run_agent", { type: "Explore", prompt: "Map auth flow", description: "map the auth flow", issue: 47 }],
     ["todo_create", { subjects: [] }],
     ["todo_create", { subjects: ["A task"], reason: "obsolete field" }],
@@ -681,11 +710,15 @@ test("start_auto_run accepts no launch options", async () => {
 test("an omitted type launches general-purpose, and a named one still wins", async () => {
   const { launch, fleet } = setup();
   assert.equal(MCP_DEFAULT_AGENT_TYPE, "general-purpose");
+  const runAgentSchema = CORE_MCP_TOOLS.find((tool) => tool.name === "run_agent")!.inputSchema as {
+    readonly required?: readonly string[];
+    readonly properties?: Readonly<Record<string, unknown>>;
+  };
   assert.equal(
-    (CORE_MCP_TOOLS.find((tool) => tool.name === "run_agent")!.inputSchema as { required?: readonly string[] }).required
-      ?.includes("type"),
+    runAgentSchema.required?.includes("type"),
     false,
   );
+  assert.equal(runAgentSchema.properties?.issues, undefined);
 
   const defaulted = await launch({ prompt: "Audit the retry paths", description: "audit the retry paths", run_in_background: true });
   assert.equal(defaulted.status, 200, JSON.stringify(defaulted.body));
@@ -701,6 +734,36 @@ test("an omitted type launches general-purpose, and a named one still wins", asy
   for (const type of [null, "", "bogus", "manager", 3]) {
     assert.equal((await launch({ type, prompt: "work", description: "do the work now" })).status, 400, String(type));
   }
+});
+
+test("Manager run_agent can launch automated and attended prototypers", async () => {
+  const { launch, fleet, lease, host } = setup();
+
+  const automated = await launch({
+    type: "prototyper",
+    prompt: "Try the parser API",
+    description: "test parser api behavior",
+    run_in_background: true,
+  });
+  assert.equal(automated.status, 200, JSON.stringify(automated.body));
+  const automatedSession = fleet.list().find((entry) => entry.identity.type === "prototyper");
+  assert.deepEqual(automatedSession?.resultDelivery, { mode: "mailbox", recipientAgentId: MANAGER });
+  assert.equal(automatedSession?.attended, undefined);
+  const prototypeCommand = host.created.at(-1)!.terminal.sent.at(-1)!;
+  assert.match(prototypeCommand, /Try the parser API/u);
+  assert.doesNotMatch(prototypeCommand, /\.aboard[\\/]prototypes/u);
+
+  const attended = await launch({
+    type: "prototyper",
+    description: "direct parser api experiment",
+    interactive: true,
+    run_in_background: true,
+  });
+  assert.equal(attended.status, 200, JSON.stringify(attended.body));
+  const attendedSession = fleet.list().filter((entry) => entry.identity.type === "prototyper").at(-1);
+  assert.deepEqual(attendedSession?.resultDelivery, { mode: "mailbox", recipientAgentId: MANAGER });
+  assert.equal(attendedSession?.attended, true);
+  assert.equal(lease.current(), undefined);
 });
 
 // The extension owns the implementation loop, so the Manager must not be able to
@@ -997,56 +1060,6 @@ test("Explore is automated only and cannot be launched interactively", async () 
   const launched = await launch({ type: "Explore", description: "browse the auth flow", interactive: true });
   assert.equal(launched.status, 400);
   assert.equal(body(launched).ok, false);
-});
-
-test("an ignored issue carries a notice: interactive-only types, and topic-less interactive launches", async () => {
-  const { launch } = setup();
-  // A brainstormer's conversation defines its own scope; the bridge does not
-  // silently bind it to an issue.
-  const brainstormer = await launch({
-    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47], run_in_background: true,
-  });
-  assert.equal(brainstormer.status, 200, JSON.stringify(brainstormer.body));
-  assert.match(JSON.stringify(brainstormer.body), /issue #47 was ignored/);
-  // An interactive launch without an opening topic gets no first message at
-  // all, so there is nothing to merge the issue contract into.
-  const topicless = await launch({
-    type: "general-purpose", description: "open general purpose session", interactive: true, issues: [47], run_in_background: true,
-  });
-  assert.equal(topicless.status, 200, JSON.stringify(topicless.body));
-  assert.match(JSON.stringify(topicless.body), /issue #47 was ignored/);
-  // The supported pairing — topic plus issue — launches clean.
-  const supported = await launch({
-    type: "general-purpose", description: "drive the session fix", prompt: "Work with me on the session loss", interactive: true, issues: [47], run_in_background: true,
-  });
-  assert.equal(supported.status, 200, JSON.stringify(supported.body));
-  assert.equal(JSON.stringify(supported.body).includes("was ignored"), false);
-  // Several ignored issues are all named, and the notice agrees in number.
-  const many = await launch({
-    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47, 52], run_in_background: true,
-  });
-  assert.equal(many.status, 200, JSON.stringify(many.body));
-  assert.match(JSON.stringify(many.body), /issues #47, #52 were ignored/);
-});
-
-test("run_agent carries several issues into one launch and resolves a repeat once", async () => {
-  const { launch, fleet } = setup();
-  const launched = await launch({
-    type: "Explore", prompt: "Compare how both issues describe the retry backlog", description: "compare retry backlog issues", issues: [47, 52], run_in_background: true,
-  });
-  assert.equal(launched.status, 200, JSON.stringify(launched.body));
-  const session = fleet.list().find((entry) => entry.identity.type === "Explore");
-  assert.deepEqual(session?.issueNumbers, [47, 52]);
-
-  // A repeated number is unambiguous, so it is deduped with a notice rather
-  // than refused — and the order the caller gave survives.
-  const repeated = await launch({
-    type: "Explore", prompt: "Compare how both issues describe the retry backlog", description: "compare retry backlog again", issues: [52, 47, 52], run_in_background: true,
-  });
-  assert.equal(repeated.status, 200, JSON.stringify(repeated.body));
-  assert.match(JSON.stringify(repeated.body), /repeated numbers/);
-  const deduped = fleet.list().filter((entry) => entry.identity.type === "Explore").at(-1);
-  assert.deepEqual(deduped?.issueNumbers, [52, 47]);
 });
 
 test("an interactive-only brainstormer is launched interactively and the correction is reported", async () => {

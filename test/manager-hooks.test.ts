@@ -510,7 +510,7 @@ test("/done closes the invoking Manager terminal without waking the model", asyn
   assert.match(String((await prompts.handle(managerId, "/done trailing text")).message), /no report recipient/);
 });
 
-test("/done reports explicit text or the last observed assistant message before closing", async () => {
+test("/done reports the last observed assistant message and appends optional further notes before closing", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const registerReporter = (id: string, sessionId: string): AgentId => {
     const reporterId = agent(id);
@@ -526,8 +526,10 @@ test("/done reports explicit text or the last observed assistant message before 
     fleet.transition(reporterId, { status: "running", startedAt: timestamp }, timestamp);
     return reporterId;
   };
-  const explicitId = registerReporter("general-purpose-explicit", "bdb05c21-eb37-4147-b5cb-6a5ca2592146");
+  const notedId = registerReporter("general-purpose-noted", "bdb05c21-eb37-4147-b5cb-6a5ca2592146");
   const observedId = registerReporter("general-purpose-observed", "cdb05c21-eb37-4147-b5cb-6a5ca2592146");
+  const missingId = registerReporter("general-purpose-missing", "ddb05c21-eb37-4147-b5cb-6a5ca2592146");
+  fleet.observeAssistantMessage(notedId, "The complete response with context.", timestamp);
   fleet.observeAssistantMessage(observedId, "The observed complete response.", timestamp);
   const killed: TerminalId[] = [];
   const prompts = new ManagerPromptService(
@@ -538,14 +540,19 @@ test("/done reports explicit text or the last observed assistant message before 
     { kill: (terminalId) => killed.push(terminalId) },
   );
 
-  assert.match(String((await prompts.handle(explicitId, "/done Explicit report text.")).message), /being delivered to manager-1/);
+  assert.match(String((await prompts.handle(notedId, "/done One additional caveat.")).message), /being delivered to manager-1/);
   assert.match(String((await prompts.handle(observedId, "/done")).message), /being delivered to manager-1/);
+  assert.match(String((await prompts.handle(missingId, "/done Notes cannot become the report.")).message), /No complete assistant message was available/);
   const reports = fleet.drainMailbox(managerId, timestamp);
   assert.deepEqual(reports.map((entry) => entry.kind === "result" && entry.result.outcome === "succeeded" ? entry.result.lastAssistantMessage : undefined), [
-    "Explicit report text.",
+    "The complete response with context.\n\nFurther notes:\nOne additional caveat.",
     "The observed complete response.",
   ]);
-  assert.deepEqual(killed, [terminal("general-purpose-explicit-terminal"), terminal("general-purpose-observed-terminal")]);
+  assert.deepEqual(killed, [
+    terminal("general-purpose-noted-terminal"),
+    terminal("general-purpose-observed-terminal"),
+    terminal("general-purpose-missing-terminal"),
+  ]);
 });
 
 test("/done returns a foreground interactive report through its waiting tool result", async () => {
@@ -561,6 +568,7 @@ test("/done returns a foreground interactive report through its waiting tool res
     telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 },
   }, timestamp);
   fleet.transition(reporterId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.observeAssistantMessage(reporterId, "Foreground report.", timestamp);
   const submitted: string[] = [];
   const killed: TerminalId[] = [];
   const prompts = new ManagerPromptService(fleet, {
@@ -571,12 +579,12 @@ test("/done returns a foreground interactive report through its waiting tool res
     },
   }, undefined, undefined, { kill: (terminalId) => killed.push(terminalId) });
 
-  const response = await prompts.handle(reporterId, "/done Foreground report.");
+  const response = await prompts.handle(reporterId, "/done User-approved caveat.");
   assert.match(String(response.message), /returned to the waiting caller/);
-  assert.deepEqual(submitted, ["Foreground report."]);
+  assert.deepEqual(submitted, ["Foreground report.\n\nFurther notes:\nUser-approved caveat."]);
   const result = fleet.takeBlockingResult(reporterId, timestamp);
   assert.equal(result?.outcome, "succeeded");
-  assert.equal(result?.outcome === "succeeded" ? result.lastAssistantMessage : undefined, "Foreground report.");
+  assert.equal(result?.outcome === "succeeded" ? result.lastAssistantMessage : undefined, "Foreground report.\n\nFurther notes:\nUser-approved caveat.");
   assert.deepEqual(killed, [terminal("brainstormer-foreground-terminal")]);
 });
 
@@ -593,10 +601,11 @@ test("/done queues the report when its recipient is no longer open", async () =>
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   }, timestamp);
   fleet.transition(reporterId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.observeAssistantMessage(reporterId, "Durable report.", timestamp);
   fleet.remove(managerId, timestamp);
   const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => undefined }, () => new Date(timestamp), undefined, { kill: () => {} });
 
-  assert.match(String((await prompts.handle(reporterId, "/done Durable report.")).message), /queued for manager-1, which is not currently open/);
+  assert.match(String((await prompts.handle(reporterId, "/done Durable note.")).message), /queued for manager-1, which is not currently open/);
   assert.equal(fleet.drainMailbox(managerId, timestamp).length, 1);
 });
 
