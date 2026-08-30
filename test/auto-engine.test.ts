@@ -38,6 +38,7 @@ interface Harness {
   /** Every merge the engine asked for, and whether it asked to delete the branch. */
   readonly merges: { readonly pr: number; readonly deleteBranch: boolean }[];
   readonly launches: DelegationLaunchInput[];
+  readonly closedTerminals: TerminalId[];
   /** Origins the engine declared for its handed-off launches; they decide the lease. */
   readonly interactiveOrigins: LaunchOrigin[];
   readonly gitCalls: string[];
@@ -127,6 +128,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const closures: { issue: number; body: string }[] = [];
   const merges: { pr: number; deleteBranch: boolean }[] = [];
   const launches: DelegationLaunchInput[] = [];
+  const closedTerminals: TerminalId[] = [];
   const interactiveOrigins: LaunchOrigin[] = [];
   const gitCalls: string[] = [];
   const commitCalls: { subject: string; body: string }[] = [];
@@ -435,7 +437,7 @@ function harness(options: HarnessOptions = {}): Harness {
     ...(options.worktree === true ? { workspaces } : {}),
     github: wrappedGithub,
     launcher,
-    terminals: { close: () => undefined },
+    terminals: { close: (terminalId) => { closedTerminals.push(terminalId); } },
     store: {
       load: async () => stored,
       // The store is a real one, not a sink: fixed-plan recovery re-reads what
@@ -472,6 +474,7 @@ function harness(options: HarnessOptions = {}): Harness {
     merges,
     createdPullRequests,
     launches,
+    closedTerminals,
     interactiveOrigins,
     gitCalls,
     commitCalls,
@@ -622,6 +625,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(context.pullRequests.get(56)?.state, "merged");
   assert.match(context.notifications.join("\n"), /issue #34 committed \([0-9a-z]+\) and opened PR #56/);
   assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
+  assert.deepEqual(context.closedTerminals, ["terminal-1"], "the successful implementer is closed as soon as its result is accepted");
   assert.equal(context.state.cleared, true);
 });
 
@@ -977,6 +981,7 @@ test("review mode launches a pr-doctor-afk and commits its fixes as a second com
   // Two commits: the implementation, then the doctor's fixes.
   assert.equal(context.gitCalls.filter((call) => call === "commit").length, 2);
   assert.match(context.notifications.join("\n"), /issue #34 reviewed; committing 1 changed path\(s\)/);
+  assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
 });
 
 test("every agent sent at an issue is launched at that issue's difficulty", async () => {
@@ -1016,7 +1021,30 @@ test("a hitl issue waits at its pull request and continues once the user merges"
     true,
     "the exact session tip produced by the user's merge is adopted before continuing",
   );
+  assert.deepEqual(context.closedTerminals, ["terminal-1"], "the implementer closes but no interactive reviewer was launched");
   assert.equal(context.state.cleared, true);
+});
+
+test("a hitl reviewer stays open while the run awaits the user and closes after resolution", async () => {
+  const context = harness({
+    settings: { review: true },
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+  });
+  await context.engine.start();
+  for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) {
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+  }
+
+  assert.equal(context.engine.state()?.waiting, true);
+  assert.equal(context.engine.owner(56)?.type, "pr-doctor-hitl");
+  assert.deepEqual(context.closedTerminals, ["terminal-1"], "only the completed implementer closes while review is active");
+
+  context.advance(SESSION);
+  context.pullRequests.set(56, { state: "merged", mergeable: "mergeable", mergeCommitSha: context.sha(SESSION) });
+  context.engine.continueNow();
+  await context.engine.settle();
+
+  assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
 });
 
 test("a hitl pull request closed unmerged stops the run and leaves the branch alone", async () => {

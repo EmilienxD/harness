@@ -415,9 +415,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       );
     },
   });
-  const releaseAbandonedTerminal = (agentId: AgentId): void => {
+  const releaseAbandonedTerminal = (agentId: AgentId, autoRunOwnsTerminal = false): void => {
     const terminalId = terminals.liveTerminalForAgent(agentId);
     if (terminalId === undefined) return;
+    // Auto-run closes its successful workers as soon as their results have
+    // been consumed and retains every other terminal for recovery or cleanup.
+    if (autoRunOwnsTerminal) return;
     if (currentConfiguration.closeTerminalOnSessionEnd) {
       try { terminals.kill(terminalId); } catch { /* already closed */ }
       return;
@@ -464,12 +467,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         lease.releaseForTerminalOutcome(observation.agentId, at, "agent session process ended");
         void rememberEndedSession(session, at);
         fleet.remove(observation.agentId, at);
-        releaseAbandonedTerminal(observation.agentId);
+        releaseAbandonedTerminal(observation.agentId, session.autoRunRestricted === true);
         output.appendLine(`Session process for agent ${observation.agentId} ended`);
         return;
       }
       void lifecycle?.processEnded(observation)
-        .then(() => releaseAbandonedTerminal(observation.agentId))
+        .then(() => releaseAbandonedTerminal(observation.agentId, session.autoRunRestricted === true))
         .catch((error: unknown) => output.appendLine(`Process-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
     },
   });
@@ -483,11 +486,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         lease.releaseForTerminalOutcome(agentId, at, `agent session ended (${reason})`);
         void rememberEndedSession(session, at);
         fleet.remove(agentId, at);
-        releaseAbandonedTerminal(agentId);
+        releaseAbandonedTerminal(agentId, session.autoRunRestricted === true);
         return;
       }
       void lifecycle?.processEnded({ agentId, sessionId: session.sessionId })
-        .then(() => releaseAbandonedTerminal(agentId))
+        .then(() => releaseAbandonedTerminal(agentId, session.autoRunRestricted === true))
         .catch((error: unknown) => output.appendLine(`Session-end reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`));
   };
   sessionLifecycle = new SessionLifecycleService({

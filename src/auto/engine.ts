@@ -1120,6 +1120,7 @@ export class AutoRunEngine {
     await this.#validate();
     const parsed = parseImplementerCompletion(outcome.result.lastAssistantMessage);
     if (!parsed.accepted) throw new Error(parsed.reason);
+    this.#closeSettledTerminal(outcome.terminalId);
     return parsed.completion;
   }
 
@@ -1236,8 +1237,10 @@ export class AutoRunEngine {
     await this.#validate();
     const status = await this.#git.status();
     this.options.notifier.notify(autoRunMessage.reviewed(issue.number, status.entries.map((entry) => entry.path)));
-    if (status.entries.length === 0) return;
-    await this.#commitFixes(issue, `Address review findings on #${issue.number}`, outcome.result.lastAssistantMessage.trim().slice(0, 500));
+    if (status.entries.length > 0) {
+      await this.#commitFixes(issue, `Address review findings on #${issue.number}`, outcome.result.lastAssistantMessage.trim().slice(0, 500));
+    }
+    this.#closeSettledTerminal(outcome.terminalId);
   }
 
   /** A follow-up commit on an issue branch, journalled like every other mutation. */
@@ -1392,6 +1395,15 @@ export class AutoRunEngine {
       }
     } catch (error) {
       this.options.log?.(`auto-run cleanup could not return to ${sessionBranch}: ${message(error)}`);
+    }
+  }
+
+  #closeSettledTerminal(terminalId: TerminalId): void {
+    try {
+      this.options.terminals.close(terminalId);
+      this.#openTerminals.delete(terminalId);
+    } catch {
+      // Keep it owned so issue or discard cleanup can retry.
     }
   }
 
