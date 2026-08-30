@@ -31,7 +31,7 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
   const files: ProjectOverlayFile[] = [];
   for (const root of [
     { name: ".claude", excludedDirectories: ["worktrees"] },
-    { name: ".aboard", excludedDirectories: ["runtime", "prototypes"] },
+    { name: ".aboard", excludedDirectories: ["runtime"] },
   ] as const) {
     const sourceRoot = join(request.workspaceRoot, root.name);
     const targetRoot = join(request.worktreeRoot, root.name);

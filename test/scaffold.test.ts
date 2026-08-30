@@ -15,7 +15,7 @@ test("fresh scaffold installs every aboard-owned asset under .aboard only", asyn
   const root = await project();
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets });
   await assert.rejects(readFile(join(root, ".gitignore")));
-  assert.equal(await readFile(join(root, ".aboard", ".gitignore"), "utf8"), "runtime/\nprototypes/\n");
+  assert.equal(await readFile(join(root, ".aboard", ".gitignore"), "utf8"), "runtime/\n");
   await assert.rejects(readFile(join(root, ".aboard", "scripts", "aboard_cli.py")));
   await assert.rejects(readFile(join(root, ".mcp.json")));
   await assert.rejects(readFile(join(root, ".claude", "settings.json")));

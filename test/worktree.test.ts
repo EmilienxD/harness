@@ -350,7 +350,7 @@ test("the project overlay copies ignored Claude and aboard files, preserves chec
   assert.ok(requested.includes(".claude/settings.local.json"), "settings.local.json is deliberately copied");
   await assert.rejects(readFile(join(checkout, ".claude", "worktrees", "other", "secret")), { code: "ENOENT" });
   await assert.rejects(readFile(join(checkout, ".aboard", "runtime", "events", "secret.json")), { code: "ENOENT" });
-  await assert.rejects(readFile(join(checkout, ".aboard", "prototypes", "7-parser", "experiment.ts")), { code: "ENOENT" });
+  assert.equal(await readFile(join(checkout, ".aboard", "prototypes", "7-parser", "experiment.ts"), "utf8"), "scratch\n");
 
   await writeFile(join(project, ".claude", "settings.local.json"), "changed later\n");
   await writeFile(join(project, ".claude", "new-after-creation.md"), "later\n");

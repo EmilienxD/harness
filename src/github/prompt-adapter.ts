@@ -26,9 +26,6 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
     if (options.interactive || isInteractiveAgentType(input.type)) {
       const instruction = input.prompt?.trim();
       if (instruction === undefined || instruction.length === 0) return undefined;
-      if (input.issues !== undefined && !isInteractiveAgentType(input.type)) {
-        return this.prompts.resolve({ kind: "issue-context", instruction, issueNumbers: input.issues });
-      }
       return this.prompts.resolve({ kind: "free-form", instruction });
     }
     if (input.type === "implementer" && input.issues !== undefined) {
@@ -41,9 +38,6 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         }),
         input.additionalGuideline,
       );
-    }
-    if (input.issues !== undefined) {
-      return this.prompts.resolve({ kind: "issue-context", instruction: input.prompt ?? "Address the work described in these issues.", issueNumbers: input.issues });
     }
     return this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Continue with the requested task." });
   }

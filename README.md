@@ -53,7 +53,7 @@ Then try one of these in the Manager terminal:
 | :-- | :-- |
 | `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
 | `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet |
-| `/prototype Try the parser API` | A user-driven prototyper opens with its own gitignored `.aboard/prototypes/` scratch folder and reports back here when you run `/done` |
+| `/prototype Try the parser API` | A user-driven prototyper opens, follows the project's prototype-location convention (or asks you where to write), and reports back here when you run `/done` |
 | `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, address, commit, PR, merge — one issue at a time, onto a branch of the run's own |
 | `/auto --dry` | Read-only forecast: show the issues found, their dependency-aware order and branches, settings-driven review/merge behavior, blockers, and every point where you will need to act |
 | `/auto no unit tests needed` | Start the same run and append that guideline to every implementer and pr-doctor prompt |
@@ -63,7 +63,7 @@ Then try one of these in the Manager terminal:
 
 When a session delegates work, its Stop hook waits so the result can arrive without another prompt. Press **Escape** whenever you want the terminal back before that work finishes. Escape cancels only the wait: the eventual report stays queued and is delivered by the next hook that fires.
 
-Prototype isolation is a visible working convention, not a security sandbox: aboard tells the prototyper to write only in its allocated scratch folder, but its shell can still reach the project. Prototype folders are never deleted automatically. `/done` uses the last complete assistant message aboard observed; if the final turn ended abnormally before its Stop hook ran, that fallback can be older than the terminal's last visible output, so pass explicit report text when that distinction matters.
+aboard does not choose or hide a prototype location. The prototyper uses a dedicated scratch, temporary, playground, spike, experiment, demo, or prototype location established by project instructions or architecture; if the project defines none, it asks before writing code. That location may be tracked or ignored, so the user controls whether the work is committed. This is a prompt-level working convention, not a security sandbox: the prototyper's shell can still reach the project. `/done` uses the last complete assistant message aboard observed; if the final turn ended abnormally before its Stop hook ran, that fallback can be older than the terminal's last visible output, so pass explicit report text when that distinction matters.
 
 ## The auto-run, honestly
 
