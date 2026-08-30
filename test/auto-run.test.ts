@@ -7,6 +7,7 @@ import {
   issueClosedComment,
   issueCommentBody,
   nextStep,
+  parseImplementerCompletion,
   pullRequestBody,
   runPullRequestBody,
   runPullRequestTitle,
@@ -111,8 +112,36 @@ test("an issue closed by aboard says who closed it and where the work is", () =>
 
 test("an issue comment is the agent's own text, bounded, and absent when there is none", () => {
   assert.equal(issueCommentBody("  Rewrote the backoff.  "), "Rewrote the backoff.");
+  assert.equal(issueCommentBody("Rewrote the backoff.", "Fix *retry* handling"), "**Fix \\*retry\\* handling**\n\nRewrote the backoff.");
   assert.equal(issueCommentBody("   "), undefined);
   assert.ok((issueCommentBody("z".repeat(70_000)) ?? "").length <= 65_536);
+});
+
+test("implementer completion accepts one commit block anywhere and removes it from the report", () => {
+  assert.deepEqual(
+    parseImplementerCompletion("Changed retry behavior.\n\n<commit>Fix retry handling</commit>\n\nTests pass."),
+    {
+      accepted: true,
+      completion: {
+        commitMessage: "Fix retry handling",
+        report: "Changed retry behavior.\n\nTests pass.",
+      },
+    },
+  );
+});
+
+test("implementer completion fails closed without one valid commit subject", () => {
+  for (const message of [
+    "Partial work only.",
+    "<commit> </commit>",
+    "<commit>One</commit><commit>Two</commit>",
+    "<commit>One</commit><commit>",
+    "</commit><commit>One</commit>",
+    "<commit>Subject\nBody</commit>",
+    `<commit>${"x".repeat(73)}</commit>`,
+  ]) {
+    assert.equal(parseImplementerCompletion(message).accepted, false, message);
+  }
 });
 
 test("the reducer walks the phases in order from a clean start", () => {

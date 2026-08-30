@@ -38,6 +38,7 @@ interface Harness {
   /** Origins the engine declared for its handed-off launches; they decide the lease. */
   readonly interactiveOrigins: LaunchOrigin[];
   readonly gitCalls: string[];
+  readonly commitCalls: { readonly subject: string; readonly body: string }[];
   readonly githubCalls: string[];
   readonly saved: AutoRunRecord[];
   readonly states: AutoRunState[];
@@ -84,6 +85,8 @@ interface HarnessOptions {
   /** Working-tree entries reported after an implementer runs. */
   readonly producesChanges?: boolean;
   readonly implementerFails?: boolean;
+  /** Final message returned by the implementer. */
+  readonly implementerMessage?: string;
   /** Called once a hitl pull request has been observed as open; returns its next state. */
   readonly resolveHitl?: "merged" | "closed";
   readonly startDirty?: boolean;
@@ -118,6 +121,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const launches: DelegationLaunchInput[] = [];
   const interactiveOrigins: LaunchOrigin[] = [];
   const gitCalls: string[] = [];
+  const commitCalls: { subject: string; body: string }[] = [];
   const githubCalls: string[] = [];
   const saved: AutoRunRecord[] = [];
   const states: AutoRunState[] = [];
@@ -196,7 +200,7 @@ function harness(options: HarnessOptions = {}): Harness {
       return true;
     },
     add: async () => { gitCalls.push("add"); },
-    commit: async () => { gitCalls.push("commit"); dirty = false; commits.add(issueForBranch(currentBranch)); pushed.delete(currentBranch); advance(currentBranch); return shaFor(currentBranch); },
+    commit: async (subject, body) => { gitCalls.push("commit"); commitCalls.push({ subject, body }); dirty = false; commits.add(issueForBranch(currentBranch)); pushed.delete(currentBranch); advance(currentBranch); return shaFor(currentBranch); },
     push: async (branch, setUpstream) => {
       gitCalls.push(`push ${branch}${setUpstream ? " -u" : ""}`);
       // The session branch's own push is infrastructure, not the issue's commit;
@@ -340,14 +344,22 @@ function harness(options: HarnessOptions = {}): Harness {
       if (input.type === "implementer" && options.relabelAfterImplementer === true) {
         queue.find((entry) => entry.number === input.issues?.[0])?.labels.splice(0, Infinity, "[AI]-hitl");
       }
-      const failed = input.type === "implementer" && options.implementerFails === true;
+      const implementer = input.type === "implementer";
+      const failed = implementer && options.implementerFails === true;
       return {
         agentId: `agent-${launches.length}` as AgentId,
         sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
         terminalId: `terminal-${launches.length}` as TerminalId,
         result: failed
           ? { outcome: "failed", failure: { type: "context-exhausted", exitCode: 1, lastAssistantMessage: null }, telemetry: telemetry() }
-          : { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Addressed the issue.", telemetry: telemetry() },
+          : {
+              outcome: "succeeded",
+              exitCode: 0,
+              lastAssistantMessage: implementer
+                ? options.implementerMessage ?? "Addressed the issue.\n\n<commit>Implement requested change</commit>"
+                : "Addressed the issue.",
+              telemetry: telemetry(),
+            },
       };
     },
     launchInteractive: async (input, origin) => {
@@ -446,6 +458,7 @@ function harness(options: HarnessOptions = {}): Harness {
     launches,
     interactiveOrigins,
     gitCalls,
+    commitCalls,
     githubCalls,
     saved,
     states,
@@ -773,13 +786,18 @@ test("a stop with uncommitted work does not check out over it", async () => {
 });
 
 test("the implementer's account of its change is posted on the issue it addressed", async () => {
-  const context = harness();
+  const context = harness({
+    implementerMessage: "Rewrote the backoff.\n\n<commit>Fix retry backoff</commit>\n\nCovered retry exhaustion.",
+  });
   await context.engine.start();
   await context.engine.settle();
 
-  // Verbatim and on the issue, not only in the pull request body a squash merge
-  // eventually folds away.
-  assert.deepEqual(context.comments, [{ issue: 34, body: "Addressed the issue." }]);
+  assert.deepEqual(context.comments, [{
+    issue: 34,
+    body: "**Fix retry backoff**\n\nRewrote the backoff.\n\nCovered retry exhaustion.",
+  }]);
+  assert.equal(context.commitCalls[0]?.subject, "Fix retry backoff");
+  assert.doesNotMatch(context.createdPullRequests[0]?.body ?? "", /<commit>/u);
 });
 
 test("a comment that cannot be posted does not fail an issue that was addressed", async () => {
@@ -920,7 +938,7 @@ test("a failing implementer stops the run with no commit and no pull request", a
   assert.match(context.notifications.join("\n"), /stopped at issue #34 \(implementer failed: context-exhausted\)/);
 });
 
-test("a successful implementer with no changes deletes its branch and continues", async () => {
+test("an implementer completion marker without changes stops for user judgment", async () => {
   const context = harness({
     producesChanges: false,
     issues: [
@@ -933,11 +951,28 @@ test("a successful implementer with no changes deletes its branch and continues"
 
   assert.equal(context.gitCalls.includes("commit"), false);
   assert.equal(context.pullRequests.size, 0);
-  assert.equal(context.launches.length, 2);
-  assert.equal(context.gitCalls.includes("deleteBranch aboard/34-add-retry-backoff"), true);
-  assert.equal(context.gitCalls.includes("deleteBranch aboard/37-later"), true);
-  assert.match(context.notifications.join("\n"), /issue #34 finished with no changes; deleted its empty branch and continuing/);
-  assert.doesNotMatch(context.notifications.join("\n"), /stopped/);
+  assert.equal(context.launches.length, 1);
+  assert.equal(context.gitCalls.includes("deleteBranch aboard/34-add-retry-backoff"), false);
+  assert.equal(context.comments.length, 0);
+  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*confirmed issue #34 complete but produced no changes/);
+  assert.equal(context.state.cleared, false);
+});
+
+test("partial work without a commit marker stops and a resume sends it to a fresh implementer", async () => {
+  const context = harness({ implementerMessage: "Implemented half, but dependency installation is blocked." });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.gitCalls.includes("commit"), false);
+  assert.equal(context.pullRequests.size, 0);
+  assert.deepEqual(context.comments, []);
+  assert.match(context.notifications.join("\n"), /did not confirm that the issue is complete/);
+  assert.equal(context.record()?.currentIssue, 34);
+
+  assert.equal((await context.engine.resume()).started, true);
+  await context.engine.settle();
+  assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 2);
+  assert.equal(context.gitCalls.includes("commit"), false);
 });
 
 test("a run with its own checkout works there, launches there, and never moves the user's HEAD", async () => {

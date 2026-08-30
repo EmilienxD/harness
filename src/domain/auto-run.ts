@@ -221,12 +221,53 @@ export function slugify(title: string): string {
   return truncated.replace(/-+$/u, "") || "issue";
 }
 
-/** The commit subject is the issue title, bounded so `git log --oneline` stays readable. */
+/** Commit subjects stay bounded so `git log --oneline` remains readable. */
 export const COMMIT_SUBJECT_MAX_CHARS = 72;
 
 export function commitSubject(title: string): string {
   const trimmed = title.trim();
   return trimmed.length <= COMMIT_SUBJECT_MAX_CHARS ? trimmed : `${trimmed.slice(0, COMMIT_SUBJECT_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+export interface ImplementerCompletion {
+  readonly commitMessage: string;
+  readonly report: string;
+}
+
+export type ImplementerCompletionParseResult =
+  | { readonly accepted: true; readonly completion: ImplementerCompletion }
+  | { readonly accepted: false; readonly reason: string };
+
+const COMMIT_BLOCK = /<commit>([\s\S]*?)<\/commit>/gu;
+
+/** Positive evidence that an implementer considers the whole issue ready to commit. */
+export function parseImplementerCompletion(message: string): ImplementerCompletionParseResult {
+  const matches = [...message.matchAll(COMMIT_BLOCK)];
+  const openingTags = message.match(/<commit>/gu)?.length ?? 0;
+  const closingTags = message.match(/<\/commit>/gu)?.length ?? 0;
+  if (matches.length !== 1 || openingTags !== 1 || closingTags !== 1) {
+    return {
+      accepted: false,
+      reason: openingTags === 0 && closingTags === 0
+        ? "the implementer did not confirm that the issue is complete"
+        : "the implementer returned a malformed or repeated commit block",
+    };
+  }
+
+  const commitMessage = matches[0]?.[1]?.trim() ?? "";
+  if (commitMessage.length === 0) return { accepted: false, reason: "the implementer returned an empty commit block" };
+  if (/\r|\n/u.test(commitMessage)) return { accepted: false, reason: "the implementer's commit message must be one line" };
+  if (/\p{Cc}/u.test(commitMessage)) return { accepted: false, reason: "the implementer's commit message contains a control character" };
+  if (commitMessage.length > COMMIT_SUBJECT_MAX_CHARS) {
+    return { accepted: false, reason: `the implementer's commit message exceeds ${COMMIT_SUBJECT_MAX_CHARS} characters` };
+  }
+
+  const match = matches[0];
+  const start = match?.index ?? 0;
+  const before = message.slice(0, start).trimEnd();
+  const after = message.slice(start + (match?.[0].length ?? 0)).trimStart();
+  const report = [before, after].filter((part) => part.length > 0).join("\n\n");
+  return { accepted: true, completion: { commitMessage, report } };
 }
 
 export const PR_BODY_MAX_CHARS = 4_000;
@@ -268,10 +309,16 @@ export function issueClosedComment(prNumber: number, sessionBranch: string, base
 
 export const ISSUE_COMMENT_MAX_CHARS = 65_536;
 
-export function issueCommentBody(summary: string): string | undefined {
-  const trimmed = summary.trim();
+export function issueCommentBody(summary: string, commitMessage?: string): string | undefined {
+  const report = summary.trim();
+  const heading = commitMessage === undefined ? "" : `**${escapeMarkdownInline(commitMessage)}**`;
+  const trimmed = [heading, report].filter((part) => part.length > 0).join("\n\n");
   if (trimmed.length === 0) return undefined;
   return trimmed.length <= ISSUE_COMMENT_MAX_CHARS ? trimmed : `${trimmed.slice(0, ISSUE_COMMENT_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+function escapeMarkdownInline(value: string): string {
+  return value.replace(/([\\*_`[\]])/gu, "\\$1");
 }
 
 /** A candidate issue as GitHub reports it, before selection filters it. */

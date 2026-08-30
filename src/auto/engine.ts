@@ -3,10 +3,10 @@ import { existsSync } from "node:fs";
 
 import {
   autoRunMessage,
-  commitSubject,
   issueClosedComment,
   issueCommentBody,
   nextStep,
+  parseImplementerCompletion,
   pullRequestBody,
   runPullRequestBody,
   runPullRequestTitle,
@@ -15,6 +15,7 @@ import {
   type AutoRunPhase,
   type AutoRunSettings,
   type CandidateIssue,
+  type ImplementerCompletion,
   type RepositoryFacts,
   type SkippedIssue,
 } from "../domain/auto-run.js";
@@ -888,7 +889,7 @@ export class AutoRunEngine {
     signal: AbortSignal,
   ): Promise<{ readonly kind: "done" } | { readonly kind: "aborted" } | { readonly kind: "stopped"; readonly reason: string }> {
     let phase: AutoRunPhase = "branch";
-    let implementationSummary = "";
+    let implementation: ImplementerCompletion | undefined;
     let previous: string | undefined;
     let repeats = 0;
 
@@ -907,7 +908,15 @@ export class AutoRunEngine {
       if (signal.aborted) return { kind: "aborted" };
       const facts = await this.#observe(issue, prNumber, reviewed);
       prNumber = facts.pullRequest?.number ?? prNumber;
-      const step = nextStep({ issue, baseBranch: this.#current.sessionBranch, reviewMode: this.#current.settings.review, facts });
+      const needsFreshImplementation = implementation === undefined
+        && facts.branchExists
+        && facts.currentBranch === issue.branch
+        && facts.workingTreeDirty
+        && !facts.hasCommit
+        && facts.pullRequest === undefined;
+      const step = needsFreshImplementation
+        ? { action: "implement", issue } as const
+        : nextStep({ issue, baseBranch: this.#current.sessionBranch, reviewMode: this.#current.settings.review, facts });
       phase = step.action === "advance" || step.action === "stop" ? phase : step.action;
       repeats = step.action === previous ? repeats + 1 : 0;
       previous = step.action;
@@ -937,28 +946,25 @@ export class AutoRunEngine {
             await this.#branch(issue.branch, this.#current.sessionBranch);
             break;
           case "implement": {
-            implementationSummary = await this.#implement(issue, signal);
+            implementation = await this.#implement(issue, signal);
             const produced = await this.#git.status();
             if (produced.entries.length === 0) {
-              await this.#discardEmptyBranch(issue.branch, this.#current.sessionBranch);
-              this.#pending.delete(issue.number);
-              this.options.notifier.notify(autoRunMessage.unchanged(issue.number));
-              await this.#finishIssue(issue, { state: "done", result: "no-changes" });
-              return { kind: "done" };
+              return { kind: "stopped", reason: `the implementer confirmed issue #${issue.number} complete but produced no changes` };
             }
+            await this.#comment(issue.number, implementation.report, implementation.commitMessage);
             this.options.notifier.notify(autoRunMessage.implemented(issue.number, issue.branch));
             break;
           }
           case "commit": {
-            const sha = await this.#commit(issue, implementationSummary);
-            const opened = prNumber ?? await this.#openPullRequest(issue, implementationSummary);
+            const sha = await this.#commit(issue, implementation);
+            const opened = prNumber ?? await this.#openPullRequest(issue, implementation?.report ?? "");
             prNumber = opened;
             this.#attach(issue.number, opened);
             this.options.notifier.notify(autoRunMessage.committed(issue.number, sha.slice(0, 8), opened));
             break;
           }
           case "pr": {
-            const opened = await this.#openPullRequest(issue, implementationSummary);
+            const opened = await this.#openPullRequest(issue, implementation?.report ?? "");
             prNumber = opened;
             this.#attach(issue.number, opened);
             this.options.notifier.notify(`auto-run: issue #${issue.number} opened PR #${opened}.`);
@@ -1070,7 +1076,7 @@ export class AutoRunEngine {
     return { additionalGuideline: base === undefined ? DIRTY_RECOVERY_SENTENCE : `${base}\n\n${DIRTY_RECOVERY_SENTENCE}` };
   }
 
-  async #implement(issue: FrozenIssue, signal: AbortSignal): Promise<string> {
+  async #implement(issue: FrozenIssue, signal: AbortSignal): Promise<ImplementerCompletion> {
     const outcome = await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
@@ -1087,12 +1093,13 @@ export class AutoRunEngine {
     if (outcome.result.outcome === "failed") throw new Error(`implementer failed: ${outcome.result.failure.type}`);
     this.#remember(issue, outcome, "implementer");
     await this.#validate();
-    await this.#comment(issue.number, outcome.result.lastAssistantMessage);
-    return outcome.result.lastAssistantMessage;
+    const parsed = parseImplementerCompletion(outcome.result.lastAssistantMessage);
+    if (!parsed.accepted) throw new Error(parsed.reason);
+    return parsed.completion;
   }
 
-  async #comment(issueNumber: number, summary: string): Promise<void> {
-    const body = issueCommentBody(summary);
+  async #comment(issueNumber: number, summary: string, commitMessage: string): Promise<void> {
+    const body = issueCommentBody(summary, commitMessage);
     if (body === undefined) return;
     try {
       await this.options.github.addIssueComment(issueNumber, body);
@@ -1114,16 +1121,17 @@ export class AutoRunEngine {
     }
   }
 
-  async #commit(issue: FrozenIssue, summary: string): Promise<string> {
+  async #commit(issue: FrozenIssue, implementation: ImplementerCompletion | undefined): Promise<string> {
     const current = await this.#git.currentBranch();
     if (current !== issue.branch) {
       throw new Error(`the repository is on ${current ?? "a detached HEAD"} but issue #${issue.number} belongs on ${issue.branch}`);
     }
     const status = await this.#git.status();
     if (status.entries.length > 0) {
+      if (implementation === undefined) throw new Error(`issue #${issue.number} has uncommitted work without implementer completion evidence`);
       const parent = await this.#git.headSha(false);
-      const subject = commitSubject(issue.title);
-      const body = `Addresses #${issue.number}.\n\n${summary.trim().slice(0, 500)}`.trim();
+      const subject = implementation.commitMessage;
+      const body = `Addresses #${issue.number}.\n\n${implementation.report.trim().slice(0, 500)}`.trim();
       await this.#git.add();
       const staged = await this.#git.status();
       await this.#journal({
@@ -1361,16 +1369,6 @@ export class AutoRunEngine {
       this.options.log?.(`auto-run cleanup could not return to ${sessionBranch}: ${message(error)}`);
     }
   }
-
-  async #discardEmptyBranch(issueBranch: string, sessionBranch: string): Promise<void> {
-    for (const terminalId of this.#openTerminals) {
-      try { this.options.terminals.close(terminalId); } catch { /* already closed */ }
-    }
-    this.#openTerminals.clear();
-    await this.#git.checkout(sessionBranch);
-    await this.#git.deleteBranch(issueBranch);
-  }
-
 
   async #concludeRun(end: AttemptEnd, signal: AbortSignal): Promise<AttemptEnd> {
     const record = this.#current;
