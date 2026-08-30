@@ -316,6 +316,7 @@ test("the project overlay copies ignored Claude and aboard files, preserves chec
   await mkdir(join(project, ".claude", "worktrees", "other"), { recursive: true });
   await mkdir(join(project, ".aboard", "agents"), { recursive: true });
   await mkdir(join(project, ".aboard", "runtime", "events"), { recursive: true });
+  await mkdir(join(project, ".aboard", "prototypes", "7-parser"), { recursive: true });
   await mkdir(join(checkout, ".claude"), { recursive: true });
   await mkdir(join(checkout, ".aboard"), { recursive: true });
   await mkdir(join(checkout, ".aboard", "runtime"), { recursive: true });
@@ -329,6 +330,7 @@ test("the project overlay copies ignored Claude and aboard files, preserves chec
   await writeFile(join(project, ".aboard", "session-setup.ps1"), "from project\n");
   await writeFile(join(project, ".aboard", "settings.json"), "local aboard settings\n");
   await writeFile(join(project, ".aboard", "runtime", "events", "secret.json"), "runtime\n");
+  await writeFile(join(project, ".aboard", "prototypes", "7-parser", "experiment.ts"), "scratch\n");
   await writeFile(join(checkout, ".claude", "settings.json"), "from git\n");
   await writeFile(join(checkout, ".aboard", "session-setup.ps1"), "from git\n");
   const requested: string[] = [];
@@ -348,6 +350,7 @@ test("the project overlay copies ignored Claude and aboard files, preserves chec
   assert.ok(requested.includes(".claude/settings.local.json"), "settings.local.json is deliberately copied");
   await assert.rejects(readFile(join(checkout, ".claude", "worktrees", "other", "secret")), { code: "ENOENT" });
   await assert.rejects(readFile(join(checkout, ".aboard", "runtime", "events", "secret.json")), { code: "ENOENT" });
+  await assert.rejects(readFile(join(checkout, ".aboard", "prototypes", "7-parser", "experiment.ts")), { code: "ENOENT" });
 
   await writeFile(join(project, ".claude", "settings.local.json"), "changed later\n");
   await writeFile(join(project, ".claude", "new-after-creation.md"), "later\n");

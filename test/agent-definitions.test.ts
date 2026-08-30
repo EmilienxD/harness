@@ -26,7 +26,13 @@ const expected = {
     capability: "write-capable",
     model: "opus",
     effort: "high",
-    tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Agent", "Skill"],
+    tools: ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Write", "Edit", "Skill"],
+  },
+  prototyper: {
+    capability: "write-capable",
+    model: "opus",
+    effort: "medium",
+    tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "Agent", "Skill"],
   },
   webresearcher: {
     capability: "read-only",
@@ -62,7 +68,7 @@ async function definition(name: WorkerAgentName) {
   return parsed.value;
 }
 
-test("ships the Manager, five complete worker definitions, and the Explore builtin profile", async () => {
+test("ships the Manager, six worker definitions, and the Explore builtin profile", async () => {
   const files = (await readdir(agentsRoot)).sort();
   assert.deepEqual(files, SCAFFOLDED_AGENT_NAMES.map((name) => `${name}.md`).sort());
   assert.equal(files.includes("manager.md"), true);
@@ -110,7 +116,8 @@ test("parses every worker definition and derives capability from its exact tools
     assert.equal(agent.effort, expected[name].effort);
     assert.deepEqual(agent.tools, expected[name].tools);
     assert.equal(agent.writeCapability, expected[name].capability);
-    assert.ok(agent.prompt.length > 1_000, `${name}.md must carry a complete system prompt`);
+    if (name === "prototyper") assert.match(agent.prompt, /interactive prototyping agent/u);
+    else assert.ok(agent.prompt.length > 1_000, `${name}.md must carry a complete system prompt`);
   }
 });
 
@@ -268,7 +275,7 @@ test("rejects definitions outside the aboard catalogue or without required front
   assert.equal(parseAgentDefinition("---\nname: reviewer\ndescription: no\ntools: Read\nmodel: future\n---\nNo.").ok, false);
 });
 
-test("only the Manager's definition admits the aboard MCP tools", async () => {
+test("only Manager and brainstormer definitions admit their role-scoped aboard MCP tools", async () => {
   const manager = await readFile(join(agentsRoot, "manager.md"), "utf8");
   const parsedManager = parseManagerAgentDefinition(manager);
   assert.equal(parsedManager.ok, true);
@@ -281,9 +288,13 @@ test("only the Manager's definition admits the aboard MCP tools", async () => {
     assert.equal(source.includes("ABOARD_CLI"), false);
     assert.equal(
       parsed.ok && parsed.value.tools.some((rule) => rule.includes("mcp__aboard")),
-      false,
-      `${name} must not admit Manager orchestration tools`,
+      name === "brainstormer",
+      `${name} has the wrong MCP admission`,
     );
+    if (name === "brainstormer") {
+      assert.match(source, /run_agent/u);
+      assert.doesNotMatch(source, /spawn Agent|subagent_type=Explore/u);
+    }
   }
 
   assert.equal(ABOARD_MCP_TOOLS, "mcp__aboard__*");

@@ -18,7 +18,8 @@ import urllib.request
 # registration cannot resurrect the same failure.
 ROUTES: dict[str, str] = {
     "manager-prompt": "/hooks/manager/prompt",
-    "manager-stop": "/hooks/manager/stop",
+    "report-stop": "/hooks/reports/stop",
+    "report-delivery": "/hooks/reports/deliver",
     "manager-brief": "/hooks/manager/brief",
     "manager-roadmap": "/hooks/manager/roadmap",
     "worker-subagent-start": "/hooks/worker/subagent-start",
@@ -36,20 +37,16 @@ ROUTES: dict[str, str] = {
 # other route would be read as "refuse to stop" or "refuse to compact".
 BLOCKING_ROUTE: str = "manager-prompt"
 
-# Roles that always run as automated, result-reporting workers. Interactive
-# roles (brainstormer, pr-doctor-hitl) never report a result, so worker
-# hooks skip them: pr-doctor-hitl waits on the user, and the run's continue
-# signal for a hitl issue is the pull request's resolution, not that agent's
-# completion. general-purpose reports per launch rather than per role: the
-# extension sets ABOARD_DELIVERS_RESULT=1 only for result-delivering sessions,
-# so an interactive one stays silent here.
+# Roles whose non-completion worker telemetry hooks apply. Whether Stop itself
+# completes a session is a separate launch fact: ABOARD_ATTENDED marks sessions
+# the user drives, which report only through /done.
 WORKER_AGENT_TYPES: frozenset[str] = frozenset({"webresearcher", "implementer", "pr-doctor-afk", "Explore"})
 
 # Commands the bridge handles itself. `/done` is available in every aboard
 # terminal; the remaining commands belong only to the Manager. These expressions
 # match the bridge-side parsers.
-MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|done|auto|review-pr|reopen)(?:\s[\s\S]*)?$")
-DONE_COMMAND: re.Pattern[str] = re.compile(r"^\s*/done(?:\s[\s\S]*)?$")
+MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|prototype|done|auto|review-pr|reopen)(?:\s[\s\S]*)?$")
+SESSION_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(done|prototype)(?:\s[\s\S]*)?$")
 
 # Leads every roadmap injection the bridge emits, on the session-start briefing
 # and on the periodic reminder alike. Plain ASCII with no quotes, backslashes, or
@@ -94,6 +91,28 @@ def roadmap_reminder_due(payload: dict[str, Any]) -> bool:
     return ROADMAP_MARKER not in tail
 
 
+def mailbox_has_entries(agent_id: str) -> bool:
+    """Cheap common-path check before a PostToolUse/prompt bridge round trip."""
+    root = os.environ.get("ABOARD_WORKSPACE_ROOT") or os.environ.get("CLAUDE_PROJECT_DIR")
+    if not root:
+        return False
+    try:
+        with open(os.path.join(root, ".aboard", "runtime", "fleet.json"), encoding="utf-8") as source:
+            fleet = json.load(source)
+    except (OSError, ValueError):
+        return False
+    mailboxes = fleet.get("mailboxes") if isinstance(fleet, dict) else None
+    if not isinstance(mailboxes, list):
+        return False
+    return any(
+        isinstance(mailbox, dict)
+        and (mailbox.get("recipientAgentId") or mailbox.get("managerAgentId")) == agent_id
+        and isinstance(mailbox.get("entries"), list)
+        and bool(mailbox["entries"])
+        for mailbox in mailboxes
+    )
+
+
 def finish(message: str) -> int:
     """Erase the prompt and show `message` to the user in place of a response.
 
@@ -111,7 +130,7 @@ def finish(message: str) -> int:
 def intercepted_prompt(prompt: Any, agent_type: str | None) -> bool:
     if not isinstance(prompt, str):
         return False
-    command = MANAGER_INTERCEPTED_COMMAND if agent_type == "manager" else DONE_COMMAND
+    command = MANAGER_INTERCEPTED_COMMAND if agent_type == "manager" else SESSION_INTERCEPTED_COMMAND
     return command.match(prompt) is not None
 
 
@@ -132,7 +151,7 @@ def main() -> int:
     if not agent_id or endpoint is None:
         return 0
     agent_type = os.environ.get("ABOARD_AGENT_TYPE")
-    delivers_result = os.environ.get("ABOARD_DELIVERS_RESULT") == "1"
+    attended = os.environ.get("ABOARD_ATTENDED") == "1"
     expected_manager = route.startswith("manager-") if route else False
     try:
         payload_raw: Any = json.load(sys.stdin)
@@ -143,7 +162,9 @@ def main() -> int:
     # The shared UserPromptSubmit registration reaches every aboard terminal.
     # Only `/done` is meaningful outside the Manager; skip the bridge entirely
     # for all other prompts so worker input remains untouched.
-    if route == BLOCKING_ROUTE and agent_type != "manager" and not intercepted_prompt(prompt, agent_type):
+    if route == BLOCKING_ROUTE and agent_type != "manager" and not intercepted_prompt(prompt, agent_type) and not mailbox_has_entries(agent_id):
+        return 0
+    if route == "report-delivery" and not mailbox_has_entries(agent_id):
         return 0
     # Lifecycle routes are role-agnostic: every aboard session reports its TUI
     # pid and its end, so the write-lease recovery and startup proof-of-life
@@ -151,11 +172,13 @@ def main() -> int:
     # gates them (checked above), never the agent type.
     # webresearcher and Explore report completion but have no implementation branch or issue
     # contract to re-ground, and neither spawns code-exploration subagents.
-    if agent_type in ("webresearcher", "Explore") and route not in ("worker-stop", "worker-stop-failure", "session-start", "session-end"):
+    if agent_type in ("webresearcher", "Explore") and route not in ("worker-stop", "worker-stop-failure", "report-stop", "report-delivery", "session-start", "session-end"):
         return 0
     if route not in ("session-start", "session-end") and (
         (expected_manager and route != BLOCKING_ROUTE and agent_type != "manager") or (
-            not expected_manager and agent_type not in WORKER_AGENT_TYPES and not delivers_result
+            route in ("worker-stop", "worker-stop-failure") and attended
+        ) or (
+            route.startswith("worker-") and route not in ("worker-stop", "worker-stop-failure") and agent_type not in WORKER_AGENT_TYPES
         )
     ):
         return 0
@@ -232,8 +255,9 @@ def main() -> int:
             # so there is nothing to attach a reminder to.
             if not is_intercepted and roadmap_reminder_due(payload):
                 body["roadmapDue"] = True
-        if endpoint == "/hooks/manager/stop":
+        if endpoint == "/hooks/reports/stop":
             body["stopHookActive"] = bool(payload.get("stop_hook_active", False))
+            body["lastAssistantMessage"] = payload.get("last_assistant_message")
     filtered_body = {key: value for key, value in body.items() if value is not None}
     result_raw: Any = None
     while True:
@@ -244,7 +268,7 @@ def main() -> int:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with urllib.request.urlopen(request, timeout=86_400) as response:
                 result_raw = json.load(response)
         except (urllib.error.HTTPError, urllib.error.URLError, ConnectionError, TimeoutError, ValueError) as error:
             if is_intercepted:
@@ -260,7 +284,7 @@ def main() -> int:
         return finish(str(result.get("message", "Aboard handled the command.")))
     # Only events that support context injection may print. Stop and
     # UserPromptSubmit do; the worker result routes deliberately do not.
-    if endpoint == "/hooks/manager/stop":
+    if endpoint == "/hooks/reports/stop":
         if result.get("state") == "results":
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": result.get("additionalContext")}}))
     elif "additionalContext" in result and event in ("SessionStart", "UserPromptSubmit", "PostToolUse"):

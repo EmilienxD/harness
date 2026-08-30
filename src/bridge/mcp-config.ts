@@ -14,6 +14,8 @@ export interface ManagerMcpRegistration {
   readonly agentId: string;
 }
 
+export type AboardMcpRegistration = ManagerMcpRegistration;
+
 export function managerMcpConfigDocument(registration: ManagerMcpRegistration): string {
   return `${JSON.stringify(
     {
@@ -32,6 +34,49 @@ export function managerMcpConfigDocument(registration: ManagerMcpRegistration): 
     null,
     2,
   )}\n`;
+}
+
+/** Per-agent resolved MCP credentials, stored only in extension-owned storage. */
+export class FileAgentMcpConfigs {
+  readonly #directory: string;
+
+  public constructor(
+    storageDirectory: string,
+    private readonly runtimeAdmission: RuntimeAdmission = new RuntimeAdmission(true),
+    private readonly available: () => boolean = () => true,
+  ) {
+    this.#directory = join(storageDirectory, "agent-mcp");
+  }
+
+  public pathFor(agentId: string): string {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(agentId)) throw new Error(`Unsafe agent id for MCP configuration: ${agentId}`);
+    return join(this.#directory, `${agentId}.json`);
+  }
+
+  public async write(registration: AboardMcpRegistration): Promise<string> {
+    if (!this.available()) throw new Error("aboard runtime is not initialized");
+    return this.runtimeAdmission.run(async () => {
+      const path = this.pathFor(registration.agentId);
+      const temporaryPath = `${path}.${process.pid}.tmp`;
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(temporaryPath, managerMcpConfigDocument(registration), { encoding: "utf8", mode: 0o600 });
+      if (!this.available()) {
+        await rm(temporaryPath, { force: true });
+        throw new Error("aboard runtime reset while preparing agent MCP configuration");
+      }
+      await rm(path, { force: true });
+      await rename(temporaryPath, path);
+      return path;
+    });
+  }
+
+  public async clear(agentId: string): Promise<void> {
+    await rm(this.pathFor(agentId), { force: true });
+  }
+
+  public async clearAll(): Promise<void> {
+    await rm(this.#directory, { recursive: true, force: true });
+  }
 }
 
 export class FileManagerMcpConfig {

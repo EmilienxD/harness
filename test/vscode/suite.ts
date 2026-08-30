@@ -4,6 +4,11 @@ import { join } from "node:path";
 
 import { commands, extensions, window, workspace } from "vscode";
 
+import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
+import { FleetRegistry } from "../../src/domain/fleet.js";
+import { WriteLease } from "../../src/domain/lease.js";
+import { FleetTreeModel } from "../../src/vscode/fleet.js";
+
 interface CommandEndpoint { readonly port: number; readonly workspaceRoot: string; readonly commandToken: string; readonly pid: number }
 interface AboardApi { readonly commandEndpointDirectory: string }
 
@@ -21,6 +26,30 @@ export async function run(): Promise<void> {
   const api = await extension.activate() as AboardApi | undefined;
   assert.equal(extension.isActive, true);
   assert.ok(api?.commandEndpointDirectory, "activation exposes the command endpoint directory");
+
+  // Keep native UI integration focused on the new row contract. The model is
+  // the registered TreeDataProvider's source; VS Code hosts this assertion so
+  // bundling and extension-host execution are covered as well as pure mapping.
+  const at = "2026-08-30T10:00:00.000Z" as IsoTimestamp;
+  const recipientId = "manager-ui" as AgentId;
+  const fleet = new FleetRegistry();
+  const base: AgentSession = {
+    identity: { agentId: recipientId, type: "manager" },
+    sessionId: "session-manager-ui" as SessionId,
+    terminal: { terminalId: "terminal-manager-ui" as TerminalId, name: "Manager" },
+    lifecycle: { status: "starting", startedAt: at },
+    resultDelivery: { mode: "none" },
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  };
+  fleet.register(base, at);
+  fleet.register({ ...base, identity: { agentId: "research-ui" as AgentId, type: "webresearcher" }, sessionId: "session-research-ui" as SessionId, terminal: { terminalId: "terminal-research-ui" as TerminalId, name: "research" }, resultDelivery: { mode: "mailbox", recipientAgentId: recipientId } }, at);
+  fleet.register({ ...base, identity: { agentId: "prototype-ui" as AgentId, type: "prototyper" }, sessionId: "session-prototype-ui" as SessionId, terminal: { terminalId: "terminal-prototype-ui" as TerminalId, name: "prototype" }, resultDelivery: { mode: "mailbox", recipientAgentId: recipientId }, attended: true }, at);
+  fleet.transition(recipientId, { status: "running", startedAt: at }, at);
+  const fleetModel = new FleetTreeModel(fleet, new WriteLease(), { refresh: () => {} }, () => true);
+  const recipientRow = fleetModel.roots().find((node) => node.kind === "agent" && node.session.identity.agentId === recipientId);
+  assert.ok(recipientRow, "the recipient has an Agents row");
+  assert.equal(fleetModel.item(recipientRow).description, "running · waiting on aboard-webresearcher-research-ui, aboard-prototyper-prototype-ui");
+  fleetModel.dispose();
 
   const available = await commands.getCommands(true);
   for (const command of [

@@ -1,6 +1,6 @@
 import type { AgentId, AgentSession, IsoTimestamp, WorkerResult } from "../domain/contracts.js";
 import { renderTasks, type RoadmapTask } from "../domain/roadmap.js";
-import type { FleetRegistry, MailboxEntry } from "../domain/fleet.js";
+import type { FleetRegistry, ReportEntry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import type { AutoRunDryRunResult } from "../domain/auto-run.js";
 import { describeIssueNumbers } from "../shared/issues.js";
@@ -10,7 +10,7 @@ import { protocolError, type BridgeRequestHandler, type BridgeResponse } from ".
 
 export const HOOK_OUTPUT_LIMIT = 10_000;
 export const MANAGER_SESSION_START_TIMEOUT_SECONDS = 120;
-export const MANAGER_STOP_TIMEOUT_SECONDS = 3_600;
+export const MANAGER_STOP_TIMEOUT_SECONDS = 86_400;
 export const MANAGER_PROMPT_TIMEOUT_SECONDS = 60;
 
 export const ROADMAP_INLINE_LIMIT = 6_000;
@@ -343,6 +343,7 @@ export class RoadmapReminderService {
 export interface ManagerStopRequest {
   readonly agentId: AgentId;
   readonly stopHookActive: boolean;
+  readonly lastAssistantMessage?: string;
 }
 
 export type ManagerStopPoll =
@@ -353,7 +354,7 @@ export type ManagerStopPoll =
 export interface ManagerStopOptions {
   readonly fleet: FleetRegistry;
   readonly now?: () => Date;
-  readonly waitForChange?: (signal: AbortSignal) => Promise<void>;
+  readonly waitForChange?: (signal: AbortSignal, afterRevision: number) => Promise<void>;
   readonly maxResults?: number;
   readonly maxContextChars?: number;
 }
@@ -369,26 +370,35 @@ export class ManagerStopService {
   }
 
   public async poll(input: ManagerStopRequest, signal: AbortSignal): Promise<ManagerStopPoll> {
-    if (input.stopHookActive) return { state: "idle" };
+    if (input.lastAssistantMessage !== undefined) {
+      this.options.fleet.observeAssistantMessage(input.agentId, input.lastAssistantMessage, this.#now().toISOString() as IsoTimestamp);
+    }
     while (!signal.aborted) {
+      const revision = this.options.fleet.revision();
       const at = this.#now().toISOString() as IsoTimestamp;
       const results = this.options.fleet.drainMailbox(input.agentId, at);
       if (results.length > 0) return { state: "results", additionalContext: this.#format(results, at) };
-      if (!this.options.fleet.list().some((entry) => entry.resultDelivery.mode === "mailbox" && entry.resultDelivery.managerAgentId === input.agentId && active(entry))) {
+      if (this.options.fleet.reportsOwedTo(input.agentId).length === 0) {
         return { state: "idle" };
       }
       if (this.options.waitForChange === undefined) return { state: "running" };
-      await this.options.waitForChange(signal);
+      await this.options.waitForChange(signal, revision);
     }
     return { state: "idle" };
   }
 
-  #format(entries: readonly MailboxEntry[], deliveredAt: IsoTimestamp): string {
+  public deliver(agentId: AgentId): { readonly additionalContext?: string } {
+    const at = this.#now().toISOString() as IsoTimestamp;
+    const results = this.options.fleet.drainMailbox(agentId, at);
+    return results.length === 0 ? {} : { additionalContext: this.#format(results, at) };
+  }
+
+  #format(entries: readonly ReportEntry[], deliveredAt: IsoTimestamp): string {
     const omitted = Math.max(0, entries.length - this.#maxResults);
     const selected = entries.slice(omitted);
-    const lines = [`At ${deliveredAt}, aboard received ${entries.length} background result(s).`];
-    if (omitted > 0) lines.push(`${omitted} older result(s) were omitted from this bounded batch.`);
-    for (const entry of selected) lines.push(formatResult(entry.agentId, entry.result));
+    const lines = [`At ${deliveredAt}, aboard received ${entries.length} report(s).`];
+    if (omitted > 0) lines.push(`${omitted} older report(s) were omitted from this bounded batch.`);
+    for (const entry of selected) lines.push(formatReport(entry));
     const joined = lines.join("\n");
     return joined.length <= this.#maxContextChars ? joined : joined.slice(0, this.#maxContextChars);
   }
@@ -400,12 +410,18 @@ function formatResult(agentId: AgentId, result: WorkerResult): string {
     : `${agentId} failed (${result.failure.type}): ${result.failure.lastAssistantMessage ?? "no final message"}`;
 }
 
+function formatReport(entry: ReportEntry): string {
+  return entry.kind === "ended-without-report"
+    ? `${entry.agentId} (${entry.agentType}) ended without reporting.`
+    : formatResult(entry.agentId, entry.result);
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 export interface InteractiveManagerLauncher {
-  spawnInteractive(input: DelegationLaunchInput): Promise<unknown>;
+  spawnInteractive(input: DelegationLaunchInput, recipientAgentId?: AgentId): Promise<unknown>;
 }
 
 export interface InvokingTerminalKiller {
@@ -437,13 +453,24 @@ export class ManagerPromptService {
   public async handle(agentId: AgentId, prompt: string, roadmapDue = false, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const done = parseDoneCommand(prompt);
     if (done !== undefined) return this.#done(agentId, done);
-    const action = parseActionCommand(prompt);
+    const prototype = parsePrototypeCommand(prompt);
+    if (prototype !== undefined) return this.#prototype(agentId, prototype);
+    // The route also serves report injection for every aboard session. That
+    // must not widen Manager-owned commands merely because a non-Manager has a
+    // queued report and therefore pays the prompt-hook round trip.
+    const managerCaller = this.fleet.get(agentId)?.identity.type === "manager";
+    const action = managerCaller ? parseActionCommand(prompt) : undefined;
     if (action !== undefined) return this.#runAction(agentId, action);
-    const command = parseInteractiveCommand(prompt);
+    const command = managerCaller ? parseInteractiveCommand(prompt) : undefined;
     if (command === undefined) {
       const deliveredAt = this.#now().toISOString() as IsoTimestamp;
+      const reports = this.fleet.drainMailbox(agentId, deliveredAt);
       const delivery = this.fleet.drainNotifications(agentId, deliveredAt);
       const lines: string[] = [];
+      if (reports.length > 0) {
+        lines.push(`At ${deliveredAt}, aboard delivered ${reports.length} report(s):`);
+        for (const report of reports) lines.push(formatReport(report));
+      }
       if (delivery.notifications.length > 0 || delivery.summarized !== undefined) {
         lines.push(`Since your last message (delivered at ${deliveredAt}):`);
         if (delivery.summarized !== undefined) {
@@ -465,7 +492,7 @@ export class ManagerPromptService {
     }
 
     if (command.invalidArguments) return { intercepted: true, message: "/general-purpose does not accept arguments." };
-    const launched = await this.launcher.spawnInteractive(command.input) as Record<string, unknown>;
+    const launched = await this.launcher.spawnInteractive(command.input, agentId) as Record<string, unknown>;
     const occurredAt = this.#now().toISOString() as IsoTimestamp;
     const launchedAgentId = typeof launched.agentId === "string" ? launched.agentId : "unknown";
     const event = command.type === "general-purpose"
@@ -487,15 +514,59 @@ export class ManagerPromptService {
       return { intercepted: true, message: "aboard could not close this terminal right now." };
     }
     try {
+      const recipientAgentId = session.resultDelivery.mode === "mailbox" ? session.resultDelivery.recipientAgentId : undefined;
+      const report = command.report ?? session.lastObservedAssistantMessage;
+      let reporting: string;
+      if (recipientAgentId === undefined) {
+        reporting = "This session has no report recipient.";
+      } else if (report === undefined) {
+        reporting = `No complete assistant message was available to report to ${recipientAgentId}.`;
+      } else {
+        this.fleet.submitReport(agentId, report, this.#now().toISOString() as IsoTimestamp);
+        const recipient = this.fleet.get(recipientAgentId);
+        reporting = recipient === undefined || !active(recipient)
+          ? `The report is queued for ${recipientAgentId}, which is not currently open.`
+          : `The report is being delivered to ${recipientAgentId}.`;
+      }
       this.terminals.kill(session.terminal.terminalId);
       return {
         intercepted: true,
-        message: command.ignoredArguments
-          ? "/done closes this terminal; the text you typed after it was not sent."
-          : "Closing this terminal.",
+        message: `Closing this terminal. ${reporting}`,
       };
     } catch (error) {
       return { intercepted: true, message: `aboard could not close this terminal: ${error instanceof Error ? error.message : "the terminal action failed"}.` };
+    }
+  }
+
+  async #prototype(agentId: AgentId, command: ParsedPrototypeCommand): Promise<Record<string, unknown>> {
+    const caller = this.fleet.get(agentId);
+    if (caller?.identity.type !== "manager" && caller?.identity.type !== "brainstormer") {
+      return { intercepted: true, message: "/prototype can be launched only from a Manager or brainstormer terminal." };
+    }
+    if (command.prompt === undefined) {
+      return { intercepted: true, message: "/prototype requires a prompt describing the experiment." };
+    }
+    const words = command.prompt.split(/\s+/u).map((word) => word.replace(/[^\p{L}\p{N}'-]/gu, "")).filter(Boolean);
+    const description = ["prototype", ...words.slice(0, 4)].slice(0, 5).join(" ");
+    try {
+      const launched = await this.launcher.spawnInteractive({
+        type: "prototyper",
+        prompt: command.prompt,
+        description: description.split(/\s+/u).length < 3 ? `${description} experiment` : description,
+      }, agentId) as Record<string, unknown>;
+      const launchedAgentId = typeof launched.agentId === "string" ? launched.agentId : "unknown";
+      const occurredAt = this.#now().toISOString() as IsoTimestamp;
+      const followUp = caller.identity.type === "brainstormer"
+        ? " Once you have it, you can use the continue_agent tool to ask follow up questions concerning the proposed prototype."
+        : "";
+      this.fleet.enqueueNotification(
+        agentId,
+        `The user manually launched a prototype agent with agent ID: ${launchedAgentId}. It may or may not experiment on this session's recent activities. You will be notified when the agent submits a report.${followUp}`,
+        occurredAt,
+      );
+      return { intercepted: true, message: `Prototype launched and focused (agent ${launchedAgentId}).` };
+    } catch (error) {
+      return { intercepted: true, message: `aboard could not launch the prototype: ${error instanceof Error ? error.message : "the launch failed"}.` };
     }
   }
 
@@ -644,13 +715,25 @@ interface ParsedActionCommand {
 }
 
 interface ParsedDoneCommand {
-  readonly ignoredArguments: boolean;
+  readonly report?: string;
+}
+
+interface ParsedPrototypeCommand {
+  readonly prompt?: string;
 }
 
 function parseDoneCommand(prompt: string): ParsedDoneCommand | undefined {
   const match = /^\s*\/done(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
   if (match === null) return undefined;
-  return { ignoredArguments: (match[1]?.trim() ?? "").length > 0 };
+  const report = match[1]?.trim();
+  return report === undefined || report.length === 0 ? {} : { report };
+}
+
+function parsePrototypeCommand(prompt: string): ParsedPrototypeCommand | undefined {
+  const match = /^\s*\/prototype(?:\s+([\s\S]*?))?\s*$/u.exec(prompt);
+  if (match === null) return undefined;
+  const instruction = match[1]?.trim();
+  return instruction === undefined || instruction.length === 0 ? {} : { prompt: instruction };
 }
 
 function parseActionCommand(prompt: string): ParsedActionCommand | undefined {
@@ -721,13 +804,23 @@ export function createManagerHookRoutes(
     if (request.url.pathname === "/hooks/manager/brief") {
       return { status: 200, body: { additionalContext: await briefings.render(request.signal) } };
     }
-    if (request.url.pathname === "/hooks/manager/stop") {
+    if (request.url.pathname === "/hooks/reports/stop") {
       const body = record(request.body);
       if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "" || typeof (body.stopHookActive ?? body.stop_hook_active) !== "boolean") {
         return protocolError(400, "invalid-request", "agentId and stopHookActive are required");
       }
       checkpoint?.(body.agentId as AgentId);
-      return { status: 200, body: await stop.poll({ agentId: body.agentId as AgentId, stopHookActive: (body.stopHookActive ?? body.stop_hook_active) as boolean }, request.signal) };
+      const lastAssistantMessage = typeof (body.lastAssistantMessage ?? body.last_assistant_message) === "string"
+        ? (body.lastAssistantMessage ?? body.last_assistant_message) as string
+        : undefined;
+      return { status: 200, body: await stop.poll({ agentId: body.agentId as AgentId, stopHookActive: (body.stopHookActive ?? body.stop_hook_active) as boolean, ...(lastAssistantMessage === undefined ? {} : { lastAssistantMessage }) }, request.signal) };
+    }
+    if (request.url.pathname === "/hooks/reports/deliver") {
+      const body = record(request.body);
+      if (body === undefined || typeof body.agentId !== "string" || body.agentId.trim() === "") {
+        return protocolError(400, "invalid-request", "agentId is required");
+      }
+      return { status: 200, body: stop.deliver(body.agentId as AgentId) };
     }
     if (request.url.pathname === "/hooks/manager/roadmap" && reminders !== undefined) {
       const body = record(request.body);

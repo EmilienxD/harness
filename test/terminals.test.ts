@@ -94,6 +94,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
     ABOARD_SESSION_ID: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
     ABOARD_AGENT_TYPE: "implementer",
     ABOARD_WORKSPACE_ROOT: "C:\\work\\aboard",
+    CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: "1000000",
     ABOARD_ISSUE_NUMBERS: "6",
   });
   assert.deepEqual(host.created[0]?.terminal.sent, [{
@@ -227,7 +228,7 @@ test("a closed terminal frees the agent for relaunch but keeps session identity 
   assert.throws(() => controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "manager" }), /already has a live aboard terminal/);
 });
 
-test("result-delivering sessions carry ABOARD_DELIVERS_RESULT; handed-off ones are focused and silent", () => {
+test("attended sessions carry ABOARD_ATTENDED independently of reporting", () => {
   const { controller, host } = setup();
   // The dual-mode builtin types make this a per-launch property: same type,
   // opposite environment and focus.
@@ -236,18 +237,18 @@ test("result-delivering sessions carry ABOARD_DELIVERS_RESULT; handed-off ones a
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     agentType: "Explore",
     initialCommand: "claude --agent Explore map the auth flow",
-    deliversResult: true,
+    attended: false,
   });
-  assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  assert.equal(host.created[0]!.options.env.ABOARD_ATTENDED, undefined);
   assert.deepEqual(host.created[0]!.terminal.shows, []);
 
   controller.create({
     agentId: agent("explore-interactive"),
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
     agentType: "Explore",
-    deliversResult: false,
+    attended: true,
   });
-  assert.equal(host.created[1]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.equal(host.created[1]!.options.env.ABOARD_ATTENDED, "1");
   assert.deepEqual(host.created[1]!.terminal.shows, [false]);
 });
 

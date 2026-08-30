@@ -1,7 +1,6 @@
 import { ProcessGitClient, isWorkingTreeClean, type GitClient } from "../git/client.js";
 import type { TerminalLifecycleEvent } from "../claude/terminals.js";
 import {
-  isInteractiveAgentType,
   type AgentId,
   type AgentSession,
   type AgentTelemetry,
@@ -33,9 +32,7 @@ export interface WorkerCompletionSink {
 }
 
 export function reportsResult(session: AgentSession): boolean {
-  return session.resultDelivery.mode !== "none"
-    && session.identity.type !== "manager"
-    && !isInteractiveAgentType(session.identity.type);
+  return session.resultDelivery.mode !== "none" && session.attended !== true;
 }
 
 export interface WorkerLifecycleReconcilerOptions {

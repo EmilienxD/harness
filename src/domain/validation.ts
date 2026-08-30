@@ -23,7 +23,7 @@ import type {
   DeferredNotification,
   FleetEvent,
   FleetPersistenceDto,
-  MailboxEntry,
+  ReportEntry,
 } from "./fleet.js";
 import type {
   ActivityDto,
@@ -355,14 +355,16 @@ function parseResultDelivery(
     case "none":
       return { mode: record.mode };
     case "mailbox": {
-      const managerAgentId = readNonEmptyString(
-        record.managerAgentId,
-        `${path}.managerAgentId`,
+      // Accept the old field once at the persisted boundary; every new write
+      // uses the role-neutral recipient name.
+      const recipientAgentId = readNonEmptyString(
+        record.recipientAgentId ?? record.managerAgentId,
+        `${path}.recipientAgentId`,
         issues,
       );
-      return managerAgentId === undefined
+      return recipientAgentId === undefined
         ? undefined
-        : { mode: "mailbox", managerAgentId: managerAgentId as AgentId };
+        : { mode: "mailbox", recipientAgentId: recipientAgentId as AgentId };
     }
     default:
       issues.push(`${path}.mode must be one of: tool-result, mailbox, none`);
@@ -441,6 +443,17 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     if (record.autoRunRestricted === true) autoRunRestricted = true;
     else issues.push("session.autoRunRestricted must be true when present");
   }
+  let attended: true | undefined;
+  if (record.attended !== undefined) {
+    if (record.attended === true) attended = true;
+    else issues.push("session.attended must be true when present");
+  }
+  let lastObservedAssistantMessage: string | undefined;
+  if (record.lastObservedAssistantMessage !== undefined) {
+    if (typeof record.lastObservedAssistantMessage === "string" && record.lastObservedAssistantMessage.trim().length > 0) {
+      lastObservedAssistantMessage = record.lastObservedAssistantMessage;
+    } else issues.push("session.lastObservedAssistantMessage must be a non-empty string when present");
+  }
   const compactSummaries = record.compactSummaries === undefined ? undefined : Array.isArray(record.compactSummaries)
     ? record.compactSummaries.map((value, index) => readNonEmptyString(value, `session.compactSummaries[${index}]`, issues))
     : (issues.push("session.compactSummaries must be an array"), undefined);
@@ -448,15 +461,6 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
   if (identity !== undefined && resultDelivery !== undefined) {
     if (chromeEnabled === true && identity.type !== "implementer") {
       issues.push("session.chromeEnabled is only legal for implementer agents");
-    }
-    if (
-      (identity.type === "manager" ||
-        INTERACTIVE_TYPES.has(identity.type)) &&
-      resultDelivery.mode !== "none"
-    ) {
-      issues.push(
-        `session.resultDelivery.mode must be none for ${identity.type} agents`,
-      );
     }
     if (
       isAutomatedAgentType(identity.type) &&
@@ -498,6 +502,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     terminal,
     lifecycle,
     resultDelivery,
+    ...(attended === undefined ? {} : { attended }),
     telemetry,
     ...(chromeEnabled === undefined ? {} : { chromeEnabled }),
     ...(lastResult === undefined ? {} : { lastResult }),
@@ -508,6 +513,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     ...(expectsUncommittedTree === undefined ? {} : { expectsUncommittedTree }),
     ...(autoRunRestricted === undefined ? {} : { autoRunRestricted }),
     ...(compactSummaries === undefined ? {} : { compactSummaries: compactSummaries as string[] }),
+    ...(lastObservedAssistantMessage === undefined ? {} : { lastObservedAssistantMessage }),
   };
   return { ok: true, value: base };
 }
@@ -556,11 +562,11 @@ export function parseFleetPersistenceDto(
     return { agentId, parentAgentId: parentAgentId as AgentId, type, status, startedAt, telemetry, ...(finishedAt === undefined ? {} : { finishedAt }), ...(result === undefined ? {} : { result }) };
   });
 
-  const parseMailboxEntry = (
+  const parseResultEntry = (
     item: unknown,
     path: string,
     innerIssues: string[],
-  ): MailboxEntry | undefined => {
+  ): { readonly agentId: AgentId; readonly result: WorkerResult } | undefined => {
     const entry = readRecord(item, path, innerIssues);
     if (entry === undefined) return undefined;
     const agentId = readNonEmptyString(entry.agentId, `${path}.agentId`, innerIssues);
@@ -572,21 +578,44 @@ export function parseFleetPersistenceDto(
   const blockingResults = parseArray(
     record.blockingResults,
     "fleet.blockingResults",
-    parseMailboxEntry,
+    parseResultEntry,
   );
+
+  const parseMailboxEntry = (item: unknown, path: string, innerIssues: string[]): ReportEntry | undefined => {
+    const entry = readRecord(item, path, innerIssues);
+    if (entry === undefined) return undefined;
+    const agentId = readNonEmptyString(entry.agentId, `${path}.agentId`, innerIssues);
+    const agentType = entry.agentType === undefined ? undefined : parseAgentType(entry.agentType, `${path}.agentType`, innerIssues);
+    // Version-one fleet files predate the discriminant and agent type. They
+    // were Manager-only mailboxes, so infer the old result entry at load time.
+    if (entry.kind === undefined && entry.result !== undefined) {
+      const result = parseWorkerResult(entry.result, `${path}.result`, innerIssues);
+      return agentId === undefined || result === undefined
+        ? undefined
+        : { kind: "result", agentId: agentId as AgentId, agentType: agentType ?? "general-purpose", result };
+    }
+    if (agentId === undefined || agentType === undefined) return undefined;
+    if (entry.kind === "ended-without-report") return { kind: "ended-without-report", agentId: agentId as AgentId, agentType };
+    if (entry.kind !== "result") {
+      innerIssues.push(`${path}.kind must be result or ended-without-report`);
+      return undefined;
+    }
+    const result = parseWorkerResult(entry.result, `${path}.result`, innerIssues);
+    return result === undefined ? undefined : { kind: "result", agentId: agentId as AgentId, agentType, result };
+  };
 
   const mailboxes = parseArray(record.mailboxes, "fleet.mailboxes", (item, path, innerIssues) => {
     const mailbox = readRecord(item, path, innerIssues);
     if (mailbox === undefined) return undefined;
-    const managerAgentId = readNonEmptyString(
-      mailbox.managerAgentId,
-      `${path}.managerAgentId`,
+    const recipientAgentId = readNonEmptyString(
+      mailbox.recipientAgentId ?? mailbox.managerAgentId,
+      `${path}.recipientAgentId`,
       innerIssues,
     );
     const entries = parseArray(mailbox.entries, `${path}.entries`, parseMailboxEntry);
-    return managerAgentId === undefined || entries === undefined
+    return recipientAgentId === undefined || entries === undefined
       ? undefined
-      : { managerAgentId: managerAgentId as AgentId, entries };
+      : { recipientAgentId: recipientAgentId as AgentId, entries };
   });
 
   const deferredNotifications = parseArray(
@@ -595,9 +624,9 @@ export function parseFleetPersistenceDto(
     (item, path, innerIssues) => {
       const queue = readRecord(item, path, innerIssues);
       if (queue === undefined) return undefined;
-      const managerAgentId = readNonEmptyString(
-        queue.managerAgentId,
-        `${path}.managerAgentId`,
+      const recipientAgentId = readNonEmptyString(
+        queue.recipientAgentId ?? queue.managerAgentId,
+        `${path}.recipientAgentId`,
         innerIssues,
       );
       const entries = parseArray(
@@ -614,9 +643,9 @@ export function parseFleetPersistenceDto(
             : { id, occurredAt, message };
         },
       );
-      return managerAgentId === undefined || entries === undefined
+      return recipientAgentId === undefined || entries === undefined
         ? undefined
-        : { managerAgentId: managerAgentId as AgentId, entries };
+        : { recipientAgentId: recipientAgentId as AgentId, entries };
     },
   );
 
@@ -660,19 +689,19 @@ export function parseFleetPersistenceDto(
       }
       case "notification-enqueued":
       case "notifications-drained": {
-        const managerAgentId = readNonEmptyString(
-          event.managerAgentId,
-          `${path}.managerAgentId`,
+        const recipientAgentId = readNonEmptyString(
+          event.recipientAgentId ?? event.managerAgentId,
+          `${path}.recipientAgentId`,
           innerIssues,
         );
         const count = readNonNegativeInteger(event.count, `${path}.count`, innerIssues);
-        return managerAgentId === undefined || count === undefined
+        return recipientAgentId === undefined || count === undefined
           ? undefined
           : {
               sequence,
               occurredAt,
               type: event.type,
-              managerAgentId: managerAgentId as AgentId,
+              recipientAgentId: recipientAgentId as AgentId,
               count,
             };
       }
@@ -793,6 +822,7 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
     // A malformed reopen block costs the reopen action, not the row: the outcome
     // is still worth showing.
     const reopen = parseReopenable(entry.reopen);
+    const continuation = parseReopenable(entry.continuation);
     seen.add(id);
     entries.push({
       kind: "agent", id, at, agentId: agentId as AgentId, type, description, outcome,
@@ -801,6 +831,7 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
       ...(pullRequest === undefined ? {} : { pullRequest }),
       ...(typeof entry.terminalId === "string" && entry.terminalId.length > 0 ? { terminalId: entry.terminalId as TerminalId } : {}),
       ...(reopen === undefined ? {} : { reopen }),
+      ...(continuation === undefined ? {} : { continuation }),
     });
   }
   return { ok: true, value: { version: 1, entries } };

@@ -1,6 +1,7 @@
 export const AGENT_TYPES = [
   "manager",
   "brainstormer",
+  "prototyper",
   "webresearcher",
   "implementer",
   "pr-doctor-afk",
@@ -17,6 +18,8 @@ export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT
   (type) => type !== "implementer" && type !== "pr-doctor-afk" && type !== "pr-doctor-hitl",
 );
 
+export const BRAINSTORMER_LAUNCHABLE_AGENT_TYPES = ["Explore", "webresearcher", "prototyper"] as const;
+
 export const MCP_DEFAULT_AGENT_TYPE: AgentType = "general-purpose";
 
 export const AUTOMATED_AGENT_TYPES = ["webresearcher", "implementer", "pr-doctor-afk", "Explore"] as const;
@@ -25,7 +28,7 @@ export function isAutomatedAgentType(type: AgentType): boolean {
   return (AUTOMATED_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "pr-doctor-hitl"] as const;
+export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "prototyper", "pr-doctor-hitl"] as const;
 
 export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
@@ -41,6 +44,13 @@ export const NON_RESTORABLE_PERSISTED_AGENT_TYPES = ["webresearcher", "Explore"]
 
 export function isNonRestorablePersistedAgentType(type: AgentType): boolean {
   return (NON_RESTORABLE_PERSISTED_AGENT_TYPES as readonly AgentType[]).includes(type);
+}
+
+/** Conversations a live MCP caller may ask to continue after their report lands. */
+export const CONTINUABLE_AGENT_TYPES = ["webresearcher", "prototyper"] as const;
+
+export function isContinuableAgentType(type: AgentType): type is (typeof CONTINUABLE_AGENT_TYPES)[number] {
+  return (CONTINUABLE_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
 export type AgentId = string & { readonly __brand: "AgentId" };
@@ -129,7 +139,7 @@ export type AgentLifecycle =
 
 export type ResultDelivery =
   | { readonly mode: "tool-result" }
-  | { readonly mode: "mailbox"; readonly managerAgentId: AgentId }
+  | { readonly mode: "mailbox"; readonly recipientAgentId: AgentId }
   | { readonly mode: "none" };
 
 export type WorkerResult =
@@ -151,6 +161,8 @@ export interface AgentSession {
   readonly terminal: TerminalReference;
   readonly lifecycle: AgentLifecycle;
   readonly resultDelivery: ResultDelivery;
+  /** The user drives this session. Absence is the persisted form of unattended. */
+  readonly attended?: true;
   readonly telemetry: AgentTelemetry;
   /** The launch explicitly enabled Claude in Chrome; absence means disabled. */
   readonly chromeEnabled?: true;
@@ -160,6 +172,8 @@ export interface AgentSession {
   readonly expectsUncommittedTree?: boolean;
   readonly autoRunRestricted?: true;
   readonly compactSummaries?: readonly string[];
+  /** Most recent complete assistant message observed by aboard's Stop hook. */
+  readonly lastObservedAssistantMessage?: string;
   readonly lastResult?: WorkerResult;
 }
 

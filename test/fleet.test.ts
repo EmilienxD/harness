@@ -11,6 +11,8 @@ import type {
 import {
   FleetRegistry,
   FleetStateError,
+  MAX_QUEUED_REPORT_CHARACTERS,
+  MAX_QUEUED_REPORTS,
 } from "../src/domain/fleet.js";
 import {
   parseFleetPersistenceDto,
@@ -107,7 +109,7 @@ test("delivers blocking and background results exactly once", () => {
     startedAt,
   );
   fleet.register(
-    createSession("background", "af817a6c-cd41-41e2-a4db-44d3f43cd560", { mode: "mailbox", managerAgentId: managerId }),
+    createSession("background", "af817a6c-cd41-41e2-a4db-44d3f43cd560", { mode: "mailbox", recipientAgentId: managerId }),
     startedAt,
   );
   for (const id of ["blocking", "background"]) {
@@ -123,6 +125,70 @@ test("delivers blocking and background results exactly once", () => {
   assert.equal(fleet.takeBlockingResult(agent("blocking"), finishedAt), undefined);
   assert.deepEqual(fleet.drainMailbox(managerId, finishedAt).map((entry) => entry.agentId), ["background"]);
   assert.deepEqual(fleet.drainMailbox(managerId, finishedAt), []);
+});
+
+test("mailbox recipients are role-neutral and reports survive either participant ending", () => {
+  const fleet = new FleetRegistry();
+  const recipientId = agent("brainstormer-1");
+  const reporterId = agent("general-purpose-1");
+  fleet.register(createSession("brainstormer-1", "140b5c21-eb37-4147-b5cb-6a5ca2592146", { mode: "none" }, "brainstormer"), startedAt);
+  fleet.register(createSession("general-purpose-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "mailbox", recipientAgentId: recipientId }, "general-purpose"), startedAt);
+  fleet.transition(reporterId, { status: "running", startedAt }, startedAt);
+
+  fleet.remove(recipientId, finishedAt);
+  fleet.submitReport(reporterId, "The prototype is ready.", finishedAt);
+  fleet.remove(reporterId, finishedAt);
+
+  const reports = fleet.drainMailbox(recipientId, finishedAt);
+  assert.equal(reports.length, 1);
+  assert.deepEqual(reports[0], {
+    kind: "result",
+    agentId: reporterId,
+    agentType: "general-purpose",
+    result: { ...success, lastAssistantMessage: "The prototype is ready." },
+  });
+});
+
+test("removing a live reporter records a content-free lifecycle fact and settles the wait", () => {
+  const fleet = new FleetRegistry();
+  const recipientId = agent("manager-1");
+  const reporterId = agent("worker-1");
+  fleet.register(createSession("manager-1", "140b5c21-eb37-4147-b5cb-6a5ca2592146", { mode: "none" }, "manager"), startedAt);
+  fleet.register(createSession("worker-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "mailbox", recipientAgentId: recipientId }), startedAt);
+  fleet.transition(reporterId, { status: "running", startedAt }, startedAt);
+  assert.deepEqual(fleet.reportsOwedTo(recipientId).map((entry) => entry.identity.agentId), [reporterId]);
+
+  fleet.remove(reporterId, finishedAt);
+
+  assert.deepEqual(fleet.reportsOwedTo(recipientId), []);
+  assert.deepEqual(fleet.drainMailbox(recipientId, finishedAt), [{
+    kind: "ended-without-report",
+    agentId: reporterId,
+    agentType: "implementer",
+  }]);
+});
+
+test("mailbox persistence is bounded by entry count and report characters", () => {
+  const fleet = new FleetRegistry();
+  const recipientId = agent("manager-1");
+  fleet.register(createSession("manager-1", "140b5c21-eb37-4147-b5cb-6a5ca2592146", { mode: "none" }, "manager"), startedAt);
+  for (let index = 0; index < MAX_QUEUED_REPORTS + 5; index += 1) {
+    const reporterId = agent(`worker-${index}`);
+    const sessionId = `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+    fleet.register(createSession(reporterId, sessionId, { mode: "mailbox", recipientAgentId: recipientId }), startedAt);
+    fleet.transition(reporterId, { status: "running", startedAt }, startedAt);
+    fleet.submitReport(reporterId, `${index}: ${"x".repeat(700)}`, finishedAt);
+    fleet.remove(reporterId, finishedAt);
+  }
+
+  const dto = fleet.toPersistenceDto();
+  const entries = dto.mailboxes[0]?.entries ?? [];
+  const characters = entries.reduce((total, entry) => total + (entry.kind === "result" && entry.result.outcome === "succeeded" ? entry.result.lastAssistantMessage.length : 0), 0);
+  assert.ok(entries.length <= MAX_QUEUED_REPORTS);
+  assert.ok(characters <= MAX_QUEUED_REPORT_CHARACTERS);
+  assert.equal(entries.at(-1)?.agentId, `worker-${MAX_QUEUED_REPORTS + 4}`);
+  const parsed = parseFleetPersistenceDto(JSON.parse(JSON.stringify(dto)) as unknown);
+  assert.equal(parsed.ok, true);
 });
 
 test("drains deferred notifications in order with an explicit large-queue summary", () => {
@@ -214,12 +280,12 @@ test("reattach preserves active identity, replaces the terminal, and hands resto
   assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
 });
 
-test("removing an agent forgets its session, children, and undelivered results", () => {
+test("removing an agent forgets live state but preserves its queued report", () => {
   const fleet = new FleetRegistry();
   const managerId = agent("manager-1");
   const workerId = agent("worker-1");
   fleet.register(createSession("manager-1", "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee", { mode: "none" }, "manager"), startedAt);
-  fleet.register(createSession("worker-1", "af817a6c-cd41-41e2-a4db-44d3f43cd560", { mode: "mailbox", managerAgentId: managerId }), startedAt);
+  fleet.register(createSession("worker-1", "af817a6c-cd41-41e2-a4db-44d3f43cd560", { mode: "mailbox", recipientAgentId: managerId }), startedAt);
   fleet.startChild({ agentId: "child-1", parentAgentId: workerId, type: "Explore", status: "running", startedAt, telemetry }, startedAt);
   fleet.transition(workerId, { status: "completed", startedAt, finishedAt, exitCode: 0, lastAssistantMessage: "done" }, finishedAt);
   fleet.recordResult(workerId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "done", telemetry }, finishedAt);
@@ -230,10 +296,10 @@ test("removing an agent forgets its session, children, and undelivered results",
   assert.equal(fleet.get(workerId), undefined);
   assert.equal(fleet.getBySession(session("af817a6c-cd41-41e2-a4db-44d3f43cd560")), undefined);
   assert.deepEqual(fleet.listChildren(workerId), []);
-  assert.deepEqual(fleet.drainMailbox(managerId, finishedAt), []);
-  assert.deepEqual(events, ["agent-removed"]);
+  assert.deepEqual(fleet.drainMailbox(managerId, finishedAt).map((entry) => entry.agentId), ["worker-1"]);
+  assert.deepEqual(events, ["agent-removed", "result-drained"]);
   fleet.remove(workerId, finishedAt);
-  assert.deepEqual(events, ["agent-removed"], "removing an absent agent is a no-op");
+  assert.deepEqual(events, ["agent-removed", "result-drained"], "removing an absent agent is a no-op");
 
   fleet.clear(finishedAt);
   assert.deepEqual(fleet.list(), []);

@@ -2,7 +2,7 @@ import type { ExtensionContext } from "vscode";
 import { RelativePattern, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
-import { FileManagerMcpConfig } from "./bridge/mcp-config.js";
+import { FileAgentMcpConfigs, FileManagerMcpConfig } from "./bridge/mcp-config.js";
 import {
   DEFAULT_BRIDGE_PORT,
   startBridge,
@@ -43,7 +43,7 @@ import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
 import { registerReopenCommand } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
-import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
+import { DelegationCoordinator, DelegationError, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { ABOARD_MCP_TOOL_PATTERN, createMcpHandler } from "./bridge/mcp.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
 import {
@@ -88,6 +88,7 @@ import { FileAutoRunStore } from "./runtime/persistence.js";
 import { RuntimeAdmission, RuntimeStartup } from "./runtime/admission.js";
 import { planSessionResume, resolveLaunchConfiguration, type LaunchConfiguration } from "./claude/launch.js";
 import { deriveWriteCapability } from "./domain/capability.js";
+import { FilePrototypeFolderAllocator } from "./bridge/prototypes.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
@@ -264,6 +265,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const sessionProofs = new SessionStartupProofs();
   let initialized = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const) === "initialized";
   const runtimeAdmission = new RuntimeAdmission(initialized);
+  const agentMcpConfigs = new FileAgentMcpConfigs(storageRoot, runtimeAdmission, () => initialized && bridge !== undefined);
+  // Clean the pre-role-catalog Manager filename as well as current per-agent
+  // registrations. New Manager launches use the same per-agent store as a
+  // brainstormer, so the existing session-end cleanup covers both roles.
+  const legacyManagerMcpConfig = new FileManagerMcpConfig(storageRoot, runtimeAdmission, () => initialized && bridge !== undefined);
+  await Promise.all([agentMcpConfigs.clearAll().catch(() => undefined), legacyManagerMcpConfig.clear().catch(() => undefined)]);
+  context.subscriptions.push({ dispose: () => { void agentMcpConfigs.clearAll(); void legacyManagerMcpConfig.clear(); } });
   const requireInitialized = (): boolean => {
     if (initialized) return true;
     void window.showInformationMessage("aboard is not initialized in this workspace. Initialize it from the Get Started view first.");
@@ -306,6 +314,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         // later poll does not report it as dead when the shell dumped it.
         sessionMonitor.untrack(event.agentId);
         sessionProofs.cancel(event.agentId);
+        void agentMcpConfigs.clear(event.agentId).catch(() => undefined);
       }
       if (event.type !== "terminal-closed") return;
       const closed = fleet?.get(event.agentId);
@@ -388,7 +397,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId: () => managerIdentity.require(), shell: process.platform === "win32" ? "powershell" : "git-bash", disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId: () => managerIdentity.require(), mcpConfig: async (agentId, type) => type === "brainstormer" ? agentMcpConfigs.write({ port: bridge!.port, token: bridge!.token, agentId }) : undefined, prototypeFolders: new FilePrototypeFolderAllocator(workspaceRoot), shell: process.platform === "win32" ? "powershell" : "git-bash", disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -422,6 +431,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // The launch is settled; the proof's timeout must not fire later and kill a
     // terminal whose error message is the whole point of keeping it.
     sessionProofs.cancel(agentId);
+    void agentMcpConfigs.clear(agentId).catch(() => undefined);
     const at = new Date().toISOString() as IsoTimestamp;
     const failed = fleet.get(agentId);
     if (failed !== undefined) {
@@ -441,6 +451,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       // The exit record is consumed either way, so a spent one can never be
       // read back against a later launch of the same agent.
       const exit = takeSessionExitRecord(observation.lockFile);
+      void agentMcpConfigs.clear(observation.agentId).catch(() => undefined);
       if (observation.phase === "launching") {
         reportFailedLaunch(observation.agentId, observation.sessionId, exit);
         return;
@@ -465,6 +476,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const session = fleet.get(agentId);
     if (session === undefined) return;
     const at = new Date().toISOString() as IsoTimestamp;
+    void agentMcpConfigs.clear(agentId).catch(() => undefined);
     output.appendLine(`Conversation for agent ${agentId} ended (${reason}); the terminal stays open`);
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(agentId, at, `agent session ended (${reason})`);
@@ -584,13 +596,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         name: `aboard: resume pull request ${owner.prNumber}`,
         ...(owner.cwd === undefined ? {} : { cwd: owner.cwd }),
         initialCommand: plan.commandLine,
+        attended: true,
         startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS,
       });
       // The agent finished, so its fleet row is spent history; `restart` reuses
       // the identity rather than leaving a live terminal untracked.
       const recorded = fleet.get(owner.agentId);
       if (recorded !== undefined && (recorded.lifecycle.status === "completed" || recorded.lifecycle.status === "failed")) {
-        fleet.restart(owner.agentId, { terminalId: terminal.terminalId, name: terminal.name }, at);
+        fleet.restart(owner.agentId, { terminalId: terminal.terminalId, name: terminal.name }, at, undefined, true);
         fleet.transition(owner.agentId, { status: "running", startedAt: at }, at);
       }
       terminals.show(terminal.terminalId);
@@ -627,10 +640,21 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // live, and wake the moment one of them files a result.
   const managerStop = new ManagerStopService({
     fleet,
-    waitForChange: (signal) => new Promise<void>((resolve) => {
-      const registration = fleet.onDidChange(() => { registration.dispose(); signal.removeEventListener("abort", onAbort); resolve(); });
-      const onAbort = (): void => { registration.dispose(); resolve(); };
+    waitForChange: (signal, afterRevision) => new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        registration.dispose();
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      const registration = fleet.onDidChange(finish);
+      const onAbort = (): void => finish();
       signal.addEventListener("abort", onAbort, { once: true });
+      // A report may have landed between the service checking the fleet and
+      // this listener being installed. The revision closes that lost wakeup.
+      if (signal.aborted || fleet.revision() !== afterRevision) finish();
     }),
   });
   const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
@@ -645,12 +669,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
     reopenSession: (selector) => reopen.reopenLatest(selector),
   }, terminals, roadmapReminders);
-  // It carries a resolved bearer token, so it remains ephemeral extension state.
-  const managerMcpConfig = new FileManagerMcpConfig(storageRoot, runtimeAdmission, () => initialized && bridge !== undefined);
-  await managerMcpConfig.clear().catch(() => undefined);
-  // The token it holds dies with this activation, so the file outlives its
-  // usefulness the moment the bridge stops.
-  context.subscriptions.push({ dispose: () => void managerMcpConfig.clear() });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);
   commandEndpointRegistry = commandEndpoint;
@@ -662,7 +680,22 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!initialized || bridge !== undefined) return;
     bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { managerAgentId: () => managerIdentity.current(), services: { github, reviews, autoRun, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
+    handler: combineHandlers(createMcpHandler(coordinator, { fleet, services: { github, reviews, autoRun, continuations: { continue: async (callerAgentId, targetAgentId, prompt) => {
+      const option = await reopen.findContinuation(targetAgentId);
+      if (option === undefined) throw new DelegationError("unknown-agent", `Unknown agent ${targetAgentId}`);
+      if (!option.resumable) throw new DelegationError("unresumable-session", `Agent ${targetAgentId} no longer has a resumable conversation`);
+      const candidate = option.candidate;
+      return coordinator.continue({
+        agentId: candidate.agentId,
+        type: candidate.type,
+        sessionId: candidate.sessionId,
+        terminalName: `aboard: ${candidate.description}`,
+        ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
+        ...(candidate.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+        ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
+        ...(candidate.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
+      }, prompt, callerAgentId);
+    } }, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
       const session = fleet.get(agentId);
       if (session?.identity.type === "manager") void runtimeAdmission.run(() => transcripts.checkpoint(session.sessionId));
     }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
@@ -777,8 +810,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     restoreTranscript: (sessionId) => runtimeAdmission.run(() => transcripts.restore(sessionId)),
     wrapper: wrapperLayout,
     // The aboard MCP server is registered per Manager launch and nowhere in the
-    // project, so no worker and no hand-started `claude` connects it.
-    mcpConfig: () => managerMcpConfig.write({ port: bridge!.port, token: bridge!.token, agentId: managerIdentity.require() }),
+    // project, so no catalog-less worker and no hand-started `claude` connects it.
+    mcpConfig: () => agentMcpConfigs.write({ port: bridge!.port, token: bridge!.token, agentId: managerIdentity.require() }),
   });
   // The UI offers resume and new as separate actions, so the launch path never
   // has to interrupt with a "which did you mean?" prompt.
@@ -788,7 +821,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const terminal = await manager.start(mode);
       const startedAt = new Date().toISOString() as IsoTimestamp;
       if (fleet.get(terminal.agentId) === undefined) {
-        fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
+        fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, attended: true, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
       } else {
         const prior = fleet.get(terminal.agentId)!;
         if (["starting", "running", "awaiting-user"].includes(prior.lifecycle.status)) {
@@ -844,7 +877,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       await bridge?.stop();
       bridge = undefined;
       await Promise.all([
-        managerMcpConfig.clear().catch(() => undefined),
+        legacyManagerMcpConfig.clear().catch(() => undefined),
+        agentMcpConfigs.clearAll().catch(() => undefined),
         commandEndpoint.clear().catch(() => undefined),
       ]);
       await rm(join(workspaceRoot, ".aboard", "runtime"), { recursive: true, force: true });

@@ -1,6 +1,10 @@
-import { MCP_DEFAULT_AGENT_TYPE, MCP_LAUNCHABLE_AGENT_TYPES } from "../domain/contracts.js";
+import {
+  BRAINSTORMER_LAUNCHABLE_AGENT_TYPES,
+  MCP_DEFAULT_AGENT_TYPE,
+  MCP_LAUNCHABLE_AGENT_TYPES,
+  type AgentType,
+} from "../domain/contracts.js";
 import { ROADMAP_TASK_STATUSES } from "../domain/roadmap.js";
-
 
 export interface McpTool {
   readonly name: string;
@@ -25,144 +29,45 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "run_agent",
     description:
-      "Launch one visible, independent, single-use agent session in a real terminal created by Aboard. " +
-      "Use this when a coherent unit of work should be delegated " +
-      "and the user should be able to watch, interrupt, or take over.\n\n" +
+      "Delegate one coherent unit of work to a fresh agent session that the user can watch, interrupt, or take over.\n\n" +
 
-      "## When not to use\n\n" +
-      "If the target is already known, use the direct tool: Read for a known path, " +
-      "Grep for a specific symbol or string. " +
-      "Reserve this tool for open-ended questions that span the codebase, " +
-      "or tasks that match an available agent type. " +
-      "Do not use it to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n" +
-      "Everything else belongs here. Direct tools are for orientation only, a few targeted queries at a time; " +
-      "as soon as a question needs several of them, or needs whole files read, it is a launch instead — " +
-      "including when you believe you could answer it from what you already know, " +
-      "which is what a half-remembered codebase feels like from the inside. " +
-      "Answering it yourself spends the one context in the system that has to survive the whole project.\n\n" +
+      "## When to use\n\n" +
+      "Use direct tools for a few targeted lookups, such as Read for a known path or Grep for a specific symbol. " +
+      "Use this tool for open-ended questions that span the codebase, multi-step work, or tasks that match a specialized agent type. " +
+      "Do not use it to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n\n" +
 
       "## Choosing the agent type\n\n" +
-      "`type` is optional and defaults to `general-purpose`, so omit it when no narrower role fits.\n" +
-      "- `general-purpose` (default): General-purpose agent for researching complex and specific questions, " +
-        "searching for code and executing multi-step tasks, " +
-        "for direct coding that may mix investigation and editing. " +
-        "This is the path for a fast change, critical fix or any unplanned modification; " +
-        "complex or planned implementation goes through `start_auto_run` instead, " +
-        "which owns branches, commits, and pull requests. " +
-        "It can be automated or handed to the user. " +
-        "An instruction addressed to you in the imperative — build this, fix this, change this, try this — " +
-        "asks for this launch. It is neither yours to carry out nor an occasion to explain that you do not implement: " +
-        "carry the user's own instruction through as the opening `prompt`, " +
-        "adding the context they did not have to repeat, " +
-        "and pass `interactive: true` when they will want to iterate on the result themselves.\n" +
-      "- `Explore`: Read-only search agent for code exploration. " +
-        "Use it to get up to date codebase reports. " +
-        "Do NOT use it for code review, design-doc auditing — it is not meant to make judgments, it is impartial and only surfaces facts" +
-        "When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, " +
-        "or \"very thorough\" to search across multiple locations and naming conventions.\n" +
-      "- `webresearcher`: automated, read-only research for cutoff-sensitive external facts. " +
-        "Use for current documentation, versions, pricing, standards, advisories, " +
-        "or vendor behavior that may have changed; it returns cited current evidence.\n" +
-      "- `brainstormer`: a user-driven conversation that resolves a vague product or architecture idea " +
-        "into an implementation-ready durable specification. " +
-        "It is interactive only.\n\n" +
+      "`type` defaults to `general-purpose`; omit it when no narrower role fits.\n" +
+      "- `general-purpose`: investigation or direct coding that may mix searching, reasoning, and editing. " +
+        "Use it for a fast or unplanned change; use `start_auto_run` for approved issue implementation. " +
+        "For a user request such as build, fix, change, or try, pass the request and relevant context in `prompt`. " +
+        "Set `interactive: true` when the user should continue the work directly.\n" +
+      "- `Explore`: read-only codebase search and factual reporting. Do not use it for reviews or other judgment calls. " +
+        "State the desired search breadth in the prompt: quick, medium, or very thorough.\n" +
+      "- `webresearcher`: automated, read-only research for current documentation, versions, pricing, standards, advisories, or vendor behavior.\n" +
+      "- `brainstormer`: a user-driven conversation that resolves a vague product or architecture idea into an implementation-ready specification. " +
+        "It is interactive only.\n" +
+      "- `prototyper`: a user-driven scratch experiment used to prove or disprove a feasibility claim. It is interactive only.\n\n" +
       "Implementation agents and pull-request doctors are not available through this tool.\n\n" +
 
-      "## Usage notes\n\n" +
-      "- `interactive: true` opens the session as a real terminal handed to the user to drive, " +
-        "and it returns no result at all — nothing comes back to you, ever. " +
-        "Use it when the work is a conversation the user should be having, not a task you need an answer from, " +
-        "and then continue with the user instead of waiting. " +
-        "`prompt` there is only the opening topic and may be omitted. " +
-        "`brainstormer` is interactive only; `webresearcher` and `Explore` are automated only and reject `interactive`.\n" +
-      "- Mode and delivery are separate decisions: `interactive` decides whether a result exists at all, " +
-        "`run_in_background` only decides when an automated result arrives.\n" +
-      "- Foreground (the default) blocks until the agent's final result lands. " +
-        "Use it when you need that answer before you can proceed — " +
-        "research whose findings inform your next recommendation. " +
-        "`run_in_background: true` returns immediately and is for genuinely independent work; " +
-        "you are notified automatically when the agent completes, so do NOT sleep, poll, " +
-        "or proactively check on its progress. Continue with other work or respond to the user instead.\n" +
-      "- Always include a short `description` summarizing what the agent will do: " +
-        "3-6 words, specific enough to tell two launches apart in the fleet tree — " +
-        "\"Audit retry logic centralization\", not \"Investigate code\". " +
-        "An out-of-range label is normalized to fit rather than rejected.\n" +
-      "- When you launch multiple agents for independent work, send them in a single message " +
-        "with multiple tool uses so they run concurrently. " +
-        "If the user asks for agents \"in parallel\", you MUST send one message with several `run_agent` calls in it.\n" +
-      "- An automated agent returns a single message back to you when it is done. " +
-        "That result is not visible to the user, so send a text message summarizing it concisely.\n" +
-      "- Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. " +
-        "When an agent writes or edits code, check the actual changes before reporting the work as done.\n" +
-      "- Every launch starts a fresh conversation with no knowledge of the Manager's conversation.\n\n" +
+      "## Usage\n\n" +
+      "- `interactive: true` hands the session to the user. Its report arrives after the user runs `/done`; the optional `prompt` is its opening topic. " +
+        "`brainstormer` and `prototyper` are interactive only; `webresearcher` and `Explore` are automated only and reject `interactive`.\n" +
+      "- Foreground automated launches wait for the result. `run_in_background: true` returns immediately and is for independent work; " +
+        "completion is reported automatically, so do not poll.\n" +
+      "- Give each launch a distinct 3-6 word `description`, such as \"Audit retry logic centralization\".\n" +
+      "- Send independent launches as multiple tool calls in one message when they should run concurrently.\n" +
+      "- Summarize an automated result for the user. For coding work, check actual edits and validation before reporting completion.\n\n" +
 
-      "## Writing the prompt\n\n" +
-      "`prompt` is the agent's opening message. It is required for an automated launch; " +
-      "for an interactive one, omit it unless the user gave an explicit opening topic.\n\n" +
-      "Brief the agent like a smart colleague who just walked into the room — " +
-      "it has not seen this conversation, does not know what you have tried, does not understand why this task matters.\n" +
-      "- Explain what you are trying to accomplish and why.\n" +
-      "- Describe what you have already learned or ruled out, including rejected approaches.\n" +
-      "- Give enough context about the surrounding problem that the agent can make judgment calls " +
-        "rather than just following a narrow instruction.\n" +
-      "- Name the exact question or bounded task, and what output or validation proves completion.\n" +
-      "- If you need a short response, say so (\"report in under 200 words\").\n" +
-      "- Lookups: hand over the exact command. Investigations: hand over the question — " +
-        "prescribed steps become dead weight when the premise is wrong.\n\n" +
-      "Terse command-style prompts produce shallow, generic work. " +
-      "Never delegate understanding: do not write \"based on your findings, fix the bug\" " +
-      "or \"based on the research, implement it.\" " +
-      "Those phrases push synthesis onto the agent instead of doing it yourself. " +
-      "Write prompts that prove you understood — what specifically to change.\n\n" +
+      "## Prompt and issues\n\n" +
+      "Automated launches require a self-contained `prompt`; interactive launches may omit it. " +
+      "Include the goal and why it matters, relevant findings or rejected approaches, the bounded task, and the expected output or validation. " +
+      "The agent has no access to this conversation. For a lookup, provide the exact command; for an investigation, provide the question rather than guessed steps.\n\n" +
+      "Use `issues` to include the GitHub issues an automated agent needs. " +
+      "Pass only related issues that fit one agent's task, and always pair `issues` with `prompt`.\n\n" +
 
-      "## Attaching issues\n\n" +
-      "`issues` names GitHub issues whose contract the agent needs. " +
-      "Aboard merges each one, its parent issue, and related issue context into the opening prompt, " +
-      "so do not spend a turn re-fetching that material. " +
-      "Pass every issue the agent needs and no more: each arrives in full, " +
-      "so a batch larger than one agent can hold and finish spends its context before it starts — " +
-      "split unrelated or heavy issues into separate launches. " +
-      "Always pair `issues` with `prompt`, or they go unused.\n\n" +
-
-      "<example>\n" +
-      "user: \"What's left on this branch before we can ship?\"\n" +
-      "assistant: A survey question across git state, tests, and config. " +
-      "Delegate it and ask for a short report so the raw command output stays out of the Manager's context.\n" +
-      "run_agent({\n" +
-      "  description: \"Audit branch ship readiness\",\n" +
-      "  prompt: \"Audit what's left before this branch can ship. Check: uncommitted changes, commits ahead of main, " +
-        "whether tests exist, whether the GrowthBook gate is wired up, whether CI-relevant files changed. " +
-        "Report a punch list — done vs. missing. Under 200 words.\"\n" +
-      "})\n" +
-      "The prompt is self-contained: it states the goal, lists what to check, and caps the response length. " +
-      "`type` is omitted, so this runs as `general-purpose`. " +
-      "The agent's report comes back as the tool result; relay the findings to the user.\n" +
-      "</example>\n\n" +
-
-      "<example>\n" +
-      "user: \"Is the pricing in our billing doc still current?\"\n" +
-      "assistant: A cutoff-sensitive external fact, so launch a webresearcher for cited current evidence.\n" +
-      "run_agent({\n" +
-      "  type: \"webresearcher\",\n" +
-      "  description: \"Verify vendor pricing is current\",\n" +
-      "  prompt: \"Check whether the per-seat and usage prices for <vendor>'s Team plan are still what our billing doc claims: " +
-        "$X per seat per month and $Y per 1M units. Context: the doc was written months ago and we are about to quote these " +
-        "numbers to a customer, so a stale figure is expensive. Report the current published figures with source links and " +
-        "effective dates, and say plainly whether each of our two numbers is still correct. Under 200 words.\",\n" +
-      "  run_in_background: true\n" +
-      "})\n" +
-      "The agent starts with no context from this conversation, so the prompt briefs it: " +
-      "what to verify, why it matters, and what form the answer should take. " +
-      "It runs in the background because the conversation can continue without the answer; " +
-      "the result arrives as a notification.\n" +
-      "</example>\n\n" +
-
-      "## Lease\n\n" +
-      "Automated write-capable launches participate in the single-writer lease. " +
-      "If another writer holds it, the call fails immediately with holder details; " +
-      "surface that conflict instead of retrying or queueing. " +
-      "Read-only and interactive sessions may run concurrently " +
-      "because interactive overlap is the user's decision.",
+      "An automated editing launch may be refused while another automated editor is active. " +
+      "Surface the returned conflict instead of retrying or queueing.",
     inputSchema: {
       type: "object",
       properties: {
@@ -170,32 +75,32 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
           type: "string",
           enum: MCP_LAUNCHABLE_AGENT_TYPES,
           default: MCP_DEFAULT_AGENT_TYPE,
-          description: `One of the agent roles above; defaults to \`${MCP_DEFAULT_AGENT_TYPE}\` when omitted.`,
+          description: `Agent role; defaults to \`${MCP_DEFAULT_AGENT_TYPE}\` when omitted.`,
         },
         prompt: {
           type: "string",
           minLength: 1,
-          description: "The agent's opening message, as free text.",
+          description: "Self-contained opening message for the agent.",
         },
         description: {
           type: "string",
           minLength: 1,
-          description: "A 3-6 word label for the fleet tree, e.g. 'Audit retry logic centralization'.",
+          description: "A distinct 3-6 word label, e.g. 'Audit retry logic centralization'.",
         },
         issues: {
           type: "array",
           minItems: 1,
           uniqueItems: true,
           items: { type: "integer", minimum: 1 },
-          description: "Optional GitHub issue numbers for the opening prompt if provided.",
+          description: "GitHub issue numbers whose context the agent needs.",
         },
         interactive: {
           type: "boolean",
-          description: "Whether to hand the session to the user instead of running it automated; false by default.",
+          description: "Hand the session to the user instead of waiting for an automated result; false by default.",
         },
         run_in_background: {
           type: "boolean",
-          description: "Whether an automated launch returns immediately instead of waiting for the result; false by default.",
+          description: "Return immediately from an automated launch; false waits for the result.",
         },
       },
       required: ["description"],
@@ -205,35 +110,17 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "todo_create",
     description:
-      "Add one or more new tasks to the project's durable roadmap, " +
-      "which is a flat checkbox list on the GitHub issue labelled [AI]-todo. " +
-      "Use this only to record newly identified project-level work or priorities; " +
-      "implementation detail belongs in other issues. " +
-      "The current roadmap is supplied in context, " +
-      "so there is deliberately no roadmap read tool and no full-body replacement operation.\n\n" +
+      "Add one or more high-level tasks to the project's durable roadmap. " +
+      "Use this only for newly identified project work or priorities; implementation details belong in the issue that carries the work. " +
+      "Send related subjects together in priority order. Each subject must be a directional single line of at most 200 characters " +
+      "with no leading list or heading markup. If any subject is invalid, no tasks are added.\n\n" +
 
-      "Send all related new subjects in one call. " +
-      "The batch is atomic, preserves the supplied order, and costs one GitHub issue edit. " +
-      "Each subject must be a directional single line of at most 200 characters " +
-      "with no leading list or heading markup. " +
-      "If any subject is invalid, nothing is written.\n\n" +
+      "Omit `after` to append, use `after: 'top'` for highest priority, or provide a current task position to insert immediately after it.\n\n" +
 
-      "Placement is explicit: omit after to append, " +
-      "use after='top' to make the batch highest priority, " +
-      "or pass a current task position to place the batch immediately after that task. " +
-      "If no roadmap issue exists, this tool creates the first one. " +
-      "It returns positions, the new tasks' positions in subject order, and the roadmap issue number.\n\n" +
-
-      "Inserting anywhere but the end renumbers every task after the insertion point. " +
-      "When that happens the result also carries tasks, the pending list as it now stands; " +
-      "use it and discard the positions you were holding. " +
-      "A plain append renumbers nothing and omits that list. " +
-      "Multiple roadmap carriers are reported but never modified or consolidated automatically.\n\n" +
+      "An insertion can renumber later tasks. When the result includes `tasks`, treat that as the current roadmap and discard older positions.\n\n" +
 
       "Never issue this call alongside another roadmap write in the same message. " +
-      "Every roadmap write rewrites the same issue body, so two in flight together lose one of the two edits, " +
-      "and a call that renumbers invalidates the positions its neighbour was addressed against. " +
-      "Batch within the call instead: one call takes many subjects.",
+      "Batch creations in one call, and make later writes against the preceding result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -254,44 +141,25 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "todo_update",
     description:
-      "Mutate exactly one existing roadmap task, addressed by its position " +
-      "in the newest roadmap block in your context. " +
-      "Use this to retitle a task, change its completion status, reprioritize it, " +
-      "delete it on the user's explicit request, or combine those changes atomically. " +
-      "At least one of subject, status, or after is required.\n\n" +
+      "Update exactly one existing roadmap task, addressed by its position in the newest roadmap block in your context. " +
+      "Use this to retitle a task, change its completion status, reprioritize it, or delete it on the user's explicit request. " +
+      "Provide at least one of `subject`, `status`, or `after`.\n\n" +
 
-      "Addressing takes two fields and both are required. " +
-      "task is the 1-based position shown against the task. " +
-      "expect is that task's current subject, or at least its first 40 characters, copied not paraphrased. " +
-      "The position says which line to change and expect proves you are looking at the task you mean, " +
-      "so a roadmap the user edited on GitHub in the meantime cannot silently take the write. " +
-      "Positions are absolute over the whole roadmap and identical in the full and pending renderings, " +
-      "so a pending list showing 4, 9, 12 means exactly those numbers. " +
-      "A position that does not exist, or an expect that does not match, " +
-      "writes nothing and returns the current list; retry against that list.\n\n" +
+      "Set `task` to the shown 1-based position. Set `expect` to the current subject, or at least its first 40 characters, copied exactly. " +
+      "Positions are absolute over the whole roadmap, so use the displayed number even when pending positions have gaps. " +
+      "If the position or subject no longer matches, use the returned current list before retrying.\n\n" +
 
-      "Status semantics: pending marks remaining work; " +
-      "completed changes the checkbox to complete but leaves the task in its current position forever; " +
-      "deleted removes the task and must be used only when the user explicitly asks for deletion. " +
-      "There is no in-progress status: live work is already derived from issues, pull requests, " +
-      "and auto-run state, and any value outside the status enum is rejected.\n\n" +
+      "`pending` marks remaining work, `completed` checks the task without moving it, and `deleted` removes it. " +
+      "Use `deleted` only when the user explicitly asks for deletion. There is no in-progress status.\n\n" +
 
-      "Reprioritize with after='top' or after=<current position>; " +
-      "moving is part of this update, not a separate operation. " +
-      "after takes no confirmation of its own: a wrong anchor only misplaces the task in the order, " +
-      "which the next roadmap block shows plainly. " +
-      "A move or a deletion renumbers other tasks, so the result then carries tasks, " +
-      "the pending list as it now stands; use it and discard the positions you were holding. " +
-      "A status or subject change in place renumbers nothing and omits that list.\n\n" +
+      "Use `after: 'top'` to move the task first or a current position to move it after that task. " +
+      "A move or deletion can renumber other tasks. When the result includes `tasks`, treat that as the current roadmap and discard older positions.\n\n" +
 
       "A replacement subject follows the same single-line, 200-character, no-leading-markup rules as creation. " +
-      "Retitling does not change the task's position. " +
-      "Non-checkbox roadmap text and all unrelated tasks remain untouched.\n\n" +
+      "Retitling does not change the task's position.\n\n" +
 
       "Never issue this call alongside another roadmap write in the same message. " +
-      "Every roadmap write rewrites the same issue body, so two in flight together lose one of the two edits, " +
-      "and a call that renumbers invalidates the positions its neighbour was addressed against. " +
-      "Send them one at a time, each addressed against the result of the last.",
+      "Send writes one at a time, each addressed against the result of the last.",
     inputSchema: {
       type: "object",
       properties: {
@@ -316,9 +184,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         status: {
           type: "string",
           enum: ROADMAP_TASK_STATUSES,
-          description:
-            "New status. deleted is allowed only on the user's explicit request. " +
-            "There is no in-progress status; live state is derived elsewhere.",
+          description: "New status. Use deleted only when the user explicitly requests deletion; there is no in-progress status.",
         },
         after: ANCHOR_SCHEMA(
           "Reprioritization anchor: 'top' to move before the first task, or a task position to move after. " +
@@ -332,52 +198,21 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_auto_run",
     description:
-      "Start Aboard's automatic issue-addressing workflow. " +
-      "The queue is every open issue labelled [AI]-afk or [AI]-hitl, dependencies first, " +
-      "with creation date and issue number breaking ties between ready issues. " +
-      "Parent and related issues still reach the implementer as context, regardless of their labels. " +
+      "Start implementation of all eligible open issues labelled `[AI]-afk` or `[AI]-hitl`, with dependencies first. " +
       "Use this only after the user has approved the work and the issues are ready to address. " +
-      "Do not use `run_agent` to bypass this workflow: " +
-      "the extension, not an agent, owns branch creation, commits, pushes, " +
-      "pull requests, optional review launches, merges, and cleanup.\n\n" +
+      "Use `run_agent` only for fast or unplanned changes, not to bypass this issue workflow.\n\n" +
 
-      "The call is non-blocking. An issue carrying [AI]-chrome launches its implementer with Claude in Chrome; " +
-      "the label is frozen into the run plan and must not change while the run is recoverable. " +
-      "It validates that no run is active, the repository and GitHub authentication are usable, " +
-      "the working tree is clean, and at least one open issue is ready to address. " +
-      "The first failed precondition launches nothing; relay its reason verbatim, especially dirty paths, " +
-      "because only the user may decide what to do with unrelated work. " +
-      "A refusal names why each candidate was skipped, which distinguishes " +
-      "\"nothing is labelled\" from \"everything is unclassified or blocked\".\n\n" +
+      "The call is non-blocking. On refusal, relay the returned reason, especially dirty paths; " +
+      "do not alter unrelated work or guess how to resolve a failed precondition.\n\n" +
 
-      "On success it immediately returns the run id, forecast issue order, " +
-      "dispositions, branch names, the run's session branch and the branch it will target, " +
-      "detected dependency cycles, and skips with reasons. " +
+      "On success it returns the frozen issue order and any skipped issues with reasons. " +
       "Report that plan and continue the conversation; do not wait or poll. " +
-      "Calling again while a run is active returns the current run instead of creating a second one. " +
-      "Progress is delivered later through bounded notifications.\n\n" +
+      "Calling again while a run is active returns that run instead of starting another.\n\n" +
 
-      "Issues are processed serially and the dependency graph is re-derived from GitHub at each boundary. " +
-      "Native blocked-by links are hard gates; sub-issues and same-repository issue references in bodies " +
-      "are best-effort ordering constraints. Cycles are reported and ordered oldest first within the cycle. " +
-      "Every issue is classified the same way: [AI]-afk and [AI]-hitl admit it, while an issue with neither " +
-      "label is skipped as unclassified even when it is a parent or has sub-issues. " +
-      "The run works on one session branch of its own, cut from the branch the user was on. " +
-      "Every issue branches off that session branch and merges back into it, " +
-      "and the extension closes the issue itself, because GitHub only acts on a closing keyword " +
-      "for a merge into the default branch and a run never merges there. " +
-      "When the run ends it opens a single pull request from the session branch " +
-      "into the branch the user started on; aboard.autoRun.mergeRunPullRequest decides " +
-      "whether aboard attempts that merge, and it is off by default. " +
-      "Never tell the user their work has landed on their branch until that pull request is merged.\n\n" +
-
-      "[AI]-afk work may merge into the session branch automatically. " +
-      "[AI]-hitl work waits at its pull request until the user merges it; " +
-      "that merge is the approval and normally resumes the run. " +
-      "A failure stops the whole run rather than skipping to the next issue, " +
-      "leaving visible work in place for inspection. " +
-      "The run drains the queue, so bound it with aboard.autoRun.pauseAfterHitl or stop it from the palette " +
-      "if the user wants a smaller batch.",
+      "`[AI]-afk` issues may proceed without user review. `[AI]-hitl` issues wait for user review and merge. " +
+      "A failure stops the run for inspection instead of skipping the issue. " +
+      "The run drains the queue, so use `aboard.autoRun.pauseAfterHitl` or stop it from the palette if the user wants a smaller batch. " +
+      "Do not say work has landed on the user's branch until the run pull request is merged.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -387,23 +222,13 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "review_pr",
     description:
-      "Hand an existing open pull request's owning Aboard session back to the user " +
-      "for interactive inspection or follow-up. " +
+      "Open an interactive session for the user to inspect or continue work on an existing pull request. " +
       "Use this when the user asks to review, inspect, discuss, or continue work on a pull request. " +
-      "This does not perform a review, launch an automated reviewer, post comments, " +
-      "approve, merge, or return a later agent result.\n\n" +
+      "The tool itself does not review, comment, approve, merge, or return a later agent result.\n\n" +
 
-      "Omit pr to select the latest open pull request, " +
-      "or provide a positive pull-request number to target one explicitly. " +
-      "The optional focus text names what the user wants to inspect. " +
-      "It steers the first pass only when Aboard must create a fallback session; " +
-      "an existing session is already loaded and cannot be steered, " +
-      "so the focus is returned as unusedFocus instead of being applied. " +
-      "If the owning implementer or pull-request doctor is live, its terminal is focused; " +
-      "if its recorded session is closed, it is resumed with its original restrictions. " +
-      "If ownership is unavailable after a restart, " +
-      "Aboard opens a fresh interactive pull-request doctor and reports that fallback. " +
-      "If no matching open pull request exists, nothing is launched.",
+      "Omit `pr` to select the latest open pull request, or provide its number. " +
+      "Use `focus` for the topic the user wants inspected. It may be returned as `unusedFocus` when an existing session is resumed " +
+      "and cannot accept a new opening prompt. If no matching open pull request exists, nothing is launched.",
     inputSchema: {
       type: "object",
       properties: {
@@ -415,9 +240,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         focus: {
           type: "string",
           minLength: 1,
-          description:
-            "Topic to focus the review on. Applied only when Aboard must launch a fallback session; " +
-            "otherwise returned as unusedFocus.",
+          description: "Topic the user wants inspected. The result reports when an existing session could not apply it.",
         },
       },
       additionalProperties: false,
@@ -425,6 +248,67 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   },
 ];
 
-export const MANAGER_TOOL_NAMES: readonly string[] = CORE_MCP_TOOLS.map(
-  (tool) => `mcp__${ABOARD_MCP_SERVER_NAME}__${tool.name}`,
-);
+const BRAINSTORMER_RUN_AGENT: McpTool = {
+  name: "run_agent",
+  description:
+    "Launch a visible research or prototyping session when the brainstorm needs evidence before it can settle a claim. " +
+    "Use `Explore` for read-only repository facts, `webresearcher` for current external facts with citations, and `prototyper` for an experiment the user will direct. " +
+    "Explore and web research run independently and report back here; a prototyper opens as an interactive terminal and reports when the user runs `/done`. " +
+    "Give the new session a self-contained prompt because it cannot see this conversation.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      type: {
+        type: "string",
+        enum: BRAINSTORMER_LAUNCHABLE_AGENT_TYPES,
+        description: "Evidence-gathering role to launch.",
+      },
+      prompt: {
+        type: "string",
+        minLength: 1,
+        description: "Self-contained question or experiment for the new session.",
+      },
+      description: {
+        type: "string",
+        minLength: 1,
+        description: "A distinct 3-6 word label for the visible terminal.",
+      },
+    },
+    required: ["type", "prompt", "description"],
+    additionalProperties: false,
+  },
+};
+
+const CONTINUE_AGENT: McpTool = {
+  name: "continue_agent",
+  description:
+    "Reopen a reported prototype or web-research conversation and ask one follow-up question. " +
+    "Use the agent id returned by `run_agent` or by a manual `/prototype` notification. " +
+    "A session that is still open cannot be continued because its report is still coming.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      agent_id: { type: "string", minLength: 1, description: "Agent id of the reported session to reopen." },
+      prompt: { type: "string", minLength: 1, description: "Self-contained follow-up question." },
+    },
+    required: ["agent_id", "prompt"],
+    additionalProperties: false,
+  },
+};
+
+export const BRAINSTORMER_MCP_TOOLS: readonly McpTool[] = [BRAINSTORMER_RUN_AGENT, CONTINUE_AGENT];
+
+export const MCP_TOOL_CATALOGS: Readonly<Partial<Record<AgentType, readonly McpTool[]>>> = {
+  manager: CORE_MCP_TOOLS,
+  brainstormer: BRAINSTORMER_MCP_TOOLS,
+};
+
+export function mcpToolsForRole(type: AgentType): readonly McpTool[] | undefined {
+  return MCP_TOOL_CATALOGS[type];
+}
+
+export function aboardToolNamesForRole(type: AgentType): readonly string[] {
+  return (mcpToolsForRole(type) ?? []).map((tool) => `mcp__${ABOARD_MCP_SERVER_NAME}__${tool.name}`);
+}
+
+export const MANAGER_TOOL_NAMES: readonly string[] = aboardToolNamesForRole("manager");

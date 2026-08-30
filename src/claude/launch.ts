@@ -8,7 +8,7 @@ import {
   type AgentType,
   type SessionId,
 } from "../domain/contracts.js";
-import { ABOARD_MCP_SERVER_NAME, MANAGER_TOOL_NAMES } from "../bridge/mcp-tools.js";
+import { ABOARD_MCP_SERVER_NAME, aboardToolNamesForRole } from "../bridge/mcp-tools.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 import {
   describeResolvedPrompt,
@@ -433,6 +433,8 @@ export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType"> & {
 
 export interface SessionResumePlanRequest extends CommonPlanRequest {
   readonly configuration: LaunchConfiguration;
+  /** Optional first message for a continuation; ordinary reopen leaves this absent. */
+  readonly prompt?: ResolvedPrompt | string | undefined;
   readonly disallowedTools?: readonly string[] | undefined;
 }
 
@@ -467,12 +469,12 @@ function mcpConfigArguments(path: string | undefined): readonly string[] {
   return ["--mcp-config", assertFlagValue(path, "invalid-mcp-config", "MCP config path")];
 }
 
-function aboardMcpAllowRules(configuration: LaunchConfiguration): readonly string[] {
+function aboardMcpAllowRules(agentType: AgentType, configuration: LaunchConfiguration): readonly string[] {
   if (configuration.shape !== "agent-defined") return [];
   const declaresAboard = configuration.declaredTools.some(
     (rule) => rule.trim() === `mcp__${ABOARD_MCP_SERVER_NAME}__*`,
   );
-  return declaresAboard ? MANAGER_TOOL_NAMES : [];
+  return declaresAboard ? aboardToolNamesForRole(agentType) : [];
 }
 
 function toolListArguments(
@@ -786,7 +788,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--session-id",
     request.sessionId,
     ...shapeArguments,
-    ...toolListArguments("--allowedTools", aboardMcpAllowRules(configuration)),
+    ...toolListArguments("--allowedTools", aboardMcpAllowRules(agentType, configuration)),
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
@@ -860,7 +862,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     ...definition.args,
     // Re-passed like every other launch flag: a resumed Manager that lost the
     // pre-approvals would stall behind the same prompts the launch avoided.
-    ...toolListArguments("--allowedTools", aboardMcpAllowRules(request.configuration)),
+    ...toolListArguments("--allowedTools", aboardMcpAllowRules("manager", request.configuration)),
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
@@ -885,7 +887,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
 }
 
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, attended } = commonPreconditions(request, request.configuration);
+  const { command, wrapper, runtimeDirectory, attended, threshold } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
   const definition = configuration.shape === "agent-defined"
@@ -899,17 +901,39 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     "--settings", `${launchRuntimeDirectory}/settings.json`,
     ...(definition?.args ?? []),
   ];
-  const args = [
+  const fixedArguments = [
     "--resume",
     request.sessionId,
     ...shapeArguments,
+    ...toolListArguments("--allowedTools", aboardMcpAllowRules(request.agentType, configuration)),
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
     ...chromeArguments(request.agentType, request.chrome),
     ...slashCommandArguments(attended),
   ];
-  const wrapped = wrapCommand(command, args, wrapper, request.agentId);
+  const prompt = normalizePrompt(request.prompt);
+  const planFor = (promptThreshold: number): { readonly promptPlan: PromptPlan; readonly args: string[]; readonly commandLine: string } => {
+    const promptPlan = planPrompt(prompt, {
+      agentId: request.agentId,
+      shell: request.shell,
+      threshold: promptThreshold,
+      runtimeDirectory,
+      stem: `${request.agentId}-continue`,
+    });
+    const args = [...fixedArguments, ...promptPlan.args];
+    const wrapped = wrapCommand(command, args, wrapper, request.agentId);
+    return { promptPlan, args, commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args) };
+  };
+  const limit = MAX_COMMAND_LINE_CHARS[request.shell];
+  let built = planFor(threshold);
+  if (built.commandLine.length > limit && built.promptPlan.delivery === "inline") built = planFor(0);
+  if (built.commandLine.length > limit) {
+    throw new LaunchPlanError(
+      "command-line-too-long",
+      `Resume command line is ${built.commandLine.length} characters, over the ${limit} the ${request.shell} shell accepts, even with the prompt spilled to a file.`,
+    );
+  }
   const capability = launchWriteCapability(request.agentType, configuration);
   return {
     kind: "resume",
@@ -918,12 +942,13 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     agentType: request.agentType,
     shell: request.shell,
     command,
-    args,
-    commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args),
+    args: built.args,
+    commandLine: built.commandLine,
     writeCapability: capability,
     requiresWriteLease: requiresWriteLease(request.agentType, capability),
-    promptDelivery: "none",
+    promptDelivery: built.promptPlan.delivery,
     runtimeDirectory: launchRuntimeDirectory,
+    ...(built.promptPlan.spill === undefined ? {} : { spill: built.promptPlan.spill }),
     ...(definition === undefined ? {} : { agentDefinition: definition.file }),
   };
 }

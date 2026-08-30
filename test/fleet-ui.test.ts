@@ -97,23 +97,21 @@ test("New Manager stays pinned above workers and is replaced by the live Manager
   model.dispose();
 });
 
-test("icons separate the Manager, interactive agents, and automated workers, never the lease", () => {
+test("icons separate the Manager, attended sessions, and unattended workers, never the report route or lease", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });
-  const icon = (type: AgentSession["identity"]["type"], id: string, sessionId: string) => {
-    fleet.register({ ...worker, identity: { agentId: agent(id), type }, sessionId: session(sessionId) }, startedAt);
+  const icon = (type: AgentSession["identity"]["type"], id: string, sessionId: string, attended = false) => {
+    fleet.register({ ...worker, identity: { agentId: agent(id), type }, sessionId: session(sessionId), ...(attended ? { attended: true as const } : {}) }, startedAt);
     return model.item({ kind: "agent", session: fleet.get(agent(id))!, leaseHolder: true }).icon;
   };
   assert.equal(icon("manager", "m", "s-m"), "organization");
-  // An interactive brainstormer is still something the user talks to.
-  assert.equal(icon("brainstormer", "b", "s-b"), "comment-discussion");
+  assert.equal(icon("brainstormer", "b", "s-b", true), "comment-discussion");
   assert.equal(icon("implementer", "i", "s-i"), "lock");
   assert.equal(icon("pr-doctor-afk", "v", "s-v"), "lock");
-  assert.equal(icon("pr-doctor-hitl", "f", "s-f"), "comment-discussion");
+  assert.equal(icon("pr-doctor-hitl", "f", "s-f", true), "comment-discussion");
   assert.equal(icon("general-purpose", "g", "s-g"), "lock");
+  assert.equal(icon("general-purpose", "g2", "s-g2", true), "comment-discussion");
   assert.equal(icon("Explore", "e", "s-e"), "lock");
-  fleet.register({ ...worker, identity: { agentId: agent("e2"), type: "Explore" }, sessionId: session("s-e2"), resultDelivery: { mode: "none" } }, startedAt);
-  assert.equal(model.item({ kind: "agent", session: fleet.get(agent("e2"))!, leaseHolder: false }).icon, "comment-discussion");
   model.dispose();
 });
 
@@ -155,6 +153,25 @@ test("a live row is focusable and says only what is true of a running agent", ()
   assert.equal(item.command?.command, "aboard.focusAgent");
   assert.doesNotMatch(item.description, /paused|terminal closed|interrupted/);
   assert.doesNotMatch(item.tooltip, /Restore Fleet/);
+  model.dispose();
+});
+
+test("a session row lists every live agent that still owes it a report", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease();
+  const recipient = { ...worker, identity: { agentId: agent("manager-1"), type: "manager" as const }, sessionId: session("session-manager"), resultDelivery: { mode: "none" as const } };
+  fleet.register(recipient, startedAt);
+  fleet.register({ ...worker, identity: { agentId: agent("2"), type: "webresearcher" }, sessionId: session("session-research"), resultDelivery: { mode: "mailbox", recipientAgentId: recipient.identity.agentId } }, startedAt);
+  fleet.register({ ...worker, identity: { agentId: agent("3"), type: "prototyper" }, sessionId: session("session-prototype"), resultDelivery: { mode: "mailbox", recipientAgentId: recipient.identity.agentId }, attended: true }, startedAt);
+  const model = new FleetTreeModel(fleet, lease, { refresh: () => {} }, () => true);
+
+  const manager = model.roots().find((node) => node.kind === "agent" && node.session.identity.agentId === recipient.identity.agentId)!;
+  const item = model.item(manager);
+  assert.equal(item.description, "starting · waiting on aboard-webresearcher-2, aboard-prototyper-3");
+  assert.match(item.tooltip, /Waiting on: aboard-webresearcher-2, aboard-prototyper-3/);
+
+  fleet.transition(agent("2"), { status: "completed", startedAt, finishedAt: startedAt, exitCode: 0, lastAssistantMessage: "reported" }, startedAt);
+  fleet.recordResult(agent("2"), { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "reported", telemetry: worker.telemetry }, startedAt);
+  assert.equal(model.item(manager).description, "starting · waiting on aboard-prototyper-3");
   model.dispose();
 });
 

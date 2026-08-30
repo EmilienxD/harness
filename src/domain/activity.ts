@@ -1,5 +1,6 @@
 
 import {
+  isContinuableAgentType,
   isNonRestorablePersistedAgentType,
   type AgentId,
   type AgentSession,
@@ -61,6 +62,8 @@ export interface AgentActivityEntry {
   readonly terminalId?: TerminalId;
   /** Present only when this conversation can be handed back to the user. */
   readonly reopen?: ReopenableSession;
+  /** Persisted for automated research that a live caller may continue, but the user cannot reopen directly. */
+  readonly continuation?: ReopenableSession;
 }
 
 export interface RunActivityEntry {
@@ -89,9 +92,9 @@ export function isReopenableType(type: AgentType): type is Exclude<AgentType, "m
   return type !== "manager" && !isNonRestorablePersistedAgentType(type);
 }
 
-/** The original launch was handed to the user instead of a result caller. */
+/** The original launch was handed to the user; reporting is an independent axis. */
 export function isInteractiveLaunch(session: AgentSession): boolean {
-  return session.resultDelivery.mode === "none" && isReopenableType(session.identity.type);
+  return session.attended === true && isReopenableType(session.identity.type);
 }
 
 /** Claude can hand this conversation back to the user after its original caller is gone. */
@@ -124,6 +127,14 @@ export function agentActivity(
   options: { readonly reason?: string; readonly terminalId?: TerminalId } = {},
 ): AgentActivityEntry {
   const reopenable = canReopenSession(session);
+  const continuationOnly = isContinuableAgentType(session.identity.type) && !reopenable;
+  const launchFacts: ReopenableSession = {
+    sessionId: session.sessionId,
+    ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
+    ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+    ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+    ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
+  };
   return {
     kind: "agent",
     id: agentEntryId(session.identity.agentId, outcome),
@@ -135,17 +146,8 @@ export function agentActivity(
     ...(options.reason === undefined ? {} : { reason: options.reason }),
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
     ...(options.terminalId === undefined ? {} : { terminalId: options.terminalId }),
-    ...(reopenable
-      ? {
-          reopen: {
-            sessionId: session.sessionId,
-            ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
-            ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
-            ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
-            ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-          },
-        }
-      : {}),
+    ...(reopenable ? { reopen: launchFacts } : {}),
+    ...(continuationOnly ? { continuation: launchFacts } : {}),
   };
 }
 

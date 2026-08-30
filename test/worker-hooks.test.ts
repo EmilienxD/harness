@@ -97,12 +97,12 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
   }
 });
 
-test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and treats Explore as automated worker", async () => {
+test("worker Python hook guards attended sessions and completes unattended sessions", async () => {
   const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
   const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "Changed the boundary — safely." });
   // An interactive general-purpose session reports nothing: without the delivery flag
   // the guard exits 0 with no output, exactly like a brainstormer.
-  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose" } });
+  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose", ABOARD_ATTENDED: "1" } });
   assert.equal(silent.status, 0); assert.equal(silent.stdout, ""); assert.equal(silent.stderr, "");
 
   // general-purpose launched to deliver a result reports its stop: the flag opens the worker route.
@@ -143,8 +143,8 @@ test("worker Python hook guards general-purpose on ABOARD_DELIVERS_RESULT and tr
       assert.equal(stderr, "");
     };
 
-    // The flag, not the type, opens the worker route for general-purpose.
-    await report({ ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose", ABOARD_DELIVERS_RESULT: "1" });
+    // Absence of the attended flag opens completion for general-purpose.
+    await report({ ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose" });
     // Explore is automated-only, so its type alone opens the route.
     await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" });
 

@@ -1,10 +1,19 @@
-import { MCP_DEFAULT_AGENT_TYPE, MCP_LAUNCHABLE_AGENT_TYPES, isAutomatedAgentType, isInteractiveAgentType, type AgentId, type AgentType } from "../domain/contracts.js";
+import {
+  BRAINSTORMER_LAUNCHABLE_AGENT_TYPES,
+  MCP_DEFAULT_AGENT_TYPE,
+  MCP_LAUNCHABLE_AGENT_TYPES,
+  isAutomatedAgentType,
+  isInteractiveAgentType,
+  type AgentId,
+  type AgentType,
+} from "../domain/contracts.js";
+import type { FleetRegistry } from "../domain/fleet.js";
 import { ROADMAP_TASK_STATUSES, type RoadmapAnchor, type RoadmapTaskStatus } from "../domain/roadmap.js";
 import { GitHubBoundaryError, type GitHubClient } from "../github/client.js";
 import type { ReviewCoordinator } from "../github/review.js";
 import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
 import { DelegationCoordinator, DelegationError, type DelegationLaunchInput } from "./delegation.js";
-import { CORE_MCP_TOOLS } from "./mcp-tools.js";
+import { CORE_MCP_TOOLS, mcpToolsForRole } from "./mcp-tools.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 
 export { CORE_MCP_TOOLS };
@@ -26,6 +35,9 @@ export interface McpServices {
   readonly github?: GitHubClient;
   readonly reviews?: ReviewCoordinator;
   readonly autoRun?: AutoRunTrigger;
+  readonly continuations?: {
+    continue(callerAgentId: AgentId, targetAgentId: AgentId, prompt: string): Promise<unknown>;
+  };
   /** A user-visible audit line derived from a roadmap operation. */
   readonly log?: (message: string) => void;
 }
@@ -34,8 +46,8 @@ export type McpCoordinator = Pick<DelegationCoordinator,
   "run" | "spawn" | "spawnInteractive">;
 
 export interface McpHandlerOptions {
-  /** Undefined until a first-ever Manager is actually launched. */
-  readonly managerAgentId: () => AgentId | undefined;
+  /** The caller's role is derived from the live fleet session. */
+  readonly fleet: Pick<FleetRegistry, "get">;
   readonly services?: McpServices;
 }
 
@@ -146,7 +158,7 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   let interactive = value.interactive === true;
   if (!interactive && isInteractiveAgentType(type)) {
     interactive = true;
-    notices.push(`${type} is an interactive type and was launched interactively; no result will be delivered, so continue with the user instead of waiting.`);
+    notices.push(`${type} is an interactive type and was launched interactively; its report will arrive after the user runs /done.`);
   }
   if (interactive && parsedIssues !== undefined && (isInteractiveAgentType(type) || !nonEmptyString(value.prompt))) {
     const ignored = parsedIssues.issues.length === 1 ? "was ignored" : "were ignored";
@@ -155,7 +167,7 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
   if (!interactive && !nonEmptyString(value.prompt)) return "prompt is required unless interactive is true";
   const background = !interactive && value.run_in_background === true;
   if (interactive && value.run_in_background === true) {
-    notices.push("run_in_background was ignored: an interactive session returns no result to wait for.");
+    notices.push("run_in_background was ignored: an interactive session reports when the user runs /done.");
   }
   return {
     input: {
@@ -204,9 +216,27 @@ async function callTool(
   name: string,
   args: unknown,
   signal: AbortSignal,
+  caller: { readonly agentId: AgentId; readonly type: AgentType },
 ): Promise<unknown> {
   switch (name) {
     case "run_agent": {
+      if (caller.type === "brainstormer") {
+        if (!isRecord(args) || !exactKeys(args, ["type", "prompt", "description"])) {
+          throw new TypeError("arguments contain an unknown property");
+        }
+        if (!nonEmptyString(args.type) || !BRAINSTORMER_LAUNCHABLE_AGENT_TYPES.includes(args.type as never)) {
+          throw new TypeError(`type must be one of: ${BRAINSTORMER_LAUNCHABLE_AGENT_TYPES.join(", ")}`);
+        }
+        if (!nonEmptyString(args.prompt)) throw new TypeError("prompt must be a non-empty string");
+        if (!nonEmptyString(args.description)) throw new TypeError("description must be a non-empty string");
+        const type = args.type as (typeof BRAINSTORMER_LAUNCHABLE_AGENT_TYPES)[number];
+        const label = normalizeDescription(args.description, args.prompt, type);
+        const input: DelegationLaunchInput = { type, prompt: args.prompt.trim(), description: label.description };
+        const launched = type === "prototyper"
+          ? await coordinator.spawnInteractive(input, caller.agentId)
+          : await coordinator.spawn(input, caller.agentId);
+        return withNotices(launched, label.notice === undefined ? [] : [label.notice]);
+      }
       const parsed = parseLaunch(args);
       if (typeof parsed === "string") throw new TypeError(parsed);
       const launched = parsed.interactive
@@ -215,6 +245,13 @@ async function callTool(
           ? coordinator.spawn(parsed.input)
           : coordinator.run(parsed.input, signal);
       return withNotices(await launched, parsed.notices);
+    }
+    case "continue_agent": {
+      if (!isRecord(args) || !exactKeys(args, ["agent_id", "prompt"])) throw new TypeError("arguments contain an unknown property");
+      if (!nonEmptyString(args.agent_id)) throw new TypeError("agent_id must be a non-empty string");
+      if (!nonEmptyString(args.prompt)) throw new TypeError("prompt must be a non-empty string");
+      if (services.continuations === undefined) throw new DelegationError("unknown-agent", "Agent continuation is unavailable");
+      return services.continuations.continue(caller.agentId, args.agent_id.trim() as AgentId, args.prompt.trim());
     }
     case "todo_create": {
       if (!isRecord(args) || !exactKeys(args, ["subjects", "after"])) throw new TypeError("arguments contain an unknown property");
@@ -301,11 +338,13 @@ export function createMcpHandler(
     if (request.method === "GET") return protocolError(405, "invalid-request", "This stateless MCP endpoint accepts POST requests");
     if (request.method !== "POST") return protocolError(405, "invalid-request", "Method not allowed");
 
-    const caller = request.headers[AGENT_ID_HEADER];
-    const managerAgentId = options.managerAgentId();
-    if (managerAgentId === undefined || caller !== managerAgentId) {
-      return refusal(403, "not-the-manager", "This MCP server is the Manager's. Only the Aboard Manager session may orchestrate the fleet.");
+    const callerHeader = request.headers[AGENT_ID_HEADER];
+    const callerSession = callerHeader === undefined ? undefined : options.fleet.get(callerHeader as AgentId);
+    const catalog = callerSession === undefined ? undefined : mcpToolsForRole(callerSession.identity.type);
+    if (callerSession === undefined || catalog === undefined) {
+      return refusal(403, "role-not-authorized", "This aboard session has no MCP tool catalog.");
     }
+    const caller = { agentId: callerSession.identity.agentId, type: callerSession.identity.type };
 
     if (!isRecord(request.body) || request.body.jsonrpc !== "2.0" || typeof request.body.method !== "string") {
       return jsonRpcError(null, -32600, "Invalid Request");
@@ -321,18 +360,21 @@ export function createMcpHandler(
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "aboard", version: "0.0.0" },
-          instructions: "Use Aboard tools to launch visible Claude Code terminals, evolve the roadmap, start auto-runs, and reopen pull-request sessions.",
+          instructions: caller.type === "manager"
+            ? "Use Aboard tools to launch visible Claude Code terminals, evolve the roadmap, start auto-runs, and reopen pull-request sessions."
+            : "Use Aboard tools to gather evidence in visible terminals and continue reported research or prototypes.",
         });
       case "notifications/initialized":
         return { status: 202 };
       case "ping":
         return jsonRpc(id, {});
       case "tools/list":
-        return jsonRpc(id, { tools: CORE_MCP_TOOLS });
+        return jsonRpc(id, { tools: catalog });
       case "tools/call": {
         if (!isRecord(params) || !nonEmptyString(params.name)) return jsonRpcError(id, -32602, "Invalid params");
+        if (!catalog.some((tool) => tool.name === params.name)) return jsonRpcError(id, -32601, "Tool is not available to this role");
         try {
-          return jsonRpc(id, toolResult(await callTool(coordinator, services, params.name, params.arguments ?? {}, request.signal)));
+          return jsonRpc(id, toolResult(await callTool(coordinator, services, params.name, params.arguments ?? {}, request.signal, caller)));
         } catch (error) {
           if (error instanceof TypeError) return jsonRpcError(id, -32602, error.message);
           if (error instanceof DelegationError) {

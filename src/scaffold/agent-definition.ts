@@ -45,6 +45,7 @@ export function agentDefinitionPath(workspaceRoot: string, name: string): string
 
 export const WORKER_AGENT_NAMES = [
   "brainstormer",
+  "prototyper",
   "webresearcher",
   "implementer",
   "pr-doctor-afk",

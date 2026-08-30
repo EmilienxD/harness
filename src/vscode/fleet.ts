@@ -1,4 +1,4 @@
-import { isInteractiveAgentType, type AgentId, type AgentSession, type ChildAgentNode, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
+import type { AgentId, AgentSession, ChildAgentNode, IsoTimestamp, TerminalId, WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
@@ -74,11 +74,16 @@ export class FleetTreeModel {
     }
     const { session } = node;
     const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
-    const markers = [session.lifecycle.status, node.leaseHolder ? "lease holder" : ""].filter(Boolean);
+    const reportsOwed = this.fleet.reportsOwedTo(session.identity.agentId).map(agentLabel);
+    const markers = [
+      session.lifecycle.status,
+      node.leaseHolder ? "lease holder" : "",
+      reportsOwed.length === 0 ? "" : `waiting on ${reportsOwed.join(", ")}`,
+    ].filter(Boolean);
     return {
       label: `${agentLabel(session)}${goal}`,
       description: markers.join(" · "),
-      tooltip: agentTooltip(session, node.leaseHolder),
+      tooltip: agentTooltip(session, node.leaseHolder, reportsOwed),
       icon: agentIcon(session),
       contextValue: "aboard.agent.active",
       collapsible: this.children(node).length > 0,
@@ -128,7 +133,7 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
 
 function agentIcon(session: AgentSession): string {
   if (session.identity.type === "manager") return "organization";
-  return isInteractiveAgentType(session.identity.type) || session.resultDelivery.mode === "none"
+  return session.attended === true
     ? "comment-discussion"
     : "lock";
 }
@@ -146,11 +151,12 @@ function agentLabel(session: AgentSession): string {
 }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
-function agentTooltip(session: AgentSession, leaseHolder: boolean): string {
+function agentTooltip(session: AgentSession, leaseHolder: boolean, reportsOwed: readonly string[]): string {
   return [
     `Session: ${session.sessionId}`,
     `Status: ${session.lifecycle.status}`,
     leaseHolder ? "Holds the write lease" : "",
+    reportsOwed.length === 0 ? "" : `Waiting on: ${reportsOwed.join(", ")}`,
   ].filter(Boolean).join("\n");
 }
 function childTooltip(child: ChildAgentNode): string { return [`Type: ${child.type}`, `Status: ${child.status}`].join("\n"); }

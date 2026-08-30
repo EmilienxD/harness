@@ -102,6 +102,7 @@ function setup() {
   const reclaimed: AgentId[] = [];
   /** Runtime files a launch wrote, and the directory they were rooted at. */
   const spills: { path: string; root: string | undefined }[] = [];
+  const writtenPromptContents: string[] = [];
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
     isResumable: async () => true,
@@ -111,6 +112,8 @@ function setup() {
     sessions: { observe: (agentId) => sessionLiveness.get(agentId) ?? "live" },
     onStaleLeaseRecovered: (holder) => { reclaimed.push(holder.agentId); },
     managerAgentId: () => MANAGER,
+    mcpConfig: async (agentId, type) => type === "brainstormer" ? `C:\\storage\\agent-mcp\\${agentId}.json` : undefined,
+    prototypeFolders: { allocate: async (agentId, description) => `C:\\repo\\.aboard\\prototypes\\${agentId}-${description.replaceAll(" ", "-")}` },
     shell: "powershell",
     disallowedTools: ["mcp__aboard__*"],
     // aboard.launch.claudeCommand: a wrapper that takes its own arguments.
@@ -122,20 +125,20 @@ function setup() {
         ? resolveLaunchConfiguration({})
         : isNamedBuiltinAgentType(type)
           ? resolveLaunchConfiguration({ agentName: type })
-          : definitionFor(type, type === "brainstormer" || type === "webresearcher" ? ["Read", "Grep"] : ["Read", "Edit"]),
+          : definitionFor(type, type === "brainstormer" ? ["mcp__aboard__*", "Read", "Grep"] : type === "webresearcher" ? ["Read", "Grep"] : ["Read", "Edit"]),
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
     spills: {
-      write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); return spill.relativePath; },
+      write: async (spill, root) => { spills.push({ path: spill.relativePath, root }); writtenPromptContents.push(spill.contents); return spill.relativePath; },
       prepare: async (plan, root) => { if (plan.agentDefinition !== undefined) spills.push({ path: plan.agentDefinition.relativePath, root }); },
     },
     now: () => new Date("2026-07-30T10:01:00.000Z"),
   });
-  const handler = createMcpHandler(coordinator, { managerAgentId: () => MANAGER });
+  const handler = createMcpHandler(coordinator, { fleet });
   const call = (name: string, args: unknown = {}, caller: readonly [string | undefined] = [MANAGER]) =>
     mcpCall(handler, name, args, caller[0]);
   const launch = (args: unknown = {}) => call("run_agent", args);
-  return { fleet, lease, host, terminals, coordinator, handler, call, launch, sessionLiveness, reclaimed, spills };
+  return { fleet, lease, host, terminals, coordinator, handler, call, launch, sessionLiveness, reclaimed, spills, writtenPromptContents };
 }
 
 async function mcpCall(
@@ -156,6 +159,16 @@ async function mcpCall(
   if (envelope.error !== undefined) return { status: 400, body: { ok: false, error: envelope.error } };
   if (envelope.result?.isError === true) return { status: 409, body: { ok: false, error: envelope.result.structuredContent } };
   return { status: 200, body: { ok: true, result: envelope.result?.structuredContent } };
+}
+
+async function mcpList(handler: ReturnType<typeof createMcpHandler>, caller: string | undefined): Promise<{ readonly status: number; readonly body?: unknown }> {
+  return handler({
+    method: "POST",
+    url: new URL("/mcp", "http://127.0.0.1"),
+    headers: caller === undefined ? {} : { "x-aboard-agent-id": caller },
+    body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+    signal: new AbortController().signal,
+  } as AuthenticatedBridgeRequest);
 }
 
 function body(response: { readonly body?: unknown }): Record<string, unknown> {
@@ -188,11 +201,31 @@ test("restores a persisted worker with --resume, no new prompt, no focus, and no
   assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /Bash\(git commit\*\)/);
   assert.match(host.created[0]!.terminal.sent.at(-1) ?? "", /Bash\(gh pr merge\*\)/);
   assert.deepEqual(host.created[0]!.terminal.shown, []);
-  assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.equal(host.created[0]!.options.env.ABOARD_ATTENDED, "1");
   assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "none" });
   // Restoration is the user reopening their own fleet and hands the worker to
   // them; the write-capable implementer therefore comes back unleased.
   assert.equal(lease.current(), undefined);
+});
+
+test("restoring an attended mailbox session preserves who it still owes a report", async () => {
+  const { fleet, coordinator } = setup();
+  const workerId = agent("persisted-interactive");
+  fleet.register({
+    identity: { agentId: workerId, type: "general-purpose" },
+    sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"),
+    terminal: { terminalId: terminal("old-terminal"), name: "aboard: experiment" },
+    lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
+    resultDelivery: { mode: "mailbox", recipientAgentId: MANAGER },
+    attended: true,
+    telemetry,
+  }, at("2026-07-30T10:00:00.000Z"));
+  fleet.transition(workerId, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
+
+  await coordinator.resumePersisted(fleet.get(workerId)!);
+
+  assert.deepEqual(fleet.get(workerId)?.resultDelivery, { mode: "mailbox", recipientAgentId: MANAGER });
+  assert.equal(fleet.reportsOwedTo(MANAGER)[0]?.identity.agentId, workerId);
 });
 
 test("a terminal handed to the user takes no lease and runs beside the holder", async () => {
@@ -308,7 +341,7 @@ test("the todo verbs pass their arguments through and reject an unknown status",
   const handler = createMcpHandler(
     setup().coordinator,
     {
-      managerAgentId: () => MANAGER,
+      fleet: setup().fleet,
       services: {
         log: (message: string) => logged.push(message),
         github: {
@@ -353,7 +386,7 @@ test("todo_update takes a numeric position and a required expect, and rejects an
   const handler = createMcpHandler(
     setup().coordinator,
     {
-      managerAgentId: () => MANAGER,
+      fleet: setup().fleet,
       services: {
         github: {
           updateRoadmapTask: async (input: unknown) => { calls.push(input); return { issue: 9, task: 3, notices: [] }; },
@@ -420,9 +453,163 @@ test("refuses every MCP call from any session but the Manager", async () => {
   assert.deepEqual(fleet.list().filter((entry) => entry.identity.type !== "manager"), []);
 });
 
+test("MCP catalogs are role-scoped and roles without a catalog are refused", async () => {
+  const { handler, fleet } = setup();
+  const brainstormer = agent("brain-1");
+  fleet.register({
+    ...managerSession(),
+    identity: { agentId: brainstormer, type: "brainstormer" },
+    sessionId: session("b5190b9d-66f1-4820-a15b-1a39b3349da9"),
+    terminal: { terminalId: terminal("brain-terminal"), name: "Brainstormer" },
+    resultDelivery: { mode: "mailbox", recipientAgentId: MANAGER },
+    attended: true,
+  }, at("2026-07-30T10:00:00.000Z"));
+  fleet.transition(brainstormer, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
+
+  const listed = await mcpList(handler, brainstormer);
+  assert.equal(listed.status, 200);
+  assert.deepEqual(
+    ((listed.body as { result?: { tools?: Array<{ name: string }> } }).result?.tools ?? []).map((tool) => tool.name),
+    ["run_agent", "continue_agent"],
+  );
+  const manager = await mcpList(handler, MANAGER);
+  assert.deepEqual(
+    ((manager.body as { result?: { tools?: Array<{ name: string }> } }).result?.tools ?? []).map((tool) => tool.name),
+    ["run_agent", "todo_create", "todo_update", "start_auto_run", "review_pr"],
+  );
+
+  const leaf = agent("prototype-leaf");
+  fleet.register({
+    ...managerSession(),
+    identity: { agentId: leaf, type: "prototyper" },
+    sessionId: session("04db3747-121a-4374-8e37-8b52e45733fa"),
+    terminal: { terminalId: terminal("prototype-terminal"), name: "Prototype" },
+    resultDelivery: { mode: "mailbox", recipientAgentId: brainstormer },
+    attended: true,
+  }, at("2026-07-30T10:00:00.000Z"));
+  assert.equal((await mcpList(handler, leaf)).status, 403);
+});
+
+test("brainstormer run_agent forces research to mailbox and prototyping to an attended scratch session", async () => {
+  const { handler, fleet, lease, writtenPromptContents } = setup();
+  const brainstormer = agent("brain-2");
+  fleet.register({
+    ...managerSession(),
+    identity: { agentId: brainstormer, type: "brainstormer" },
+    sessionId: session("328e378a-f09f-47cf-8822-0fb7844c13c6"),
+    terminal: { terminalId: terminal("brain-terminal-2"), name: "Brainstormer" },
+    resultDelivery: { mode: "mailbox", recipientAgentId: MANAGER },
+    attended: true,
+  }, at("2026-07-30T10:00:00.000Z"));
+
+  const refused = await mcpCall(handler, "run_agent", { type: "general-purpose", prompt: "Edit it", description: "edit the application code" }, brainstormer);
+  assert.equal(refused.status, 400);
+  const explored = await mcpCall(handler, "run_agent", { type: "Explore", prompt: "Map the cache boundary", description: "map cache boundary code" }, brainstormer);
+  assert.equal(explored.status, 200, JSON.stringify(explored.body));
+  const exploreSession = fleet.list().find((entry) => entry.identity.type === "Explore");
+  assert.deepEqual(exploreSession?.resultDelivery, { mode: "mailbox", recipientAgentId: brainstormer });
+  assert.equal(exploreSession?.attended, undefined);
+
+  const prototyped = await mcpCall(handler, "run_agent", { type: "prototyper", prompt: "Try the parser API", description: "test parser api behavior" }, brainstormer);
+  assert.equal(prototyped.status, 200, JSON.stringify(prototyped.body));
+  const prototypeSession = fleet.list().find((entry) => entry.identity.type === "prototyper");
+  assert.deepEqual(prototypeSession?.resultDelivery, { mode: "mailbox", recipientAgentId: brainstormer });
+  assert.equal(prototypeSession?.attended, true);
+  assert.match(writtenPromptContents.at(-1)!, /\.aboard\\prototypes\\worker-2-test-parser-api-behavior/u);
+  assert.equal(lease.current(), undefined);
+});
+
+test("continue_agent reopens the same supported session, re-points its report, and refuses live or one-shot targets", async () => {
+  const { coordinator, fleet, host } = setup();
+  const brainstormer = agent("brain-continue");
+  fleet.register({
+    ...managerSession(),
+    identity: { agentId: brainstormer, type: "brainstormer" },
+    sessionId: session("190e66e0-c01e-41e8-b36e-fb083cce29fb"),
+    terminal: { terminalId: terminal("brain-continue-terminal"), name: "Brainstormer" },
+    resultDelivery: { mode: "mailbox", recipientAgentId: MANAGER },
+    attended: true,
+  }, at("2026-07-30T10:00:00.000Z"));
+
+  const continued = await coordinator.continue({
+    agentId: agent("old-prototype"),
+    type: "prototyper",
+    sessionId: session("9fcc5264-4009-4a55-954d-9613f73bf23e"),
+    terminalName: "aboard: test parser api behavior",
+  }, "Now test malformed input", brainstormer) as Record<string, unknown>;
+  assert.equal(continued.agentId, "old-prototype");
+  const restored = fleet.get(agent("old-prototype"));
+  assert.deepEqual(restored?.resultDelivery, { mode: "mailbox", recipientAgentId: brainstormer });
+  assert.equal(restored?.attended, true);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--resume 9fcc5264/u);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /Now test malformed input/u);
+
+  await assert.rejects(
+    coordinator.continue({
+      agentId: agent("old-prototype"),
+      type: "prototyper",
+      sessionId: session("9fcc5264-4009-4a55-954d-9613f73bf23e"),
+      terminalName: "aboard: test parser api behavior",
+    }, "Do more", brainstormer),
+    /still live/u,
+  );
+  await assert.rejects(
+    coordinator.continue({
+      agentId: agent("one-shot"),
+      type: "Explore",
+      sessionId: session("78c445df-70d5-4758-8516-e0a027b0842f"),
+      terminalName: "aboard: one shot",
+    }, "Look again", brainstormer),
+    /cannot be continued/u,
+  );
+});
+
+test("continue_agent preserves a reported session until its spent terminal settles", async () => {
+  const { coordinator, fleet, host } = setup();
+  const brainstormer = agent("brain-immediate");
+  fleet.register({
+    ...managerSession(),
+    identity: { agentId: brainstormer, type: "brainstormer" },
+    sessionId: session("0199db2a-86d8-4b0f-89a1-624ba42d2635"),
+    terminal: { terminalId: terminal("brain-immediate-terminal"), name: "Brainstormer" },
+    resultDelivery: { mode: "mailbox", recipientAgentId: MANAGER },
+    attended: true,
+  }, at("2026-07-30T10:00:00.000Z"));
+
+  const launched = await coordinator.spawn({
+    type: "webresearcher",
+    prompt: "Check the current API behavior",
+    description: "check current api behavior",
+  }, brainstormer) as { agentId: AgentId; sessionId: SessionId };
+  assert.equal(coordinator.complete(launched.agentId, {
+    outcome: "succeeded",
+    exitCode: 0,
+    lastAssistantMessage: "The API supports it.",
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }), true);
+
+  const target = {
+    agentId: launched.agentId,
+    type: "webresearcher" as const,
+    sessionId: launched.sessionId,
+    terminalName: "aboard: check current api behavior",
+  };
+  await assert.rejects(
+    coordinator.continue(target, "Verify the edge case too", brainstormer),
+    /has reported and its terminal is still closing/u,
+  );
+  assert.equal(fleet.get(launched.agentId)?.lifecycle.status, "completed");
+
+  host.close(0);
+  const continued = await coordinator.continue(target, "Verify the edge case too", brainstormer) as Record<string, unknown>;
+  assert.equal(continued.agentId, launched.agentId);
+  assert.equal(host.created.length, 2);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /Verify the edge case too/u);
+});
+
 test("a pre-Manager MCP request is refused without resolving an identity", async () => {
   const context = setup();
-  const handler = createMcpHandler(context.coordinator, { managerAgentId: () => undefined });
+  const handler = createMcpHandler(context.coordinator, { fleet: { get: () => undefined } });
   const response = await mcpCall(handler, "run_agent", {
     type: "general-purpose",
     description: "try to launch before the Manager exists",
@@ -478,7 +665,7 @@ test("start_auto_run accepts no launch options", async () => {
   const { coordinator } = setup();
   const starts: unknown[] = [];
   const handler = createMcpHandler(coordinator, {
-    managerAgentId: () => MANAGER,
+    fleet: setup().fleet,
     services: { autoRun: { start: async () => { starts.push("started"); return { started: true }; } } },
   });
   const response = await mcpCall(handler, "start_auto_run", {}, MANAGER);
@@ -517,7 +704,7 @@ test("an omitted type launches general-purpose, and a named one still wins", asy
 // reach an implementation agent directly.
 test("run_agent cannot launch an implementation agent", async () => {
   const { launch, fleet } = setup();
-  assert.deepEqual([...MCP_LAUNCHABLE_AGENT_TYPES].sort(), ["Explore", "brainstormer", "general-purpose", "webresearcher"]);
+  assert.deepEqual([...MCP_LAUNCHABLE_AGENT_TYPES].sort(), ["Explore", "brainstormer", "general-purpose", "prototyper", "webresearcher"]);
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
     const response = await launch({ type, prompt: "work", description: "do the work now" });
     assert.equal(response.status, 400, type);
@@ -630,12 +817,12 @@ test("a lease conflict reaches the MCP tool as a readable error result", async (
   assert.equal(error.details.holder?.agentId, "worker-1");
 });
 
-test("interactive launch focuses the terminal and expects no result", async () => {
+test("interactive launch focuses the terminal and reports when the user is done", async () => {
   const { launch, host } = setup();
   const launched = await launch({
     type: "brainstormer", description: "brainstorm the caching design", interactive: true,
   });
-  assert.match(JSON.stringify(launched.body), /no agent result/);
+  assert.match(JSON.stringify(launched.body), /report will be delivered/);
   assert.deepEqual(host.created[0]!.terminal.shown, [false]);
 });
 
@@ -698,7 +885,7 @@ test("interactive mode makes the prompt optional", async () => {
   const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true });
   assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --settings \.aboard\/runtime\/agents\/worker-1\/settings\.json --agent aboard-brainstormer-worker-1 --disallowedTools 'mcp__aboard__\*'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--mcp-config 'C:\\storage\\agent-mcp\\worker-1\.json'.*--agent aboard-brainstormer-worker-1 --allowedTools 'mcp__aboard__run_agent,mcp__aboard__continue_agent'\s*$/);
 
   const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
@@ -718,7 +905,7 @@ test("webresearcher runs unattended, reports a result, and takes no lease", asyn
   const researcher = fleet.list().find((entry) => entry.identity.type === "webresearcher")!;
   assert.equal(researcher.resultDelivery.mode, "mailbox");
   assert.equal(lease.current(), undefined);
-  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, undefined);
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --settings \.aboard\/runtime\/agents\/worker-1\/settings\.json --agent aboard-webresearcher-worker-1/);
   assert.deepEqual(host.created.at(-1)!.terminal.shown, []);
 });
@@ -735,7 +922,7 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
   // A full-tool agent is write-capable: it holds the lease and its session is
   // marked result-delivering for the hooks.
   assert.equal(lease.current()?.agentId, worker.identity.agentId);
-  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, undefined);
   assert.equal(worker.resultDelivery.mode, "tool-result");
 
   // Explore is read-only, so it launches concurrently instead of conflicting.
@@ -746,7 +933,7 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
   assert.match(JSON.stringify(background.body), /running/);
   const explorer = fleet.list().find((entry) => entry.identity.type === "Explore")!;
   assert.equal(explorer.resultDelivery.mode, "mailbox");
-  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, "1");
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, undefined);
   const explorerCommand = host.created.at(-1)!.terminal.sent.at(-1)!;
   assert.match(explorerCommand, /--agent Explore/);
   assert.match(explorerCommand, /map the auth flow/);
@@ -757,15 +944,15 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
   assert.equal(lease.current(), undefined);
 });
 
-test("general-purpose runs interactively: focused, hook-silent, prompt optional", async () => {
+test("general-purpose runs attended, focused, and reports only through /done", async () => {
   const { launch, host } = setup();
   const launched = await launch({ type: "general-purpose", description: "browse the auth flow", interactive: true });
   assert.equal(launched.status, 200, JSON.stringify(launched.body));
-  assert.match(JSON.stringify(launched.body), /no agent result/);
+  assert.match(JSON.stringify(launched.body), /report will be delivered/);
   // Focused like any handed-off session, with no result to report and no
   // positional prompt: the user types the first message.
   assert.deepEqual(host.created.at(-1)!.terminal.shown, [false]);
-  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, "1");
   // The default shape: no `--agent`, no system-prompt flag.
   const bare = host.created.at(-1)!.terminal.sent.at(-1)!;
   assert.doesNotMatch(bare, /--agent|--system-prompt(?:-file)?/);
@@ -780,7 +967,7 @@ test("general-purpose runs interactively: focused, hook-silent, prompt optional"
   const command = host.created.at(-1)!.terminal.sent.at(-1)!;
   assert.doesNotMatch(command, /--agent|--system-prompt(?:-file)?/);
   assert.match(command, /start from src\/auth\.ts/);
-  assert.equal(host.created.at(-1)!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, "1");
 
 });
 
@@ -844,12 +1031,15 @@ test("run_agent carries several issues into one launch and resolves a repeat onc
 test("an interactive-only brainstormer is launched interactively and the correction is reported", async () => {
   const { launch, host } = setup();
   // The only valid reading of the call, so it is honoured rather than refused —
-  // but the Manager must learn it is waiting for a result that cannot arrive.
+  // and the Manager is told when its report will arrive.
   const coerced = await launch({ type: "brainstormer", description: "open a brainstorm session" });
   assert.equal(coerced.status, 200, JSON.stringify(coerced.body));
-  assert.match(JSON.stringify(coerced.body), /no result will be delivered/);
-  assert.match(JSON.stringify(coerced.body), /continue with the user/);
+  assert.match(JSON.stringify(coerced.body), /report will arrive after the user runs \/done/);
   assert.deepEqual(host.created[0]!.terminal.shown, [false]);
+  const command = host.created[0]!.terminal.sent.at(-1)!;
+  assert.match(command, /--mcp-config/u);
+  assert.match(command, /mcp__aboard__run_agent,mcp__aboard__continue_agent/u);
+  assert.doesNotMatch(command, /--disallowedTools\s+['"]?mcp__aboard__\*/u);
 
   // Backgrounding an interactive session is meaningless rather than ambiguous.
   const flagged = await launch({

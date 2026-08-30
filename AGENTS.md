@@ -26,7 +26,7 @@ Design priorities:
 ```text
 User <-> VS Code UI and terminals <-> extension host
                                       |-- domain state
-                                      |-- authenticated loopback bridge and Manager MCP
+                                      |-- authenticated loopback bridge and role-scoped MCP
                                       |-- Claude Code launches, hooks, sessions, and resume
                                       `-- git and GitHub boundaries
 ```
@@ -77,8 +77,8 @@ User <-> VS Code UI and terminals <-> extension host
 - The bridge runs in the extension host, binds only to `127.0.0.1`, and requires a new bearer token for every activation and every request.
 - The bridge is the only creator of aboard agents. Hand-started Claude Code sessions are deliberately outside the fleet.
 - `POST /commands` is the one bridge surface that opens a terminal for something other than an agent: an automated script's command, run in a visible VS Code terminal. It creates no fleet row, takes no lease, and passes no `ABOARD_*` credentials. Like every runtime surface, it exists only while the project is initialized.
-- The bridge mints two per-activation credentials. The full token reaches everything and is never published — it stays in memory and in the environment of processes aboard launched; only the Manager's ephemeral MCP configuration contains a resolved copy outside memory while initialized. The command token reaches `/commands` and is refused everywhere else, and it is the only one published where an unrelated script can find it. A script needing a way in is never a reason to widen what it finds: keep the published credential scoped, and keep the scope check in the server rather than in a route.
-- Never log or commit tokens, prompts, transcripts, session data, or other `.aboard/runtime/` contents. The full bridge token stays in memory. Manager MCP configuration and the command endpoint record are ephemeral external credentials that exist only while the project is initialized. No credential is ever written into the user's tree.
+- The bridge mints two per-activation credentials. The full token reaches everything and is never published — it stays in memory and in the environment of processes aboard launched; ephemeral MCP configurations for catalog-owning roles contain resolved copies outside memory only while initialized. The command token reaches `/commands` and is refused everywhere else, and it is the only one published where an unrelated script can find it. A script needing a way in is never a reason to widen what it finds: keep the published credential scoped, and keep the scope check in the server rather than in a route.
+- Never log or commit tokens, prompts, transcripts, session data, or other `.aboard/runtime/` contents. The full bridge token stays in memory. Per-launch MCP configuration and the command endpoint record are ephemeral external credentials that exist only while the project is initialized. No credential is ever written into the user's tree.
 - `.aboard/scaffold.json` is the sole initialized-project signal. Side-effecting commands must also enforce initialization at runtime; VS Code `when` clauses are visibility controls, not authorization.
 - With that marker absent the extension is inert except for UI, configuration, and Initialize: no bridge or command endpoint exists and no runtime writer may recreate `.aboard/`. Deleting `.aboard/` closes admission before cleanup, invalidates external credentials, and a later initialization starts with fresh tokens and state.
 - Use native VS Code and Node APIs unless a new dependency has a demonstrated need. Do not introduce a database, UI framework, DI container, web framework, or separate bridge process speculatively.
@@ -91,11 +91,13 @@ User <-> VS Code UI and terminals <-> extension host
 - An aboard agent definition is the authority for that role's whole system prompt and tools. Capability and write access are derived from the effective tool set, never from a second manual flag.
 - The same definition is the authority for its own model and effort, including the choice not to decide: `by-difficulty` delegates one field to the difficulty label on the issue that launch is working, and any named value wins over the label. Precedence, most specific first, is definition, then difficulty, then `aboard.launch.effort`, then no flag. Unrated work resolves to the most capable tier, never to the user's global default.
 - `Explore` remains Claude Code's built-in read-only agent with metadata-only launch policy. `general-purpose` remains an unmodified default Claude Code session. Do not reconstruct either as an aboard definition.
-- The aboard MCP server is exposed only to the Manager through per-launch configuration stored outside the workspace. Never register it in `.mcp.json`, agent frontmatter, or another project-scoped location, and never widen the Manager-only caller check.
-- Start and resume must preserve the same launch policy, including isolated definitions, capability limits, model/effort policy, issue-derived Chrome policy, and Manager MCP access.
+- The aboard MCP server is exposed only to roles with an explicit catalog, currently Manager and brainstormer, through per-launch configuration stored outside the workspace. The server derives the caller's role from the fleet and refuses roles without a catalog. Never register it in `.mcp.json`, agent frontmatter, or another project-scoped location.
+- Start and resume must preserve the same launch policy, including isolated definitions, capability limits, model/effort policy, issue-derived Chrome policy, and any role-scoped MCP access.
 - Resolve an automated worker's context before launch and pass its first prompt as a CLI argument. Never inject an automated prompt by typing into a live TUI.
 - Claude in Chrome is enabled only for an auto-run implementer whose frozen issue carries `[AI]-chrome`. The label-derived fact must survive resume; general-purpose and other sessions expose no Chrome launch option.
 - Every project-scoped hook first guards on `ABOARD_AGENT_ID`; role-specific hooks also guard on `ABOARD_AGENT_TYPE`. A hook not addressed to the current session exits successfully and silently.
+- Every launched session records its report recipient when it has one. Unattended sessions report on completion; attended sessions report only through `/done`. A recipient's Stop hook waits while live sessions owe it reports, and Escape reclaims the terminal without discarding later delivery.
+- A prototyper works from the project root but is prompted to write only in its exclusive, gitignored `.aboard/prototypes/` folder. That prompt is not a filesystem security boundary; prototypers take no write lease, and aboard never deletes their folders.
 
 ### Human Control and Write Safety
 
@@ -112,6 +114,7 @@ User <-> VS Code UI and terminals <-> extension host
 | :-- | :-- | :-- |
 | `manager` | Long-lived project continuity, planning, and delegation; never implementation | User starts or resumes it |
 | `brainstormer` | Interactive discovery that produces an implementation-ready durable specification | Manager or user workflow |
+| `prototyper` | User-driven scratch experiment that reports evidence to its launching conversation | Manager or brainstormer workflow |
 | `webresearcher` | Non-interactive research of current external facts with citations | Delegated research only |
 | `implementer` | Implements one resolved issue and leaves changes uncommitted | Auto-run only |
 | `pr-doctor-afk` | Reviews and directly fixes an implementation when unattended review is allowed | Auto-run or `review_pr` |
@@ -199,7 +202,7 @@ flowchart TD
 - A run that needs the user's hands says so immediately rather than only queueing a line for the Manager. Recovery and history never depend on a notification: the Auto Run view is where a stopped run and its actions live, and Recent Activity is where its outcome lands.
 - Opt-in, a run works in a checkout of its own instead of the user's: a git worktree created beside the project root, never inside it, with the leaf named after the repository so it reads as an ordinary clone from the inside. Nothing about the path announces what it is. In that mode the run's whole git surface is that checkout, the user's HEAD and working tree are never touched — so the clean-tree precondition and the end-of-run branch restore both fall away — and every agent is launched with it as its working directory. The path is derived from the run id, so it is never stored.
 - That isolation is a convention with a fence, not a sandbox. Launches carry `Read`/`Edit` deny rules covering the project root, which stops the accident; `Bash` reaches the whole filesystem and aboard does not try to police shell commands. Do not present it as a security boundary, and do not add command-level guessing to make it look like one.
-- A second checkout starts with what git tracks. On creation, aboard overlays missing files from the user's project `.claude/` and non-runtime `.aboard/` without replacing tracked entries, but only when every copied path is gitignored; `.claude/worktrees/`, `.aboard/runtime/`, and links are excluded. Any path tracked under `.aboard/runtime/` on the exact source tree is a hard preflight failure. The project's own `.aboard/session-setup.*` then makes the checkout usable. These are preconditions before any agent starts: a run must never discover missing configuration one dead worker at a time or let local/runtime configuration reach `git add -A`.
+- A second checkout starts with what git tracks. On creation, aboard overlays missing files from the user's project `.claude/` and non-runtime `.aboard/` without replacing tracked entries, but only when every copied path is gitignored; `.claude/worktrees/`, `.aboard/runtime/`, `.aboard/prototypes/`, and links are excluded. Any path tracked under `.aboard/runtime/` on the exact source tree is a hard preflight failure. The project's own `.aboard/session-setup.*` then makes the checkout usable. These are preconditions before any agent starts: a run must never discover missing configuration one dead worker at a time or let local/runtime configuration reach `git add -A`.
 - A checkout the run created is removed when its plan drains and kept whenever the user was sent to look at something in it — a stop or an abort. Removal is best-effort: a shell still sitting in the directory is the normal reason it fails, and the path is reported rather than the failure escalated.
 
 ### Scaffold and State Ownership

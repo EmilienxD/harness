@@ -30,8 +30,8 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
 
   const files: ProjectOverlayFile[] = [];
   for (const root of [
-    { name: ".claude", excludedDirectory: "worktrees" },
-    { name: ".aboard", excludedDirectory: "runtime" },
+    { name: ".claude", excludedDirectories: ["worktrees"] },
+    { name: ".aboard", excludedDirectories: ["runtime", "prototypes"] },
   ] as const) {
     const sourceRoot = join(request.workspaceRoot, root.name);
     const targetRoot = join(request.worktreeRoot, root.name);
@@ -39,7 +39,7 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
     if (source === undefined || !source.isDirectory()) {
       throw new RunWorkspaceError(`The project configuration directory at ${sourceRoot} is missing or is not a directory.`);
     }
-    await planProjectOverlay(sourceRoot, targetRoot, [root.name], root.excludedDirectory, files);
+    await planProjectOverlay(sourceRoot, targetRoot, [root.name], root.excludedDirectories, files);
   }
 
   const paths = [PROJECT_OVERLAY_MARKER, ...files.map((file) => file.repositoryPath)];
@@ -69,13 +69,13 @@ async function planProjectOverlay(
   sourceDirectory: string,
   targetDirectory: string,
   segments: readonly string[],
-  excludedDirectory: string,
+  excludedDirectories: readonly string[],
   files: ProjectOverlayFile[],
 ): Promise<void> {
   for (const entry of await readdir(sourceDirectory, { withFileTypes: true })) {
     // Claude's own checkouts and aboard's runtime are live state rather than
     // project configuration. Neither belongs in another run checkout.
-    if (segments.length === 1 && entry.name.toLowerCase() === excludedDirectory.toLowerCase()) continue;
+    if (segments.length === 1 && excludedDirectories.some((directory) => entry.name.toLowerCase() === directory.toLowerCase())) continue;
     const nextSegments = [...segments, entry.name];
     const source = join(sourceDirectory, entry.name);
     const target = join(targetDirectory, entry.name);
@@ -88,7 +88,7 @@ async function planProjectOverlay(
     }
     if (entry.isDirectory()) {
       if (targetEntry !== undefined && !targetEntry.isDirectory()) continue;
-      await planProjectOverlay(source, target, nextSegments, excludedDirectory, files);
+      await planProjectOverlay(source, target, nextSegments, excludedDirectories, files);
       continue;
     }
     if (!entry.isFile()) {

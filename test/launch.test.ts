@@ -38,13 +38,17 @@ const sessionId = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b" as SessionId;
 
 const IMPLEMENTER_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill"];
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash(gh *)", "Bash(git diff*)", "LSP"];
-const BRAINSTORMER_TOOLS = ["Read", "Grep", "Glob", "Bash", "Write", "Edit", "Agent", "Skill"];
+const BRAINSTORMER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Write", "Edit", "Skill"];
 const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
 /** The pre-approved delegation surface the Manager's command line carries, derived from its definition's `mcp__aboard__*` rule. */
 const ABOARD_ALLOW_ARGS = [
   "--allowedTools",
   "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
 ];
+const BRAINSTORMER_ALLOW_ARGS = [
+  "--allowedTools",
+  "mcp__aboard__run_agent,mcp__aboard__continue_agent",
+] as const;
 
 function definition(
   agentName: string,
@@ -121,7 +125,7 @@ test("plans the Manager from its definition rather than a discoverable agent", (
   assert.equal(plan.requiresWriteLease, false);
 });
 
-test("the aboard MCP server is registered per Manager launch and nowhere else", () => {
+test("the aboard MCP server is registered only for catalog-owning defined roles", () => {
   const mcpConfigPath = "C:\\storage\\aboard\\manager-mcp.json";
   const configuration = definition("manager", MANAGER_TOOLS);
   const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined, mcpConfigPath }));
@@ -147,6 +151,31 @@ test("the aboard MCP server is registered per Manager launch and nowhere else", 
     "--allowedTools",
     "mcp__aboard__run_agent,mcp__aboard__todo_create,mcp__aboard__todo_update,mcp__aboard__start_auto_run,mcp__aboard__review_pr",
   ]);
+
+  const brainstormer = definition("brainstormer", BRAINSTORMER_TOOLS);
+  const brainstormPath = "C:\\storage\\aboard\\agent-mcp\\brain-1.json";
+  const brainstormLaunch = planLaunch(request({
+    agentType: "brainstormer",
+    configuration: brainstormer,
+    prompt: "Settle the cache design",
+    attended: true,
+    mcpConfigPath: brainstormPath,
+  }));
+  assert.equal(brainstormLaunch.args.includes(brainstormPath), true);
+  assert.equal(brainstormLaunch.args[brainstormLaunch.args.indexOf("--allowedTools") + 1], BRAINSTORMER_ALLOW_ARGS[1]);
+  const brainstormResume = planSessionResume({
+    agentId,
+    sessionId,
+    agentType: "brainstormer",
+    shell: "powershell",
+    configuration: brainstormer,
+    attended: true,
+    mcpConfigPath: brainstormPath,
+    prompt: "Check one follow-up",
+  });
+  assert.equal(brainstormResume.args.includes(brainstormPath), true);
+  assert.equal(brainstormResume.args[brainstormResume.args.indexOf("--allowedTools") + 1], BRAINSTORMER_ALLOW_ARGS[1]);
+  assert.match(brainstormResume.commandLine, /Check one follow-up/u);
 
   // A worker's launch carries no registration at all: the delegation surface is
   // not merely denied to it, it is absent from its context.
@@ -430,7 +459,7 @@ test("puts the definition's model and effort on the command line, overriding the
       agentType: "brainstormer",
       effort: "low",
     })).args.slice(8),
-    ["--model", "opus", "--effort", "low", "Address issue #47."],
+    ["--allowedTools", "mcp__aboard__run_agent,mcp__aboard__continue_agent", "--model", "opus", "--effort", "low", "Address issue #47."],
   );
 
   // `model: inherit` is the definition declining to choose, which is no flag —

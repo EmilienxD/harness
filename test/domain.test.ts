@@ -19,7 +19,7 @@ const validSession = {
     status: "running",
     startedAt: "2026-07-29T10:00:00.000Z",
   },
-  resultDelivery: { mode: "mailbox", managerAgentId: "manager-1" },
+  resultDelivery: { mode: "mailbox", recipientAgentId: "manager-1" },
   telemetry: {
     totalTokens: 120,
     totalDurationMs: 2_000,
@@ -136,14 +136,15 @@ test("rejects unknown agent, lifecycle, result, and failure variants", () => {
   assert.equal(parseAgentSession(failed).ok, false);
 });
 
-test("enforces result and lifecycle invariants for agent roles", () => {
+test("enforces unattended result and lifecycle invariants for agent roles", () => {
   const interactiveWithResult = structuredClone(validSession) as unknown as Record<
     string,
     unknown
   >;
   (interactiveWithResult.identity as Record<string, unknown>).type =
     "brainstormer";
-  assert.equal(parseAgentSession(interactiveWithResult).ok, false);
+  interactiveWithResult.attended = true;
+  assert.equal(parseAgentSession(interactiveWithResult).ok, true);
 
   const automatedWithoutResult = structuredClone(validSession) as unknown as Record<
     string,
@@ -175,7 +176,7 @@ test("enforces result and lifecycle invariants for agent roles", () => {
   >;
   (interactiveGeneralPurpose.identity as Record<string, unknown>).type = "general-purpose";
   (interactiveGeneralPurpose.resultDelivery as Record<string, unknown>).mode = "none";
-  delete (interactiveGeneralPurpose.resultDelivery as Record<string, unknown>).managerAgentId;
+  delete (interactiveGeneralPurpose.resultDelivery as Record<string, unknown>).recipientAgentId;
   assert.equal(parseAgentSession(interactiveGeneralPurpose).ok, true);
 });
 
@@ -208,6 +209,7 @@ test("the legal agent catalogue ships no custom lowercase explorer type", () => 
   assert.deepEqual(AGENT_TYPES, [
     "manager",
     "brainstormer",
+    "prototyper",
     "webresearcher",
     "implementer",
     "pr-doctor-afk",

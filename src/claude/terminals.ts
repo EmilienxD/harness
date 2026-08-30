@@ -29,6 +29,9 @@ export const TERMINAL_KEYS = [
   "ctrl-l",
 ] as const;
 
+/** High finite guard only for Claude Code's own consecutive Stop continuations. */
+export const ABOARD_STOP_HOOK_BLOCK_CAP = "1000000";
+
 export type TerminalKey = (typeof TERMINAL_KEYS)[number];
 
 const KEY_SEQUENCES: Readonly<Record<TerminalKey, string>> = {
@@ -90,7 +93,8 @@ export interface CreateAboardTerminalRequest {
   readonly initialCommand?: string;
   /** Overrides the default focus behavior for bulk restoration. */
   readonly focus?: boolean;
-  readonly deliversResult?: boolean;
+  /** The user drives this session; reporting is configured independently. */
+  readonly attended?: boolean;
   readonly startupTimeoutMs?: number;
 }
 
@@ -173,7 +177,7 @@ export interface TerminalControllerOptions {
 }
 
 function isUserFacing(request: CreateAboardTerminalRequest): boolean {
-  return request.focus ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType) || request.deliversResult === false);
+  return request.focus ?? (request.attended ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType)));
 }
 
 export class TerminalController {
@@ -217,11 +221,12 @@ export class TerminalController {
       ABOARD_SESSION_ID: request.sessionId,
       ABOARD_AGENT_TYPE: request.agentType,
       ABOARD_WORKSPACE_ROOT: cwd,
+      CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: ABOARD_STOP_HOOK_BLOCK_CAP,
     };
     if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
       env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");
     }
-    if (request.deliversResult === true) env.ABOARD_DELIVERS_RESULT = "1";
+    if (request.attended === true) env.ABOARD_ATTENDED = "1";
     if (request.agentType === "manager") {
       env.MCP_TOOL_TIMEOUT = String(environment.managerMcpTimeoutMs);
       env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS = "0";

@@ -116,7 +116,7 @@ export class ManagerLifecycle {
     // Manager on Claude Code's default persona.
     await this.options.files.prepare(plan);
     if (this.options.admission?.() === false) throw new Error("aboard runtime reset while preparing Manager launch");
-    const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine, startupTimeoutMs: MANAGER_STARTUP_PROOF_TIMEOUT_MS });
+    const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine, attended: true, startupTimeoutMs: MANAGER_STARTUP_PROOF_TIMEOUT_MS });
     const updatedAt = this.#now().toISOString() as IsoTimestamp;
     try { await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt }); }
     catch (error) {

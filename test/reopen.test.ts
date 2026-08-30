@@ -9,7 +9,7 @@ import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
-import { migrateLegacySessions, type LegacySessionRecord } from "../src/domain/activity.js";
+import { migrateLegacySessions, type ActivityDto, type LegacySessionRecord } from "../src/domain/activity.js";
 import { renderReopenItems, registerReopenCommand, type ReopenQuickPickItem } from "../src/vscode/reopen.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 
@@ -54,6 +54,7 @@ class FakeHost implements TerminalHost {
 
 function setup(options: {
   readonly ledger?: LegacyLedger;
+  readonly activity?: ActivityDto;
   readonly resumable?: (sessionId: SessionId) => boolean;
   /** Every transcript lookup, so a test can assert *where* it was looked for. */
   readonly resumeChecks?: { sessionId: SessionId; cwd: string | undefined }[];
@@ -101,7 +102,7 @@ function setup(options: {
   const reopen = new ReopenCoordinator({
     // Production reads the activity store; a legacy ledger reaches it only
     // through the one-time migration, which is exactly what these tests exercise.
-    activity: { entries: () => migrateLegacySessions(undefined, options.ledger?.sessions ?? []) },
+    activity: { entries: () => options.activity ?? migrateLegacySessions(undefined, options.ledger?.sessions ?? []) },
     fleet,
     terminals: {
       isOpen: (id) => openTerminals.has(id) || terminals.list().some((entry) => entry.terminalId === id && entry.status === "open"),
@@ -113,6 +114,32 @@ function setup(options: {
   });
   return { fleet, lease, host, terminals, coordinator, reopen, openTerminals, liveTerminals, shown };
 }
+
+test("automated web research is hidden from user reopen but remains available to continue_agent", async () => {
+  const webSession = session("516e25a5-b829-47ef-b52a-f091fbcc549a");
+  const { reopen } = setup({
+    activity: {
+      version: 1,
+      entries: [{
+        kind: "agent",
+        id: "agent:web-7:2026-07-30T09:30:00.000Z",
+        at: at("2026-07-30T09:30:00.000Z"),
+        agentId: agent("web-7"),
+        type: "webresearcher",
+        description: "research current API pricing",
+        outcome: "succeeded",
+        continuation: { sessionId: webSession },
+      }],
+    },
+  });
+
+  assert.deepEqual(await reopen.list(), []);
+  const continuation = await reopen.findContinuation(agent("web-7"));
+  assert.equal(continuation?.resumable, true);
+  assert.equal(continuation?.candidate.agentId, "web-7");
+  assert.equal(continuation?.candidate.sessionId, webSession);
+  assert.equal(continuation?.candidate.type, "webresearcher");
+});
 
 function ledgerWith(...entries: readonly { readonly agentId: string; readonly type: AgentSession["identity"]["type"]; readonly sessionId: SessionId; readonly endedAt: string }[]): LegacyLedger {
   return entries.reduce<LegacyLedger | undefined>((current, entry) => recordEndedSession(current, {
@@ -146,7 +173,7 @@ test("an ended brainstormer is reopened with its own definition re-emitted, not 
   assert.deepEqual(restored?.resultDelivery, { mode: "none" });
   assert.equal(restored?.lifecycle.status, "running");
   // Nothing waits on it and it is the user's conversation: no result, no lease.
-  assert.equal(host.created[0]!.options.env.ABOARD_DELIVERS_RESULT, undefined);
+  assert.equal(host.created[0]!.options.env.ABOARD_ATTENDED, "1");
   assert.equal(lease.current(), undefined);
 });
 

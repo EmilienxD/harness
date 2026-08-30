@@ -86,7 +86,7 @@ export type FleetEvent =
       readonly sequence: number;
       readonly occurredAt: IsoTimestamp;
       readonly type: "notification-enqueued" | "notifications-drained";
-      readonly managerAgentId: AgentId;
+      readonly recipientAgentId: AgentId;
       readonly count: number;
     }
   | {
@@ -110,21 +110,34 @@ type NewFleetEvent = FleetEvent extends infer Event
   : never;
 
 export interface MailboxEntry {
+  readonly kind: "result";
   readonly agentId: AgentId;
+  readonly agentType: AgentSession["identity"]["type"];
   readonly result: WorkerResult;
 }
+
+export interface EndedWithoutReportEntry {
+  readonly kind: "ended-without-report";
+  readonly agentId: AgentId;
+  readonly agentType: AgentSession["identity"]["type"];
+}
+
+export type ReportEntry = MailboxEntry | EndedWithoutReportEntry;
+
+export const MAX_QUEUED_REPORTS = 20;
+export const MAX_QUEUED_REPORT_CHARACTERS = 9_500;
 
 export interface FleetPersistenceDto {
   readonly version: 1;
   readonly sessions: readonly AgentSession[];
   readonly childAgents?: readonly ChildAgentNode[];
-  readonly blockingResults: readonly MailboxEntry[];
+  readonly blockingResults: readonly { readonly agentId: AgentId; readonly result: WorkerResult }[];
   readonly mailboxes: readonly {
-    readonly managerAgentId: AgentId;
-    readonly entries: readonly MailboxEntry[];
+    readonly recipientAgentId: AgentId;
+    readonly entries: readonly ReportEntry[];
   }[];
   readonly deferredNotifications: readonly {
-    readonly managerAgentId: AgentId;
+    readonly recipientAgentId: AgentId;
     readonly entries: readonly DeferredNotification[];
   }[];
   readonly events: readonly FleetEvent[];
@@ -145,7 +158,7 @@ export class FleetRegistry {
   private readonly childAgentsById = new Map<string, ChildAgentNode>();
   private readonly agentBySession = new Map<SessionId, AgentId>();
   private readonly blockingResults = new Map<AgentId, WorkerResult>();
-  private readonly mailboxes = new Map<AgentId, MailboxEntry[]>();
+  private readonly mailboxes = new Map<AgentId, ReportEntry[]>();
   private readonly notifications = new Map<AgentId, DeferredNotification[]>();
   private readonly eventHistory: FleetEvent[] = [];
   private nextNotificationId = 1;
@@ -168,10 +181,10 @@ export class FleetRegistry {
       registry.blockingResults.set(entry.agentId, entry.result);
     }
     for (const mailbox of dto.mailboxes) {
-      registry.mailboxes.set(mailbox.managerAgentId, [...mailbox.entries]);
+      for (const entry of mailbox.entries) registry.#enqueueReport(mailbox.recipientAgentId, entry);
     }
     for (const queue of dto.deferredNotifications) {
-      registry.notifications.set(queue.managerAgentId, [...queue.entries]);
+      registry.notifications.set(queue.recipientAgentId, [...queue.entries]);
     }
     registry.eventHistory.push(...dto.events);
     registry.nextNotificationId = dto.nextNotificationId;
@@ -197,11 +210,11 @@ export class FleetRegistry {
       );
     }
     if (session.resultDelivery.mode === "mailbox") {
-      const manager = this.sessionsByAgent.get(session.resultDelivery.managerAgentId);
-      if (manager?.identity.type !== "manager") {
+      const recipient = this.sessionsByAgent.get(session.resultDelivery.recipientAgentId);
+      if (recipient === undefined) {
         throw new FleetStateError(
           "unknown-agent",
-          `Mailbox manager ${session.resultDelivery.managerAgentId} is not registered`,
+          `Report recipient ${session.resultDelivery.recipientAgentId} is not registered`,
         );
       }
     }
@@ -213,17 +226,17 @@ export class FleetRegistry {
   public remove(agentId: AgentId, occurredAt: IsoTimestamp): void {
     const session = this.sessionsByAgent.get(agentId);
     if (session === undefined) return;
+    if (session.resultDelivery.mode === "mailbox" && session.lastResult === undefined) {
+      this.#enqueueReport(session.resultDelivery.recipientAgentId, {
+        kind: "ended-without-report",
+        agentId,
+        agentType: session.identity.type,
+      });
+    }
     this.sessionsByAgent.delete(agentId);
     this.agentBySession.delete(session.sessionId);
     this.blockingResults.delete(agentId);
-    this.mailboxes.delete(agentId);
     this.notifications.delete(agentId);
-    for (const [managerAgentId, entries] of this.mailboxes) {
-      const kept = entries.filter((entry) => entry.agentId !== agentId);
-      if (kept.length === entries.length) continue;
-      if (kept.length === 0) this.mailboxes.delete(managerAgentId);
-      else this.mailboxes.set(managerAgentId, kept);
-    }
     for (const [childId, child] of this.childAgentsById) {
       if (child.parentAgentId === agentId) this.childAgentsById.delete(childId);
     }
@@ -311,6 +324,7 @@ export class FleetRegistry {
     terminal: AgentSession["terminal"],
     startedAt: IsoTimestamp,
     sessionId?: SessionId,
+    attended?: boolean,
   ): void {
     const session = this.requireSession(agentId);
     if (session.lifecycle.status !== "completed" && session.lifecycle.status !== "failed") {
@@ -325,9 +339,10 @@ export class FleetRegistry {
       this.agentBySession.set(sessionId, agentId);
     }
     const from = session.lifecycle.status;
-    const { lastResult: _lastResult, ...withoutResult } = session;
+    const { lastResult: _lastResult, attended: _attended, ...withoutResult } = session;
     this.sessionsByAgent.set(agentId, {
       ...withoutResult,
+      ...(attended === undefined ? (session.attended === true ? { attended: true as const } : {}) : attended ? { attended: true as const } : {}),
       ...(sessionId === undefined ? {} : { sessionId }),
       terminal,
       lifecycle: { status: "starting", startedAt },
@@ -342,6 +357,7 @@ export class FleetRegistry {
     startedAt: IsoTimestamp,
     sessionId?: SessionId,
     resultDelivery?: AgentSession["resultDelivery"],
+    attended?: boolean,
   ): void {
     const session = this.requireSession(agentId);
     if (
@@ -360,8 +376,10 @@ export class FleetRegistry {
       this.agentBySession.set(sessionId, agentId);
     }
     const from = session.lifecycle.status;
+    const { attended: _attended, ...withoutAttended } = session;
     this.sessionsByAgent.set(agentId, {
-      ...session,
+      ...withoutAttended,
+      ...(attended === undefined ? (session.attended === true ? { attended: true as const } : {}) : attended ? { attended: true as const } : {}),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(resultDelivery === undefined ? {} : { resultDelivery }),
       terminal,
@@ -379,6 +397,52 @@ export class FleetRegistry {
     this.record({ type: "telemetry-updated", agentId }, occurredAt);
   }
 
+  public observeAssistantMessage(agentId: AgentId, message: string, occurredAt: IsoTimestamp): boolean {
+    if (message.trim().length === 0) return false;
+    const session = this.sessionsByAgent.get(agentId);
+    if (session === undefined) return false;
+    if (session.lastObservedAssistantMessage === message) return true;
+    this.sessionsByAgent.set(agentId, { ...session, lastObservedAssistantMessage: message });
+    this.record({ type: "telemetry-updated", agentId }, occurredAt);
+    return true;
+  }
+
+  /** Live sessions that still owe this recipient a report, in fleet order. */
+  public reportsOwedTo(recipientAgentId: AgentId): readonly AgentSession[] {
+    return this.list().filter((session) =>
+      session.resultDelivery.mode === "mailbox"
+      && session.resultDelivery.recipientAgentId === recipientAgentId
+      && session.lastResult === undefined
+      && (session.lifecycle.status === "starting" || session.lifecycle.status === "running" || session.lifecycle.status === "awaiting-user"));
+  }
+
+  /** Complete an attended session with the explicit report supplied by `/done`. */
+  public submitReport(agentId: AgentId, message: string, occurredAt: IsoTimestamp): WorkerResult {
+    if (message.trim().length === 0) throw new FleetStateError("invalid-result", "Report must not be empty");
+    const session = this.requireSession(agentId);
+    if (session.resultDelivery.mode !== "mailbox") {
+      throw new FleetStateError("invalid-result", `Agent ${agentId} has no mailbox recipient`);
+    }
+    if (session.lifecycle.status !== "starting" && session.lifecycle.status !== "running" && session.lifecycle.status !== "awaiting-user") {
+      throw new FleetStateError("invalid-result", `Agent ${agentId} has already ended`);
+    }
+    const result: WorkerResult = {
+      outcome: "succeeded",
+      exitCode: 0,
+      lastAssistantMessage: message,
+      telemetry: session.telemetry,
+    };
+    this.transition(agentId, {
+      status: "completed",
+      startedAt: session.lifecycle.startedAt,
+      finishedAt: occurredAt,
+      exitCode: 0,
+      lastAssistantMessage: message,
+    }, occurredAt);
+    this.recordResult(agentId, result, occurredAt);
+    return result;
+  }
+
   public recordResult(agentId: AgentId, result: WorkerResult, occurredAt: IsoTimestamp): void {
     const session = this.requireSession(agentId);
     if (session.lifecycle.status !== "completed" && session.lifecycle.status !== "failed") {
@@ -394,9 +458,12 @@ export class FleetRegistry {
         this.blockingResults.set(agentId, result);
         break;
       case "mailbox": {
-        const entries = this.mailboxes.get(session.resultDelivery.managerAgentId) ?? [];
-        entries.push({ agentId, result });
-        this.mailboxes.set(session.resultDelivery.managerAgentId, entries);
+        this.#enqueueReport(session.resultDelivery.recipientAgentId, {
+          kind: "result",
+          agentId,
+          agentType: session.identity.type,
+          result,
+        });
         break;
       }
       case "none":
@@ -413,44 +480,41 @@ export class FleetRegistry {
     return result;
   }
 
-  public drainMailbox(managerAgentId: AgentId, occurredAt: IsoTimestamp): readonly MailboxEntry[] {
-    const entries = this.mailboxes.get(managerAgentId) ?? [];
+  public drainMailbox(recipientAgentId: AgentId, occurredAt: IsoTimestamp): readonly ReportEntry[] {
+    const entries = this.mailboxes.get(recipientAgentId) ?? [];
     if (entries.length === 0) return [];
-    this.mailboxes.delete(managerAgentId);
+    this.mailboxes.delete(recipientAgentId);
     for (const entry of entries) {
       this.record({ type: "result-drained", agentId: entry.agentId, delivery: "mailbox" }, occurredAt);
     }
     return entries;
   }
 
-  public enqueueNotification(managerAgentId: AgentId, message: string, occurredAt: IsoTimestamp): void {
+  public enqueueNotification(recipientAgentId: AgentId, message: string, occurredAt: IsoTimestamp): void {
     if (message.trim().length === 0) {
       throw new FleetStateError("invalid-result", "Deferred notification must not be empty");
     }
-    const manager = this.requireSession(managerAgentId);
-    if (manager.identity.type !== "manager") {
-      throw new FleetStateError("invalid-result", `Agent ${managerAgentId} is not a Manager`);
-    }
-    const queue = this.notifications.get(managerAgentId) ?? [];
+    this.requireSession(recipientAgentId);
+    const queue = this.notifications.get(recipientAgentId) ?? [];
     queue.push({ id: this.nextNotificationId++, occurredAt, message });
-    this.notifications.set(managerAgentId, queue);
-    this.record({ type: "notification-enqueued", managerAgentId, count: 1 }, occurredAt);
+    this.notifications.set(recipientAgentId, queue);
+    this.record({ type: "notification-enqueued", recipientAgentId, count: 1 }, occurredAt);
   }
 
   public drainNotifications(
-    managerAgentId: AgentId,
+    recipientAgentId: AgentId,
     occurredAt: IsoTimestamp,
     policy: NotificationSummaryPolicy = DEFAULT_NOTIFICATION_SUMMARY_POLICY,
   ): DeferredNotificationDelivery {
     if (!Number.isInteger(policy.maxDetailedEntries) || policy.maxDetailedEntries < 0) {
       throw new RangeError("maxDetailedEntries must be a non-negative integer");
     }
-    const queue = this.notifications.get(managerAgentId) ?? [];
+    const queue = this.notifications.get(recipientAgentId) ?? [];
     if (queue.length === 0) return { notifications: [] };
-    this.notifications.delete(managerAgentId);
+    this.notifications.delete(recipientAgentId);
     const omittedCount = Math.max(0, queue.length - policy.maxDetailedEntries);
     const notifications = queue.slice(omittedCount);
-    this.record({ type: "notifications-drained", managerAgentId, count: queue.length }, occurredAt);
+    this.record({ type: "notifications-drained", recipientAgentId, count: queue.length }, occurredAt);
     if (omittedCount === 0) return { notifications };
     const first = queue[0]!;
     const lastOmitted = queue[omittedCount - 1]!;
@@ -468,14 +532,19 @@ export class FleetRegistry {
     return [...this.eventHistory];
   }
 
+  /** Monotonic change token used to close the check-then-subscribe long-poll race. */
+  public revision(): number {
+    return this.nextEventSequence - 1;
+  }
+
   public toPersistenceDto(): FleetPersistenceDto {
     return {
       version: 1,
       sessions: this.list(),
       childAgents: this.listChildren(),
       blockingResults: [...this.blockingResults].map(([agentId, result]) => ({ agentId, result })),
-      mailboxes: [...this.mailboxes].map(([managerAgentId, entries]) => ({ managerAgentId, entries: [...entries] })),
-      deferredNotifications: [...this.notifications].map(([managerAgentId, entries]) => ({ managerAgentId, entries: [...entries] })),
+      mailboxes: [...this.mailboxes].map(([recipientAgentId, entries]) => ({ recipientAgentId, entries: [...entries] })),
+      deferredNotifications: [...this.notifications].map(([recipientAgentId, entries]) => ({ recipientAgentId, entries: [...entries] })),
       events: this.events(),
       nextNotificationId: this.nextNotificationId,
       nextEventSequence: this.nextEventSequence,
@@ -490,6 +559,13 @@ export class FleetRegistry {
     return session;
   }
 
+  #enqueueReport(recipientAgentId: AgentId, entry: ReportEntry): void {
+    const normalized = boundReportEntry(entry, MAX_QUEUED_REPORT_CHARACTERS);
+    const entries = [...(this.mailboxes.get(recipientAgentId) ?? []), normalized];
+    while (entries.length > MAX_QUEUED_REPORTS || reportCharacters(entries) > MAX_QUEUED_REPORT_CHARACTERS) entries.shift();
+    this.mailboxes.set(recipientAgentId, entries);
+  }
+
   private record(
     event: NewFleetEvent,
     occurredAt: IsoTimestamp,
@@ -498,4 +574,26 @@ export class FleetRegistry {
     this.eventHistory.push(recorded);
     for (const listener of this.listeners) listener(recorded);
   }
+}
+
+function reportCharacters(entries: readonly ReportEntry[]): number {
+  return entries.reduce((total, entry) => total + (entry.kind === "result"
+    ? entry.result.outcome === "succeeded"
+      ? entry.result.lastAssistantMessage.length
+      : entry.result.failure.lastAssistantMessage?.length ?? 0
+    : entry.agentId.length + entry.agentType.length), 0);
+}
+
+function boundReportEntry(entry: ReportEntry, maxCharacters: number): ReportEntry {
+  if (entry.kind === "ended-without-report") return entry;
+  if (entry.result.outcome === "succeeded") {
+    return {
+      ...entry,
+      result: { ...entry.result, lastAssistantMessage: entry.result.lastAssistantMessage.slice(0, maxCharacters) },
+    };
+  }
+  const message = entry.result.failure.lastAssistantMessage;
+  return message === null
+    ? entry
+    : { ...entry, result: { ...entry.result, failure: { ...entry.result.failure, lastAssistantMessage: message.slice(0, maxCharacters) } } };
 }

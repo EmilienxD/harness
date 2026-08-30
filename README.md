@@ -44,7 +44,7 @@ The panel has three views, and each answers exactly one question:
 **You need:** VS Code 1.125+, Claude Code, Git, the GitHub CLI (`gh`), and [`uv`](https://docs.astral.sh/uv/).
 
 1. Install the extension (`code --install-extension aboard-*.vsix`).
-2. Open your project, click the aboard icon, hit **Initialize**. It installs aboard-owned agent definitions, skills, and hooks under `.aboard/`, starts a loopback-only bridge, and supplies the Manager's authenticated MCP configuration only for that launch. Your project-wide Claude settings and MCP servers are untouched.
+2. Open your project, click the aboard icon, hit **Initialize**. It installs aboard-owned agent definitions, skills, and hooks under `.aboard/`, starts a loopback-only bridge, and supplies authenticated, role-scoped MCP configuration only to the Manager and brainstormers it launches. Your project-wide Claude settings and MCP servers are untouched.
 3. Click **+ New Manager** and ask it something: *"What's the state of this project?"*
 
 Then try one of these in the Manager terminal:
@@ -53,11 +53,17 @@ Then try one of these in the Manager terminal:
 | :-- | :-- |
 | `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
 | `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet |
+| `/prototype Try the parser API` | A user-driven prototyper opens with its own gitignored `.aboard/prototypes/` scratch folder and reports back here when you run `/done` |
 | `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, address, commit, PR, merge — one issue at a time, onto a branch of the run's own |
 | `/auto --dry` | Read-only forecast: show the issues found, their dependency-aware order and branches, settings-driven review/merge behavior, blockers, and every point where you will need to act |
 | `/auto no unit tests needed` | Start the same run and append that guideline to every implementer and pr-doctor prompt |
+| `/done` or `/done <report>` | Close this session and report its last complete answer, or your replacement text, to the session that launched it |
 | `/reopen` | The last session you were handed comes back — same conversation, same agent definition. `/reopen brainstorm` picks by type, `/reopen 7` by agent id, and **Aboard: Reopen a Session** lists them all |
 | *"Address issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
+
+When a session delegates work, its Stop hook waits so the result can arrive without another prompt. Press **Escape** whenever you want the terminal back before that work finishes. Escape cancels only the wait: the eventual report stays queued and is delivered by the next hook that fires.
+
+Prototype isolation is a visible working convention, not a security sandbox: aboard tells the prototyper to write only in its allocated scratch folder, but its shell can still reach the project. Prototype folders are never deleted automatically. `/done` uses the last complete assistant message aboard observed; if the final turn ended abnormally before its Stop hook ran, that fallback can be older than the terminal's last visible output, so pass explicit report text when that distinction matters.
 
 ## The auto-run, honestly
 

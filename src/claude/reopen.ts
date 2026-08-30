@@ -1,9 +1,10 @@
 
 import type { InteractiveLaunchHandles, ReopenTarget } from "../bridge/delegation.js";
-import type { AgentId, AgentType, SessionId, TerminalId } from "../domain/contracts.js";
+import { isContinuableAgentType, type AgentId, type AgentType, type SessionId, type TerminalId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import {
   reopenCandidates,
+  describeTerminalName,
   type ActivityDto,
   type ReopenCandidate,
 } from "../domain/activity.js";
@@ -50,6 +51,8 @@ export interface ReopenCoordinatorOptions {
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
   brainstorm: "brainstormer",
   brainstormer: "brainstormer",
+  prototype: "prototyper",
+  prototyper: "prototyper",
   "general-purpose": "general-purpose",
   "pr-doctor-hitl": "pr-doctor-hitl",
   implementer: "implementer",
@@ -118,6 +121,44 @@ export class ReopenCoordinator {
   /** Looks one candidate up by agent id, for a tree item or a command argument. */
   public async find(agentId: AgentId): Promise<ReopenOption | undefined> {
     return (await this.list()).find((option) => option.candidate.agentId === agentId);
+  }
+
+  /** Includes automated research retained only for an MCP follow-up, not for the user-facing reopen list. */
+  public async findContinuation(agentId: AgentId): Promise<ReopenOption | undefined> {
+    const ordinary = await this.find(agentId);
+    if (ordinary !== undefined && isContinuableAgentType(ordinary.candidate.type)) return ordinary;
+    const live = this.options.fleet.get(agentId);
+    if (live !== undefined && live.identity.type !== "manager" && isContinuableAgentType(live.identity.type)) {
+      return {
+        resumable: true,
+        candidate: {
+          agentId,
+          type: live.identity.type,
+          sessionId: live.sessionId,
+          description: describeTerminalName(live.terminal.name),
+          origin: "live",
+          at: live.lifecycle.startedAt,
+          terminalId: live.terminal.terminalId,
+          ...(live.issueNumbers === undefined ? {} : { issueNumbers: live.issueNumbers }),
+          ...(live.cwd === undefined ? {} : { cwd: live.cwd }),
+        },
+      };
+    }
+    const entry = this.options.activity.entries().entries.find((item) =>
+      item.kind === "agent" && item.agentId === agentId && item.continuation !== undefined);
+    if (entry?.kind !== "agent" || entry.continuation === undefined || !isContinuableAgentType(entry.type)) return undefined;
+    const candidate: ReopenCandidate = {
+      agentId: entry.agentId,
+      type: entry.type,
+      sessionId: entry.continuation.sessionId,
+      description: entry.description,
+      origin: "ended",
+      at: entry.at,
+      ...(entry.continuation.issueNumbers === undefined ? {} : { issueNumbers: entry.continuation.issueNumbers }),
+      ...(entry.continuation.cwd === undefined ? {} : { cwd: entry.continuation.cwd }),
+    };
+    const resumable = await this.options.isResumable(candidate.sessionId, candidate.cwd).catch(() => false);
+    return resumable ? { candidate, resumable } : { candidate, resumable, reason: "no-transcript" };
   }
 }
 

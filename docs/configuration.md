@@ -81,7 +81,7 @@ The label is frozen per issue when the run starts and survives recovery. Adding 
 
 ## Agent tool sets are not settings
 
-Every aboard-defined agent takes its capability set from the `tools:` field of its `.aboard/agents/<name>.md` definition — including the Manager. The Manager alone admits `mcp__aboard__*`; non-Manager launches additionally receive that namespace as an infrastructure-level denial. The MCP registration itself is ephemeral and passed only to the Manager. To widen or narrow an agent's ordinary capabilities, edit its definition; the change applies on its next launch.
+Every aboard-defined agent takes its capability set from the `tools:` field of its `.aboard/agents/<name>.md` definition — including the Manager. The Manager and brainstormer admit role-scoped `mcp__aboard__*` catalogs; roles with no catalog receive no MCP registration and are refused by the server. Each registration is ephemeral, resolved outside the workspace, and replayed on resume. To widen or narrow an agent's ordinary capabilities, edit its definition; the change applies on its next launch.
 
 The definitions are deliberately **not** in `.claude/agents/`. For each start or resume, aboard builds `.aboard/runtime/agents/<id>/`: a rewritten definition, generated hook settings, and the aboard skills for that launch. Claude receives the bundle through `--add-dir` and `--settings`; a hand-started session never discovers it. `Explore` remains Claude Code's named built-in and `general-purpose` remains its default session, but both receive the same private hook-and-skill bundle while aboard owns them.
 

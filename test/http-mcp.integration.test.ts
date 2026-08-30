@@ -6,6 +6,9 @@ import { startBridge } from "../src/bridge/server.js";
 import type { AgentId } from "../src/domain/contracts.js";
 
 const managerAgentId = "manager-1" as AgentId;
+const managerSession = {
+  identity: { agentId: managerAgentId, type: "manager" as const },
+};
 
 async function rpc(
   port: number,
@@ -34,7 +37,7 @@ test("serves the MCP protocol over authenticated loopback HTTP to the Manager on
       run: async () => ({ result: "done" }),
       spawn: async () => ({ status: "running" }),
       spawnInteractive: async () => ({ handoff: "open" }),
-    }, { managerAgentId: () => managerAgentId }),
+    }, { fleet: { get: (agentId) => agentId === managerAgentId ? managerSession as never : undefined } }),
   });
   context.after(() => bridge.stop());
 

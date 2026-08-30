@@ -6,6 +6,8 @@ import type { ShellKind } from "../claude/shell.js";
 import type { TerminalController } from "../claude/terminals.js";
 import type { WriteCapability } from "../domain/capability.js";
 import {
+  isContinuableAgentType,
+  isInteractiveAgentType,
   isNonRestorablePersistedAgentType,
   type AgentId,
   type AgentSession,
@@ -28,6 +30,7 @@ import type { SessionWrapperLayout } from "../claude/launch.js";
 import { sessionIsResumable } from "../claude/sessions.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
 import type { IssueDifficulty } from "../shared/labels.js";
+import type { PrototypeFolderAllocator } from "./prototypes.js";
 
 export interface LaunchIsolation {
   readonly cwd: string;
@@ -66,6 +69,8 @@ export interface ReopenTarget {
   readonly agentId: AgentId;
   readonly type: Exclude<AgentType, "manager">;
   readonly sessionId: SessionId;
+  /** Preserved only for a restored mailbox obligation; foreground callers do not survive a handoff. */
+  readonly resultDelivery?: Extract<AgentSession["resultDelivery"], { readonly mode: "mailbox" }>;
   /** The terminal name, already carrying aboard's own prefix. */
   readonly terminalName: string;
   readonly issueNumbers?: readonly number[];
@@ -76,6 +81,10 @@ export interface ReopenTarget {
   /** Replays the command fence carried by a session that originated in auto-run. */
   readonly autoRunRestricted?: true;
   readonly cwd?: string;
+  /** A continuation's first message; ordinary reopen leaves the conversation idle. */
+  readonly prompt?: string;
+  /** Ordinary reopen is attended; continuation derives this from the target role. */
+  readonly attended?: boolean;
 }
 
 export interface InteractiveLaunchHandles {
@@ -108,6 +117,9 @@ export interface DelegationCoordinatorOptions {
   readonly spills: PromptSpillStore;
   /** Resolved lazily so extension activation alone does not consume the first agent id. */
   readonly managerAgentId: () => AgentId;
+  /** Writes a resolved per-launch MCP registration for roles that own a catalog. */
+  readonly mcpConfig?: (agentId: AgentId, type: AgentType) => Promise<string | undefined>;
+  readonly prototypeFolders?: PrototypeFolderAllocator;
   readonly shell: ShellKind;
   /** Infrastructure-level denials applied to every delegated launch and resume. */
   readonly disallowedTools?: readonly string[];
@@ -153,19 +165,19 @@ export class DelegationCoordinator {
   }
 
   public async run(input: DelegationLaunchInput, signal?: AbortSignal): Promise<unknown> {
-    const launched = await this.#launch(input, { mode: "tool-result" }, "manager");
+    const launched = await this.#launch(input, { mode: "tool-result" }, "manager", false);
     const result = await this.#waitForResult(launched.agentId, signal);
     return this.#foregroundResult(launched.agentId, result);
   }
 
   public async runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome> {
-    const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run");
+    const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run", false);
     const result = await this.#waitForResult(launched.agentId, signal);
     return { ...launched, result };
   }
 
   public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles> {
-    return this.#launch(input, { mode: "none" }, origin);
+    return this.#launch(input, { mode: "none" }, origin, true);
   }
 
   /** Reopens a persisted active worker after the extension host restarted. */
@@ -185,6 +197,7 @@ export class DelegationCoordinator {
       agentId: session.identity.agentId,
       type: session.identity.type,
       sessionId: session.sessionId,
+      ...(session.resultDelivery.mode === "mailbox" ? { resultDelivery: session.resultDelivery } : {}),
       terminalName: session.terminal.name,
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
@@ -205,18 +218,21 @@ export class DelegationCoordinator {
     if (!resumable) {
       throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no Claude conversation to resume`);
     }
+    const attended = target.attended ?? true;
+    const mcpConfigPath = await this.options.mcpConfig?.(target.agentId, target.type);
     const plan = planSessionResume({
       agentId: target.agentId,
       sessionId: target.sessionId,
       agentType: target.type,
       shell: this.options.shell,
-      // Reopening hands the session to the user whatever it was: an automated
-      // launch's caller is long gone, and this terminal is theirs to type in.
-      attended: true,
+      attended,
       ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration,
+      ...(target.prompt === undefined ? {} : { prompt: target.prompt }),
+      ...(mcpConfigPath === undefined ? {} : { mcpConfigPath }),
+      maxInlinePromptChars: this.options.maxInlinePromptChars,
       disallowedTools: [
-        ...(this.options.disallowedTools ?? []),
+        ...this.#infrastructureDenials(mcpConfigPath),
         ...(target.autoRunRestricted === true ? AUTO_RUN_DISALLOWED_TOOLS : []),
       ],
       ...this.#effort(),
@@ -227,6 +243,7 @@ export class DelegationCoordinator {
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
     await this.options.spills.prepare(plan, target.cwd);
+    if (plan.spill !== undefined) await this.options.spills.write(plan.spill, target.cwd);
     if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
     const terminal = this.options.terminals.create({
       agentId: target.agentId,
@@ -236,7 +253,7 @@ export class DelegationCoordinator {
       name: target.terminalName,
       ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
       initialCommand: plan.commandLine,
-      deliversResult: false,
+      attended,
       ...(target.focus === undefined ? {} : { focus: target.focus }),
       ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
     });
@@ -246,7 +263,8 @@ export class DelegationCoordinator {
         sessionId: target.sessionId,
         terminal: { terminalId: terminal.terminalId, name: terminal.name },
         lifecycle: { status: "starting", startedAt: occurredAt },
-        resultDelivery: { mode: "none" },
+        resultDelivery: target.resultDelivery ?? { mode: "none" },
+        ...(attended ? { attended: true as const } : {}),
         telemetry: EMPTY_TELEMETRY,
         ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
         ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
@@ -259,26 +277,54 @@ export class DelegationCoordinator {
         { terminalId: terminal.terminalId, name: terminal.name },
         occurredAt,
         undefined,
-        { mode: "none" },
+        target.resultDelivery ?? { mode: "none" },
+        attended,
       );
     }
     this.options.fleet.transition(target.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
     return { agentId: target.agentId, sessionId: target.sessionId, terminalId: terminal.terminalId };
   }
 
-  public async spawn(input: DelegationLaunchInput): Promise<unknown> {
+  public async spawn(input: DelegationLaunchInput, recipientAgentId = this.options.managerAgentId()): Promise<unknown> {
     const launched = await this.#launch(input, {
       mode: "mailbox",
-      managerAgentId: this.options.managerAgentId(),
-    }, "manager");
+      recipientAgentId,
+    }, "manager", false);
     return { ...launched, status: "running" };
   }
 
-  public async spawnInteractive(input: DelegationLaunchInput): Promise<unknown> {
-    const launched = await this.#launch(input, { mode: "none" }, "manager");
+  /** Reopens one reported research/prototype conversation under the same agent id. */
+  public async continue(target: ReopenTarget, prompt: string, recipientAgentId: AgentId): Promise<unknown> {
+    if (!isContinuableAgentType(target.type)) {
+      throw new DelegationError("unknown-agent", `${target.type} sessions cannot be continued`);
+    }
+    const current = this.options.fleet.get(target.agentId);
+    if (current !== undefined && ["starting", "running", "awaiting-user"].includes(current.lifecycle.status)) {
+      throw new DelegationError("agent-active", `Agent ${target.agentId} is still live; its report is coming`);
+    }
+    // Completion can enqueue the report before SessionEnd/process settlement
+    // detaches the spent terminal. Do not remove the fleet row and then fail
+    // terminal creation: the old and new wrappers would also contend for the
+    // same per-agent liveness marker. A retry after settlement reopens safely.
+    const spentTerminal = this.options.terminals.liveTerminalForAgent(target.agentId);
+    if (spentTerminal !== undefined) {
+      throw new DelegationError("agent-active", `Agent ${target.agentId} has reported and its terminal is still closing; retry the follow-up once it closes`);
+    }
+    if (current !== undefined) this.options.fleet.remove(target.agentId, this.#timestamp());
+    const handles = await this.reopen({
+      ...target,
+      prompt,
+      attended: isInteractiveAgentType(target.type),
+      resultDelivery: { mode: "mailbox", recipientAgentId },
+    });
+    return { ...handles, status: "running", reportRecipientAgentId: recipientAgentId };
+  }
+
+  public async spawnInteractive(input: DelegationLaunchInput, recipientAgentId = this.options.managerAgentId()): Promise<unknown> {
+    const launched = await this.#launch(input, { mode: "mailbox", recipientAgentId }, "manager", true);
     return {
       ...launched,
-      handoff: `Terminal focused for ${input.description}. Continue directly with the user; no agent result will be returned.`,
+      handoff: `Terminal focused for ${input.description}. Its report will be delivered to ${recipientAgentId} when the user runs /done.`,
     };
   }
 
@@ -310,29 +356,41 @@ export class DelegationCoordinator {
     return true;
   }
 
-  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin): Promise<{
+  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean): Promise<{
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
     readonly terminalId: AgentSession["terminal"]["terminalId"];
   }> {
     const agentId = this.options.agentIdFactory();
     const sessionId = this.options.sessionIdFactory();
-    const interactive = resultDelivery.mode === "none";
+    let effectiveInput = input;
+    if (input.type === "prototyper") {
+      if (!attended) throw new DelegationError("unknown-agent", "A prototyper must be launched interactively");
+      if (this.options.prototypeFolders === undefined) throw new Error("Prototype folder allocation is unavailable");
+      const scratch = await this.options.prototypeFolders.allocate(agentId, input.description);
+      const instruction = `Aboard allocated this prototype's scratch folder at ${scratch}. Work only inside that folder; do not edit application files elsewhere in the project.`;
+      effectiveInput = {
+        ...input,
+        prompt: input.prompt === undefined ? instruction : `${input.prompt.trim()}\n\n${instruction}`,
+      };
+    }
+    const mcpConfigPath = await this.options.mcpConfig?.(agentId, input.type);
     const [configuration, prompt] = await Promise.all([
       this.options.configurations.get(input.type),
-      this.options.prompts.resolve(input, { interactive }),
+      this.options.prompts.resolve(effectiveInput, { interactive: attended }),
     ]);
     const plan = planLaunch({
       agentId,
       sessionId,
       agentType: input.type,
       shell: this.options.shell,
-      attended: interactive,
+      attended,
       ...(input.type === "implementer" && input.chrome === true ? { chrome: true } : {}),
       configuration,
+      ...(mcpConfigPath === undefined ? {} : { mcpConfigPath }),
       prompt,
       disallowedTools: [
-        ...(this.options.disallowedTools ?? []),
+        ...this.#infrastructureDenials(mcpConfigPath),
         ...(origin === "auto-run" ? AUTO_RUN_DISALLOWED_TOOLS : []),
         ...(input.isolation?.denyTools ?? []),
       ],
@@ -344,7 +402,7 @@ export class DelegationCoordinator {
     });
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    if (leaseRequired(origin, interactive)) {
+    if (leaseRequired(origin, attended)) {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
     }
     const cwd = input.isolation?.cwd;
@@ -360,9 +418,7 @@ export class DelegationCoordinator {
         name: `aboard: ${input.description}`,
         ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,
-        // Hooks and focus both key on this: a result-delivering session reports
-        // over the bridge and runs unfocused; a handed-off one stays silent.
-        deliversResult: !interactive,
+        attended,
         // A failed launch prints to the terminal and exits before any hook; the
         // SessionStart pid report is the only trustworthy proof the TUI is up.
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
@@ -373,6 +429,7 @@ export class DelegationCoordinator {
         terminal: { terminalId: terminal.terminalId, name: terminal.name },
         lifecycle: { status: "starting", startedAt: occurredAt },
         resultDelivery,
+        ...(attended ? { attended: true as const } : {}),
         telemetry: EMPTY_TELEMETRY,
         ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
@@ -466,6 +523,13 @@ export class DelegationCoordinator {
   #effort(): { readonly effort?: EffortLevel } {
     const effort = this.options.effort?.();
     return effort === undefined ? {} : { effort };
+  }
+
+  #infrastructureDenials(mcpConfigPath: string | undefined): readonly string[] {
+    const denied = this.options.disallowedTools ?? [];
+    return mcpConfigPath === undefined
+      ? denied
+      : denied.filter((rule) => rule.trim() !== "mcp__aboard__*");
   }
 
   #timestamp(): IsoTimestamp {

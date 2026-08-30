@@ -137,8 +137,8 @@ Processes aboard launched itself do not need any of this: they inherit
 The bridge mints two per-activation credentials:
 
 - The **full token** reaches every route. It stays in memory and in the
-  environment of processes aboard started; only the Manager's ephemeral MCP
-  configuration contains a resolved copy while initialized. It is not published.
+  environment of processes aboard started; only ephemeral MCP configurations
+  for catalog-owning roles contain resolved copies while initialized. It is not published.
 - The **command token** reaches `/commands` and nothing else — a request to any
   other path is `403 forbidden`. This is the one that gets published, because a
   credential a script can find is a credential anything running as that user can

@@ -50,6 +50,7 @@ function fleetSession(overrides: {
     terminal: { terminalId: terminal(`terminal-${overrides.agentId}`), name: `aboard: ${overrides.type} conversation` },
     lifecycle: { status: "running", startedAt: at(overrides.startedAt ?? "2026-07-30T09:00:00.000Z") },
     resultDelivery: overrides.delivers === true ? { mode: "mcp", requestId: "r1" } : { mode: "none" },
+    ...(overrides.delivers === true ? {} : { attended: true as const }),
     telemetry,
     ...(overrides.issueNumbers === undefined ? {} : { issueNumbers: overrides.issueNumbers }),
     ...(overrides.cwd === undefined ? {} : { cwd: overrides.cwd }),
@@ -102,9 +103,10 @@ test("an agent entry carries the launch facts a reopen replays, and nothing else
   assert.deepEqual(Object.keys(entry).filter((key) => /prompt|transcript|message|token|env/iu.test(key)), []);
 });
 
-test("an automated launch is recorded without a way back into it", () => {
+test("web research retains continuation facts without becoming user-reopenable", () => {
   const entry = agentActivity(fleetSession({ agentId: "12", type: "webresearcher", delivers: true }), "succeeded", at("2026-07-30T09:30:00.000Z"));
   assert.equal(entry.reopen, undefined);
+  assert.deepEqual(entry.continuation, { sessionId: SESSIONS[0] as SessionId });
   assert.equal(entry.outcome, "succeeded");
 });
 
