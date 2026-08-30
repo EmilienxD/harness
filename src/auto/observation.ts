@@ -24,12 +24,16 @@ export interface RunObservationSources {
 export async function observeRun(record: AutoRunRecord, sources: RunObservationSources): Promise<RunObservations> {
   const { git, github } = sources;
   let repositoryUsable = true;
+  let status;
   try {
-    await git.defaultBranch();
-    await git.fetch();
+    status = await git.status();
   } catch {
     repositoryUsable = false;
   }
+  // Fetch is a remote observation, not proof that the local checkout is a
+  // repository. Let an unavailable remote fail the check operationally instead
+  // of turning a retryable network or ref-lock error into structural damage.
+  if (repositoryUsable) await git.fetch();
   let gitHubAuthenticated = true;
   try {
     await github.checkAuthentication();
@@ -37,11 +41,8 @@ export async function observeRun(record: AutoRunRecord, sources: RunObservationS
     gitHubAuthenticated = false;
   }
 
-  const workingTree = repositoryUsable
-    ? await git.status().then(
-        (status) => ({ branch: status.branch, dirtyPaths: status.entries.map((entry) => entry.path) }),
-        () => ({ branch: undefined, dirtyPaths: [] as readonly string[] }),
-      )
+  const workingTree = repositoryUsable && status !== undefined
+    ? { branch: status.branch, dirtyPaths: status.entries.map((entry) => entry.path) }
     : { branch: undefined, dirtyPaths: [] as readonly string[] };
 
   const branchNames = [record.sessionBranch, ...record.plan.map((issue) => issue.branch)];

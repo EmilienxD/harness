@@ -42,7 +42,7 @@ import { DIRTY_RECOVERY_SENTENCE, hasTrustedDirtyWork, validateRun, type RunObse
 import { planDiscard, type DiscardBehavior, type DiscardPlan, type DiscardResult } from "../domain/run-cleanup.js";
 import type { AgentId, SessionId, TerminalId } from "../domain/contracts.js";
 import type { LaunchOrigin } from "../domain/lease.js";
-import type { GitClient, GitStatus } from "../git/client.js";
+import { GitBoundaryError, type GitClient, type GitStatus } from "../git/client.js";
 import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles, LaunchIsolation } from "../bridge/delegation.js";
 import { runWorkspacePath, type RunWorkspace, type RunWorkspaceOutcome, type RunWorkspaceProvider } from "./worktree.js";
 import { checkRun, type RunObservationSources } from "./observation.js";
@@ -189,6 +189,7 @@ export class AutoRunEngine {
   #loop: Promise<void> = Promise.resolve();
   #wake: (() => void) | undefined;
   #checking: Promise<RecoveryEligibility> | undefined;
+  #observationTail: Promise<void> = Promise.resolve();
   #generation = 0;
   readonly #owners = new Map<number, PullRequestOwner>();
   readonly #pending = new Map<number, Omit<PullRequestOwner, "prNumber" | "issueNumber">>();
@@ -280,7 +281,16 @@ export class AutoRunEngine {
       this.#persisted = persisted;
       this.options.activity?.runEnded(persisted, { kind: "interrupted" });
     }
-    const { eligibility, observations } = await checkRun(persisted, this.#observationSources(persisted));
+    let checked;
+    try {
+      checked = await this.#checkRun(persisted);
+    } catch (error) {
+      if (generation !== this.#generation) return this.#eligibility ?? { state: "checking" };
+      this.options.log?.(`auto-run recovery check unavailable: ${message(error)}`);
+      this.#eligibility = { state: "checking" };
+      return this.#eligibility;
+    }
+    const { eligibility, observations } = checked;
     if (generation !== this.#generation) return this.#eligibility ?? eligibility;
     this.#eligibility = eligibility;
     this.#titles = observations.titles;
@@ -304,6 +314,19 @@ export class AutoRunEngine {
       github: this.options.github,
       ...(root === undefined ? {} : { workspacePresent: async () => this.#exists(root) }),
     };
+  }
+
+  /** Git fetch mutates refs, so every active and UI-triggered observation shares one queue. */
+  async #checkRun(record: AutoRunRecord): ReturnType<typeof checkRun> {
+    const previous = this.#observationTail;
+    let release = (): void => undefined;
+    this.#observationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await checkRun(record, this.#observationSources(record));
+    } finally {
+      release();
+    }
   }
 
   public async dryRun(options: { readonly additionalGuideline?: string } = {}): Promise<AutoRunDryRunResult> {
@@ -521,7 +544,7 @@ export class AutoRunEngine {
     if (persisted === undefined) {
       return { behavior, closeTerminals: false, removeWorkspace: false, localBranches: [], remoteBranches: [], pullRequests: [], retained: [] };
     }
-    const { observations } = await checkRun(persisted, this.#observationSources(persisted));
+    const { observations } = await this.#checkRun(persisted);
     return planDiscard(persisted, behavior, observations);
   }
 
@@ -745,13 +768,7 @@ export class AutoRunEngine {
   /** Validates the whole frozen plan before a phase side effect. */
   async #validate(): Promise<RunObservations> {
     const record = this.#current;
-    const { eligibility, observations } = await checkRun(record, {
-      git: this.#git,
-      github: this.options.github,
-      ...(record.settings.workspaceRoot === undefined
-        ? {}
-        : { workspacePresent: async () => this.#exists(record.settings.workspaceRoot!) }),
-    });
+    const { eligibility, observations } = await this.#checkRun(record);
     this.#titles = observations.titles;
     if (eligibility.state === "broken") throw new StructuralError(eligibility.reason);
     return observations;
@@ -1590,7 +1607,17 @@ function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> 
 }
 
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : "unknown error";
+  if (!(error instanceof Error)) return "unknown error";
+  if (!(error instanceof GitBoundaryError)) return error.message;
+  const details = error.details;
+  if (typeof details !== "object" || details === null || !("stderr" in details)) return error.message;
+  const stderr = (details as { readonly stderr?: unknown }).stderr;
+  if (typeof stderr !== "string") return error.message;
+  const firstLine = stderr.split(/\r?\n/u).map((line) => line.trim()).find((line) => line.length > 0);
+  if (firstLine === undefined) return error.message;
+  // Git diagnostics are useful for ref-lock and network failures, but a remote
+  // URL may contain credentials. Keep the diagnostic while dropping whole URLs.
+  return `${error.message}: ${firstLine.replace(/\b(?:https?|ssh):\/\/\S+/giu, "<remote>")}`;
 }
 
 function fingerprint(status: GitStatus): readonly string[] {

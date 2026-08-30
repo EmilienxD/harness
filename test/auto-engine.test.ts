@@ -6,8 +6,9 @@ import type { AutoRunSettings } from "../src/domain/auto-run.js";
 import type { AutoRunRecord } from "../src/domain/run-plan.js";
 import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
 import type { LaunchOrigin } from "../src/domain/lease.js";
-import type { GitClient, GitStatus } from "../src/git/client.js";
+import { GitBoundaryError, type GitClient, type GitStatus } from "../src/git/client.js";
 import type { RunWorkspaceOutcome, RunWorkspaceProvider } from "../src/auto/worktree.js";
+import { observeRun } from "../src/auto/observation.js";
 import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
@@ -25,6 +26,8 @@ interface FakePullRequest {
 
 interface Harness {
   readonly engine: AutoRunEngine;
+  readonly git: GitClient;
+  readonly github: AutoRunGitHub;
   readonly notifications: string[];
   /** Messages the engine escalated because they need the user's hands. */
   readonly alerts: { readonly message: string; readonly url: string | undefined }[];
@@ -40,6 +43,7 @@ interface Harness {
   readonly gitCalls: string[];
   readonly commitCalls: { readonly subject: string; readonly body: string }[];
   readonly githubCalls: string[];
+  readonly logs: string[];
   readonly saved: AutoRunRecord[];
   readonly states: AutoRunState[];
   readonly state: { cleared: boolean };
@@ -110,6 +114,8 @@ interface HarnessOptions {
   readonly worktree?: boolean;
   /** Changes a frozen classification after the worker returns, before commit. */
   readonly relabelAfterImplementer?: boolean;
+  /** Adds controllable latency or failure to every remote-ref observation. */
+  readonly fetch?: () => Promise<void>;
 }
 
 function harness(options: HarnessOptions = {}): Harness {
@@ -123,6 +129,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const gitCalls: string[] = [];
   const commitCalls: { subject: string; body: string }[] = [];
   const githubCalls: string[] = [];
+  const logs: string[] = [];
   const saved: AutoRunRecord[] = [];
   const states: AutoRunState[] = [];
   const state = { cleared: false };
@@ -180,7 +187,7 @@ function harness(options: HarnessOptions = {}): Harness {
       return true;
     },
     remoteBranchExists: async (branch) => remoteBranches.has(branch),
-    fetch: async () => { gitCalls.push("fetch"); },
+    fetch: async () => { gitCalls.push("fetch"); await options.fetch?.(); },
     checkout: async (branch) => { gitCalls.push(`checkout ${branch}`); currentBranch = branch; },
     createBranch: async (branch, from) => {
       gitCalls.push(`createBranch ${branch} ${from}`);
@@ -438,6 +445,7 @@ function harness(options: HarnessOptions = {}): Harness {
       notify: (message) => notifications.push(message),
       alert: (message, url) => { notifications.push(message); alerts.push({ message, url }); },
     },
+    log: (message) => logs.push(message),
     settings: () => ({ ...SETTINGS, ...options.settings }),
     runIdFactory: () => "run_test",
     // A macrotask, not an immediately-resolved promise: a microtask-only poll
@@ -449,6 +457,8 @@ function harness(options: HarnessOptions = {}): Harness {
 
   return {
     engine,
+    git,
+    github: wrappedGithub,
     notifications,
     alerts,
     comments,
@@ -460,6 +470,7 @@ function harness(options: HarnessOptions = {}): Harness {
     gitCalls,
     commitCalls,
     githubCalls,
+    logs,
     saved,
     states,
     state,
@@ -517,6 +528,66 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
 function telemetry() {
   return { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 };
 }
+
+test("run observation distinguishes an unusable checkout from an unavailable fetch", async () => {
+  const context = harness();
+  let fetched = false;
+  const unusable = await observeRun(plannedRecord(), {
+    git: {
+      ...context.git,
+      status: async () => { throw new Error("not a repository"); },
+      fetch: async () => { fetched = true; },
+    },
+    github: context.github,
+  });
+  assert.equal(unusable.repositoryUsable, false);
+  assert.equal(fetched, false, "a checkout that failed locally is not fetched");
+
+  await assert.rejects(
+    observeRun(plannedRecord(), {
+      git: { ...context.git, fetch: async () => { throw new Error("remote ref lock busy"); } },
+      github: context.github,
+    }),
+    /remote ref lock busy/,
+  );
+});
+
+test("all run observations serialize their ref-mutating fetches", async () => {
+  let activeFetches = 0;
+  let maximumActiveFetches = 0;
+  const context = harness({
+    fetch: async () => {
+      activeFetches += 1;
+      maximumActiveFetches = Math.max(maximumActiveFetches, activeFetches);
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      activeFetches -= 1;
+    },
+  });
+  context.seed(plannedRecord());
+
+  await Promise.all([
+    context.engine.refresh(),
+    context.engine.planDiscard("record-only"),
+  ]);
+
+  assert.equal(maximumActiveFetches, 1);
+});
+
+test("a transient recovery fetch failure stays unavailable rather than becoming broken", async () => {
+  const context = harness({
+    fetch: async () => {
+      throw new GitBoundaryError("command-failed", "git fetch failed", {
+        stderr: "fatal: cannot lock ref 'refs/remotes/origin/aboard/run/test'",
+      });
+    },
+  });
+  const record = plannedRecord();
+  context.seed(record);
+
+  assert.deepEqual(await context.engine.refresh(), { state: "checking" });
+  assert.equal(context.record()?.outcome?.kind, "interrupted", "the recoverable run record survives an unavailable observation");
+  assert.match(context.logs.join("\n"), /recovery check unavailable: git fetch failed: fatal: cannot lock ref/);
+});
 
 test("the afk path runs branch to merge and performs every side effect itself", async () => {
   const context = harness();
