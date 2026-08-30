@@ -804,10 +804,11 @@ export class AutoRunEngine {
     await this.#git.fetch();
     const baseOnRemote = await this.#git.remoteBranchExists(base);
     if (!await this.#git.branchExists(record.sessionBranch)) {
-      const baseSha = await this.#git.remoteBranchSha(base) ?? await this.#git.branchSha(base);
+      const localBaseSha = await this.#git.branchSha(base);
+      const baseSha = localBaseSha ?? await this.#git.remoteBranchSha(base);
       if (baseSha === undefined) throw new Error(`the base branch ${base} no longer exists`);
       await this.#journal({ kind: "create-branch", branch: record.sessionBranch, base, baseSha });
-      await this.#git.createBranch(record.sessionBranch, baseOnRemote ? `origin/${base}` : base);
+      await this.#git.createBranch(record.sessionBranch, localBaseSha === undefined ? `origin/${base}` : base);
     }
     const sha = await this.#git.branchSha(record.sessionBranch);
     if (sha !== undefined && this.#current.pendingAction?.kind === "create-branch" && sha !== this.#current.pendingAction.baseSha) {

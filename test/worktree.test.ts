@@ -99,7 +99,7 @@ interface FakeGit {
 function fakeGit(options: FakeGitOptions = {}): FakeGit {
   const calls: string[] = [];
   const worktrees = [...(options.worktrees ?? [])];
-  const branches = new Set(options.branches ?? []);
+  const branches = new Set(options.branches ?? ["main"]);
   const client = {
     currentBranch: async () => "main",
     defaultBranch: async () => "main",
@@ -210,14 +210,14 @@ test("worktree mode off leaves the run in the user's own checkout", async () => 
   assert.deepEqual(git.calls, [], "no checkout is created, and git is not asked about one");
 });
 
-test("preparing a checkout creates it from the remote base and installs into it", async () => {
+test("preparing a checkout creates it from the local base and installs into it", async () => {
   const { provider, git, setups, notifications } = fixture({ setupFile: "npm ci\n" });
   const workspace = await provider.prepare(REQUEST);
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
   assert.equal(workspace.root, path);
   assert.equal(workspace.isolated, true);
   assert.deepEqual(workspace.denyTools, isolationDenyRules(PROJECT));
-  assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test origin/main`), git.calls.join(", "));
+  assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test main`), git.calls.join(", "));
   // The setup command runs in the new checkout, from the project's own copy of
   // the file — the one the user edits, not whatever the branch carries.
   assert.equal(setups.length, 1);
@@ -226,6 +226,13 @@ test("preparing a checkout creates it from the remote base and installs into it"
   assert.equal(setups[0]?.env.ABOARD_PROJECT_ROOT, PROJECT);
   assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "aboard/run/test");
   assert.ok(notifications.some((message) => message.includes(path)));
+});
+
+test("a checkout falls back to the remote base when no local base ref exists", async () => {
+  const { provider, git } = fixture({ git: { branches: [] } });
+  await provider.prepare(REQUEST);
+  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test origin/main`), git.calls.join(", "));
 });
 
 test("an existing session branch is checked out rather than created a second time", async () => {
@@ -283,13 +290,13 @@ test("tracked runtime state refuses a new checkout at its exact start point befo
   const { provider, git, overlays } = fixture({ git: { trackedRuntime } });
   await assert.rejects(provider.prepare(REQUEST), (error: unknown) => {
     assert.ok(error instanceof RunWorkspaceError);
-    assert.match(error.message, /origin\/main tracks 25 path/u);
+    assert.match(error.message, /main tracks 25 path/u);
     assert.match(error.message, /\.gitkeep/u, "even an empty keeper is tracked runtime state");
     assert.match(error.message, /git rm -r --cached/u);
     assert.doesNotMatch(error.message, /file-21\.json/u, "the diagnostic is bounded");
     return true;
   });
-  assert.ok(git.calls.includes("trackedPathsUnder origin/main .aboard/runtime"), git.calls.join(", "));
+  assert.ok(git.calls.includes("trackedPathsUnder main .aboard/runtime"), git.calls.join(", "));
   assert.ok(!git.calls.some((call) => call.startsWith("addWorktree")), "the unsafe checkout is never created");
   assert.deepEqual(overlays, [], "no source configuration is read after the preflight fails");
 });

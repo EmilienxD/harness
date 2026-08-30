@@ -110,6 +110,8 @@ interface HarnessOptions {
   readonly closeFails?: boolean;
   /** The run's target branch exists only locally, so no pull request can target it. */
   readonly baseNotOnRemote?: boolean;
+  /** A stale remote target SHA, distinct from the local target branch. */
+  readonly remoteBaseSha?: string;
   /** Runs with a checkout of its own instead of the user's working tree. */
   readonly worktree?: boolean;
   /** Changes a frozen classification after the worker returns, before commit. */
@@ -171,7 +173,11 @@ function harness(options: HarnessOptions = {}): Harness {
     headSha: async () => shaFor(currentBranch),
     branchExists: async (branch) => branches.has(branch),
     branchSha: async (branch) => branches.has(branch) ? shaFor(branch) : undefined,
-    remoteBranchSha: async (branch) => remoteBranches.has(branch) ? shaFor(branch) : undefined,
+    remoteBranchSha: async (branch) => remoteBranches.has(branch)
+      ? branch === (options.startBranch ?? "main") && options.remoteBaseSha !== undefined
+        ? options.remoteBaseSha
+        : shaFor(branch)
+      : undefined,
     commitDetails: async (ref) => ({ sha: shaFor(ref), parents: ["parent0000000000000000000000000000000000"], subject: "subject", message: "subject", treeSha: "tree000000000000000000000000000000000000" }),
     stagedTreeSha: async () => "tree000000000000000000000000000000000000",
     deleteBranchAt: async (branch, expected) => {
@@ -600,9 +606,9 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(context.launches[0]?.description, "address issue 34");
   assert.match(context.launches[0]?.prompt ?? "", /^Address issue #34/);
   assert.deepEqual(context.gitCalls.filter((call) => call !== "fetch"), [
-    // The session branch is cut from the remote's copy of the user's branch and
-    // published before any issue starts, because it is a pull request base.
-    `createBranch ${SESSION} origin/main`, `push ${SESSION} -u`,
+    // The session branch carries the user's local branch, including commits not
+    // published yet, and is published before any issue starts.
+    `createBranch ${SESSION} main`, `push ${SESSION} -u`,
     `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch aboard/34-add-retry-backoff ${SESSION}`,
     "add", "commit", "push aboard/34-add-retry-backoff -u",
     // After the merge, so the record carries the session branch tip the merge
@@ -617,6 +623,21 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.match(context.notifications.join("\n"), /issue #34 committed \([0-9a-z]+\) and opened PR #56/);
   assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
   assert.equal(context.state.cleared, true);
+});
+
+test("resume creates a missing session branch from the unpublished local target", async () => {
+  const context = harness({
+    remoteBaseSha: "f".repeat(40),
+    implementerMessage: "The dependency is unavailable.",
+  });
+  context.seed(plannedRecord({ checkpoint: "workspace-ready" }));
+
+  assert.equal((await context.engine.resume()).started, true);
+  await context.engine.settle();
+
+  assert.ok(context.gitCalls.includes(`createBranch ${SESSION} main`), context.gitCalls.join(", "));
+  assert.equal(context.record()?.branchShas[SESSION], context.sha("main"));
+  assert.notEqual(context.record()?.branchShas[SESSION], "f".repeat(40));
 });
 
 test("auto-run freezes recursive issue context and passes it only as launch data", async () => {

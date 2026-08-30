@@ -389,11 +389,12 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
       await this.options.git.addWorktree(path, request.sessionBranch);
       return true;
     }
-    // Cut from the remote's copy of the base for the same reason the in-place
-    // run does: a run must not inherit local commits the user has not published.
-    const startPoint = await this.options.git.remoteBranchExists(request.base)
-      ? `origin/${request.base}`
-      : request.base;
+    // The user's local branch is the run's source of truth, including commits
+    // not published yet. Fall back to the remote only for a detached checkout
+    // whose resolved default branch has no local ref.
+    const startPoint = await this.options.git.branchExists(request.base)
+      ? request.base
+      : `origin/${request.base}`;
     await this.#requireRuntimeUntracked(this.options.git, startPoint);
     await this.options.git.addWorktree(path, request.sessionBranch, startPoint);
     return true;
