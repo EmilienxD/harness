@@ -619,7 +619,7 @@ function planPrompt(
   }
 
   const relativePath = spillRelativePath(options.runtimeDirectory, options.stem);
-  const reference = `Your full task is in @${relativePath} — read it first.`;
+  const reference = `Your full task is in @${relativePath} — follow it.`;
   const withHeadline = `${prompt.headline} ${reference}`;
   const stub =
     withHeadline.length <= options.threshold && canQuoteArgument(options.shell, withHeadline)

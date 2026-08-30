@@ -261,17 +261,18 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   );
   const plan = planLaunch(request({ shell: "git-bash", prompt }));
 
-  assert.deepEqual(plan.args, [
+  // The stub's wording is free to change; what the launch must deliver is the
+  // headline and a pointer at the spilled file.
+  const stub = plan.args.at(-1)!;
+  assert.ok(stub.includes("#47"));
+  assert.ok(stub.includes("@.aboard/runtime/prompts/a1b2c3.md"));
+  assert.deepEqual(plan.args.slice(0, -1), [
     "--session-id",
     sessionId,
     ...definitionArgs("implementer"),
     "--disable-slash-commands",
-    "Address issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.",
   ]);
-  assert.equal(
-    plan.commandLine,
-    `claude --session-id ${sessionId} ${definitionFlags("implementer")} --disable-slash-commands 'Address issue #47 — Add token refresh. Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.'`,
-  );
+  assert.ok(plan.commandLine.includes(`'${stub}'`));
   assert.equal(plan.promptDelivery, "spilled");
   assert.equal(plan.spill?.relativePath, ".aboard/runtime/prompts/a1b2c3.md");
   assert.equal(plan.spill?.contents, `${prompt.text}\n`);
@@ -927,14 +928,17 @@ test("spills what a shell cannot represent, per shell", () => {
   assert.equal(planLaunch(request({ prompt: quoted, shell: "git-bash" })).promptDelivery, "inline");
   assert.equal(planLaunch(request({ prompt: quoted, shell: "cmd" })).promptDelivery, "spilled");
 
-  // A headline that is itself unquotable falls back to a generic stub.
+  // A headline that is itself unquotable falls back to a generic stub: just a
+  // pointer at the spilled file, no headline text.
   const plan = planLaunch(
     request({
       prompt: resolvedPromptFromText(`Fix the "auth" bug.\n${"detail ".repeat(1000)}`),
       shell: "powershell",
     }),
   );
-  assert.deepEqual(plan.args.at(-1), "Your full task is in @.aboard/runtime/prompts/a1b2c3.md — read it first.");
+  const stub = plan.args.at(-1)!;
+  assert.ok(stub.includes("@.aboard/runtime/prompts/a1b2c3.md"));
+  assert.equal(stub.includes("auth"), false);
 });
 
 test("quotes Windows paths with spaces, unicode, and quotes", () => {

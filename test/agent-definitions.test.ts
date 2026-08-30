@@ -116,8 +116,7 @@ test("parses every worker definition and derives capability from its exact tools
     assert.equal(agent.effort, expected[name].effort);
     assert.deepEqual(agent.tools, expected[name].tools);
     assert.equal(agent.writeCapability, expected[name].capability);
-    if (name === "prototyper") assert.match(agent.prompt, /interactive prototyping agent/u);
-    else assert.ok(agent.prompt.length > 1_000, `${name}.md must carry a complete system prompt`);
+    assert.ok(agent.prompt.length > 1_000, `${name}.md must carry a complete system prompt`);
   }
 });
 

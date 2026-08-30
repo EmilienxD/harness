@@ -77,9 +77,10 @@ test("resolves an implementation prompt from issue, parent issue, and labels", a
   });
 
   assert.ok(prompt !== undefined);
-  assert.equal(prompt.headline, "Address issue #47 — Add token refresh.");
   // Caller-supplied input survives verbatim; the resolved wording around it is
   // free to change without touching this test.
+  assert.ok(prompt.text.includes("#47"));
+  assert.ok(prompt.text.includes("Add token refresh"));
   assert.ok(prompt.text.includes("Keep the change small."));
   assert.ok(prompt.text.includes("Refresh the access token before it expires."));
   assert.deepEqual(
@@ -154,8 +155,9 @@ test("resolves a review prompt with the contract and the diff", async () => {
     focus: "error handling",
   });
 
-  assert.equal(prompt?.headline, "Review pull request #42 — Add token refresh.");
   // Caller-supplied material survives verbatim.
+  assert.ok(prompt?.text.includes("#42"));
+  assert.ok(prompt?.text.includes("Add token refresh"));
   assert.ok(prompt?.text.includes("error handling"));
   assert.ok(prompt?.text.includes("--- a/src/auth.ts"));
   assert.deepEqual(
@@ -174,7 +176,7 @@ test("leaves a bare brainstorm launch with no prompt at all", async () => {
     topic: "Rework auth",
     relatedIssueNumbers: [31, 999],
   });
-  assert.equal(prompt?.headline, "Brainstorm: Rework auth");
+  assert.ok(prompt?.text.includes("Rework auth"));
   // Resolvable related issues contribute their content; missing ones are dropped.
   assert.ok(prompt?.text.includes("The auth subsystem is replaced end to end."));
   assert.equal(prompt?.text.includes("999"), false);
@@ -355,7 +357,8 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
     github: new FakeGitHub({ issues: [issue47, parent31], pullRequests: [pull42], diff: "+ refreshEarly();" }),
   }));
   const guideline = "no unit tests needed";
-  const expectedEnd = `# Additional User Guideline For this Session\n\n${guideline}`;
+  // The resolved text ends with the caller's guideline, verbatim; the heading
+  // above it is prose and free to change.
 
   const implementer = await adapter.resolve({
     type: "implementer",
@@ -363,8 +366,10 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
     issues: [47],
     additionalGuideline: guideline,
   }, { interactive: false });
-  assert.equal(implementer?.text.endsWith(expectedEnd), true);
-  assert.match(implementer?.text ?? "", /## Disposition[\s\S]*# Additional User Guideline/u);
+  const implementerText = implementer?.text ?? "";
+  assert.equal(implementerText.trimEnd().endsWith(guideline), true);
+  // The resolved issue context comes first.
+  assert.equal(implementerText.indexOf("Refresh the access token before it expires.") < implementerText.indexOf(guideline), true);
 
   for (const type of ["pr-doctor-afk", "pr-doctor-hitl"] as const) {
     const doctor = await adapter.resolve({
@@ -373,8 +378,10 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
       pullRequest: 42,
       additionalGuideline: guideline,
     }, { interactive: type === "pr-doctor-hitl" });
-    assert.equal(doctor?.text.endsWith(expectedEnd), true, type);
-    assert.match(doctor?.text ?? "", /## Diff[\s\S]*# Additional User Guideline/u, type);
+    const doctorText = doctor?.text ?? "";
+    assert.equal(doctorText.trimEnd().endsWith(guideline), true, type);
+    // The resolved diff comes first.
+    assert.equal(doctorText.indexOf("+ refreshEarly();") < doctorText.indexOf(guideline), true, type);
   }
 });
 

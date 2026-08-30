@@ -607,7 +607,9 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(context.launches[0]?.expectsUncommittedTree, true);
   assert.equal(context.launches[0]?.recursiveIssueReferences, false);
   assert.equal(context.launches[0]?.description, "address issue 34");
-  assert.match(context.launches[0]?.prompt ?? "", /^Address issue #34/);
+  // The issue number and branch reach the prompt; the wording around them is free.
+  assert.equal(context.launches[0]?.prompt?.includes("#34"), true);
+  assert.equal(context.launches[0]?.prompt?.includes("aboard/34-add-retry-backoff"), true);
   assert.deepEqual(context.gitCalls.filter((call) => call !== "fetch"), [
     // The session branch carries the user's local branch, including commits not
     // published yet, and is published before any issue starts.
