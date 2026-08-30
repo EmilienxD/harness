@@ -126,6 +126,14 @@ export interface OpenPullRequest {
   readonly reviewState: string;
 }
 
+export interface BranchPullRequest {
+  readonly number: number;
+  readonly title: string;
+  readonly state: "open" | "closed" | "merged";
+  readonly head: string;
+  readonly base: string;
+}
+
 /** The complete open-issue queue used by auto-run. */
 export interface ImplementableIssues {
   readonly candidates: readonly CandidateIssue[];
@@ -586,6 +594,22 @@ export class GitHubClient implements GitHubPromptSource {
     const output = await this.gh.run(["pr", "list", "--state", "all", "--head", branch, "--limit", "1", "--json", "number"]);
     const items = array(json(output, "branch pull request lookup"), "branch pull request lookup");
     return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
+  }
+
+  /** Pull requests whose head or base is one of the named branches, for destructive-cleanup previews. */
+  public async listPullRequestsForBranches(branches: readonly string[]): Promise<readonly BranchPullRequest[]> {
+    if (branches.length === 0) return [];
+    const wanted = new Set(branches);
+    const output = await this.gh.run(["pr", "list", "--state", "all", "--limit", "1000", "--json", "number,title,state,headRefName,baseRefName"]);
+    return array(json(output, "branch pull requests"), "branch pull requests").flatMap((value, index) => {
+      const item = record(value, `branch pull request[${index}]`);
+      const head = string(item.headRefName, `branch pull request[${index}].headRefName`);
+      const base = string(item.baseRefName, `branch pull request[${index}].baseRefName`);
+      if (!wanted.has(head) && !wanted.has(base)) return [];
+      const rawState = string(item.state, `branch pull request[${index}].state`).toLowerCase();
+      if (rawState !== "open" && rawState !== "closed" && rawState !== "merged") throw new GitHubBoundaryError("malformed-output", `branch pull request[${index}].state is unknown`);
+      return [{ number: integer(item.number, `branch pull request[${index}].number`), title: string(item.title, `branch pull request[${index}].title`), state: rawState, head, base }];
+    });
   }
 
   /** The most recently opened pull request still open, for `review_pr`. */

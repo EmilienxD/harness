@@ -431,6 +431,17 @@ test("branch pull request recovery can observe closed and merged records", async
   assert.deepEqual(gh.calls, [["pr", "list", "--state", "all", "--head", "aboard/34-fix", "--limit", "1", "--json", "number"]]);
 });
 
+test("branch cleanup finds pull requests where an aboard branch is either head or base", async () => {
+  const gh = new FixtureGh(() => JSON.stringify([
+    { number: 58, title: "Issue work", state: "OPEN", headRefName: "aboard/34-fix", baseRefName: "aboard/run/old" },
+    { number: 59, title: "Unrelated", state: "MERGED", headRefName: "feature/x", baseRefName: "main" },
+  ]));
+  assert.deepEqual(await new GitHubClient(gh).listPullRequestsForBranches(["aboard/run/old"]), [
+    { number: 58, title: "Issue work", state: "open", head: "aboard/34-fix", base: "aboard/run/old" },
+  ]);
+  assert.deepEqual(gh.calls, [["pr", "list", "--state", "all", "--limit", "1000", "--json", "number,title,state,headRefName,baseRefName"]]);
+});
+
 test("closing a pull request checks its identity and state before mutating anything", async () => {
   const pullRequest = (overrides: Record<string, unknown>) => ({
     number: 57, title: "PR", body: "", merged: false, state: "OPEN", mergeable: "MERGEABLE",

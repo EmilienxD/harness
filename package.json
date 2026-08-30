@@ -144,6 +144,11 @@
         "command": "aboard.activity.clear",
         "title": "Aboard: Clear Recent Activity",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "aboard.clearBranches",
+        "title": "Aboard: Clear Remaining Branches",
+        "icon": "$(git-branch-delete)"
       }
     ],
     "viewsContainers": {
@@ -195,6 +200,11 @@
           "command": "aboard.updateProject",
           "when": "view == aboard.fleet",
           "group": "navigation@1"
+        },
+        {
+          "command": "aboard.clearBranches",
+          "when": "view == aboard.fleet && !aboard.autoRunActive",
+          "group": "navigation@2"
         },
         {
           "command": "aboard.reopenSession",
@@ -300,6 +310,10 @@
         {
           "command": "aboard.activity.clear",
           "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.clearBranches",
+          "when": "aboard.initialized && !aboard.autoRunActive"
         },
         {
           "command": "aboard.openIssue",

@@ -80,6 +80,8 @@ const STARTUP_PROOF_TIMEOUT_MS = 60_000;
 const SESSION_LIVENESS_POLL_MS = 5_000;
 import { registerReviewCommand } from "./vscode/review.js";
 import { ProcessGitClient, type GitClient } from "./git/client.js";
+import { AboardBranchCleanup, ProcessAboardBranchRepository } from "./git/branch-cleanup.js";
+import { registerBranchCleanupCommand } from "./vscode/branch-cleanup.js";
 import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
 import { closeSettledAutoRunTerminal } from "./auto/terminal-cleanup.js";
 import { WorktreeRunWorkspaces } from "./auto/worktree.js";
@@ -508,6 +510,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   }
   activeSessionMonitor = sessionMonitor;
   const git: GitClient = new ProcessGitClient(workspaceRoot);
+  const branchCleanup = new AboardBranchCleanup(new ProcessAboardBranchRepository(workspaceRoot), github);
   const autoRun = new AutoRunEngine({
     git,
     gitFor: (cwd) => new ProcessGitClient(cwd),
@@ -936,6 +939,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }),
     commands.registerCommand("aboard.resumeManager", () => launch("resume")),
     commands.registerCommand("aboard.newManager", () => launch("new")),
+    registerBranchCleanupCommand({
+      registerCommand: (command, callback) => commands.registerCommand(command, async () => {
+        if (!requireInitialized()) return;
+        if (autoRun.state() !== undefined) { void window.showWarningMessage("Stop the active auto-run before clearing aboard branches."); return; }
+        await callback();
+      }),
+      confirm: async (message, detail, action) => window.showWarningMessage(message, { modal: true, detail }, action),
+      info: (message) => { void window.showInformationMessage(message); },
+      error: (message) => { void window.showErrorMessage(message); },
+    }, branchCleanup),
     registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
     registerReopenCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined),
