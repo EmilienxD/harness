@@ -52,7 +52,7 @@ Cleanup never deletes a dirty checkout, never touches a branch or pull request w
 
 ## Running in a checkout of its own
 
-By default an auto-run works in your files: it moves HEAD, needs a clean working tree before it starts, and owns the repository until it finishes. With `aboard.autoRun.worktree.enabled` on, it gets a second checkout of this repository instead — created beside your project directory, never inside it — runs every agent there, and leaves your working tree and your branch exactly as they are. You can keep working while it does, and a dirty tree of yours no longer refuses the run.
+By default an auto-run works in your files: it moves HEAD, needs a clean working tree before it starts, and owns the repository until it finishes. After success, cancellation, or interruption, aboard returns to the branch where the run started. After a failure, it keeps the current run branch active so you can inspect and fix the failure there. With `aboard.autoRun.worktree.enabled` on, the run gets a second checkout of this repository instead — created beside your project directory, never inside it — runs every agent there, and leaves your working tree and your branch exactly as they are. You can keep working while it does, and a dirty tree of yours no longer refuses the run.
 
 | Setting | Default | What it does |
 | :-- | :-- | :-- |

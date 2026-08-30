@@ -599,13 +599,15 @@ export class AutoRunEngine {
       currentPullRequest: currentPullRequest(record),
     });
     const homeBranch = record.targetBranch;
+    let attemptEnd: AttemptEnd | undefined;
     this.#loop = this.#run(controller.signal)
+      .then((end) => { attemptEnd = end; })
       .catch((error: unknown) => {
         this.options.log?.(`auto-run failed: ${message(error)}`);
       })
       .finally(() => {
         this.#controller = undefined;
-        void this.#restoreOriginalBranch(homeBranch).finally(() => {
+        void this.#restoreOriginalBranch(homeBranch, attemptEnd).finally(() => {
           this.#workspace = undefined;
           this.#publish(undefined);
           void this.refresh();
@@ -613,8 +615,13 @@ export class AutoRunEngine {
       });
   }
 
-  async #restoreOriginalBranch(branch: string | undefined): Promise<void> {
-    if (branch === undefined || this.#workspace?.isolated === true) return;
+  async #restoreOriginalBranch(branch: string | undefined, end: AttemptEnd | undefined): Promise<void> {
+    if (
+      branch === undefined
+      || this.#workspace?.isolated === true
+      || end === undefined
+      || (end.outcome !== "succeeded" && end.outcome.kind === "failed")
+    ) return;
     try {
       const status = await this.options.git.status();
       if (status.branch === branch) return;
@@ -657,7 +664,7 @@ export class AutoRunEngine {
   }
 
 
-  async #run(signal: AbortSignal): Promise<void> {
+  async #run(signal: AbortSignal): Promise<AttemptEnd> {
     let end: AttemptEnd = { outcome: { kind: "interrupted" } };
     try {
       await this.#recoverPendingAction();
@@ -667,15 +674,14 @@ export class AutoRunEngine {
     } catch (error) {
       if (error instanceof StructuralError) {
         end = { outcome: { kind: "failed", reason: error.eligibilityReason } };
-        await this.#conclude(end, signal, { sideEffects: false });
-        return;
+        return this.#conclude(end, signal, { sideEffects: false });
       }
       end = { outcome: { kind: "failed", reason: message(error) } };
     }
-    await this.#conclude(end, signal, { sideEffects: true });
+    return this.#conclude(end, signal, { sideEffects: true });
   }
 
-  async #conclude(end: AttemptEnd, signal: AbortSignal, options: { readonly sideEffects: boolean }): Promise<void> {
+  async #conclude(end: AttemptEnd, signal: AbortSignal, options: { readonly sideEffects: boolean }): Promise<AttemptEnd> {
     let final = end;
     try {
       if (options.sideEffects) final = await this.#concludeRun(end, signal);
@@ -698,6 +704,7 @@ export class AutoRunEngine {
     }
     await this.#releaseWorkspace(final.outcome === "succeeded" ? "drained" : "interrupted");
     this.#record = undefined;
+    return final;
   }
 
   async #releaseWorkspace(outcome: RunWorkspaceOutcome): Promise<void> {

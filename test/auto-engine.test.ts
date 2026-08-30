@@ -765,15 +765,15 @@ test("the end-of-run restore does not trigger on the mid-run cleanup checkout", 
   assert.equal(cleanups.length, 1, "only the terminal restore touches the original branch — per-issue cleanup still uses the default");
 });
 
-test("a stop restores the original branch when the tree is clean", async () => {
-  // A failed implementer stops the run; with producesChanges off the launch
-  // left nothing behind, so the restore is safe and must run.
+test("a failed run keeps its current branch active when the tree is clean", async () => {
+  // A failed implementer stops the run; even without edits, its issue branch is
+  // the useful place for the user to inspect and fix the failure.
   const context = harness({ startBranch: "feature/wip", implementerFails: true, producesChanges: false });
   await context.engine.start();
   await context.engine.settle();
 
   assert.match(context.notifications.join("\n"), /implementer failed/);
-  assert.equal(context.gitCalls[context.gitCalls.length - 1], "checkout feature/wip");
+  assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
 });
 
 test("a stop with uncommitted work does not check out over it", async () => {
@@ -783,6 +783,18 @@ test("a stop with uncommitted work does not check out over it", async () => {
 
   assert.match(context.notifications.join("\n"), /implementer failed/);
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
+});
+
+test("a user cancellation still restores the original branch", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+  });
+  await context.engine.start();
+  context.engine.stop();
+  await context.engine.settle();
+
+  assert.equal(context.gitCalls[context.gitCalls.length - 1], "checkout feature/wip");
 });
 
 test("the implementer's account of its change is posted on the issue it addressed", async () => {
@@ -924,7 +936,13 @@ test("a hitl pull request closed unmerged stops the run and leaves the branch al
   await context.engine.settle();
 
   assert.match(context.notifications.join("\n"), /stopped at issue #35 .*closed without merging/);
-  assert.equal(context.gitCalls.includes("checkout main"), true, "the branch phase still ran, but no cleanup checkout followed the stop");
+  const branchCreated = context.gitCalls.lastIndexOf(`createBranch aboard/35-migrate-the-queue ${SESSION}`);
+  assert.notEqual(branchCreated, -1, "the issue branch was created");
+  assert.deepEqual(
+    context.gitCalls.slice(branchCreated + 1).filter((call) => call.startsWith("checkout ")),
+    [],
+    "no cleanup or original-branch checkout followed the failure",
+  );
   assert.equal(context.state.cleared, false, "the record survives a stop so an explicit resume can re-enter");
 });
 

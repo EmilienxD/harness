@@ -179,9 +179,12 @@ flowchart TD
   RUNPR --> RUNMERGE{"aboard.autoRun.mergeRunPullRequest?"}
   RUNMERGE -->|on| RUNMERGED["Extension merges it,<br/>reconciling a conflict once"]
   RUNMERGE -->|off, or the run was stopped| RUNWAIT["Extension alerts the user<br/>PR left open for them"]
-  RUNMERGED --> DONE["Restore the user's original branch<br/>and end the run"]
-  RUNWAIT --> DONE
-  DONE --> RECORD["Record the attempt's outcome:<br/>succeeded, cancelled, interrupted, or failed"]
+  RUNMERGED --> OUTCOME{"Attempt outcome?"}
+  RUNWAIT --> OUTCOME
+  OUTCOME -->|succeeded, cancelled, or interrupted| RESTORE["Restore the user's original branch"]
+  OUTCOME -->|failed| LEAVE["Keep the current run branch active<br/>for the user to inspect and fix"]
+  RESTORE --> RECORD["Record the attempt's outcome:<br/>succeeded, cancelled, interrupted, or failed"]
+  LEAVE --> RECORD
 ```
 
 - The extension owns every automatic git and GitHub side effect: branch, commit, push, issue comment, issue closure, pull request, and merge. Implementers and pr-doctors leave edits uncommitted and never run `gh` or mutating git workflow commands.
