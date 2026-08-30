@@ -113,6 +113,12 @@ export interface ReviewState {
   readonly unresolvedThreadCount: number;
 }
 
+/** GraphQL spells these APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED; null is an unreviewed pull request. */
+function reviewDecision(value: unknown, context: string): ReviewState["decision"] {
+  if (value === null || value === undefined) return "unreviewed";
+  return string(value, context).toLowerCase().replace("_", "-") as ReviewState["decision"];
+}
+
 export interface UnreviewedMerge {
   readonly number: number;
   readonly title: string;
@@ -152,6 +158,8 @@ export interface PullRequestMergeFacts {
   readonly headSha: string;
   /** GitHub's resulting commit once merged. */
   readonly mergeCommitSha?: string;
+  /** Already in the pull-request query, so callers need no second round trip for it. */
+  readonly reviewDecision: ReviewState["decision"];
 }
 
 function mergeability(value: unknown): PullRequestMergeFacts["mergeable"] {
@@ -596,6 +604,31 @@ export class GitHubClient implements GitHubPromptSource {
     return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
   }
 
+  /**
+   * The newest pull request for each head branch, in any state, in one query —
+   * the batched form of `findPullRequestForBranch` for plan-wide checks.
+   */
+  public async findPullRequestsByHead(branches: readonly string[]): Promise<ReadonlyMap<string, number>> {
+    const found = new Map<string, number>();
+    const wanted = [...new Set(branches)];
+    if (wanted.length === 0) return found;
+    // A first:1 lookup per branch, aliased into a single GraphQL round trip.
+    // Aliases must be GraphQL names, so the branch is carried as a variable.
+    const fields = wanted.map((branch, index) =>
+      `b${index}:pullRequests(headRefName:$h${index},first:1,states:[OPEN,CLOSED,MERGED],orderBy:{field:CREATED_AT,direction:DESC}){nodes{number}}`
+    ).join(" ");
+    const parameters = wanted.map((_branch, index) => `$h${index}:String!`).join(",");
+    const variables = Object.fromEntries(wanted.map((branch, index) => [`h${index}`, branch]));
+    const data = await this.#graphql(`query($owner:String!,$repo:String!,${parameters}){repository(owner:$owner,name:$repo){${fields}}}`, variables);
+    const repository = repositoryFromGraphql(data);
+    for (let index = 0; index < wanted.length; index += 1) {
+      const nodes = array(record(repository[`b${index}`], `pull request lookup b${index}`).nodes, `pull request lookup b${index}.nodes`);
+      if (nodes.length === 0) continue;
+      found.set(wanted[index]!, integer(record(nodes[0], "pull request").number, "pull request.number"));
+    }
+    return found;
+  }
+
   /** Pull requests whose head or base is one of the named branches, for destructive-cleanup previews. */
   public async listPullRequestsForBranches(branches: readonly string[]): Promise<readonly BranchPullRequest[]> {
     if (branches.length === 0) return [];
@@ -656,6 +689,7 @@ export class GitHubClient implements GitHubPromptSource {
       mergeable: mergeability(item.mergeable),
       url: string(item.url, "pullRequest.url"),
       headSha: string(item.headRefOid, "pullRequest.headRefOid"),
+      reviewDecision: reviewDecision(item.reviewDecision, "pullRequest.reviewDecision"),
       ...(item.mergeCommit === null || item.mergeCommit === undefined
         ? {}
         : { mergeCommitSha: string(record(item.mergeCommit, "pullRequest.mergeCommit").oid, "pullRequest.mergeCommit.oid") }),
@@ -670,9 +704,7 @@ export class GitHubClient implements GitHubPromptSource {
   public async getReviewState(number: number): Promise<ReviewState> {
     const data = await this.#graphql(PR_QUERY, { number });
     const item = record(repositoryFromGraphql(data).pullRequest, "pullRequest");
-    const decision = item.reviewDecision === null
-      ? "unreviewed"
-      : string(item.reviewDecision, "pullRequest.reviewDecision").toLowerCase().replace("_", "-") as ReviewState["decision"];
+    const decision = reviewDecision(item.reviewDecision, "pullRequest.reviewDecision");
     const threads = array(record(item.reviewThreads, "pullRequest.reviewThreads").nodes, "pullRequest.reviewThreads.nodes");
     return { decision, unresolvedThreadCount: threads.filter((thread, index) => !boolean(record(thread, `thread[${index}]`).isResolved, `thread[${index}].isResolved`)).length };
   }

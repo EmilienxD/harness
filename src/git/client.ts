@@ -93,6 +93,8 @@ export interface GitClient {
   codebase(): Promise<CodebaseSurvey>;
   headSha(short?: boolean): Promise<string>;
   branchExists(branch: string): Promise<boolean>;
+  /** Which of these branches exist, locally and on the remote, in one read. */
+  existingBranches(branches: readonly string[]): Promise<{ readonly local: ReadonlySet<string>; readonly remote: ReadonlySet<string> }>;
   branchSha(branch: string): Promise<string | undefined>;
   /** The same, for `origin/<branch>` as of the last fetch. */
   remoteBranchSha(branch: string): Promise<string | undefined>;
@@ -103,7 +105,11 @@ export interface GitClient {
   /** The same guard against `origin/<branch>`, then a delete-push. */
   deleteRemoteBranchAt(branch: string, expectedSha: string): Promise<boolean>;
   remoteBranchExists(branch: string): Promise<boolean>;
-  fetch(): Promise<void>;
+  /**
+   * Updates remote-tracking refs. `fresh` bypasses any fetch coalescing the
+   * client applies, for the reads that verify a mutation's recorded outcome.
+   */
+  fetch(options?: { readonly fresh?: boolean }): Promise<void>;
   checkout(branch: string): Promise<void>;
   createBranch(branch: string, from: string): Promise<void>;
   /** Deletes a local branch only when Git considers it fully merged. */
@@ -168,6 +174,26 @@ export class ProcessGitClient implements GitClient {
 
   public async branchExists(branch: string): Promise<boolean> {
     return await this.tryRun(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) !== undefined;
+  }
+
+  public async existingBranches(branches: readonly string[]): Promise<{ readonly local: ReadonlySet<string>; readonly remote: ReadonlySet<string> }> {
+    const wanted = new Set(branches);
+    const local = new Set<string>();
+    const remote = new Set<string>();
+    if (wanted.size === 0) return { local, remote };
+    // One ref listing instead of two probes per branch. for-each-ref matches
+    // whole ref namespaces, so the branch names still need the exact filter.
+    const listed = await this.tryRun(["for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/origin/"]);
+    for (const ref of (listed ?? "").split(/\r?\n/u)) {
+      if (ref.startsWith("refs/heads/")) {
+        const name = ref.slice("refs/heads/".length);
+        if (wanted.has(name)) local.add(name);
+      } else if (ref.startsWith("refs/remotes/origin/")) {
+        const name = ref.slice("refs/remotes/origin/".length);
+        if (wanted.has(name)) remote.add(name);
+      }
+    }
+    return { local, remote };
   }
 
   public async branchSha(branch: string): Promise<string | undefined> {
@@ -384,6 +410,74 @@ export class ProcessGitClient implements GitClient {
       return undefined;
     }
   }
+}
+
+export const FETCH_FRESHNESS_MS = 5_000;
+
+/**
+ * Coalesces remote fetches. Every fetch updates the same remote-tracking refs,
+ * so one that succeeded moments ago already serves the next reader; the reads
+ * that verify a mutation's postcondition ask for `fresh` instead. Callers are
+ * not serialized: a fetch in flight is shared rather than queued behind.
+ */
+export class CachingGitClient implements GitClient {
+  #fetchedAt = -Infinity;
+  #inFlight: Promise<void> | undefined;
+
+  public constructor(
+    private readonly inner: GitClient,
+    private readonly freshnessMs: number = FETCH_FRESHNESS_MS,
+    private readonly now: () => number = () => Date.now(),
+  ) {}
+
+  public async fetch(options?: { readonly fresh?: boolean }): Promise<void> {
+    if (options?.fresh === true) {
+      this.#inFlight = undefined;
+      await this.inner.fetch();
+      this.#fetchedAt = this.now();
+      return;
+    }
+    if (this.#inFlight !== undefined) return this.#inFlight;
+    if (this.now() - this.#fetchedAt < this.freshnessMs) return;
+    const pending = this.inner.fetch().then(() => {
+      this.#fetchedAt = this.now();
+    }).finally(() => {
+      // A failed fetch records nothing, so the next caller retries remotely.
+      if (this.#inFlight === pending) this.#inFlight = undefined;
+    });
+    this.#inFlight = pending;
+    return pending;
+  }
+
+  public currentBranch(): ReturnType<GitClient["currentBranch"]> { return this.inner.currentBranch(); }
+  public defaultBranch(): ReturnType<GitClient["defaultBranch"]> { return this.inner.defaultBranch(); }
+  public status(): ReturnType<GitClient["status"]> { return this.inner.status(); }
+  public codebase(): ReturnType<GitClient["codebase"]> { return this.inner.codebase(); }
+  public headSha(short?: boolean): ReturnType<GitClient["headSha"]> { return this.inner.headSha(short); }
+  public branchExists(branch: string): ReturnType<GitClient["branchExists"]> { return this.inner.branchExists(branch); }
+  public existingBranches(branches: readonly string[]): ReturnType<GitClient["existingBranches"]> { return this.inner.existingBranches(branches); }
+  public branchSha(branch: string): ReturnType<GitClient["branchSha"]> { return this.inner.branchSha(branch); }
+  public remoteBranchSha(branch: string): ReturnType<GitClient["remoteBranchSha"]> { return this.inner.remoteBranchSha(branch); }
+  public commitDetails(ref: string): ReturnType<GitClient["commitDetails"]> { return this.inner.commitDetails(ref); }
+  public stagedTreeSha(): ReturnType<GitClient["stagedTreeSha"]> { return this.inner.stagedTreeSha(); }
+  public deleteBranchAt(branch: string, expectedSha: string): ReturnType<GitClient["deleteBranchAt"]> { return this.inner.deleteBranchAt(branch, expectedSha); }
+  public deleteRemoteBranchAt(branch: string, expectedSha: string): ReturnType<GitClient["deleteRemoteBranchAt"]> { return this.inner.deleteRemoteBranchAt(branch, expectedSha); }
+  public remoteBranchExists(branch: string): ReturnType<GitClient["remoteBranchExists"]> { return this.inner.remoteBranchExists(branch); }
+  public checkout(branch: string): ReturnType<GitClient["checkout"]> { return this.inner.checkout(branch); }
+  public createBranch(branch: string, from: string): ReturnType<GitClient["createBranch"]> { return this.inner.createBranch(branch, from); }
+  public deleteBranch(branch: string): ReturnType<GitClient["deleteBranch"]> { return this.inner.deleteBranch(branch); }
+  public fastForward(branch: string): ReturnType<GitClient["fastForward"]> { return this.inner.fastForward(branch); }
+  public mergeFromRemote(base: string): ReturnType<GitClient["mergeFromRemote"]> { return this.inner.mergeFromRemote(base); }
+  public add(): ReturnType<GitClient["add"]> { return this.inner.add(); }
+  public commit(subject: string, body: string): ReturnType<GitClient["commit"]> { return this.inner.commit(subject, body); }
+  public push(branch: string, setUpstream: boolean): ReturnType<GitClient["push"]> { return this.inner.push(branch, setUpstream); }
+  public hasCommitFor(issueNumber: number, base: string): ReturnType<GitClient["hasCommitFor"]> { return this.inner.hasCommitFor(issueNumber, base); }
+  public isPushed(branch: string): ReturnType<GitClient["isPushed"]> { return this.inner.isPushed(branch); }
+  public ignoredPaths(paths: readonly string[]): ReturnType<GitClient["ignoredPaths"]> { return this.inner.ignoredPaths(paths); }
+  public trackedPathsUnder(ref: string, directory: string): ReturnType<GitClient["trackedPathsUnder"]> { return this.inner.trackedPathsUnder(ref, directory); }
+  public worktrees(): ReturnType<GitClient["worktrees"]> { return this.inner.worktrees(); }
+  public addWorktree(path: string, branch: string, startPoint?: string): ReturnType<GitClient["addWorktree"]> { return this.inner.addWorktree(path, branch, startPoint); }
+  public removeWorktree(path: string, force: boolean): ReturnType<GitClient["removeWorktree"]> { return this.inner.removeWorktree(path, force); }
 }
 
 export function isWorkingTreeClean(status: GitStatus): boolean {

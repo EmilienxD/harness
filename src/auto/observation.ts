@@ -122,13 +122,14 @@ async function observePullRequests(record: AutoRunRecord, github: AutoRunGitHub)
     if (snapshot === undefined) {
       return { number, state: "missing", head: "", base: "", approvedByOther: false };
     }
-    const review = await github.getReviewState(number).catch(() => ({ decision: "unreviewed" as const }));
     return {
       number,
       state: snapshot.state,
       head: snapshot.headBranch,
       base: snapshot.baseBranch,
-      approvedByOther: review.decision === "approved",
+      // The decision rides along in the pull-request snapshot; a missing field
+      // means this surface could not see it, which is not an approval.
+      approvedByOther: snapshot.reviewDecision === "approved",
       ...(snapshot.headSha === undefined ? {} : { headSha: snapshot.headSha }),
       ...(snapshot.mergeCommitSha === undefined ? {} : { mergeCommitSha: snapshot.mergeCommitSha }),
     };

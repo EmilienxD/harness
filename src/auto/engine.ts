@@ -57,6 +57,8 @@ export interface PullRequestObservation {
   readonly baseBranch: string;
   readonly headSha?: string;
   readonly mergeCommitSha?: string;
+  /** Comes back in the same query as the rest, sparing a second pull-request read. */
+  readonly reviewDecision?: "approved" | "changes-requested" | "reviewed" | "unreviewed";
 }
 
 /** The GitHub surface the engine needs, narrowed so tests can fake it whole. */
@@ -70,6 +72,8 @@ export interface AutoRunGitHub {
   createPullRequest(input: { readonly title: string; readonly body: string; readonly head: string; readonly base: string }): Promise<number>;
   findOpenPullRequestForBranch(branch: string): Promise<number | undefined>;
   findPullRequestForBranch(branch: string): Promise<number | undefined>;
+  /** The batched form of `findPullRequestForBranch`, one round trip for many branches. */
+  findPullRequestsByHead?(branches: readonly string[]): Promise<ReadonlyMap<string, number>>;
   getPullRequest(number: number): Promise<PullRequestObservation | undefined>;
   getReviewState(number: number): Promise<{ readonly decision: "approved" | "changes-requested" | "reviewed" | "unreviewed" }>;
   mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase", deleteBranch: boolean): Promise<void>;
@@ -451,15 +455,34 @@ export class AutoRunEngine {
   }
 
   async #findPlanConflict(issues: readonly FrozenIssue[]): Promise<string | undefined> {
+    // One ref listing and one pull-request query for the whole plan instead of
+    // three process spawns per issue. Issues are still reported in plan order,
+    // branch conflict before pull-request conflict.
+    const branches = issues.map((issue) => issue.branch);
+    const [existing, pullRequests] = await Promise.all([
+      this.options.git.existingBranches(branches),
+      this.options.github.findPullRequestsByHead !== undefined
+        ? this.options.github.findPullRequestsByHead(branches)
+        : this.#findPullRequestsIndividually(branches),
+    ]);
     for (const issue of issues) {
-      if (await this.options.git.branchSha(issue.branch) !== undefined || await this.options.git.remoteBranchSha(issue.branch) !== undefined) {
+      if (existing.local.has(issue.branch) || existing.remote.has(issue.branch)) {
         return `${issue.branch} already exists, so aboard cannot prove a run would own it; delete or rename it first`;
       }
-      if (await this.options.github.findPullRequestForBranch(issue.branch) !== undefined) {
+      if (pullRequests.has(issue.branch)) {
         return `a pull request already uses ${issue.branch}, so aboard cannot prove a run would own it; delete or rename the branch first`;
       }
     }
     return undefined;
+  }
+
+  async #findPullRequestsIndividually(branches: readonly string[]): Promise<ReadonlyMap<string, number>> {
+    const found = new Map<string, number>();
+    for (const branch of branches) {
+      const number = await this.options.github.findPullRequestForBranch(branch);
+      if (number !== undefined) found.set(branch, number);
+    }
+    return found;
   }
 
   public async resume(): Promise<AutoRunStartResult> {
@@ -886,8 +909,9 @@ export class AutoRunEngine {
         const snapshot = await this.options.github.getPullRequest(action.prNumber).catch(() => undefined);
         if (snapshot?.state !== "merged") { await this.#settled(); return; }
         // The merge landed. Re-read the base branch so the record carries the
-        // tip the merge produced, which is what later validation compares.
-        await this.#git.fetch().catch(() => undefined);
+        // tip the merge produced, which is what later validation compares. A
+        // coalesced fetch could hide that tip, so this one bypasses freshness.
+        await this.#git.fetch({ fresh: true }).catch(() => undefined);
         const baseSha = await this.#git.remoteBranchSha(action.base).catch(() => undefined);
         if (snapshot.headSha !== action.headSha || snapshot.mergeCommitSha === undefined || baseSha !== snapshot.mergeCommitSha) {
           throw new StructuralError(`pull request #${action.prNumber} merged without producing the recorded base branch`);
@@ -1045,17 +1069,26 @@ export class AutoRunEngine {
   /** Reads the repository for the current issue's phase decision. */
   async #observe(issue: FrozenIssue, knownPullRequest: number | undefined, reviewed: ReadonlySet<number>): Promise<RepositoryFacts> {
     const status = await this.#git.status();
-    const branchExists = await this.#git.branchExists(issue.branch);
     const onBranch = status.branch === issue.branch;
     const baseBranch = this.#current.sessionBranch;
-    const hasCommit = branchExists && onBranch && await this.#git.hasCommitFor(issue.number, baseBranch);
-    const prNumber = (branchExists ? await this.options.github.findOpenPullRequestForBranch(issue.branch) : undefined) ?? knownPullRequest;
+    // Independent reads run together; the dependent ones keep their guards.
+    const [branchExists, issueSnapshot] = await Promise.all([
+      this.#git.branchExists(issue.branch),
+      this.options.github.getIssue(issue.number),
+    ]);
+    const [hasCommit, openPr] = await Promise.all([
+      branchExists && onBranch ? this.#git.hasCommitFor(issue.number, baseBranch) : Promise.resolve(false),
+      branchExists ? this.options.github.findOpenPullRequestForBranch(issue.branch) : Promise.resolve(undefined),
+    ]);
+    const prNumber = openPr ?? knownPullRequest;
     const known = this.#owners.get(prNumber ?? -1);
     let pullRequest: RepositoryFacts["pullRequest"];
-    const snapshot = prNumber === undefined ? undefined : await this.options.github.getPullRequest(prNumber);
+    const [snapshot, commitPushed] = await Promise.all([
+      prNumber === undefined ? Promise.resolve(undefined) : this.options.github.getPullRequest(prNumber),
+      hasCommit ? this.#git.isPushed(issue.branch) : Promise.resolve(false),
+    ]);
     if (prNumber !== undefined && snapshot !== undefined) {
-      const review = await this.options.github.getReviewState(prNumber);
-      pullRequest = { number: prNumber, state: snapshot.state, approvedByOther: review.decision === "approved" };
+      pullRequest = { number: prNumber, state: snapshot.state, approvedByOther: snapshot.reviewDecision === "approved" };
     }
     return {
       currentBranch: status.branch,
@@ -1063,10 +1096,10 @@ export class AutoRunEngine {
       workingTreeDirty: status.entries.length > 0,
       dirtyPaths: status.entries.map((entry) => entry.path),
       hasCommit,
-      commitPushed: hasCommit && await this.#git.isPushed(issue.branch),
+      commitPushed,
       pullRequest,
       reviewed: reviewed.has(issue.number) || (known !== undefined && known.type !== "implementer"),
-      issueClosed: (await this.options.github.getIssue(issue.number))?.state === "closed",
+      issueClosed: issueSnapshot?.state === "closed",
     };
   }
 
@@ -1269,8 +1302,11 @@ export class AutoRunEngine {
 
   async #awaitResolution(issue: FrozenIssue, prNumber: number, signal: AbortSignal): Promise<"merged" | "rejected" | "aborted"> {
     this.options.notifier.notify(autoRunMessage.waiting(issue.number, prNumber));
+    // The wait polls one pull request rather than re-validating the whole plan
+    // every tick. Full validation still runs before the loop's only possible
+    // side effect (capturing edits), at the next phase boundary, and on the
+    // Auto Run view's own refresh cadence.
     while (!signal.aborted) {
-      await this.#validate();
       await this.#captureOpenWork(issue, prNumber);
       const snapshot = await this.options.github.getPullRequest(prNumber);
       if (snapshot?.state === "merged") {
@@ -1278,7 +1314,7 @@ export class AutoRunEngine {
         return "merged";
       }
       if (snapshot?.state === "closed") return "rejected";
-      if ((await this.options.github.getReviewState(prNumber)).decision === "approved") return "merged";
+      if (snapshot?.reviewDecision === "approved") return "merged";
       await this.#waitForPoll(this.#current.settings.pollSeconds, signal);
     }
     return "aborted";
@@ -1291,6 +1327,9 @@ export class AutoRunEngine {
       this.options.log?.(`auto-run left uncommitted work on ${status.branch ?? "a detached HEAD"}: issue #${issue.number} belongs on ${issue.branch}`);
       return;
     }
+    // The capture commits and pushes, so the frozen plan is validated first —
+    // same as before every other phase side effect.
+    await this.#validate();
     const paths = status.entries.map((entry) => entry.path);
     await this.#commitFixes(issue, `Address review findings on #${issue.number}`, `Applied while PR #${prNumber} was open for review.`);
     this.options.notifier.notify(autoRunMessage.captured(issue.number, prNumber, paths));
@@ -1325,7 +1364,7 @@ export class AutoRunEngine {
           throw new Error(`merging PR #${prNumber} failed (${message(error)}). If the branch requires a review, auto-run cannot approve its own pull request — merge it yourself and resume the run.`);
         }
       }
-      await this.#git.fetch().catch(() => undefined);
+      await this.#git.fetch({ fresh: true }).catch(() => undefined);
       const baseSha = await this.#git.remoteBranchSha(base).catch(() => undefined);
       const after = await this.options.github.getPullRequest(prNumber).catch(() => undefined);
       if (baseSha === undefined || after?.headSha !== headSha || after.mergeCommitSha === undefined || baseSha !== after.mergeCommitSha) {
@@ -1355,7 +1394,7 @@ export class AutoRunEngine {
     ) {
       throw new StructuralError(`pull request #${prNumber} did not produce the expected HITL merge`);
     }
-    await this.#git.fetch();
+    await this.#git.fetch({ fresh: true });
     const remoteSha = await this.#git.remoteBranchSha(base);
     if (remoteSha !== snapshot.mergeCommitSha) {
       throw new StructuralError(`pull request #${prNumber} did not produce the expected HITL merge`);
@@ -1481,7 +1520,7 @@ export class AutoRunEngine {
         return false;
       }
     }
-    await this.#git.fetch().catch(() => undefined);
+    await this.#git.fetch({ fresh: true }).catch(() => undefined);
     const baseShaAfter = await this.#git.remoteBranchSha(base).catch(() => undefined);
     const after = await this.options.github.getPullRequest(prNumber).catch(() => undefined);
     if (after?.headSha !== headSha || after.mergeCommitSha === undefined || baseShaAfter !== after.mergeCommitSha) {

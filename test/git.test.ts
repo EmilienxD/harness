@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { ProcessGitClient, dirtyPaths, isWorkingTreeClean, summarizeSourceFiles } from "../src/git/client.js";
+import { CachingGitClient, ProcessGitClient, dirtyPaths, isWorkingTreeClean, summarizeSourceFiles, type GitClient } from "../src/git/client.js";
 
 const run = promisify(execFile);
 
@@ -77,8 +77,8 @@ test("deleteBranch removes only a fully merged local branch", async () => {
   assert.equal(await client.branchExists("aboard/35-has-work"), true);
 });
 
-async function trackRemote(root: string, branch: string): Promise<void> {
-  await run("git", ["update-ref", `refs/remotes/origin/${branch}`, branch], { cwd: root, windowsHide: true });
+async function trackRemote(root: string, branch: string, at: string = branch): Promise<void> {
+  await run("git", ["update-ref", `refs/remotes/origin/${branch}`, at], { cwd: root, windowsHide: true });
 }
 
 test("remote branch existence is a separate question from being pushed", async () => {
@@ -335,4 +335,93 @@ test("remote branch deletion is guarded the same way, over a real remote", async
   assert.equal(await client.deleteRemoteBranchAt("aboard/34-one", recorded!), true);
   await client.fetch();
   assert.equal(await client.remoteBranchExists("aboard/34-one"), false);
+});
+
+test("existingBranches answers local and remote membership in one read", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  await client.createBranch("aboard/34-local-only", "main");
+  await client.checkout("main");
+  await client.createBranch("aboard/35-both", "main");
+  await client.checkout("main");
+  await trackRemote(root, "aboard/35-both");
+  await trackRemote(root, "aboard/36-remote-only", "main");
+
+  const found = await client.existingBranches([
+    "aboard/34-local-only",
+    "aboard/35-both",
+    "aboard/36-remote-only",
+    "aboard/37-nowhere",
+  ]);
+  assert.deepEqual([...found.local].sort(), ["aboard/34-local-only", "aboard/35-both"]);
+  assert.deepEqual([...found.remote].sort(), ["aboard/35-both", "aboard/36-remote-only"]);
+
+  // An empty ask never reaches git.
+  assert.deepEqual(await client.existingBranches([]), { local: new Set(), remote: new Set() });
+});
+
+test("the caching git client coalesces fetches and lets a fresh read through", async () => {
+  let fetches = 0;
+  let clock = 1_000;
+  const inner = {
+    fetch: async () => { fetches += 1; },
+  } as unknown as GitClient;
+  const client = new CachingGitClient(inner, 5_000, () => clock);
+
+  await client.fetch();
+  await client.fetch();
+  await client.fetch();
+  assert.equal(fetches, 1, "fetches inside the freshness window share one remote read");
+
+  clock += 6_000;
+  await client.fetch();
+  assert.equal(fetches, 2, "a fetch past the window reaches the remote again");
+
+  await client.fetch({ fresh: true });
+  assert.equal(fetches, 3, "a fresh read bypasses the window it also re-arms");
+
+  await client.fetch();
+  assert.equal(fetches, 3, "the fresh read's timestamp serves the next ordinary fetch");
+});
+
+test("the caching git client shares one in-flight fetch across overlapping callers", async () => {
+  let fetches = 0;
+  // The fetch the test controls; reassigned each time the inner client is hit.
+  let settle: () => void = () => undefined;
+  const inner = {
+    fetch: () => {
+      fetches += 1;
+      return new Promise<void>((resolve) => { settle = resolve; });
+    },
+  } as unknown as GitClient;
+  const client = new CachingGitClient(inner, 5_000);
+
+  // Three callers before the first fetch settles: they join one remote read.
+  const joined = Promise.all([client.fetch(), client.fetch(), client.fetch()]);
+  assert.equal(fetches, 1, "overlapping fetches start one remote read");
+  settle();
+  await joined;
+  assert.equal(fetches, 1, "overlapping fetches join rather than queue");
+});
+
+test("a failed fetch records nothing, so the next caller retries remotely", async () => {
+  let fetches = 0;
+  let clock = 1_000;
+  let failNext = false;
+  const inner = {
+    fetch: async () => {
+      fetches += 1;
+      if (failNext) { failNext = false; throw new Error("remote ref lock busy"); }
+    },
+  } as unknown as GitClient;
+  const client = new CachingGitClient(inner, 5_000, () => clock);
+
+  await client.fetch();
+  clock += 6_000;
+  failNext = true;
+  await assert.rejects(client.fetch());
+  assert.equal(fetches, 2, "a fetch outside the window reaches the remote");
+
+  await client.fetch();
+  assert.equal(fetches, 3, "a failed fetch records nothing, so the retry is a fresh remote read");
 });

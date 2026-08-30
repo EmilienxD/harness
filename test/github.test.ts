@@ -431,6 +431,30 @@ test("branch pull request recovery can observe closed and merged records", async
   assert.deepEqual(gh.calls, [["pr", "list", "--state", "all", "--head", "aboard/34-fix", "--limit", "1", "--json", "number"]]);
 });
 
+test("a pull request snapshot carries its review decision without a second query", async () => {
+  const gh = new FixtureGh((args) => args[0] === "repo" ? repo : graph({ pullRequest: { number: 42, title: "PR", body: "", state: "OPEN", merged: false, mergeable: "MERGEABLE", url: "https://github.com/acme/app/pull/42", headRefName: "feat/17", baseRefName: "main", headRefOid: "abc123", closingIssuesReferences: { nodes: [] }, reviewDecision: "APPROVED", reviewThreads: { nodes: [] } } }));
+  assert.equal((await new GitHubClient(gh).getPullRequest(42))?.reviewDecision, "approved");
+});
+
+test("head-branch pull request lookups batch into one GraphQL query", async () => {
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "repo") return repo;
+    return graph({
+      b0: { nodes: [{ number: 58 }] },
+      b1: { nodes: [] },
+      b2: { nodes: [{ number: 61 }] },
+    });
+  });
+  const found = await new GitHubClient(gh).findPullRequestsByHead(["aboard/34-fix", "aboard/35-two", "aboard/36-three"]);
+  assert.deepEqual([...found], [["aboard/34-fix", 58], ["aboard/36-three", 61]]);
+  const query = gh.calls.map((args) => args.find((arg) => arg.startsWith("query=")) ?? "").find((q) => q.includes("pullRequests"));
+  // One round trip: every branch is an aliased field carrying its own variable.
+  assert.ok(query?.includes("b0:pullRequests(headRefName:$h0"));
+  assert.ok(query?.includes("b2:pullRequests(headRefName:$h2"));
+  const variables = gh.calls.flatMap((args) => args).filter((arg) => arg.startsWith("h") && arg.includes("=aboard/"));
+  assert.equal(variables.length, 3);
+});
+
 test("branch cleanup finds pull requests where an aboard branch is either head or base", async () => {
   const gh = new FixtureGh(() => JSON.stringify([
     { number: 58, title: "Issue work", state: "OPEN", headRefName: "aboard/34-fix", baseRefName: "aboard/run/old" },

@@ -119,6 +119,10 @@ interface HarnessOptions {
   readonly relabelAfterImplementer?: boolean;
   /** Adds controllable latency or failure to every remote-ref observation. */
   readonly fetch?: () => Promise<void>;
+  /** Head branches GitHub reports as already having a pull request, before the run opens any. */
+  readonly preExistingPullRequestBranches?: readonly string[];
+  /** Review decision GitHub reports on the hitl pull request once it is waiting. */
+  readonly hitlReviewDecision?: "approved" | "changes-requested" | "reviewed" | "unreviewed";
 }
 
 function harness(options: HarnessOptions = {}): Harness {
@@ -138,6 +142,9 @@ function harness(options: HarnessOptions = {}): Harness {
   const states: AutoRunState[] = [];
   const state = { cleared: false };
   const pullRequests = new Map<number, FakePullRequest>();
+  // Head branches that already have a pull request before the run opens any,
+  // for the start-time ownership conflict check.
+  const preExistingPrBranches = new Set<string>(options.preExistingPullRequestBranches ?? []);
   const branches = new Set<string>(["main", "feature/wip"]);
   // What origin has. A branch the user never pushed exists locally and not here,
   // which is the difference a pull request base cares about.
@@ -174,6 +181,10 @@ function harness(options: HarnessOptions = {}): Harness {
     codebase: async () => ({ sourceFileCount: 12, languages: ["ts"], commitCount: 40 }),
     headSha: async () => shaFor(currentBranch),
     branchExists: async (branch) => branches.has(branch),
+    existingBranches: async (names) => ({
+      local: new Set(names.filter((name) => branches.has(name))),
+      remote: new Set(names.filter((name) => remoteBranches.has(name))),
+    }),
     branchSha: async (branch) => branches.has(branch) ? shaFor(branch) : undefined,
     remoteBranchSha: async (branch) => remoteBranches.has(branch)
       ? branch === (options.startBranch ?? "main") && options.remoteBaseSha !== undefined
@@ -284,7 +295,15 @@ function harness(options: HarnessOptions = {}): Harness {
       }
       return undefined;
     },
-    findPullRequestForBranch: async (branch) => prForBranch(branch),
+    findPullRequestForBranch: async (branch) => prForBranch(branch) ?? (preExistingPrBranches.has(branch) ? 900 : undefined),
+    findPullRequestsByHead: async (names) => {
+      const found = new Map<string, number>();
+      for (const name of names) {
+        const number = prForBranch(name) ?? (preExistingPrBranches.has(name) ? 900 : undefined);
+        if (number !== undefined) found.set(name, number);
+      }
+      return found;
+    },
     getPullRequest: async (number) => {
       const pr = pullRequests.get(number);
       const waiting = notifications.some((entry) => entry.includes("is hitl — PR"));
@@ -310,6 +329,9 @@ function harness(options: HarnessOptions = {}): Harness {
         headBranch: branchesByPr.get(number) ?? "",
         baseBranch: basesByPr.get(number) ?? "",
         headSha: shaFor(branchesByPr.get(number) ?? ""),
+        // The decision rides in the same snapshot; an unreviewed pull request
+        // reports none rather than omitting the field.
+        reviewDecision: pr.state === "open" && isHitl(number) ? options.hitlReviewDecision ?? "unreviewed" : "unreviewed",
         ...(pr.mergeCommitSha === undefined ? {} : { mergeCommitSha: pr.mergeCommitSha }),
       };
     },
@@ -1231,6 +1253,34 @@ test("a dry run reports the same run-owned branch conflict that Start would refu
   assert.match(result.blockers.join("\n"), /aboard\/34-add-retry-backoff already exists/);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
+});
+
+test("a branch that already has a pull request refuses the run the same way", async () => {
+  const context = harness({
+    preExistingPullRequestBranches: ["aboard/34-add-retry-backoff"],
+  });
+
+  const result = await context.engine.start();
+
+  assert.equal(result.started, false);
+  assert.match((result as { reason: string }).reason, /a pull request already uses aboard\/34-add-retry-backoff/);
+  assert.deepEqual(context.launches, []);
+  assert.deepEqual(context.saved, []);
+});
+
+test("a hitl pull request approved by another account is adopted without waiting for a merge", async () => {
+  const context = harness({
+    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+    resolveHitl: "merged",
+    hitlReviewDecision: "approved",
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  // The approval rides in the pull-request snapshot, so the run does not wait
+  // for the user to merge by hand before continuing.
+  assert.match(context.notifications.join("\n"), /issue #35 merged/);
+  assert.equal(context.state.cleared, true);
 });
 
 test("an unauthenticated GitHub CLI refuses the run before querying or persisting a plan", async () => {

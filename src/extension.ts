@@ -79,7 +79,7 @@ import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } fr
 const STARTUP_PROOF_TIMEOUT_MS = 60_000;
 const SESSION_LIVENESS_POLL_MS = 5_000;
 import { registerReviewCommand } from "./vscode/review.js";
-import { ProcessGitClient, type GitClient } from "./git/client.js";
+import { CachingGitClient, ProcessGitClient, type GitClient } from "./git/client.js";
 import { AboardBranchCleanup, ProcessAboardBranchRepository } from "./git/branch-cleanup.js";
 import { registerBranchCleanupCommand } from "./vscode/branch-cleanup.js";
 import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
@@ -511,18 +511,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     output.appendLine(`Could not watch session lock markers; falling back to polling only. ${error instanceof Error ? error.message : "unknown error"}`);
   }
   activeSessionMonitor = sessionMonitor;
-  const git: GitClient = new ProcessGitClient(workspaceRoot);
+  const git: GitClient = new CachingGitClient(new ProcessGitClient(workspaceRoot));
   const branchCleanup = new AboardBranchCleanup(new ProcessAboardBranchRepository(workspaceRoot), github);
   const autoRun = new AutoRunEngine({
     git,
-    gitFor: (cwd) => new ProcessGitClient(cwd),
+    gitFor: (cwd) => new CachingGitClient(new ProcessGitClient(cwd)),
     workspaceRoot,
     // Where a run works. In its own checkout beside the project when the user
     // asked for one, in their files otherwise.
     workspaces: new WorktreeRunWorkspaces({
       workspaceRoot,
       git,
-      gitFor: (cwd) => new ProcessGitClient(cwd),
+      gitFor: (cwd) => new CachingGitClient(new ProcessGitClient(cwd)),
       settings: () => currentConfiguration.autoRun.worktree,
       notify: (message) => enqueueManagerNotification(message),
       log: (message) => output.appendLine(message),

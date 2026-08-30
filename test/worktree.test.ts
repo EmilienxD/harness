@@ -110,6 +110,10 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     codebase: async () => ({ sourceFileCount: 1, languages: ["ts"], commitCount: 1 }),
     headSha: async () => "abc1234",
     branchExists: async (branch: string) => branches.has(branch),
+    existingBranches: async (names: readonly string[]) => ({
+      local: new Set(names.filter((name) => branches.has(name))),
+      remote: new Set(names.filter((name) => (options.remoteBranches ?? ["main"]).includes(name))),
+    }),
     remoteBranchExists: async (branch: string) => (options.remoteBranches ?? ["main"]).includes(branch),
     fetch: async () => { calls.push("fetch"); },
     checkout: async (branch: string) => { calls.push(`checkout ${branch}`); },
