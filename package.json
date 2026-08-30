@@ -30,7 +30,7 @@
       {
         "command": "aboard.resumeManager",
         "title": "Aboard: Resume Manager",
-        "icon": "$(history)"
+        "icon": "$(debug-continue)"
       },
       {
         "command": "aboard.newManager",
@@ -43,7 +43,7 @@
       {
         "command": "aboard.updateProject",
         "title": "Update .aboard/",
-        "icon": "$(sync)"
+        "icon": "$(cloud-download)"
       },
       {
         "command": "aboard.reviewPr",
@@ -52,7 +52,7 @@
       {
         "command": "aboard.reopenSession",
         "title": "Aboard: Reopen a Session",
-        "icon": "$(history)"
+        "icon": "$(debug-continue)"
       },
       {
         "command": "aboard.startAutoRun",
@@ -138,7 +138,7 @@
       {
         "command": "aboard.activity.reopen",
         "title": "Aboard: Reopen Session",
-        "icon": "$(history)"
+        "icon": "$(debug-continue)"
       },
       {
         "command": "aboard.activity.clear",
@@ -148,7 +148,7 @@
       {
         "command": "aboard.clearBranches",
         "title": "Aboard: Clear Remaining Branches",
-        "icon": "$(git-branch-delete)"
+        "icon": "$(trash)"
       }
     ],
     "viewsContainers": {

@@ -137,6 +137,16 @@ export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
   return { kind: "recoverable", record: persisted };
 }
 
+/**
+ * The card's menu identity: the `aboard.autoRunCard` context key and the card
+ * row's contextValue suffix. A forecast with blockers is its own state so the
+ * `when` clauses that offer Start on an exact `forecast` match hide it, rather
+ * than inviting a click that can only fail.
+ */
+export function autoRunCardMenuState(card: AutoRunCard): string {
+  return card.kind === "forecast" && !card.forecast.preview.ready ? "forecastBlocked" : card.kind;
+}
+
 /** The record behind the card, when there is one. */
 export function cardRecord(card: AutoRunCard): AutoRunRecord | undefined {
   return card.kind === "idle" || card.kind === "starting" || card.kind === "checking-next" || card.kind === "forecast" || card.kind === "unavailable" || card.kind === "unsupported"
@@ -220,8 +230,8 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
             ? `${count} issue${count === 1 ? "" : "s"} queued`
             : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
         tooltip: forecastTooltip(card.forecast),
-        icon: card.forecast.checking ? "sync~spin" : preview.ready ? "list-tree" : "warning",
-        contextValue: "aboard.autoRun.forecast",
+        icon: card.forecast.checking ? "refresh~spin" : preview.ready ? "list-tree" : "warning",
+        contextValue: `aboard.autoRun.${autoRunCardMenuState(card)}`,
         collapsible: count > 0,
       };
     }
@@ -240,7 +250,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         label: `Auto-run ${record.runId}`,
         description: `${state.phase} · issue #${state.currentIssue ?? "?"} · ${state.completedCount}/${state.totalCount}`,
         tooltip: runTooltip(record, state),
-        icon: "sync~spin",
+        icon: "run-all",
         contextValue: "aboard.autoRun.active",
         collapsible: true,
       };

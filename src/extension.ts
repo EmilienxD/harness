@@ -790,7 +790,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (state === undefined) {
       autoRunStatus.hide();
     } else {
-      autoRunStatus.text = `$(sync~spin) Auto-run: issue #${state.currentIssue ?? "?"} (${state.completedCount + 1}/${state.totalCount})`;
+      autoRunStatus.text = `$(run-all) Auto-run: issue #${state.currentIssue ?? "?"} (${state.completedCount + 1}/${state.totalCount})`;
       autoRunStatus.tooltip = state.waiting
         ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Click to stop the run.`
         : `${state.phase} — issue #${state.currentIssue ?? "?"}. Click to stop the run.`;

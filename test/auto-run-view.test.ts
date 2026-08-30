@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, cardPullRequest, type AutoRunForecast, type AutoRunPreview, type AutoRunViewSources } from "../src/vscode/auto-run.js";
+import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, type AutoRunForecast, type AutoRunPreview, type AutoRunViewSources } from "../src/vscode/auto-run.js";
 import type { AutoRunState } from "../src/auto/engine.js";
 import type { AutoRunDryRunResult } from "../src/domain/auto-run.js";
 import type { AutoRunRecord, PersistedAutoRunRecord, RecoveryEligibility } from "../src/domain/run-plan.js";
@@ -140,6 +140,7 @@ test("the live forecast shows loading feedback, then the planned issues in execu
   assert.equal(card({ forecast: live }).kind, "forecast");
   assert.equal(item.description, "3 issues queued");
   assert.equal(item.contextValue, "aboard.autoRun.forecast");
+  assert.equal(autoRunCardMenuState(card({ forecast: live })), "forecast");
   assert.equal(item.collapsible, true);
   const rows = model.children(root).map((node) => model.item(node));
   assert.deepEqual(rows.map((row) => row.label), [
@@ -157,6 +158,10 @@ test("a blocked forecast explains why the run cannot start", () => {
   assert.equal(item.icon, "warning");
   assert.match(item.tooltip, /Cannot start: the working tree is not clean/);
   assert.equal(item.collapsible, false);
+  // Its own menu identity: the Start `when` clauses match only an exact
+  // "forecast", so a card that already knows it cannot start hides the action.
+  assert.equal(item.contextValue, "aboard.autoRun.forecastBlocked");
+  assert.equal(autoRunCardMenuState(card({ forecast: forecast(result) })), "forecastBlocked");
 });
 
 test("the forecast tooltip counts unclassified issues instead of listing them", () => {
@@ -178,7 +183,7 @@ test("a refresh keeps the last successful issue list visible", () => {
   const result = preview();
   const { item, model, root } = rootItem({ forecast: forecast(result, { checking: true }) });
   assert.equal(item.description, "3 issues queued · refreshing…");
-  assert.equal(item.icon, "sync~spin");
+  assert.equal(item.icon, "refresh~spin");
   assert.equal(model.children(root).length, 3);
 });
 

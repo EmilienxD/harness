@@ -4,7 +4,7 @@ import type { TerminalController } from "../claude/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning, type FleetTreeNode } from "./fleet.js";
-import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunViewSources } from "./auto-run.js";
+import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunViewSources } from "./auto-run.js";
 import { ActivityTreeModel, canOpenActivityIssue, clearActivityWarning, type ActivityNode } from "./activity.js";
 import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
 import type { AutoRunEngine } from "../auto/engine.js";
@@ -118,7 +118,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   const publishAutoRunContext = async (): Promise<void> => {
     const card = autoRunCard(autoRunSources);
-    await commands.executeCommand("setContext", "aboard.autoRunCard", card.kind);
+    await commands.executeCommand("setContext", "aboard.autoRunCard", autoRunCardMenuState(card));
   };
   const renderAutoRun = (): void => {
     // A frozen record supersedes the live forecast. Generation invalidation

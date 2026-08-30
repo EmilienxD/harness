@@ -99,10 +99,13 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const when = (command: string) => title.find((entry) => entry.command === command)?.when ?? "";
 
   // Start is offered only with nothing unresolved: two runs competing for the
-  // same branches is the failure this prevents.
+  // same branches is the failure this prevents. A forecast that already knows
+  // it cannot start publishes "forecastBlocked" instead of "forecast", and the
+  // exact-match Start clause hides the action there.
   assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == idle/);
-  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == forecast/);
+  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == forecast\b/);
   assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == unavailable/);
+  assert.doesNotMatch(when("aboard.startAutoRun"), /forecastBlocked/);
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.previewAutoRun"), false);
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
   // Resume appears only once validation has said the run may continue — never
@@ -121,6 +124,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   // the other refuses.
   const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
   assert.match(palette.get("aboard.startAutoRun") ?? "", /aboard\.autoRunCard == idle/);
+  assert.doesNotMatch(palette.get("aboard.startAutoRun") ?? "", /forecastBlocked/);
   assert.match(palette.get("aboard.resumeAutoRun") ?? "", /aboard\.autoRunCard == recoverable/);
 });
 
