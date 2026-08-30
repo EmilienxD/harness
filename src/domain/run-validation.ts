@@ -112,7 +112,8 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
   for (const name of required) {
     const observed = branchOf(observations, name);
     const expected = record.branchShas[name];
-    const merge = mergePostcondition(record.pendingAction, name, observations);
+    const merge = mergePostcondition(record.pendingAction, name, observations)
+      ?? hitlMergePostcondition(record, name, observations);
     if (observed?.localSha === undefined && observed?.remoteSha === undefined) {
       const mergedHeadWasDeleted = record.pendingAction?.kind === "merge-issue-pr"
         && record.pendingAction.head === name
@@ -149,6 +150,32 @@ function mergePostcondition(
   const pullRequest = pullRequestOf(observations, action.prNumber);
   if (pullRequest?.state !== "merged" || pullRequest.head !== action.head || pullRequest.base !== action.base) return undefined;
   if (pullRequest.headSha !== action.headSha || pullRequest.mergeCommitSha === undefined) return undefined;
+  const baseBranch = branchOf(observations, branch);
+  if (baseBranch?.localSha !== pullRequest.mergeCommitSha && baseBranch?.remoteSha !== pullRequest.mergeCommitSha) return undefined;
+  return pullRequest;
+}
+
+/**
+ * A user merging the current HITL pull request is the one unjournalled change
+ * allowed to move the session branch. Keep the exception as exact as a
+ * journalled merge: the recorded issue head must be what GitHub merged, and
+ * the observed branch movement must stop at GitHub's merge commit.
+ */
+function hitlMergePostcondition(
+  record: AutoRunRecord,
+  branch: string,
+  observations: RunObservations,
+): PullRequestObservation | undefined {
+  if (branch !== record.sessionBranch) return undefined;
+  const issue = currentIssue(record);
+  if (issue?.disposition !== "hitl") return undefined;
+  const progress = issueProgress(record, issue.number);
+  if (progress.state !== "current" || progress.prNumber === undefined) return undefined;
+  const expectedHead = record.branchShas[issue.branch];
+  if (expectedHead === undefined) return undefined;
+  const pullRequest = pullRequestOf(observations, progress.prNumber);
+  if (pullRequest?.state !== "merged" || pullRequest.head !== issue.branch || pullRequest.base !== branch) return undefined;
+  if (pullRequest.headSha !== expectedHead || pullRequest.mergeCommitSha === undefined) return undefined;
   const baseBranch = branchOf(observations, branch);
   if (baseBranch?.localSha !== pullRequest.mergeCommitSha && baseBranch?.remoteSha !== pullRequest.mergeCommitSha) return undefined;
   return pullRequest;

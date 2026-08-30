@@ -273,7 +273,15 @@ function harness(options: HarnessOptions = {}): Harness {
         hitlPolls += 1;
         // The doctor applies what the user approved once, mid-wait and uncommitted.
         if (options.dirtyDuringWait === true && hitlPolls === 1) dirty = true;
-        if (hitlPolls >= 2 && options.resolveHitl !== undefined) pullRequests.set(number, { ...pr, state: options.resolveHitl });
+        if (hitlPolls >= 2 && options.resolveHitl !== undefined) {
+          const base = basesByPr.get(number);
+          if (options.resolveHitl === "merged" && base !== undefined) advance(base);
+          pullRequests.set(number, {
+            ...pr,
+            state: options.resolveHitl,
+            ...(options.resolveHitl === "merged" && base !== undefined ? { mergeCommitSha: shaFor(base) } : {}),
+          });
+        }
       }
       return pr === undefined ? undefined : {
         ...pr,
@@ -881,6 +889,11 @@ test("a hitl issue waits at its pull request and continues once the user merges"
 
   assert.match(context.notifications.join("\n"), /issue #35 is hitl — PR #56 is open and waiting for you/);
   assert.match(context.notifications.join("\n"), /PR #56 merged by you; continuing/);
+  assert.equal(
+    context.saved.some((record) => record.branchShas[SESSION] === context.sha(SESSION)),
+    true,
+    "the exact session tip produced by the user's merge is adopted before continuing",
+  );
   assert.equal(context.state.cleared, true);
 });
 

@@ -247,8 +247,36 @@ test("a hitl pull request the user merged or another account approved is allowed
   const current = working({ state: "current", phase: "await-approval", prNumber: 57 }, 35);
   const observed = observations({ branches: [branch(SESSION, SHA("a")), branch("aboard/35-migrate-the-queue", SHA("c"))] });
 
-  const mergedByUser = { ...observed, pullRequests: [pullRequest({ number: 57, head: "aboard/35-migrate-the-queue", state: "merged" })] };
+  const mergedByUser = {
+    ...observed,
+    branches: [branch(SESSION, SHA("d")), branch("aboard/35-migrate-the-queue", SHA("c"))],
+    pullRequests: [pullRequest({
+      number: 57,
+      head: "aboard/35-migrate-the-queue",
+      state: "merged",
+      headSha: SHA("c"),
+      mergeCommitSha: SHA("d"),
+    })],
+  };
   assert.equal(reason(current, mergedByUser), undefined);
+
+  const wrongHead = {
+    ...mergedByUser,
+    pullRequests: [pullRequest({
+      number: 57,
+      head: "aboard/35-migrate-the-queue",
+      state: "merged",
+      headSha: SHA("e"),
+      mergeCommitSha: SHA("d"),
+    })],
+  };
+  assert.match(reason(current, wrongHead) ?? "", new RegExp(`${SESSION} has moved`));
+
+  const movedAgain = {
+    ...mergedByUser,
+    branches: [branch(SESSION, SHA("e")), branch("aboard/35-migrate-the-queue", SHA("c"))],
+  };
+  assert.match(reason(current, movedAgain) ?? "", new RegExp(`${SESSION} has moved`));
 
   const approved = { ...observed, pullRequests: [pullRequest({ number: 57, head: "aboard/35-migrate-the-queue", approvedByOther: true })] };
   assert.equal(reason(current, approved), undefined);

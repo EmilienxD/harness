@@ -982,6 +982,9 @@ export class AutoRunEngine {
           }
           case "cleanup": {
             const landed = facts.pullRequest?.state === "merged" ? facts.pullRequest.number : undefined;
+            if (landed !== undefined && issue.disposition === "hitl") {
+              await this.#adoptHitlMerge(issue, landed);
+            }
             let closed = facts.issueClosed;
             if (landed !== undefined && !facts.issueClosed) closed = await this.#closeIssue(issue, landed);
             await this.#cleanup(this.#current.sessionBranch, issue.branch);
@@ -1299,6 +1302,35 @@ export class AutoRunEngine {
     this.options.notifier.notify(autoRunMessage.merged(issue.number, base));
     this.#owners.delete(prNumber);
     return "merged";
+  }
+
+  /** Adopt the exact session-branch tip produced by the user's HITL merge. */
+  async #adoptHitlMerge(issue: FrozenIssue, prNumber: number): Promise<void> {
+    const base = this.#current.sessionBranch;
+    const expectedHead = this.#current.branchShas[issue.branch];
+    const snapshot = await this.options.github.getPullRequest(prNumber);
+    if (
+      expectedHead === undefined
+      || snapshot?.state !== "merged"
+      || snapshot.headBranch !== issue.branch
+      || snapshot.baseBranch !== base
+      || snapshot.headSha !== expectedHead
+      || snapshot.mergeCommitSha === undefined
+    ) {
+      throw new StructuralError(`pull request #${prNumber} did not produce the expected HITL merge`);
+    }
+    await this.#git.fetch();
+    const remoteSha = await this.#git.remoteBranchSha(base);
+    if (remoteSha !== snapshot.mergeCommitSha) {
+      throw new StructuralError(`pull request #${prNumber} did not produce the expected HITL merge`);
+    }
+    await this.#git.checkout(base);
+    await this.#git.fastForward(base);
+    const localSha = await this.#git.branchSha(base);
+    if (localSha !== snapshot.mergeCommitSha) {
+      throw new StructuralError(`${base} did not fast-forward to the HITL merge for pull request #${prNumber}`);
+    }
+    await this.#save({ ...this.#current, ...this.#patchBranchSha(base, localSha) });
   }
 
   async #reconcile(branch: string, base: string): Promise<boolean> {
