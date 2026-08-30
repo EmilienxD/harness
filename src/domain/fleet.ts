@@ -420,8 +420,8 @@ export class FleetRegistry {
   public submitReport(agentId: AgentId, message: string, occurredAt: IsoTimestamp): WorkerResult {
     if (message.trim().length === 0) throw new FleetStateError("invalid-result", "Report must not be empty");
     const session = this.requireSession(agentId);
-    if (session.resultDelivery.mode !== "mailbox") {
-      throw new FleetStateError("invalid-result", `Agent ${agentId} has no mailbox recipient`);
+    if (session.resultDelivery.mode === "none") {
+      throw new FleetStateError("invalid-result", `Agent ${agentId} has no result delivery route`);
     }
     if (session.lifecycle.status !== "starting" && session.lifecycle.status !== "running" && session.lifecycle.status !== "awaiting-user") {
       throw new FleetStateError("invalid-result", `Agent ${agentId} has already ended`);

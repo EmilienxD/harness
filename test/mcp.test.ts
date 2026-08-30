@@ -233,10 +233,10 @@ test("a terminal handed to the user takes no lease and runs beside the holder", 
   await coordinator.spawn({ type: "implementer", prompt: "Address issue nine", description: "address issue nine" });
   const holder = lease.current()?.agentId;
   assert.notEqual(holder, undefined);
-  const generalPurpose = await launch({ type: "general-purpose", description: "open general purpose session", interactive: true });
+  const generalPurpose = await launch({ type: "general-purpose", description: "open general purpose session", interactive: true, run_in_background: true });
   assert.equal(generalPurpose.status, 200, JSON.stringify(generalPurpose.body));
   const withTopic = await launch({
-    type: "general-purpose", description: "drive the auth cleanup", prompt: "Start from src/auth.ts", interactive: true,
+    type: "general-purpose", description: "drive the auth cleanup", prompt: "Start from src/auth.ts", interactive: true, run_in_background: true,
   });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
   assert.equal(lease.current()?.agentId, holder);
@@ -253,6 +253,7 @@ test("an out-of-range description is coerced, not refused", async () => {
     type: "general-purpose",
     description: "investigate the retry logic centralization across the whole messaging layer",
     interactive: true,
+    run_in_background: true,
   });
   assert.equal(long.status, 200, JSON.stringify(long.body));
   assert.match(notice(long), /truncated to "investigate the retry logic centralization across"/);
@@ -262,6 +263,7 @@ test("an out-of-range description is coerced, not refused", async () => {
     description: "fix it",
     prompt: "Fix the flaky OAuth login retry",
     interactive: true,
+    run_in_background: true,
   });
   assert.equal(short.status, 200, JSON.stringify(short.body));
   assert.match(notice(short), /extended to "fix it Fix"/);
@@ -281,6 +283,7 @@ test("an out-of-range description is coerced, not refused", async () => {
     type: "general-purpose",
     description: "chat",
     interactive: true,
+    run_in_background: true,
   });
   assert.equal(fallback.status, 200, JSON.stringify(fallback.body));
   assert.match(notice(fallback), /extended to "chat general-purpose general-purpose"/);
@@ -820,10 +823,28 @@ test("a lease conflict reaches the MCP tool as a readable error result", async (
 test("interactive launch focuses the terminal and reports when the user is done", async () => {
   const { launch, host } = setup();
   const launched = await launch({
-    type: "brainstormer", description: "brainstorm the caching design", interactive: true,
+    type: "brainstormer", description: "brainstorm the caching design", interactive: true, run_in_background: true,
   });
   assert.match(JSON.stringify(launched.body), /report will be delivered/);
   assert.deepEqual(host.created[0]!.terminal.shown, [false]);
+});
+
+test("foreground interactive launch blocks until /done returns its report as the tool result", async () => {
+  const { launch, fleet, coordinator } = setup();
+  let settled = false;
+  const pending = launch({
+    type: "brainstormer", description: "brainstorm the caching design", interactive: true,
+  }).then((value) => { settled = true; return value; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  const interactive = fleet.list().find((entry) => entry.identity.type === "brainstormer")!;
+  assert.equal(interactive.attended, true);
+  assert.equal(interactive.resultDelivery.mode, "tool-result");
+
+  coordinator.submitReport(interactive.identity.agentId, "Use a bounded cache with explicit invalidation.");
+  const response = await pending;
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  assert.match(JSON.stringify(response.body), /Use a bounded cache with explicit invalidation/);
 });
 
 test("the configured launch command leads every worker command line", async () => {
@@ -882,12 +903,12 @@ test("an isolated launch runs in its own directory, writes its runtime files the
 
 test("interactive mode makes the prompt optional", async () => {
   const { launch, host } = setup();
-  const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true });
+  const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true, run_in_background: true });
   assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--mcp-config 'C:\\storage\\agent-mcp\\worker-1\.json'.*--agent aboard-brainstormer-worker-1 --allowedTools 'mcp__aboard__run_agent,mcp__aboard__continue_agent'\s*$/);
 
-  const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true });
+  const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true, run_in_background: true });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /caching layer/);
 });
@@ -944,9 +965,9 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
   assert.equal(lease.current(), undefined);
 });
 
-test("general-purpose runs attended, focused, and reports only through /done", async () => {
+test("background general-purpose runs attended, focused, and reports only through /done", async () => {
   const { launch, host } = setup();
-  const launched = await launch({ type: "general-purpose", description: "browse the auth flow", interactive: true });
+  const launched = await launch({ type: "general-purpose", description: "browse the auth flow", interactive: true, run_in_background: true });
   assert.equal(launched.status, 200, JSON.stringify(launched.body));
   assert.match(JSON.stringify(launched.body), /report will be delivered/);
   // Focused like any handed-off session, with no result to report and no
@@ -961,7 +982,7 @@ test("general-purpose runs attended, focused, and reports only through /done", a
   // The same shape with an opening topic, which names the conversation rather
   // than delivering a task.
   const withTopic = await launch({
-    type: "general-purpose", prompt: "start from src/auth.ts", description: "drive the auth cleanup", interactive: true,
+    type: "general-purpose", prompt: "start from src/auth.ts", description: "drive the auth cleanup", interactive: true, run_in_background: true,
   });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
   const command = host.created.at(-1)!.terminal.sent.at(-1)!;
@@ -983,26 +1004,26 @@ test("an ignored issue carries a notice: interactive-only types, and topic-less 
   // A brainstormer's conversation defines its own scope; the bridge does not
   // silently bind it to an issue.
   const brainstormer = await launch({
-    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47],
+    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47], run_in_background: true,
   });
   assert.equal(brainstormer.status, 200, JSON.stringify(brainstormer.body));
   assert.match(JSON.stringify(brainstormer.body), /issue #47 was ignored/);
   // An interactive launch without an opening topic gets no first message at
   // all, so there is nothing to merge the issue contract into.
   const topicless = await launch({
-    type: "general-purpose", description: "open general purpose session", interactive: true, issues: [47],
+    type: "general-purpose", description: "open general purpose session", interactive: true, issues: [47], run_in_background: true,
   });
   assert.equal(topicless.status, 200, JSON.stringify(topicless.body));
   assert.match(JSON.stringify(topicless.body), /issue #47 was ignored/);
   // The supported pairing — topic plus issue — launches clean.
   const supported = await launch({
-    type: "general-purpose", description: "drive the session fix", prompt: "Work with me on the session loss", interactive: true, issues: [47],
+    type: "general-purpose", description: "drive the session fix", prompt: "Work with me on the session loss", interactive: true, issues: [47], run_in_background: true,
   });
   assert.equal(supported.status, 200, JSON.stringify(supported.body));
   assert.equal(JSON.stringify(supported.body).includes("was ignored"), false);
   // Several ignored issues are all named, and the notice agrees in number.
   const many = await launch({
-    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47, 52],
+    type: "brainstormer", description: "brainstorm the caching design", interactive: true, issues: [47, 52], run_in_background: true,
   });
   assert.equal(many.status, 200, JSON.stringify(many.body));
   assert.match(JSON.stringify(many.body), /issues #47, #52 were ignored/);
@@ -1032,7 +1053,7 @@ test("an interactive-only brainstormer is launched interactively and the correct
   const { launch, host } = setup();
   // The only valid reading of the call, so it is honoured rather than refused —
   // and the Manager is told when its report will arrive.
-  const coerced = await launch({ type: "brainstormer", description: "open a brainstorm session" });
+  const coerced = await launch({ type: "brainstormer", description: "open a brainstorm session", run_in_background: true });
   assert.equal(coerced.status, 200, JSON.stringify(coerced.body));
   assert.match(JSON.stringify(coerced.body), /report will arrive after the user runs \/done/);
   assert.deepEqual(host.created[0]!.terminal.shown, [false]);
@@ -1041,10 +1062,9 @@ test("an interactive-only brainstormer is launched interactively and the correct
   assert.match(command, /mcp__aboard__run_agent,mcp__aboard__continue_agent/u);
   assert.doesNotMatch(command, /--disallowedTools\s+['"]?mcp__aboard__\*/u);
 
-  // Backgrounding an interactive session is meaningless rather than ambiguous.
+  // An interactive session can run in the background and report asynchronously.
   const flagged = await launch({
     type: "brainstormer", description: "brainstorm the caching design", interactive: true, run_in_background: true,
   });
-  assert.match(JSON.stringify(flagged.body), /run_in_background was ignored/);
   assert.match(JSON.stringify(flagged.body), /handoff/);
 });

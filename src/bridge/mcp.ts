@@ -43,7 +43,7 @@ export interface McpServices {
 }
 
 export type McpCoordinator = Pick<DelegationCoordinator,
-  "run" | "spawn" | "spawnInteractive">;
+  "run" | "runInteractive" | "spawn" | "spawnInteractive">;
 
 export interface McpHandlerOptions {
   /** The caller's role is derived from the live fleet session. */
@@ -165,10 +165,7 @@ function parseLaunch(value: unknown): ParsedLaunch | string {
     notices.push(`${describeIssueNumbers(parsedIssues.issues)} ${ignored}: an interactive session opens with only the opening topic. To hand the session an issue's context, pass it in \`prompt\`.`);
   }
   if (!interactive && !nonEmptyString(value.prompt)) return "prompt is required unless interactive is true";
-  const background = !interactive && value.run_in_background === true;
-  if (interactive && value.run_in_background === true) {
-    notices.push("run_in_background was ignored: an interactive session reports when the user runs /done.");
-  }
+  const background = value.run_in_background === true;
   return {
     input: {
       type: type as DelegationLaunchInput["type"],
@@ -240,7 +237,9 @@ async function callTool(
       const parsed = parseLaunch(args);
       if (typeof parsed === "string") throw new TypeError(parsed);
       const launched = parsed.interactive
-        ? coordinator.spawnInteractive(parsed.input)
+        ? parsed.background
+          ? coordinator.spawnInteractive(parsed.input)
+          : coordinator.runInteractive(parsed.input, signal)
         : parsed.background
           ? coordinator.spawn(parsed.input)
           : coordinator.run(parsed.input, signal);

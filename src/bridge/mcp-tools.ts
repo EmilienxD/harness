@@ -29,32 +29,48 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
   {
     name: "run_agent",
     description:
-      "Delegate one coherent unit of work to a fresh agent session that the user can watch, interrupt, or take over.\n\n" +
-
-      "## When to use\n\n" +
-      "Use direct tools for a few targeted lookups, such as Read for a known path or Grep for a specific symbol. " +
-      "Use this tool for open-ended questions that span the codebase, multi-step work, or tasks that match a specialized agent type. " +
-      "Do not use it to fetch roadmap, fleet, issue, pull-request, or git state already supplied in context.\n\n" +
+      "Launch one visible, independent, fresh agent session. " +
+      "Use this when a coherent unit of work should be delegated " +
+      "and the user should be able to watch, interrupt, or take over.\n\n" +
 
       "## Choosing the agent type\n\n" +
-      "`type` defaults to `general-purpose`; omit it when no narrower role fits.\n" +
-      "- `general-purpose`: investigation or direct coding that may mix searching, reasoning, and editing. " +
-        "Use it for a fast or unplanned change; use `start_auto_run` for approved issue implementation. " +
-        "For a user request such as build, fix, change, or try, pass the request and relevant context in `prompt`. " +
-        "Set `interactive: true` when the user should continue the work directly.\n" +
-      "- `Explore`: read-only codebase search and factual reporting. Do not use it for reviews or other judgment calls. " +
-        "State the desired search breadth in the prompt: quick, medium, or very thorough.\n" +
-      "- `webresearcher`: automated, read-only research for current documentation, versions, pricing, standards, advisories, or vendor behavior.\n" +
-      "- `brainstormer`: a user-driven conversation that resolves a vague product or architecture idea into an implementation-ready specification. " +
-        "It is interactive only.\n" +
-      "- `prototyper`: a user-driven scratch experiment used to prove or disprove a feasibility claim. It is interactive only.\n\n" +
-      "Implementation agents and pull-request doctors are not available through this tool.\n\n" +
+      "`type` is optional and defaults to `general-purpose`, so omit it when no narrower role fits.\n" +
+      "- `general-purpose` (default): General-purpose agent for researching complex and specific questions, " +
+        "searching for code and executing multi-step tasks, " +
+        "for direct coding that may mix investigation and editing. " +
+        "This is the path for a fast change, critical fix or any unplanned modification; " +
+        "complex or planned implementation goes through `start_auto_run` instead, " +
+        "which owns branches, commits, and pull requests. " +
+        "It can be automated or handed to the user. " +
+        "An instruction addressed to you in the imperative — build this, fix this, change this, try this — " +
+        "asks for this launch. It is neither yours to carry out nor an occasion to explain that you do not implement: " +
+        "carry the user's own instruction through as the opening `prompt`, " +
+        "adding the context they did not have to repeat, " +
+        "and pass `interactive: true` when they will want to iterate on the result themselves.\n" +
+      "- `Explore`: Read-only search agent for code exploration. " +
+        "Use it to get up to date codebase reports. " +
+        "Do NOT use it for code review, design-doc auditing — it is not meant to make judgments, it is impartial and only surfaces facts" +
+        "When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, " +
+        "or \"very thorough\" to search across multiple locations and naming conventions.\n" +
+      "- `webresearcher`: automated, read-only research for cutoff-sensitive external facts. " +
+        "Use for current documentation, versions, pricing, standards, advisories, " +
+        "or vendor behavior that may have changed; it returns cited current evidence.\n" +
+      "- `brainstormer`: a user-driven conversation that resolves a vague product or architecture idea " +
+        "into an implementation-ready durable specification. " +
+        "It is interactive only.\n\n" +
+
+      "## When to use or not use\n\n" +
+      "If the target is already known, use the direct tool: Read for a known path, " +
+      "the Grep tool for a specific symbol or string. " + 
+      "Reserve this tool for open-ended questions that span the codebase, or tasks that match an available agent type." +
 
       "## Usage\n\n" +
-      "- `interactive: true` hands the session to the user. Its report arrives after the user runs `/done`; the optional `prompt` is its opening topic. " +
+      "- `interactive: true` hands the session to the user. Its report arrives after the user runs `/done`. " +
+        "Use it when the work is a conversation the user should be having, not a task. " +
+        "The optional `prompt` is its opening topic. " +
         "`brainstormer` and `prototyper` are interactive only; `webresearcher` and `Explore` are automated only and reject `interactive`.\n" +
-      "- Foreground automated launches wait for the result. `run_in_background: true` returns immediately and is for independent work; " +
-        "completion is reported automatically, so do not poll.\n" +
+      "- **Foreground vs background**: Use `run_in_background: false` (default) when you need the agent's results before you can proceed — " +
+        "e.g., research agents whose findings inform your next steps. Use background when you have genuinely independent work to do in parallel." +
       "- Give each launch a distinct 3-6 word `description`, such as \"Audit retry logic centralization\".\n" +
       "- Send independent launches as multiple tool calls in one message when they should run concurrently.\n" +
       "- Summarize an automated result for the user. For coding work, check actual edits and validation before reporting completion.\n\n" +

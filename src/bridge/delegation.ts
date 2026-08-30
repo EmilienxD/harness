@@ -170,6 +170,12 @@ export class DelegationCoordinator {
     return this.#foregroundResult(launched.agentId, result);
   }
 
+  public async runInteractive(input: DelegationLaunchInput, signal?: AbortSignal): Promise<unknown> {
+    const launched = await this.#launch(input, { mode: "tool-result" }, "manager", true);
+    const result = await this.#waitForResult(launched.agentId, signal);
+    return this.#foregroundResult(launched.agentId, result);
+  }
+
   public async runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome> {
     const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run", false);
     const result = await this.#waitForResult(launched.agentId, signal);
@@ -354,6 +360,16 @@ export class DelegationCoordinator {
     this.#waiters.get(agentId)?.(result);
     this.#waiters.delete(agentId);
     return true;
+  }
+
+  /** Completes an attended foreground launch from its explicit `/done` report. */
+  public submitReport(agentId: AgentId, message: string): WorkerResult {
+    const occurredAt = this.#timestamp();
+    const result = this.options.fleet.submitReport(agentId, message, occurredAt);
+    this.options.lease.releaseForTerminalOutcome(agentId, occurredAt, "agent reported done");
+    this.#waiters.get(agentId)?.(result);
+    this.#waiters.delete(agentId);
+    return result;
   }
 
   async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean): Promise<{

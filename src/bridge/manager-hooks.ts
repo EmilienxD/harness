@@ -422,6 +422,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 export interface InteractiveManagerLauncher {
   spawnInteractive(input: DelegationLaunchInput, recipientAgentId?: AgentId): Promise<unknown>;
+  submitReport?(agentId: AgentId, message: string): WorkerResult;
 }
 
 export interface InvokingTerminalKiller {
@@ -517,7 +518,10 @@ export class ManagerPromptService {
       const recipientAgentId = session.resultDelivery.mode === "mailbox" ? session.resultDelivery.recipientAgentId : undefined;
       const report = command.report ?? session.lastObservedAssistantMessage;
       let reporting: string;
-      if (recipientAgentId === undefined) {
+      if (session.resultDelivery.mode === "tool-result" && report !== undefined && this.launcher.submitReport !== undefined) {
+        this.launcher.submitReport(agentId, report);
+        reporting = "The report is being returned to the waiting caller.";
+      } else if (recipientAgentId === undefined) {
         reporting = "This session has no report recipient.";
       } else if (report === undefined) {
         reporting = `No complete assistant message was available to report to ${recipientAgentId}.`;

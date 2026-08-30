@@ -35,6 +35,7 @@ test("serves the MCP protocol over authenticated loopback HTTP to the Manager on
     tokenFactory: () => "activation-token",
     handler: createMcpHandler({
       run: async () => ({ result: "done" }),
+      runInteractive: async () => ({ result: "interactive done" }),
       spawn: async () => ({ status: "running" }),
       spawnInteractive: async () => ({ handoff: "open" }),
     }, { fleet: { get: (agentId) => agentId === managerAgentId ? managerSession as never : undefined } }),
@@ -57,7 +58,7 @@ test("serves the MCP protocol over authenticated loopback HTTP to the Manager on
   });
   assert.deepEqual(
     (called.body as { result?: { structuredContent?: unknown } }).result?.structuredContent,
-    { handoff: "open" },
+    { result: "interactive done" },
   );
 
   assert.equal((await rpc(bridge.port, bridge.token, "worker-1", "tools/list", {})).status, 403);

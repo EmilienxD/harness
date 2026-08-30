@@ -548,6 +548,38 @@ test("/done reports explicit text or the last observed assistant message before 
   assert.deepEqual(killed, [terminal("general-purpose-explicit-terminal"), terminal("general-purpose-observed-terminal")]);
 });
 
+test("/done returns a foreground interactive report through its waiting tool result", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const reporterId = agent("brainstormer-foreground");
+  fleet.register({
+    identity: { agentId: reporterId, type: "brainstormer" },
+    sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("brainstormer-foreground-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "tool-result" },
+    attended: true,
+    telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(reporterId, { status: "running", startedAt: timestamp }, timestamp);
+  const submitted: string[] = [];
+  const killed: TerminalId[] = [];
+  const prompts = new ManagerPromptService(fleet, {
+    spawnInteractive: async () => assert.fail("/done must not launch an agent"),
+    submitReport: (agentId, message) => {
+      submitted.push(message);
+      return fleet.submitReport(agentId, message, timestamp);
+    },
+  }, undefined, undefined, { kill: (terminalId) => killed.push(terminalId) });
+
+  const response = await prompts.handle(reporterId, "/done Foreground report.");
+  assert.match(String(response.message), /returned to the waiting caller/);
+  assert.deepEqual(submitted, ["Foreground report."]);
+  const result = fleet.takeBlockingResult(reporterId, timestamp);
+  assert.equal(result?.outcome, "succeeded");
+  assert.equal(result?.outcome === "succeeded" ? result.lastAssistantMessage : undefined, "Foreground report.");
+  assert.deepEqual(killed, [terminal("brainstormer-foreground-terminal")]);
+});
+
 test("/done queues the report when its recipient is no longer open", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const reporterId = agent("brainstormer-1");
