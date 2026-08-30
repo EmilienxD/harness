@@ -11,7 +11,7 @@ import {
 } from "../domain/run-plan.js";
 import type { AutoRunState } from "../auto/engine.js";
 import { currentPhase } from "../auto/engine.js";
-import type { AutoRunDryRunResult, PlannedIssue } from "../domain/auto-run.js";
+import type { AutoRunDryRunResult, PlannedIssue, SkippedIssue } from "../domain/auto-run.js";
 
 export type AutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: true }>;
 
@@ -347,10 +347,26 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
     `Review ${preview.reviewMode ? "on" : "off"}`,
     preview.ready ? "Ready to start" : `Cannot start: ${preview.blockers.join("; ")}`,
-    preview.skipped.length === 0
-      ? ""
-      : `Skipped: ${preview.skipped.map((issue) => `#${issue.number} (${issue.reason})`).join("; ")}`,
+    ...skippedLines(preview.skipped),
   ].filter(Boolean).join("\n");
+}
+
+/**
+ * Summarizes the skipped list for the forecast tooltip. Unclassified issues are
+ * the ordinary state of most projects and can number in the dozens, so they get
+ * a count; the actionable "blocked by" entries keep their per-issue reasons.
+ */
+function skippedLines(skipped: readonly SkippedIssue[]): string[] {
+  const unclassified = skipped.filter((issue) => issue.reason.startsWith("unclassified:"));
+  const other = skipped.filter((issue) => !issue.reason.startsWith("unclassified:"));
+  const lines: string[] = [];
+  if (unclassified.length > 0) {
+    lines.push(`${unclassified.length} unclassified issue${unclassified.length === 1 ? "" : "s"} skipped (neither [AI]-afk nor [AI]-hitl)`);
+  }
+  if (other.length > 0) {
+    lines.push(`Skipped: ${other.map((issue) => `#${issue.number} (${issue.reason})`).join("; ")}`);
+  }
+  return lines;
 }
 
 function describeOutcome(record: AutoRunRecord): string {

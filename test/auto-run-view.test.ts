@@ -159,6 +159,21 @@ test("a blocked forecast explains why the run cannot start", () => {
   assert.equal(item.collapsible, false);
 });
 
+test("the forecast tooltip counts unclassified issues instead of listing them", () => {
+  const skipped = [
+    { number: 1, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
+    { number: 2, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
+    { number: 3, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
+    { number: 36, reason: "blocked by open #41, which this run cannot address" },
+  ];
+  const { item } = rootItem({ forecast: forecast(preview({ skipped })) });
+  assert.match(item.tooltip, /3 unclassified issues skipped/);
+  // Unclassified issues are the ordinary state of most projects; the tooltip
+  // must not enumerate them one line each.
+  assert.doesNotMatch(item.tooltip, /#1\b/);
+  assert.match(item.tooltip, /Skipped: #36 \(blocked by open #41, which this run cannot address\)/);
+});
+
 test("a refresh keeps the last successful issue list visible", () => {
   const result = preview();
   const { item, model, root } = rootItem({ forecast: forecast(result, { checking: true }) });
