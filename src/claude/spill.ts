@@ -49,6 +49,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
       });
     }
     if (plan.agentDefinition !== undefined) await this.#write(plan.agentDefinition, base);
+    if (plan.wrapperRequest !== undefined) await this.#write(plan.wrapperRequest, base);
   }
 
   #resolvePath(relativePath: string, base: string): string {

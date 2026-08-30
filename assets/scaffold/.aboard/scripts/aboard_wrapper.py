@@ -2,6 +2,7 @@
 
 Usage:
     python aboard_wrapper.py <lock-file> -- <command> [args...]
+    python aboard_wrapper.py <lock-file> --request <launch.json>
 
 The extension launches every Claude session through this wrapper. The wrapper
 creates the marker file before spawning the child Claude process, forwards the
@@ -36,10 +37,29 @@ from typing import Any
 
 def main() -> int:
     args: list[str] = sys.argv[1:]
-    if len(args) < 3 or args[1] != "--":
+    if len(args) == 3 and args[1] == "--request":
+        request_path: str = args[2]
+        try:
+            with open(request_path, "r", encoding="utf-8") as handle:
+                request: Any = json.load(handle)
+            loaded_command: Any = request.get("command") if isinstance(request, dict) else None
+            if not isinstance(loaded_command, list) or not loaded_command or not all(
+                isinstance(token, str) and token for token in loaded_command
+            ):
+                return 2
+            command: list[str] = loaded_command
+        except (OSError, json.JSONDecodeError):
+            return 2
+        finally:
+            try:
+                os.remove(request_path)
+            except OSError:
+                pass
+    elif len(args) >= 3 and args[1] == "--":
+        command = args[2:]
+    else:
         return 2
     lock_path: str = args[0]
-    command: list[str] = args[2:]
 
     os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
     started_at: str = time.strftime("%Y-%m-%dT%H:%M:%S")

@@ -374,6 +374,9 @@ export type PromptSpillFile = RuntimeFile;
 
 export type AgentDefinitionFile = RuntimeFile;
 
+/** Exact child argv consumed by the wrapper before it starts Claude. */
+export type WrapperRequestFile = RuntimeFile;
+
 export type PromptDelivery = "none" | "inline" | "spilled";
 
 export interface LaunchPlan {
@@ -390,6 +393,7 @@ export interface LaunchPlan {
   readonly promptDelivery: PromptDelivery;
   readonly spill?: PromptSpillFile;
   readonly agentDefinition?: AgentDefinitionFile;
+  readonly wrapperRequest?: WrapperRequestFile;
   /** Per-launch directory selected with `--settings` and `--add-dir`. */
   readonly runtimeDirectory: string;
 }
@@ -701,17 +705,33 @@ function commonPreconditions(
   };
 }
 
-/** The wrapper executable, then the marker path and the original line after `--`. */
+function wrapperRequestFile(
+  runtimeDirectory: string,
+  agentId: AgentId,
+  command: readonly string[],
+  args: readonly string[],
+): WrapperRequestFile {
+  return {
+    agentId,
+    relativePath: `${agentRuntimeDirectory(runtimeDirectory, agentId)}/launch.json`,
+    contents: `${JSON.stringify({ command: [...command, ...args] })}\n`,
+  };
+}
+
+/** The wrapper executable plus short paths; child argv stays out of terminal input. */
 function wrapCommand(
   command: readonly string[],
   args: readonly string[],
   wrapper: SessionWrapperLayout | undefined,
   agentId: AgentId,
-): { readonly command: readonly string[]; readonly args: readonly string[] } {
+  runtimeDirectory: string,
+): { readonly command: readonly string[]; readonly args: readonly string[]; readonly request?: WrapperRequestFile } {
   if (wrapper === undefined) return { command, args };
+  const request = wrapperRequestFile(runtimeDirectory, agentId, command, args);
   return {
     command: ["uv", "run", "--no-project", "--no-managed-python", wrapper.script],
-    args: [wrapper.lockPathFor(agentId), "--", ...command, ...args],
+    args: [wrapper.lockPathFor(agentId), "--request", request.relativePath],
+    request,
   };
 }
 
@@ -796,7 +816,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     ...slashCommandArguments(attended),
   ];
 
-  const planFor = (promptThreshold: number): { readonly plan: PromptPlan; readonly args: string[]; readonly commandLine: string } => {
+  const planFor = (promptThreshold: number): { readonly plan: PromptPlan; readonly args: string[]; readonly commandLine: string; readonly request?: WrapperRequestFile } => {
     const plan = planPrompt(prompt, {
       agentId: request.agentId,
       shell: request.shell,
@@ -805,8 +825,13 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       stem: request.agentId,
     });
     const args = [...fixedArguments, ...plan.args];
-    const wrapped = wrapCommand(command, args, wrapper, request.agentId);
-    return { plan, args, commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args) };
+    const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory);
+    return {
+      plan,
+      args,
+      commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args),
+      ...(wrapped.request === undefined ? {} : { request: wrapped.request }),
+    };
   };
 
   const limit = MAX_COMMAND_LINE_CHARS[request.shell];
@@ -836,6 +861,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     runtimeDirectory: launchRuntimeDirectory,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
     ...(agentDefinition === undefined ? {} : { agentDefinition }),
+    ...(built.request === undefined ? {} : { wrapperRequest: built.request }),
   };
 }
 
@@ -868,7 +894,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     ...effortArguments(policy.effort),
     ...slashCommandArguments(attended),
   ];
-  const wrapped = wrapCommand(command, args, wrapper, request.agentId);
+  const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory);
   return {
     kind: "resume",
     agentId: request.agentId,
@@ -883,6 +909,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     promptDelivery: "none",
     runtimeDirectory: launchRuntimeDirectory,
     agentDefinition: definition.file,
+    ...(wrapped.request === undefined ? {} : { wrapperRequest: wrapped.request }),
   };
 }
 
@@ -913,7 +940,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ...slashCommandArguments(attended),
   ];
   const prompt = normalizePrompt(request.prompt);
-  const planFor = (promptThreshold: number): { readonly promptPlan: PromptPlan; readonly args: string[]; readonly commandLine: string } => {
+  const planFor = (promptThreshold: number): { readonly promptPlan: PromptPlan; readonly args: string[]; readonly commandLine: string; readonly request?: WrapperRequestFile } => {
     const promptPlan = planPrompt(prompt, {
       agentId: request.agentId,
       shell: request.shell,
@@ -922,8 +949,13 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       stem: `${request.agentId}-continue`,
     });
     const args = [...fixedArguments, ...promptPlan.args];
-    const wrapped = wrapCommand(command, args, wrapper, request.agentId);
-    return { promptPlan, args, commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args) };
+    const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory);
+    return {
+      promptPlan,
+      args,
+      commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args),
+      ...(wrapped.request === undefined ? {} : { request: wrapped.request }),
+    };
   };
   const limit = MAX_COMMAND_LINE_CHARS[request.shell];
   let built = planFor(threshold);
@@ -950,6 +982,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     runtimeDirectory: launchRuntimeDirectory,
     ...(built.promptPlan.spill === undefined ? {} : { spill: built.promptPlan.spill }),
     ...(definition === undefined ? {} : { agentDefinition: definition.file }),
+    ...(built.request === undefined ? {} : { wrapperRequest: built.request }),
   };
 }
 

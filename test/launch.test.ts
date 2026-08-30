@@ -223,7 +223,7 @@ test("the Manager MCP registration resolves the live port and token", () => {
   });
 });
 
-test("wrapper layout prefixes the launch and resume lines without reshaping the args", () => {
+test("wrapper layout keeps child argv out of the visible launch and resume lines", () => {
   const wrapper = {
     script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py",
     lockPathFor: (id: typeof agentId) => `C:\\repo\\.aboard\\runtime\\locks\\${id}.lock`,
@@ -232,13 +232,16 @@ test("wrapper layout prefixes the launch and resume lines without reshaping the 
   // plan.args keeps the claude-side view; only the command line changes.
   assert.equal(plan.args[2], "--add-dir");
   assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
-  assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' -- claude --session-id ${sessionId}`));
+  assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' --request .aboard/runtime/agents/${agentId}/launch.json`));
+  assert.doesNotMatch(plan.commandLine, /--allowedTools|--session-id/);
+  assert.deepEqual(JSON.parse(plan.wrapperRequest!.contents), { command: ["claude", ...plan.args] });
 
   const resumed = planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
     configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
   });
-  assert.match(resumed.commandLine, /aboard_wrapper\.py' .* -- claude --resume/);
+  assert.match(resumed.commandLine, /aboard_wrapper\.py' .* --request \.aboard\/runtime\/agents\/a1b2c3\/launch\.json/);
+  assert.deepEqual(JSON.parse(resumed.wrapperRequest!.contents), { command: ["claude", ...resumed.args] });
 });
 
 test("wrapper tokens are validated like the launch command", () => {
@@ -1042,7 +1045,8 @@ test("a definition's command replaces the configured launch command for that age
     configuration, prompt: "Go.",
     wrapper: { script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py", lockPathFor: () => "C:\\repo\\lock" },
   }));
-  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' -- wrapper run MyProfile -- --session-id"));
+  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' --request .aboard/runtime/agents/a1b2c3/launch.json"));
+  assert.deepEqual(JSON.parse(wrapped.wrapperRequest!.contents), { command: ["wrapper", "run", "MyProfile", "--", ...wrapped.args] });
 });
 
 test("a declared command is validated like the setting, and requires a definition or builtin profile", () => {

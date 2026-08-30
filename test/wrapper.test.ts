@@ -137,3 +137,18 @@ test("wrapper returns the child's exit code", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("wrapper consumes a request file and runs its exact argv", () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-"));
+  const lock = join(root, "a.lock");
+  const request = join(root, "launch.json");
+  try {
+    writeFileSync(request, JSON.stringify({ command: [process.execPath, "-e", "process.exit(6)"] }));
+    const result = uv([WRAPPER, lock, "--request", request]);
+    assert.equal(result.status, 6);
+    assert.equal(existsSync(request), false, "launch argv is removed once consumed");
+    assert.equal(existsSync(lock), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
