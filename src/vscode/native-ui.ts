@@ -5,7 +5,7 @@ import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning, type FleetTreeNode } from "./fleet.js";
 import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunViewSources } from "./auto-run.js";
-import { ActivityTreeModel, clearActivityWarning, type ActivityNode } from "./activity.js";
+import { ActivityTreeModel, canOpenActivityIssue, clearActivityWarning, type ActivityNode } from "./activity.js";
 import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
 import type { AutoRunEngine } from "../auto/engine.js";
 import type { DiscardBehavior } from "../domain/run-cleanup.js";
@@ -256,7 +256,8 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       if (entry !== undefined) options.activity.showTerminal(entry);
     }),
     commands.registerCommand("aboard.activity.openIssue", (node: unknown) => {
-      void openNumber(activityEntryOf(node)?.issueNumbers?.[0]);
+      const entry = activityEntryOf(node);
+      if (entry !== undefined && canOpenActivityIssue(entry)) void openNumber(entry.issueNumbers[0]);
     }),
     commands.registerCommand("aboard.activity.openPullRequest", (node: unknown) => {
       void openNumber(activityEntryOf(node)?.pullRequest);

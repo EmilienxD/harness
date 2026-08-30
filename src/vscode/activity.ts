@@ -35,13 +35,15 @@ export class ActivityTreeModel {
     const capabilities = ["aboard.activity"];
     const live = entry.kind === "agent" && entry.terminalId !== undefined && this.sources.isTerminalOpen(entry.terminalId);
     if (live) capabilities.push("terminal");
-    if ((entry.issueNumbers?.length ?? 0) > 0) capabilities.push("issue");
+    // Run rows represent a whole frozen plan. Issue navigation belongs on the
+    // agent row that carried one concrete issue.
+    if (canOpenActivityIssue(entry)) capabilities.push("issue");
     if (entry.pullRequest !== undefined) capabilities.push("pr");
     if (entry.kind === "agent" && entry.reopen !== undefined && !live) capabilities.push("reopen");
     if (entry.kind === "agent" && entry.type === "manager" && !live) capabilities.push("manager");
     return {
       label: describeActivity(entry),
-      description: "",
+      description: describeDetail(entry),
       tooltip: tooltip(entry),
       icon: icon(entry),
       contextValue: capabilities.join("."),
@@ -56,11 +58,24 @@ export class ActivityTreeModel {
   }
 }
 
+export function canOpenActivityIssue(entry: ActivityEntry): entry is ActivityEntry & { readonly issueNumbers: readonly [number] } {
+  return entry.kind === "agent"
+    && ["implementer", "pr-doctor-afk", "pr-doctor-hitl"].includes(entry.type)
+    && entry.issueNumbers?.length === 1;
+}
+
 function describeDetail(entry: ActivityEntry): string {
-  const parts = [
-    entry.kind === "agent" ? entry.description : `attempt ${entry.attempt}`,
+  const parts = entry.kind === "agent" ? [
+    entry.description,
     entry.issueNumbers === undefined || entry.issueNumbers.length === 0 ? "" : formatIssueNumbers(entry.issueNumbers),
     entry.pullRequest === undefined ? "" : `PR #${entry.pullRequest}`,
+    formatDuration(entry.durationMs),
+  ] : [
+    `attempt ${entry.attempt}`,
+    entry.completedIssues === undefined || entry.totalIssues === undefined ? "" : `${entry.completedIssues}/${entry.totalIssues} issues`,
+    entry.currentIssue === undefined ? "" : `at #${entry.currentIssue}`,
+    entry.pullRequest === undefined ? "" : `PR #${entry.pullRequest}`,
+    formatDuration(entry.durationMs),
   ];
   return parts.filter(Boolean).join(" · ");
 }
@@ -69,11 +84,23 @@ function tooltip(entry: ActivityEntry): string {
   return [
     describeActivity(entry),
     describeDetail(entry),
+    entry.kind === "run" && (entry.issueNumbers?.length ?? 0) > 0
+      ? `Planned issues: ${formatIssueNumbers(entry.issueNumbers ?? [])}`
+      : "",
     entry.kind === "agent" ? `Agent ${entry.agentId} (${entry.type})` : `Run ${entry.runId}, attempt ${entry.attempt}`,
-    `At ${entry.at}`,
+    `At ${new Date(entry.at).toLocaleString()} (${entry.at})`,
     entry.reason === undefined ? "" : entry.reason,
     entry.kind === "agent" && entry.reopen !== undefined ? "This conversation can be reopened." : "",
   ].filter(Boolean).join("\n");
+}
+
+function formatDuration(durationMs: number | undefined): string {
+  if (durationMs === undefined) return "";
+  if (durationMs < 60_000) return `${Math.max(1, Math.round(durationMs / 1_000))}s`;
+  if (durationMs < 3_600_000) return `${Math.round(durationMs / 60_000)}m`;
+  const hours = Math.floor(durationMs / 3_600_000);
+  const minutes = Math.round((durationMs % 3_600_000) / 60_000);
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 
 function icon(entry: ActivityEntry): string {

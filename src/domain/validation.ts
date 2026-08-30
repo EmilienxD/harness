@@ -798,16 +798,32 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
       ? undefined
       : readNonNegativeInteger(entry.pullRequest, "pullRequest", dropped);
     const reason = typeof entry.reason === "string" && entry.reason.trim().length > 0 ? entry.reason : undefined;
+    const durationMs = entry.durationMs === undefined
+      ? undefined
+      : readNonNegativeInteger(entry.durationMs, "durationMs", dropped);
 
     if (entry.kind === "run") {
       const runId = readNonEmptyString(entry.runId, "runId", dropped);
       const attempt = readNonNegativeInteger(entry.attempt, "attempt", dropped);
       const outcome = RUN_OUTCOMES.includes(entry.outcome as RunOutcome) ? entry.outcome as RunOutcome : undefined;
+      const completedIssues = entry.completedIssues === undefined
+        ? undefined
+        : readNonNegativeInteger(entry.completedIssues, "completedIssues", dropped);
+      const totalIssues = entry.totalIssues === undefined
+        ? undefined
+        : readNonNegativeInteger(entry.totalIssues, "totalIssues", dropped);
+      const currentIssue = entry.currentIssue === undefined
+        ? undefined
+        : readNonNegativeInteger(entry.currentIssue, "currentIssue", dropped);
       if (dropped.length > 0 || runId === undefined || attempt === undefined || outcome === undefined) continue;
       seen.add(id);
       entries.push({
         kind: "run", id, at, runId, attempt, outcome,
         ...(reason === undefined ? {} : { reason }),
+        ...(durationMs === undefined ? {} : { durationMs }),
+        ...(completedIssues === undefined ? {} : { completedIssues }),
+        ...(totalIssues === undefined ? {} : { totalIssues }),
+        ...(currentIssue === undefined ? {} : { currentIssue }),
         ...(issueNumbers === undefined ? {} : { issueNumbers }),
         ...(pullRequest === undefined ? {} : { pullRequest }),
       });
@@ -827,6 +843,7 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
     entries.push({
       kind: "agent", id, at, agentId: agentId as AgentId, type, description, outcome,
       ...(reason === undefined ? {} : { reason }),
+      ...(durationMs === undefined ? {} : { durationMs }),
       ...(issueNumbers === undefined ? {} : { issueNumbers }),
       ...(pullRequest === undefined ? {} : { pullRequest }),
       ...(typeof entry.terminalId === "string" && entry.terminalId.length > 0 ? { terminalId: entry.terminalId as TerminalId } : {}),

@@ -38,7 +38,7 @@ import {
 import { FileActivityStore, FileFleetStore, FileLegacySessionLedger, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
 import { isInteractiveLaunch, shouldRecordEndedSession } from "./domain/activity.js";
-import { isUnsupportedRecord } from "./domain/run-plan.js";
+import { completedCount, isUnsupportedRecord } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
 import { registerReopenCommand } from "./vscode/reopen.js";
@@ -548,6 +548,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         outcome: outcome === "succeeded" ? "succeeded" : outcome.kind,
         ...(outcome !== "succeeded" && outcome.kind === "failed" ? { reason: outcome.reason } : {}),
         issueNumbers: record.plan.map((issue) => issue.number),
+        completedIssues: completedCount(record),
+        totalIssues: record.plan.length,
+        ...(record.currentIssue === undefined ? {} : { currentIssue: record.currentIssue }),
         ...(record.runPullRequest === undefined ? {} : { pullRequest: record.runPullRequest }),
       }),
       runDiscarded: (record) => activity.recordRun({

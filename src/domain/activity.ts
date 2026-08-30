@@ -54,6 +54,8 @@ export interface AgentActivityEntry {
   /** The launch description, as shown on the terminal. */
   readonly description: string;
   readonly outcome: AgentOutcome;
+  /** Wall-clock launch duration. Summary metadata only; no conversation telemetry. */
+  readonly durationMs?: number;
   /** Short and human-readable; the stack stays in the output channel. */
   readonly reason?: string;
   readonly issueNumbers?: readonly number[];
@@ -73,6 +75,11 @@ export interface RunActivityEntry {
   readonly runId: string;
   readonly attempt: number;
   readonly outcome: RunOutcome;
+  /** Duration of this attempt, derived from its recorded start or resume row. */
+  readonly durationMs?: number;
+  readonly completedIssues?: number;
+  readonly totalIssues?: number;
+  readonly currentIssue?: number;
   readonly reason?: string;
   /** The plan's issue numbers, so the row can say what the run was for. */
   readonly issueNumbers?: readonly number[];
@@ -128,6 +135,7 @@ export function agentActivity(
 ): AgentActivityEntry {
   const reopenable = canReopenSession(session);
   const continuationOnly = isContinuableAgentType(session.identity.type) && !reopenable;
+  const durationMs = elapsedMs(session.lifecycle.startedAt, at);
   const launchFacts: ReopenableSession = {
     sessionId: session.sessionId,
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
@@ -143,6 +151,7 @@ export function agentActivity(
     type: session.identity.type,
     description: describeTerminalName(session.terminal.name),
     outcome,
+    ...(durationMs === undefined ? {} : { durationMs }),
     ...(options.reason === undefined ? {} : { reason: options.reason }),
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
     ...(options.terminalId === undefined ? {} : { terminalId: options.terminalId }),
@@ -160,6 +169,10 @@ export function runActivity(
     readonly reason?: string;
     readonly issueNumbers?: readonly number[];
     readonly pullRequest?: number;
+    readonly durationMs?: number;
+    readonly completedIssues?: number;
+    readonly totalIssues?: number;
+    readonly currentIssue?: number;
   },
 ): RunActivityEntry {
   return {
@@ -169,6 +182,10 @@ export function runActivity(
     runId: input.runId,
     attempt: input.attempt,
     outcome: input.outcome,
+    ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }),
+    ...(input.completedIssues === undefined ? {} : { completedIssues: input.completedIssues }),
+    ...(input.totalIssues === undefined ? {} : { totalIssues: input.totalIssues }),
+    ...(input.currentIssue === undefined ? {} : { currentIssue: input.currentIssue }),
     ...(input.reason === undefined ? {} : { reason: input.reason }),
     ...(input.issueNumbers === undefined ? {} : { issueNumbers: input.issueNumbers }),
     ...(input.pullRequest === undefined ? {} : { pullRequest: input.pullRequest }),
@@ -180,8 +197,24 @@ export function appendActivity(
   entry: ActivityEntry,
   limit: number = ACTIVITY_LIMIT,
 ): ActivityDto {
-  const previous = (store ?? EMPTY_ACTIVITY).entries.filter((existing) => existing.id !== entry.id);
+  const previous = (store ?? EMPTY_ACTIVITY).entries.filter((existing) => {
+    if (existing.id === entry.id) return false;
+    // A run attempt is one useful history item. Its final outcome replaces the
+    // temporary start/resume marker instead of spending two of the twenty slots.
+    if (
+      entry.kind === "run" && existing.kind === "run"
+      && entry.runId === existing.runId && entry.attempt === existing.attempt
+      && entry.outcome !== "started" && entry.outcome !== "resumed"
+      && (existing.outcome === "started" || existing.outcome === "resumed")
+    ) return false;
+    return true;
+  });
   return { version: 1, entries: [entry, ...previous].slice(0, Math.max(limit, 0)) };
+}
+
+function elapsedMs(startedAt: IsoTimestamp, endedAt: IsoTimestamp): number | undefined {
+  const elapsed = Date.parse(endedAt) - Date.parse(startedAt);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : undefined;
 }
 
 /** True when clearing the store would cost the user a way back into a conversation. */

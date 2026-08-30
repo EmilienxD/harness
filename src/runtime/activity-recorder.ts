@@ -64,8 +64,20 @@ export class ActivityRecorder {
     readonly reason?: string;
     readonly issueNumbers?: readonly number[];
     readonly pullRequest?: number;
+    readonly completedIssues?: number;
+    readonly totalIssues?: number;
+    readonly currentIssue?: number;
   }): void {
-    this.#append(runActivity({ ...input, at: this.#now() }));
+    const at = this.#now();
+    const beginning = this.#cache.entries.find((entry) =>
+      entry.kind === "run" && entry.runId === input.runId && entry.attempt === input.attempt
+      && (entry.outcome === "started" || entry.outcome === "resumed"));
+    const durationMs = beginning === undefined ? undefined : Math.max(0, Date.parse(at) - Date.parse(beginning.at));
+    this.#append(runActivity({
+      ...input,
+      at,
+      ...(durationMs === undefined || !Number.isFinite(durationMs) ? {} : { durationMs }),
+    }));
   }
 
   public async clear(): Promise<void> {

@@ -138,13 +138,14 @@ test("appends are newest first, idempotent by id, and capped", () => {
   assert.equal(twice.entries[0]?.at, "2026-07-30T09:30:01.000Z");
 });
 
-test("a resumed run keeps its id, and start and outcome are separate rows per attempt", () => {
+test("a resumed run keeps its id, and each attempt settles into one history row", () => {
   let store = appendActivity(undefined, runActivity({ runId: "run_a", attempt: 1, outcome: "started", at: at("2026-07-30T09:00:00.000Z") }));
   store = appendActivity(store, runActivity({ runId: "run_a", attempt: 1, outcome: "interrupted", at: at("2026-07-30T09:10:00.000Z") }));
   store = appendActivity(store, runActivity({ runId: "run_a", attempt: 2, outcome: "resumed", at: at("2026-07-30T09:20:00.000Z") }));
   store = appendActivity(store, runActivity({ runId: "run_a", attempt: 2, outcome: "succeeded", at: at("2026-07-30T09:30:00.000Z") }));
-  assert.equal(store.entries.length, 4);
-  assert.equal(new Set(store.entries.map((entry) => entry.id)).size, 4);
+  assert.equal(store.entries.length, 2);
+  assert.deepEqual(store.entries.map((entry) => entry.kind === "run" ? entry.outcome : "agent"), ["succeeded", "interrupted"]);
+  assert.equal(new Set(store.entries.map((entry) => entry.id)).size, 2);
 });
 
 test("outcomes read as roles rather than lifecycle names", () => {
@@ -258,7 +259,7 @@ test("the legacy ledger parser drops unreadable entries rather than the file", (
 test("a row offers only the actions it can actually perform", () => {
   const openTerminals = new Set<string>(["terminal-7"]);
   const entries = [
-    agentActivity(fleetSession({ agentId: "7", type: "brainstormer", issueNumbers: [34] }), "ended", at("2026-07-30T09:30:00.000Z"), { terminalId: terminal("terminal-7") }),
+    agentActivity(fleetSession({ agentId: "7", type: "pr-doctor-hitl", issueNumbers: [34] }), "ended", at("2026-07-30T09:30:00.000Z"), { terminalId: terminal("terminal-7") }),
     agentActivity(fleetSession({ agentId: "9", type: "implementer", delivers: true }), "succeeded", at("2026-07-30T09:00:00.000Z"), { terminalId: terminal("terminal-9") }),
     runActivity({ runId: "run_a", attempt: 1, outcome: "succeeded", at: at("2026-07-30T08:00:00.000Z"), issueNumbers: [34, 35], pullRequest: 60 }),
     agentActivity(fleetSession({ agentId: "1", type: "manager" }), "interrupted", at("2026-07-30T07:00:00.000Z")),
@@ -266,10 +267,11 @@ test("a row offers only the actions it can actually perform", () => {
   const model = new ActivityTreeModel({ entries: () => entries, isTerminalOpen: (id) => openTerminals.has(id) });
   const items = model.roots().map((node) => model.item(node));
 
-  // Recent Activity stays compact: launch metadata remains available on hover
-  // instead of occupying VS Code's muted secondary-description column.
-  assert.deepEqual(items.map((item) => item.description), ["", "", "", ""]);
-  assert.match(items[0]?.tooltip ?? "", /brainstormer conversation/);
+  // Rows expose enough launch metadata to be distinguishable without hover.
+  assert.match(items[0]?.description ?? "", /pr-doctor-hitl conversation · #34 · 30m/);
+  assert.match(items[1]?.description ?? "", /implementer conversation · 1s/);
+  assert.match(items[2]?.description ?? "", /attempt 1 · PR #60/);
+  assert.match(items[0]?.tooltip ?? "", /pr-doctor-hitl conversation/);
   assert.match(items[2]?.tooltip ?? "", /#34, #35/);
   assert.match(items[2]?.tooltip ?? "", /PR #60/);
 
@@ -281,8 +283,9 @@ test("a row offers only the actions it can actually perform", () => {
   // implementer can be handed back to the user.
   assert.match(items[1]?.contextValue ?? "", /reopen/);
   assert.equal(items[1]?.command?.command, "aboard.activity.reopen");
-  // A run row names its issues and its pull request.
-  assert.match(items[2]?.contextValue ?? "", /issue/);
+  // A run row represents the whole plan: it exposes its PR, but issue actions
+  // belong to the single-issue implementer and doctor rows.
+  assert.doesNotMatch(items[2]?.contextValue ?? "", /issue/);
   assert.match(items[2]?.contextValue ?? "", /pr/);
   assert.equal(items[2]?.label, "auto-run finished");
   // Manager continuity has its own command rather than the generic session reopen path.
