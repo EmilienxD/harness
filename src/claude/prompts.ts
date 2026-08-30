@@ -1,5 +1,4 @@
 
-import { describeIssueNumbers } from "../shared/issues.js";
 import { issueDisposition } from "../shared/labels.js";
 
 export { issueDisposition };
@@ -67,11 +66,6 @@ export type PromptResolutionRequest =
       readonly issueNumbers: readonly number[];
       /** Defaults to recursive resolution for callers outside auto-run. */
       readonly recursiveIssueReferences?: boolean;
-    }
-  | {
-      readonly kind: "issue-context";
-      readonly instruction: string;
-      readonly issueNumbers: readonly number[];
     }
   | {
       readonly kind: "review";
@@ -220,8 +214,6 @@ export class PromptResolver {
     switch (request.kind) {
       case "implementation":
         return this.#resolveImplementation(request);
-      case "issue-context":
-        return this.#resolveIssueContext(request);
       case "review":
         return this.#resolveReview(request);
       case "brainstorm":
@@ -336,27 +328,6 @@ export class PromptResolver {
     // change, and the engine launches one implementer per issue.
     builder.section("Disposition", dispositionGuidance(issueDisposition(primary.labels)));
     return builder.build(`Address issue #${primary.number} — ${primary.title}.`);
-  }
-
-  async #resolveIssueContext(
-    request: Extract<PromptResolutionRequest, { kind: "issue-context" }>,
-  ): Promise<ResolvedPrompt> {
-    const instruction = requireInstruction(request.instruction);
-    const issues = await this.#fetchIssues(request.issueNumbers);
-    const [primary] = issues;
-    const named = describeIssueNumbers(issues.map((issue) => issue.number));
-    const builder = new PromptBuilder();
-    if (issues.length > 1) builder.section(undefined, `You have the resolved context for ${named}.`);
-    builder.section(undefined, instruction);
-
-    await this.#issueSections(builder, issues, false);
-    // A single issue keeps its title in the headline; several would overrun the
-    // one line that also serves as the spill stub.
-    return builder.build(
-      issues.length === 1
-        ? `Use the resolved context for issue #${primary.number} — ${primary.title}.`
-        : `Use the resolved context for ${named}.`,
-    );
   }
 
   async #resolveReview(
