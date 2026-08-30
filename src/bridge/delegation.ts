@@ -30,7 +30,6 @@ import type { SessionWrapperLayout } from "../claude/launch.js";
 import { sessionIsResumable } from "../claude/sessions.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
 import type { IssueDifficulty } from "../shared/labels.js";
-import type { PrototypeFolderAllocator } from "./prototypes.js";
 
 export interface LaunchIsolation {
   readonly cwd: string;
@@ -119,7 +118,6 @@ export interface DelegationCoordinatorOptions {
   readonly managerAgentId: () => AgentId;
   /** Writes a resolved per-launch MCP registration for roles that own a catalog. */
   readonly mcpConfig?: (agentId: AgentId, type: AgentType) => Promise<string | undefined>;
-  readonly prototypeFolders?: PrototypeFolderAllocator;
   readonly shell: ShellKind;
   /** Infrastructure-level denials applied to every delegated launch and resume. */
   readonly disallowedTools?: readonly string[];
@@ -379,21 +377,10 @@ export class DelegationCoordinator {
   }> {
     const agentId = this.options.agentIdFactory();
     const sessionId = this.options.sessionIdFactory();
-    let effectiveInput = input;
-    if (input.type === "prototyper") {
-      if (!attended) throw new DelegationError("unknown-agent", "A prototyper must be launched interactively");
-      if (this.options.prototypeFolders === undefined) throw new Error("Prototype folder allocation is unavailable");
-      const scratch = await this.options.prototypeFolders.allocate(agentId, input.description);
-      const instruction = `Aboard allocated this prototype's scratch folder at ${scratch}. Work only inside that folder; do not edit application files elsewhere in the project.`;
-      effectiveInput = {
-        ...input,
-        prompt: input.prompt === undefined ? instruction : `${input.prompt.trim()}\n\n${instruction}`,
-      };
-    }
     const mcpConfigPath = await this.options.mcpConfig?.(agentId, input.type);
     const [configuration, prompt] = await Promise.all([
       this.options.configurations.get(input.type),
-      this.options.prompts.resolve(effectiveInput, { interactive: attended }),
+      this.options.prompts.resolve(input, { interactive: attended }),
     ]);
     const plan = planLaunch({
       agentId,
@@ -418,7 +405,7 @@ export class DelegationCoordinator {
     });
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    if (leaseRequired(origin, attended)) {
+    if (input.type !== "prototyper" && leaseRequired(origin, attended)) {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
     }
     const cwd = input.isolation?.cwd;
