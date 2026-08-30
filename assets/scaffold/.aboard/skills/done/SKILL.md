@@ -1,7 +1,7 @@
 ---
 name: done
-description: Close this visible aboard terminal and report to the session that launched it. Optional trailing text replaces the last complete assistant message as the report. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
-argument-hint: "[report]"
+description: Close this visible aboard terminal and report the last complete assistant message to the session that launched it. Optional trailing text is included as further notes, not as a replacement for that report. Handled entirely by a UserPromptSubmit hook - the body below is an error notice that is only reachable when that hook fails.
+argument-hint: "[further notes]"
 disable-model-invocation: true
 ---
 
