@@ -101,14 +101,20 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const title = (contributes.menus["view/title"] ?? []).filter((entry) => (entry.when ?? "").includes("aboard.autoRun"));
   const when = (command: string) => title.find((entry) => entry.command === command)?.when ?? "";
 
+  // Start lives on the card itself as its inline action; repeating it in the
+  // view title would only duplicate the button one row below.
+  const start = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.startAutoRun");
+  assert.match(start?.group ?? "", /^inline@/, "Start Auto Run must be the card's inline action");
+  assert.equal(title.some((entry) => entry.command === "aboard.startAutoRun"), false, "Start Auto Run must not also sit in the view title");
+
   // Start is offered only with nothing unresolved: two runs competing for the
   // same branches is the failure this prevents. A forecast that already knows
   // it cannot start publishes "forecastBlocked" instead of "forecast", and the
   // exact-match Start clause hides the action there.
-  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == idle/);
-  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == forecast\b/);
-  assert.match(when("aboard.startAutoRun"), /aboard\.autoRunCard == unavailable/);
-  assert.doesNotMatch(when("aboard.startAutoRun"), /forecastBlocked/);
+  assert.match(start?.when ?? "", /viewItem == aboard\.autoRun\.idle/);
+  assert.match(start?.when ?? "", /viewItem == aboard\.autoRun\.forecast\b/);
+  assert.match(start?.when ?? "", /viewItem == aboard\.autoRun\.forecastUnavailable/);
+  assert.doesNotMatch(start?.when ?? "", /forecastBlocked/);
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.previewAutoRun"), false);
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
   // Resume appears only once validation has said the run may continue — never

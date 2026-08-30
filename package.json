@@ -212,24 +212,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "aboard.startAutoRun",
-          "when": "view == aboard.autoRun && (aboard.autoRunCard == idle || aboard.autoRunCard == forecast || aboard.autoRunCard == unavailable)",
-          "group": "1_run@1"
-        },
-        {
           "command": "aboard.stopAutoRun",
           "when": "view == aboard.autoRun && (aboard.autoRunCard == active || aboard.autoRunCard == waiting)",
-          "group": "1_run@3"
+          "group": "1_run@1"
         },
         {
           "command": "aboard.resumeAutoRun",
           "when": "view == aboard.autoRun && aboard.autoRunCard == recoverable",
-          "group": "1_run@4"
+          "group": "1_run@2"
         },
         {
           "command": "aboard.discardAutoRun",
           "when": "view == aboard.autoRun && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken || aboard.autoRunCard == unsupported)",
-          "group": "1_run@5"
+          "group": "1_run@3"
         },
         {
           "command": "aboard.activity.clear",
