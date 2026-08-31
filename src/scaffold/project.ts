@@ -89,20 +89,28 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
     const content = await readFile(source, "utf8");
     const sourceHash = hash(content);
     const destination = join(projectRoot, ...path.split("/"));
+    let installedAsset: InstalledAsset | undefined;
     if (!await exists(destination)) {
       await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, content, "utf8"); created.push(path);
+      installedAsset = { sourceHash };
     } else {
       const current = await readFile(destination, "utf8");
       const previousAsset = previous.assets[path];
       if (current === content) {
         // Already current.
+        installedAsset = { sourceHash };
       } else if (previousAsset !== undefined && hash(current) === previousAsset.sourceHash) {
         await writeFile(destination, content, "utf8"); updated.push(path);
+        installedAsset = { sourceHash };
       } else {
         preserved.push(path);
+        // Keep the last version known to have been installed. Recording the
+        // new source here would make a preserved old version look user-edited
+        // forever, even if the user later restored that installed version.
+        installedAsset = previousAsset;
       }
     }
-    next[path] = { sourceHash };
+    if (installedAsset !== undefined) next[path] = installedAsset;
   }
 
   // `agents` holds the derived system-prompt files every agent-defined launch

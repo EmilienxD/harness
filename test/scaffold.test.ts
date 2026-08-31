@@ -1,7 +1,7 @@
 ﻿import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { readScaffoldState, scaffoldProject } from "../src/scaffold/project.js";
@@ -85,6 +85,40 @@ test("owned assets upgrade only when unchanged and quietly preserve local edits"
   // is not a warning; the autoCompact check remains the only warning here.
   assert.deepEqual(report.warnings.filter((warning) => warning.toLowerCase().includes("preserved")), []);
   assert.ok(report.warnings.some((warning) => warning.includes("autoCompact")));
+});
+
+test("preserving a local edit does not advance its installed-version baseline", async () => {
+  const root = await project(); const source = await project();
+  const sourceAgent = join(source, ".aboard", "agents", "implementer.md");
+  const installedAgent = join(root, ".aboard", "agents", "implementer.md");
+  await mkdir(dirname(sourceAgent), { recursive: true });
+  await writeFile(sourceAgent, "v1");
+  await scaffoldProject({ projectRoot: root, assetRoot: source });
+
+  await writeFile(installedAgent, "local edit");
+  await writeFile(sourceAgent, "v2");
+  const preserved = await scaffoldProject({ projectRoot: root, assetRoot: source });
+  assert.ok(preserved.preserved.includes(".aboard/agents/implementer.md"));
+
+  await writeFile(installedAgent, "v1");
+  const updated = await scaffoldProject({ projectRoot: root, assetRoot: source });
+  assert.equal(await readFile(installedAgent, "utf8"), "v2");
+  assert.ok(updated.updated.includes(".aboard/agents/implementer.md"));
+});
+
+test("a pre-existing conflicting asset is preserved without claiming its source version was installed", async () => {
+  const root = await project(); const source = await project();
+  const sourceAgent = join(source, ".aboard", "agents", "implementer.md");
+  const installedAgent = join(root, ".aboard", "agents", "implementer.md");
+  await mkdir(dirname(sourceAgent), { recursive: true });
+  await mkdir(dirname(installedAgent), { recursive: true });
+  await writeFile(sourceAgent, "shipped");
+  await writeFile(installedAgent, "pre-existing");
+
+  const report = await scaffoldProject({ projectRoot: root, assetRoot: source });
+  const manifest = await json(join(root, ".aboard", "scaffold.json"));
+  assert.ok(report.preserved.includes(".aboard/agents/implementer.md"));
+  assert.equal(Object.hasOwn(manifest.assets as object, ".aboard/agents/implementer.md"), false);
 });
 
 test("files absent from the current scaffold are never inspected or deleted", async () => {

@@ -944,6 +944,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       });
       for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
       output.appendLine(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
+      if (report.preserved.length > 0) {
+        output.appendLine("Preserved locally changed aboard assets:");
+        for (const path of report.preserved) output.appendLine(`  ${path}`);
+        void window.showWarningMessage(`${report.preserved.length} locally changed aboard asset${report.preserved.length === 1 ? " was" : "s were"} preserved. See the aboard Output channel for the file list.`);
+      }
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
     finally { await publishScaffoldState(); }
   };
