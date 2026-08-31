@@ -90,7 +90,7 @@
       {
         "command": "aboard.discardAutoRun",
         "title": "Aboard: Discard Auto Run",
-        "icon": "$(trash)"
+        "icon": "$(close)"
       },
       {
         "command": "aboard.autoRun.refresh",

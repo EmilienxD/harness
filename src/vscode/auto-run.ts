@@ -144,7 +144,12 @@ export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
  * than inviting a click that can only fail.
  */
 export function autoRunCardMenuState(card: AutoRunCard): string {
-  return card.kind === "forecast" && !card.forecast.preview.ready ? "forecastBlocked" : card.kind;
+  if (card.kind !== "forecast") return card.kind;
+  const preview = card.forecast.preview;
+  // An empty queue is not a problem to fix, so it keeps a neutral identity
+  // distinct from a forecast that is genuinely blocked. Both hide Start.
+  if (preview.emptyReason !== undefined && preview.blockers.length === 0) return "forecastEmpty";
+  return preview.ready ? card.kind : "forecastBlocked";
 }
 
 /** The record behind the card, when there is one. */
@@ -222,15 +227,18 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
     case "forecast": {
       const { preview } = card.forecast;
       const count = preview.issues.length;
+      const empty = preview.emptyReason !== undefined && preview.blockers.length === 0;
       return {
         label: "Next auto-run",
         description: card.forecast.checking
           ? `${count} issue${count === 1 ? "" : "s"} queued · refreshing…`
-          : preview.ready
-            ? `${count} issue${count === 1 ? "" : "s"} queued`
-            : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
+          : empty
+            ? "nothing to run"
+            : preview.ready
+              ? `${count} issue${count === 1 ? "" : "s"} queued`
+              : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
         tooltip: forecastTooltip(card.forecast),
-        icon: card.forecast.checking ? "refresh~spin" : preview.ready ? "list-tree" : "warning",
+        icon: card.forecast.checking ? "refresh~spin" : empty || preview.ready ? "list-tree" : "warning",
         contextValue: `aboard.autoRun.${autoRunCardMenuState(card)}`,
         collapsible: count > 0,
       };
@@ -356,7 +364,11 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     `Target branch: ${preview.sessionBase}`,
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
     `Review ${preview.reviewMode ? "on" : "off"}`,
-    preview.ready ? "Ready to start" : `Cannot start: ${preview.blockers.join("; ")}`,
+    preview.emptyReason !== undefined && preview.blockers.length === 0
+      ? `Nothing to run: ${preview.emptyReason}`
+      : preview.ready
+        ? "Ready to start"
+        : `Cannot start: ${preview.blockers.join("; ")}`,
     ...skippedLines(preview.skipped),
   ].filter(Boolean).join("\n");
 }

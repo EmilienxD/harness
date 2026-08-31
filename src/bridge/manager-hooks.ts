@@ -685,8 +685,15 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
     for (const cycle of result.dependencyCycles) lines.push(`- ${cycle.map((number) => `#${number}`).join(", ")}: internal edges are relaxed and those issues are ordered oldest first.`);
   }
   if (result.skipped.length > 0) {
-    lines.push("", "Skipped for this forecast:");
-    for (const issue of result.skipped) lines.push(`- #${issue.number}: ${issue.reason}.`);
+    // Unclassified issues are the ordinary state of most projects and can number
+    // in the dozens, so they are counted, not listed; the actionable "blocked
+    // by" entries keep their per-issue reasons.
+    const unclassified = result.skipped.filter((issue) => issue.reason.startsWith("unclassified:"));
+    const other = result.skipped.filter((issue) => !issue.reason.startsWith("unclassified:"));
+    const parts: string[] = [];
+    if (unclassified.length > 0) parts.push(`${unclassified.length} unclassified (neither [AI]-afk nor [AI]-hitl)`);
+    for (const issue of other) parts.push(`#${issue.number}: ${issue.reason}`);
+    lines.push("", `Skipped for this forecast: ${parts.join("; ")}.`);
   }
 
   lines.push(

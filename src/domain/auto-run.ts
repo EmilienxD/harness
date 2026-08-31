@@ -80,6 +80,12 @@ export type AutoRunDryRunResult =
       readonly inspected: true;
       readonly ready: boolean;
       readonly blockers: readonly string[];
+      /**
+       * Why the plan is empty, when it is. An empty queue is the ordinary state
+       * of a project with nothing labelled, not a problem to fix, so it is kept
+       * apart from the blockers that actually prevent a start.
+       */
+      readonly emptyReason: string | undefined;
       readonly reviewMode: boolean;
       readonly pauseAfterHitl: boolean;
       /** User-authored guidance that would be appended to every auto agent. */

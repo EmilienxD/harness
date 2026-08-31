@@ -362,8 +362,8 @@ export class AutoRunEngine {
       const paths = status.entries.map((entry) => entry.path);
       blockers.push(`the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`);
     }
-    if (plan.issues.length === 0) blockers.push(emptyQueueReason(plan.skipped));
-    else {
+    const emptyReason = plan.issues.length === 0 ? emptyQueueReason(plan.skipped) : undefined;
+    if (plan.issues.length > 0) {
       const conflict = await this.#findPlanConflict(plan.issues);
       if (conflict !== undefined) blockers.push(conflict);
     }
@@ -371,8 +371,9 @@ export class AutoRunEngine {
     return {
       dryRun: true,
       inspected: true,
-      ready: blockers.length === 0,
+      ready: blockers.length === 0 && emptyReason === undefined,
       blockers,
+      emptyReason,
       reviewMode: settings.review,
       pauseAfterHitl: settings.pauseAfterHitl,
       ...guidelineProperty(options.additionalGuideline),
@@ -446,8 +447,8 @@ export class AutoRunEngine {
     for (const cycle of plan.dependencyCycles) {
       this.options.notifier.notify(`auto-run: dependency cycle detected among ${cycle.map((number) => `#${number}`).join(", ")}; ordering those issues oldest first.`);
     }
-    for (const skipped of plan.skipped) {
-      this.options.notifier.notify(`auto-run: issue #${skipped.number} skipped (${skipped.reason}).`);
+    if (plan.skipped.length > 0) {
+      this.options.notifier.notify(`auto-run: ${plan.skipped.length} issue${plan.skipped.length === 1 ? "" : "s"} discarded (not ready to run).`);
     }
     this.options.activity?.runStarted(record, false);
     this.#begin(record);
@@ -1714,9 +1715,12 @@ function guidelineProperty(value: string | undefined): { readonly additionalGuid
   return trimmed === undefined || trimmed.length === 0 ? {} : { additionalGuideline: trimmed };
 }
 
+/**
+ * Why a run has nothing to do. The count is all that matters here: the skipped
+ * list can run to dozens of unclassified issues, and enumerating them would
+ * bury the one fact the user needs.
+ */
 function emptyQueueReason(skipped: readonly SkippedIssue[]): string {
-  if (skipped.length === 0) return "no open issue is labelled [AI]-afk or [AI]-hitl";
-  const listed = skipped.slice(0, 20).map((entry) => `#${entry.number} (${entry.reason})`).join(", ");
-  const rest = skipped.length > 20 ? `, and ${skipped.length - 20} more` : "";
-  return `no open issue is ready to address: ${listed}${rest}`;
+  const base = "no open issue is labelled [AI]-afk or [AI]-hitl";
+  return skipped.length === 0 ? base : `${base} (${skipped.length} discarded)`;
 }

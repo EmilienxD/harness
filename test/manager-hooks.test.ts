@@ -802,6 +802,7 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
           inspected: true,
           ready: true,
           blockers: [],
+          emptyReason: undefined,
           reviewMode: true,
           pauseAfterHitl: false,
           additionalGuideline: options?.additionalGuideline,
@@ -814,7 +815,10 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
             { number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff", chrome: true },
             { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "aboard/35-migrate-the-queue", difficulty: "advanced" },
           ],
-          skipped: [{ number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" }],
+          skipped: [
+            { number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
+            { number: 41, reason: "blocked by open #99, which this run cannot address" },
+          ],
           dependencyCycles: [[34, 35]],
         };
       },
@@ -832,7 +836,10 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
   assert.match(String(result.message), /2\. #35 Migrate the queue.*You must merge its PR/);
   assert.match(String(result.message), /interactive pr-doctor/);
   assert.match(String(result.message), /# Additional User Guideline For this Session\n\nkeep generated files out of commits/);
-  assert.match(String(result.message), /#36: unclassified/);
+  // Unclassified issues are counted, never listed one line each; the
+  // actionable "blocked by" entry keeps its per-issue reason.
+  assert.match(String(result.message), /Skipped for this forecast: 1 unclassified \(neither \[AI\]-afk nor \[AI\]-hitl\); #41: blocked by open #99, which this run cannot address\./);
+  assert.doesNotMatch(String(result.message), /#36: unclassified/);
   assert.match(String(result.message), /opens one PR from aboard\/run\/<run-id> into feature\/wip; you must review and merge/);
   assert.deepEqual(await prompts.handle(managerId, "show me the plan"), {}, "a dry-run forecast is not replayed through the Manager mailbox");
 });
@@ -849,6 +856,7 @@ test("/auto --dry reports blockers while preserving the inspected issue plan", a
         inspected: true,
         ready: false,
         blockers: ["the working tree is not clean: src/a.ts"],
+        emptyReason: undefined,
         reviewMode: false,
         pauseAfterHitl: false,
         isolatedWorkspace: false,

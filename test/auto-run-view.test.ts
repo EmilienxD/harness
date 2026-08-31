@@ -81,6 +81,7 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     inspected: true,
     ready: true,
     blockers: [],
+    emptyReason: undefined,
     reviewMode: false,
     pauseAfterHitl: false,
     isolatedWorkspace: false,
@@ -162,6 +163,40 @@ test("a blocked forecast explains why the run cannot start", () => {
   // "forecast", so a card that already knows it cannot start hides the action.
   assert.equal(item.contextValue, "aboard.autoRun.forecastBlocked");
   assert.equal(autoRunCardMenuState(card({ forecast: forecast(result) })), "forecastBlocked");
+});
+
+test("an empty queue is not a blocker: the forecast reads as nothing to run", () => {
+  const result = preview({
+    ready: false,
+    blockers: [],
+    emptyReason: "no open issue is labelled [AI]-afk or [AI]-hitl (3 discarded)",
+    issues: [],
+  });
+  const { item } = rootItem({ forecast: forecast(result) });
+  assert.equal(item.description, "nothing to run");
+  // A neutral state, not a warning: there is simply nothing for a run to do.
+  assert.equal(item.icon, "list-tree");
+  assert.match(item.tooltip, /Nothing to run: no open issue is labelled \[AI\]-afk or \[AI\]-hitl/);
+  assert.doesNotMatch(item.tooltip, /Cannot start/);
+  assert.equal(item.collapsible, false);
+  // Its own menu identity: Start's exact "forecast" match hides the action,
+  // just as it does for a genuinely blocked forecast.
+  assert.equal(item.contextValue, "aboard.autoRun.forecastEmpty");
+  assert.equal(autoRunCardMenuState(card({ forecast: forecast(result) })), "forecastEmpty");
+});
+
+test("a blocked forecast stays a warning even when the queue is also empty", () => {
+  const result = preview({
+    ready: false,
+    blockers: ["the working tree is not clean: src/a.ts"],
+    emptyReason: "no open issue is labelled [AI]-afk or [AI]-hitl",
+    issues: [],
+  });
+  const { item } = rootItem({ forecast: forecast(result) });
+  assert.equal(item.description, "cannot start · 1 blocker");
+  assert.equal(item.icon, "warning");
+  assert.match(item.tooltip, /Cannot start: the working tree is not clean/);
+  assert.equal(item.contextValue, "aboard.autoRun.forecastBlocked");
 });
 
 test("the forecast tooltip counts unclassified issues instead of listing them", () => {

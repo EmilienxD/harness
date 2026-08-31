@@ -1335,6 +1335,21 @@ test("a dry run in worktree mode treats the user's dirty checkout as read-only",
   assert.deepEqual(context.launches, []);
 });
 
+test("a dry run with nothing to run reports an empty queue, not a blocker", async () => {
+  const context = harness({
+    issues: [{ number: 40, title: "Fix the parser", labels: [], state: "open", openBlockedByNumbers: [] }],
+  });
+  const result = await context.engine.dryRun();
+
+  assert.equal(result.inspected, true);
+  if (!result.inspected) return;
+  // An empty queue is ordinary, not a problem to fix: it must not surface as a
+  // blocker even though it does mean the run cannot start.
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.emptyReason, "no open issue is labelled [AI]-afk or [AI]-hitl (1 discarded)");
+});
+
 test("a dry run reports an aboard target branch as a blocker", async () => {
   const context = harness({ startBranch: "aboard/run/old", worktree: true });
   const result = await context.engine.dryRun();
@@ -1473,17 +1488,19 @@ test("the queue drains standalone and child issues while reporting an unclassifi
     [`createBranch aboard/40-fix-the-parser ${SESSION}`, `createBranch aboard/121-add-retry-backoff ${SESSION}`],
   );
   assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
-  assert.match(context.notifications.join("\n"), /#12 skipped \(unclassified: neither \[AI\]-afk nor \[AI\]-hitl\)/);
+  assert.match(context.notifications.join("\n"), /1 issue discarded \(not ready to run\)/);
   assert.equal(context.state.cleared, true);
 });
 
-test("an empty queue refuses the run and names why each candidate was skipped", async () => {
+test("an empty queue refuses the run and counts the discarded candidates", async () => {
   const unlabelled = harness({
     issues: [{ number: 40, title: "Fix the parser", labels: [], state: "open", openBlockedByNumbers: [] }],
   });
   const refused = await unlabelled.engine.start();
   assert.equal(refused.started, false);
-  assert.match((refused as { reason: string }).reason, /#40 \(unclassified: neither \[AI\]-afk nor \[AI\]-hitl\)/);
+  // The reason is a count, never a per-issue list: dozens of unclassified
+  // issues would bury the one fact the user needs.
+  assert.equal((refused as { reason: string }).reason, "no open issue is labelled [AI]-afk or [AI]-hitl (1 discarded)");
   assert.equal(unlabelled.launches.length, 0);
   assert.equal(unlabelled.saved.length, 0);
 
