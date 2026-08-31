@@ -180,7 +180,7 @@ Claude Code never auto-backgrounds three kinds of command. It stops them at the 
 
 * A command that starts with `sleep`.
 * A command that runs `git` anywhere in it.
-* A compound command Claude Code can't fully parse into simple commands.
+* A compound command Claude Code can't fully parse into simple commands. Claude Code treats a parameter expansion such as `${VAR}` as unparseable, so it stops a command that ends in `; exit "${PIPESTATUS[0]}"` at the timeout even when the rest of that command parses.
 
 The result of a command moved to the background states what happened:
 
@@ -303,9 +303,9 @@ The LSP tool gives Claude code intelligence from a running language server. Afte
 * Find implementations of an interface
 * Trace call hierarchies
 
-Claude Code keeps the tool inactive until you install a [code intelligence plugin](/docs/en/discover-plugins#code-intelligence) for your language. Claude Code takes the language server's configuration from the plugin, and you install the server binary yourself.
+Claude Code keeps the tool inactive until you install a [code intelligence plugin](/docs/en/discover-plugins#code-intelligence) for your language. In [cloud sessions](/docs/en/claude-code-on-the-web), Claude Code doesn't start plugin language servers, so the LSP tool stays inactive there. Claude Code takes the language server's configuration from the plugin, and you install the server binary yourself.
 
-Claude Code keeps the tool active for the rest of a session once it has had a language server available in that session. Claude Code returns an error result for each LSP call on a file whose language server it can't start. Before v2.1.235, Claude Code deactivated the tool whenever every language server had crashed or failed to start and reactivated it when one recovered.
+Claude Code returns an error result for each LSP call on a file whose language server it can't start.
 
 ## Monitor tool
 
