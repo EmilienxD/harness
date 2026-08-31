@@ -1,5 +1,5 @@
 name = "redirect-subagents"
-version = "1.2.2"
+version = "1.2.3"
 description = "Redirect Claude Code's built-in Agent tool subagents to alternate providers, avoiding Claude subscription usage"
 requires = []
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/redirect-subagents/README.md"

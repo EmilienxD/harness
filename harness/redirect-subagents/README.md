@@ -30,7 +30,8 @@ entry:
 ```jsonc
 {
   // 1. clauder profile, the original use case. Runs:
-  //    clauder run myprofile --model claude-haiku-4-5 --effort low --system-prompt "..." "<prompt>"
+  //    clauder run myprofile -p --model claude-haiku-4-5 --effort low --system-prompt "..."
+  //    with <prompt> on stdin
   "Explore": {
     "profile": "myprofile",
     "model": "claude-haiku-4-5",
@@ -40,7 +41,7 @@ entry:
   },
 
   // 2. The "self" shorthand — a plain string. Runs:
-  //    claude -p --model auto "<prompt>"
+  //    claude -p --model auto, with <prompt> on stdin
   //    (same CLI, same auth; useful for cheap/explicit model tiers when the
   //    subscription is separately gated for the small model)
   "Plan": "auto",
@@ -59,9 +60,11 @@ entry:
 
 Useful optional key on any entry: `"_append_prompt": false` — don't
 substitute `{prompt}` and don't append it; the prompt goes to the backend's
-**stdin** instead (keeps it out of `ps` and the Windows process table).
-`claude -p` reads its prompt from stdin, so the shorthand could use this
-too; it defaults to argv because not every backend does.
+**stdin** instead (keeps it out of `ps` and the Windows process table and
+preserves multiline prompts). Profile-based `clauder` entries and the
+`claude -p` shorthand use stdin by default. Explicit custom commands default
+to argv because not every backend reads stdin; set this key to `false` when
+yours does.
 
 ### User-level fallback config
 
@@ -88,7 +91,7 @@ The installer only writes the project file; this one is yours to edit.
   `uvx;--from;clauder;clauder` to run it through uvx without a global install.
 - **`REDIRECT_SUBAGENTS_BACKEND`** — the command template used for entries
   with `profile`/`model`/`effort` but no `command`, default
-  `clauder run {profile} --model {model} --effort {effort} --system-prompt {system_prompt}`.
+  `clauder run {profile} -p --model {model} --effort {effort} --system-prompt {system_prompt}`.
 - **`LOG_LEVEL`** — hook log verbosity, default `INFO`.
 
 ## How it works

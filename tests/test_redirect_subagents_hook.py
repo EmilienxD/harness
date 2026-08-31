@@ -121,14 +121,17 @@ def test_build_cmd_full_entry():
         {"profile": "myprofile", "model": "m", "effort": "low", "system_prompt": "sp"},
         "hello prompt",
     )
-    assert cmd == ["clauder", "run", "myprofile", "--model", "m",
-                   "--effort", "low", "--system-prompt", "sp", "hello prompt"]
+    assert cmd == ["clauder", "run", "myprofile", "-p", "--model", "m",
+                   "--effort", "low", "--system-prompt", "sp"]
+    assert rs_io.prompt_input(
+        {"profile": "myprofile", "model": "m", "effort": "low"}, "hello prompt"
+    ) == "hello prompt"
 
 
 def test_build_cmd_unset_fields_drop():
     """A field the entry leaves out takes its flag with it."""
     cmd = rs_io.build_cmd({"profile": "myprofile"}, "p")
-    assert cmd == ["clauder", "run", "myprofile", "p"]
+    assert cmd == ["clauder", "run", "myprofile", "-p"]
 
 
 def test_build_cmd_unset_field_before_inline_prompt_drops_its_flag():
@@ -156,7 +159,17 @@ def test_build_cmd_valueless_flag_survives_a_dropped_prompt():
 def test_build_cmd_string_shorthand_is_self_backend():
     cfg = rs_io._normalize({"Explore": "auto"})["Explore"]
     cmd = rs_io.build_cmd(cfg, "do thing")
-    assert cmd == ["claude", "-p", "--model", "auto", "do thing"]
+    assert cmd == ["claude", "-p", "--model", "auto"]
+    assert rs_io.prompt_input(cfg, "first\n\nsecond") == "first\n\nsecond"
+
+
+def test_profile_entry_uses_print_mode_and_multiline_stdin():
+    cfg = rs_io._normalize({"Explore": {"profile": "myprofile", "effort": "low"}})["Explore"]
+    prompt = "find and report:\n\n1. first\n2. second"
+    assert rs_io.build_cmd(cfg, prompt) == [
+        "clauder", "run", "myprofile", "-p", "--effort", "low"
+    ]
+    assert rs_io.prompt_input(cfg, prompt) == prompt
 
 
 def test_build_cmd_append_prompt_off_strips_prompt():
@@ -170,7 +183,7 @@ def test_build_cmd_clauder_bin_env_expands_launcher(monkeypatch):
     monkeypatch.setenv("REDIRECT_SUBAGENTS_CLAUDER_BIN", "uvx;--from;clauder;clauder")
     cmd = rs_io.build_cmd({"profile": "myprofile", "model": "m", "effort": "low"}, "x")
     assert cmd == ["uvx", "--from", "clauder", "clauder", "run", "myprofile",
-                   "--model", "m", "--effort", "low", "x"]
+                   "-p", "--model", "m", "--effort", "low"]
 
 
 def test_build_cmd_backend_env_replaces_default_command(monkeypatch):
@@ -270,8 +283,25 @@ def test_deny_foreground_success(tmp_path, monkeypatch):
     })
     assert code == 0
     assert captured["encoding"] == "utf-8"
+    assert captured["input"] == "hi"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "Hi there! 👋" in reason
+
+
+def test_background_job_pipes_multiline_stdin(tmp_path):
+    prompt = "find and report:\n\n1. first\n2. second"
+    job_id = deny_hook.start_background_job(
+        "Explore",
+        [sys.executable, "-c", "import sys; print(sys.stdin.read(), end='')"],
+        "s1",
+        cwd=str(tmp_path),
+        stdin_text=prompt,
+    )
+    deadline = time.monotonic() + 5
+    while not rs_io.is_done(job_id) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert rs_io.is_done(job_id)
+    assert rs_io.job_result(job_id) == (True, prompt)
 
 
 def test_deny_defers_when_clauder_missing(tmp_path, monkeypatch):

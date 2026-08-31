@@ -20,7 +20,7 @@ Environment variables (all optional):
                                     "uvx;--from;clauder;clauder"
     REDIRECT_SUBAGENTS_BACKEND      fallback command template for entries with
                                     profile/model/effort but no "command"
-                                    (default "clauder run {profile} --model
+                                    (default "clauder run {profile} -p --model
                                     {model} --effort {effort} --system-prompt
                                     {system_prompt}")
     LOG_LEVEL                       logging verbosity (default INFO)
@@ -107,15 +107,21 @@ def _normalize(data: dict) -> dict:
     """Canonical mapping form for every entry.
 
     A plain string is the "self" shorthand: "Explore": "auto" runs that
-    subagent through `claude -p --model auto`. Objects are used as-is, with
-    {"command": ...} taking precedence over the profile/model/effort template.
+    subagent through `claude -p --model auto`. Profile-based clauder entries
+    and the shorthand send prompts over stdin by default; this preserves
+    multiline prompts on platforms where Claude's positional prompt is split
+    at the first newline. Other backends keep the historical argv default.
+    {"command": ...} takes precedence over the profile/model/effort template.
     """
     out = {}
     for agent, entry in data.items():
         if isinstance(entry, str) and entry:
-            out[str(agent)] = {"command": f"claude;-p;--model;{entry};{{prompt}}"}
+            out[str(agent)] = {
+                "command": f"claude;-p;--model;{entry};{{prompt}}",
+                "_append_prompt": False,
+            }
         elif isinstance(entry, dict):
-            out[str(agent)] = {**entry, "_append_prompt": entry.get("_append_prompt", True)}
+            out[str(agent)] = dict(entry)
     return out
 
 
@@ -153,7 +159,7 @@ def command_template() -> str:
     """Fallback command for entries that set profile/model/effort but no "command"."""
     return os.environ.get(
         "REDIRECT_SUBAGENTS_BACKEND",
-        "clauder run {profile} --model {model} --effort {effort} --system-prompt {system_prompt}",
+        "clauder run {profile} -p --model {model} --effort {effort} --system-prompt {system_prompt}",
     )
 
 
@@ -183,7 +189,7 @@ def build_cmd(cfg: dict, prompt: str) -> list[str]:
     fields = {k: v for k, v in cfg.items() if not k.startswith("_") and k != "command"}
 
     template = cfg.get("command") or command_template()
-    _append_prompt = cfg.get("_append_prompt", True)
+    _append_prompt = append_prompt(cfg)
     parts: list[str] = []
 
     def drop_flag_for(missing: str) -> None:
@@ -226,6 +232,16 @@ def build_cmd(cfg: dict, prompt: str) -> list[str]:
     if parts and parts[0] == "clauder":
         parts = [*clauder_command(), *parts[1:]]
     return parts
+
+
+def append_prompt(cfg: dict) -> bool:
+    """Whether this backend receives its prompt as a positional argv item."""
+    return bool(cfg.get("_append_prompt", build_backend(cfg) != "clauder"))
+
+
+def prompt_input(cfg: dict, prompt: str) -> str | None:
+    """Prompt to pipe to the backend, or None when it is already in argv."""
+    return None if append_prompt(cfg) else prompt
 
 
 # Flags that take no value of their own, so the *next* flag is never mistaken

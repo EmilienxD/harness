@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rs_io import (  # noqa: E402
     JOBS_REL, build_cmd, clauder_available, defer_job, deliver_report,
     emit_json_output, is_deferrable, load_subagents, logger, open_job_ids,
-    root,
+    prompt_input, root,
 )
 
 FOREGROUND_TIMEOUT_S = 540
@@ -54,6 +54,7 @@ def run_subagent(agent: str, prompt: str, timeout: float | None = None) -> tuple
         result = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=timeout, cwd=cfg.get("_cwd") or None,
+            input=prompt_input(cfg, prompt),
         )
         if result.returncode == 0:
             return True, result.stdout.strip()
@@ -65,7 +66,8 @@ def run_subagent(agent: str, prompt: str, timeout: float | None = None) -> tuple
 
 
 def start_background_job(agent: str, cmd: list[str], session_id: str | None,
-                         cwd: str | None = None) -> str:
+                         cwd: str | None = None,
+                         stdin_text: str | None = None) -> str:
     """Launch cmd detached in background, return job ID."""
     job_id = uuid.uuid4().hex[:12]
     job_dir = root() / JOBS_REL / job_id
@@ -85,9 +87,15 @@ try:
     config = json.loads(sys.stdin.read())
     with open(config['stdout'], 'w', encoding='utf-8') as out, \\
          open(config['stderr'], 'w', encoding='utf-8') as err:
-        p = subprocess.Popen(config['cmd'], stdout=out, stderr=err,
-                             stdin=subprocess.DEVNULL, cwd=config.get('cwd'))
-        code = p.wait()
+        if config.get('stdin') is None:
+            p = subprocess.Popen(config['cmd'], stdout=out, stderr=err,
+                                 stdin=subprocess.DEVNULL, cwd=config.get('cwd'))
+            code = p.wait()
+        else:
+            p = subprocess.Popen(config['cmd'], stdout=out, stderr=err,
+                                 stdin=subprocess.PIPE, cwd=config.get('cwd'))
+            p.communicate(config['stdin'].encode('utf-8'))
+            code = p.returncode
     with open(config['exit_code'], 'w', encoding='utf-8') as f:
         f.write(str(code))
 except Exception as e:
@@ -118,6 +126,7 @@ finally:
     config_payload = {
         "cmd": cmd,
         "cwd": cwd,
+        "stdin": stdin_text,
         "stdout": str(job_dir / "stdout.log"),
         "stderr": str(job_dir / "stderr.log"),
         "exit_code": str(job_dir / "exit_code"),
@@ -203,8 +212,13 @@ def main() -> None:
             return
 
     if run_in_background:
-        job_id_str = start_background_job(subagent_type, build_cmd(cfg, prompt), session_id,
-                                          cwd=cfg.get("_cwd"))
+        job_id_str = start_background_job(
+            subagent_type,
+            build_cmd(cfg, prompt),
+            session_id,
+            cwd=cfg.get("_cwd"),
+            stdin_text=prompt_input(cfg, prompt),
+        )
         logger.info("Started background subagent %s", job_id_str)
         deny(
             f"The {subagent_type} subagent is disabled in this session to avoid consuming Claude "
