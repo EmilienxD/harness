@@ -371,7 +371,7 @@ export class AutoRunEngine {
       const paths = status.entries.map((entry) => entry.path);
       blockers.push(`the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`);
     }
-    const emptyReason = plan.issues.length === 0 ? emptyQueueReason(plan.skipped) : undefined;
+    const emptyReason = plan.issues.length === 0 ? emptyQueueReason() : undefined;
     if (plan.issues.length > 0) {
       const conflict = await this.#findPlanConflict(plan.issues);
       if (conflict !== undefined) blockers.push(conflict);
@@ -408,7 +408,7 @@ export class AutoRunEngine {
     if (precondition !== undefined) return { started: false, reason: precondition };
 
     const plan = planRun((await this.options.github.listImplementableIssues()).candidates);
-    if (plan.issues.length === 0) return { started: false, reason: emptyQueueReason(plan.skipped) };
+    if (plan.issues.length === 0) return { started: false, reason: emptyQueueReason() };
     const returnBranch = await this.options.git.currentBranch() ?? await this.options.git.defaultBranch();
     const branchBlocker = autoRunTargetBranchBlocker(returnBranch);
     if (branchBlocker !== undefined) return { started: false, reason: branchBlocker };
@@ -1770,12 +1770,6 @@ function guidelineProperty(value: string | undefined): { readonly additionalGuid
   return trimmed === undefined || trimmed.length === 0 ? {} : { additionalGuideline: trimmed };
 }
 
-/**
- * Why a run has nothing to do. The count is all that matters here: the skipped
- * list can run to dozens of unclassified issues, and enumerating them would
- * bury the one fact the user needs.
- */
-function emptyQueueReason(skipped: readonly SkippedIssue[]): string {
-  const base = "no open issue is labelled [AI]-afk or [AI]-hitl";
-  return skipped.length === 0 ? base : `${base} (${skipped.length} discarded)`;
+function emptyQueueReason(): string {
+  return "no open issue to adress.";
 }

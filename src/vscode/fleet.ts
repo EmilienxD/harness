@@ -1,7 +1,7 @@
 import type { AgentId, AgentSession, ChildAgentNode, IsoTimestamp, TerminalId, WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
-import { describeIssueNumbers, formatIssueNumbers } from "../shared/issues.js";
+import { formatIssueNumbers } from "../shared/issues.js";
 
 export type FleetTreeNode =
   | { readonly kind: "new-manager" }
@@ -161,7 +161,7 @@ function agentTooltip(session: AgentSession, leaseHolder: boolean, reportsOwed: 
 }
 function childTooltip(child: ChildAgentNode): string { return [`Type: ${child.type}`, `Status: ${child.status}`].join("\n"); }
 
-export interface FleetNotificationHost { information(message: string): void; warning(message: string): void; error(message: string): void; }
+export interface FleetNotificationHost { warning(message: string): void; error(message: string): void; }
 export class FleetNotifications {
   readonly #fleetRegistration: { dispose(): void };
   public constructor(fleet: FleetRegistry, private readonly host: FleetNotificationHost) {
@@ -178,8 +178,7 @@ function notify(event: FleetEvent, fleet: FleetRegistry, host: FleetNotification
   // The Manager is the user's own console: its ending is something they did, not
   // a background result worth a toast.
   if (session?.identity.type === "manager") return;
-  if (session?.lifecycle.status === "completed") host.information(`${session.identity.type} completed${session.issueNumbers === undefined ? "" : ` ${describeIssueNumbers(session.issueNumbers)}`}.`);
-  else if (session?.lifecycle.status === "failed") host.error(`${session.identity.type} failed: ${failureLabel(session.lifecycle.failure.type)}.`);
+  if (session?.lifecycle.status === "failed") host.error(`${session.identity.type} failed: ${failureLabel(session.lifecycle.failure.type)}.`);
 }
 function failureLabel(type: WorkerFailureType): string { return type.replaceAll("-", " "); }
 
@@ -193,4 +192,17 @@ export function renderFleetStatus(port: number, fleet: FleetRegistry, lease: Wri
 export function saveLeaseWarning(lease: WriteLease): string | undefined {
   const holder = lease.current();
   return holder === undefined ? undefined : `You saved a file while ${holder.agentId} holds the aboard write lease. Your edit was saved, but concurrent changes may conflict.`;
+}
+
+/** Emits at most once for each acquisition; a later holder gets its own warning. */
+export class LeaseSaveWarnings {
+  #warned: { readonly agentId: AgentId; readonly acquiredAt: IsoTimestamp } | undefined;
+
+  public next(lease: WriteLease): string | undefined {
+    const holder = lease.current();
+    if (holder === undefined) { this.#warned = undefined; return undefined; }
+    if (this.#warned?.agentId === holder.agentId && this.#warned.acquiredAt === holder.acquiredAt) return undefined;
+    this.#warned = holder;
+    return saveLeaseWarning(lease);
+  }
 }

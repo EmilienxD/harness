@@ -4,7 +4,7 @@ import test from "node:test";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
-import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning } from "../src/vscode/fleet.js";
+import { FleetNotifications, FleetTreeModel, LeaseSaveWarnings, registerFleetCommands, renderFleetStatus, saveLeaseWarning } from "../src/vscode/fleet.js";
 
 const at = (value: string) => value as IsoTimestamp;
 const agent = (value: string) => value as AgentId;
@@ -188,13 +188,36 @@ test("only running children render under an agent", () => {
   model.dispose();
 });
 
-test("status and typed notifications render domain state without sensitive content", () => {
-  const fleet = new FleetRegistry(); const lease = new WriteLease(); const info: string[] = []; const errors: string[] = [];
-  const notifications = new FleetNotifications(fleet, { information: (message) => info.push(message), warning: () => {}, error: (message) => errors.push(message) });
+test("status and failure notifications render domain state without routine completion toasts", () => {
+  const fleet = new FleetRegistry(); const lease = new WriteLease(); const errors: string[] = [];
+  const notifications = new FleetNotifications(fleet, { warning: () => {}, error: (message) => errors.push(message) });
   fleet.register(worker, startedAt); fleet.transition(worker.identity.agentId, { status: "running", startedAt }, startedAt); lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, startedAt, "test");
   assert.deepEqual(renderFleetStatus(4823, fleet, lease), { text: "$(organization) 1 · :4823 · $(lock) 4", tooltip: "aboard bridge: 127.0.0.1:4823\nLive agents: 1\nWrite lease: 4", liveAgentCount: 1 });
   assert.match(saveLeaseWarning(lease) ?? "", /saved.*4.*may conflict/);
   assert.equal(renderFleetStatus(4823, fleet, lease, () => false).liveAgentCount, 0, "paused records are not live terminals");
   const finishedAt = at("2026-07-30T10:05:00.000Z"); fleet.transition(worker.identity.agentId, { status: "failed", startedAt, finishedAt, failure: { type: "timeout", exitCode: null, lastAssistantMessage: "secret prompt" } }, finishedAt);
-  assert.deepEqual(errors, ["implementer failed: timeout."]); assert.equal(info.length, 0); notifications.dispose();
+  assert.deepEqual(errors, ["implementer failed: timeout."]); notifications.dispose();
+});
+
+test("successful worker completion is silent", () => {
+  const fleet = new FleetRegistry(); const errors: string[] = [];
+  const notifications = new FleetNotifications(fleet, { warning: () => {}, error: (message) => errors.push(message) });
+  fleet.register(worker, startedAt);
+  const finishedAt = at("2026-07-30T10:05:00.000Z");
+  fleet.transition(worker.identity.agentId, { status: "completed", startedAt, finishedAt, exitCode: 0, lastAssistantMessage: "done" }, finishedAt);
+  assert.deepEqual(errors, []);
+  notifications.dispose();
+});
+
+test("save warnings appear once per lease acquisition", () => {
+  const lease = new WriteLease();
+  const warnings = new LeaseSaveWarnings();
+  assert.equal(warnings.next(lease), undefined);
+  lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, startedAt, "test");
+  assert.match(warnings.next(lease) ?? "", /saved.*4.*may conflict/);
+  assert.equal(warnings.next(lease), undefined);
+  lease.forceRelease(at("2026-07-30T10:01:00.000Z"), "test release");
+  assert.equal(warnings.next(lease), undefined);
+  lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, at("2026-07-30T10:02:00.000Z"), "test");
+  assert.match(warnings.next(lease) ?? "", /saved.*4.*may conflict/);
 });

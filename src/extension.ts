@@ -297,10 +297,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     startupProofs: sessionProofs,
     onStartupTimeout: (agentId, sessionId, timeoutMs) => {
       const label = fleet.get(agentId)?.terminal.name ?? `agent ${agentId}`;
-      output.appendLine(`${label} (agent ${agentId}, session ${sessionId}) did not produce a SessionStart hook in time; closing the terminal as a failed launch.`);
-      void window.showWarningMessage(
-        `aboard closed "${label}": Claude Code reported no session start within ${Math.round(timeoutMs / 1000)}s. The launch failed before Claude Code could begin, or the SessionStart hook never fired. Check aboard.launch.claudeCommand and the project's hook configuration; the aboard output channel has details.`,
-      );
+      output.appendLine(`${label} (agent ${agentId}, session ${sessionId}) did not produce a SessionStart hook within ${Math.round(timeoutMs / 1000)}s; closing the terminal as a failed launch.`);
+      // Settle the timeout before TerminalController closes the terminal. Its
+      // close event then observes an already-failed session instead of emitting
+      // a second, misleading "killed" failure notification.
+      void lifecycle?.timeout(agentId, sessionId).catch((error: unknown) => {
+        output.appendLine(`Startup-timeout reconciliation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      });
     },
     onLifecycleEvent: (event) => {
       if (event.type === "terminal-created") {
@@ -741,7 +744,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (!result.started) void window.showWarningMessage("preview" in result
         ? "The auto-run plan changed. Review the updated preview, then start again."
         : `aboard cannot start an auto-run: ${result.reason}.`);
-      else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued on ${result.sessionBranch}, opening a pull request into ${result.sessionBase} at the end (${result.mergesItsOwnPullRequest ? "merged automatically" : "yours to merge"}), review ${result.reviewMode ? "on" : "off"}.`);
       return result;
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Unable to start the auto-run";
@@ -770,7 +772,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         const option = await reopen.find(entry.agentId);
         if (option === undefined) { void window.showInformationMessage("aboard no longer has enough about that session to reopen it."); return; }
         const outcome = await reopen.reopen(option.candidate);
-        void window.showInformationMessage(describeReopenOutcome(outcome));
+        if (outcome.action === "unresumable") void window.showWarningMessage(describeReopenOutcome(outcome));
+        else if (outcome.action === "none") void window.showInformationMessage(describeReopenOutcome(outcome));
       },
       showTerminal: (entry) => {
         if (entry.kind !== "agent" || entry.terminalId === undefined) return;
@@ -940,7 +943,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
       });
       for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
-      void window.showInformationMessage(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
+      output.appendLine(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
     finally { await publishScaffoldState(); }
   };
@@ -969,7 +972,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       info: (message) => { void window.showInformationMessage(message); },
       error: (message) => { void window.showErrorMessage(message); },
     }, branchCleanup),
-    registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
+    registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, warning: (message) => { void window.showWarningMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
     registerReopenCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined),
       // `matchOnDetail` so "ended", or an age, filters the list, which is how a

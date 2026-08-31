@@ -84,7 +84,9 @@ export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoo
       return;
     }
     try {
-      host.info(describeReopenOutcome(await reopen.reopen(chosen.option.candidate)));
+      const outcome = await reopen.reopen(chosen.option.candidate);
+      if (outcome.action === "unresumable") host.warning(describeReopenOutcome(outcome));
+      else if (outcome.action === "none") host.info(describeReopenOutcome(outcome));
     } catch (error) {
       host.error(error instanceof Error ? error.message : "Unable to reopen that session");
     }

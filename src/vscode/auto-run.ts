@@ -12,6 +12,7 @@ import {
 import type { AutoRunState } from "../auto/engine.js";
 import { currentPhase } from "../auto/engine.js";
 import type { AutoRunDryRunResult, PlannedIssue, SkippedIssue } from "../domain/auto-run.js";
+import { formatTimestamp } from "../shared/time.js";
 
 export type AutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: true }>;
 
@@ -399,12 +400,6 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
         : `Cannot start: ${preview.blockers.join("; ")}`,
     ...skippedLines(preview.skipped),
   ].filter(Boolean).join("\n");
-}
-
-function formatTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 /**

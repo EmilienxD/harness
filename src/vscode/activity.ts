@@ -1,6 +1,7 @@
 
 import { describeActivity, type ActivityDto, type ActivityEntry } from "../domain/activity.js";
 import { formatIssueNumbers } from "../shared/issues.js";
+import { formatTimestamp } from "../shared/time.js";
 import type { TerminalId } from "../domain/contracts.js";
 
 export interface ActivityNode {
@@ -82,7 +83,7 @@ function tooltip(entry: ActivityEntry): string {
       ? `Planned issues: ${formatIssueNumbers(entry.issueNumbers ?? [])}`
       : "",
     entry.kind === "agent" ? `Agent ${entry.agentId} (${entry.type})` : `Run ${entry.runId}, attempt ${entry.attempt}`,
-    `At ${new Date(entry.at).toLocaleString()} (${entry.at})`,
+    `At ${formatTimestamp(entry.at)}`,
     entry.reason === undefined ? "" : entry.reason,
     entry.kind === "agent" && entry.reopen !== undefined ? "This conversation can be reopened." : "",
   ].filter(Boolean).join("\n");

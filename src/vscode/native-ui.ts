@@ -3,7 +3,7 @@ import { EventEmitter, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, comma
 import type { TerminalController } from "../claude/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
-import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning, type FleetTreeNode } from "./fleet.js";
+import { FleetNotifications, FleetTreeModel, LeaseSaveWarnings, registerFleetCommands, renderFleetStatus, type FleetTreeNode } from "./fleet.js";
 import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunPreview, type AutoRunViewSources } from "./auto-run.js";
 import { ActivityTreeModel, canOpenActivityIssue, clearActivityWarning, type ActivityNode } from "./activity.js";
 import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
@@ -304,7 +304,6 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   disposables.push(commandRegistration);
 
   const notifications = new FleetNotifications(fleet, {
-    information: (message) => { void window.showInformationMessage(message); },
     warning: (message) => { void window.showWarningMessage(message); },
     error: (message) => { void window.showErrorMessage(message); },
   });
@@ -324,8 +323,9 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   disposables.push(status, fleet.onDidChange(render), lease.onDidChange(render));
   disposables.push(commands.registerCommand("aboard.focusFleet", () => commands.executeCommand("aboard.fleet.focus")));
 
+  const leaseSaveWarnings = new LeaseSaveWarnings();
   disposables.push(workspace.onDidSaveTextDocument(() => {
-    const warning = saveLeaseWarning(lease);
+    const warning = leaseSaveWarnings.next(lease);
     if (warning !== undefined) void window.showWarningMessage(warning);
   }));
 

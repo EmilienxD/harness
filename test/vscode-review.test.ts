@@ -11,6 +11,7 @@ function setup(outcome: ReviewOutcome) {
   const host: ReviewCommandHost = {
     registerCommand: (_command, registered) => { callback = registered; return { dispose() {} }; },
     info: (message) => messages.push(message),
+    warning: (message) => messages.push(message),
     error: () => assert.fail("reopening should not fail"),
   };
   const reviews = { review: async (request: ReviewRequest = {}) => { requests.push(request); return outcome; } } as ReviewCoordinator;
@@ -18,11 +19,11 @@ function setup(outcome: ReviewOutcome) {
   return { invoke: async (...args: readonly unknown[]) => { await callback?.(...args); }, requests, messages };
 }
 
-test("the panel action asks for nothing and targets the pull request in flight", async () => {
+test("the panel action asks for nothing, targets the pull request in flight, and stays silent when the terminal proves success", async () => {
   const { invoke, requests, messages } = setup({ action: "focused", prNumber: 42, agentId: "a", type: "implementer" });
   await invoke();
   assert.deepEqual(requests, [{}]);
-  assert.equal(messages[0], "Focused the implementer terminal for PR #42.");
+  assert.deepEqual(messages, []);
 });
 
 test("a positional pull request number narrows the action, and junk is ignored", async () => {
@@ -37,4 +38,10 @@ test("no open pull request reports that nothing was reopened", async () => {
   const { invoke, messages } = setup({ action: "none", reason: "no-open-pull-request" });
   await invoke();
   assert.match(messages[0]!, /No pull request is open/);
+});
+
+test("focus text that could not be applied remains visible", async () => {
+  const { invoke, messages } = setup({ action: "resumed", prNumber: 17, agentId: "a", type: "pr-doctor-afk", unusedFocus: "check retries" });
+  await invoke(17);
+  assert.match(messages[0]!, /focus text was not applied/i);
 });

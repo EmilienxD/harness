@@ -511,7 +511,7 @@ test("the command refuses an unresumable pick, and reopens a resumable one", asy
 
   await registration.run();
   assert.equal(picked?.label, "aboard-brainstormer-7");
-  assert.match(messages.join("\n"), /^info: Reopened the brainstormer session/);
+  assert.deepEqual(messages, []);
   assert.equal(host.created.length, 1);
 });
 
