@@ -1261,6 +1261,26 @@ test("a dirty working tree refuses the run and names the dirty paths", async () 
   assert.equal(context.saved.length, 0);
 });
 
+test("an aboard session branch cannot become another run's target", async () => {
+  const context = harness({ startBranch: "aboard/run/old" });
+  const result = await context.engine.start();
+
+  assert.equal(result.started, false);
+  assert.match((result as { reason: string }).reason, /cannot start from aboard\/run\/old.*run-owned artifacts/);
+  assert.deepEqual(context.saved, []);
+  assert.deepEqual(context.launches, []);
+});
+
+test("an aboard issue branch is refused as a target even in worktree mode", async () => {
+  const context = harness({ startBranch: "aboard/34-old-issue", worktree: true });
+  const result = await context.engine.start();
+
+  assert.equal(result.started, false);
+  assert.match((result as { reason: string }).reason, /cannot start from aboard\/34-old-issue/);
+  assert.deepEqual(context.saved, []);
+  assert.deepEqual(context.launches, []);
+});
+
 test("a dry run forecasts the exact queue and branches without creating run state or side effects", async () => {
   const context = harness({
     startBranch: "feature/wip",
@@ -1311,6 +1331,19 @@ test("a dry run in worktree mode treats the user's dirty checkout as read-only",
   assert.deepEqual(result.blockers, []);
   assert.equal(context.userGitCalls.includes("status"), true);
   assert.equal(context.workspaceGitCalls.length, 0, "dry-run never prepares or reads a second checkout");
+  assert.deepEqual(context.saved, []);
+  assert.deepEqual(context.launches, []);
+});
+
+test("a dry run reports an aboard target branch as a blocker", async () => {
+  const context = harness({ startBranch: "aboard/run/old", worktree: true });
+  const result = await context.engine.dryRun();
+
+  assert.equal(result.inspected, true);
+  if (!result.inspected) return;
+  assert.equal(result.ready, false);
+  assert.match(result.blockers.join("\n"), /cannot start from aboard\/run\/old/);
+  assert.equal(result.sessionBase, "aboard/run/old");
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
 });

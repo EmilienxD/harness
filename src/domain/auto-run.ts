@@ -16,6 +16,18 @@ export type AutoRunPhase = (typeof AUTO_RUN_PHASES)[number];
 
 export type IssueDisposition = "afk" | "hitl";
 
+/** Branches in this namespace are automation artifacts, never run targets. */
+export const ABOARD_BRANCH_PREFIX = "aboard/";
+
+export function isAboardBranch(branch: string): boolean {
+  return branch.startsWith(ABOARD_BRANCH_PREFIX);
+}
+
+export function autoRunTargetBranchBlocker(branch: string): string | undefined {
+  if (!isAboardBranch(branch)) return undefined;
+  return `auto-run cannot start from ${branch} because ${ABOARD_BRANCH_PREFIX}* branches are run-owned artifacts; check out the branch that should receive the final run pull request and start again`;
+}
+
 export const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 export type MergeStrategy = (typeof MERGE_STRATEGIES)[number];
 
@@ -197,11 +209,11 @@ function requirePullRequest(facts: RepositoryFacts, issue: PlannedIssue): PullRe
 }
 
 export function branchName(issueNumber: number, title: string): string {
-  return `aboard/${issueNumber}-${slugify(title)}`;
+  return `${ABOARD_BRANCH_PREFIX}${issueNumber}-${slugify(title)}`;
 }
 
 export function sessionBranchName(runId: string): string {
-  return `aboard/run/${slugify(runId.replace(/^run_/u, ""))}`;
+  return `${ABOARD_BRANCH_PREFIX}run/${slugify(runId.replace(/^run_/u, ""))}`;
 }
 
 const SLUG_MAX_CHARS = 40;

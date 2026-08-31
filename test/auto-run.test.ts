@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ABOARD_BRANCH_PREFIX,
+  autoRunTargetBranchBlocker,
   branchName,
   commitSubject,
   issueClosedComment,
@@ -60,9 +62,16 @@ test("slug normalization collapses punctuation, trims, and never cuts mid-word",
 });
 
 test("branch names carry the issue number so a branch is greppable back to it", () => {
+  assert.equal(ABOARD_BRANCH_PREFIX, "aboard/");
   assert.equal(branchName(34, "Add retry backoff"), "aboard/34-add-retry-backoff");
   // Colliding slugs stay distinct because the number is part of the name.
   assert.notEqual(branchName(34, "Same title"), branchName(35, "Same title"));
+});
+
+test("aboard branches are reserved and cannot become auto-run targets", () => {
+  assert.match(autoRunTargetBranchBlocker("aboard/run/old") ?? "", /run-owned artifacts/);
+  assert.match(autoRunTargetBranchBlocker("aboard/34-old-issue") ?? "", /final run pull request/);
+  assert.equal(autoRunTargetBranchBlocker("feature/wip"), undefined);
 });
 
 test("commit subject and pull request body are bounded and carry the closing trailer", () => {

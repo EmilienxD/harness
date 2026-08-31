@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 
 import {
+  autoRunTargetBranchBlocker,
   autoRunMessage,
   issueClosedComment,
   issueCommentBody,
@@ -353,6 +354,10 @@ export class AutoRunEngine {
     const plan = planRun((await this.options.github.listImplementableIssues()).candidates);
     const settings = this.options.settings();
     const blockers: string[] = [];
+    if (status.branch !== undefined) {
+      const branchBlocker = autoRunTargetBranchBlocker(status.branch);
+      if (branchBlocker !== undefined) blockers.push(branchBlocker);
+    }
     if (status.entries.length > 0 && this.options.workspaces?.isolates() !== true) {
       const paths = status.entries.map((entry) => entry.path);
       blockers.push(`the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`);
@@ -395,6 +400,8 @@ export class AutoRunEngine {
     const plan = planRun((await this.options.github.listImplementableIssues()).candidates);
     if (plan.issues.length === 0) return { started: false, reason: emptyQueueReason(plan.skipped) };
     const returnBranch = await this.options.git.currentBranch() ?? await this.options.git.defaultBranch();
+    const branchBlocker = autoRunTargetBranchBlocker(returnBranch);
+    if (branchBlocker !== undefined) return { started: false, reason: branchBlocker };
     const runId = this.#runId();
     const isolated = this.options.workspaces?.isolates() ?? settings.worktree.enabled;
 
@@ -1577,6 +1584,10 @@ export class AutoRunEngine {
     if (status.entries.length > 0 && this.options.workspaces?.isolates() !== true) {
       const paths = status.entries.map((entry) => entry.path);
       return `the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`;
+    }
+    if (status.branch !== undefined) {
+      const branchBlocker = autoRunTargetBranchBlocker(status.branch);
+      if (branchBlocker !== undefined) return branchBlocker;
     }
     return undefined;
   }

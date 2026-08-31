@@ -2,10 +2,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 
+import { ABOARD_BRANCH_PREFIX } from "../domain/auto-run.js";
 import type { GitHubClient } from "../github/client.js";
 
 const execFileAsync = promisify(execFile);
-const ABOARD_PREFIX = "aboard/";
 
 export interface AboardPullRequest {
   readonly number: number;
@@ -86,14 +86,14 @@ export class ProcessAboardBranchRepository implements AboardBranchRepository {
       const [ref, sha] = line.split("\t");
       if (ref === undefined || sha === undefined) continue;
       const name = ref.replace("refs/heads/", "");
-      if (!name.startsWith(ABOARD_PREFIX)) continue;
+      if (!name.startsWith(ABOARD_BRANCH_PREFIX)) continue;
       byName.set(name, { ...byName.get(name), localSha: sha });
     }
     for (const line of remoteRefs.split(/\r?\n/u).filter(Boolean)) {
       const [sha, ref] = line.split("\t");
       if (ref === undefined || sha === undefined) continue;
       const name = ref.replace("refs/heads/", "");
-      if (!name.startsWith(ABOARD_PREFIX)) continue;
+      if (!name.startsWith(ABOARD_BRANCH_PREFIX)) continue;
       byName.set(name, { ...byName.get(name), remoteSha: sha });
     }
     const worktrees = await this.worktrees();
