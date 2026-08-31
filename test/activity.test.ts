@@ -279,11 +279,9 @@ test("a row offers only the actions it can actually perform", () => {
   // Terminal still open: focus it, and do not offer to relaunch the same session.
   assert.match(items[0]?.contextValue ?? "", /terminal/);
   assert.doesNotMatch(items[0]?.contextValue ?? "", /reopen/);
-  assert.equal(items[0]?.command?.command, "aboard.activity.openTerminal");
   // Terminal gone, conversation intact: even a finished result-delivering
   // implementer can be handed back to the user.
   assert.match(items[1]?.contextValue ?? "", /reopen/);
-  assert.equal(items[1]?.command?.command, "aboard.activity.reopen");
   // A run row represents the whole plan: it exposes its PR, but issue actions
   // belong to the single-issue implementer and doctor rows.
   assert.doesNotMatch(items[2]?.contextValue ?? "", /issue/);
@@ -292,5 +290,6 @@ test("a row offers only the actions it can actually perform", () => {
   // The Manager reopens through the same surface as every other session; the
   // resume path it rides is a routing detail the row does not expose.
   assert.match(items[3]?.contextValue ?? "", /reopen/);
-  assert.equal(items[3]?.command?.command, "aboard.activity.reopen");
+  // Clicking a row does nothing: every action belongs to an inline icon button.
+  for (const item of items) assert.equal(item?.command, undefined);
 });

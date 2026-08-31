@@ -46,11 +46,8 @@ export class ActivityTreeModel {
       tooltip: tooltip(entry),
       icon: icon(entry),
       contextValue: capabilities.join("."),
-      ...(live
-        ? { command: { command: "aboard.activity.openTerminal", title: "Open Terminal", arguments: [node] } }
-        : entry.kind === "agent" && entry.reopen !== undefined
-          ? { command: { command: "aboard.activity.reopen", title: "Reopen Session", arguments: [node] } }
-          : {}),
+      // Clicking a row does nothing on its own; the inline icon buttons carry
+      // the actions (focus the live terminal, reopen a dead conversation, ...).
     };
   }
 }
