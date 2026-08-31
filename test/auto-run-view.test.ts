@@ -223,7 +223,7 @@ test("a refresh keeps the last successful issue list visible", () => {
   const result = preview();
   const { item, model, root } = rootItem({ forecast: forecast(result, { checking: true }) });
   assert.equal(item.description, "3 issues queued · refreshing…");
-  assert.equal(item.icon, "refresh~spin");
+  assert.equal(item.icon, "loading~spin");
   assert.equal(autoRunCardMenuState(card({ forecast: forecast(result, { checking: true }) })), "forecastChecking");
   assert.equal(model.children(root).length, 3);
 });

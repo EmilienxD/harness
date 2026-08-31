@@ -265,7 +265,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
                 ? `${count} issue${count === 1 ? "" : "s"} queued`
                 : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
         tooltip: forecastTooltip(card.forecast),
-        icon: card.forecast.checking ? "refresh~spin" : empty || preview.ready ? "list-tree" : "warning",
+        icon: card.forecast.checking ? "loading~spin" : empty || preview.ready ? "list-tree" : "warning",
         contextValue: `aboard.autoRun.${autoRunCardMenuState(card)}`,
         collapsible: count > 0,
       };
