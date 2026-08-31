@@ -57,11 +57,13 @@ set `platforms = ["chatgpt"]` (or `"claude"`) for a variant. The adapter maps th
 Claude-relative `dest` entries and `settings.fragment.json` remain supported unchanged.
 
 ChatGPT skill payloads place a variant `SKILL.md` (plus reference doc variants) under
-`chatgpt/skills/<skill>/` when the content diverges — Claude-only frontmatter keys such as
-`disable-model-invocation` or `argument-hint`, Claude tool names, or `$ARGUMENTS` references.
-Claude's `disable-model-invocation: true` maps to `chatgpt/skills/<skill>/agents/openai.yaml` with
-`policy: allow_implicit_invocation: false`; ChatGPT has no documented argument substitution, so
-argument-taking skills read the invocation's surrounding user text instead of `$ARGUMENTS`.
+`chatgpt/skills/<skill>/` only when the content genuinely diverges, such as for Claude command
+injection (`` !`command` ``), `argument-hint`, Claude tool names, or `$ARGUMENTS` references. Do not split
+a skill merely because it contains `disable-model-invocation`: ChatGPT silently ignores that unknown
+frontmatter key, so such a skill belongs in `shared/`. Claude's `disable-model-invocation: true` maps
+to `chatgpt/skills/<skill>/agents/openai.yaml` with `policy: allow_implicit_invocation: false`;
+ChatGPT has no documented argument substitution, so argument-taking skills read the invocation's
+surrounding user text instead of `$ARGUMENTS`.
 
 ## Tools
 

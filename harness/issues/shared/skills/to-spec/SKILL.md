@@ -1,19 +1,18 @@
 ---
 name: to-spec
 description: Turn the current conversation into a spec, delivered directly in chat — no interview, just synthesis of what you've already discussed.
+disable-model-invocation: true
 ---
 
-Use the invocation's surrounding user text as this skill's input.
-
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user — just synthesize what you already know.
+
+Use any details provided alongside the invocation as additional input.
 
 ## Process
 
 1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, if available.
 
 2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
-
-Check with the user that these seams match their expectations.
 
 3. Write the spec using the template below. **Default: write the spec directly in the chat.** Do not write it to a file, and do not create a GitHub issue, unless the user explicitly asked for one of those in this invocation.
 
@@ -72,4 +71,3 @@ A description of the things that are out of scope for this spec.
 Any further notes about the feature.
 
 </spec-template>
-

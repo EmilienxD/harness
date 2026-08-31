@@ -91,12 +91,12 @@ skills.
 | Tool | What it does |
 |---|---|
 | [`audit`](harness/audit/claude/skills/audit/SKILL.md) | Audits a codebase and reports evidence-backed findings |
-| [`caveman`](harness/caveman/claude/skills/caveman/SKILL.md) | Ultra-compressed communication mode |
+| [`caveman`](harness/caveman/shared/skills/caveman/SKILL.md) | Ultra-compressed communication mode |
 | [`commit`](harness/commit/README.md) | `/commit` that stages and commits with zero model calls |
 | [`create-skill`](harness/create-skill/claude/skills/create-skill/SKILL.md) | Guide for authoring new Claude Skills |
-| [`grill-me`](harness/grill-me/claude/skills/grill-me/SKILL.md) | Interviews you to stress-test a plan or design |
+| [`grill-me`](harness/grill-me/shared/skills/grill-me/SKILL.md) | Interviews you to stress-test a plan or design |
 | [`handoff`](harness/handoff/claude/skills/handoff/SKILL.md) | Compacts a conversation into a handoff doc |
-| [`improve-codebase-architecture`](harness/improve-codebase-architecture/claude/skills/improve-codebase-architecture/SKILL.md) | Finds architectural friction, proposes refactors |
+| [`improve-codebase-architecture`](harness/improve-codebase-architecture/shared/skills/improve-codebase-architecture/SKILL.md) | Finds architectural friction, proposes refactors |
 | [`issues`](harness/issues/README.md) | Draft, spec and publish reviewed GitHub issues — one or a whole plan |
 | [`on-edit-block`](harness/on-edit-block/README.md) | Blocks edits to protected files until Claude reads the required files |
 | [`on-edit-reminder`](harness/on-edit-reminder/README.md) | Lets edits land, then makes Claude read the required files and fix what breaks them |
@@ -104,13 +104,14 @@ skills.
 | [`prefer-edit-tool`](harness/prefer-edit-tool/README.md) | Nudges Claude to use Write/Edit instead of heredocs, `>`, `sed -i` or inline `python` |
 | [`prefer-read-tool`](harness/prefer-read-tool/README.md) | Nudges Claude to use Read instead of `cat`/`sed` |
 | [`redirect-subagents`](harness/redirect-subagents/README.md) | Redirects Agent subagents to alternate providers, sparing subscription usage |
-| [`senior-advisor`](harness/senior-advisor/claude/skills/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
+| [`senior-advisor`](harness/senior-advisor/shared/skills/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
 | [`usage-limit-wait`](harness/usage-limit-wait/README.md) | Warns as a subscription usage limit fills, then waits it out instead of failing the turn |
-| [`zoom-out`](harness/zoom-out/claude/skills/zoom-out/SKILL.md) | Higher-level map of a codebase area |
+| [`zoom-out`](harness/zoom-out/shared/skills/zoom-out/SKILL.md) | Higher-level map of a codebase area |
 
-Skill-only tools keep native payloads under `claude/skills/` and `chatgpt/skills/`.
-If you'd rather not use the installer, copy the appropriate product variant to
-that product's skill directory.
+Skill-only tools keep portable payloads under `shared/skills/` and only use
+`claude/skills/` or `chatgpt/skills/` when behavior genuinely differs. If you'd
+rather not use the installer, copy the shared skill or the appropriate product
+variant to that product's skill directory.
 
 ## How installing works
 

@@ -1,5 +1,5 @@
 name = "issues"
-version = "1.13.6"
+version = "1.13.7"
 description = "Draft, spec and publish reviewed GitHub issues - one at a time or a whole plan"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/issues/README.md"
@@ -44,10 +44,9 @@ root = "skills"
 platforms = ["claude"]
 
 [[files]]
-src = "claude/skills/to-spec"
+src = "shared/skills/to-spec"
 dest = "to-spec"
 root = "skills"
-platforms = ["claude"]
 
 [[files]]
 src = "claude/skills/to-spec-draft-issue"
@@ -77,12 +76,6 @@ platforms = ["chatgpt"]
 [[files]]
 src = "chatgpt/skills/publish-issues/SKILL.md"
 dest = "publish-issues/SKILL.md"
-root = "skills"
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/skills/to-spec/SKILL.md"
-dest = "to-spec/SKILL.md"
 root = "skills"
 platforms = ["chatgpt"]
 
