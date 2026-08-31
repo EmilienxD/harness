@@ -47,7 +47,7 @@
       {
         "command": "aboard.reopenSession",
         "title": "Aboard: Reopen a Session",
-        "icon": "$(debug-continue)"
+        "icon": "$(history)"
       },
       {
         "command": "aboard.startAutoRun",
@@ -197,19 +197,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "aboard.clearBranches",
-          "when": "view == aboard.fleet && !aboard.autoRunActive",
-          "group": "navigation@2"
-        },
-        {
           "command": "aboard.reopenSession",
           "when": "view == aboard.fleet",
-          "group": "navigation@3"
+          "group": "navigation@2"
         },
         {
           "command": "aboard.autoRun.refresh",
           "when": "view == aboard.autoRun",
           "group": "navigation@1"
+        },
+        {
+          "command": "aboard.clearBranches",
+          "when": "view == aboard.autoRun && !aboard.autoRunActive",
+          "group": "navigation@2"
         },
         {
           "command": "aboard.stopAutoRun",
