@@ -18,12 +18,13 @@ export type AutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: 
 export interface AutoRunForecast {
   readonly preview: AutoRunPreview | undefined;
   readonly checking: boolean;
+  readonly stale: boolean;
   readonly checkedAt: string | undefined;
   readonly error: string | undefined;
 }
 
 export class AutoRunForecastController {
-  #value: AutoRunForecast = { preview: undefined, checking: false, checkedAt: undefined, error: undefined };
+  #value: AutoRunForecast = { preview: undefined, checking: false, stale: false, checkedAt: undefined, error: undefined };
   #generation = 0;
   #inFlight: Promise<void> | undefined;
 
@@ -39,7 +40,28 @@ export class AutoRunForecastController {
   public invalidate(): void {
     this.#generation += 1;
     this.#inFlight = undefined;
-    this.#value = { preview: undefined, checking: false, checkedAt: undefined, error: undefined };
+    this.#value = { preview: undefined, checking: false, stale: false, checkedAt: undefined, error: undefined };
+  }
+
+  public markStale(): void {
+    this.#generation += 1;
+    this.#inFlight = undefined;
+    this.#value = { ...this.#value, checking: false, stale: this.#value.preview !== undefined, error: undefined };
+    this.onDidChange();
+  }
+
+  public replace(preview: AutoRunPreview): void {
+    this.#generation += 1;
+    this.#inFlight = undefined;
+    this.#value = { preview, checking: false, stale: false, checkedAt: this.now().toISOString(), error: undefined };
+    this.onDidChange();
+  }
+
+  public fail(error: string): void {
+    this.#generation += 1;
+    this.#inFlight = undefined;
+    this.#value = { ...this.#value, checking: false, error };
+    this.onDidChange();
   }
 
   public refresh(inspect: () => Promise<AutoRunDryRunResult>): Promise<void> {
@@ -52,7 +74,7 @@ export class AutoRunForecastController {
         const result = await inspect();
         if (generation !== this.#generation) return;
         this.#value = result.inspected
-          ? { preview: result, checking: false, checkedAt: this.now().toISOString(), error: undefined }
+          ? { preview: result, checking: false, stale: false, checkedAt: this.now().toISOString(), error: undefined }
           : { ...this.#value, checking: false, error: result.reason };
       } catch (error) {
         if (generation !== this.#generation) return;
@@ -145,6 +167,8 @@ export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
  */
 export function autoRunCardMenuState(card: AutoRunCard): string {
   if (card.kind !== "forecast") return card.kind;
+  if (card.forecast.checking) return "forecastChecking";
+  if (card.forecast.stale || card.forecast.error !== undefined) return "forecastStale";
   const preview = card.forecast.preview;
   // An empty queue is not a problem to fix, so it keeps a neutral identity
   // distinct from a forecast that is genuinely blocked. Both hide Start.
@@ -232,11 +256,13 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         label: "Next auto-run",
         description: card.forecast.checking
           ? `${count} issue${count === 1 ? "" : "s"} queued · refreshing…`
-          : empty
-            ? "nothing to run"
-            : preview.ready
-              ? `${count} issue${count === 1 ? "" : "s"} queued`
-              : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
+          : card.forecast.stale
+            ? `${count} issue${count === 1 ? "" : "s"} queued · update needed`
+            : empty
+              ? "nothing to run"
+              : preview.ready
+                ? `${count} issue${count === 1 ? "" : "s"} queued`
+                : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
         tooltip: forecastTooltip(card.forecast),
         icon: card.forecast.checking ? "refresh~spin" : empty || preview.ready ? "list-tree" : "warning",
         contextValue: `aboard.autoRun.${autoRunCardMenuState(card)}`,
@@ -359,7 +385,9 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
 function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRunPreview }): string {
   const { preview } = forecast;
   return [
-    `Live forecast${forecast.checkedAt === undefined ? "" : `; last checked ${forecast.checkedAt}`}. Start performs one final fresh check before freezing the run.`,
+    forecast.checkedAt === undefined ? "" : `Updated at: ${formatTimestamp(forecast.checkedAt)}`,
+    "Start checks once more and runs only if the plan is unchanged.",
+    forecast.stale ? "Settings changed. Use Check Now to update this preview." : "",
     forecast.error === undefined ? "" : `Last refresh failed: ${forecast.error}. The list below is the last successful result.`,
     `Target branch: ${preview.sessionBase}`,
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
@@ -371,6 +399,12 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
         : `Cannot start: ${preview.blockers.join("; ")}`,
     ...skippedLines(preview.skipped),
   ].filter(Boolean).join("\n");
+}
+
+function formatTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 /**

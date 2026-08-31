@@ -24,6 +24,7 @@ import { basename, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
 import { registerNativeFleetUi, type NativeFleetUiRegistration } from "./vscode/native-ui.js";
+import type { AutoRunPreview } from "./vscode/auto-run.js";
 import {
   ABOARD_SETTINGS,
   EMPTY_PROJECT_SETTINGS,
@@ -733,13 +734,20 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     });
   };
   await startRuntimeBridge();
-  const startAutoRun = async (): Promise<void> => {
-    if (!requireInitialized()) return;
+  const startAutoRun = async (preview: AutoRunPreview) => {
+    if (!requireInitialized()) return { started: false as const, reason: "the project is not initialized" };
     try {
-      const result = await autoRun.start();
-      if (!result.started) void window.showWarningMessage(`aboard cannot start an auto-run: ${result.reason}.`);
+      const result = await autoRun.startPreviewed(preview);
+      if (!result.started) void window.showWarningMessage("preview" in result
+        ? "The auto-run plan changed. Review the updated preview, then start again."
+        : `aboard cannot start an auto-run: ${result.reason}.`);
       else void window.showInformationMessage(`Auto-run started — ${result.issues.length} issue(s) queued on ${result.sessionBranch}, opening a pull request into ${result.sessionBase} at the end (${result.mergesItsOwnPullRequest ? "merged automatically" : "yours to merge"}), review ${result.reviewMode ? "on" : "off"}.`);
-    } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the auto-run"); }
+      return result;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Unable to start the auto-run";
+      void window.showErrorMessage(reason);
+      return { started: false as const, reason };
+    }
   };
   fleetUi = registerNativeFleetUi(context, {
     port: () => bridge?.port,
@@ -751,7 +759,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       engine: autoRun,
       discardBehavior: () => currentConfiguration.autoRun.discardBehavior,
       webUrl: (number) => github.webUrl(number),
-      start: () => startAutoRun(),
+      start: (preview) => startAutoRun(preview),
     },
     activity: {
       entries: () => activity.entries(),

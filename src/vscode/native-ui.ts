@@ -4,10 +4,10 @@ import type { TerminalController } from "../claude/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, registerFleetCommands, renderFleetStatus, saveLeaseWarning, type FleetTreeNode } from "./fleet.js";
-import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunViewSources } from "./auto-run.js";
+import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunPreview, type AutoRunViewSources } from "./auto-run.js";
 import { ActivityTreeModel, canOpenActivityIssue, clearActivityWarning, type ActivityNode } from "./activity.js";
 import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
-import type { AutoRunEngine } from "../auto/engine.js";
+import type { AutoRunEngine, AutoRunPreviewedStartResult } from "../auto/engine.js";
 import type { DiscardBehavior } from "../domain/run-cleanup.js";
 import { describeDiscard } from "../domain/run-cleanup.js";
 
@@ -16,7 +16,7 @@ const AUTO_RUN_POLL_MS = 30_000;
 export interface NativeFleetUiRegistration extends Disposable {
   /** Re-renders status-bar visibility; call it whenever the project's initialized state changes. */
   readonly refresh: () => void;
-  /** Rechecks the visible Auto Run view after configuration changes. */
+  /** Marks an idle forecast stale, or rechecks a visible recorded run. */
   readonly checkAutoRun: () => void;
 }
 
@@ -25,7 +25,7 @@ export interface AutoRunUiHost {
   readonly discardBehavior: () => DiscardBehavior;
   /** Opens an issue or pull request in the browser. */
   readonly webUrl: (number: number) => Promise<string>;
-  readonly start: () => Promise<void>;
+  readonly start: (preview: AutoRunPreview) => Promise<AutoRunPreviewedStartResult>;
 }
 
 export interface ActivityUiHost {
@@ -131,12 +131,14 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   };
   renderAutoRun();
 
-  const checkAutoRun = async (): Promise<void> => {
+  const checkAutoRun = async (forceForecast = false): Promise<void> => {
     if (autoRunStarting) return;
     if (engine.state() !== undefined || engine.persisted() !== undefined) {
       await engine.refresh();
       return;
     }
+    const snapshot = forecast.snapshot();
+    if (!forceForecast && (snapshot.preview !== undefined || snapshot.checking || snapshot.error !== undefined)) return;
     await forecast.refresh(() => engine.dryRun());
   };
 
@@ -145,7 +147,9 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const stopPolling = (): void => { if (poll !== undefined) { clearInterval(poll); poll = undefined; } };
   const startPolling = (): void => {
     if (poll !== undefined) return;
-    poll = setInterval(() => { void checkAutoRun(); }, AUTO_RUN_POLL_MS);
+    poll = setInterval(() => {
+      if (engine.state() !== undefined || engine.persisted() !== undefined) void checkAutoRun();
+    }, AUTO_RUN_POLL_MS);
   };
   disposables.push({ dispose: stopPolling });
   disposables.push(autoRunView.onDidChangeVisibility((event) => {
@@ -154,7 +158,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     startPolling();
   }));
   disposables.push(window.onDidChangeWindowState((state) => {
-    if (state.focused && autoRunView.visible) void checkAutoRun();
+    if (state.focused && autoRunView.visible && (engine.state() !== undefined || engine.persisted() !== undefined)) void checkAutoRun();
   }));
   if (autoRunView.visible) {
     void checkAutoRun();
@@ -171,7 +175,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     commands.registerCommand("aboard.openIssue", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
     commands.registerCommand("aboard.openPullRequest", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
     commands.registerCommand("aboard.autoRun.refresh", async () => {
-      await checkAutoRun();
+      await checkAutoRun(true);
       // A waiting run polls GitHub on its own interval; "Check Now" is the user
       // saying they have just merged and would rather not wait for it.
       if (engine.state()?.waiting === true) engine.continueNow();
@@ -185,14 +189,20 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     }),
     commands.registerCommand("aboard.startAutoRun", async () => {
       if (autoRunStarting) return;
-      forecast.invalidate();
+      const card = autoRunCard(autoRunSources);
+      if (card.kind !== "forecast" || autoRunCardMenuState(card) !== "forecast") return;
       autoRunStarting = true;
       renderAutoRun();
-      try { await options.autoRun.start(); }
+      try {
+        const result = await options.autoRun.start(card.forecast.preview);
+        if (!result.started) {
+          if ("preview" in result) forecast.replace(result.preview);
+          else forecast.fail(result.reason);
+        }
+      }
       finally {
         autoRunStarting = false;
         renderAutoRun();
-        if (autoRunView.visible && engine.state() === undefined && engine.persisted() === undefined) void checkAutoRun();
       }
     }),
     commands.registerCommand("aboard.resumeAutoRun", async () => {
@@ -322,11 +332,12 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const registration: NativeFleetUiRegistration = {
     refresh: render,
     checkAutoRun: () => {
-      if (!autoRunView.visible) return;
       if (engine.state() === undefined && engine.persisted() === undefined) {
-        forecast.invalidate();
+        forecast.markStale();
+        renderAutoRun();
+        return;
       }
-      void checkAutoRun();
+      if (autoRunView.visible) void checkAutoRun();
     },
     dispose: () => { for (const disposable of [...disposables].reverse()) disposable.dispose(); },
   };

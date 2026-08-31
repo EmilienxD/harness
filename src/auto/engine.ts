@@ -173,6 +173,11 @@ export type AutoRunStartResult =
     }
   | { readonly started: false; readonly reason: string; readonly active?: AutoRunState };
 
+type InspectedAutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: true }>;
+
+export type AutoRunPreviewedStartResult = AutoRunStartResult
+  | { readonly started: false; readonly reason: string; readonly preview: InspectedAutoRunPreview };
+
 /** Terminal for one attempt: how the loop left the run. */
 type AttemptEnd = { readonly outcome: RunAttemptOutcome | "succeeded" };
 
@@ -186,6 +191,10 @@ class StructuralError extends Error {
 
 /** The active auto-run worker settled because this attempt was aborted. */
 class AutomatedWorkerCancelled extends Error {}
+
+function samePreview(left: InspectedAutoRunPreview, right: InspectedAutoRunPreview): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 export class AutoRunEngine {
   #controller: AbortController | undefined;
@@ -403,11 +412,57 @@ export class AutoRunEngine {
     const returnBranch = await this.options.git.currentBranch() ?? await this.options.git.defaultBranch();
     const branchBlocker = autoRunTargetBranchBlocker(returnBranch);
     if (branchBlocker !== undefined) return { started: false, reason: branchBlocker };
-    const runId = this.#runId();
-    const isolated = this.options.workspaces?.isolates() ?? settings.worktree.enabled;
-
     const conflict = await this.#findPlanConflict(plan.issues);
     if (conflict !== undefined) return { started: false, reason: conflict };
+
+    return this.#startPlan(plan, settings, returnBranch, options);
+  }
+
+  /**
+   * Re-discovers the queue immediately before Start. A changed result is
+   * returned to the UI for review; only the exact result the user already saw
+   * may be frozen into a run.
+   */
+  public async startPreviewed(
+    expected: InspectedAutoRunPreview,
+    options: { readonly additionalGuideline?: string } = {},
+  ): Promise<AutoRunPreviewedStartResult> {
+    if (this.#state !== undefined) return { started: false, reason: "a run is already active", active: this.#state };
+    const existing = await this.options.store.load().catch(() => undefined);
+    if (existing !== undefined) {
+      return { started: false, reason: "a previous run is still unresolved; resume or discard it first" };
+    }
+
+    const confirmed = await this.dryRun(options);
+    if (!confirmed.inspected) return { started: false, reason: confirmed.reason };
+    if (!samePreview(expected, confirmed)) {
+      return { started: false, reason: "the auto-run plan changed; review the updated preview before starting", preview: confirmed };
+    }
+    if (!confirmed.ready) {
+      return {
+        started: false,
+        reason: confirmed.blockers[0] ?? confirmed.emptyReason ?? "there is nothing ready to run",
+        preview: confirmed,
+      };
+    }
+
+    const settings = this.options.settings();
+    return this.#startPlan(
+      { issues: confirmed.issues as readonly FrozenIssue[], skipped: confirmed.skipped, dependencyCycles: confirmed.dependencyCycles },
+      settings,
+      confirmed.sessionBase,
+      options,
+    );
+  }
+
+  async #startPlan(
+    plan: ReturnType<typeof planRun>,
+    settings: AutoRunSettings,
+    returnBranch: string,
+    options: { readonly additionalGuideline?: string },
+  ): Promise<AutoRunStartResult> {
+    const runId = this.#runId();
+    const isolated = this.options.workspaces?.isolates() ?? settings.worktree.enabled;
 
     const frozen: FrozenRunSettings = {
       review: settings.review,

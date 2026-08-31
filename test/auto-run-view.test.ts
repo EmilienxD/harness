@@ -67,7 +67,7 @@ function sources(overrides: {
 } = {}): AutoRunViewSources {
   return {
     starting: () => overrides.starting ?? false,
-    forecast: () => overrides.forecast ?? { preview: undefined, checking: false, checkedAt: undefined, error: undefined },
+    forecast: () => overrides.forecast ?? { preview: undefined, checking: false, stale: false, checkedAt: undefined, error: undefined },
     state: () => overrides.state,
     persisted: () => overrides.persisted,
     eligibility: () => overrides.eligibility,
@@ -100,6 +100,7 @@ function forecast(result: AutoRunPreview | undefined, overrides: Partial<AutoRun
   return {
     preview: result,
     checking: false,
+    stale: false,
     checkedAt: "2026-01-01T00:00:00.000Z",
     error: undefined,
     ...overrides,
@@ -142,6 +143,10 @@ test("the live forecast shows loading feedback, then the planned issues in execu
   assert.equal(item.description, "3 issues queued");
   assert.equal(item.contextValue, "aboard.autoRun.forecast");
   assert.equal(autoRunCardMenuState(card({ forecast: live })), "forecast");
+  const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
+    .format(new Date("2026-01-01T00:00:00.000Z"));
+  assert.match(item.tooltip, new RegExp(`Updated at: ${formatted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.doesNotMatch(item.tooltip, /Live forecast|2026-01-01T00:00:00\.000Z/);
   assert.equal(item.collapsible, true);
   const rows = model.children(root).map((node) => model.item(node));
   assert.deepEqual(rows.map((row) => row.label), [
@@ -219,6 +224,7 @@ test("a refresh keeps the last successful issue list visible", () => {
   const { item, model, root } = rootItem({ forecast: forecast(result, { checking: true }) });
   assert.equal(item.description, "3 issues queued · refreshing…");
   assert.equal(item.icon, "refresh~spin");
+  assert.equal(autoRunCardMenuState(card({ forecast: forecast(result, { checking: true }) })), "forecastChecking");
   assert.equal(model.children(root).length, 3);
 });
 
@@ -227,10 +233,19 @@ test("a failed refresh keeps the last result and reports that it is stale", () =
   const { item } = rootItem({ forecast: forecast(result, { error: "GitHub is unavailable" }) });
   assert.equal(item.description, "3 issues queued");
   assert.match(item.tooltip, /Last refresh failed: GitHub is unavailable/);
+  assert.equal(autoRunCardMenuState(card({ forecast: forecast(result, { error: "GitHub is unavailable" }) })), "forecastStale");
 
   const unavailable = rootItem({ forecast: forecast(undefined, { checkedAt: undefined, error: "not authenticated" }) });
   assert.equal(unavailable.item.contextValue, "aboard.autoRun.forecastUnavailable");
   assert.match(unavailable.item.tooltip, /Use Check Now to try again/);
+});
+
+test("a settings change keeps the reviewed plan visible but requires Check Now", () => {
+  const result = preview();
+  const { item } = rootItem({ forecast: forecast(result, { stale: true }) });
+  assert.equal(item.description, "3 issues queued · update needed");
+  assert.match(item.tooltip, /Settings changed\. Use Check Now/);
+  assert.equal(autoRunCardMenuState(card({ forecast: forecast(result, { stale: true }) })), "forecastStale");
 });
 
 test("forecast refreshes are single-flight and invalidation rejects a stale result", async () => {
@@ -267,6 +282,30 @@ test("a forecast refresh failure retains the last successful result", async () =
   assert.equal(controller.snapshot().preview?.issues.length, 3);
   assert.equal(controller.snapshot().error, "GitHub is unavailable");
   assert.equal(controller.snapshot().checkedAt, "2026-01-01T00:00:00.000Z");
+});
+
+test("a confirmed replacement updates the timestamp and a later failure disables Start", () => {
+  const controller = new AutoRunForecastController(() => undefined, () => new Date("2026-02-03T04:05:00.000Z"));
+  controller.replace(preview());
+  assert.equal(controller.snapshot().checkedAt, "2026-02-03T04:05:00.000Z");
+
+  controller.fail("GitHub is unavailable");
+  const current = controller.snapshot();
+  assert.equal(current.preview?.issues.length, 3);
+  assert.equal(current.error, "GitHub is unavailable");
+  assert.equal(autoRunCardMenuState(card({ forecast: current })), "forecastStale");
+});
+
+test("marking a forecast stale preserves it until an explicit refresh", async () => {
+  const controller = new AutoRunForecastController(() => undefined);
+  controller.replace(preview());
+  controller.markStale();
+  assert.equal(controller.snapshot().preview?.issues.length, 3);
+  assert.equal(controller.snapshot().stale, true);
+
+  await controller.refresh(async () => preview({ reviewMode: true }));
+  assert.equal(controller.snapshot().stale, false);
+  assert.equal(controller.snapshot().preview?.reviewMode, true);
 });
 
 test("an unresolved record suppresses Start, whatever state it is in", () => {

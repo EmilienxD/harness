@@ -263,7 +263,7 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "aboard.initialized && (aboard.autoRunCard == idle || aboard.autoRunCard == forecast || aboard.autoRunCard == unavailable)"
+          "when": "aboard.initialized && aboard.autoRunCard == forecast"
         },
         {
           "command": "aboard.stopAutoRun",
@@ -345,7 +345,7 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "viewItem == aboard.autoRun.idle || viewItem == aboard.autoRun.forecast || viewItem == aboard.autoRun.forecastUnavailable",
+          "when": "viewItem == aboard.autoRun.forecast",
           "group": "inline@1"
         },
         {

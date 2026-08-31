@@ -107,14 +107,9 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   assert.match(start?.group ?? "", /^inline@/, "Start Auto Run must be the card's inline action");
   assert.equal(title.some((entry) => entry.command === "aboard.startAutoRun"), false, "Start Auto Run must not also sit in the view title");
 
-  // Start is offered only with nothing unresolved: two runs competing for the
-  // same branches is the failure this prevents. A forecast that already knows
-  // it cannot start publishes "forecastBlocked" instead of "forecast", and the
-  // exact-match Start clause hides the action there.
-  assert.match(start?.when ?? "", /viewItem == aboard\.autoRun\.idle/);
-  assert.match(start?.when ?? "", /viewItem == aboard\.autoRun\.forecast\b/);
-  assert.match(start?.when ?? "", /viewItem == aboard\.autoRun\.forecastUnavailable/);
-  assert.doesNotMatch(start?.when ?? "", /forecastBlocked/);
+  // Start is offered only for a successfully checked, ready preview. Idle,
+  // failed, refreshing, empty, and blocked forecasts must be reviewed first.
+  assert.equal(start?.when, "viewItem == aboard.autoRun.forecast");
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.previewAutoRun"), false);
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
   // Resume appears only once validation has said the run may continue — never
@@ -132,8 +127,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   // The palette mirrors the same gating, so neither surface can offer a Start
   // the other refuses.
   const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
-  assert.match(palette.get("aboard.startAutoRun") ?? "", /aboard\.autoRunCard == idle/);
-  assert.doesNotMatch(palette.get("aboard.startAutoRun") ?? "", /forecastBlocked/);
+  assert.equal(palette.get("aboard.startAutoRun"), "aboard.initialized && aboard.autoRunCard == forecast");
   assert.match(palette.get("aboard.resumeAutoRun") ?? "", /aboard\.autoRunCard == recoverable/);
 });
 

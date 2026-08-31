@@ -36,7 +36,7 @@ You talk to the **Manager**. It plans, delegates, and reports — and it cannot 
 The panel has three views, and each answers exactly one question:
 
 - **Agents** — what is running right now. A row appears only while its terminal is open, so everything you see is something you can go and look at.
-- **Auto Run** — the next run's live issue forecast, the current run's fixed plan and progress, or the recovery card for one that stopped. The visible forecast refreshes every 30 seconds and **Check Now** refreshes it immediately; Start always performs one final fresh read before freezing the plan. Resume appears only after aboard has checked that git and GitHub still match what the run recorded; when they don't, you get the reason and Discard.
+- **Auto Run** — the next run's issue forecast, the current run's fixed plan and progress, or the recovery card for one that stopped. The forecast loads when first revealed and **Check Now** refreshes it on demand. Start appears only for a ready preview and performs one final read: if the plan changed, aboard shows the update for review instead of starting. Resume appears only after aboard has checked that git and GitHub still match what the run recorded; when they don't, you get the reason and Discard.
 - **Recent Activity** — the last twenty agent and run outcomes, including the conversations you can reopen.
 
 ## Quick start

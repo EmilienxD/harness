@@ -1320,6 +1320,42 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.deepEqual(context.createdPullRequests, []);
 });
 
+test("a previewed start freezes the exact plan confirmed by its final discovery", async () => {
+  const context = harness();
+  const preview = await context.engine.dryRun();
+  assert.equal(preview.inspected, true);
+  if (!preview.inspected) return;
+  context.githubCalls.splice(0);
+
+  const result = await context.engine.startPreviewed(preview);
+
+  assert.equal(result.started, true);
+  if (!result.started) return;
+  assert.deepEqual(context.record()?.plan, preview.issues);
+  assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"], "Start confirms once and freezes that result without a third discovery");
+  await context.engine.settle();
+});
+
+test("a previewed start returns a changed plan for review without creating a run", async () => {
+  const context = harness();
+  const preview = await context.engine.dryRun();
+  assert.equal(preview.inspected, true);
+  if (!preview.inspected) return;
+  context.relabel(34, ["[AI]-hitl"]);
+  context.githubCalls.splice(0);
+
+  const result = await context.engine.startPreviewed(preview);
+
+  assert.equal(result.started, false);
+  assert.equal("preview" in result, true);
+  if (result.started || !("preview" in result)) return;
+  assert.equal(result.preview.issues[0]?.disposition, "hitl");
+  assert.match(result.reason, /plan changed/);
+  assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"]);
+  assert.deepEqual(context.saved, []);
+  assert.deepEqual(context.launches, []);
+});
+
 test("a dry run in worktree mode treats the user's dirty checkout as read-only", async () => {
   const context = harness({ worktree: true, startDirty: true });
   const result = await context.engine.dryRun();
