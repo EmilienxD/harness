@@ -105,6 +105,14 @@ test("a recorded Manager identity is reused without minting another index", () =
   assert.equal(mints, 0);
 });
 
+test("a Manager identity can be restored after scaffold admission opens", () => {
+  let mints = 0;
+  const identity = new ManagerIdentity(undefined, () => { mints += 1; return "2" as AgentId; });
+  identity.restore(agentId);
+  assert.equal(identity.require(), agentId);
+  assert.equal(mints, 0);
+});
+
 test("reset during Manager bundle preparation prevents terminal creation", async () => {
   let admitted = true;
   let release!: () => void;

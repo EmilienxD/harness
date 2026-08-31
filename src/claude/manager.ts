@@ -45,6 +45,7 @@ export class ManagerIdentity {
   }
 
   public current(): AgentId | undefined { return this.#agentId; }
+  public restore(agentId: AgentId | undefined): void { this.#agentId = agentId; }
   public reset(): void { this.#agentId = undefined; }
 
   public require(): AgentId {

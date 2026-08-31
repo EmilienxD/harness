@@ -45,6 +45,8 @@ The panel has three views, and each answers exactly one question:
 
 1. Install the extension (`code --install-extension aboard-*.vsix`).
 2. Open your project, click the aboard icon, hit **Initialize**. It installs aboard-owned agent definitions, skills, and hooks under `.aboard/`, starts a loopback-only bridge, and supplies authenticated, role-scoped MCP configuration only to the Manager and brainstormers it launches. Your project-wide Claude settings and MCP servers are untouched.
+
+When an extension update ships different project assets, aboard pauses its runtime and offers **Update .aboard/**. Unchanged owned files are upgraded, locally edited files are preserved and listed, and aboard starts again only after the project records the new scaffold revision.
 3. Click **+ New Manager** and ask it something: *"What's the state of this project?"*
 
 Then try one of these in the Manager terminal:

@@ -19,7 +19,7 @@ import { sessionIsResumable } from "./claude/sessions.js";
 import { TranscriptBackupStore } from "./claude/transcript-backup.js";
 import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
-import { readScaffoldState, scaffoldProject } from "./scaffold/project.js";
+import { readScaffoldState, scaffoldCatalogRevision, scaffoldProject } from "./scaffold/project.js";
 import { basename, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
@@ -265,7 +265,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let lifecycle: WorkerLifecycleReconciler | undefined;
   let sessionLifecycle: SessionLifecycleService | undefined;
   const sessionProofs = new SessionStartupProofs();
-  let initialized = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const) === "initialized";
+  const scaffoldAssetRoot = join(context.extensionPath, "assets", "scaffold");
+  const expectedScaffoldRevision = await scaffoldCatalogRevision(scaffoldAssetRoot);
+  let scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
+  let initialized = scaffoldState === "ready";
+  let scaffoldUpdateWarningShown = false;
   const runtimeAdmission = new RuntimeAdmission(initialized);
   const agentMcpConfigs = new FileAgentMcpConfigs(storageRoot, runtimeAdmission, () => initialized && bridge !== undefined);
   // Clean the pre-role-catalog Manager filename as well as current per-agent
@@ -276,7 +280,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push({ dispose: () => { void agentMcpConfigs.clearAll(); void legacyManagerMcpConfig.clear(); } });
   const requireInitialized = (): boolean => {
     if (initialized) return true;
-    void window.showInformationMessage("aboard is not initialized in this workspace. Initialize it from the Get Started view first.");
+    void window.showInformationMessage(scaffoldState === "update-required"
+      ? "aboard's project assets must be updated before this extension version can use them. Run Update .aboard/."
+      : "aboard is not initialized in this workspace. Initialize it from the Get Started view first.");
     return false;
   };
   const terminals = new TerminalController({
@@ -883,19 +889,20 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   const publishScaffoldState = async () => {
     const wasInitialized = initialized;
-    const state = await readScaffoldState(workspaceRoot).catch(() => "uninitialized" as const);
-    const next = state === "initialized";
+    scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
+    const next = scaffoldState === "ready";
     if (initialized && !next) {
       initialized = false;
       const runtimeDrained = runtimeAdmission.close();
-      autoRun.stop("project state was removed");
+      const reason = scaffoldState === "uninitialized" ? "project state was removed" : "project assets became incompatible";
+      autoRun.stop(reason);
       await autoRun.settle();
       await runtimeDrained;
       for (const terminal of terminals.list()) {
         if (terminal.status === "open") try { terminals.kill(terminal.terminalId); } catch { /* already closing */ }
       }
       const at = new Date().toISOString() as IsoTimestamp;
-      if (lease.current() !== undefined) lease.forceRelease(at, "project state was removed");
+      if (lease.current() !== undefined) lease.forceRelease(at, reason);
       fleet.clear(at);
       await activity.reset();
       managerIdentity.reset();
@@ -909,17 +916,31 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         commandEndpoint.clear().catch(() => undefined),
       ]);
       await rm(join(workspaceRoot, ".aboard", "runtime"), { recursive: true, force: true });
-      output.appendLine("Project state directory .aboard/ was removed; the aboard session was discarded.");
+      output.appendLine(scaffoldState === "uninitialized"
+        ? "Project state directory .aboard/ was removed; the aboard session was discarded."
+        : "aboard's project assets no longer match this extension; runtime access was closed until they are updated.");
     }
     initialized = next;
     if (initialized && !wasInitialized) {
       runtimeAdmission.open();
-      agentIdCounter = WorkspaceAgentIdCounter.load(workspaceRoot, undefined, runtimeAdmission.isOpen);
+      recordedManager = await managerStore.load();
+      managerIdentity.restore(recordedManager?.agentId);
+      agentIdCounter = WorkspaceAgentIdCounter.load(workspaceRoot, () => [
+        ...fleet.list().map((session) => session.identity.agentId as string),
+        ...(recordedManager === undefined ? [] : [recordedManager.agentId as string]),
+      ], runtimeAdmission.isOpen);
       // The store on disk is the only history a newly initialized project has.
       await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
+      if (recordedManager !== undefined) void runtimeAdmission.run(() => transcripts.checkpoint(recordedManager!.sessionId));
     }
     if (initialized) await startRuntimeBridge();
     await commands.executeCommand("setContext", "aboard.initialized", next);
+    await commands.executeCommand("setContext", "aboard.scaffoldUpdateRequired", scaffoldState === "update-required");
+    if (scaffoldState !== "update-required") scaffoldUpdateWarningShown = false;
+    if (scaffoldState === "update-required" && !scaffoldUpdateWarningShown) {
+      scaffoldUpdateWarningShown = true;
+      void window.showWarningMessage("aboard's project assets were created by another extension version. Update .aboard/ before starting or resuming aboard.");
+    }
     fleetUi.refresh();
     await publishManagerState();
   };
@@ -936,14 +957,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const scaffold = async () => {
     try {
       const autoCompactEnabled = workspace.getConfiguration("claudeCode").get<boolean>("autoCompact");
-      const first = await readScaffoldState(workspaceRoot) === "uninitialized";
+      const first = await readScaffoldState(workspaceRoot, expectedScaffoldRevision) === "uninitialized";
       const report = await scaffoldProject({
         projectRoot: workspaceRoot,
-        assetRoot: join(context.extensionPath, "assets", "scaffold"),
+        assetRoot: scaffoldAssetRoot,
         ...(autoCompactEnabled === undefined ? {} : { autoCompactEnabled }),
       });
       for (const warning of report.warnings) { output.appendLine(`Warning: ${warning}`); void window.showWarningMessage(warning); }
-      output.appendLine(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.preserved.length} preserved).`);
+      output.appendLine(`aboard ${first ? "initialized" : "updated"} (${report.created.length} created, ${report.updated.length} updated, ${report.removed.length} removed, ${report.preserved.length} preserved).`);
       if (report.preserved.length > 0) {
         output.appendLine("Preserved locally changed aboard assets:");
         for (const path of report.preserved) output.appendLine(`  ${path}`);
@@ -955,12 +976,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push(
     commands.registerCommand("aboard.initializeProject", scaffold),
     commands.registerCommand("aboard.updateProject", async () => {
-      if (!requireInitialized()) return;
+      if (scaffoldState === "uninitialized") { requireInitialized(); return; }
       const confirmed = await window.showWarningMessage(
         "Update aboard's project assets?",
         {
           modal: true,
-          detail: "aboard updates the current agents, hooks, and skills it owns under .aboard/. Files you have not touched are replaced with this version's copies; assets you edited yourself are kept and listed afterwards rather than overwritten. Running sessions keep their already-prepared launch bundles.",
+          detail: "aboard updates the current agents, hooks, and skills it owns under .aboard/. Files you have not touched are replaced with this version's copies, and unchanged files this version retired are removed. Assets you edited yourself are kept and listed afterwards rather than overwritten. Running sessions keep their already-prepared launch bundles.",
         },
         "Update",
       );

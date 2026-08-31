@@ -48,6 +48,15 @@ test("the activity-bar views are bound to opposite initialization states", async
   assert.equal((contributes.views["aboard"] ?? []).find((view) => view.id === "aboard.fleet")?.name, "Agent Fleet");
 });
 
+test("a stale scaffold gets a dedicated update action instead of Initialize", async () => {
+  const { contributes } = await manifest();
+  const welcome = (contributes.viewsWelcome ?? []).filter((entry) => entry.view === "aboard.welcome");
+  assert.ok(welcome.some((entry) => entry.when === "aboard.scaffoldUpdateRequired" && entry.contents.includes("command:aboard.updateProject")));
+  const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
+  assert.match(palette.get("aboard.initializeProject") ?? "", /!aboard\.scaffoldUpdateRequired/u);
+  assert.match(palette.get("aboard.updateProject") ?? "", /aboard\.scaffoldUpdateRequired/u);
+});
+
 test("Agent Fleet keeps New Manager first, and the Manager reopens through the shared reopen action", async () => {
   const { contributes } = await manifest();
   const fleetWelcome = (contributes.viewsWelcome ?? []).filter((entry) => entry.view === "aboard.fleet");

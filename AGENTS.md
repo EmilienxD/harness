@@ -214,6 +214,7 @@ flowchart TD
 - Scaffold templates are assets, not runtime source. Do not create placeholder directories or abstractions before their first real use.
 - Preserve user settings and unrelated MCP servers. aboard never writes project `.claude/` state or root `.gitignore`; it passes generated hook settings and copied aboard skills from a per-launch `.aboard/runtime/agents/<id>/` bundle.
 - The extension owns only files recorded by its scaffold manifest. Upgrade unchanged owned files and warn instead of overwriting locally edited files.
+- A scaffold catalog revision must match the running extension before any runtime surface opens. Extension upgrades require an explicit project update; unchanged owned files advance safely, locally edited files are preserved and reported, and unchanged retired owned files are removed.
 - User-owned skills and hooks installed from upstream remain upstream-owned. Do not copy, rewrite, or silently replace them inside aboard.
 - Durable project state belongs in GitHub or committed files. Ephemeral fleet, activity, auto-run, lock, prompt, agent-rewrite, event, and transcript state belongs under gitignored `.aboard/runtime/`. Activity entries carry summary metadata only — identity, timing, issue and pull request numbers, a short reason, and the launch facts a reopen replays — never prompts, transcripts, assistant messages, tokens, or environments. A launch's own runtime files are written under the directory that launch runs in, because its command line references them relatively.
 

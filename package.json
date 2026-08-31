@@ -182,7 +182,13 @@
     "viewsWelcome": [
       {
         "view": "aboard.welcome",
-        "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over — coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)"
+        "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over — coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
+        "when": "!aboard.scaffoldUpdateRequired"
+      },
+      {
+        "view": "aboard.welcome",
+        "contents": "This project's aboard assets were created by another extension version. Update them before starting or resuming aboard. Files you have edited are preserved and listed for review.\n[Update .aboard/](command:aboard.updateProject)",
+        "when": "aboard.scaffoldUpdateRequired"
       },
       {
         "view": "aboard.recentActivity",
@@ -235,11 +241,11 @@
       "commandPalette": [
         {
           "command": "aboard.initializeProject",
-          "when": "!aboard.initialized"
+          "when": "!aboard.initialized && !aboard.scaffoldUpdateRequired"
         },
         {
           "command": "aboard.updateProject",
-          "when": "aboard.initialized"
+          "when": "aboard.initialized || aboard.scaffoldUpdateRequired"
         },
         {
           "command": "aboard.newManager",
