@@ -5,9 +5,17 @@ import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { lockMarkerDirectory, lockMarkerPresent, takeSessionExitRecord, watchLockMarkers } from "../src/runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_wrapper.py");
+
+test("each Aboard launch gets a fresh one-time code", () => {
+  const layout = sessionWrapperLayout("C:\\work\\aboard");
+  const first = layout.mintLaunchCode();
+  const second = layout.mintLaunchCode();
+  assert.notEqual(first, second);
+  assert.match(first, /^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+});
 
 function uv(args: readonly string[], options: { readonly input?: string; readonly env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync("uv", ["run", "--no-project", "python", ...args], { input: options.input, encoding: "utf8", env: options.env });
@@ -148,6 +156,27 @@ test("wrapper consumes a request file and runs its exact argv", () => {
     assert.equal(result.status, 6);
     assert.equal(existsSync(request), false, "launch argv is removed once consumed");
     assert.equal(existsSync(lock), false);
+    assert.equal(uv([WRAPPER, lock, "--request", request]).status, 2, "the visible command cannot be replayed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("only one concurrent wrapper can claim a launch request", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-"));
+  const request = join(root, "launch-once.json");
+  const proof = join(root, "started.txt");
+  writeFileSync(request, JSON.stringify({
+    command: [process.execPath, "-e", `require("node:fs").appendFileSync(${JSON.stringify(proof)}, "started\\n")`],
+  }));
+  const run = (suffix: string) => new Promise<number | null>((resolve) => {
+    const child = spawn("uv", ["run", "--no-project", "python", WRAPPER, join(root, `${suffix}.lock`), "--request", request], { stdio: "ignore" });
+    child.once("close", resolve);
+  });
+  try {
+    const statuses = await Promise.all([run("one"), run("two")]);
+    assert.deepEqual(statuses.sort(), [0, 2]);
+    assert.equal(readFileSync(proof, "utf8"), "started\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -4,7 +4,9 @@ Usage:
     python aboard_wrapper.py <lock-file> -- <command> [args...]
     python aboard_wrapper.py <lock-file> --request <launch.json>
 
-The extension launches every Claude session through this wrapper. The wrapper
+The extension launches every Claude session through this wrapper. A request
+path is a one-time launch capability: it is claimed before it is read, so a
+terminal-history replay cannot start or resume Claude again. The wrapper
 creates the marker file before spawning the child Claude process, forwards the
 terminal, waits, and removes the marker when the child exits for any reason —
 `exit`, double Ctrl+C, an unhandled crash. The bridge polls the marker's
@@ -39,8 +41,12 @@ def main() -> int:
     args: list[str] = sys.argv[1:]
     if len(args) == 3 and args[1] == "--request":
         request_path: str = args[2]
+        claimed_path: str = f"{request_path}.claimed-{os.getpid()}"
         try:
-            with open(request_path, "r", encoding="utf-8") as handle:
+            # Same-directory rename is atomic: only one wrapper can claim this
+            # launch capability, even when terminal history is replayed twice.
+            os.replace(request_path, claimed_path)
+            with open(claimed_path, "r", encoding="utf-8") as handle:
                 request: Any = json.load(handle)
             loaded_command: Any = request.get("command") if isinstance(request, dict) else None
             if not isinstance(loaded_command, list) or not loaded_command or not all(
@@ -52,7 +58,7 @@ def main() -> int:
             return 2
         finally:
             try:
-                os.remove(request_path)
+                os.remove(claimed_path)
             except OSError:
                 pass
     elif len(args) >= 3 and args[1] == "--":

@@ -421,6 +421,8 @@ export interface SessionWrapperLayout {
   readonly script: string;
   /** Per-agent marker path the wrapper owns (`lockFile` in the request). */
   lockPathFor(agentId: AgentId): string;
+  /** Fresh capability embedded in exactly one wrapper request path. */
+  mintLaunchCode(): string;
 }
 
 export interface LaunchPlanRequest extends CommonPlanRequest {
@@ -651,6 +653,7 @@ function commonPreconditions(
   readonly threshold: number;
   readonly runtimeDirectory: string;
   readonly wrapper: SessionWrapperLayout | undefined;
+  readonly launchCode: string | undefined;
   readonly attended: boolean;
 } {
   if (!AGENT_ID_PATTERN.test(request.agentId)) {
@@ -684,6 +687,7 @@ function commonPreconditions(
     }
   }
   const wrapper = request.wrapper;
+  const launchCode = wrapper?.mintLaunchCode();
   if (wrapper !== undefined) {
     for (const token of [wrapper.script, wrapper.lockPathFor(request.agentId)]) {
       if (token.trim().length === 0 || !canQuoteArgument(request.shell, token)) {
@@ -693,6 +697,12 @@ function commonPreconditions(
         );
       }
     }
+    if (launchCode === undefined || !AGENT_ID_PATTERN.test(launchCode)) {
+      throw new LaunchPlanError(
+        "invalid-command",
+        `Wrapper launch code is not safe as a file name: ${JSON.stringify(launchCode)}`,
+      );
+    }
   }
   const attended =
     request.attended ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType));
@@ -701,6 +711,7 @@ function commonPreconditions(
     threshold,
     runtimeDirectory: request.runtimeDirectory ?? DEFAULT_RUNTIME_DIRECTORY,
     wrapper,
+    launchCode,
     attended,
   };
 }
@@ -708,12 +719,13 @@ function commonPreconditions(
 function wrapperRequestFile(
   runtimeDirectory: string,
   agentId: AgentId,
+  launchCode: string,
   command: readonly string[],
   args: readonly string[],
 ): WrapperRequestFile {
   return {
     agentId,
-    relativePath: `${agentRuntimeDirectory(runtimeDirectory, agentId)}/launch.json`,
+    relativePath: `${agentRuntimeDirectory(runtimeDirectory, agentId)}/launch-${launchCode}.json`,
     contents: `${JSON.stringify({ command: [...command, ...args] })}\n`,
   };
 }
@@ -725,9 +737,11 @@ function wrapCommand(
   wrapper: SessionWrapperLayout | undefined,
   agentId: AgentId,
   runtimeDirectory: string,
+  launchCode: string | undefined,
 ): { readonly command: readonly string[]; readonly args: readonly string[]; readonly request?: WrapperRequestFile } {
   if (wrapper === undefined) return { command, args };
-  const request = wrapperRequestFile(runtimeDirectory, agentId, command, args);
+  if (launchCode === undefined) throw new LaunchPlanError("invalid-command", "Wrapper launch code is missing");
+  const request = wrapperRequestFile(runtimeDirectory, agentId, launchCode, command, args);
   return {
     command: ["uv", "run", "--no-project", "--no-managed-python", wrapper.script],
     args: [wrapper.lockPathFor(agentId), "--request", request.relativePath],
@@ -736,7 +750,7 @@ function wrapCommand(
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { command, threshold, runtimeDirectory, wrapper, attended } = commonPreconditions(request, request.configuration);
+  const { command, threshold, runtimeDirectory, wrapper, launchCode, attended } = commonPreconditions(request, request.configuration);
   const { agentType, configuration } = request;
 
   if (agentType === "manager") {
@@ -825,7 +839,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       stem: request.agentId,
     });
     const args = [...fixedArguments, ...plan.args];
-    const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory);
+    const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       plan,
       args,
@@ -866,7 +880,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 }
 
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
+  const { command, wrapper, runtimeDirectory, launchCode, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
   if (
     request.configuration.shape !== "agent-defined" ||
     request.configuration.agentName !== MANAGER_AGENT_NAME
@@ -894,7 +908,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     ...effortArguments(policy.effort),
     ...slashCommandArguments(attended),
   ];
-  const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory);
+  const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
   return {
     kind: "resume",
     agentId: request.agentId,
@@ -914,7 +928,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
 }
 
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, attended, threshold } = commonPreconditions(request, request.configuration);
+  const { command, wrapper, runtimeDirectory, launchCode, attended, threshold } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
   const definition = configuration.shape === "agent-defined"
@@ -949,7 +963,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       stem: `${request.agentId}-continue`,
     });
     const args = [...fixedArguments, ...promptPlan.args];
-    const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory);
+    const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       promptPlan,
       args,

@@ -227,12 +227,13 @@ test("wrapper layout keeps child argv out of the visible launch and resume lines
   const wrapper = {
     script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py",
     lockPathFor: (id: typeof agentId) => `C:\\repo\\.aboard\\runtime\\locks\\${id}.lock`,
+    mintLaunchCode: () => "start-code",
   };
   const plan = planLaunch(request({ wrapper }));
   // plan.args keeps the claude-side view; only the command line changes.
   assert.equal(plan.args[2], "--add-dir");
   assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
-  assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' --request .aboard/runtime/agents/${agentId}/launch.json`));
+  assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' --request .aboard/runtime/agents/${agentId}/launch-start-code.json`));
   assert.doesNotMatch(plan.commandLine, /--allowedTools|--session-id/);
   assert.deepEqual(JSON.parse(plan.wrapperRequest!.contents), { command: ["claude", ...plan.args] });
 
@@ -240,7 +241,7 @@ test("wrapper layout keeps child argv out of the visible launch and resume lines
     agentId, sessionId, agentType: "implementer", shell: "powershell",
     configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
   });
-  assert.match(resumed.commandLine, /aboard_wrapper\.py' .* --request \.aboard\/runtime\/agents\/a1b2c3\/launch\.json/);
+  assert.match(resumed.commandLine, /aboard_wrapper\.py' .* --request \.aboard\/runtime\/agents\/a1b2c3\/launch-start-code\.json/);
   assert.deepEqual(JSON.parse(resumed.wrapperRequest!.contents), { command: ["claude", ...resumed.args] });
 });
 
@@ -248,6 +249,7 @@ test("wrapper tokens are validated like the launch command", () => {
   const wrapper = {
     script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py",
     lockPathFor: () => 'has "quote".lock',
+    mintLaunchCode: () => "start-code",
   };
   assert.throws(() => planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
@@ -1047,9 +1049,9 @@ test("a definition's command replaces the configured launch command for that age
   // The wrapper still owns the outermost program; the override is what it runs.
   const wrapped = planLaunch(request({
     configuration, prompt: "Go.",
-    wrapper: { script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py", lockPathFor: () => "C:\\repo\\lock" },
+    wrapper: { script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py", lockPathFor: () => "C:\\repo\\lock", mintLaunchCode: () => "start-code" },
   }));
-  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' --request .aboard/runtime/agents/a1b2c3/launch.json"));
+  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' --request .aboard/runtime/agents/a1b2c3/launch-start-code.json"));
   assert.deepEqual(JSON.parse(wrapped.wrapperRequest!.contents), { command: ["wrapper", "run", "MyProfile", "--", ...wrapped.args] });
 });
 

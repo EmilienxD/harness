@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, watch } from "node:fs";
 import { join } from "node:path";
 import type { LockMarkerProbe } from "../bridge/session-lifecycle.js";
@@ -10,6 +11,7 @@ export function sessionWrapperLayout(workspaceRoot: string): SessionWrapperLayou
   return {
     script: join(workspaceRoot, ".aboard", "scripts", "aboard_wrapper.py"),
     lockPathFor: (agentId) => join(workspaceRoot, ".aboard", "runtime", "locks", `${agentId}.lock`),
+    mintLaunchCode: () => randomUUID(),
   };
 }
 
