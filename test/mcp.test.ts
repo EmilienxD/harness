@@ -24,9 +24,10 @@ class FakeTerminal implements TerminalHandle {
   public exitStatus: { code: number | undefined } | undefined;
   public readonly shown: Array<boolean | undefined> = [];
   public readonly sent: string[] = [];
+  public disposed = false;
   public sendText(text: string): void { this.sent.push(text); }
   public show(preserveFocus?: boolean): void { this.shown.push(preserveFocus); }
-  public dispose(): void {}
+  public dispose(): void { this.disposed = true; }
 }
 
 class FakeHost implements TerminalHost {
@@ -937,6 +938,30 @@ test("an auto-run launch marks the tree it is expected to leave dirty and fences
   assert.match(line, /Bash\(gh pr merge\*\)/);
   assert.doesNotMatch(line, /Bash\(git status\*\)/);
   assert.doesNotMatch(line, /Bash\(gh issue view\*\)/);
+});
+
+test("aborting an auto-run launch kills its terminal but keeps waiting for lifecycle settlement", async () => {
+  const { coordinator, fleet, host } = setup();
+  const controller = new AbortController();
+  let settled = false;
+  const pending = coordinator.runAutomated({
+    type: "implementer",
+    prompt: "Address issue nine",
+    description: "address issue nine",
+    expectsUncommittedTree: true,
+  }, controller.signal).then((outcome) => { settled = true; return outcome; });
+  await new Promise((resolve) => setImmediate(resolve));
+  const worker = fleet.list().find((entry) => entry.identity.type === "implementer")!;
+
+  controller.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(host.created[0]!.terminal.disposed, true);
+  assert.equal(settled, false, "terminal disposal is a request; lifecycle still owns settlement");
+
+  const killed = { outcome: "failed", failure: { type: "killed", exitCode: null, lastAssistantMessage: null }, telemetry } as const;
+  coordinator.complete(worker.identity.agentId, killed);
+  assert.deepEqual((await pending).result, killed);
 });
 
 test("an isolated launch runs in its own directory, writes its runtime files there, and is denied the user's checkout", async () => {

@@ -386,6 +386,8 @@ export const autoRunMessage = {
   resolved: (pr: number): string => `auto-run: PR #${pr} merged by you; continuing.`,
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
+  returnBlocked: (target: string, current: string, paths: readonly string[]): string =>
+    `auto-run: stayed on ${current} instead of returning to ${target}; uncommitted work remains in ${paths.length} path(s): ${paths.slice(0, 10).join(", ")}. Resume the run or inspect it there.`,
   complete: (count: number, parked: number): string =>
     `auto-run: plan drained (${count} issue${count === 1 ? "" : "s"} addressed${parked === 0 ? "" : `, ${parked} left for you`}). Start another run once more work is labelled.`,
   returned: (branch: string): string => `auto-run: back on ${branch}.`,

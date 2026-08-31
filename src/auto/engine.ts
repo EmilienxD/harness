@@ -183,6 +183,9 @@ class StructuralError extends Error {
   }
 }
 
+/** The active auto-run worker settled because this attempt was aborted. */
+class AutomatedWorkerCancelled extends Error {}
+
 export class AutoRunEngine {
   #controller: AbortController | undefined;
   #state: AutoRunState | undefined;
@@ -672,6 +675,12 @@ export class AutoRunEngine {
       const status = await this.options.git.status();
       if (status.branch === branch) return;
       if (status.entries.length > 0) {
+        const current = status.branch ?? "a detached HEAD";
+        this.options.notifier.notify(autoRunMessage.returnBlocked(
+          branch,
+          current,
+          status.entries.map((entry) => entry.path),
+        ));
         this.options.log?.(`auto-run: not returning to ${branch} — the working tree on ${status.branch ?? "a detached HEAD"} has uncommitted changes`);
         return;
       }
@@ -1055,6 +1064,7 @@ export class AutoRunEngine {
             return { kind: "stopped", reason: step.reason };
         }
       } catch (error) {
+        if (error instanceof AutomatedWorkerCancelled) return { kind: "aborted" };
         if (error instanceof StructuralError) throw error;
         return { kind: "stopped", reason: message(error) };
       }
@@ -1148,6 +1158,10 @@ export class AutoRunEngine {
       ...this.#isolation(),
     }, signal);
     this.#openTerminals.add(outcome.terminalId);
+    if (signal.aborted) {
+      this.#closeSettledTerminal(outcome.terminalId);
+      throw new AutomatedWorkerCancelled();
+    }
     if (outcome.result.outcome === "failed") throw new Error(`implementer failed: ${outcome.result.failure.type}`);
     this.#remember(issue, outcome, "implementer");
     await this.#validate();
@@ -1264,6 +1278,10 @@ export class AutoRunEngine {
       ...this.#isolation(),
     }, signal);
     this.#openTerminals.add(outcome.terminalId);
+    if (signal.aborted) {
+      this.#closeSettledTerminal(outcome.terminalId);
+      throw new AutomatedWorkerCancelled();
+    }
     if (outcome.result.outcome === "failed") throw new Error(`pr-doctor-afk failed: ${outcome.result.failure.type}`);
     this.#remember(issue, outcome, "pr-doctor-afk");
 

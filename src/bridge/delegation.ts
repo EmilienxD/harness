@@ -176,8 +176,20 @@ export class DelegationCoordinator {
 
   public async runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome> {
     const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run", false);
-    const result = await this.#waitForResult(launched.agentId, signal);
-    return { ...launched, result };
+    const stopWorker = (): void => {
+      try { this.options.terminals.kill(launched.terminalId); } catch { /* terminal already settled */ }
+    };
+    if (signal?.aborted) stopWorker();
+    else signal?.addEventListener("abort", stopWorker, { once: true });
+    try {
+      // Auto-run owns this terminal. Cancelling it stops the worker, but the
+      // result wait remains attached until terminal lifecycle has classified
+      // the kill and released the lease.
+      const result = await this.#waitForResult(launched.agentId);
+      return { ...launched, result };
+    } finally {
+      signal?.removeEventListener("abort", stopWorker);
+    }
   }
 
   public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles> {

@@ -117,6 +117,8 @@ interface HarnessOptions {
   readonly worktree?: boolean;
   /** Changes a frozen classification after the worker returns, before commit. */
   readonly relabelAfterImplementer?: boolean;
+  /** Leaves this automated worker pending until the run aborts it. */
+  readonly pendingWorkerType?: "implementer" | "pr-doctor-afk";
   /** Adds controllable latency or failure to every remote-ref observation. */
   readonly fetch?: () => Promise<void>;
   /** Head branches GitHub reports as already having a pull request, before the run opens any. */
@@ -374,10 +376,22 @@ function harness(options: HarnessOptions = {}): Harness {
   }
 
   const launcher: AutoRunLauncher = {
-    runAutomated: async (input) => {
+    runAutomated: async (input, signal) => {
       launches.push(input);
       // Both agent types leave their work in the working tree; the engine commits.
       if (options.producesChanges !== false) dirty = true;
+      if (input.type === options.pendingWorkerType) {
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return {
+          agentId: `agent-${launches.length}` as AgentId,
+          sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
+          terminalId: `terminal-${launches.length}` as TerminalId,
+          result: { outcome: "failed", failure: { type: "killed", exitCode: null, lastAssistantMessage: null }, telemetry: telemetry() },
+        };
+      }
       if (input.type === "implementer" && options.relabelAfterImplementer === true) {
         queue.find((entry) => entry.number === input.issues?.[0])?.labels.splice(0, Infinity, "[AI]-hitl");
       }
@@ -526,6 +540,14 @@ function harness(options: HarnessOptions = {}): Harness {
       if (entry !== undefined) entry.labels.splice(0, entry.labels.length, ...labels);
     },
   };
+}
+
+async function waitForLaunch(context: Harness, type: DelegationLaunchInput["type"]): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (context.launches.some((launch) => launch.type === type)) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.fail(`${type} was not launched`);
 }
 
 function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
@@ -915,6 +937,58 @@ test("a user cancellation still restores the original branch", async () => {
   await context.engine.settle();
 
   assert.equal(context.gitCalls[context.gitCalls.length - 1], "checkout feature/wip");
+});
+
+test("cancelling a running implementer settles its terminal and records cancellation", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    producesChanges: false,
+    pendingWorkerType: "implementer",
+  });
+  await context.engine.start();
+  await waitForLaunch(context, "implementer");
+
+  context.engine.stop();
+  await context.engine.settle();
+
+  assert.deepEqual(context.record()?.outcome, { kind: "cancelled" });
+  assert.deepEqual(context.closedTerminals, ["terminal-1"]);
+  assert.equal(context.gitCalls.at(-1), "checkout feature/wip");
+  assert.doesNotMatch(context.notifications.join("\n"), /Foreground wait/u);
+});
+
+test("cancelling a running implementer keeps its partial edits on the issue branch", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    pendingWorkerType: "implementer",
+  });
+  await context.engine.start();
+  await waitForLaunch(context, "implementer");
+
+  context.engine.stop();
+  await context.engine.settle();
+
+  assert.deepEqual(context.record()?.outcome, { kind: "cancelled" });
+  assert.deepEqual(context.closedTerminals, ["terminal-1"]);
+  assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
+  assert.match(context.notifications.join("\n"), /stayed on aboard\/34-add-retry-backoff.*uncommitted work remains/u);
+});
+
+test("cancelling a running automated reviewer uses the same owned-terminal path", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    settings: { review: true },
+    pendingWorkerType: "pr-doctor-afk",
+  });
+  await context.engine.start();
+  await waitForLaunch(context, "pr-doctor-afk");
+
+  context.engine.stop();
+  await context.engine.settle();
+
+  assert.deepEqual(context.record()?.outcome, { kind: "cancelled" });
+  assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
+  assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
 });
 
 test("the implementer's account of its change is posted on the issue it addressed", async () => {
