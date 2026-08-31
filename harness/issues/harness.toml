@@ -1,6 +1,6 @@
 name = "issues"
-version = "1.13.7"
-description = "Draft, spec and publish reviewed GitHub issues - one at a time or a whole plan"
+version = "1.14.0"
+description = "Draft, spec and publish reviewed GitHub issues from requests, plans and audits"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/issues/README.md"
 
@@ -34,6 +34,12 @@ platforms = ["claude"]
 [[files]]
 src = "claude/skills/draft-issues"
 dest = "draft-issues"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "claude/skills/draft-audit-issues"
+dest = "draft-audit-issues"
 root = "skills"
 platforms = ["claude"]
 
@@ -74,6 +80,12 @@ root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
+src = "chatgpt/skills/draft-audit-issues/SKILL.md"
+dest = "draft-audit-issues/SKILL.md"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
 src = "chatgpt/skills/publish-issues/SKILL.md"
 dest = "publish-issues/SKILL.md"
 root = "skills"
@@ -94,6 +106,12 @@ platforms = ["chatgpt"]
 [[files]]
 src = "chatgpt/skills/draft-issues/agents/openai.yaml"
 dest = "draft-issues/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/draft-audit-issues/agents/openai.yaml"
+dest = "draft-audit-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 

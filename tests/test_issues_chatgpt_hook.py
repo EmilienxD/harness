@@ -42,6 +42,7 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
     assert (tmp_path / ".codex/hooks/issues_core.py").is_file()
     assert (tmp_path / ".codex/hooks/issues_ChatGPT_hook.py").is_file()
     for name in (
+        "draft-audit-issues",
         "draft-issue",
         "draft-issues",
         "publish-issues",
@@ -86,6 +87,7 @@ def test_drafting_prompt_injects_stable_session_and_next_index(
 @pytest.mark.parametrize(
     "prompt",
     [
+        "$draft-audit-issues convert the audit",
         "$draft-issues break this down",
         "@to-spec-draft-issue",
         "/draft-issue legacy spelling",

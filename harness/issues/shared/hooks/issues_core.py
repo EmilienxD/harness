@@ -1433,7 +1433,10 @@ def publish_batch(
 def publish_issues(dry: bool, session_id: str) -> str:
     """Publish drafts belonging to the current agent session only."""
     if not GATEWAY_DIR.is_dir():
-        return "No .issues-gateway/ folder found. Run /draft-issue or /draft-issues first."
+        return (
+            "No .issues-gateway/ folder found. Run /draft-issue, /draft-issues, "
+            "or /draft-audit-issues first."
+        )
 
     if not SESSION_ID_PATTERN.fullmatch(session_id):
         return "Invalid or missing issues session id. Nothing was published."

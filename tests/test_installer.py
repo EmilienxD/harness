@@ -61,6 +61,7 @@ def test_install_leaves_no_lock_or_backup(target):
         "hooks/publish_issues_UserPromptSubmit_hook.py",
         "settings.json",
         "skills/commit/SKILL.md",
+        "skills/draft-audit-issues/SKILL.md",
         "skills/draft-issue/SKILL.md",
         "skills/draft-issues/SKILL.md",
         "skills/publish-issues/SKILL.md",

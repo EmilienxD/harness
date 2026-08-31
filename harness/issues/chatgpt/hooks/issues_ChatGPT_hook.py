@@ -21,7 +21,7 @@ import issues_core as core
 
 PUBLISH_PATTERN = re.compile(r"(?<![\w-])[$@/]publish-issues?(?=\s|$)")
 DRAFT_PATTERN = re.compile(
-    r"(?<![\w-])[$@/](draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
+    r"(?<![\w-])[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
 )
 
 

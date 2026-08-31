@@ -1,10 +1,11 @@
 # Issues
 
 Everything for getting work out of a conversation and onto the GitHub tracker: one idea → one
-reviewed issue, a whole plan → a dependency-linked batch, or the current conversation → a spec
-(in chat, or as an issue). Nothing reaches the tracker before a human has looked at it.
+reviewed issue, a whole plan → a dependency-linked batch, an audit → one evidence-preserving issue
+per finding, or the current conversation → a spec (in chat, or as an issue). Nothing reaches the
+tracker before a human has looked at it.
 
-One install ships all five skills and one publishing hook. Claude Code remains
+One install ships all six skills and one publishing hook. Claude Code remains
 the default target; pass `--platform chatgpt` for the native ChatGPT payload:
 
 ```bash
@@ -38,16 +39,17 @@ including creating the workflow's labels and, for batches, rewriting cross-refer
 issue numbers. Bodies always go through LF-only `--body-file` temporary files, never inline, which
 avoids both the Windows command-length limit and Windows newline expansion.
 
-### Three flows
+### Four flows
 
 | Flow | Skills | Cost |
 |---|---|---|
 | One issue | `/draft-issue` → `/publish-issues` | 2 API calls |
 | A plan, as a batch | `/draft-issues` → `/publish-issues` | 3 API calls |
+| Audit findings, one issue each | `/draft-audit-issues` → `/publish-issues` | 3 API calls |
 | This conversation, as a spec | `/to-spec`, or `/to-spec-draft-issue` → `/publish-issues` | 1–2 API calls |
 
 The table uses Claude Code's `/skill` spelling. In ChatGPT CLI/IDE prompts, invoke the same skills
-as `$draft-issue`, `$draft-issues`, `$publish-issues`, `$to-spec`, and
+as `$draft-issue`, `$draft-issues`, `$draft-audit-issues`, `$publish-issues`, `$to-spec`, and
 `$to-spec-draft-issue`.
 
 **Single issue.** `/draft-issue` pins down scope, difficulty, and mode with you in chat, then writes
@@ -63,6 +65,12 @@ writing one file per issue under `.issues-gateway/{session-id}/`, tagged with a 
 dependent issues can reference each other before any of them exist. `/publish-issues` creates them in
 dependency order and rewrites each plain `{session-id}/{i}` reference into the real number as soon as
 that issue exists — a whole dependency graph published without a single model call driving it.
+
+**Audit findings.** `/draft-audit-issues` consumes an audit already in the conversation or at a
+passed reference. It preserves a strict one-finding-to-one-issue mapping, keeps the audit's location,
+impact, evidence, severity, confidence, remediation difficulty, and recommendation, and asks you to
+approve the mapping before writing drafts. It does not re-audit, merge findings, or force them into
+the implementation-oriented `What to build` and acceptance-criteria template.
 
 **Spec.** `/to-spec` synthesizes what you've already discussed into a spec and delivers it in chat —
 no interview, no files. `/to-spec-draft-issue` does the same synthesis but writes it to
@@ -136,6 +144,7 @@ additional API calls**.
 ├── skills/
 │   ├── draft-issue/SKILL.md            # writes .issues-gateway/{session-id}/issue-{n}.md
 │   ├── draft-issues/SKILL.md           # maps, gets approval, then writes the issue batch
+│   ├── draft-audit-issues/SKILL.md     # writes one evidence-preserving draft per audit finding
 │   ├── publish-issues/SKILL.md         # user-invocable, empty body (hook does the work)
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
 │   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
@@ -262,7 +271,7 @@ gateway directory and `.gitignore`, computes the next free index, and injects th
 developer context before the drafting skill runs. The same adapter delegates publishing to the
 shared core, including 65,536-character splitting and resumable continuation comments.
 
-That copies the five skills and the hook into `.claude/` and merges the hook registration below
+That copies the six skills and the hook into `.claude/` and merges the hook registration below
 into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry` first to
 see the exact file list and settings diff. See the [repo README](../../README.md) for `--user`,
 `--local`, and `uninstall`.
@@ -336,6 +345,10 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 /draft-issues [optional: issue number, URL, or path to a plan]
   → proposes a breakdown in chat and iterates until it looks right
   → after approval, writes .issues-gateway/{session-id}/issue-{i}.md, one per issue
+
+/draft-audit-issues [optional: path, issue, or URL containing an audit]
+  → proposes an exact one-to-one mapping from numbered findings to issues
+  → after approval, writes one evidence-preserving draft per finding
 
 /to-spec
   → synthesizes the conversation into a spec, in chat only
