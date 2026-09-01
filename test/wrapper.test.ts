@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -157,6 +157,92 @@ test("wrapper consumes a request file and runs its exact argv", () => {
     assert.equal(existsSync(request), false, "launch argv is removed once consumed");
     assert.equal(existsSync(lock), false);
     assert.equal(uv([WRAPPER, lock, "--request", request]).status, 2, "the visible command cannot be replayed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wrapper leaves a sanitized launch audit for each aboard invocation", () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-"));
+  const lock = join(root, "runtime", "locks", "worker-7.lock");
+  const request = join(root, "launch.json");
+  const secretPrompt = "private prompt that must not reach diagnostics";
+  try {
+    writeFileSync(request, JSON.stringify({
+      command: [
+        process.execPath,
+        "-e", "process.exit(0)", "--",
+        "--session-id", "session-secret",
+        "--agent", "aboard-implementer-worker-7",
+        "--chrome",
+        "--disable-slash-commands",
+        secretPrompt,
+      ],
+    }));
+    const result = uv([WRAPPER, lock, "--request", request], {
+      env: { ...process.env, ABOARD_AGENT_ID: "worker-7", ABOARD_AGENT_TYPE: "implementer" },
+    });
+    assert.equal(result.status, 0);
+
+    const events = join(root, "runtime", "events");
+    const files = readdirSync(events);
+    assert.equal(files.length, 1);
+    const raw = readFileSync(join(events, files[0]!), "utf8");
+    assert.doesNotMatch(raw, /session-secret|private prompt|aboard-implementer-worker-7/);
+    assert.deepEqual(JSON.parse(raw), {
+      version: 1,
+      agentId: "worker-7",
+      agentType: "implementer",
+      startedAt: JSON.parse(raw).startedAt,
+      delivery: "request",
+      launchKind: "start",
+      chromeFlag: "enabled",
+      agentDefinition: true,
+      disableSlashCommands: true,
+      commandTokenCount: 11,
+      childSpawned: true,
+      exitCode: 0,
+      spawnFailed: false,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("launch audits distinguish resume, conflicting Chrome flags, and spawn failure", () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-"));
+  const events = join(root, "runtime", "events");
+  const run = (agentId: string, command: readonly string[]) => uv([
+    WRAPPER,
+    join(root, "runtime", "locks", `${agentId}.lock`),
+    "--",
+    ...command,
+  ], { env: { ...process.env, ABOARD_AGENT_ID: agentId, ABOARD_AGENT_TYPE: "implementer" } });
+  const audit = (agentId: string): Record<string, unknown> => {
+    const file = readdirSync(events).find((candidate) => candidate.startsWith(`launch-${agentId}-`));
+    assert.notEqual(file, undefined);
+    return JSON.parse(readFileSync(join(events, file!), "utf8")) as Record<string, unknown>;
+  };
+  try {
+    assert.equal(run("resume-1", [process.execPath, "-e", "process.exit(0)", "--", "--resume", "private-session"]).status, 0);
+    assert.deepEqual(
+      { launchKind: audit("resume-1").launchKind, chromeFlag: audit("resume-1").chromeFlag },
+      { launchKind: "resume", chromeFlag: "absent" },
+    );
+
+    assert.equal(run("conflict-1", [process.execPath, "-e", "process.exit(0)", "--", "--chrome", "--no-chrome"]).status, 0);
+    assert.equal(audit("conflict-1").chromeFlag, "conflicting");
+
+    assert.equal(run("failed-1", [join(root, "missing-claude"), "--chrome"]).status, 127);
+    assert.deepEqual(
+      {
+        chromeFlag: audit("failed-1").chromeFlag,
+        childSpawned: audit("failed-1").childSpawned,
+        exitCode: audit("failed-1").exitCode,
+        spawnFailed: audit("failed-1").spawnFailed,
+      },
+      { chromeFlag: "enabled", childSpawned: false, exitCode: 127, spawnFailed: true },
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
