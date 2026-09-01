@@ -39,9 +39,13 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     await mkdir(directory, { recursive: true });
     const hooks: unknown = JSON.parse(await readFile(join(base, ".aboard", "aboard-hooks.json"), "utf8"));
     await writeFile(join(directory, "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    // `/prototype` is also intercepted from brainstormer terminals (the hook and
+    // bridge both admit it there), so a brainstormer bundle must ship it too.
     const skills = plan.agentType === "manager"
-      ? ["auto", "brainstorm", "done", "general-purpose", "reopen", "review-pr", "update-todo"]
-      : ["done"];
+      ? ["auto", "brainstorm", "done", "general-purpose", "prototype", "reopen", "review-pr", "update-todo"]
+      : plan.agentType === "brainstormer"
+        ? ["done", "prototype"]
+        : ["done"];
     for (const skill of skills) {
       await cp(join(base, ".aboard", "skills", skill), join(directory, ".claude", "skills", skill), {
         recursive: true,
