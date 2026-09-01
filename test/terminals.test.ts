@@ -200,11 +200,13 @@ test("several bound issues reach the session as one comma-separated variable, an
   assert.equal("ABOARD_ISSUE_NUMBERS" in (host.created[1]?.options.env ?? {}), false);
 });
 
-test("the terminal keeps its default shell name; the aboard label stays on the record", () => {
-  // A tab named "aboard: manager" outlives the agent and then lies about it.
+test("the terminal follows Claude's live title; the aboard label stays on the record", () => {
+  // A static "aboard: manager" tab outlives the agent and then lies about it.
+  // The sequence template follows Claude while it runs and the shell afterwards.
   const { controller, host } = setup();
   const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "implementer", issueNumbers: [6] });
   assert.equal("name" in (host.created[0]?.options ?? {}), false);
+  assert.equal(host.created[0]?.options.titleTemplate, "${sequence}");
   assert.equal(created.name, "aboard: implementer");
 });
 

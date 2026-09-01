@@ -63,6 +63,7 @@ export interface TerminalHandle {
 export interface TerminalCreationOptions {
   readonly cwd: string;
   readonly name?: string;
+  readonly titleTemplate?: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
   readonly env: Readonly<Record<string, string>>;
@@ -237,6 +238,10 @@ export class TerminalController {
     const creationOptions: TerminalCreationOptions = {
       cwd,
       env,
+      // Claude Code reports its live status through OSC title sequences. Keep
+      // that display scoped to aboard's agent terminals instead of changing the
+      // user's title template for every integrated terminal.
+      titleTemplate: "${sequence}",
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
       ...(request.shellArgs === undefined ? {} : { shellArgs: request.shellArgs }),
     };
