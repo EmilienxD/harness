@@ -115,6 +115,10 @@ interface HarnessOptions {
   readonly baseNotOnRemote?: boolean;
   /** A stale remote target SHA, distinct from the local target branch. */
   readonly remoteBaseSha?: string;
+  /** Local commits on the run target which origin does not contain. */
+  readonly unpublishedTargetCommits?: number;
+  /** The target's starting tip has been published by the time the final PR opens. */
+  readonly targetPublishedBeforeConclusion?: boolean;
   /** Runs with a checkout of its own instead of the user's working tree. */
   readonly worktree?: boolean;
   /** Changes a frozen classification after the worker returns, before commit. */
@@ -203,6 +207,8 @@ function harness(options: HarnessOptions = {}): Harness {
         ? options.remoteBaseSha
         : remoteShas.get(branch) ?? shaFor(branch)
       : undefined,
+    aheadBehind: async () => ({ ahead: options.unpublishedTargetCommits ?? 0, behind: 0 }),
+    isAncestor: async () => options.targetPublishedBeforeConclusion ?? (options.unpublishedTargetCommits === undefined),
     commitDetails: async (ref) => ({ sha: shaFor(ref), parents: ["parent0000000000000000000000000000000000"], subject: "subject", message: "subject", treeSha: "tree000000000000000000000000000000000000" }),
     stagedTreeSha: async () => "tree000000000000000000000000000000000000",
     deleteBranchAt: async (branch, expected) => {
@@ -807,6 +813,70 @@ test("the run merges its own pull request only when the setting allows it", asyn
   assert.match(context.notifications.join("\n"), /PR #57 merged into feature\/wip\. Pull feature\/wip/);
 });
 
+test("unpublished target commits are frozen, warned about, and included in the final PR guidance", async () => {
+  const context = harness({ startBranch: "feature/wip", unpublishedTargetCommits: 2 });
+
+  const preview = await context.engine.dryRun();
+  assert.equal(preview.inspected, true);
+  if (!preview.inspected) return;
+  assert.equal(preview.unpublishedTargetCommits, 2);
+  assert.match(preview.warnings.join("\n"), /2 commits not on origin\/feature\/wip/);
+
+  const started = await context.engine.startPreviewed(preview);
+  assert.equal(started.started, true);
+  await context.engine.settle();
+
+  assert.equal(context.saved[0]?.unpublishedTargetCommits, 2);
+  assert.equal(context.saved[0]?.targetHeadSha, context.sha("feature/wip"));
+  assert.match(context.createdPullRequests.at(-1)?.body ?? "", /started with 2 commits on `feature\/wip`/);
+  assert.match(context.notifications.join("\n"), /Push feature\/wip before squash\/rebase merging/);
+});
+
+test("automatic squash leaves the final PR open while its target commits are unpublished", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    unpublishedTargetCommits: 2,
+    settings: { mergeRunPullRequest: true, mergeStrategy: "squash" },
+  });
+
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.pullRequests.get(57)?.state, "open");
+  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: false }]);
+  assert.match(context.alerts.map((alert) => alert.message).join("\n"), /left open.*squash would rewrite their ancestry/);
+  assert.match(context.record()?.outcome?.kind ?? "", /failed/);
+});
+
+test("publishing the target during the run makes its configured final squash safe", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    unpublishedTargetCommits: 2,
+    targetPublishedBeforeConclusion: true,
+    settings: { mergeRunPullRequest: true, mergeStrategy: "squash" },
+  });
+
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.pullRequests.get(57)?.state, "merged");
+  assert.deepEqual(context.merges.map((merge) => merge.pr), [56, 57]);
+});
+
+test("a merge commit preserves unpublished target ancestry and may land automatically", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    unpublishedTargetCommits: 2,
+    settings: { mergeRunPullRequest: true, mergeStrategy: "merge" },
+  });
+
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.pullRequests.get(57)?.state, "merged");
+  assert.deepEqual(context.merges.map((merge) => merge.pr), [56, 57]);
+});
+
 test("the run's own pull request is reconciled when it conflicts with the user's branch", async () => {
   const context = harness({
     startBranch: "feature/wip",
@@ -1368,7 +1438,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.equal(result.issues.find((issue) => issue.number === 41)?.chrome, true);
   assert.deepEqual(result.skipped, [{ number: 43, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" }]);
   assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"]);
-  assert.deepEqual(context.gitCalls, []);
+  assert.deepEqual(context.gitCalls, ["fetch"]);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.states, []);
   assert.deepEqual(context.notifications, []);

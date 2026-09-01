@@ -522,7 +522,7 @@
             "rebase"
           ],
           "default": "squash",
-          "description": "How auto-run merges a pull request. Squash by default because one issue is one logical change even when the engine made two commits."
+          "description": "How auto-run merges a pull request. Squash by default because one issue is one logical change even when the engine made two commits. A final run pull request carrying unpublished target commits is left open for squash or rebase until those commits are pushed; merge preserves their ancestry and remains safe."
         },
         "aboard.autoRun.mergeRunPullRequest": {
           "type": "boolean",

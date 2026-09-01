@@ -98,6 +98,10 @@ export interface GitClient {
   branchSha(branch: string): Promise<string | undefined>;
   /** The same, for `origin/<branch>` as of the last fetch. */
   remoteBranchSha(branch: string): Promise<string | undefined>;
+  /** Commits reachable from each ref but not the other. */
+  aheadBehind(left: string, right: string): Promise<{ readonly ahead: number; readonly behind: number }>;
+  /** Whether `ancestor` is reachable from `descendant`. */
+  isAncestor(ancestor: string, descendant: string): Promise<boolean>;
   commitDetails(ref: string): Promise<CommitDetails | undefined>;
   /** The tree represented by the current index, used before creating a commit. */
   stagedTreeSha(): Promise<string>;
@@ -202,6 +206,26 @@ export class ProcessGitClient implements GitClient {
 
   public async remoteBranchSha(branch: string): Promise<string | undefined> {
     return this.tryRun(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]);
+  }
+
+  public async aheadBehind(left: string, right: string): Promise<{ readonly ahead: number; readonly behind: number }> {
+    const output = await this.run(["rev-list", "--left-right", "--count", `${left}...${right}`]);
+    const [ahead, behind] = output.split(/\s+/u).map(Number);
+    if (!Number.isSafeInteger(ahead) || !Number.isSafeInteger(behind) || ahead! < 0 || behind! < 0) {
+      throw new GitBoundaryError("command-failed", `git returned invalid ahead/behind counts for ${left} and ${right}`);
+    }
+    return { ahead: ahead!, behind: behind! };
+  }
+
+  public async isAncestor(ancestor: string, descendant: string): Promise<boolean> {
+    try {
+      await this.run(["merge-base", "--is-ancestor", ancestor, descendant]);
+      return true;
+    } catch (error) {
+      if (error instanceof GitBoundaryError && typeof error.details === "object" && error.details !== null
+        && "exitCode" in error.details && error.details.exitCode === 1) return false;
+      throw error;
+    }
   }
 
   public async commitDetails(ref: string): Promise<CommitDetails | undefined> {
@@ -458,6 +482,8 @@ export class CachingGitClient implements GitClient {
   public existingBranches(branches: readonly string[]): ReturnType<GitClient["existingBranches"]> { return this.inner.existingBranches(branches); }
   public branchSha(branch: string): ReturnType<GitClient["branchSha"]> { return this.inner.branchSha(branch); }
   public remoteBranchSha(branch: string): ReturnType<GitClient["remoteBranchSha"]> { return this.inner.remoteBranchSha(branch); }
+  public aheadBehind(left: string, right: string): ReturnType<GitClient["aheadBehind"]> { return this.inner.aheadBehind(left, right); }
+  public isAncestor(ancestor: string, descendant: string): ReturnType<GitClient["isAncestor"]> { return this.inner.isAncestor(ancestor, descendant); }
   public commitDetails(ref: string): ReturnType<GitClient["commitDetails"]> { return this.inner.commitDetails(ref); }
   public stagedTreeSha(): ReturnType<GitClient["stagedTreeSha"]> { return this.inner.stagedTreeSha(); }
   public deleteBranchAt(branch: string, expectedSha: string): ReturnType<GitClient["deleteBranchAt"]> { return this.inner.deleteBranchAt(branch, expectedSha); }

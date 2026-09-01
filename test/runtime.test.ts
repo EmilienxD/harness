@@ -139,6 +139,8 @@ function fixedPlanRecord(): AutoRunRecord {
     },
     sessionBranch: "aboard/run/return",
     targetBranch: "feature/wip",
+    targetHeadSha: "c".repeat(40),
+    unpublishedTargetCommits: 2,
     branchShas: { "aboard/run/return": "a".repeat(40), "aboard/35-migrate-the-queue": "b".repeat(40) },
     currentIssue: 35,
     checkpoint: "issue",

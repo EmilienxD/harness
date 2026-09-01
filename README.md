@@ -71,7 +71,7 @@ aboard does not choose or hide a prototype location. The prototyper uses a dedic
 
 `/auto` is the closest aboard gets to hands-off, and it's deliberately fenced in:
 
-- **Preview the whole bargain first.** `/auto --dry` reads git and GitHub but changes neither. It reports whether a real run can start, the issue order and exact issue branches, which issues carry `[AI]-chrome`, the prospective `aboard/run/<run-id>` session branch and its target, skipped issues and dependency cycles, review/worktree/final-merge settings, and the user action required at HITL, conflict, failure, and final-PR gates. It is a forecast only because GitHub may change before you start; once a run starts, that plan is what it works.
+- **Preview the whole bargain first.** `/auto --dry` reads git and GitHub but changes neither. It reports whether a real run can start, the issue order and exact issue branches, which issues carry `[AI]-chrome`, the prospective `aboard/run/<run-id>` session branch and its target, unpublished target commits that the session branch will carry, skipped issues and dependency cycles, review/worktree/final-merge settings, and the user action required at HITL, conflict, failure, and final-PR gates. It is a forecast only because GitHub may change before you start; once a run starts, that plan is what it works.
 
 - **Add one guideline for the whole run.** Put free-form text after the optional `--dry` flag, for example `/auto no unit tests needed`. aboard appends it under `# Additional User Guideline For this Session` at the very end of every implementer and pr-doctor prompt. The same text is kept in the run's gitignored runtime record so interrupted runs resume with it; `/auto --dry <guideline>` previews it without persisting anything.
 

@@ -267,6 +267,25 @@ test("full SHAs answer for local and remote refs, and for neither when absent", 
   assert.equal(await client.remoteBranchSha("main"), head);
 });
 
+test("ahead/behind and ancestry distinguish unpublished local commits", async () => {
+  const root = await repository();
+  const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
+  const client = new ProcessGitClient(root);
+  const remote = await mkdtemp(join(tmpdir(), "aboard-git-remote-"));
+  await run("git", ["init", "--bare", "--initial-branch", "main"], { cwd: remote, windowsHide: true });
+  await git("remote", "add", "origin", remote);
+  await git("push", "-u", "origin", "main");
+  const published = await client.remoteBranchSha("main");
+
+  await writeFile(join(root, "src.ts"), "export const local = true;\n");
+  await client.add();
+  const local = await client.commit("Local work", "");
+
+  assert.deepEqual(await client.aheadBehind("main", "origin/main"), { ahead: 1, behind: 0 });
+  assert.equal(await client.isAncestor(published!, local), true);
+  assert.equal(await client.isAncestor(local, published!), false);
+});
+
 test("a commit is recognisable again by its exact parent, message, and tree", async () => {
   const root = await repository();
   const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });

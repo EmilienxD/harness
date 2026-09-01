@@ -83,6 +83,7 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     inspected: true,
     ready: true,
     blockers: [],
+    warnings: [],
     emptyReason: undefined,
     reviewMode: false,
     pauseAfterHitl: false,
@@ -90,6 +91,8 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     keepsWorkspace: false,
     sessionBranch: "aboard/run/<run-id>",
     sessionBase: "feature/wip",
+    targetHeadSha: "a".repeat(40),
+    unpublishedTargetCommits: 0,
     mergesItsOwnPullRequest: false,
     issues: record().plan,
     skipped: [],
@@ -170,6 +173,19 @@ test("a blocked forecast explains why the run cannot start", () => {
   // "forecast", so a card that already knows it cannot start hides the action.
   assert.equal(item.contextValue, "aboard.autoRun.forecastBlocked");
   assert.equal(autoRunCardMenuState(card({ forecast: forecast(result) })), "forecastBlocked");
+});
+
+test("a ready forecast makes unpublished target commits visible without blocking Start", () => {
+  const result = preview({
+    warnings: ["feature/wip has 2 commits not on origin/feature/wip; the run will include them."],
+    unpublishedTargetCommits: 2,
+  });
+  const { item } = rootItem({ forecast: forecast(result) });
+
+  assert.equal(item.description, "3 issues queued · warning");
+  assert.equal(item.icon, "warning");
+  assert.match(item.tooltip, /Warning: feature\/wip has 2 commits not on origin\/feature\/wip/);
+  assert.equal(item.contextValue, "aboard.autoRun.forecast");
 });
 
 test("an empty queue is not a blocker: the forecast reads as nothing to run", () => {

@@ -109,6 +109,10 @@ export interface AutoRunRecord {
   readonly progress: Readonly<Record<string, IssueProgress>>;
   readonly sessionBranch: string;
   readonly targetBranch: string | undefined;
+  /** The target's local tip from which this run was cut. */
+  readonly targetHeadSha?: string;
+  /** Local target commits absent from origin when the run was frozen. */
+  readonly unpublishedTargetCommits?: number;
   /** Run-owned branch name to the full SHA this run last pushed there. */
   readonly branchShas: Readonly<Record<string, string>>;
   readonly currentIssue: number | undefined;

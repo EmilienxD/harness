@@ -28,6 +28,10 @@ export function autoRunTargetBranchBlocker(branch: string): string | undefined {
   return `auto-run cannot start from ${branch} because ${ABOARD_BRANCH_PREFIX}* branches are run-owned artifacts; check out the branch that should receive the final run pull request and start again`;
 }
 
+export function unpublishedTargetWarning(base: string, count: number): string {
+  return `${base} has ${count} commit${count === 1 ? "" : "s"} not on origin/${base}; the run will include them. Push ${base} before squash/rebase merging the final PR, or use a merge commit.`;
+}
+
 export const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 export type MergeStrategy = (typeof MERGE_STRATEGIES)[number];
 
@@ -80,6 +84,8 @@ export type AutoRunDryRunResult =
       readonly inspected: true;
       readonly ready: boolean;
       readonly blockers: readonly string[];
+      /** Important facts the user should review which do not prevent a start. */
+      readonly warnings: readonly string[];
       /**
        * Why the plan is empty, when it is. An empty queue is the ordinary state
        * of a project with nothing labelled, not a problem to fix, so it is kept
@@ -94,6 +100,10 @@ export type AutoRunDryRunResult =
       readonly keepsWorkspace: boolean;
       readonly sessionBranch: "aboard/run/<run-id>";
       readonly sessionBase: string;
+      /** Full local target tip inspected for this forecast. */
+      readonly targetHeadSha: string;
+      /** Commits on the local target which origin does not yet contain. */
+      readonly unpublishedTargetCommits: number;
       readonly mergesItsOwnPullRequest: boolean;
       readonly issues: readonly PlannedIssue[];
       readonly skipped: readonly SkippedIssue[];
@@ -309,10 +319,21 @@ export function runPullRequestTitle(landed: readonly LandedIssue[]): string {
     : `aboard auto-run: ${landed.length} issues`;
 }
 
-export function runPullRequestBody(landed: readonly LandedIssue[], sessionBranch: string, base: string): string {
+export function runPullRequestBody(
+  landed: readonly LandedIssue[],
+  sessionBranch: string,
+  base: string,
+  unpublishedTargetCommits = 0,
+): string {
   const lines = landed.map((issue) => `- #${issue.number} ${commitSubject(issue.title)} (PR #${issue.prNumber})`);
+  const warning = unpublishedTargetCommits === 0 ? [] : [
+    "",
+    `> [!WARNING]`,
+    `> This run started with ${unpublishedTargetCommits} commit${unpublishedTargetCommits === 1 ? "" : "s"} on \`${base}\` that \`origin/${base}\` did not contain. Before squash- or rebase-merging, push \`${base}\` so GitHub removes those commits from this pull request. Otherwise use a merge commit to preserve their ancestry.`,
+  ];
   const body = [
     `Addressed by an aboard auto-run on \`${sessionBranch}\`, one issue at a time.`,
+    ...warning,
     "",
     ...lines,
     "",
@@ -388,10 +409,14 @@ export const autoRunMessage = {
     `auto-run: issue #${issue} merged but could not be closed (${reason}). Close it yourself: issues that depend on it stay blocked until you do.`,
   runOpened: (pr: number, base: string, count: number): string =>
     `auto-run: opened PR #${pr} into ${base} with ${count} issue${count === 1 ? "" : "s"}.`,
+  unpublishedTarget: (base: string, count: number): string =>
+    `auto-run: ${unpublishedTargetWarning(base, count)}`,
   runWaiting: (pr: number, base: string): string =>
     `auto-run: PR #${pr} into ${base} is yours to merge (aboard.autoRun.mergeRunPullRequest is off).`,
   runMerged: (pr: number, base: string): string =>
     `auto-run: PR #${pr} merged into ${base}. Pull ${base} to get the work.`,
+  unsafeRunMerge: (pr: number, base: string, strategy: MergeStrategy): string =>
+    `auto-run: PR #${pr} was left open because ${base} still has unpublished commits included in it; ${strategy} would rewrite their ancestry. Push ${base} and resume, or merge the PR with a merge commit.`,
   runParked: (pr: number, base: string, reason: string): string =>
     `auto-run: PR #${pr} into ${base} needs you (${reason}). The session branch and its pull request are left in place.`,
   runNotOpened: (branch: string, base: string, reason: string): string =>

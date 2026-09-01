@@ -656,6 +656,7 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
   const lines = [
     "Auto-run dry run - no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed.",
     result.ready ? "Ready: /auto can start with the repository state inspected." : `Blocked: ${result.blockers.join("; ")}.`,
+    ...(result.warnings.length === 0 ? [] : [`Warning: ${result.warnings.join("; ")}`]),
     "",
     "Run plan:",
     `- Session: create ${result.sessionBranch} from ${result.sessionBase}; every issue PR targets that session branch.`,
@@ -705,7 +706,9 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
   lines.push(
     "",
     result.mergesItsOwnPullRequest
-      ? `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase} and attempts to merge it; you act if reconciliation or the merge fails.`
+      ? result.unpublishedTargetCommits > 0
+        ? `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase}; an automatic squash/rebase merge waits until you push the target's unpublished commits, while a merge commit remains safe.`
+        : `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase} and attempts to merge it; you act if reconciliation or the merge fails.`
       : `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase}; you must review and merge that final PR.`,
     "The order is a forecast: aboard re-reads GitHub after every issue, so newly unblocked, closed, or relabelled work can change what comes next.",
   );

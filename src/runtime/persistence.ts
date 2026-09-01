@@ -297,10 +297,14 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
   const runPullRequest = positiveInteger(value.runPullRequest);
   const currentIssue = positiveInteger(value.currentIssue);
   const reviewedIssues = numbers(value.reviewedIssues);
+  const targetHeadSha = fullSha(value.targetHeadSha);
+  const unpublishedTargetCommits = positiveInteger(value.unpublishedTargetCommits);
   if (value.pendingAction !== undefined && pendingAction === undefined) return undefined;
   if (value.outcome !== undefined && outcome === undefined) return undefined;
   if (value.runPullRequest !== undefined && runPullRequest === undefined) return undefined;
   if (value.currentIssue !== undefined && currentIssue === undefined) return undefined;
+  if (value.targetHeadSha !== undefined && targetHeadSha === undefined) return undefined;
+  if (value.unpublishedTargetCommits !== undefined && unpublishedTargetCommits === undefined) return undefined;
   if (reviewedIssues === undefined) return undefined;
   if (value.workspaceCreated !== undefined && value.workspaceCreated !== true) return undefined;
   if (currentIssue !== undefined && (!issueNumbers.has(String(currentIssue)) || progress[String(currentIssue)]?.state !== "current")) return undefined;
@@ -315,6 +319,8 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
     progress,
     sessionBranch,
     targetBranch,
+    ...(targetHeadSha === undefined ? {} : { targetHeadSha }),
+    ...(unpublishedTargetCommits === undefined ? {} : { unpublishedTargetCommits }),
     branchShas,
     currentIssue,
     checkpoint,

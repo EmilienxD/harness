@@ -12,6 +12,7 @@ import {
   runPullRequestBody,
   runPullRequestTitle,
   sessionBranchName,
+  unpublishedTargetWarning,
   type AutoRunDryRunResult,
   type AutoRunPhase,
   type AutoRunSettings,
@@ -174,6 +175,11 @@ export type AutoRunStartResult =
   | { readonly started: false; readonly reason: string; readonly active?: AutoRunState };
 
 type InspectedAutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: true }>;
+
+interface TargetPublication {
+  readonly headSha: string;
+  readonly unpublishedCommits: number;
+}
 
 export type AutoRunPreviewedStartResult = AutoRunStartResult
   | { readonly started: false; readonly reason: string; readonly preview: InspectedAutoRunPreview };
@@ -360,9 +366,20 @@ export class AutoRunEngine {
     const githubFailure = await this.#checkGitHubAuthentication();
     if (githubFailure !== undefined) return { dryRun: true, inspected: false, reason: githubFailure };
 
+    const sessionBase = status.branch ?? defaultBranch;
+    let publication: TargetPublication;
+    try {
+      publication = await this.#targetPublication(sessionBase);
+    } catch (error) {
+      return { dryRun: true, inspected: false, reason: `the target branch could not be compared with origin (${message(error)})` };
+    }
+
     const plan = planRun((await this.options.github.listImplementableIssues()).candidates);
     const settings = this.options.settings();
     const blockers: string[] = [];
+    const warnings = publication.unpublishedCommits === 0
+      ? []
+      : [unpublishedTargetWarning(sessionBase, publication.unpublishedCommits)];
     if (status.branch !== undefined) {
       const branchBlocker = autoRunTargetBranchBlocker(status.branch);
       if (branchBlocker !== undefined) blockers.push(branchBlocker);
@@ -371,7 +388,7 @@ export class AutoRunEngine {
       const paths = status.entries.map((entry) => entry.path);
       blockers.push(`the working tree is not clean: ${paths.slice(0, 20).join(", ")}${paths.length > 20 ? `, and ${paths.length - 20} more` : ""}`);
     }
-    const emptyReason = plan.issues.length === 0 ? emptyQueueReason() : undefined;
+    const emptyReason = plan.issues.length === 0 ? emptyQueueReason(plan.skipped.length) : undefined;
     if (plan.issues.length > 0) {
       const conflict = await this.#findPlanConflict(plan.issues);
       if (conflict !== undefined) blockers.push(conflict);
@@ -382,6 +399,7 @@ export class AutoRunEngine {
       inspected: true,
       ready: blockers.length === 0 && emptyReason === undefined,
       blockers,
+      warnings,
       emptyReason,
       reviewMode: settings.review,
       pauseAfterHitl: settings.pauseAfterHitl,
@@ -389,7 +407,9 @@ export class AutoRunEngine {
       isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
       keepsWorkspace: settings.worktree.keep,
       sessionBranch: "aboard/run/<run-id>",
-      sessionBase: status.branch ?? defaultBranch,
+      sessionBase,
+      targetHeadSha: publication.headSha,
+      unpublishedTargetCommits: publication.unpublishedCommits,
       mergesItsOwnPullRequest: settings.mergeRunPullRequest,
       issues: plan.issues,
       skipped: plan.skipped,
@@ -408,14 +428,20 @@ export class AutoRunEngine {
     if (precondition !== undefined) return { started: false, reason: precondition };
 
     const plan = planRun((await this.options.github.listImplementableIssues()).candidates);
-    if (plan.issues.length === 0) return { started: false, reason: emptyQueueReason() };
+    if (plan.issues.length === 0) return { started: false, reason: emptyQueueReason(plan.skipped.length) };
     const returnBranch = await this.options.git.currentBranch() ?? await this.options.git.defaultBranch();
     const branchBlocker = autoRunTargetBranchBlocker(returnBranch);
     if (branchBlocker !== undefined) return { started: false, reason: branchBlocker };
     const conflict = await this.#findPlanConflict(plan.issues);
     if (conflict !== undefined) return { started: false, reason: conflict };
 
-    return this.#startPlan(plan, settings, returnBranch, options);
+    let publication: TargetPublication;
+    try {
+      publication = await this.#targetPublication(returnBranch);
+    } catch (error) {
+      return { started: false, reason: `the target branch could not be compared with origin (${message(error)})` };
+    }
+    return this.#startPlan(plan, settings, returnBranch, publication, options);
   }
 
   /**
@@ -451,6 +477,7 @@ export class AutoRunEngine {
       { issues: confirmed.issues as readonly FrozenIssue[], skipped: confirmed.skipped, dependencyCycles: confirmed.dependencyCycles },
       settings,
       confirmed.sessionBase,
+      { headSha: confirmed.targetHeadSha, unpublishedCommits: confirmed.unpublishedTargetCommits },
       options,
     );
   }
@@ -459,6 +486,7 @@ export class AutoRunEngine {
     plan: ReturnType<typeof planRun>,
     settings: AutoRunSettings,
     returnBranch: string,
+    publication: TargetPublication,
     options: { readonly additionalGuideline?: string },
   ): Promise<AutoRunStartResult> {
     const runId = this.#runId();
@@ -489,6 +517,8 @@ export class AutoRunEngine {
       progress: Object.fromEntries(plan.issues.map((issue) => [String(issue.number), { state: "pending" } as IssueProgress])),
       sessionBranch: sessionBranchName(runId),
       targetBranch: returnBranch,
+      targetHeadSha: publication.headSha,
+      ...(publication.unpublishedCommits === 0 ? {} : { unpublishedTargetCommits: publication.unpublishedCommits }),
       branchShas: {},
       currentIssue: undefined,
       checkpoint: "planned",
@@ -496,6 +526,9 @@ export class AutoRunEngine {
     };
     await this.options.store.save(record);
     this.#persisted = record;
+    if (publication.unpublishedCommits > 0) {
+      this.options.notifier.notify(autoRunMessage.unpublishedTarget(returnBranch, publication.unpublishedCommits));
+    }
 
     const afk = plan.issues.filter((issue) => issue.disposition === "afk").length;
     this.options.notifier.notify(autoRunMessage.started(afk, plan.issues.length - afk, frozen.review));
@@ -1549,12 +1582,18 @@ export class AutoRunEngine {
         this.options.notifier.alert(autoRunMessage.runNotOpened(record.sessionBranch, base, `${base} is not on origin`));
         return failIfSucceeded(end, `${base} is not on origin, so the run's pull request could not be opened`);
       }
+      const targetStillUnpublished = await this.#targetStillUnpublished(record, base);
       let prNumber = record.runPullRequest ?? await this.options.github.findOpenPullRequestForBranch(record.sessionBranch);
       if (prNumber === undefined) {
         await this.#journal({ kind: "create-run-pr", head: record.sessionBranch, base });
         prNumber = await this.options.github.createPullRequest({
           title: runPullRequestTitle(landed),
-          body: runPullRequestBody(landed, record.sessionBranch, base),
+          body: runPullRequestBody(
+            landed,
+            record.sessionBranch,
+            base,
+            targetStillUnpublished ? record.unpublishedTargetCommits : 0,
+          ),
           head: record.sessionBranch,
           base,
         });
@@ -1563,12 +1602,19 @@ export class AutoRunEngine {
         await this.#save({ ...this.#current, runPullRequest: prNumber });
       }
       this.options.notifier.notify(autoRunMessage.runOpened(prNumber, base, landed.length));
+      if (targetStillUnpublished && record.unpublishedTargetCommits !== undefined) {
+        this.options.notifier.notify(autoRunMessage.unpublishedTarget(base, record.unpublishedTargetCommits));
+      }
       const snapshot = await this.options.github.getPullRequest(prNumber);
       // A run the user interrupted must not finish by landing a batch of
       // automated work on their branch.
       if (!record.settings.mergeRunPullRequest || signal.aborted) {
         this.options.notifier.alert(autoRunMessage.runWaiting(prNumber, base), snapshot?.url);
         return end;
+      }
+      if (targetStillUnpublished && record.settings.mergeStrategy !== "merge") {
+        this.options.notifier.alert(autoRunMessage.unsafeRunMerge(prNumber, base, record.settings.mergeStrategy), snapshot?.url);
+        return failIfSucceeded(end, `the run's pull request #${prNumber} needs the unpublished commits on ${base} pushed before a ${record.settings.mergeStrategy} merge`);
       }
       const merged = await this.#mergeRun(prNumber, base);
       if (!merged) return failIfSucceeded(end, `the run's pull request #${prNumber} could not be merged into ${base}`);
@@ -1652,6 +1698,28 @@ export class AutoRunEngine {
       if (branchBlocker !== undefined) return branchBlocker;
     }
     return undefined;
+  }
+
+  async #targetPublication(base: string): Promise<TargetPublication> {
+    await this.options.git.fetch();
+    const headSha = await this.options.git.branchSha(base) ?? await this.options.git.headSha(false);
+    if (headSha === undefined) throw new Error(`the local target branch ${base} does not exist`);
+    const remoteSha = await this.options.git.remoteBranchSha(base);
+    if (remoteSha === undefined) return { headSha, unpublishedCommits: 0 };
+    const { ahead } = await this.options.git.aheadBehind(base, `origin/${base}`);
+    return { headSha, unpublishedCommits: ahead };
+  }
+
+  async #targetStillUnpublished(record: AutoRunRecord, base: string): Promise<boolean> {
+    if (record.unpublishedTargetCommits === undefined || record.targetHeadSha === undefined) return false;
+    try {
+      await this.#git.fetch({ fresh: true });
+      const remoteSha = await this.#git.remoteBranchSha(base);
+      return remoteSha === undefined || !await this.#git.isAncestor(record.targetHeadSha, remoteSha);
+    } catch (error) {
+      this.options.log?.(`auto-run could not verify whether ${base} contains its starting tip: ${message(error)}`);
+      return true;
+    }
   }
 
   async #checkGitHubAuthentication(): Promise<string | undefined> {
@@ -1776,6 +1844,8 @@ function guidelineProperty(value: string | undefined): { readonly additionalGuid
   return trimmed === undefined || trimmed.length === 0 ? {} : { additionalGuideline: trimmed };
 }
 
-function emptyQueueReason(): string {
-  return "no open issue to adress.";
+function emptyQueueReason(discarded: number): string {
+  return discarded === 0
+    ? "no open issue is labelled [AI]-afk or [AI]-hitl"
+    : `no open issue is labelled [AI]-afk or [AI]-hitl (${discarded} discarded)`;
 }

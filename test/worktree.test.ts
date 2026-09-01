@@ -146,6 +146,8 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     // The SHA-aware surface belongs to recovery and cleanup, not to workspaces.
     branchSha: async () => undefined,
     remoteBranchSha: async () => undefined,
+    aheadBehind: async () => ({ ahead: 0, behind: 0 }),
+    isAncestor: async () => true,
     commitDetails: async () => undefined,
     stagedTreeSha: async () => "tree000000000000000000000000000000000000",
     deleteBranchAt: async () => false,

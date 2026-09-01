@@ -265,10 +265,10 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
             : empty
               ? "nothing to run"
               : preview.ready
-                ? `${count} issue${count === 1 ? "" : "s"} queued`
+                ? `${count} issue${count === 1 ? "" : "s"} queued${preview.warnings.length === 0 ? "" : " · warning"}`
                 : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
         tooltip: forecastTooltip(card.forecast),
-        icon: card.forecast.checking ? "loading~spin" : empty || preview.ready ? "list-tree" : "warning",
+        icon: card.forecast.checking ? "loading~spin" : preview.warnings.length > 0 || (!empty && !preview.ready) ? "warning" : "list-tree",
         contextValue: `aboard.autoRun.${autoRunCardMenuState(card)}`,
         collapsible: count > 0,
       };
@@ -400,6 +400,7 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     forecast.stale ? "Settings changed. Use Check Now to update this preview." : "",
     forecast.error === undefined ? "" : `Last refresh failed: ${forecast.error}. The list below is the last successful result.`,
     `Target branch: ${preview.sessionBase}`,
+    ...preview.warnings.map((warning) => `Warning: ${warning}`),
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
     `Review ${preview.reviewMode ? "on" : "off"}`,
     preview.emptyReason !== undefined && preview.blockers.length === 0

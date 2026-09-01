@@ -105,6 +105,9 @@ test("the run's pull request indexes what landed and closes nothing itself", () 
   // The issues are already closed; a second closing reference on a branch where
   // GitHub would honour it only invites reopen/close churn.
   assert.equal(/closes #/iu.test(body), false);
+  const warned = runPullRequestBody(landed, "aboard/run/k3f9x1", "feature/wip", 2);
+  assert.match(warned, /started with 2 commits on `feature\/wip` that `origin\/feature\/wip` did not contain/);
+  assert.match(warned, /push `feature\/wip`.*use a merge commit/s);
   assert.ok(runPullRequestBody(
     Array.from({ length: 500 }, (_, index) => ({ number: index, title: "x".repeat(60), prNumber: index })),
     "aboard/run/k3f9x1",
