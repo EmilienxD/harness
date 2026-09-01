@@ -1024,7 +1024,10 @@ test("the implementer's account of its change is posted on the issue it addresse
     issue: 34,
     body: "**Fix retry backoff**\n\nRewrote the backoff.\n\nCovered retry exhaustion.",
   }]);
-  assert.equal(context.commitCalls[0]?.subject, "Fix retry backoff");
+  assert.deepEqual(context.commitCalls[0], {
+    subject: "Fix retry backoff",
+    body: "Addresses #34.",
+  });
   assert.doesNotMatch(context.createdPullRequests[0]?.body ?? "", /<commit>/u);
 });
 

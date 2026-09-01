@@ -1273,7 +1273,7 @@ export class AutoRunEngine {
       if (implementation === undefined) throw new Error(`issue #${issue.number} has uncommitted work without implementer completion evidence`);
       const parent = await this.#git.headSha(false);
       const subject = implementation.commitMessage;
-      const body = `Addresses #${issue.number}.\n\n${implementation.report.trim().slice(0, 500)}`.trim();
+      const body = `Addresses #${issue.number}.`;
       await this.#git.add();
       const staged = await this.#git.status();
       await this.#journal({
