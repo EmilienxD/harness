@@ -66,6 +66,8 @@ interface Harness {
   readonly sha: (branch: string) => string;
   /** Moves a branch, as a force-push or somebody else's commit would. */
   readonly advance: (branch: string) => void;
+  /** Moves only origin, as a GitHub squash merge does while VS Code is closed. */
+  readonly advanceRemote: (branch: string) => string;
   readonly closeIssue: (number: number) => void;
   /** Puts a branch in place locally and on origin, as a previous attempt would have. */
   readonly createBranch: (branch: string) => void;
@@ -160,6 +162,7 @@ function harness(options: HarnessOptions = {}): Harness {
   let hitlPolls = 0;
   const shas = new Map<string, number>();
   const inheritedShas = new Map<string, string>();
+  const remoteShas = new Map<string, string>();
   function shaFor(branch: string): string {
     const inherited = inheritedShas.get(branch);
     if (inherited !== undefined) return inherited;
@@ -169,6 +172,13 @@ function harness(options: HarnessOptions = {}): Harness {
   function advance(branch: string): void {
     inheritedShas.delete(branch);
     shas.set(branch, (shas.get(branch) ?? 0) + 1);
+  }
+  function advanceRemote(branch: string): string {
+    const revision = (shas.get(`${branch}:remote`) ?? 0) + 1;
+    shas.set(`${branch}:remote`, revision);
+    const sha = `${branch.replace(/[^a-z0-9]/gu, "")}remote${revision}`.padEnd(40, "0").slice(0, 40);
+    remoteShas.set(branch, sha);
+    return sha;
   }
 
   const queue = options.issues ?? [
@@ -191,7 +201,7 @@ function harness(options: HarnessOptions = {}): Harness {
     remoteBranchSha: async (branch) => remoteBranches.has(branch)
       ? branch === (options.startBranch ?? "main") && options.remoteBaseSha !== undefined
         ? options.remoteBaseSha
-        : shaFor(branch)
+        : remoteShas.get(branch) ?? shaFor(branch)
       : undefined,
     commitDetails: async (ref) => ({ sha: shaFor(ref), parents: ["parent0000000000000000000000000000000000"], subject: "subject", message: "subject", treeSha: "tree000000000000000000000000000000000000" }),
     stagedTreeSha: async () => "tree000000000000000000000000000000000000",
@@ -218,7 +228,11 @@ function harness(options: HarnessOptions = {}): Harness {
       currentBranch = branch;
     },
     deleteBranch: async (branch) => { gitCalls.push(`deleteBranch ${branch}`); branches.delete(branch); inheritedShas.delete(branch); },
-    fastForward: async (branch) => { gitCalls.push(`fastForward ${branch}`); },
+    fastForward: async (branch) => {
+      gitCalls.push(`fastForward ${branch}`);
+      const remote = remoteShas.get(branch);
+      if (remote !== undefined) inheritedShas.set(branch, remote);
+    },
     mergeFromRemote: async (base) => {
       gitCalls.push(`mergeFromRemote ${base}`);
       if (options.reconcilable !== true) return false;
@@ -234,6 +248,7 @@ function harness(options: HarnessOptions = {}): Harness {
       // The session branch's own push is infrastructure, not the issue's commit;
       // a `pushFails` test is about the latter.
       if (options.pushFails === true && branch !== SESSION) throw new Error("push rejected");
+      if (remoteShas.has(branch) && remoteShas.get(branch) !== shaFor(branch)) throw new Error("non-fast-forward");
       pushed.add(branch);
       remoteBranches.add(branch);
     },
@@ -315,7 +330,10 @@ function harness(options: HarnessOptions = {}): Harness {
         if (options.dirtyDuringWait === true && hitlPolls === 1) dirty = true;
         if (hitlPolls >= 2 && options.resolveHitl !== undefined) {
           const base = basesByPr.get(number);
-          if (options.resolveHitl === "merged" && base !== undefined) advance(base);
+          if (options.resolveHitl === "merged" && base !== undefined) {
+            advance(base);
+            remoteShas.set(base, shaFor(base));
+          }
           pullRequests.set(number, {
             ...pr,
             state: options.resolveHitl,
@@ -345,7 +363,10 @@ function harness(options: HarnessOptions = {}): Harness {
       if (pr?.mergeable === "conflicting") throw new Error("Pull request is not mergeable");
       // The merge moves the base branch, exactly as a real one does.
       const base = basesByPr.get(number);
-      if (base !== undefined) advance(base);
+      if (base !== undefined) {
+        advance(base);
+        remoteShas.set(base, shaFor(base));
+      }
       pullRequests.set(number, { state: "merged", ...(base === undefined ? {} : { mergeCommitSha: shaFor(base) }) });
     },
     closePullRequestIf: async (number, expected) => {
@@ -533,6 +554,7 @@ function harness(options: HarnessOptions = {}): Harness {
     remoteBranchExists: (branch: string) => remoteBranches.has(branch),
     sha: (branch: string) => shaFor(branch),
     advance,
+    advanceRemote,
     closeIssue: (number: number) => open.delete(number),
     createBranch: (branch: string) => { branches.add(branch); remoteBranches.add(branch); },
     relabel: (number: number, labels: string[]) => {
@@ -1120,6 +1142,37 @@ test("a hitl issue waits at its pull request and continues once the user merges"
     "the exact session tip produced by the user's merge is adopted before continuing",
   );
   assert.deepEqual(context.closedTerminals, ["terminal-1"], "the implementer closes but no interactive reviewer was launched");
+  assert.equal(context.state.cleared, true);
+});
+
+test("resume adopts a hitl squash merge before trying to publish the session branch again", async () => {
+  const context = harness({
+    issues: [
+      { number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { number: 36, title: "Add queue metrics", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  await context.engine.start();
+  for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) {
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+  }
+  assert.equal(context.engine.state()?.waiting, true);
+
+  context.engine.interrupt();
+  await context.engine.settle();
+  const mergeCommitSha = context.advanceRemote(SESSION);
+  context.pullRequests.set(56, { state: "merged", mergeable: "mergeable", mergeCommitSha });
+
+  assert.equal((await context.engine.resume()).started, true);
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.issues?.[0]), [35, 36]);
+  assert.equal(
+    context.gitCalls.filter((call) => call === `push ${SESSION} -u`).length,
+    1,
+    "resume must not push the stale pre-merge session tip before HITL adoption",
+  );
+  assert.equal(context.closures.some((entry) => entry.issue === 35), true);
   assert.equal(context.state.cleared, true);
 });
 

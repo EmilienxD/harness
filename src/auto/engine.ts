@@ -896,6 +896,12 @@ export class AutoRunEngine {
     const record = this.#current;
     const base = record.targetBranch ?? await this.#git.defaultBranch();
     this.options.notifier.notify(autoRunMessage.session(record.sessionBranch, base));
+    // Once published, the session branch may legitimately move on origin when
+    // the user merges a HITL pull request while aboard is not running. The
+    // issue phase validates and adopts that exact merge. Re-running setup here
+    // would instead try to push the stale local tip over it and fail before the
+    // adoption path gets a chance to run.
+    if (checkpointReached(record.checkpoint, "session-branch-ready")) return;
     await this.#git.fetch();
     const baseOnRemote = await this.#git.remoteBranchExists(base);
     if (!await this.#git.branchExists(record.sessionBranch)) {
