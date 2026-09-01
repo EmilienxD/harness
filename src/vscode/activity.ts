@@ -99,24 +99,15 @@ function formatDuration(durationMs: number | undefined): string {
 }
 
 function icon(entry: ActivityEntry): string {
+  // Pass or error only: the user should be able to scan the list and know at a
+  // glance whether the row is a success log or a failure log.
   if (entry.kind === "run") {
-    switch (entry.outcome) {
-      case "succeeded": return "pass";
-      case "failed": return "error";
-      case "cancelled": return "circle-slash";
-      case "interrupted": return "debug-pause";
-      case "discarded": return "trash";
-      default: return "robot";
-    }
+    return entry.outcome === "succeeded" ? "pass" : "error";
   }
   switch (entry.outcome) {
-    case "succeeded": return "pass";
-    case "failed":
-    case "launch-failed": return "error";
-    case "cancelled": return "circle-slash";
-    case "killed": return "close";
-    case "interrupted": return "debug-pause";
-    case "ended": return "comment-discussion";
+    case "succeeded":
+    case "ended": return "pass";
+    default: return "error";
   }
 }
 

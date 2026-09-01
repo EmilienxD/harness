@@ -127,9 +127,13 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   for (const state of ["checking", "broken", "unsupported", "idle"]) {
     assert.doesNotMatch(when("aboard.resumeAutoRun"), new RegExp(`== ${state}`), state);
   }
-  // Discard is the one action a broken or unsupported record still has.
+  // Discard is the card's inline action, never a 3-dots menu entry: it is the
+  // only command that menu would carry, and the inline button sits right below.
+  assert.equal(title.some((entry) => entry.command === "aboard.discardAutoRun"), false, "Discard must not sit in the view title");
+  const discardInline = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.discardAutoRun");
+  assert.match(discardInline?.group ?? "", /^inline@/, "Discard Auto Run must be the card's inline action");
   for (const state of ["recoverable", "broken", "unsupported"]) {
-    assert.match(when("aboard.discardAutoRun"), new RegExp(`== ${state}`), state);
+    assert.match(discardInline?.when ?? "", new RegExp(state), state);
   }
   assert.match(when("aboard.stopAutoRun"), /active|waiting/);
 

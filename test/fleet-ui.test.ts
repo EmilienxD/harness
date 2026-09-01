@@ -97,7 +97,7 @@ test("New Manager stays pinned above workers and is replaced by the live Manager
   model.dispose();
 });
 
-test("icons separate the Manager, attended sessions, and unattended workers, never the report route or lease", () => {
+test("every agent row uses the sparkle icon, with only the Manager keeping its own", () => {
   const fleet = new FleetRegistry(); const lease = new WriteLease();
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });
   const icon = (type: AgentSession["identity"]["type"], id: string, sessionId: string, attended = false) => {
@@ -105,13 +105,13 @@ test("icons separate the Manager, attended sessions, and unattended workers, nev
     return model.item({ kind: "agent", session: fleet.get(agent(id))!, leaseHolder: true }).icon;
   };
   assert.equal(icon("manager", "m", "s-m"), "organization");
-  assert.equal(icon("brainstormer", "b", "s-b", true), "comment-discussion");
-  assert.equal(icon("implementer", "i", "s-i"), "lock");
-  assert.equal(icon("pr-doctor-afk", "v", "s-v"), "lock");
-  assert.equal(icon("pr-doctor-hitl", "f", "s-f", true), "comment-discussion");
-  assert.equal(icon("general-purpose", "g", "s-g"), "lock");
-  assert.equal(icon("general-purpose", "g2", "s-g2", true), "comment-discussion");
-  assert.equal(icon("Explore", "e", "s-e"), "lock");
+  assert.equal(icon("brainstormer", "b", "s-b", true), "sparkle-filled");
+  assert.equal(icon("implementer", "i", "s-i"), "sparkle-filled");
+  assert.equal(icon("pr-doctor-afk", "v", "s-v"), "sparkle-filled");
+  assert.equal(icon("pr-doctor-hitl", "f", "s-f", true), "sparkle-filled");
+  assert.equal(icon("general-purpose", "g", "s-g"), "sparkle-filled");
+  assert.equal(icon("general-purpose", "g2", "s-g2", true), "sparkle-filled");
+  assert.equal(icon("Explore", "e", "s-e"), "sparkle-filled");
   model.dispose();
 });
 

@@ -108,8 +108,14 @@
         "icon": "$(git-pull-request)"
       },
       {
+        "command": "aboard.autoRun.focusImplementer",
+        "title": "Aboard: Auto Run — Focus Implementer",
+        "icon": "$(terminal)"
+      },
+      {
         "command": "aboard.openIssue",
-        "title": "Aboard: Open Issue"
+        "title": "Aboard: Open Issue",
+        "icon": "$(issues)"
       },
       {
         "command": "aboard.openPullRequest",
@@ -228,11 +234,6 @@
           "group": "1_run@2"
         },
         {
-          "command": "aboard.discardAutoRun",
-          "when": "view == aboard.autoRun && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken || aboard.autoRunCard == unsupported)",
-          "group": "1_run@3"
-        },
-        {
           "command": "aboard.activity.clear",
           "when": "view == aboard.recentActivity",
           "group": "navigation@1"
@@ -324,6 +325,10 @@
           "when": "false"
         },
         {
+          "command": "aboard.autoRun.focusImplementer",
+          "when": "false"
+        },
+        {
           "command": "aboard.activity.openTerminal",
           "when": "false"
         },
@@ -382,6 +387,16 @@
         {
           "command": "aboard.discardAutoRun",
           "when": "viewItem =~ /aboard.autoRun.(recoverable|broken|unsupported)/",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.autoRun.focusImplementer",
+          "when": "viewItem =~ /aboard.autoRun.issue.\\w+.implementer/",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.openIssue",
+          "when": "viewItem =~ /aboard.autoRun.issue.\\w+/",
           "group": "inline@2"
         },
         {

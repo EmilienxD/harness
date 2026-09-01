@@ -64,6 +64,7 @@ function sources(overrides: {
   readonly persisted?: PersistedAutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
+  readonly hasLiveImplementer?: (issueNumber: number) => boolean;
 } = {}): AutoRunViewSources {
   return {
     starting: () => overrides.starting ?? false,
@@ -72,6 +73,7 @@ function sources(overrides: {
     persisted: () => overrides.persisted,
     eligibility: () => overrides.eligibility,
     titles: () => overrides.titles ?? {},
+    ...(overrides.hasLiveImplementer === undefined ? {} : { hasLiveImplementer: overrides.hasLiveImplementer }),
   };
 }
 
@@ -382,6 +384,21 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
   ]);
   // Clicking a row opens the issue on GitHub.
   assert.deepEqual(rows[0]?.command, { command: "aboard.openIssue", title: "Open Issue", arguments: [34] });
+});
+
+test("a row with a live implementer focuses it on click instead of opening the issue", () => {
+  const { model, root } = rootItem({
+    persisted: record(),
+    state: state(),
+    hasLiveImplementer: (number) => number === 35,
+  });
+  const rows = model.children(root).map((node) => model.item(node));
+  // The current issue has a live implementer: click focuses the terminal.
+  assert.deepEqual(rows[1]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [35] });
+  assert.equal(rows[1]?.contextValue, "aboard.autoRun.issue.current.implementer");
+  // The done and pending rows keep the issue-opening behaviour.
+  assert.deepEqual(rows[0]?.command, { command: "aboard.openIssue", title: "Open Issue", arguments: [34] });
+  assert.deepEqual(rows[2]?.command, { command: "aboard.openIssue", title: "Open Issue", arguments: [36] });
 });
 
 test("an [AI]-chrome issue says so in its frozen plan row", () => {

@@ -1,5 +1,7 @@
 import { EventEmitter, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type TreeDataProvider } from "vscode";
 
+import type { TerminalId } from "../domain/contracts.js";
+
 import type { TerminalController } from "../claude/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
@@ -88,6 +90,15 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const engine = options.autoRun.engine;
   let autoRunStarting = false;
   const forecast = new AutoRunForecastController(() => renderAutoRun());
+  const implementerFor = (issueNumber: number): { readonly terminalId: TerminalId } | undefined => {
+    for (const session of fleet.list()) {
+      if (session.identity.type !== "implementer") continue;
+      if (session.issueNumbers?.includes(issueNumber) !== true) continue;
+      if (!isTerminalOpen(session.terminal.terminalId)) continue;
+      return { terminalId: session.terminal.terminalId };
+    }
+    return undefined;
+  };
   const autoRunSources: AutoRunViewSources = {
     starting: () => autoRunStarting,
     forecast: () => forecast.snapshot(),
@@ -95,6 +106,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     persisted: () => engine.persisted(),
     eligibility: () => engine.eligibility(),
     titles: () => engine.observedTitles(),
+    hasLiveImplementer: (issueNumber) => implementerFor(issueNumber) !== undefined,
   };
   const autoRunModel = new AutoRunTreeModel(autoRunSources);
   const autoRunChanges = new EventEmitter<AutoRunNode | undefined>();
@@ -171,8 +183,17 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     catch (error) { void window.showWarningMessage(`aboard could not open #${number}: ${error instanceof Error ? error.message : "unknown error"}`); }
   };
 
+  const issueNumberOf = (value: unknown): number | undefined => {
+    if (typeof value === "number") return value;
+    if (typeof value === "object" && value !== null) {
+      const node = value as { kind?: unknown; issue?: { number?: unknown } };
+      if ((node.kind === "issue" || node.kind === "forecast-issue") && typeof node.issue?.number === "number") return node.issue.number;
+    }
+    return undefined;
+  };
+
   disposables.push(
-    commands.registerCommand("aboard.openIssue", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
+    commands.registerCommand("aboard.openIssue", (value: unknown) => void openNumber(issueNumberOf(value))),
     commands.registerCommand("aboard.openPullRequest", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
     commands.registerCommand("aboard.autoRun.refresh", async () => {
       await checkAutoRun(true);
@@ -186,6 +207,16 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     }),
     commands.registerCommand("aboard.autoRun.openPullRequest", () => {
       void openNumber(cardPullRequest(autoRunCard(autoRunSources), engine.state()));
+    }),
+    commands.registerCommand("aboard.autoRun.focusImplementer", (value: unknown) => {
+      const issueNumber = issueNumberOf(value);
+      if (issueNumber === undefined) return;
+      const implementer = implementerFor(issueNumber);
+      if (implementer === undefined) {
+        void window.showInformationMessage(`No live implementer for #${issueNumber}.`);
+        return;
+      }
+      terminals.show(implementer.terminalId);
     }),
     commands.registerCommand("aboard.startAutoRun", async () => {
       if (autoRunStarting) return;

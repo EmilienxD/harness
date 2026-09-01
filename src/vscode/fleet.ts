@@ -133,9 +133,7 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
 
 function agentIcon(session: AgentSession): string {
   if (session.identity.type === "manager") return "organization";
-  return session.attended === true
-    ? "comment-discussion"
-    : "lock";
+  return "sparkle-filled";
 }
 
 /** Lifecycle states that describe an agent still doing something. */

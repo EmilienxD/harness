@@ -114,7 +114,7 @@ export type AutoRunCard =
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
-  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string }
+  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly implementerLive: boolean }
   | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number };
 
 export interface AutoRunTreeItem {
@@ -135,6 +135,8 @@ export interface AutoRunViewSources {
   readonly eligibility: () => RecoveryEligibility | undefined;
   /** Live issue titles, for display only; the plan's frozen titles do the work. */
   readonly titles: () => Readonly<Record<string, string>>;
+  /** Whether a live implementer session exists for this issue number. */
+  readonly hasLiveImplementer?: (issueNumber: number) => boolean;
 }
 
 export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
@@ -211,6 +213,7 @@ export class AutoRunTreeModel {
       issue,
       progress: issueProgress(record, issue.number),
       title: titles[String(issue.number)] ?? issue.title,
+      implementerLive: this.sources.hasLiveImplementer?.(issue.number) ?? false,
     }));
   }
 
@@ -285,7 +288,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         label: `Auto-run ${record.runId}`,
         description: `${state.phase} · issue #${state.currentIssue ?? "?"} · ${state.completedCount}/${state.totalCount}`,
         tooltip: runTooltip(record, state),
-        icon: "run-all",
+        icon: "sync",
         contextValue: "aboard.autoRun.active",
         collapsible: true,
       };
@@ -341,7 +344,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
 }
 
 function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeItem {
-  const { issue, progress, title } = node;
+  const { issue, progress, title, implementerLive } = node;
   const state = progress.state === "done"
     ? progress.result === "landed" ? `done · PR #${progress.prNumber}` : "done · no changes needed"
     : progress.state === "current" ? `current · ${progress.phase}` : "pending";
@@ -357,9 +360,15 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
       issue.dependsOn.length === 0 ? "" : `Depends on ${issue.dependsOn.map((number) => `#${number}`).join(", ")}`,
     ].filter(Boolean).join("\n"),
     icon: progress.state === "done" ? "pass" : progress.state === "current" ? "circle-filled" : "circle-outline",
-    contextValue: `aboard.autoRun.issue.${progress.state}`,
+    // A row whose implementer is live focuses that terminal on click; the inline
+    // button does the same and the issue-icon button opens the issue itself.
+    contextValue: implementerLive
+      ? `aboard.autoRun.issue.${progress.state}.implementer`
+      : `aboard.autoRun.issue.${progress.state}`,
     collapsible: false,
-    command: { command: "aboard.openIssue", title: "Open Issue", arguments: [issue.number] },
+    command: implementerLive
+      ? { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [issue.number] }
+      : { command: "aboard.openIssue", title: "Open Issue", arguments: [issue.number] },
   };
 }
 
