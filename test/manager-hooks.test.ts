@@ -510,6 +510,36 @@ test("/done closes the invoking Manager terminal without waking the model", asyn
   assert.match(String((await prompts.handle(managerId, "/done trailing text")).message), /no report recipient/);
 });
 
+test("/done leaves an auto-run hitl reviewer open until its pull request lands", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const reviewerId = agent("pr-doctor-hitl-1");
+  fleet.register({
+    identity: { agentId: reviewerId, type: "pr-doctor-hitl" },
+    sessionId: session("adb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("pr-doctor-hitl-terminal"), name: "pr-doctor-hitl" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" },
+    attended: true,
+    autoRunRestricted: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(reviewerId, { status: "running", startedAt: timestamp }, timestamp);
+  const killed: TerminalId[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("/done must not launch an agent") },
+    undefined,
+    undefined,
+    { kill: (terminalId) => killed.push(terminalId) },
+  );
+
+  const result = await prompts.handle(reviewerId, "/done");
+
+  assert.match(String(result.message), /stays open.*awaits the user's merge/i);
+  assert.deepEqual(killed, []);
+  assert.equal(fleet.get(reviewerId)?.lifecycle.status, "running");
+});
+
 test("/done reports the last observed assistant message and appends optional further notes before closing", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const registerReporter = (id: string, sessionId: string): AgentId => {

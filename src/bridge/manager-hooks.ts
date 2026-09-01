@@ -514,6 +514,12 @@ export class ManagerPromptService {
     if (session === undefined || this.terminals === undefined) {
       return { intercepted: true, message: "aboard could not close this terminal right now." };
     }
+    if (session.identity.type === "pr-doctor-hitl" && session.autoRunRestricted === true) {
+      return {
+        intercepted: true,
+        message: "This review stays open while its HITL pull request awaits the user's merge. aboard will close the terminal after the pull request lands.",
+      };
+    }
     try {
       const recipientAgentId = session.resultDelivery.mode === "mailbox" ? session.resultDelivery.recipientAgentId : undefined;
       const report = composeDoneReport(session.lastObservedAssistantMessage, command.furtherNotes);
