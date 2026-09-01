@@ -118,13 +118,14 @@ def main() -> None:
 def _rerun_deferred(deferred: dict, cfg: dict) -> None:
     """Kick a deferred job off again through its fallback command, foreground.
 
-    The fallback is `claude -p`, which reads the prompt from stdin — the
-    config entry sets `_append_prompt: False`, so build_cmd strips `{prompt}`
-    from the template and the prompt goes to the process's stdin instead of
-    its command line (out of `ps` output and the process table).
+    The fallback is `claude -p --agent <name>`, which reads the prompt from
+    stdin — the config entry sets `_append_prompt: False`, so build_cmd strips
+    `{prompt}` from the template and the prompt goes to the process's stdin
+    instead of its command line (out of `ps` output and the process table).
     """
     prompt = deferred.get("prompt", "")
-    cmd = build_cmd(cfg, prompt)
+    agent = deferred.get("agent", "")
+    cmd = build_cmd(cfg, prompt, agent)
     logger.info("Re-running deferred job %s: %s", deferred.get("job_id"), cmd)
     try:
         import subprocess

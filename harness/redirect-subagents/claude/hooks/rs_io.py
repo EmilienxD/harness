@@ -107,17 +107,18 @@ def _normalize(data: dict) -> dict:
     """Canonical mapping form for every entry.
 
     A plain string is the "self" shorthand: "Explore": "auto" runs that
-    subagent through `claude -p --model auto`. Profile-based clauder entries
-    and the shorthand send prompts over stdin by default; this preserves
-    multiline prompts on platforms where Claude's positional prompt is split
-    at the first newline. Other backends keep the historical argv default.
-    {"command": ...} takes precedence over the profile/model/effort template.
+    subagent through `claude -p --model auto --agent Explore`. Profile-based
+    clauder entries and the shorthand send prompts over stdin by default; this
+    preserves multiline prompts on platforms where Claude's positional prompt
+    is split at the first newline. Other backends keep the historical argv
+    default. {"command": ...} takes precedence over the profile/model/effort
+    template.
     """
     out = {}
     for agent, entry in data.items():
         if isinstance(entry, str) and entry:
             out[str(agent)] = {
-                "command": f"claude;-p;--model;{entry};{{prompt}}",
+                "command": f"claude;-p;--model;{entry};--agent;{{agent}};{{prompt}}",
                 "_append_prompt": False,
             }
         elif isinstance(entry, dict):
@@ -159,7 +160,7 @@ def command_template() -> str:
     """Fallback command for entries that set profile/model/effort but no "command"."""
     return os.environ.get(
         "REDIRECT_SUBAGENTS_BACKEND",
-        "clauder run {profile} -p --model {model} --effort {effort} --system-prompt {system_prompt}",
+        "clauder run {profile} -p --model {model} --effort {effort} --system-prompt {system_prompt} --agent {agent}",
     )
 
 
@@ -175,18 +176,23 @@ def clauder_available() -> bool:
     return shutil.which(clauder_command()[0]) is not None
 
 
-def build_cmd(cfg: dict, prompt: str) -> list[str]:
+def build_cmd(cfg: dict, prompt: str, agent: str | None = None) -> list[str]:
     """The backend argv for one redirected subagent run.
 
     An explicit "command" template wins; otherwise REDIRECT_SUBAGENTS_BACKEND
     (defaulting to `clauder run …`) is used. The template is split into argv
-    words on ';' and whitespace. Substitution fields are {prompt},
+    words on ';' and whitespace. Substitution fields are {prompt}, {agent},
     {system_prompt} and every other key of the config entry, so a custom
-    backend can name whatever flags its own CLI takes. A word left holding an
+    backend can name whatever flags its own CLI takes. {agent} is available
+    only when no explicit system_prompt is configured: the two Claude CLI
+    options represent alternative ways to select the subagent's instructions.
+    A word left holding an
     unsubstantiated {placeholder} — the entry never set that key — is dropped,
     and the flag it was the value for drops with it.
     """
     fields = {k: v for k, v in cfg.items() if not k.startswith("_") and k != "command"}
+    if agent and not cfg.get("system_prompt"):
+        fields["agent"] = agent
 
     template = cfg.get("command") or command_template()
     _append_prompt = append_prompt(cfg)
@@ -382,9 +388,13 @@ def pop_deferred(session_id: str | None) -> dict | None:
 
 
 def deferred_config(agent: str) -> dict | None:
-    """The fallback a deferred job re-runs through: `claude -p`, no model flag
-    (the default model of whichever auth `claude` is set up with)."""
+    """The fallback a deferred job re-runs through: `claude -p --agent <name>`,
+    with no model flag (the default model of whichever auth `claude` uses)."""
     cfg = load_subagents().get(agent)
     if cfg is None or not is_deferrable(cfg):
         return None
-    return {"command": "claude;-p;{prompt}", "_append_prompt": False, "_cwd": cfg.get("_cwd", str(root()))}
+    return {
+        "command": "claude;-p;--agent;{agent};{prompt}",
+        "_append_prompt": False,
+        "_cwd": cfg.get("_cwd", str(root())),
+    }

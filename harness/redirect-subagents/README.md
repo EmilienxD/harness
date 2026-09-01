@@ -30,7 +30,8 @@ entry:
 ```jsonc
 {
   // 1. clauder profile, the original use case. Runs:
-  //    clauder run myprofile -p --model claude-haiku-4-5 --effort low --system-prompt "..."
+  //    clauder run myprofile -p --model claude-haiku-4-5 --effort low --agent Explore
+  //    or --system-prompt "..." when system_prompt is configured
   //    with <prompt> on stdin
   "Explore": {
     "profile": "myprofile",
@@ -41,15 +42,15 @@ entry:
   },
 
   // 2. The "self" shorthand — a plain string. Runs:
-  //    claude -p --model auto, with <prompt> on stdin
+  //    claude -p --model auto --agent Plan, with <prompt> on stdin
   //    (same CLI, same auth; useful for cheap/explicit model tiers when the
   //    subscription is separately gated for the small model)
   "Plan": "auto",
 
   // 3. An explicit command template: argv elements separated by ';',
   //    whitespace ok within an element. Substitutions are any config key,
-  //    {prompt} and {system_prompt}; unset keys (and the flags that carried
-  //    them) drop out. The prompt is appended positionally wherever
+  //    {prompt}, {agent}, and {system_prompt}; unset keys (and the flags that
+  //    carried them) drop out. The prompt is appended positionally wherever
   //    {prompt} appears, else at the end.
   "Explore-custom": {
     "command": "my-cli;chat;--model;{model};{prompt}",
@@ -91,7 +92,10 @@ The installer only writes the project file; this one is yours to edit.
   `uvx;--from;clauder;clauder` to run it through uvx without a global install.
 - **`REDIRECT_SUBAGENTS_BACKEND`** — the command template used for entries
   with `profile`/`model`/`effort` but no `command`, default
-  `clauder run {profile} -p --model {model} --effort {effort} --system-prompt {system_prompt}`.
+  `clauder run {profile} -p --model {model} --effort {effort} --system-prompt {system_prompt} --agent {agent}`.
+  `{agent}` is the intercepted `subagent_type` and is omitted when the entry
+  provides `system_prompt`, because those options are alternative instruction
+  sources.
 - **`LOG_LEVEL`** — hook log verbosity, default `INFO`.
 
 ## How it works

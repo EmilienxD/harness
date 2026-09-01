@@ -120,6 +120,7 @@ def test_build_cmd_full_entry():
     cmd = rs_io.build_cmd(
         {"profile": "myprofile", "model": "m", "effort": "low", "system_prompt": "sp"},
         "hello prompt",
+        "Explore",
     )
     assert cmd == ["clauder", "run", "myprofile", "-p", "--model", "m",
                    "--effort", "low", "--system-prompt", "sp"]
@@ -130,8 +131,8 @@ def test_build_cmd_full_entry():
 
 def test_build_cmd_unset_fields_drop():
     """A field the entry leaves out takes its flag with it."""
-    cmd = rs_io.build_cmd({"profile": "myprofile"}, "p")
-    assert cmd == ["clauder", "run", "myprofile", "-p"]
+    cmd = rs_io.build_cmd({"profile": "myprofile"}, "p", "Explore")
+    assert cmd == ["clauder", "run", "myprofile", "-p", "--agent", "Explore"]
 
 
 def test_build_cmd_unset_field_before_inline_prompt_drops_its_flag():
@@ -158,16 +159,16 @@ def test_build_cmd_valueless_flag_survives_a_dropped_prompt():
 
 def test_build_cmd_string_shorthand_is_self_backend():
     cfg = rs_io._normalize({"Explore": "auto"})["Explore"]
-    cmd = rs_io.build_cmd(cfg, "do thing")
-    assert cmd == ["claude", "-p", "--model", "auto"]
+    cmd = rs_io.build_cmd(cfg, "do thing", "Explore")
+    assert cmd == ["claude", "-p", "--model", "auto", "--agent", "Explore"]
     assert rs_io.prompt_input(cfg, "first\n\nsecond") == "first\n\nsecond"
 
 
 def test_profile_entry_uses_print_mode_and_multiline_stdin():
     cfg = rs_io._normalize({"Explore": {"profile": "myprofile", "effort": "low"}})["Explore"]
     prompt = "find and report:\n\n1. first\n2. second"
-    assert rs_io.build_cmd(cfg, prompt) == [
-        "clauder", "run", "myprofile", "-p", "--effort", "low"
+    assert rs_io.build_cmd(cfg, prompt, "Explore") == [
+        "clauder", "run", "myprofile", "-p", "--effort", "low", "--agent", "Explore"
     ]
     assert rs_io.prompt_input(cfg, prompt) == prompt
 
@@ -229,7 +230,7 @@ def test_defer_and_pop_roundtrip():
 def test_deferred_config_falls_back_to_claude_p(tmp_path):
     write_project_config(tmp_path, {"Explore": {"profile": "myprofile", "model": "m", "effort": "low"}})
     cfg = rs_io.deferred_config("Explore")
-    assert cfg["command"] == "claude;-p;{prompt}"
+    assert cfg["command"] == "claude;-p;--agent;{agent};{prompt}"
     assert cfg["_append_prompt"] is False
 
 
@@ -269,6 +270,7 @@ def test_deny_foreground_success(tmp_path, monkeypatch):
     captured = {}
 
     def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
         captured.update(kwargs)
         return types.SimpleNamespace(returncode=0, stdout="Hi there! 👋", stderr="")
 
@@ -282,6 +284,10 @@ def test_deny_foreground_success(tmp_path, monkeypatch):
         "session_id": "s1",
     })
     assert code == 0
+    assert captured["cmd"] == [
+        "clauder", "run", "p", "-p", "--model", "m", "--effort", "low",
+        "--agent", "Explore",
+    ]
     assert captured["encoding"] == "utf-8"
     assert captured["input"] == "hi"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
@@ -369,7 +375,7 @@ def test_notify_runs_deferred_via_fallback(tmp_path, monkeypatch):
     code, out = run_hook(notify_hook, {"session_id": "s1"})
     assert code == 0
     assert out["decision"] == "block"
-    assert captured["cmd"] == ["claude", "-p"]
+    assert captured["cmd"] == ["claude", "-p", "--agent", "Explore"]
     assert captured["input"] == "find it"
     assert "found it" in out["reason"]
 

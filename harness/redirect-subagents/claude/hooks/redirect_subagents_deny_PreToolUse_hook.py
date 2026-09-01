@@ -48,7 +48,7 @@ def run_subagent(agent: str, prompt: str, timeout: float | None = None) -> tuple
     cfg = load_subagents().get(agent)
     if not cfg:
         return False, f"No config for subagent '{agent}'"
-    cmd = build_cmd(cfg, prompt)
+    cmd = build_cmd(cfg, prompt, agent)
     logger.info("Running subagent %s: %s", agent, cmd)
     try:
         result = subprocess.run(
@@ -214,7 +214,7 @@ def main() -> None:
     if run_in_background:
         job_id_str = start_background_job(
             subagent_type,
-            build_cmd(cfg, prompt),
+            build_cmd(cfg, prompt, subagent_type),
             session_id,
             cwd=cfg.get("_cwd"),
             stdin_text=prompt_input(cfg, prompt),
