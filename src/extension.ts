@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { RelativePattern, Uri, commands, env, window, workspace } from "vscode";
+import { ProgressLocation, RelativePattern, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
 import { FileAgentMcpConfigs, FileManagerMcpConfig } from "./bridge/mcp-config.js";
@@ -983,6 +983,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         if (autoRun.state() !== undefined) { void window.showWarningMessage("Stop the active auto-run before clearing aboard branches."); return; }
         await callback();
       }),
+      progress: (title, task) => Promise.resolve(window.withProgress({ location: ProgressLocation.Window, title }, task)),
       confirm: async (message, detail, action) => window.showWarningMessage(message, { modal: true, detail }, action),
       info: (message) => { void window.showInformationMessage(message); },
       error: (message) => { void window.showErrorMessage(message); },

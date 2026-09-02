@@ -12,12 +12,20 @@ test("branch cleanup discovers first and mutates only after Clear", async () => 
   };
   registerBranchCleanupCommand({
     registerCommand: (_command, registered) => { callback = registered; return { dispose() {} }; },
+    progress: async (title, task) => { calls.push(`progress ${title}`); return task(); },
     confirm: async (_message, detail) => { calls.push(`preview ${detail.includes("local only")}`); return "Clear"; },
     info: (message) => calls.push(`info ${message}`),
     error: (message) => assert.fail(message),
   }, cleanup as never);
   await callback!();
-  assert.deepEqual(calls.slice(0, 3), ["discover", "preview true", "clear"]);
+  assert.deepEqual(calls, [
+    "progress Checking aboard branches…",
+    "discover",
+    "preview true",
+    "progress Clearing aboard branches…",
+    "clear",
+    "info Aboard branch cleanup finished; removed local aboard/1-x.",
+  ]);
 });
 
 test("Cancel leaves every branch untouched", async () => {
@@ -25,6 +33,7 @@ test("Cancel leaves every branch untouched", async () => {
   let cleared = false;
   registerBranchCleanupCommand({
     registerCommand: (_command, registered) => { callback = registered; return { dispose() {} }; },
+    progress: async (_title, task) => task(),
     confirm: async () => undefined,
     info: () => undefined,
     error: (message) => assert.fail(message),

@@ -1,4 +1,4 @@
-import { EventEmitter, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type TreeDataProvider } from "vscode";
+import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type TreeDataProvider } from "vscode";
 
 import type { TerminalId } from "../domain/contracts.js";
 
@@ -249,14 +249,20 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     }),
     commands.registerCommand("aboard.discardAutoRun", async () => {
       const behavior = options.autoRun.discardBehavior();
-      const plan = await engine.planDiscard(behavior);
+      const plan = await window.withProgress(
+        { location: ProgressLocation.Window, title: "Checking auto-run cleanup…" },
+        () => engine.planDiscard(behavior),
+      );
       const confirmed = await window.showWarningMessage(
         `Discard this auto-run? (aboard.autoRun.discardBehavior: ${behavior})`,
         { modal: true, detail: describeDiscard(plan) },
         "Discard",
       );
       if (confirmed !== "Discard") return;
-      const result = await engine.discard(behavior);
+      const result = await window.withProgress(
+        { location: ProgressLocation.Window, title: "Discarding auto-run…" },
+        () => engine.discard(behavior),
+      );
       const removed = [
         ...result.deletedLocalBranches.map((branch) => `local ${branch}`),
         ...result.deletedRemoteBranches.map((branch) => `origin/${branch}`),

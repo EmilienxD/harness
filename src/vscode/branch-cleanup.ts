@@ -4,6 +4,7 @@ import { describeAboardBranchDiscovery, type AboardBranchCleanup } from "../git/
 
 export interface BranchCleanupCommandHost {
   registerCommand(command: string, callback: () => Promise<void>): Disposable;
+  progress<T>(title: string, task: () => Promise<T>): Promise<T>;
   confirm(message: string, detail: string, action: string): Promise<string | undefined>;
   info(message: string): void;
   error(message: string): void;
@@ -12,12 +13,12 @@ export interface BranchCleanupCommandHost {
 export function registerBranchCleanupCommand(host: BranchCleanupCommandHost, cleanup: AboardBranchCleanup): Disposable {
   return host.registerCommand("aboard.clearBranches", async () => {
     try {
-      const snapshot = await cleanup.discover();
+      const snapshot = await host.progress("Checking aboard branches…", () => cleanup.discover());
       const detail = describeAboardBranchDiscovery(snapshot);
       if (snapshot.branches.length === 0) { host.info(detail); return; }
       const choice = await host.confirm("Clear all remaining aboard branches?", detail, "Clear");
       if (choice !== "Clear") return;
-      const result = await cleanup.clear(snapshot);
+      const result = await host.progress("Clearing aboard branches…", () => cleanup.clear(snapshot));
       const removed = [...result.deletedLocal.map((branch) => `local ${branch}`), ...result.deletedRemote.map((branch) => `origin/${branch}`)];
       host.info(`Aboard branch cleanup finished${removed.length === 0 ? "" : `; removed ${removed.join(", ")}`}.${result.retained.length === 0 ? "" : ` Retained: ${result.retained.join("; ")}.`}`);
     } catch (error) {
