@@ -121,7 +121,7 @@ export interface AutoRunTreeItem {
   readonly label: string;
   readonly description: string;
   readonly tooltip: string;
-  readonly icon: string;
+  readonly icon?: string;
   readonly contextValue: string;
   readonly collapsible: boolean;
   readonly command?: { readonly command: string; readonly title: string; readonly arguments: readonly unknown[] };
@@ -230,7 +230,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         label: "Next auto-run",
         description: "not checked yet",
         tooltip: "Open this view or use Check Now to load the issues the next auto-run would process.",
-        icon: "list-tree",
+        icon: "tasklist",
         contextValue: "aboard.autoRun.idle",
         collapsible: false,
       };
@@ -268,7 +268,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
                 ? `${count} issue${count === 1 ? "" : "s"} queued${preview.warnings.length === 0 ? "" : " · warning"}`
                 : `cannot start · ${preview.blockers.length} blocker${preview.blockers.length === 1 ? "" : "s"}`,
         tooltip: forecastTooltip(card.forecast),
-        icon: card.forecast.checking ? "loading~spin" : preview.warnings.length > 0 || (!empty && !preview.ready) ? "warning" : "list-tree",
+        icon: card.forecast.checking ? "loading~spin" : preview.warnings.length > 0 || (!empty && !preview.ready) ? "warning" : "tasklist",
         contextValue: `aboard.autoRun.${autoRunCardMenuState(card)}`,
         collapsible: count > 0,
       };
@@ -359,7 +359,6 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
       `Branch: ${issue.branch}`,
       issue.dependsOn.length === 0 ? "" : `Depends on ${issue.dependsOn.map((number) => `#${number}`).join(", ")}`,
     ].filter(Boolean).join("\n"),
-    icon: progress.state === "done" ? "pass" : progress.state === "current" ? "circle-filled" : "circle-outline",
     // Row clicks are terminal-only. Pending issues therefore do nothing, while
     // the issue-icon button remains the single way to open GitHub from a row.
     contextValue: implementerLive
@@ -383,10 +382,9 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
       issue.chrome === true ? "Claude in Chrome: enabled by [AI]-chrome" : "",
       `Planned branch: ${issue.branch}`,
     ].filter(Boolean).join("\n"),
-    icon: "issue-opened",
-    contextValue: "aboard.autoRun.forecastIssue",
+    contextValue: "aboard.autoRun.issue.forecast",
     collapsible: false,
-    command: { command: "aboard.openIssue", title: "Open Issue", arguments: [issue.number] },
+    command: { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [issue.number] },
   };
 }
 

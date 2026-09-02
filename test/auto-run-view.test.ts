@@ -146,6 +146,7 @@ test("the live forecast shows loading feedback, then the planned issues in execu
   const { model, root, item } = rootItem({ forecast: live });
   assert.equal(card({ forecast: live }).kind, "forecast");
   assert.equal(item.description, "3 issues queued");
+  assert.equal(item.icon, "tasklist");
   assert.equal(item.contextValue, "aboard.autoRun.forecast");
   assert.equal(autoRunCardMenuState(card({ forecast: live })), "forecast");
   const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
@@ -160,6 +161,13 @@ test("the live forecast shows loading feedback, then the planned issues in execu
     "#36 Trim the cache",
   ]);
   assert.deepEqual(rows.map((row) => row.description), ["1/3 · afk", "2/3 · hitl", "3/3 · afk"]);
+  assert.deepEqual(rows.map((row) => row.icon), [undefined, undefined, undefined]);
+  assert.deepEqual(rows.map((row) => row.contextValue), [
+    "aboard.autoRun.issue.forecast",
+    "aboard.autoRun.issue.forecast",
+    "aboard.autoRun.issue.forecast",
+  ]);
+  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [34] });
 });
 
 test("a blocked forecast explains why the run cannot start", () => {
@@ -198,7 +206,7 @@ test("an empty queue is not a blocker: the forecast reads as nothing to run", ()
   const { item } = rootItem({ forecast: forecast(result) });
   assert.equal(item.description, "nothing to run");
   // A neutral state, not a warning: there is simply nothing for a run to do.
-  assert.equal(item.icon, "list-tree");
+  assert.equal(item.icon, "tasklist");
   assert.match(item.tooltip, /Nothing to run: no open issue is labelled \[AI\]-afk or \[AI\]-hitl/);
   assert.doesNotMatch(item.tooltip, /Cannot start/);
   assert.equal(item.collapsible, false);
@@ -394,6 +402,7 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
     "#36 Trim the cache",
   ]);
   assert.deepEqual(rows.map((row) => row.description), ["done · PR #56", "current · await-approval", "pending"]);
+  assert.deepEqual(rows.map((row) => row.icon), [undefined, undefined, undefined]);
   assert.deepEqual(rows.map((row) => row.contextValue), [
     "aboard.autoRun.issue.done",
     "aboard.autoRun.issue.current",

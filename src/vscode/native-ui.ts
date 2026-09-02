@@ -120,7 +120,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
         item.description = mapped.description;
         item.tooltip = mapped.tooltip;
         item.contextValue = mapped.contextValue;
-        item.iconPath = new ThemeIcon(mapped.icon);
+        if (mapped.icon !== undefined) item.iconPath = new ThemeIcon(mapped.icon);
         if (mapped.command) item.command = { ...mapped.command, arguments: [...mapped.command.arguments] };
         return item;
       },
