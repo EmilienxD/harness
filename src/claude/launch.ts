@@ -3,7 +3,6 @@ import { deriveWriteCapability, type WriteCapability } from "../domain/capabilit
 import {
   isAutomatedAgentType,
   isNamedBuiltinAgentType,
-  isInteractiveAgentType,
   type AgentId,
   type AgentType,
   type SessionId,
@@ -12,6 +11,7 @@ import { ABOARD_MCP_SERVER_NAME, aboardToolNamesForRole } from "../bridge/mcp-to
 import type { IssueDifficulty } from "../shared/labels.js";
 import {
   describeResolvedPrompt,
+  normalizeGeneratedPrompt,
   resolvedPromptFromText,
   type ResolvedPrompt,
 } from "./prompts.js";
@@ -512,10 +512,6 @@ function effortArguments(effort: EffortLevel | undefined): readonly string[] {
   return ["--effort", effort];
 }
 
-function slashCommandArguments(attended: boolean): readonly string[] {
-  return attended ? [] : ["--disable-slash-commands"];
-}
-
 function chromeArguments(agentType: AgentType, enabled: true | undefined): readonly string[] {
   if (enabled !== true) return [];
   if (agentType !== "implementer") {
@@ -532,7 +528,7 @@ function normalizePrompt(
 ): ResolvedPrompt | undefined {
   if (prompt === undefined) return undefined;
   const resolved = typeof prompt === "string" ? resolvedPromptFromText(prompt) : prompt;
-  return resolved.text.trim().length === 0 ? undefined : resolved;
+  return resolved.text.trim().length === 0 ? undefined : normalizeGeneratedPrompt(resolved);
 }
 
 function spillRelativePath(runtimeDirectory: string, stem: string): string {
@@ -658,7 +654,6 @@ function commonPreconditions(
   readonly runtimeDirectory: string;
   readonly wrapper: SessionWrapperLayout | undefined;
   readonly launchCode: string | undefined;
-  readonly attended: boolean;
 } {
   if (!AGENT_ID_PATTERN.test(request.agentId)) {
     throw new LaunchPlanError(
@@ -708,15 +703,12 @@ function commonPreconditions(
       );
     }
   }
-  const attended =
-    request.attended ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType));
   return {
     command,
     threshold,
     runtimeDirectory: request.runtimeDirectory ?? DEFAULT_RUNTIME_DIRECTORY,
     wrapper,
     launchCode,
-    attended,
   };
 }
 
@@ -754,7 +746,7 @@ function wrapCommand(
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
-  const { command, threshold, runtimeDirectory, wrapper, launchCode, attended } = commonPreconditions(request, request.configuration);
+  const { command, threshold, runtimeDirectory, wrapper, launchCode } = commonPreconditions(request, request.configuration);
   const { agentType, configuration } = request;
 
   if (agentType === "manager") {
@@ -831,7 +823,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
     ...chromeArguments(agentType, request.chrome),
-    ...slashCommandArguments(attended),
   ];
 
   const planFor = (promptThreshold: number): { readonly plan: PromptPlan; readonly args: string[]; readonly commandLine: string; readonly request?: WrapperRequestFile } => {
@@ -884,7 +875,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 }
 
 export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, launchCode, attended } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
+  const { command, wrapper, runtimeDirectory, launchCode } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
   if (
     request.configuration.shape !== "agent-defined" ||
     request.configuration.agentName !== MANAGER_AGENT_NAME
@@ -910,7 +901,6 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
-    ...slashCommandArguments(attended),
   ];
   const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
   return {
@@ -932,7 +922,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
 }
 
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, launchCode, attended, threshold } = commonPreconditions(request, request.configuration);
+  const { command, wrapper, runtimeDirectory, launchCode, threshold } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
   const definition = configuration.shape === "agent-defined"
@@ -955,7 +945,6 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
     ...chromeArguments(request.agentType, request.chrome),
-    ...slashCommandArguments(attended),
   ];
   const prompt = normalizePrompt(request.prompt);
   const planFor = (promptThreshold: number): { readonly promptPlan: PromptPlan; readonly args: string[]; readonly commandLine: string; readonly request?: WrapperRequestFile } => {

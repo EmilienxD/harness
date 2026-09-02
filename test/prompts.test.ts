@@ -6,6 +6,7 @@ import {
   PromptResolver,
   describeResolvedPrompt,
   issueDisposition,
+  normalizeGeneratedPrompt,
   resolvedPromptFromText,
   type GitHubPromptSource,
   type IssueSnapshot,
@@ -65,6 +66,19 @@ const pull42: PullRequestSnapshot = {
   state: "open",
   issueNumber: 47,
 };
+
+test("normalizes slash-prefixed words in generated prompts", () => {
+  const normalized = normalizeGeneratedPrompt(resolvedPromptFromText(
+    "/review //carefully keep mid/word and https://example.com.\nThen /done; leave / alone.",
+  ));
+
+  assert.equal(
+    normalized.text,
+    "review carefully keep mid/word and https://example.com.\nThen done; leave / alone.",
+  );
+  assert.equal(normalized.headline, "review carefully keep mid/word and https://example.com.");
+  assert.equal(normalized.body, "Then done; leave / alone.");
+});
 
 test("resolves an implementation prompt from issue, parent issue, and labels", async () => {
   const github = new FakeGitHub({ issues: [issue47, parent31] });

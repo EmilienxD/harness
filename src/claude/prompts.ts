@@ -194,6 +194,15 @@ export function resolvedPromptFromText(text: string): ResolvedPrompt {
   return { headline, body, text: trimmed, sources: [] };
 }
 
+/**
+ * Prevents an extension-supplied prompt from being interpreted as a slash
+ * command while leaving slash commands available for later user input.
+ */
+export function normalizeGeneratedPrompt(prompt: ResolvedPrompt): ResolvedPrompt {
+  const text = prompt.text.replace(/(^|\s)\/+(?=\S)/gu, "$1");
+  return { ...resolvedPromptFromText(text), sources: prompt.sources };
+}
+
 export interface PromptResolverOptions {
   readonly github: GitHubPromptSource;
   readonly limits?: Partial<PromptResolutionLimits>;
