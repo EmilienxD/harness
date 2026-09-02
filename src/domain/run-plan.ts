@@ -32,6 +32,8 @@ export interface FrozenRunSettings {
   readonly pollSeconds: number;
   readonly worktree: WorktreeSettings;
   readonly workspaceRoot?: string;
+  /** Configured note added before any per-run guidance. */
+  readonly permanentPrompt?: string;
   /** Appended to every implementer and pr-doctor prompt for this run. */
   readonly additionalGuideline?: string;
 }

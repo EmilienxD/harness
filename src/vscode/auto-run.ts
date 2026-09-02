@@ -401,6 +401,8 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     ...preview.warnings.map((warning) => `Warning: ${warning}`),
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
     `Review ${preview.reviewMode ? "on" : "off"}`,
+    preview.permanentPrompt === undefined ? "" : "Configured auto-run note will be included",
+    preview.additionalGuideline === undefined ? "" : "Per-run auto note will be included after the configured note",
     preview.emptyReason !== undefined && preview.blockers.length === 0
       ? `Nothing to run: ${preview.emptyReason}`
       : preview.ready

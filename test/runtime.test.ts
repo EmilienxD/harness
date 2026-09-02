@@ -127,6 +127,7 @@ function fixedPlanRecord(): AutoRunRecord {
       pollSeconds: 45,
       worktree: { enabled: true, root: "C:/checkouts", keep: false, setupTimeoutSeconds: 900 },
       workspaceRoot: "C:/checkouts/run_return/aboard",
+      permanentPrompt: "run browser tests",
       additionalGuideline: "keep fixtures small",
     },
     plan: [
@@ -160,6 +161,7 @@ test("a version-2 record round-trips every discriminated state it can hold", asy
   await store.save(record);
   assert.deepEqual(await store.load(), record);
   const raw = await readFile(join(root, "state", "auto-run.json"), "utf8");
+  assert.match(raw, /"permanentPrompt": "run browser tests"/);
   assert.match(raw, /"additionalGuideline": "keep fixtures small"/);
   await store.clear();
   assert.equal(await store.load(), undefined);

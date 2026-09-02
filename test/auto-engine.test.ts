@@ -13,7 +13,7 @@ import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
-const SETTINGS: AutoRunSettings = { review: false, recursiveIssueReferences: false, discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
+const SETTINGS: AutoRunSettings = { review: false, recursiveIssueReferences: false, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "aboard/run/test";
@@ -965,18 +965,21 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
 
   assert.equal(context.launches[0]?.type, "implementer");
   assert.equal(context.launches[0]?.chrome, true);
+  assert.match(context.launches[0]?.prompt ?? "", /Use Claude in Chrome to test and debug\./);
   assert.equal(context.launches[1]?.type, "pr-doctor-afk");
   assert.equal(context.launches[1]?.chrome, undefined);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
 });
 
-test("one additional guideline is persisted and reaches every auto agent", async () => {
-  const context = harness({ settings: { review: true } });
+test("configured and per-run guidance are persisted and reach every auto agent separately", async () => {
+  const context = harness({ settings: { review: true, permanentPrompt: "  run browser tests  " } });
   await context.engine.start({ additionalGuideline: "  no unit tests needed  " });
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
+  assert.deepEqual(context.launches.map((launch) => launch.permanentPrompt), ["run browser tests", "run browser tests"]);
   assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["no unit tests needed", "no unit tests needed"]);
+  assert.equal(context.saved.every((record) => record.settings.permanentPrompt === "run browser tests"), true);
   assert.equal(context.saved.every((record) => record.settings.additionalGuideline === "no unit tests needed"), true);
 });
 
@@ -1411,7 +1414,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   const context = harness({
     startBranch: "feature/wip",
     startDirty: true,
-    settings: { review: true, pauseAfterHitl: true, mergeRunPullRequest: true },
+    settings: { review: true, pauseAfterHitl: true, mergeRunPullRequest: true, permanentPrompt: "  run browser tests  " },
     issues: [
       { number: 41, title: "Ship the UI", labels: ["[AI]-hitl", "[AI]-advanced-difficulty", "[AI]-chrome"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [42], createdAt: "2026-01-01T00:00:00.000Z" },
       { number: 42, title: "Build the API", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
@@ -1429,6 +1432,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.equal(result.sessionBase, "feature/wip");
   assert.equal(result.reviewMode, true);
   assert.equal(result.pauseAfterHitl, true);
+  assert.equal(result.permanentPrompt, "run browser tests");
   assert.equal(result.additionalGuideline, "no unit tests needed");
   assert.equal(result.mergesItsOwnPullRequest, true);
   assert.deepEqual(result.issues.map((issue) => [issue.number, issue.branch]), [

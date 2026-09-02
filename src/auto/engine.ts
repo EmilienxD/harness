@@ -403,6 +403,7 @@ export class AutoRunEngine {
       emptyReason,
       reviewMode: settings.review,
       pauseAfterHitl: settings.pauseAfterHitl,
+      ...permanentPromptProperty(settings.permanentPrompt),
       ...guidelineProperty(options.additionalGuideline),
       isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
       keepsWorkspace: settings.worktree.keep,
@@ -503,6 +504,7 @@ export class AutoRunEngine {
       ...(isolated
         ? { workspaceRoot: runWorkspacePath({ workspaceRoot: this.options.workspaceRoot, runId, root: settings.worktree.root }) }
         : {}),
+      ...permanentPromptProperty(settings.permanentPrompt),
       ...guidelineProperty(options.additionalGuideline),
     };
     const now = this.#now().toISOString();
@@ -1238,12 +1240,19 @@ export class AutoRunEngine {
     return issue.difficulty === undefined ? {} : { difficulty: issue.difficulty };
   }
 
-  async #guidance(issue: FrozenIssue): Promise<{ readonly additionalGuideline?: string }> {
+  async #guidance(issue: FrozenIssue): Promise<{
+    readonly permanentPrompt?: string;
+    readonly additionalGuideline?: string;
+  }> {
+    const permanent = permanentPromptProperty(this.#current.settings.permanentPrompt);
     const base = this.#current.settings.additionalGuideline;
     const status = await this.#git.status().catch(() => undefined);
     const dirty = status !== undefined && status.entries.length > 0 && status.branch === issue.branch;
-    if (!dirty) return guidelineProperty(base);
-    return { additionalGuideline: base === undefined ? DIRTY_RECOVERY_SENTENCE : `${base}\n\n${DIRTY_RECOVERY_SENTENCE}` };
+    if (!dirty) return { ...permanent, ...guidelineProperty(base) };
+    return {
+      ...permanent,
+      additionalGuideline: base === undefined ? DIRTY_RECOVERY_SENTENCE : `${base}\n\n${DIRTY_RECOVERY_SENTENCE}`,
+    };
   }
 
   async #implement(issue: FrozenIssue, signal: AbortSignal): Promise<ImplementerCompletion> {
@@ -1254,7 +1263,7 @@ export class AutoRunEngine {
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
-      prompt: `Address issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.`,
+      prompt: `Address issue #${issue.number} on branch \`${issue.branch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits, pushes, and opens the pull request for you. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to test and debug." : ""}`,
       ...(await this.#guidance(issue)),
       expectsUncommittedTree: true,
       ...this.#isolation(),
@@ -1842,6 +1851,11 @@ function sameFingerprint(expected: readonly string[], observed: readonly string[
 function guidelineProperty(value: string | undefined): { readonly additionalGuideline?: string } {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed.length === 0 ? {} : { additionalGuideline: trimmed };
+}
+
+function permanentPromptProperty(value: string | undefined): { readonly permanentPrompt?: string } {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? {} : { permanentPrompt: trimmed };
 }
 
 function emptyQueueReason(discarded: number): string {

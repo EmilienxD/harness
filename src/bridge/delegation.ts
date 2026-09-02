@@ -41,6 +41,8 @@ export interface LaunchIsolation {
 export interface DelegationLaunchInput {
   readonly type: Exclude<AgentType, "manager">;
   readonly prompt?: string;
+  /** Persistent configured note, ordered before the per-run guideline. */
+  readonly permanentPrompt?: string;
   readonly additionalGuideline?: string;
   readonly description: string;
   /** Every issue whose resolved contract belongs in the opening prompt, in the caller's order. */

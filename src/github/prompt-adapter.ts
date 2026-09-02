@@ -11,17 +11,18 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
   public async resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined> {
     if (input.type === "pr-doctor-afk" || input.type === "pr-doctor-hitl") {
       if (input.pullRequest === undefined) {
-        return appendAdditionalGuideline(
+        return appendAutoRunGuidance(
           await this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Review the supplied change against its contract." }),
+          input.permanentPrompt,
           input.additionalGuideline,
         );
       }
-      return appendAdditionalGuideline(await this.prompts.resolve({
+      return appendAutoRunGuidance(await this.prompts.resolve({
         kind: "review",
         instruction: input.prompt ?? PR_DOCTOR_INSTRUCTION,
         pullRequestNumber: input.pullRequest,
         ...(input.focus === undefined ? {} : { focus: input.focus }),
-      }), input.additionalGuideline);
+      }), input.permanentPrompt, input.additionalGuideline);
     }
     if (options.interactive || isInteractiveAgentType(input.type)) {
       const instruction = input.prompt?.trim();
@@ -29,13 +30,14 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
       return this.prompts.resolve({ kind: "free-form", instruction });
     }
     if (input.type === "implementer" && input.issues !== undefined) {
-      return appendAdditionalGuideline(
+      return appendAutoRunGuidance(
         await this.prompts.resolve({
           kind: "implementation",
           instruction: input.prompt ?? "Address the issue.",
           issueNumbers: input.issues,
           ...(input.recursiveIssueReferences === undefined ? {} : { recursiveIssueReferences: input.recursiveIssueReferences }),
         }),
+        input.permanentPrompt,
         input.additionalGuideline,
       );
     }
@@ -44,15 +46,29 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
 }
 
 const ADDITIONAL_GUIDELINE_HEADING = "# Additional User Guideline For this Session";
+const PERMANENT_PROMPT_HEADING = "# Configured Auto Run Note";
 
-/** Appends user guidance literally last, after every resolved contract section. */
-function appendAdditionalGuideline(prompt: ResolvedPrompt | undefined, guideline: string | undefined): ResolvedPrompt | undefined {
-  const trimmed = guideline?.trim();
-  if (prompt === undefined || trimmed === undefined || trimmed.length === 0) return prompt;
-  const section = `${ADDITIONAL_GUIDELINE_HEADING}\n\n${trimmed}`;
+/** Appends configured guidance first and the per-run guidance literally last. */
+function appendAutoRunGuidance(
+  prompt: ResolvedPrompt | undefined,
+  permanentPrompt: string | undefined,
+  additionalGuideline: string | undefined,
+): ResolvedPrompt | undefined {
+  if (prompt === undefined) return undefined;
+  const sections = [
+    guidanceSection(PERMANENT_PROMPT_HEADING, permanentPrompt),
+    guidanceSection(ADDITIONAL_GUIDELINE_HEADING, additionalGuideline),
+  ].filter((section): section is string => section !== undefined);
+  if (sections.length === 0) return prompt;
+  const appended = sections.join("\n\n");
   return {
     ...prompt,
-    body: prompt.body.length === 0 ? section : `${prompt.body}\n\n${section}`,
-    text: `${prompt.text}\n\n${section}`,
+    body: prompt.body.length === 0 ? appended : `${prompt.body}\n\n${appended}`,
+    text: `${prompt.text}\n\n${appended}`,
   };
+}
+
+function guidanceSection(heading: string, value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : `${heading}\n\n${trimmed}`;
 }

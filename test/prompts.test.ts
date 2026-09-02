@@ -356,6 +356,7 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
     github: new FakeGitHub({ issues: [issue47, parent31], pullRequests: [pull42], diff: "+ refreshEarly();" }),
   }));
+  const permanentPrompt = "run the full browser suite";
   const guideline = "no unit tests needed";
   // The resolved text ends with the caller's guideline, verbatim; the heading
   // above it is prose and free to change.
@@ -364,24 +365,28 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
     type: "implementer",
     description: "address issue 47",
     issues: [47],
+    permanentPrompt,
     additionalGuideline: guideline,
   }, { interactive: false });
   const implementerText = implementer?.text ?? "";
   assert.equal(implementerText.trimEnd().endsWith(guideline), true);
   // The resolved issue context comes first.
   assert.equal(implementerText.indexOf("Refresh the access token before it expires.") < implementerText.indexOf(guideline), true);
+  assert.equal(implementerText.indexOf(permanentPrompt) < implementerText.indexOf(guideline), true);
 
   for (const type of ["pr-doctor-afk", "pr-doctor-hitl"] as const) {
     const doctor = await adapter.resolve({
       type,
       description: "review pull request 42",
       pullRequest: 42,
+      permanentPrompt,
       additionalGuideline: guideline,
     }, { interactive: type === "pr-doctor-hitl" });
     const doctorText = doctor?.text ?? "";
     assert.equal(doctorText.trimEnd().endsWith(guideline), true, type);
     // The resolved diff comes first.
     assert.equal(doctorText.indexOf("+ refreshEarly();") < doctorText.indexOf(guideline), true, type);
+    assert.equal(doctorText.indexOf(permanentPrompt) < doctorText.indexOf(guideline), true, type);
   }
 });
 

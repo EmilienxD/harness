@@ -131,8 +131,12 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     || typeof worktree.enabled !== "boolean" || typeof worktree.root !== "string"
     || typeof worktree.keep !== "boolean" || positiveInteger(worktree.setupTimeoutSeconds) === undefined
   ) return undefined;
+  const permanentPrompt = nonEmptyString(value.permanentPrompt)?.trim();
   const guideline = nonEmptyString(value.additionalGuideline)?.trim();
-  if (value.additionalGuideline !== undefined && guideline === undefined) return undefined;
+  if (
+    (value.permanentPrompt !== undefined && permanentPrompt === undefined)
+    || (value.additionalGuideline !== undefined && guideline === undefined)
+  ) return undefined;
   return {
     review: value.review,
     recursiveIssueReferences: value.recursiveIssueReferences ?? false,
@@ -147,6 +151,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
       setupTimeoutSeconds: worktree.setupTimeoutSeconds as number,
     },
     ...(nonEmptyString(value.workspaceRoot) === undefined ? {} : { workspaceRoot: value.workspaceRoot as string }),
+    ...(permanentPrompt === undefined || permanentPrompt.length === 0 ? {} : { permanentPrompt }),
     ...(guideline === undefined || guideline.length === 0 ? {} : { additionalGuideline: guideline }),
   };
 }

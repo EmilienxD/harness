@@ -50,6 +50,8 @@ export interface AutoRunSettings {
   readonly review: boolean;
   /** Whether issue context follows references beyond the primary issue's direct references. */
   readonly recursiveIssueReferences: boolean;
+  /** Persistent user-authored note added to every auto-run agent prompt. */
+  readonly permanentPrompt: string;
   readonly discardBehavior: DiscardBehavior;
   readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;
@@ -94,6 +96,8 @@ export type AutoRunDryRunResult =
       readonly emptyReason: string | undefined;
       readonly reviewMode: boolean;
       readonly pauseAfterHitl: boolean;
+      /** Persistent configured note that would be added to every auto agent. */
+      readonly permanentPrompt?: string;
       /** User-authored guidance that would be appended to every auto agent. */
       readonly additionalGuideline?: string;
       readonly isolatedWorkspace: boolean;

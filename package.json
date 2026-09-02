@@ -524,6 +524,11 @@
           "default": false,
           "description": "Include issue bodies referenced by the primary issue's directly related issues in an auto-run implementer's initial context. Direct references are always included. Off by default, so traversal stops after that first level. This changes loaded issue bodies only, not the implementer's instructions."
         },
+        "aboard.autoRun.prompt": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Persistent note added near the end of every auto-run implementer and pr-doctor prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
+        },
         "aboard.autoRun.pauseAfterHitl": {
           "type": "boolean",
           "default": false,
