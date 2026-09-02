@@ -549,7 +549,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     github,
     launcher: coordinator,
     terminals: { close: (terminalId) => closeSettledAutoRunTerminal(terminals, fleet, terminalId) },
-    store: new FileAutoRunStore(workspaceRoot, runtimeAdmission),
+    store: new FileAutoRunStore(runtime, runtimeAdmission),
     notifier: {
       notify: (message) => enqueueManagerNotification(message),
       alert: (message, pullRequestUrl) => { alertAboutAutoRun(message, pullRequestUrl); },

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { ActivityRecorder } from "../src/runtime/activity-recorder.js";
 import type { ActivityDto } from "../src/domain/activity.js";
@@ -12,6 +14,7 @@ import type { AutoRunRecord } from "../src/domain/run-plan.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import { RuntimeAdmission, RuntimeStartup } from "../src/runtime/admission.js";
+import { RuntimeLayout } from "../src/runtime/layout.js";
 
 test("runtime admission closes immediately and drains admitted operations before reset cleanup", async () => {
   const admission = new RuntimeAdmission(true);
@@ -155,16 +158,43 @@ function fixedPlanRecord(): AutoRunRecord {
 
 test("a version-2 record round-trips every discriminated state it can hold", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-autorun-record-"));
-  const store = new FileAutoRunStore(root);
+  const runtime = new RuntimeLayout(root);
+  const store = new FileAutoRunStore(runtime);
   assert.equal(await store.load(), undefined);
   const record = fixedPlanRecord();
   await store.save(record);
   assert.deepEqual(await store.load(), record);
-  const raw = await readFile(join(root, "state", "auto-run.json"), "utf8");
+  const raw = await readFile(runtime.state("auto-run.json"), "utf8");
   assert.match(raw, /"permanentPrompt": "run browser tests"/);
   assert.match(raw, /"additionalGuideline": "keep fixtures small"/);
   await store.clear();
   assert.equal(await store.load(), undefined);
+});
+
+test("auto-run persistence leaves the project clean and recovers from private workspace storage", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-autorun-storage-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspaceRoot = join(root, "project");
+  const storageRoot = join(root, "vscode-storage");
+  const git = promisify(execFile);
+  await git("git", ["init", workspaceRoot]);
+  const status = async () => (await git("git", ["-C", workspaceRoot, "status", "--porcelain"])).stdout;
+  assert.equal(await status(), "");
+
+  const runtime = new RuntimeLayout(storageRoot);
+  const store = new FileAutoRunStore(runtime, new RuntimeAdmission(true));
+  const record = fixedPlanRecord();
+  await store.save(record);
+  assert.deepEqual(JSON.parse(await readFile(join(storageRoot, "runtime", "state", "auto-run.json"), "utf8")), record);
+  assert.equal(existsSync(join(workspaceRoot, "state")), false);
+  assert.equal(existsSync(join(workspaceRoot, ".aboard")), false);
+  assert.equal(await status(), "");
+
+  const reopened = new FileAutoRunStore(new RuntimeLayout(storageRoot));
+  assert.deepEqual(await reopened.load(), record);
+  await reopened.clear();
+  assert.equal(await store.load(), undefined);
+  assert.equal(await status(), "");
 });
 
 test("a failed worker session reference survives runtime parsing", () => {
@@ -182,7 +212,7 @@ test("a failed worker session reference survives runtime parsing", () => {
 
 test("every pending-action and progress shape survives a round trip", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-autorun-actions-"));
-  const store = new FileAutoRunStore(root);
+  const store = new FileAutoRunStore(new RuntimeLayout(root));
   const actions = [
     { kind: "create-branch", branch: "aboard/34-x", base: "aboard/run/return", baseSha: "c".repeat(40) },
     { kind: "commit", branch: "aboard/34-x", parentSha: "d".repeat(40), message: "Add retry backoff", treeSha: "e".repeat(40), fingerprint: ["src/a.ts", "src/b.ts"] },

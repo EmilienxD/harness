@@ -18,6 +18,7 @@ import type { AgentId, SessionId } from "../domain/contracts.js";
 import { parseActivityDto, parseFleetPersistenceDto, parseLegacySessionLedger, type LegacySessionLedgerDto } from "../domain/validation.js";
 import { ISSUE_DIFFICULTIES, type IssueDifficulty } from "../shared/labels.js";
 import type { RuntimeAdmission } from "./admission.js";
+import type { RuntimeLayout } from "./layout.js";
 
 export class AtomicJsonFile<T> {
   public constructor(private readonly path: string, private readonly parse: (value: unknown) => T | undefined, private readonly admission?: RuntimeAdmission) {}
@@ -375,8 +376,8 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
 }
 
 export class FileAutoRunStore extends AtomicJsonFile<PersistedAutoRunRecord> {
-  public constructor(runtimeRoot: string, admission?: RuntimeAdmission) {
-    super(join(runtimeRoot, "state", "auto-run.json"), parseAutoRunRecord, admission);
+  public constructor(runtime: RuntimeLayout, admission?: RuntimeAdmission) {
+    super(runtime.state("auto-run.json"), parseAutoRunRecord, admission);
   }
 
   public async clear(): Promise<void> {
