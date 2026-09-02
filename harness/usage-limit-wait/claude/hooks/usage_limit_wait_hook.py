@@ -20,11 +20,13 @@ with "limit reached".
 
 Everything fails open. The hook is only meaningful for a Claude subscription,
 so any sign of another credential path (API key, bearer gateway, Bedrock,
-Vertex, Foundry), a missing OAuth token, or an unreadable usage response means
-exit 0 immediately and let Claude Code handle its own errors. It never blocks
-a tool call, never writes to the model's context, and never waits longer than
-`USAGE_LIMIT_WAIT_MAX_WAIT` (7 days: a reset further out than that means there
-is no subscription behind this session).
+Vertex, Foundry), a missing OAuth token, or an initially unreadable usage
+response means exit 0 immediately and let Claude Code handle its own errors.
+Once a confirmed wait has begun, a transient read failure is not mistaken for
+a reset: the last announced reset remains authoritative until it arrives. It
+never blocks a tool call, never writes to the model's context, and never waits
+longer than `USAGE_LIMIT_WAIT_MAX_WAIT` (7 days: a reset further out than that
+means there is no subscription behind this session).
 
 Configuration is environment-only; see the README for the full table.
 """
@@ -538,9 +540,10 @@ def wait_for_reset(
     """Block until the exhausted window resets. Returns (seconds, kind).
 
     Stops early -- and always exits 0 -- on anything unexpected: a reset
-    further out than the cap (which means this is not a subscription any more),
-    a reading that stops coming back (expired token, revoked access), or the
-    cap itself.
+    further out than the cap (which means this is not a subscription any more)
+    or the cap itself. A read failure during a confirmed wait keeps the last
+    valid verdict until its announced reset; rate-limited usage endpoints and
+    the CLI fallback can both become temporarily unreadable at the wall.
     """
     refresh = refresh or (lambda: read_usage(force=True, now=now()))
     started = now()
@@ -559,10 +562,18 @@ def wait_for_reset(
         # floor keeps an already-past reset from spinning on the network.
         until_reset = max(verdict.reset_at + GRACE_SECONDS - now(), MIN_SLEEP_SECONDS)
         sleep(min(until_reset, poll_interval(snapshot), remaining))
-        snapshot = refresh()
-        if snapshot is None:
+        refreshed = refresh()
+        if refreshed is None:
+            # An exhausted account can make both the usage endpoint and the
+            # `claude -p /usage` fallback temporarily unreadable. Absence of a
+            # reading is not evidence that usage dropped. Keep the last valid
+            # verdict until the reset it announced, then fail open if it still
+            # cannot be verified.
+            if now() < verdict.reset_at + GRACE_SECONDS:
+                continue
             break
-        verdict = evaluate(snapshot)
+        snapshot = refreshed
+        verdict = evaluate(refreshed)
         if verdict.blocked and verdict.kind:
             waited_for = verdict.kind
 

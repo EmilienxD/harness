@@ -185,6 +185,50 @@ def test_same_script_with_different_launcher_flags_is_one_hook():
     assert ".py" in entries[0]["hooks"][0]["args"][-1]
 
 
+def test_shell_form_hook_dedupes_launcher_flags_quotes_and_install_path():
+    old = {
+        "hooks": {"UserPromptSubmit": [group(
+            {
+                "type": "command",
+                "command": "uv run --no-project .codex/hooks/issues_ChatGPT_hook.py",
+                "timeout": 300,
+            },
+            {
+                "type": "command",
+                "command": (
+                    'uv run --no-project --no-managed-python '
+                    '"C:/old/project/.codex/hooks/issues_ChatGPT_hook.py"'
+                ),
+                "timeout": 300,
+            },
+        )]}
+    }
+    fragment = {
+        "hooks": {"UserPromptSubmit": [group({
+            "type": "command",
+            "command": (
+                'uv run --no-project --no-managed-python '
+                '"C:/work/project/.codex/hooks/issues_ChatGPT_hook.py"'
+            ),
+            "timeout": 300,
+        })]}
+    }
+    merged = merge(old, fragment)
+    hooks = merged["hooks"]["UserPromptSubmit"][0]["hooks"]
+    assert hooks == fragment["hooks"]["UserPromptSubmit"][0]["hooks"]
+
+
+def test_shell_form_hooks_for_different_scripts_still_stack():
+    old = {"hooks": {"UserPromptSubmit": [group({
+        "type": "command", "command": "uv run .codex/hooks/a.py"
+    })]}}
+    fragment = {"hooks": {"UserPromptSubmit": [group({
+        "type": "command", "command": "uv run .codex/hooks/b.py"
+    })]}}
+    hooks = merge(old, fragment)["hooks"]["UserPromptSubmit"][0]["hooks"]
+    assert len(hooks) == 2
+
+
 def test_uninstall_removes_hook_regardless_of_launcher_flags():
     installed = {
         "hooks": {"UserPromptSubmit": [group(hook("uv", "run", "--no-project", "--managed-python", "/x/publish.py"))]}

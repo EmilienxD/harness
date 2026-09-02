@@ -444,13 +444,33 @@ def test_an_undatable_limit_is_not_waited_on():
     assert clock.slept == [] and waited == 0
 
 
-def test_the_wait_ends_when_usage_stops_being_readable():
+def test_a_transient_read_failure_before_reset_does_not_end_the_wait(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_POLL", "60")
+    clock = Clock()
+    reset_at = clock.now + 120
+    exhausted = snapshot(("session", 100.0, reset_at))
+    answers = [None, snapshot(("session", 1.0, reset_at + 18_000))]
+
+    waited, _ = hook.wait_for_reset(
+        exhausted, now=clock.time, sleep=clock.sleep, refresh=lambda: answers.pop(0)
+    )
+
+    assert clock.slept == [60, 60]
+    assert waited == pytest.approx(120)
+    assert answers == []
+
+
+def test_an_unreadable_snapshot_fails_open_after_the_announced_reset(monkeypatch):
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_POLL", "7200")
     clock = Clock()
     exhausted = snapshot(("session", 100.0, clock.now + 60))
+
     waited, _ = hook.wait_for_reset(
         exhausted, now=clock.time, sleep=clock.sleep, refresh=lambda: None
     )
-    assert len(clock.slept) == 1 and waited > 0
+
+    assert clock.slept == [60 + hook.GRACE_SECONDS]
+    assert waited == pytest.approx(60 + hook.GRACE_SECONDS)
 
 
 def test_the_cap_bounds_a_limit_that_never_clears(monkeypatch):

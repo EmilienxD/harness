@@ -114,12 +114,16 @@ class ClaudeAdapter(PlatformAdapter):
 class ChatGPTAdapter(PlatformAdapter):
     """Native ChatGPT layout.
 
-    ChatGPT project paths are deliberately absolute in hook fragments because
-    its public hook contract has no project-root placeholder.
+    Project hook commands use the repo-relative ``.codex/hooks`` path.  Apart
+    from avoiding platform-specific quoting in ChatGPT's single-string command
+    field, this keeps a checkout relocatable.  User installs remain absolute:
+    their hooks live outside the current project.
     """
 
     def placeholders(self, scope_root: Path, is_user: bool) -> dict[str, str]:
         values = super().placeholders(scope_root, is_user)
+        if not is_user:
+            values["${HOOKS_DIR}"] = f"{self.project_platform_dir}/hooks"
         values["${CHATGPT_CONFIG_DIR}"] = values["${PLATFORM_DIR}"]
         return values
 

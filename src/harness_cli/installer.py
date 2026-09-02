@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -224,6 +225,16 @@ def substitute(value, target: "Target | None" = None, python_info=None):
         scope_root = target.scope_root if target else Path(".").resolve()
         is_user = target.is_user if target else False
         expanded = value
+        if target and target.platform is Platform.CHATGPT and not is_user:
+            # Project hook paths are deliberately relative and cannot contain
+            # spaces, so do not preserve the fragment's quotes around them.
+            # ChatGPT's Windows hook launcher currently passes those quotes
+            # through in cases where an unquoted repo-relative path works.
+            expanded = re.sub(
+                r'"\$\{HOOKS_DIR\}(/[^"\r\n]*)"',
+                r"${HOOKS_DIR}\1",
+                expanded,
+            )
         for placeholder, replacement in adapter.placeholders(scope_root, is_user).items():
             expanded = expanded.replace(placeholder, replacement)
         if "${PYTHON}" in expanded and python_info:

@@ -89,12 +89,18 @@ silently, changing nothing — the moment anything says otherwise:
 | Direct API key, or a bearer-token gateway | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` set |
 | Bedrock, Vertex, or Foundry | `CLAUDE_CODE_USE_BEDROCK` / `_USE_VERTEX` / `_USE_FOUNDRY` |
 | Logged out, or a third-party CLI | no OAuth token in `~/.claude/.credentials.json` |
-| Expired session, revoked access, endpoint down | the usage request fails, or the reading can't be parsed |
+| Expired session, revoked access, endpoint down | the initial usage request fails, or the reading can't be parsed |
 | Reset is more than `MAX_WAIT` (7 days) away | there is no live subscription behind this session |
 
 It never blocks a tool call, never rejects a prompt, and never writes to the
 model's context. Its only hook output is a `systemMessage`, shown to you and not
 to Claude; desktop notifications go directly through the host OS.
+
+After a confirmed limit has started a wait, a transient read failure does not
+count as a reset. The hook keeps the last valid reading until its announced
+reset time, then fails open if usage is still unreadable. This matters at the
+wall, where the usage endpoint and the `claude -p /usage` fallback can fail at
+the same time as ordinary model requests.
 
 ### Pay-as-you-go credits
 

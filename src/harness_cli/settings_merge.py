@@ -9,6 +9,7 @@ would duplicate hook entries and silently run every hook twice.
 from __future__ import annotations
 
 import json
+import shlex
 from typing import Any
 
 Json = Any
@@ -39,6 +40,9 @@ def identity(item: Json) -> tuple:
                 # Keying by script+args also survives an interpreter upgrade,
                 # replacing the launch string in place instead of stacking.
                 return ("command", item.get("type", "command"), _operand_tail(args))
+            operands = _command_operand_tail(item["command"])
+            if operands is not None:
+                return ("command", item.get("type", "command"), operands)
             return ("command", item.get("type", "command"), item["command"])
         return ("obj", json.dumps(item, sort_keys=True))
     if isinstance(item, (list, dict)):
@@ -67,6 +71,34 @@ def _operand_tail(args: list) -> tuple:
         if arg != "run" and not str(arg).startswith("-"):
             return tuple(args[i:])
     return tuple(args)
+
+
+def _command_operand_tail(command) -> tuple | None:
+    """Normalize a shell-form hook command around the script it launches.
+
+    ChatGPT stores a hook's complete command in one string, so launcher flags,
+    quoting, and absolute-versus-project-relative installation paths otherwise
+    make successive spellings of the same hook look unrelated.  Only commands
+    containing a recognizable script are folded; arbitrary shell commands keep
+    their exact-string identity.
+    """
+    if not isinstance(command, str):
+        return None
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return None
+    for i, token in enumerate(tokens):
+        normalized = token.replace("\\", "/")
+        if not normalized.lower().endswith((".py", ".sh", ".js", ".ts", ".ps1", ".bash")):
+            continue
+        for root in (".codex/hooks/", ".claude/hooks/"):
+            marker = f"/{root}"
+            if marker in normalized:
+                normalized = root + normalized.rsplit(marker, 1)[1]
+                break
+        return (normalized, *tokens[i + 1 :])
+    return None
 
 
 def normalize_scope(matcher) -> tuple | None:
@@ -105,6 +137,21 @@ def _merge_lists(base: list, incoming: list, *, hook_event: bool | None = None) 
     if hook_event is None:
         hook_event = any(_is_group(v) for v in (*base, *incoming))
     out = list(base)
+    if hook_event and not any(_is_group(v) for v in (*base, *incoming)):
+        # This is the command list inside one matcher group.  Older merging
+        # could already have left two shell-form spellings of the same hook in
+        # the base file.  Normalize the base itself so a reinstall heals that
+        # state instead of merely updating one of the duplicate entries.
+        deduped: list = []
+        positions: dict[tuple, int] = {}
+        for entry in out:
+            key = identity(entry)
+            if key in positions:
+                deduped[positions[key]] = entry
+            else:
+                positions[key] = len(deduped)
+                deduped.append(entry)
+        out = deduped
     index = {normalize_scope(v) or identity(v): i for i, v in enumerate(out)}
     for item in incoming:
         key = normalize_scope(item) or identity(item)

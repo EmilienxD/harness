@@ -92,7 +92,7 @@ def test_adapters_map_shared_and_specific_payloads_to_native_roots(tmp_path):
     assert not (target.scope_root / ".claude").exists()
     config = json.loads((target.scope_root / ".codex/hooks.json").read_text())
     command = config["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
-    assert command == (target.scope_root / ".codex/hooks/hook.py").as_posix()
+    assert command == ".codex/hooks/hook.py"
 
 
 def test_chatgpt_keeps_python_launcher_and_script_in_native_command(tmp_path, monkeypatch):
@@ -114,8 +114,7 @@ def test_chatgpt_keeps_python_launcher_and_script_in_native_command(tmp_path, mo
 
     config = json.loads(target.settings_path.read_text(encoding="utf-8"))
     entry = config["hooks"]["UserPromptSubmit"][0]["hooks"][0]
-    script = (target.scope_root / ".codex/hooks/hook.py").as_posix()
-    assert entry["command"] == f'uv run --no-project --no-managed-python "{script}" --flag'
+    assert entry["command"] == "uv run --no-project --no-managed-python .codex/hooks/hook.py --flag"
     assert "args" not in entry
 
 
