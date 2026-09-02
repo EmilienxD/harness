@@ -1,7 +1,7 @@
 import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, parseClaudeCommand, type EffortLevel } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 import { DEFAULT_TRANSCRIPT_BACKUPS } from "./claude/transcript-backup.js";
-import { DISCARD_BEHAVIORS, MERGE_STRATEGIES, type AutoRunSettings, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";
+import { AUTO_RUN_BRANCH_MODES, DISCARD_BEHAVIORS, MERGE_STRATEGIES, type AutoRunSettings, type AutoRunBranchMode, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";
 
 export interface ConfigurationReader { get(section: string): unknown; }
 export interface AboardConfiguration {
@@ -34,6 +34,7 @@ export const ABOARD_SETTINGS = [
   "aboard.manager.roadmapReminderBytes",
   "aboard.manager.transcriptBackups",
   "aboard.autoRun.review",
+  "aboard.autoRun.branchMode",
   "aboard.autoRun.recursiveIssueReferences",
   "aboard.autoRun.prompt",
   "aboard.autoRun.pauseAfterHitl",
@@ -174,6 +175,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     managerTranscriptBackups: integer(reader, "aboard.manager.transcriptBackups", DEFAULT_TRANSCRIPT_BACKUPS, 0, 100, diagnostics),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {
+      branchMode: choice<AutoRunBranchMode>(reader, "aboard.autoRun.branchMode", AUTO_RUN_BRANCH_MODES, "per-issue", diagnostics),
       // Automated review stays opt-in so a run cannot silently expand its
       // authority from implementation into review.
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),

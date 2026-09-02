@@ -45,7 +45,7 @@ export async function observeRun(record: AutoRunRecord, sources: RunObservationS
     ? { branch: status.branch, dirtyPaths: status.entries.map((entry) => entry.path) }
     : { branch: undefined, dirtyPaths: [] as readonly string[] };
 
-  const branchNames = [record.sessionBranch, ...record.plan.map((issue) => issue.branch)];
+  const branchNames = record.settings.branchMode === "single-branch" ? [record.sessionBranch] : [record.sessionBranch, ...record.plan.map((issue) => issue.branch)];
   const branches: BranchObservation[] = repositoryUsable
     ? await Promise.all([...new Set(branchNames)].map(async (name): Promise<BranchObservation> => ({
         name,
@@ -113,8 +113,8 @@ async function observePullRequests(record: AutoRunRecord, github: AutoRunGitHub)
   const wanted = new Set<number>();
   for (const issue of record.plan) {
     const progress = issueProgress(record, issue.number);
-    if (progress.state === "current" && progress.prNumber !== undefined) wanted.add(progress.prNumber);
-    if (progress.state === "done" && progress.result === "landed") wanted.add(progress.prNumber);
+    if (record.settings.branchMode !== "single-branch" && progress.state === "current" && progress.prNumber !== undefined) wanted.add(progress.prNumber);
+    if (record.settings.branchMode !== "single-branch" && progress.state === "done" && progress.result === "landed") wanted.add(progress.prNumber);
   }
   if (record.runPullRequest !== undefined) wanted.add(record.runPullRequest);
   return Promise.all([...wanted].map(async (number): Promise<PullRequestObservation> => {

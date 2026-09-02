@@ -6,6 +6,7 @@ import {
   type CandidateIssue,
   type IssueDisposition,
   type MergeStrategy,
+  type AutoRunBranchMode,
   type SkippedIssue,
   type WorktreeSettings,
 } from "./auto-run.js";
@@ -24,6 +25,7 @@ export interface FrozenIssue {
 
 /** The settings a run is bound to for its whole life, including every resume. */
 export interface FrozenRunSettings {
+  readonly branchMode?: AutoRunBranchMode;
   readonly review: boolean;
   readonly recursiveIssueReferences: boolean;
   readonly mergeStrategy: MergeStrategy;
@@ -64,6 +66,11 @@ export type IssueProgress =
       /** The branch tip this run last pushed, for force-push detection. */
       readonly headSha?: string;
       readonly reviewed?: true;
+      readonly beforeSha?: string;
+      readonly implementationSha?: string;
+      readonly reviewedSha?: string;
+      readonly awaitingAcceptance?: true;
+      readonly accepted?: true;
     }
   | {
       readonly state: "done";
@@ -71,6 +78,9 @@ export type IssueProgress =
       readonly prNumber: number;
       /** Whether aboard's best-effort close attempt succeeded. */
       readonly issueClosed: boolean;
+      readonly beforeSha?: string;
+      readonly implementationSha?: string;
+      readonly reviewedSha?: string;
     }
   | { readonly state: "done"; readonly result: "no-changes" };
 
@@ -96,6 +106,7 @@ export type PendingAction =
   | { readonly kind: "create-issue-pr"; readonly issue: number; readonly head: string; readonly base: string }
   | { readonly kind: "merge-issue-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string }
   | { readonly kind: "create-run-pr"; readonly head: string; readonly base: string }
+  | { readonly kind: "update-run-pr"; readonly prNumber: number; readonly title: string; readonly body: string }
   | { readonly kind: "merge-run-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string };
 
 export interface AutoRunRecord {
@@ -184,6 +195,7 @@ export function runSucceeded(record: AutoRunRecord, runPullRequestMerged: boolea
 /** Every branch this run owns and expects to exist, given how far it has got. */
 export function runOwnedBranches(record: AutoRunRecord): readonly string[] {
   const branches = [record.sessionBranch];
+  if (record.settings.branchMode === "single-branch") return branches;
   for (const issue of record.plan) {
     const progress = issueProgress(record, issue.number);
     // A landed issue's branch is deleted with its merge, and a no-changes

@@ -93,7 +93,7 @@ export function planDiscard(
 
 /** Branches this run created, whether or not it still expects them to exist. */
 function ownedBranches(record: AutoRunRecord): readonly string[] {
-  return [record.sessionBranch, ...record.plan.map((issue) => issue.branch)];
+  return record.settings.branchMode === "single-branch" ? [record.sessionBranch] : [record.sessionBranch, ...record.plan.map((issue) => issue.branch)];
 }
 
 /** Whether a branch's work already reached the session branch, or is the session branch after its own merge. */
@@ -107,7 +107,7 @@ function isLanded(record: AutoRunRecord, branch: string): boolean {
 
 function ownedPullRequests(record: AutoRunRecord): readonly PullRequestClosure[] {
   const closures: PullRequestClosure[] = [];
-  for (const issue of record.plan) {
+  for (const issue of record.settings.branchMode === "single-branch" ? [] : record.plan) {
     const progress = issueProgress(record, issue.number);
     if (progress.state !== "current" || progress.prNumber === undefined) continue;
     closures.push({ number: progress.prNumber, head: issue.branch, base: record.sessionBranch });

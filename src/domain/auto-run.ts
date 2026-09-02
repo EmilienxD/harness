@@ -35,6 +35,9 @@ export function unpublishedTargetWarning(base: string, count: number): string {
 export const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 export type MergeStrategy = (typeof MERGE_STRATEGIES)[number];
 
+export const AUTO_RUN_BRANCH_MODES = ["per-issue", "single-branch"] as const;
+export type AutoRunBranchMode = (typeof AUTO_RUN_BRANCH_MODES)[number];
+
 export interface WorktreeSettings {
   readonly enabled: boolean;
   readonly root: string;
@@ -47,6 +50,7 @@ export const DISCARD_BEHAVIORS = ["record-only", "local-cleanup", "full-cleanup"
 export type DiscardBehavior = (typeof DISCARD_BEHAVIORS)[number];
 
 export interface AutoRunSettings {
+  readonly branchMode?: AutoRunBranchMode;
   readonly review: boolean;
   /** Whether issue context follows references beyond the primary issue's direct references. */
   readonly recursiveIssueReferences: boolean;
@@ -95,6 +99,7 @@ export type AutoRunDryRunResult =
        */
       readonly emptyReason: string | undefined;
       readonly reviewMode: boolean;
+      readonly branchMode?: AutoRunBranchMode;
       readonly pauseAfterHitl: boolean;
       /** Persistent configured note that would be added to every auto agent. */
       readonly permanentPrompt?: string;
@@ -328,8 +333,9 @@ export function runPullRequestBody(
   sessionBranch: string,
   base: string,
   unpublishedTargetCommits = 0,
+  branchMode: AutoRunBranchMode = "per-issue",
 ): string {
-  const lines = landed.map((issue) => `- #${issue.number} ${commitSubject(issue.title)} (PR #${issue.prNumber})`);
+  const lines = landed.map((issue) => `- #${issue.number} ${commitSubject(issue.title)}${branchMode === "per-issue" ? ` (PR #${issue.prNumber})` : ""}`);
   const warning = unpublishedTargetCommits === 0 ? [] : [
     "",
     `> [!WARNING]`,
@@ -341,7 +347,9 @@ export function runPullRequestBody(
     "",
     ...lines,
     "",
-    `Each issue was merged into \`${sessionBranch}\` and closed as it landed; this pull request carries all of it to \`${base}\`.`,
+    branchMode === "single-branch"
+      ? `Each accepted issue was committed directly to \`${sessionBranch}\` and explicitly closed; this cumulative pull request carries all of it to \`${base}\`.`
+      : `Each issue was merged into \`${sessionBranch}\` and closed as it landed; this pull request carries all of it to \`${base}\`.`,
   ].join("\n");
   return body.length <= PR_BODY_MAX_CHARS ? body : `${body.slice(0, PR_BODY_MAX_CHARS - 1).trimEnd()}…`;
 }

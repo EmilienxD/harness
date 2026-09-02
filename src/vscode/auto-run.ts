@@ -114,8 +114,8 @@ export type AutoRunCard =
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
-  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly implementerLive: boolean }
-  | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number };
+  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly implementerLive: boolean; readonly workingBranch: string }
+  | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number; readonly branchMode: "per-issue" | "single-branch" };
 
 export interface AutoRunTreeItem {
   readonly label: string;
@@ -198,11 +198,13 @@ export class AutoRunTreeModel {
     if (node.kind !== "card") return [];
     if (node.card.kind === "forecast") {
       const issues = node.card.forecast.preview.issues;
+      const branchMode = node.card.forecast.preview.branchMode ?? "per-issue";
       return issues.map((issue, index): AutoRunNode => ({
         kind: "forecast-issue",
         issue,
         position: index + 1,
         total: issues.length,
+        branchMode,
       }));
     }
     const record = cardRecord(node.card);
@@ -214,6 +216,7 @@ export class AutoRunTreeModel {
       progress: issueProgress(record, issue.number),
       title: titles[String(issue.number)] ?? issue.title,
       implementerLive: this.sources.hasLiveImplementer?.(issue.number) ?? false,
+      workingBranch: record.settings.branchMode === "single-branch" ? record.sessionBranch : issue.branch,
     }));
   }
 
@@ -356,7 +359,7 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
       `Disposition: ${issue.disposition}`,
       issue.difficulty === undefined ? "Difficulty: unrated" : `Difficulty: ${issue.difficulty}`,
       issue.chrome === true ? "Claude in Chrome: enabled by [AI]-chrome" : "",
-      `Branch: ${issue.branch}`,
+      `Branch: ${node.workingBranch}`,
       issue.dependsOn.length === 0 ? "" : `Depends on ${issue.dependsOn.map((number) => `#${number}`).join(", ")}`,
     ].filter(Boolean).join("\n"),
     // Row clicks are terminal-only. Pending issues therefore do nothing, while
@@ -380,7 +383,7 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
       `Disposition: ${issue.disposition}`,
       issue.difficulty === undefined ? "Difficulty: unrated" : `Difficulty: ${issue.difficulty}`,
       issue.chrome === true ? "Claude in Chrome: enabled by [AI]-chrome" : "",
-      `Planned branch: ${issue.branch}`,
+      node.branchMode === "single-branch" ? "Planned branch: run session branch" : `Planned branch: ${issue.branch}`,
     ].filter(Boolean).join("\n"),
     contextValue: "aboard.autoRun.issue.forecast",
     collapsible: false,
@@ -396,6 +399,8 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     forecast.stale ? "Settings changed. Use Check Now to update this preview." : "",
     forecast.error === undefined ? "" : `Last refresh failed: ${forecast.error}. The list below is the last successful result.`,
     `Target branch: ${preview.sessionBase}`,
+    `Branch mode: ${preview.branchMode ?? "per-issue"}`,
+    preview.branchMode === "single-branch" ? "All issues are committed to the session branch; one cumulative pull request is used." : "Each issue uses its own branch and pull request.",
     ...preview.warnings.map((warning) => `Warning: ${warning}`),
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
     `Review ${preview.reviewMode ? "on" : "off"}`,
@@ -443,6 +448,7 @@ function runTooltip(record: AutoRunRecord, state?: AutoRunState): string {
     `Run ${record.runId} (attempt ${record.attempt})`,
     `Session branch: ${record.sessionBranch}`,
     `Target branch: ${record.targetBranch ?? "the repository default"}`,
+    `Branch mode: ${record.settings.branchMode ?? "per-issue"}`,
     record.settings.workspaceRoot === undefined ? "Working in your checkout" : `Working in ${record.settings.workspaceRoot}`,
     `Review ${record.settings.review ? "on" : "off"}`,
     record.runPullRequest === undefined ? "" : `Run pull request: #${record.runPullRequest}`,

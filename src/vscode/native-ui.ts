@@ -202,7 +202,8 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       await checkAutoRun(true);
       // A waiting run polls GitHub on its own interval; "Check Now" is the user
       // saying they have just merged and would rather not wait for it.
-      if (engine.state()?.waiting === true) engine.continueNow();
+      const record = engine.persisted();
+      if (engine.state()?.waiting === true && record?.version === 2 && record.settings.branchMode !== "single-branch") engine.continueNow();
     }),
     commands.registerCommand("aboard.autoRun.openCurrentIssue", () => {
       const record = cardRecord(autoRunCard(autoRunSources));

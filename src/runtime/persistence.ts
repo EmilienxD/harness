@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { AUTO_RUN_PHASES, MERGE_STRATEGIES, type AutoRunPhase, type IssueDisposition, type MergeStrategy } from "../domain/auto-run.js";
+import { AUTO_RUN_BRANCH_MODES, AUTO_RUN_PHASES, MERGE_STRATEGIES, type AutoRunBranchMode, type AutoRunPhase, type IssueDisposition, type MergeStrategy } from "../domain/auto-run.js";
 import {
   RUN_CHECKPOINTS,
   type AutoRunRecord,
@@ -137,7 +137,10 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     (value.permanentPrompt !== undefined && permanentPrompt === undefined)
     || (value.additionalGuideline !== undefined && guideline === undefined)
   ) return undefined;
+  const branchMode = (AUTO_RUN_BRANCH_MODES as readonly string[]).includes(value.branchMode as string) ? value.branchMode as AutoRunBranchMode : undefined;
+  if (value.branchMode !== undefined && branchMode === undefined) return undefined;
   return {
+    ...(branchMode === undefined ? {} : { branchMode }),
     review: value.review,
     recursiveIssueReferences: value.recursiveIssueReferences ?? false,
     mergeStrategy,
@@ -190,12 +193,20 @@ function parseProgress(value: unknown): IssueProgress | undefined {
     if (value.prNumber !== undefined && prNumber === undefined) return undefined;
     if (value.headSha !== undefined && headSha === undefined) return undefined;
     if (value.reviewed !== undefined && value.reviewed !== true) return undefined;
+    if (value.awaitingAcceptance !== undefined && value.awaitingAcceptance !== true) return undefined;
+    if (value.accepted !== undefined && value.accepted !== true) return undefined;
+    for (const sha of [value.beforeSha, value.implementationSha, value.reviewedSha]) if (sha !== undefined && fullSha(sha) === undefined) return undefined;
     return {
       state: "current",
       phase,
       ...(prNumber === undefined ? {} : { prNumber }),
       ...(headSha === undefined ? {} : { headSha }),
       ...(value.reviewed === true ? { reviewed: true as const } : {}),
+      ...(value.beforeSha === undefined ? {} : { beforeSha: value.beforeSha as string }),
+      ...(value.implementationSha === undefined ? {} : { implementationSha: value.implementationSha as string }),
+      ...(value.reviewedSha === undefined ? {} : { reviewedSha: value.reviewedSha as string }),
+      ...(value.awaitingAcceptance === true ? { awaitingAcceptance: true as const } : {}),
+      ...(value.accepted === true ? { accepted: true as const } : {}),
     };
   }
   if (value.state !== "done") return undefined;
@@ -203,7 +214,11 @@ function parseProgress(value: unknown): IssueProgress | undefined {
   if (value.result !== "landed") return undefined;
   const prNumber = positiveInteger(value.prNumber);
   if (prNumber === undefined || typeof value.issueClosed !== "boolean") return undefined;
-  return { state: "done", result: "landed", prNumber, issueClosed: value.issueClosed };
+  for (const sha of [value.beforeSha, value.implementationSha, value.reviewedSha]) if (sha !== undefined && fullSha(sha) === undefined) return undefined;
+  return { state: "done", result: "landed", prNumber, issueClosed: value.issueClosed,
+    ...(value.beforeSha === undefined ? {} : { beforeSha: value.beforeSha as string }),
+    ...(value.implementationSha === undefined ? {} : { implementationSha: value.implementationSha as string }),
+    ...(value.reviewedSha === undefined ? {} : { reviewedSha: value.reviewedSha as string }) };
 }
 
 function parsePendingAction(value: unknown): PendingAction | undefined {
@@ -242,6 +257,11 @@ function parsePendingAction(value: unknown): PendingAction | undefined {
     case "create-run-pr":
       if (head === undefined || base === undefined) return undefined;
       return { kind: "create-run-pr", head, base };
+    case "update-run-pr": {
+      const title = nonEmptyString(value.title);
+      if (prNumber === undefined || title === undefined || typeof value.body !== "string") return undefined;
+      return { kind: "update-run-pr", prNumber, title, body: value.body };
+    }
     case "merge-run-pr":
       if (prNumber === undefined || head === undefined || base === undefined || fullSha(value.headSha) === undefined || fullSha(value.baseSha) === undefined) return undefined;
       return { kind: "merge-run-pr", prNumber, head, base, headSha: value.headSha as string, baseSha: value.baseSha as string };

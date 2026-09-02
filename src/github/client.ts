@@ -591,6 +591,10 @@ export class GitHubClient implements GitHubPromptSource {
     return integer(Number(match[1]), "created pull request number");
   }
 
+  public async updatePullRequest(number: number, input: { readonly title: string; readonly body: string }): Promise<void> {
+    await this.gh.run(["pr", "edit", String(number), "--title", input.title, "--body", input.body]);
+  }
+
   public async findOpenPullRequestForBranch(branch: string): Promise<number | undefined> {
     const output = await this.gh.run(["pr", "list", "--state", "open", "--head", branch, "--limit", "1", "--json", "number"]);
     const items = array(json(output, "branch pull request lookup"), "branch pull request lookup");

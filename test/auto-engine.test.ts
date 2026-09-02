@@ -133,6 +133,40 @@ interface HarnessOptions {
   readonly hitlReviewDecision?: "approved" | "changes-requested" | "reviewed" | "unreviewed";
 }
 
+test("single-branch processes sequential AFK issues without issue branches or issue pull requests", async () => {
+  const context = harness({
+    settings: { branchMode: "single-branch" },
+    issues: [
+      { number: 34, title: "first", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 35, title: "second", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+    ],
+  });
+  const started = await context.engine.start();
+  assert.equal(started.started, true);
+  await context.engine.settle();
+  assert.equal(context.createdPullRequests.length, 1);
+  assert.equal(context.createdPullRequests[0]?.head, SESSION);
+  assert.equal(context.gitCalls.some((call) => call.includes("aboard/34-") || call.includes("aboard/35-")), false);
+  assert.deepEqual(context.closures.map((closure) => closure.issue), [34, 35]);
+});
+
+test("single-branch HITL waits for explicit Aboard acceptance and scopes review to its SHA range", async () => {
+  const context = harness({
+    settings: { branchMode: "single-branch", review: true },
+    issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+  });
+  await context.engine.start();
+  for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(context.engine.state()?.waiting, true);
+  assert.equal(context.closures.length, 0);
+  const review = context.launches.find((launch) => launch.type === "pr-doctor-hitl");
+  assert.match(review?.additionalGuideline ?? "", /Review only issue #35's changes in exact range .{40}\.\..{40}/);
+  context.engine.continueNow();
+  await context.engine.settle();
+  assert.deepEqual(context.closures.map((closure) => closure.issue), [35]);
+  assert.equal(context.merges.length, 0, "the cumulative PR is not an issue-acceptance signal");
+});
+
 function harness(options: HarnessOptions = {}): Harness {
   const notifications: string[] = [];
   const alerts: { message: string; url: string | undefined }[] = [];

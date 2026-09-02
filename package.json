@@ -519,6 +519,12 @@
           "default": false,
           "description": "Launch a pr-doctor after each issue is addressed during an auto-run. Automated review stays opt-in; the explicit review action is always available."
         },
+        "aboard.autoRun.branchMode": {
+          "type": "string",
+          "enum": ["per-issue", "single-branch"],
+          "default": "per-issue",
+          "description": "Use one branch and pull request per issue, or commit all issues directly to the run session branch and use only its cumulative pull request."
+        },
         "aboard.autoRun.recursiveIssueReferences": {
           "type": "boolean",
           "default": false,
@@ -532,7 +538,7 @@
         "aboard.autoRun.pauseAfterHitl": {
           "type": "boolean",
           "default": false,
-          "description": "Stop the run after a hitl issue is merged instead of continuing automatically. The merge is already an explicit user gesture, so this is the harder brake rather than the default."
+          "description": "Stop the run after a hitl issue is accepted instead of continuing automatically. In per-issue mode acceptance comes from its merge or a third-party approval; in single-branch mode it is the explicit Aboard Continue action."
         },
         "aboard.autoRun.mergeStrategy": {
           "type": "string",

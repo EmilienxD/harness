@@ -1012,7 +1012,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     commands.registerCommand("aboard.continueAutoRun", () => { if (requireInitialized()) autoRun.continueNow(); }),
     // A wait outstanding when the window regains focus is polled immediately,
     // so returning to VS Code after merging does not cost a poll interval.
-    window.onDidChangeWindowState((state) => { if (state.focused && autoRun.state()?.waiting === true) autoRun.continueNow(); }),
+    window.onDidChangeWindowState((state) => {
+      const record = autoRun.persisted();
+      if (state.focused && autoRun.state()?.waiting === true && record?.version === 2 && record.settings.branchMode !== "single-branch") autoRun.continueNow();
+    }),
   );
   // Recovery has no notification: the Auto Run view is the place, and it
   // revalidates on activation, on visibility, on focus, and on a timer.

@@ -102,7 +102,7 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
   const required = new Set<string>();
   if (record.checkpoint !== "planned" && record.checkpoint !== "workspace-ready") required.add(record.sessionBranch);
   const current = record.currentIssue === undefined ? undefined : record.plan.find((issue) => issue.number === record.currentIssue);
-  if (current !== undefined) {
+  if (current !== undefined && record.settings.branchMode !== "single-branch") {
     const progress = issueProgress(record, current.number);
     // The branch is required only once the run recorded a SHA for it: before
     // the branch phase reaches its postcondition there is nothing to require.
@@ -131,6 +131,7 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
   }
 
   for (const issue of record.plan) {
+    if (record.settings.branchMode === "single-branch") break;
     if (required.has(issue.branch)) continue;
     if (issueProgress(record, issue.number).state !== "pending") continue;
     const observed = branchOf(observations, issue.branch);
@@ -250,6 +251,15 @@ function journalMerges(action: PendingAction | undefined, pullRequest: PullReque
 }
 
 function validatePullRequests(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility | undefined {
+  if (record.settings.branchMode === "single-branch") {
+    if (record.runPullRequest === undefined) return undefined;
+    const observed = pullRequestOf(observations, record.runPullRequest);
+    const identity = validatePullRequestIdentity(observed, record.runPullRequest, record.sessionBranch, record.targetBranch);
+    if (identity !== undefined) return identity;
+    if (observed!.state === "closed") return broken(`the run's pull request #${record.runPullRequest} was closed`);
+    if (observed!.state === "merged" && remainingIssuesForValidation(record) && !journalMerges(record.pendingAction, observed!)) return broken(`the run's pull request #${record.runPullRequest} merged while its issue queue was active`);
+    return undefined;
+  }
   for (const issue of record.plan) {
     const progress = issueProgress(record, issue.number);
     const prNumber = progress.state === "current" ? progress.prNumber
@@ -303,7 +313,8 @@ function validateWorkingTree(record: AutoRunRecord, observations: RunObservation
   if (observations.workingTree.dirtyPaths.length === 0) return RESUMABLE;
   const current = currentIssue(record);
   const branch = observations.workingTree.branch;
-  if (current !== undefined && branch === current.branch) return RESUMABLE;
+  const expected = record.settings.branchMode === "single-branch" ? record.sessionBranch : current?.branch;
+  if (current !== undefined && branch === expected) return RESUMABLE;
   return broken(
     `there are uncommitted changes on ${branch ?? "a detached HEAD"}, which is not the branch this run is working`,
   );
@@ -317,7 +328,11 @@ export function currentIssue(record: AutoRunRecord): FrozenIssue | undefined {
 export function hasTrustedDirtyWork(record: AutoRunRecord, observations: RunObservations): boolean {
   const current = currentIssue(record);
   if (current === undefined || observations.workingTree.dirtyPaths.length === 0) return false;
-  return observations.workingTree.branch === current.branch;
+  return observations.workingTree.branch === (record.settings.branchMode === "single-branch" ? record.sessionBranch : current.branch);
+}
+
+function remainingIssuesForValidation(record: AutoRunRecord): boolean {
+  return record.plan.some((issue) => issueProgress(record, issue.number).state !== "done");
 }
 
 export const DIRTY_RECOVERY_SENTENCE =
