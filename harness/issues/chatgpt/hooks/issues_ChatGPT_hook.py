@@ -48,13 +48,13 @@ def prepare_drafting_context(root: Path, session_id: str) -> str:
     next_index = max(indexes, default=-1) + 1
     relative = Path(".issues-gateway") / batch_id
     return (
-        "Issues gateway drafting context (prepared before the skill loaded):\n"
+        "Issues gateway drafting context:\n"
         f"- issues session id: {batch_id}\n"
         f"- draft directory: {relative.as_posix()}\n"
         f"- next free issue index: {next_index}\n"
         "Use these exact values wherever the skill asks for its session id, "
         "draft directory, or starting issue index. The directory and gateway "
-        ".gitignore already exist; do not recompute them."
+        ".gitignore already exist; do not verify."
     )
 
 
