@@ -288,7 +288,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         label: `Auto-run ${record.runId}`,
         description: `${state.phase} · issue #${state.currentIssue ?? "?"} · ${state.completedCount}/${state.totalCount}`,
         tooltip: runTooltip(record, state),
-        icon: "sync",
+        icon: "sync~spin",
         contextValue: "aboard.autoRun.active",
         collapsible: true,
       };
@@ -360,15 +360,13 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
       issue.dependsOn.length === 0 ? "" : `Depends on ${issue.dependsOn.map((number) => `#${number}`).join(", ")}`,
     ].filter(Boolean).join("\n"),
     icon: progress.state === "done" ? "pass" : progress.state === "current" ? "circle-filled" : "circle-outline",
-    // A row whose implementer is live focuses that terminal on click; the inline
-    // button does the same and the issue-icon button opens the issue itself.
+    // Row clicks are terminal-only. Pending issues therefore do nothing, while
+    // the issue-icon button remains the single way to open GitHub from a row.
     contextValue: implementerLive
       ? `aboard.autoRun.issue.${progress.state}.implementer`
       : `aboard.autoRun.issue.${progress.state}`,
     collapsible: false,
-    command: implementerLive
-      ? { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [issue.number] }
-      : { command: "aboard.openIssue", title: "Open Issue", arguments: [issue.number] },
+    command: { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [issue.number] },
   };
 }
 

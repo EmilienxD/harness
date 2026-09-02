@@ -804,19 +804,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       else if (choice === "Show Log") output.show(true);
     });
   };
-  const autoRunStatus = window.createStatusBarItem(undefined, 99);
-  autoRunStatus.command = "aboard.stopAutoRun";
-  context.subscriptions.push(autoRunStatus);
   const publishAutoRunState = async (state: ReturnType<AutoRunEngine["state"]> | undefined): Promise<void> => {
-    if (state === undefined) {
-      autoRunStatus.hide();
-    } else {
-      autoRunStatus.text = `$(run-all) Auto-run: issue #${state.currentIssue ?? "?"} (${state.completedCount + 1}/${state.totalCount})`;
-      autoRunStatus.tooltip = state.waiting
-        ? `Waiting for you to merge the pull request for issue #${state.currentIssue ?? "?"}. Click to stop the run.`
-        : `${state.phase} — issue #${state.currentIssue ?? "?"}. Click to stop the run.`;
-      autoRunStatus.show();
-    }
+    fleetUi?.refresh();
     await commands.executeCommand("setContext", "aboard.autoRunActive", state !== undefined);
     await commands.executeCommand("setContext", "aboard.autoRunWaiting", state?.waiting === true);
   };

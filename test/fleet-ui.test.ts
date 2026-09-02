@@ -192,7 +192,24 @@ test("status and failure notifications render domain state without routine compl
   const fleet = new FleetRegistry(); const lease = new WriteLease(); const errors: string[] = [];
   const notifications = new FleetNotifications(fleet, { warning: () => {}, error: (message) => errors.push(message) });
   fleet.register(worker, startedAt); fleet.transition(worker.identity.agentId, { status: "running", startedAt }, startedAt); lease.acquire("write-capable", { agentId: worker.identity.agentId, sessionId: worker.sessionId }, startedAt, "test");
-  assert.deepEqual(renderFleetStatus(4823, fleet, lease), { text: "$(organization) 1 · :4823 · $(lock) 4", tooltip: "aboard bridge: 127.0.0.1:4823\nLive agents: 1\nWrite lease: 4", liveAgentCount: 1 });
+  assert.deepEqual(renderFleetStatus(4823, fleet, lease), {
+    text: "$(organization)",
+    tooltip: "aboard\nBridge: 127.0.0.1:4823\nLive agents: 1\nWrite lease: 4\n\nAuto Run: inactive",
+    liveAgentCount: 1,
+  });
+  assert.deepEqual(renderFleetStatus(4823, fleet, lease, () => true, {
+    runId: "run_test",
+    phase: "await-approval",
+    currentIssue: 19,
+    completedCount: 1,
+    totalCount: 3,
+    waiting: true,
+    currentPullRequest: 42,
+  }), {
+    text: "$(organization)",
+    tooltip: "aboard\nBridge: 127.0.0.1:4823\nLive agents: 1\nWrite lease: 4\n\nAuto Run: waiting for you\nRun: run_test\nPhase: await-approval\nCurrent issue: #19\nProgress: 1/3\nPull request: #42",
+    liveAgentCount: 1,
+  });
   assert.match(saveLeaseWarning(lease) ?? "", /saved.*4.*may conflict/);
   assert.equal(renderFleetStatus(4823, fleet, lease, () => false).liveAgentCount, 0, "paused records are not live terminals");
   const finishedAt = at("2026-07-30T10:05:00.000Z"); fleet.transition(worker.identity.agentId, { status: "failed", startedAt, finishedAt, failure: { type: "timeout", exitCode: null, lastAssistantMessage: "secret prompt" } }, finishedAt);

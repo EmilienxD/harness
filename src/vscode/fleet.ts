@@ -1,6 +1,7 @@
 import type { AgentId, AgentSession, ChildAgentNode, IsoTimestamp, TerminalId, WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
+import type { AutoRunState } from "../auto/engine.js";
 import { formatIssueNumbers } from "../shared/issues.js";
 
 export type FleetTreeNode =
@@ -181,10 +182,37 @@ function notify(event: FleetEvent, fleet: FleetRegistry, host: FleetNotification
 function failureLabel(type: WorkerFailureType): string { return type.replaceAll("-", " "); }
 
 export interface FleetStatusSnapshot { readonly text: string; readonly tooltip: string; readonly liveAgentCount: number; }
-export function renderFleetStatus(port: number, fleet: FleetRegistry, lease: WriteLease, isTerminalOpen: (terminalId: TerminalId) => boolean = () => true): FleetStatusSnapshot {
+export function renderFleetStatus(
+  port: number,
+  fleet: FleetRegistry,
+  lease: WriteLease,
+  isTerminalOpen: (terminalId: TerminalId) => boolean = () => true,
+  autoRun?: AutoRunState,
+): FleetStatusSnapshot {
   const live = fleet.list().filter((entry) => ["starting", "running", "awaiting-user"].includes(entry.lifecycle.status) && isTerminalOpen(entry.terminal.terminalId));
   const holder = lease.current()?.agentId;
-  return { text: `$(organization) ${live.length} · :${port}${holder === undefined ? "" : ` · $(lock) ${holder}`}`, tooltip: `aboard bridge: 127.0.0.1:${port}\nLive agents: ${live.length}\nWrite lease: ${holder ?? "free"}`, liveAgentCount: live.length };
+  const autoRunLines = autoRun === undefined
+    ? ["Auto Run: inactive"]
+    : [
+        `Auto Run: ${autoRun.waiting ? "waiting for you" : "running"}`,
+        `Run: ${autoRun.runId}`,
+        `Phase: ${autoRun.phase}`,
+        `Current issue: ${autoRun.currentIssue === undefined ? "none" : `#${autoRun.currentIssue}`}`,
+        `Progress: ${autoRun.completedCount}/${autoRun.totalCount}`,
+        `Pull request: ${autoRun.currentPullRequest === undefined ? "none" : `#${autoRun.currentPullRequest}`}`,
+      ];
+  return {
+    text: "$(organization)",
+    tooltip: [
+      "aboard",
+      `Bridge: 127.0.0.1:${port}`,
+      `Live agents: ${live.length}`,
+      `Write lease: ${holder ?? "free"}`,
+      "",
+      ...autoRunLines,
+    ].join("\n"),
+    liveAgentCount: live.length,
+  };
 }
 
 export function saveLeaseWarning(lease: WriteLease): string | undefined {

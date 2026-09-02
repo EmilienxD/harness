@@ -339,6 +339,7 @@ test("a live run outranks any recovery question about its own record", () => {
   const { item } = rootItem({ persisted: record(), state: state() });
   assert.equal(item.contextValue, "aboard.autoRun.active");
   assert.match(item.description, /await-approval · issue #35 · 1\/3/);
+  assert.equal(item.icon, "sync~spin");
 });
 
 test("a run waiting for the user is its own state, with its own actions", () => {
@@ -398,8 +399,10 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
     "aboard.autoRun.issue.current",
     "aboard.autoRun.issue.pending",
   ]);
-  // Clicking a row opens the issue on GitHub.
-  assert.deepEqual(rows[0]?.command, { command: "aboard.openIssue", title: "Open Issue", arguments: [34] });
+  // Clicking any row asks to focus its implementer. The command is a no-op when
+  // that issue has no live session, including while it is still pending.
+  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [34] });
+  assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [36] });
 });
 
 test("a row with a live implementer focuses it on click instead of opening the issue", () => {
@@ -412,9 +415,10 @@ test("a row with a live implementer focuses it on click instead of opening the i
   // The current issue has a live implementer: click focuses the terminal.
   assert.deepEqual(rows[1]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [35] });
   assert.equal(rows[1]?.contextValue, "aboard.autoRun.issue.current.implementer");
-  // The done and pending rows keep the issue-opening behaviour.
-  assert.deepEqual(rows[0]?.command, { command: "aboard.openIssue", title: "Open Issue", arguments: [34] });
-  assert.deepEqual(rows[2]?.command, { command: "aboard.openIssue", title: "Open Issue", arguments: [36] });
+  // Done and pending rows use the same terminal-only command; without a live
+  // implementer the command quietly does nothing.
+  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [34] });
+  assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [36] });
 });
 
 test("an [AI]-chrome issue says so in its frozen plan row", () => {

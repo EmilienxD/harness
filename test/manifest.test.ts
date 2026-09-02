@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 interface Manifest {
   contributes: {
-    commands: readonly { command: string; title?: string; icon?: string }[];
+    commands: readonly { command: string; title?: string; category?: string; icon?: string }[];
     menus: {
       commandPalette?: readonly { command: string; when?: string }[];
       "view/title"?: readonly { command: string; when?: string; group?: string }[];
@@ -86,6 +86,13 @@ test("every action rendered inline in a panel has an icon", async () => {
   }
 });
 
+test("button labels omit the Aboard prefix while commands retain the Aboard category", async () => {
+  const { contributes } = await manifest();
+  for (const command of contributes.commands.filter((entry) => entry.category === "Aboard")) {
+    assert.doesNotMatch(command.title ?? "", /^Aboard:/, command.command);
+  }
+});
+
 test("reopening is always offered, and bulk fleet restoration no longer exists", async () => {
   const { contributes } = await manifest();
   // An ended conversation is always something the user may want back, so the
@@ -108,11 +115,12 @@ test("reopening is always offered, and bulk fleet restoration no longer exists",
 test("the auto-run card offers exactly the actions its state allows", async () => {
   const { contributes } = await manifest();
   const title = (contributes.menus["view/title"] ?? []).filter((entry) => (entry.when ?? "").includes("aboard.autoRun"));
-  const when = (command: string) => title.find((entry) => entry.command === command)?.when ?? "";
+  const inline = contributes.menus["view/item/context"] ?? [];
+  const action = (command: string) => inline.find((entry) => entry.command === command);
 
   // Start lives on the card itself as its inline action; repeating it in the
   // view title would only duplicate the button one row below.
-  const start = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.startAutoRun");
+  const start = action("aboard.startAutoRun");
   assert.match(start?.group ?? "", /^inline@/, "Start Auto Run must be the card's inline action");
   assert.equal(title.some((entry) => entry.command === "aboard.startAutoRun"), false, "Start Auto Run must not also sit in the view title");
 
@@ -123,19 +131,34 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
   // Resume appears only once validation has said the run may continue — never
   // while checking, and never when broken.
-  assert.match(when("aboard.resumeAutoRun"), /aboard\.autoRunCard == recoverable/);
+  const resume = action("aboard.resumeAutoRun");
+  assert.match(resume?.when ?? "", /aboard\.autoRun\.recoverable/);
+  assert.match(resume?.group ?? "", /^inline@1$/);
   for (const state of ["checking", "broken", "unsupported", "idle"]) {
-    assert.doesNotMatch(when("aboard.resumeAutoRun"), new RegExp(`== ${state}`), state);
+    assert.doesNotMatch(resume?.when ?? "", new RegExp(`aboard\\.autoRun\\.${state}`), state);
   }
   // Discard is the card's inline action, never a 3-dots menu entry: it is the
   // only command that menu would carry, and the inline button sits right below.
   assert.equal(title.some((entry) => entry.command === "aboard.discardAutoRun"), false, "Discard must not sit in the view title");
-  const discardInline = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === "aboard.discardAutoRun");
+  const discardInline = action("aboard.discardAutoRun");
   assert.match(discardInline?.group ?? "", /^inline@/, "Discard Auto Run must be the card's inline action");
   for (const state of ["recoverable", "broken", "unsupported"]) {
     assert.match(discardInline?.when ?? "", new RegExp(state), state);
   }
-  assert.match(when("aboard.stopAutoRun"), /active|waiting/);
+  const stop = action("aboard.stopAutoRun");
+  assert.match(stop?.when ?? "", /active|waiting/);
+  assert.equal(stop?.group, "inline@1");
+  assert.equal(title.some((entry) => entry.command === "aboard.stopAutoRun" || entry.command === "aboard.resumeAutoRun"), false,
+    "run controls must appear only once, on the state row");
+
+  const pullRequest = action("aboard.autoRun.openPullRequest");
+  const currentIssue = action("aboard.autoRun.openCurrentIssue");
+  assert.match(pullRequest?.when ?? "", /aboard\.autoRunHasPullRequest/);
+  assert.equal(pullRequest?.group, "inline@2");
+  assert.equal(currentIssue?.group, "inline@3");
+
+  const issueButtons = inline.filter((entry) => entry.command === "aboard.openIssue" && (entry.when ?? "").includes("aboard.autoRun.issue"));
+  assert.equal(issueButtons.length, 1, "each issue row must contribute one GitHub issue button");
 
   // The palette mirrors the same gating, so neither surface can offer a Start
   // the other refuses.

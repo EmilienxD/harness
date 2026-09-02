@@ -29,11 +29,13 @@
     "commands": [
       {
         "command": "aboard.newManager",
-        "title": "Aboard: New Manager"
+        "title": "New Manager",
+        "category": "Aboard"
       },
       {
         "command": "aboard.initializeProject",
-        "title": "Aboard: Initialize Project"
+        "title": "Initialize Project",
+        "category": "Aboard"
       },
       {
         "command": "aboard.updateProject",
@@ -42,113 +44,136 @@
       },
       {
         "command": "aboard.reviewPr",
-        "title": "Aboard: Review a Pull Request"
+        "title": "Review a Pull Request",
+        "category": "Aboard"
       },
       {
         "command": "aboard.reopenSession",
-        "title": "Aboard: Reopen a Session",
+        "title": "Reopen a Session",
+        "category": "Aboard",
         "icon": "$(history)"
       },
       {
         "command": "aboard.startAutoRun",
-        "title": "Aboard: Start Auto Run",
+        "title": "Start Auto Run",
+        "category": "Aboard",
         "icon": "$(play)"
       },
       {
         "command": "aboard.stopAutoRun",
-        "title": "Aboard: Stop Auto Run",
+        "title": "Stop Auto Run",
+        "category": "Aboard",
         "icon": "$(debug-stop)"
       },
       {
         "command": "aboard.continueAutoRun",
-        "title": "Aboard: Auto Run — Continue Now",
+        "title": "Auto Run — Continue Now",
+        "category": "Aboard",
         "icon": "$(debug-continue)"
       },
       {
         "command": "aboard.focusAgent",
-        "title": "Aboard: Focus Agent",
+        "title": "Focus Agent",
+        "category": "Aboard",
         "icon": "$(terminal)"
       },
       {
         "command": "aboard.killAgent",
-        "title": "Aboard: Kill Agent",
+        "title": "Kill Agent",
+        "category": "Aboard",
         "icon": "$(close)"
       },
       {
         "command": "aboard.forceReleaseLease",
-        "title": "Aboard: Force Release Write Lease"
+        "title": "Force Release Write Lease",
+        "category": "Aboard"
       },
       {
         "command": "aboard.focusFleet",
-        "title": "Aboard: Focus Fleet"
+        "title": "Focus Fleet",
+        "category": "Aboard"
       },
       {
         "command": "aboard.resumeAutoRun",
-        "title": "Aboard: Resume Auto Run",
+        "title": "Resume Auto Run",
+        "category": "Aboard",
         "icon": "$(debug-continue)"
       },
       {
         "command": "aboard.discardAutoRun",
-        "title": "Aboard: Discard Auto Run",
+        "title": "Discard Auto Run",
+        "category": "Aboard",
         "icon": "$(close)"
       },
       {
         "command": "aboard.autoRun.refresh",
-        "title": "Aboard: Auto Run — Check Now",
+        "title": "Auto Run — Check Now",
+        "category": "Aboard",
         "icon": "$(refresh)"
       },
       {
         "command": "aboard.autoRun.openCurrentIssue",
-        "title": "Aboard: Auto Run — Open Current Issue",
+        "title": "Auto Run — Open Current Issue",
+        "category": "Aboard",
         "icon": "$(issues)"
       },
       {
         "command": "aboard.autoRun.openPullRequest",
-        "title": "Aboard: Auto Run — Open Pull Request",
+        "title": "Auto Run — Open Pull Request",
+        "category": "Aboard",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "aboard.autoRun.focusImplementer",
-        "title": "Aboard: Auto Run — Focus Implementer",
+        "title": "Auto Run — Focus Implementer",
+        "category": "Aboard",
         "icon": "$(terminal)"
       },
       {
         "command": "aboard.openIssue",
-        "title": "Aboard: Open Issue",
+        "title": "Open Issue",
+        "category": "Aboard",
         "icon": "$(issues)"
       },
       {
         "command": "aboard.openPullRequest",
-        "title": "Aboard: Open Pull Request"
+        "title": "Open Pull Request",
+        "category": "Aboard"
       },
       {
         "command": "aboard.activity.openTerminal",
-        "title": "Aboard: Open Terminal",
+        "title": "Open Terminal",
+        "category": "Aboard",
         "icon": "$(terminal)"
       },
       {
         "command": "aboard.activity.openIssue",
-        "title": "Aboard: Open Issue",
+        "title": "Open Issue",
+        "category": "Aboard",
         "icon": "$(issues)"
       },
       {
         "command": "aboard.activity.openPullRequest",
-        "title": "Aboard: Open Pull Request",
+        "title": "Open Pull Request",
+        "category": "Aboard",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "aboard.activity.reopen",
-        "title": "Aboard: Reopen Session",
+        "title": "Reopen Session",
+        "category": "Aboard",
         "icon": "$(debug-continue)"
       },
       {
         "command": "aboard.activity.clear",
-        "title": "Aboard: Clear Recent Activity",
+        "title": "Clear Recent Activity",
+        "category": "Aboard",
         "icon": "$(clear-all)"
       },
       {
         "command": "aboard.clearBranches",
-        "title": "Aboard: Clear Remaining Branches",
+        "title": "Clear Remaining Branches",
+        "category": "Aboard",
         "icon": "$(trash)"
       }
     ],
@@ -222,16 +247,6 @@
           "command": "aboard.clearBranches",
           "when": "view == aboard.autoRun && !aboard.autoRunActive",
           "group": "navigation@2"
-        },
-        {
-          "command": "aboard.stopAutoRun",
-          "when": "view == aboard.autoRun && (aboard.autoRunCard == active || aboard.autoRunCard == waiting)",
-          "group": "1_run@1"
-        },
-        {
-          "command": "aboard.resumeAutoRun",
-          "when": "view == aboard.autoRun && aboard.autoRunCard == recoverable",
-          "group": "1_run@2"
         },
         {
           "command": "aboard.activity.clear",
@@ -361,23 +376,23 @@
         },
         {
           "command": "aboard.autoRun.openCurrentIssue",
-          "when": "viewItem == aboard.autoRun.active",
-          "group": "inline@1"
+          "when": "viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting",
+          "group": "inline@3"
         },
         {
           "command": "aboard.autoRun.openPullRequest",
-          "when": "viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting",
+          "when": "(viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting) && aboard.autoRunHasPullRequest",
           "group": "inline@2"
         },
         {
           "command": "aboard.autoRun.refresh",
           "when": "viewItem == aboard.autoRun.waiting",
-          "group": "inline@3"
+          "group": "inline@4"
         },
         {
           "command": "aboard.stopAutoRun",
           "when": "viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting",
-          "group": "inline@4"
+          "group": "inline@1"
         },
         {
           "command": "aboard.resumeAutoRun",

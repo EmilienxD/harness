@@ -130,7 +130,10 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   const publishAutoRunContext = async (): Promise<void> => {
     const card = autoRunCard(autoRunSources);
-    await commands.executeCommand("setContext", "aboard.autoRunCard", autoRunCardMenuState(card));
+    await Promise.all([
+      commands.executeCommand("setContext", "aboard.autoRunCard", autoRunCardMenuState(card)),
+      commands.executeCommand("setContext", "aboard.autoRunHasPullRequest", cardPullRequest(card, engine.state()) !== undefined),
+    ]);
   };
   const renderAutoRun = (): void => {
     // A frozen record supersedes the live forecast. Generation invalidation
@@ -212,10 +215,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       const issueNumber = issueNumberOf(value);
       if (issueNumber === undefined) return;
       const implementer = implementerFor(issueNumber);
-      if (implementer === undefined) {
-        void window.showInformationMessage(`No live implementer for #${issueNumber}.`);
-        return;
-      }
+      if (implementer === undefined) return;
       terminals.show(implementer.terminalId);
     }),
     commands.registerCommand("aboard.startAutoRun", async () => {
@@ -345,7 +345,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const render = () => {
     renderAutoRun();
     if (!isInitialized()) { status.hide(); return; }
-    const snapshot = renderFleetStatus(options.port() ?? 0, fleet, lease, (terminalId) => isTerminalOpen(terminalId));
+    const snapshot = renderFleetStatus(options.port() ?? 0, fleet, lease, (terminalId) => isTerminalOpen(terminalId), engine.state());
     status.text = snapshot.text;
     status.tooltip = snapshot.tooltip;
     status.show();
