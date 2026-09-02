@@ -161,7 +161,7 @@ test("the live forecast shows loading feedback, then the planned issues in execu
     "#36 Trim the cache",
   ]);
   assert.deepEqual(rows.map((row) => row.description), ["1/3 · afk", "2/3 · hitl", "3/3 · afk"]);
-  assert.deepEqual(rows.map((row) => row.icon), [undefined, undefined, undefined]);
+  assert.deepEqual(rows.map((row) => row.icon), ["circle-outline", "circle-outline", "circle-outline"]);
   assert.deepEqual(rows.map((row) => row.contextValue), [
     "aboard.autoRun.issue.forecast",
     "aboard.autoRun.issue.forecast",
@@ -438,7 +438,7 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
     "#36 Trim the cache",
   ]);
   assert.deepEqual(rows.map((row) => row.description), ["done · PR #56", "current · await-approval", "pending"]);
-  assert.deepEqual(rows.map((row) => row.icon), [undefined, undefined, undefined]);
+  assert.deepEqual(rows.map((row) => row.icon), ["pass", "sync~spin", "circle-outline"]);
   assert.deepEqual(rows.map((row) => row.contextValue), [
     "aboard.autoRun.issue.done",
     "aboard.autoRun.issue.current",

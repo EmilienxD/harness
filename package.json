@@ -416,22 +416,22 @@
         },
         {
           "command": "aboard.activity.openTerminal",
-          "when": "viewItem =~ /\\bterminal\\b/",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\bterminal\\b/",
           "group": "inline@1"
         },
         {
           "command": "aboard.activity.reopen",
-          "when": "viewItem =~ /\\breopen\\b/",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\breopen\\b/",
           "group": "inline@2"
         },
         {
           "command": "aboard.activity.openIssue",
-          "when": "viewItem =~ /\\bissue\\b/",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\bissue\\b/",
           "group": "inline@3"
         },
         {
           "command": "aboard.activity.openPullRequest",
-          "when": "viewItem =~ /\\bpr\\b/",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\bpr\\b/",
           "group": "inline@4"
         }
       ]

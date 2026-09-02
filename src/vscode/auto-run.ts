@@ -355,6 +355,7 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
   return {
     label: `#${issue.number} ${title}`,
     description: state,
+    icon: progress.state === "done" ? "pass" : progress.state === "current" ? "sync~spin" : "circle-outline",
     tooltip: [
       `Issue #${issue.number}`,
       `Disposition: ${issue.disposition}`,
@@ -378,6 +379,7 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
   return {
     label: `#${issue.number} ${issue.title}`,
     description: `${position}/${total} · ${issue.disposition}`,
+    icon: "circle-outline",
     tooltip: [
       `Issue #${issue.number}`,
       `Execution order: ${position} of ${total}`,

@@ -170,6 +170,10 @@ test("the auto-run card offers exactly the actions its state allows", async () =
 test("recent activity rows are offered only the actions their capabilities carry", async () => {
   const { contributes } = await manifest();
   const rows = (contributes.menus["view/item/context"] ?? []).filter((entry) => entry.command.startsWith("aboard.activity."));
+  for (const entry of rows) {
+    assert.match(entry.when ?? "", /^view == aboard\.recentActivity && /,
+      `${entry.command} must not leak into other views with matching row capabilities`);
+  }
   const when = (command: string) => rows.find((entry) => entry.command === command)?.when ?? "";
   assert.match(when("aboard.activity.openTerminal"), /terminal/);
   assert.match(when("aboard.activity.reopen"), /reopen/);
