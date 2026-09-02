@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, readdir } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import test from "node:test";
 
 import {
@@ -19,6 +19,7 @@ import {
   planLaunch,
   planManagerResume,
   planSessionResume,
+  promptSpillRoot,
   resolveLaunchConfiguration,
   type EffortLevel,
   type LaunchPlanRequest,
@@ -270,7 +271,7 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   // headline and a pointer at the spilled file.
   const stub = plan.args.at(-1)!;
   assert.ok(stub.includes("#47"));
-  assert.ok(stub.includes(`@${runtimeDir}/prompts/prompt.md`));
+  assert.ok(stub.includes(`@${plan.spill!.relativePath}`));
   assert.deepEqual(plan.args.slice(0, -1), [
     "--session-id",
     sessionId,
@@ -278,7 +279,7 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   ]);
   assert.ok(plan.commandLine.includes(`'${stub}'`));
   assert.equal(plan.promptDelivery, "spilled");
-  assert.equal(plan.spill?.relativePath, `${runtimeDir}/prompts/prompt.md`);
+  assert.equal(dirname(plan.spill!.relativePath).replaceAll("\\", "/"), `${promptSpillRoot(RUNTIME_ROOT).replaceAll("\\", "/")}/${agentId}`);
   assert.equal(plan.spill?.contents, `${prompt.text}\n`);
   assert.equal(plan.requiresWriteLease, true);
 });
@@ -937,7 +938,7 @@ test("spills what a shell cannot represent, per shell", () => {
     }),
   );
   const stub = plan.args.at(-1)!;
-  assert.ok(stub.includes(`@${runtimeDir}/prompts/prompt.md`));
+  assert.ok(stub.includes(`@${plan.spill!.relativePath}`));
   assert.equal(stub.includes("auth"), false);
 });
 
@@ -1124,9 +1125,15 @@ test("describes a plan without leaking prompt content", () => {
   );
 });
 
-test("writes spill files under private workspace storage", async () => {
+test("writes fresh temporary prompts for starts and resumes and cleans them up", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "aboard-spill-"));
   const runtimeRoot = join(root, "storage", "runtime");
+  const otherRuntimeRoot = join(root, "other-storage", "runtime");
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+    await rm(promptSpillRoot(runtimeRoot), { recursive: true, force: true });
+    await rm(promptSpillRoot(otherRuntimeRoot), { recursive: true, force: true });
+  });
   const store = new FileSystemPromptSpillStore(root, runtimeRoot, {
     settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
     script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
@@ -1135,13 +1142,49 @@ test("writes spill files under private workspace storage", async () => {
   assert.ok(plan.spill !== undefined);
 
   const path = await store.write(plan.spill);
-  assert.equal(path, join(runtimeRoot, "agents", agentId, "prompts", "prompt.md"));
+  assert.equal(dirname(path), join(promptSpillRoot(runtimeRoot), agentId));
+  assert.equal(relative(tmpdir(), path).startsWith(".."), false);
+  await assert.rejects(readdir(runtimeRoot), { code: "ENOENT" });
   assert.equal(await readFile(path, "utf8"), "line one\nline two\n");
 
   await assert.rejects(
     () => store.write({ ...plan.spill!, relativePath: join(root, "outside.md") }),
     (error: unknown) => error instanceof PromptSpillPathError,
   );
+  await assert.rejects(
+    () => store.write({ ...plan.spill!, agentId: "other-agent" as AgentId }),
+    (error: unknown) => error instanceof PromptSpillPathError,
+  );
+
+  // A session ending removes its prompt; another start recreates it from context.
+  await store.remove(agentId);
+  await assert.rejects(readFile(path), { code: "ENOENT" });
+  const restarted = planLaunch(request({ prompt: "line one\nline two", runtimeDirectory: runtimeRoot }));
+  assert.notEqual(restarted.spill!.relativePath, plan.spill.relativePath);
+  const restartedPath = await store.write(restarted.spill!);
+  assert.equal(await readFile(restartedPath, "utf8"), "line one\nline two\n");
+
+  const resumed = planSessionResume(request({ prompt: "continue\nwith context", runtimeDirectory: runtimeRoot }));
+  const resumedPath = await store.write(resumed.spill!);
+  assert.notEqual(resumedPath, restartedPath);
+  assert.ok(resumed.args.at(-1)!.includes(`@${resumed.spill!.relativePath}`));
+  assert.equal(await readFile(resumedPath, "utf8"), "continue\nwith context\n");
+
+  const otherStore = new FileSystemPromptSpillStore(root, otherRuntimeRoot, {
+    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+  });
+  const otherPlan = planLaunch(request({ prompt: "other workspace\ncontext", runtimeDirectory: otherRuntimeRoot }));
+  const otherPath = await otherStore.write(otherPlan.spill!);
+  await assert.rejects(store.write(otherPlan.spill!), PromptSpillPathError);
+
+  // Activation prunes abandoned temp files even without a runtime bundle.
+  await store.prune(new Set([agentId]));
+  assert.equal(await readFile(resumedPath, "utf8"), "continue\nwith context\n");
+  await store.prune(new Set());
+  await assert.rejects(readFile(resumedPath), { code: "ENOENT" });
+  await assert.rejects(readFile(restartedPath), { code: "ENOENT" });
+  assert.equal(await readFile(otherPath, "utf8"), "other workspace\ncontext\n");
 });
 
 test("runtime bundles give every launch done and reserve Manager commands for Manager", async () => {
@@ -1185,7 +1228,7 @@ test("derives write capability from the effective tool set", () => {
   assert.equal(deriveWriteCapability([]), "read-only");
 });
 
-test("a prompt under the inline threshold still spills when the command line would be too long", async () => {
+test("a prompt under the inline threshold still spills when the command line would be too long", async (t) => {
   // The threshold measures the prompt; the shell's limit applies to the whole
   // assembled line. A generous threshold must not be able to defeat it.
   const text = "Address issue #47. ".repeat(500);
@@ -1197,7 +1240,7 @@ test("a prompt under the inline threshold still spills when the command line wou
 
   assert.equal(plan.promptDelivery, "spilled");
   assert.ok(plan.commandLine.length <= MAX_COMMAND_LINE_CHARS.cmd, `command line was ${plan.commandLine.length} characters`);
-  assert.ok(plan.commandLine.includes(`@${runtimeDir}/prompts/prompt.md`));
+  assert.ok(plan.commandLine.includes(`@${plan.spill!.relativePath}`));
   assert.equal(plan.spill?.contents.trim(), text.trim());
 
   // The spilled file is what the agent actually reads, so it must round-trip.
@@ -1207,6 +1250,7 @@ test("a prompt under the inline threshold still spills when the command line wou
     script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
   });
   const path = await store.write(plan.spill!);
+  t.after(() => rm(path, { force: true }));
   assert.equal((await readFile(path, "utf8")).trim(), text.trim());
 });
 
@@ -1249,7 +1293,7 @@ test("a long prompt is spilled once and the stub keeps its headline when it fits
   assert.equal(plan.promptDelivery, "spilled");
   // The stub is the whole prompt argument; the body never reaches the line.
   assert.ok(!plan.commandLine.includes("x".repeat(100)));
-  assert.equal(plan.spill?.relativePath, `${runtimeDir}/prompts/prompt.md`);
+  assert.equal(dirname(plan.spill!.relativePath).replaceAll("\\", "/"), `${promptSpillRoot(RUNTIME_ROOT).replaceAll("\\", "/")}/${agentId}`);
 });
 
 // Permissions are the user's to manage: aboard never puts a permission flag on

@@ -136,7 +136,7 @@ export class ProcessAboardBranchRepository implements AboardBranchRepository {
   }
 
   private async statusAt(path: string, branch: string) {
-    const { stdout } = await execFileAsync("git", ["status", "--porcelain"], { cwd: path, encoding: "utf8", windowsHide: true });
+    const { stdout } = await execFileAsync("git", ["--no-optional-locks", "status", "--porcelain"], { cwd: path, encoding: "utf8", windowsHide: true });
     return { branch, path, dirtyPaths: stdout.split(/\r?\n/u).filter(Boolean).map((line) => line.slice(3).trim()), primary: resolve(path) === resolve(this.cwd) };
   }
 

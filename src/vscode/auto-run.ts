@@ -226,7 +226,8 @@ export class AutoRunTreeModel {
   }
 }
 
-function cardItem(card: AutoRunCard): AutoRunTreeItem {
+// The card reports state; its actions belong exclusively in the inline menu.
+function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: never } {
   switch (card.kind) {
     case "idle":
       return {
@@ -321,7 +322,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem {
         label: `Auto-run ${card.record.runId}`,
         description: `${describeOutcome(card.record)} · ${completedCount(card.record)}/${card.record.plan.length} done`,
         tooltip: `${runTooltip(card.record)}\n\nResume continues at the first unfinished step, using the settings this run started with.`,
-        icon: "debug-continue",
+        icon: card.record.outcome?.kind === "failed" ? "error" : card.record.outcome?.kind === "cancelled" ? "circle-slash" : "warning",
         contextValue: "aboard.autoRun.recoverable",
         collapsible: true,
       };

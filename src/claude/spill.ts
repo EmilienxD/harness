@@ -1,7 +1,7 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import type { LaunchPlan, RuntimeFile } from "./launch.js";
+import { promptSpillRoot, type LaunchPlan, type RuntimeFile } from "./launch.js";
 import { RuntimeAdmission } from "../runtime/admission.js";
 
 export interface PromptSpillStore {
@@ -22,12 +22,12 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
   ) {}
 
   public async write(file: RuntimeFile, root?: string): Promise<string> {
-    return this.admission.run(() => this.#write(file));
+    return this.admission.run(() => this.#write(file, this.#promptDirectory(file.agentId)));
   }
 
-  async #write(file: RuntimeFile): Promise<string> {
-    const path = this.#resolvePath(file.relativePath);
-    await mkdir(dirname(path), { recursive: true });
+  async #write(file: RuntimeFile, allowedRoot = this.runtimeRoot): Promise<string> {
+    const path = this.#resolvePath(file.relativePath, allowedRoot);
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     // Prompt bodies can carry issue content the user considers private.
     await writeFile(path, file.contents, { encoding: "utf8", mode: 0o600 });
     return path;
@@ -68,25 +68,36 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
   }
 
   public async remove(agentId: string): Promise<void> {
-    await rm(join(this.runtimeRoot, "agents", agentId), { recursive: true, force: true });
+    const promptDirectory = this.#promptDirectory(agentId);
+    await Promise.all([
+      rm(join(this.runtimeRoot, "agents", agentId), { recursive: true, force: true }),
+      rm(promptDirectory, { recursive: true, force: true }),
+    ]);
   }
 
   public async prune(retainedAgentIds: ReadonlySet<string>): Promise<void> {
-    let entries: readonly import("node:fs").Dirent[];
-    try { entries = await import("node:fs/promises").then(({ readdir }) => readdir(join(this.runtimeRoot, "agents"), { withFileTypes: true })); }
-    catch { return; }
-    await Promise.all(entries
-      .filter((entry) => entry.isDirectory() && !retainedAgentIds.has(entry.name))
-      .map((entry) => this.remove(entry.name)));
+    for (const root of [join(this.runtimeRoot, "agents"), promptSpillRoot(this.runtimeRoot)]) {
+      let entries: readonly import("node:fs").Dirent[];
+      try { entries = await readdir(root, { withFileTypes: true }); }
+      catch { continue; }
+      await Promise.all(entries
+        .filter((entry) => entry.isDirectory() && !retainedAgentIds.has(entry.name))
+        .map((entry) => this.remove(entry.name)));
+    }
   }
 
-  #resolvePath(candidate: string): string {
+  #promptDirectory(agentId: string): string {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(agentId)) throw new PromptSpillPathError("Invalid prompt agent id");
+    return join(promptSpillRoot(this.runtimeRoot), agentId);
+  }
+
+  #resolvePath(candidate: string, allowedRoot = this.runtimeRoot): string {
     if (!isAbsolute(candidate)) throw new PromptSpillPathError(`Runtime file path must be absolute: ${candidate}`);
-    const root = resolve(this.runtimeRoot);
+    const root = resolve(allowedRoot);
     const path = resolve(candidate);
     const offset = relative(root, path);
     if (offset === ".." || offset.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(offset)) {
-      throw new PromptSpillPathError(`Runtime file path escapes workspace storage: ${candidate}`);
+      throw new PromptSpillPathError(`Runtime file path escapes its storage directory: ${candidate}`);
     }
     return path;
   }

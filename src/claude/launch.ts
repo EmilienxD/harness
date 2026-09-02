@@ -17,7 +17,8 @@ import {
 } from "./prompts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 /** Planner-only fallback; production supplies VS Code's workspace storage root. */
@@ -367,12 +368,12 @@ export function requiresWriteLease(
 /** A file the plan needs on disk before its command line can run. */
 export interface RuntimeFile {
   readonly agentId: AgentId;
-  /** Workspace-relative, POSIX separators. */
+  /** Absolute path, with POSIX separators in generated plans. */
   readonly relativePath: string;
   readonly contents: string;
 }
 
-/** The relative path is the exact text after `@`, so it carries no whitespace. */
+/** The path is the exact text after `@`, so it carries no whitespace. */
 export type PromptSpillFile = RuntimeFile;
 
 export type AgentDefinitionFile = RuntimeFile;
@@ -531,9 +532,15 @@ function normalizePrompt(
   return resolved.text.trim().length === 0 ? undefined : normalizeGeneratedPrompt(resolved);
 }
 
-function spillRelativePath(runtimeDirectory: string, stem: string): string {
-  const directory = runtimeDirectory.replaceAll("\\", "/").replace(/\/+$/, "");
-  const path = `${directory}/prompts/${stem}.md`;
+/** Namespace temp prompts by workspace storage so cleanup cannot affect another project. */
+export function promptSpillRoot(runtimeDirectory: string): string {
+  const identity = createHash("sha256").update(resolve(runtimeDirectory)).digest("hex");
+  return join(tmpdir(), "aboard-prompts", identity);
+}
+
+function spillRelativePath(runtimeDirectory: string, agentId: AgentId, stem: string): string {
+  const directory = promptSpillRoot(runtimeDirectory).replaceAll("\\", "/");
+  const path = `${directory}/${agentId}/${stem}-${randomUUID()}.md`;
   // `@path` expansion has no quoting of its own, so the reference must not
   // contain whitespace even when the surrounding argument is quoted.
   if (/\s/.test(path)) {
@@ -620,7 +627,7 @@ function planPrompt(
     return { delivery: "inline", args: [text] };
   }
 
-  const relativePath = spillRelativePath(options.runtimeDirectory, options.stem);
+  const relativePath = spillRelativePath(options.runtimeDirectory, options.agentId, options.stem);
   const reference = `Your full task is in @${relativePath} — follow it.`;
   const withHeadline = `${prompt.headline} ${reference}`;
   const stub =
@@ -830,7 +837,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       agentId: request.agentId,
       shell: request.shell,
       threshold: promptThreshold,
-      runtimeDirectory: launchRuntimeDirectory,
+      runtimeDirectory,
       stem: "prompt",
     });
     const args = [...fixedArguments, ...plan.args];
@@ -952,7 +959,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       agentId: request.agentId,
       shell: request.shell,
       threshold: promptThreshold,
-      runtimeDirectory: launchRuntimeDirectory,
+      runtimeDirectory,
       stem: "continue",
     });
     const args = [...fixedArguments, ...promptPlan.args];

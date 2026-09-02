@@ -465,7 +465,7 @@
           "type": "integer",
           "default": 4000,
           "minimum": 0,
-          "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to private VS Code workspace storage and are referenced with @path."
+          "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to one-use files in the OS temporary directory and are referenced with @path."
         },
         "aboard.launch.effort": {
           "type": "string",

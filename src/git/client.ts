@@ -1,5 +1,6 @@
 
 import { execFile } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -156,7 +157,8 @@ export class ProcessGitClient implements GitClient {
   public async status(): Promise<GitStatus> {
     // Admission must see untracked/submodule changes even when personal Git
     // display settings normally hide them.
-    const output = await this.run(["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"]);
+    // Background observations must not refresh the index and contend with checkout.
+    const output = await this.run(["--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"]);
     const entries = output.split(/\r?\n/u).flatMap((line) => {
       if (line.trim().length === 0) return [];
       return [{ status: line.slice(0, 2).trim(), path: line.slice(3).trim() }];
@@ -270,11 +272,11 @@ export class ProcessGitClient implements GitClient {
   }
 
   public async checkout(branch: string): Promise<void> {
-    await this.run(["checkout", branch]);
+    await this.runCheckout(["checkout", branch]);
   }
 
   public async createBranch(branch: string, from: string): Promise<void> {
-    await this.run(["checkout", "-b", branch, from]);
+    await this.runCheckout(["checkout", "-b", branch, from]);
   }
 
   public async deleteBranch(branch: string): Promise<void> {
@@ -376,6 +378,27 @@ export class ProcessGitClient implements GitClient {
 
   public async removeWorktree(path: string, force: boolean): Promise<void> {
     await this.run(force ? ["worktree", "remove", "--force", path] : ["worktree", "remove", path]);
+  }
+
+  private async runCheckout(args: readonly string[]): Promise<void> {
+    const waits = [100, 200, 400, 800, 1_600];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.run(args);
+        return;
+      } catch (error) {
+        const details = error instanceof GitBoundaryError ? error.details : undefined;
+        const wait = waits[attempt];
+        // This failure occurs before checkout changes the tree or creates a
+        // branch. Retry only that refusal, never a partial checkout or hook
+        // failure, and leave the other process's lock alone.
+        if (wait === undefined || typeof details !== "object" || details === null
+          || !("exitCode" in details) || details.exitCode !== 128
+          || !("stderr" in details) || typeof details.stderr !== "string"
+          || !/^fatal: Unable to create '[^\r\n]*[/\\]index\.lock': File exists\.(?:\r?\n|$)/u.test(details.stderr)) throw error;
+        await delay(wait);
+      }
+    }
   }
 
   private async run(args: readonly string[]): Promise<string> {

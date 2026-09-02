@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { CachingGitClient, ProcessGitClient, dirtyPaths, isWorkingTreeClean, summarizeSourceFiles, type GitClient } from "../src/git/client.js";
+import { CachingGitClient, GitBoundaryError, ProcessGitClient, dirtyPaths, isWorkingTreeClean, summarizeSourceFiles, type GitClient } from "../src/git/client.js";
 
 const run = promisify(execFile);
 
@@ -47,6 +47,65 @@ test("clean-tree admission sees untracked files despite personal status settings
   const status = await new ProcessGitClient(root).status();
   assert.equal(isWorkingTreeClean(status), false);
   assert.deepEqual(dirtyPaths(status), ["new-directory/file.ts"]);
+});
+
+test("status observes file changes without writing the index's cached stat data", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  const index = join(root, ".git", "index");
+  const before = await readFile(index);
+  const changedTime = new Date("2020-01-01T00:00:00Z");
+  await utimes(join(root, "README.md"), changedTime, changedTime);
+  assert.equal(isWorkingTreeClean(await client.status()), true);
+  assert.deepEqual(await readFile(index), before);
+  await writeFile(join(root, "README.md"), "changed\n");
+  assert.equal(isWorkingTreeClean(await client.status()), false);
+  assert.deepEqual(await readFile(index), before);
+});
+
+for (const create of [false, true]) {
+  test(`${create ? "createBranch" : "checkout"} waits for a temporary index lock`, async () => {
+    const root = await repository();
+    const client = new ProcessGitClient(root);
+    const branch = "aboard/run/lock-test";
+    if (!create) await run("git", ["branch", branch], { cwd: root, windowsHide: true });
+    const lock = join(root, ".git", "index.lock");
+    await writeFile(lock, "held by another process");
+    const release = new Promise<void>((resolve, reject) => {
+      setTimeout(() => { unlink(lock).then(resolve, reject); }, 250);
+    });
+    await Promise.all([release, create ? client.createBranch(branch, "main") : client.checkout(branch)]);
+    assert.equal(await client.currentBranch(), branch);
+    assert.equal(isWorkingTreeClean(await client.status()), true);
+  });
+}
+
+test("a persistent index lock stops checkout without deleting the lock or creating a branch", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  const lock = join(root, ".git", "index.lock");
+  await writeFile(lock, "held by another process");
+  const branch = "aboard/run/locked";
+  await assert.rejects(client.createBranch(branch, "main"), (error: unknown) => {
+    assert.ok(error instanceof GitBoundaryError);
+    assert.equal(error.code, "command-failed");
+    assert.match(JSON.stringify(error.details), /index\.lock/);
+    return true;
+  });
+  assert.equal(await readFile(lock, "utf8"), "held by another process");
+  assert.equal(await client.currentBranch(), "main");
+  assert.equal(await client.branchExists(branch), false);
+});
+
+test("a failing post-checkout hook is not retried after the branch has changed", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  const hookDirectory = join(root, ".git", "hooks");
+  await run("git", ["config", "core.hooksPath", hookDirectory], { cwd: root, windowsHide: true });
+  await writeFile(join(hookDirectory, "post-checkout"), "#!/bin/sh\nprintf x >> .git/checkout-count\nexit 1\n", { mode: 0o755 });
+  await assert.rejects(client.createBranch("aboard/run/hook-failed", "main"), GitBoundaryError);
+  assert.equal(await client.currentBranch(), "aboard/run/hook-failed");
+  assert.equal(await readFile(join(root, ".git", "checkout-count"), "utf8"), "x");
 });
 
 test("createBranch, add, and commit leave the branch carrying the issue's commit", async () => {

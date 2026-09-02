@@ -368,14 +368,50 @@ test("Resume is absent while eligibility is still being computed", () => {
 test("a resumable run names how it ended and how far it got", () => {
   const cancelled = rootItem({ persisted: record({ outcome: { kind: "cancelled" } }), eligibility: { state: "resumable" } });
   assert.equal(cancelled.item.contextValue, "aboard.autoRun.recoverable");
+  assert.equal(cancelled.item.icon, "circle-slash");
   assert.match(cancelled.item.description, /stopped by you · 1\/3 done/);
 
   const failed = rootItem({ persisted: record({ outcome: { kind: "failed", reason: "push rejected" } }), eligibility: { state: "resumable" } });
   assert.match(failed.item.description, /failed — push rejected/);
+  assert.equal(failed.item.icon, "error");
+
+  const interrupted = rootItem({ persisted: record({ outcome: { kind: "interrupted" } }), eligibility: { state: "resumable" } });
+  assert.equal(interrupted.item.icon, "warning");
 
   // A record with no outcome is one whose host disappeared under it.
   const lost = rootItem({ persisted: record(), eligibility: { state: "resumable" } });
   assert.match(lost.item.description, /^interrupted/);
+  assert.equal(lost.item.icon, "warning");
+});
+
+test("every auto-run card is a status display with no row action", () => {
+  const cases: Parameters<typeof sources>[0][] = [
+    {},
+    { starting: true },
+    { forecast: forecast(undefined, { checking: true }) },
+    { forecast: forecast(preview()) },
+    { forecast: forecast(preview(), { checking: true }) },
+    { forecast: forecast(preview(), { stale: true }) },
+    { forecast: forecast(preview(), { error: "offline" }) },
+    { forecast: forecast(preview({ ready: false, blockers: ["dirty tree"] })) },
+    { forecast: forecast(preview({ ready: false, issues: [], emptyReason: "no issues" })) },
+    { forecast: forecast(undefined, { error: "offline" }) },
+    { persisted: record(), state: state() },
+    { persisted: record(), state: state({ waiting: true }) },
+    { persisted: record(), eligibility: { state: "checking" } },
+    { persisted: record(), eligibility: { state: "resumable" } },
+    { persisted: record({ outcome: { kind: "cancelled" } }), eligibility: { state: "resumable" } },
+    { persisted: record({ outcome: { kind: "interrupted" } }), eligibility: { state: "resumable" } },
+    { persisted: record({ outcome: { kind: "failed", reason: "push rejected" } }), eligibility: { state: "resumable" } },
+    { persisted: record(), eligibility: { state: "broken", reason: "branch moved" } },
+    { persisted: { version: 1, runId: "old", startedAt: "2026-01-01T00:00:00.000Z" } },
+  ];
+  const statusIcons = new Set(["tasklist", "loading~spin", "sync~spin", "person", "error", "warning", "circle-slash"]);
+  for (const input of cases) {
+    const { item } = rootItem(input);
+    assert.equal(item.command, undefined, item.contextValue);
+    assert.ok(statusIcons.has(item.icon!), item.contextValue);
+  }
 });
 
 test("a broken run shows the short reason and nothing to resume with", () => {
