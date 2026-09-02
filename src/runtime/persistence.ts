@@ -14,6 +14,7 @@ import {
 } from "../domain/run-plan.js";
 import type { ActivityDto } from "../domain/activity.js";
 import type { FleetPersistenceDto } from "../domain/fleet.js";
+import type { AgentId, SessionId } from "../domain/contracts.js";
 import { parseActivityDto, parseFleetPersistenceDto, parseLegacySessionLedger, type LegacySessionLedgerDto } from "../domain/validation.js";
 import { ISSUE_DIFFICULTIES, type IssueDifficulty } from "../shared/labels.js";
 import type { RuntimeAdmission } from "./admission.js";
@@ -324,6 +325,7 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
   const reviewedIssues = numbers(value.reviewedIssues);
   const targetHeadSha = fullSha(value.targetHeadSha);
   const unpublishedTargetCommits = positiveInteger(value.unpublishedTargetCommits);
+  const workerSession = isRecord(value.workerSession) ? value.workerSession : undefined;
   if (value.pendingAction !== undefined && pendingAction === undefined) return undefined;
   if (value.outcome !== undefined && outcome === undefined) return undefined;
   if (value.runPullRequest !== undefined && runPullRequest === undefined) return undefined;
@@ -332,6 +334,14 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
   if (value.unpublishedTargetCommits !== undefined && unpublishedTargetCommits === undefined) return undefined;
   if (reviewedIssues === undefined) return undefined;
   if (value.workspaceCreated !== undefined && value.workspaceCreated !== true) return undefined;
+  if (value.workerSession !== undefined && (
+    workerSession === undefined
+    || nonEmptyString(workerSession.agentId) === undefined
+    || nonEmptyString(workerSession.sessionId) === undefined
+    || (workerSession.type !== "implementer" && workerSession.type !== "pr-doctor-afk")
+    || positiveInteger(workerSession.issueNumber) === undefined
+    || (workerSession.continuable !== undefined && workerSession.continuable !== true)
+  )) return undefined;
   if (currentIssue !== undefined && (!issueNumbers.has(String(currentIssue)) || progress[String(currentIssue)]?.state !== "current")) return undefined;
   return {
     version: 2,
@@ -354,6 +364,13 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
     ...(pendingAction === undefined ? {} : { pendingAction }),
     ...(outcome === undefined ? {} : { outcome }),
     ...(value.workspaceCreated === true ? { workspaceCreated: true as const } : {}),
+    ...(workerSession === undefined ? {} : { workerSession: {
+      agentId: workerSession.agentId as AgentId,
+      sessionId: workerSession.sessionId as SessionId,
+      type: workerSession.type as "implementer" | "pr-doctor-afk",
+      issueNumber: workerSession.issueNumber as number,
+      ...(workerSession.continuable === true ? { continuable: true as const } : {}),
+    } }),
   };
 }
 

@@ -1,15 +1,16 @@
 import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type TreeDataProvider } from "vscode";
 
-import type { TerminalId } from "../domain/contracts.js";
+import type { AgentSession, TerminalId } from "../domain/contracts.js";
 
 import type { TerminalController } from "../claude/terminals.js";
+import { sessionIsResumable } from "../claude/sessions.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, LeaseSaveWarnings, registerFleetCommands, renderFleetStatus, type FleetTreeNode } from "./fleet.js";
 import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, cardRecord, type AutoRunNode, type AutoRunPreview, type AutoRunViewSources } from "./auto-run.js";
 import { ActivityTreeModel, canOpenActivityIssue, clearActivityWarning, type ActivityNode } from "./activity.js";
 import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
-import type { AutoRunEngine, AutoRunPreviewedStartResult } from "../auto/engine.js";
+import { continuationSessionFor, type AutoRunEngine, type AutoRunPreviewedStartResult } from "../auto/engine.js";
 import type { DiscardBehavior } from "../domain/run-cleanup.js";
 import { describeDiscard } from "../domain/run-cleanup.js";
 
@@ -245,7 +246,24 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
         void window.showWarningMessage(`aboard cannot resume that run: ${eligibility?.state === "broken" ? eligibility.reason : "its state is still being checked"}.`);
         return;
       }
-      const result = await engine.resume();
+      const persisted = engine.persisted();
+      const candidate = persisted?.version === 2 ? continuationSessionFor(persisted, fleet.list()) : undefined;
+      const cwd = candidate?.cwd ?? workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const canContinue = candidate !== undefined && cwd !== undefined
+        ? await sessionIsResumable(candidate.sessionId, cwd)
+        : false;
+      let continueSession: AgentSession | undefined;
+      if (candidate !== undefined && canContinue) {
+        const choice = await window.showInformationMessage(
+          `Restart the failed ${candidate.identity.type} for issue #${candidate.issueNumbers?.[0] ?? "?"} from the beginning, or continue its existing session from where it left off?`,
+          { modal: true },
+          "Restart",
+          "Continue",
+        );
+        if (choice === undefined) return;
+        if (choice === "Continue") continueSession = candidate;
+      }
+      const result = await engine.resume(continueSession === undefined ? {} : { continueSession });
       if (!result.started) void window.showErrorMessage(`aboard could not resume the run: ${result.reason}.`);
     }),
     commands.registerCommand("aboard.discardAutoRun", async () => {

@@ -210,6 +210,41 @@ test("restores a persisted worker with --resume, no new prompt, no focus, and no
   assert.equal(lease.current(), undefined);
 });
 
+test("continuing an auto-run worker resumes the same session with Continue and reacquires its lease", async () => {
+  const { fleet, host, coordinator, lease } = setup();
+  const workerId = agent("failed-auto-worker");
+  const sessionId = session("c15badb6-d6c8-45a6-a59f-e931cd364332");
+  fleet.register({
+    identity: { agentId: workerId, type: "implementer" },
+    sessionId,
+    terminal: { terminalId: terminal("old-terminal"), name: "aboard: address issue 19" },
+    lifecycle: { status: "starting", startedAt: at("2026-07-30T10:00:00.000Z") },
+    resultDelivery: { mode: "tool-result" },
+    telemetry,
+    issueNumbers: [19],
+    autoRunRestricted: true,
+  }, at("2026-07-30T10:00:30.000Z"));
+  fleet.transition(workerId, { status: "running", startedAt: at("2026-07-30T10:00:00.000Z") }, at("2026-07-30T10:00:00.000Z"));
+  coordinator.complete(workerId, {
+    outcome: "failed",
+    failure: { type: "context-exhausted", exitCode: 1, lastAssistantMessage: null },
+    telemetry,
+  });
+
+  const resumed = coordinator.resumeAutomated(fleet.get(workerId)!, "Continue");
+  for (let attempt = 0; attempt < 20 && host.created.length === 0; attempt += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(lease.current()?.agentId, workerId);
+  assert.match(host.created[0]?.terminal.sent.at(-1) ?? "", /--resume c15badb6/);
+  assert.match(host.created[0]?.terminal.sent.at(-1) ?? "", /Continue/);
+  coordinator.complete(workerId, success);
+  const outcome = await resumed;
+
+  assert.equal(outcome.agentId, workerId);
+  assert.equal(outcome.sessionId, sessionId);
+  assert.equal(outcome.result.outcome, "succeeded");
+  assert.equal(lease.current(), undefined);
+});
+
 test("restoring an attended mailbox session preserves who it still owes a report", async () => {
   const { fleet, coordinator } = setup();
   const workerId = agent("persisted-interactive");

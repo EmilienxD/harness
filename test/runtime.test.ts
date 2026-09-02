@@ -167,6 +167,19 @@ test("a version-2 record round-trips every discriminated state it can hold", asy
   assert.equal(await store.load(), undefined);
 });
 
+test("a failed worker session reference survives runtime parsing", () => {
+  const workerSession = {
+    agentId: "worker-19",
+    sessionId: "c15badb6-d6c8-45a6-a59f-e931cd364332",
+    type: "implementer",
+    issueNumber: 35,
+    continuable: true,
+  } as const;
+  const parsed = parseAutoRunRecord({ ...fixedPlanRecord(), workerSession });
+  assert.equal(parsed?.version, 2);
+  assert.deepEqual(parsed?.version === 2 ? parsed.workerSession : undefined, workerSession);
+});
+
 test("every pending-action and progress shape survives a round trip", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-autorun-actions-"));
   const store = new FileAutoRunStore(root);
@@ -214,6 +227,7 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, pendingAction: { kind: "push", branch: "aboard/run/return", sha: "short" } },
     { ...valid, progress: { ...valid.progress, "35": { state: "current", phase: "commit", headSha: "short" } } },
     { ...valid, outcome: { kind: "failed" } },
+    { ...valid, workerSession: { agentId: "worker-19", sessionId: "session", type: "implementer", issueNumber: 35, continuable: false } },
   ]) {
     assert.equal(parseAutoRunRecord(broken), undefined, JSON.stringify(broken));
   }

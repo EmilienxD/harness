@@ -72,7 +72,7 @@ export interface ReopenTarget {
   readonly type: Exclude<AgentType, "manager">;
   readonly sessionId: SessionId;
   /** Preserved only for a restored mailbox obligation; foreground callers do not survive a handoff. */
-  readonly resultDelivery?: Extract<AgentSession["resultDelivery"], { readonly mode: "mailbox" }>;
+  readonly resultDelivery?: AgentSession["resultDelivery"];
   /** The terminal name, already carrying aboard's own prefix. */
   readonly terminalName: string;
   readonly issueNumbers?: readonly number[];
@@ -87,6 +87,8 @@ export interface ReopenTarget {
   readonly prompt?: string;
   /** Ordinary reopen is attended; continuation derives this from the target role. */
   readonly attended?: boolean;
+  /** Reacquires the auto-run write lease before restoring an unattended worker. */
+  readonly origin?: LaunchOrigin;
 }
 
 export interface InteractiveLaunchHandles {
@@ -264,33 +266,41 @@ export class DelegationCoordinator {
     });
     await this.options.preflight?.(plan.command);
     const occurredAt = this.#timestamp();
-    await this.options.spills.prepare(plan, target.cwd);
-    if (plan.spill !== undefined) await this.options.spills.write(plan.spill, target.cwd);
-    if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
-    const existing = this.options.fleet.get(target.agentId);
-    if (existing !== undefined && (
-      existing.identity.type !== target.type
-      || existing.sessionId !== target.sessionId
-    )) {
-      throw new DelegationError(
-        "unknown-agent",
-        `Agent ${target.agentId} is registered to a different ${existing.identity.type} session`,
-      );
+    const origin = target.origin;
+    if (origin !== undefined && leaseRequired(origin, attended)) {
+      this.#acquire(plan.writeCapability, target.agentId, target.sessionId, occurredAt, leaseReason(origin));
     }
-    const resultDelivery = target.resultDelivery ?? { mode: "none" } as const;
-    const terminal = this.options.terminals.create({
-      agentId: target.agentId,
-      sessionId: target.sessionId,
-      agentType: target.type,
-      ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
-      name: target.terminalName,
-      ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
-      initialCommand: plan.commandLine,
-      attended,
-      ...(target.focus === undefined ? {} : { focus: target.focus }),
-      ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
-    });
+    let terminalStarted = false;
+    let startedTerminalId: AgentSession["terminal"]["terminalId"] | undefined;
     try {
+      await this.options.spills.prepare(plan, target.cwd);
+      if (plan.spill !== undefined) await this.options.spills.write(plan.spill, target.cwd);
+      if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
+      const existing = this.options.fleet.get(target.agentId);
+      if (existing !== undefined && (
+        existing.identity.type !== target.type
+        || existing.sessionId !== target.sessionId
+      )) {
+        throw new DelegationError(
+          "unknown-agent",
+          `Agent ${target.agentId} is registered to a different ${existing.identity.type} session`,
+        );
+      }
+      const resultDelivery = target.resultDelivery ?? { mode: "none" } as const;
+      const terminal = this.options.terminals.create({
+        agentId: target.agentId,
+        sessionId: target.sessionId,
+        agentType: target.type,
+        ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
+        name: target.terminalName,
+        ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
+        initialCommand: plan.commandLine,
+        attended,
+        ...(target.focus === undefined ? {} : { focus: target.focus }),
+        ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+      });
+      terminalStarted = true;
+      startedTerminalId = terminal.terminalId;
       const fleetTerminal = { terminalId: terminal.terminalId, name: terminal.name };
       if (existing === undefined) {
         this.options.fleet.register({
@@ -326,11 +336,56 @@ export class DelegationCoordinator {
         );
       }
       this.options.fleet.transition(target.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
+      return { agentId: target.agentId, sessionId: target.sessionId, terminalId: terminal.terminalId };
     } catch (error) {
-      try { this.options.terminals.kill(terminal.terminalId); } catch { /* already closed */ }
+      this.options.lease.release(target.agentId, occurredAt, "resume failed");
+      if (startedTerminalId !== undefined) {
+        try { this.options.terminals.kill(startedTerminalId); } catch { /* already closed */ }
+      }
+      if (!terminalStarted) await this.options.spills.remove?.(target.agentId).catch(() => undefined);
       throw error;
     }
-    return { agentId: target.agentId, sessionId: target.sessionId, terminalId: terminal.terminalId };
+  }
+
+  /** Restores one ended auto-run worker and waits for its next report. */
+  public async resumeAutomated(
+    session: AgentSession,
+    prompt: string,
+    difficulty?: IssueDifficulty,
+    signal?: AbortSignal,
+  ): Promise<AutomatedLaunchOutcome> {
+    if (session.autoRunRestricted !== true || !["completed", "failed"].includes(session.lifecycle.status)) {
+      throw new DelegationError("unresumable-session", `Agent ${session.identity.agentId} is not an ended auto-run session`);
+    }
+    // The first automated wait receives the result directly from `complete`;
+    // discard its retained blocking copy before waiting for the continuation.
+    this.options.fleet.takeBlockingResult(session.identity.agentId, this.#timestamp());
+    const launched = await this.reopen({
+      agentId: session.identity.agentId,
+      type: session.identity.type as Exclude<AgentType, "manager">,
+      sessionId: session.sessionId,
+      terminalName: session.terminal.name,
+      ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
+      ...(difficulty === undefined ? {} : { difficulty }),
+      ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
+      ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      autoRunRestricted: true,
+      prompt,
+      attended: false,
+      resultDelivery: { mode: "tool-result" },
+      origin: "auto-run",
+    });
+    const stopWorker = (): void => {
+      try { this.options.terminals.kill(launched.terminalId); } catch { /* terminal already settled */ }
+    };
+    if (signal?.aborted) stopWorker();
+    else signal?.addEventListener("abort", stopWorker, { once: true });
+    try {
+      const result = await this.#waitForResult(launched.agentId);
+      return { ...launched, result };
+    } finally {
+      signal?.removeEventListener("abort", stopWorker);
+    }
   }
 
   public async spawn(input: DelegationLaunchInput, recipientAgentId = this.options.managerAgentId()): Promise<unknown> {

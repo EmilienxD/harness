@@ -1,4 +1,5 @@
 
+import type { AgentId, SessionId } from "./contracts.js";
 import { LABEL_CHROME, hasLabel, issueDifficulty, issueDisposition, type IssueDifficulty } from "../shared/labels.js";
 import {
   branchName,
@@ -137,6 +138,15 @@ export interface AutoRunRecord {
   readonly outcome?: RunAttemptOutcome;
   /** Set once the run's own checkout has actually been created. */
   readonly workspaceCreated?: true;
+  /** The most recent blocking worker, retained only so recovery can offer its exact conversation. */
+  readonly workerSession?: {
+    readonly agentId: AgentId;
+    readonly sessionId: SessionId;
+    readonly type: "implementer" | "pr-doctor-afk";
+    readonly issueNumber: number;
+    /** The worker itself failed or returned an unusable completion, rather than a later phase failing. */
+    readonly continuable?: true;
+  };
 }
 
 export type RecoveryEligibility =

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AutoRunEngine, type AutoRunGitHub, type AutoRunLauncher, type AutoRunState } from "../src/auto/engine.js";
+import { AutoRunEngine, continuationSessionFor, type AutoRunGitHub, type AutoRunLauncher, type AutoRunState } from "../src/auto/engine.js";
 import type { AutoRunSettings } from "../src/domain/auto-run.js";
 import type { AutoRunRecord } from "../src/domain/run-plan.js";
-import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
+import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import type { LaunchOrigin } from "../src/domain/lease.js";
 import { GitBoundaryError, type GitClient, type GitStatus } from "../src/git/client.js";
 import type { RunWorkspaceOutcome, RunWorkspaceProvider } from "../src/auto/worktree.js";
@@ -38,6 +38,7 @@ interface Harness {
   /** Every merge the engine asked for, and whether it asked to delete the branch. */
   readonly merges: { readonly pr: number; readonly deleteBranch: boolean }[];
   readonly launches: DelegationLaunchInput[];
+  readonly continuations: { readonly session: AgentSession; readonly prompt: string }[];
   readonly closedTerminals: TerminalId[];
   /** Origins the engine declared for its handed-off launches; they decide the lease. */
   readonly interactiveOrigins: LaunchOrigin[];
@@ -174,6 +175,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const closures: { issue: number; body: string }[] = [];
   const merges: { pr: number; deleteBranch: boolean }[] = [];
   const launches: DelegationLaunchInput[] = [];
+  const continuations: { session: AgentSession; prompt: string }[] = [];
   const closedTerminals: TerminalId[] = [];
   const interactiveOrigins: LaunchOrigin[] = [];
   const gitCalls: string[] = [];
@@ -474,6 +476,21 @@ function harness(options: HarnessOptions = {}): Harness {
             },
       };
     },
+    resumeAutomated: async (session, prompt) => {
+      continuations.push({ session, prompt });
+      dirty = true;
+      return {
+        agentId: session.identity.agentId,
+        sessionId: session.sessionId,
+        terminalId: "terminal-continued" as TerminalId,
+        result: {
+          outcome: "succeeded",
+          exitCode: 0,
+          lastAssistantMessage: "Finished the issue.\n\n<commit>Complete requested change</commit>",
+          telemetry: telemetry(),
+        },
+      };
+    },
     launchInteractive: async (input, origin) => {
       launches.push(input);
       interactiveOrigins.push(origin);
@@ -571,6 +588,7 @@ function harness(options: HarnessOptions = {}): Harness {
     merges,
     createdPullRequests,
     launches,
+    continuations,
     closedTerminals,
     interactiveOrigins,
     gitCalls,
@@ -1372,6 +1390,41 @@ test("partial work without a commit marker stops and a resume sends it to a fres
   await context.engine.settle();
   assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 2);
   assert.equal(context.gitCalls.includes("commit"), false);
+});
+
+test("a failed run can continue its exact ended worker with one Continue message", async () => {
+  const context = harness({ implementerMessage: "Implemented half, but dependency installation is blocked." });
+  await context.engine.start();
+  await context.engine.settle();
+
+  const reference = context.record()?.workerSession;
+  assert.ok(reference);
+  const session: AgentSession = {
+    identity: { agentId: reference.agentId, type: reference.type },
+    sessionId: reference.sessionId,
+    terminal: { terminalId: "terminal-1" as TerminalId, name: "aboard: address issue 34" },
+    lifecycle: {
+      status: "completed",
+      startedAt: "2026-01-01T00:00:00.000Z" as IsoTimestamp,
+      finishedAt: "2026-01-01T00:01:00.000Z" as IsoTimestamp,
+      exitCode: 0,
+      lastAssistantMessage: "Implemented half, but dependency installation is blocked.",
+    },
+    resultDelivery: { mode: "tool-result" },
+    telemetry: telemetry(),
+    issueNumbers: [34],
+    autoRunRestricted: true,
+  };
+  assert.equal(continuationSessionFor(context.record()!, [session]), session);
+
+  assert.equal((await context.engine.resume({ continueSession: session })).started, true);
+  await context.engine.settle();
+
+  assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1, "no fresh worker was launched");
+  assert.equal(context.continuations.length, 1);
+  assert.equal(context.continuations[0]?.session, session);
+  assert.equal(context.continuations[0]?.prompt, "Continue");
+  assert.equal(context.gitCalls.includes("commit"), true);
 });
 
 test("a run with its own checkout works there, launches there, and never moves the user's HEAD", async () => {

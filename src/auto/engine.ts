@@ -42,7 +42,7 @@ import {
 import { isUnsupportedRecord, UNSUPPORTED_RECORD_REASON } from "../domain/run-plan.js";
 import { DIRTY_RECOVERY_SENTENCE, hasTrustedDirtyWork, validateRun, type RunObservations } from "../domain/run-validation.js";
 import { planDiscard, type DiscardBehavior, type DiscardPlan, type DiscardResult } from "../domain/run-cleanup.js";
-import type { AgentId, SessionId, TerminalId } from "../domain/contracts.js";
+import type { AgentId, AgentSession, SessionId, TerminalId } from "../domain/contracts.js";
 import type { LaunchOrigin } from "../domain/lease.js";
 import { GitBoundaryError, type GitClient, type GitStatus } from "../git/client.js";
 import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles, LaunchIsolation } from "../bridge/delegation.js";
@@ -86,6 +86,7 @@ export interface AutoRunGitHub {
 
 export interface AutoRunLauncher {
   runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome>;
+  resumeAutomated?(session: AgentSession, prompt: string, difficulty?: IssueDifficulty, signal?: AbortSignal): Promise<AutomatedLaunchOutcome>;
   launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles>;
 }
 
@@ -223,6 +224,7 @@ export class AutoRunEngine {
   readonly #runId: () => string;
   readonly #sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly #exists: (path: string) => boolean;
+  #continuedSession: AgentSession | undefined;
 
   public constructor(private readonly options: AutoRunEngineOptions) {
     this.#now = options.now ?? (() => new Date());
@@ -591,7 +593,7 @@ export class AutoRunEngine {
     return found;
   }
 
-  public async resume(): Promise<AutoRunStartResult> {
+  public async resume(options: { readonly continueSession?: AgentSession } = {}): Promise<AutoRunStartResult> {
     if (this.#state !== undefined) return { started: false, reason: "a run is already active", active: this.#state };
     const eligibility = await this.refresh();
     const persisted = this.#persisted;
@@ -599,6 +601,15 @@ export class AutoRunEngine {
     if (isUnsupportedRecord(persisted)) return { started: false, reason: UNSUPPORTED_RECORD_REASON };
     if (eligibility?.state !== "resumable") {
       return { started: false, reason: eligibility?.state === "broken" ? eligibility.reason : "the run's state is still being checked" };
+    }
+    if (options.continueSession !== undefined) {
+      const candidate = continuationSessionFor(persisted, [options.continueSession]);
+      if (candidate === undefined || this.options.launcher.resumeAutomated === undefined) {
+        return { started: false, reason: "the failed agent session is no longer available to continue" };
+      }
+      this.#continuedSession = candidate;
+    } else {
+      this.#continuedSession = undefined;
     }
     const { outcome: _previous, ...rest } = persisted;
     const record: AutoRunRecord = { ...rest, attempt: persisted.attempt + 1 };
@@ -1425,7 +1436,10 @@ export class AutoRunEngine {
 
   async #implement(issue: FrozenIssue, signal: AbortSignal): Promise<ImplementerCompletion> {
     const workingBranch = this.#current.settings.branchMode === "single-branch" ? this.#current.sessionBranch : issue.branch;
-    const outcome = await this.options.launcher.runAutomated({
+    const continued = this.#takeContinuation("implementer", issue.number);
+    const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
+      ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
+      : await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
       recursiveIssueReferences: this.#current.settings.recursiveIssueReferences,
@@ -1436,17 +1450,23 @@ export class AutoRunEngine {
       ...(await this.#guidance(issue)),
       expectsUncommittedTree: true,
       ...this.#isolation(),
-    }, signal);
+      }, signal);
     this.#openTerminals.add(outcome.terminalId);
+    await this.#remember(issue, outcome, "implementer");
     if (signal.aborted) {
       this.#closeSettledTerminal(outcome.terminalId);
       throw new AutomatedWorkerCancelled();
     }
-    if (outcome.result.outcome === "failed") throw new Error(`implementer failed: ${outcome.result.failure.type}`);
-    this.#remember(issue, outcome, "implementer");
+    if (outcome.result.outcome === "failed") {
+      await this.#markWorkerContinuable();
+      throw new Error(`implementer failed: ${outcome.result.failure.type}`);
+    }
     await this.#validate();
     const parsed = parseImplementerCompletion(outcome.result.lastAssistantMessage);
-    if (!parsed.accepted) throw new Error(parsed.reason);
+    if (!parsed.accepted) {
+      await this.#markWorkerContinuable();
+      throw new Error(parsed.reason);
+    }
     this.#closeSettledTerminal(outcome.terminalId);
     return parsed.completion;
   }
@@ -1555,7 +1575,10 @@ export class AutoRunEngine {
       this.#owners.set(prNumber, { prNumber, ...handles, type: "pr-doctor-hitl", issueNumber: issue.number, ...this.#difficulty(issue), ...this.#ownerCwd() });
       return;
     }
-    const outcome = await this.options.launcher.runAutomated({
+    const continued = this.#takeContinuation("pr-doctor-afk", issue.number);
+    const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
+      ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
+      : await this.options.launcher.runAutomated({
       type: "pr-doctor-afk",
       issues: [issue.number],
       pullRequest: prNumber,
@@ -1564,14 +1587,17 @@ export class AutoRunEngine {
       expectsUncommittedTree: true,
       ...this.#difficulty(issue),
       ...this.#isolation(),
-    }, signal);
+      }, signal);
     this.#openTerminals.add(outcome.terminalId);
+    await this.#remember(issue, outcome, "pr-doctor-afk");
     if (signal.aborted) {
       this.#closeSettledTerminal(outcome.terminalId);
       throw new AutomatedWorkerCancelled();
     }
-    if (outcome.result.outcome === "failed") throw new Error(`pr-doctor-afk failed: ${outcome.result.failure.type}`);
-    this.#remember(issue, outcome, "pr-doctor-afk");
+    if (outcome.result.outcome === "failed") {
+      await this.#markWorkerContinuable();
+      throw new Error(`pr-doctor-afk failed: ${outcome.result.failure.type}`);
+    }
 
     await this.#validate();
     const status = await this.#git.status();
@@ -1920,7 +1946,7 @@ export class AutoRunEngine {
     }
   }
 
-  #remember(issue: FrozenIssue, outcome: AutomatedLaunchOutcome, type: PullRequestOwner["type"]): void {
+  async #remember(issue: FrozenIssue, outcome: AutomatedLaunchOutcome, type: "implementer" | "pr-doctor-afk"): Promise<void> {
     this.#pending.set(issue.number, {
       agentId: outcome.agentId,
       sessionId: outcome.sessionId,
@@ -1929,7 +1955,26 @@ export class AutoRunEngine {
       ...this.#difficulty(issue),
       ...this.#ownerCwd(),
     });
+    await this.#save({ ...this.#current, workerSession: {
+      agentId: outcome.agentId,
+      sessionId: outcome.sessionId,
+      type,
+      issueNumber: issue.number,
+    } });
     this.#attach(issue.number, this.#prForIssue(issue.number));
+  }
+
+  #takeContinuation(type: "implementer" | "pr-doctor-afk", issueNumber: number): AgentSession | undefined {
+    const session = this.#continuedSession;
+    if (session?.identity.type !== type || session.issueNumbers?.includes(issueNumber) !== true) return undefined;
+    this.#continuedSession = undefined;
+    return session;
+  }
+
+  async #markWorkerContinuable(): Promise<void> {
+    const workerSession = this.#current.workerSession;
+    if (workerSession === undefined || workerSession.continuable === true) return;
+    await this.#save({ ...this.#current, workerSession: { ...workerSession, continuable: true } });
   }
 
   #attach(issueNumber: number, prNumber: number | undefined): void {
@@ -1997,6 +2042,29 @@ export function eligibilityFor(record: AutoRunRecord, observations: RunObservati
 /** Whether a fresh worker on this issue needs the recovery sentence. */
 export function needsDirtyRecoveryPrompt(record: AutoRunRecord, observations: RunObservations): boolean {
   return hasTrustedDirtyWork(record, observations);
+}
+
+/** Finds the exact ended worker recorded by a failed run, if it is still in the fleet. */
+export function continuationSessionFor(
+  record: AutoRunRecord,
+  sessions: readonly AgentSession[],
+): AgentSession | undefined {
+  if (record.outcome?.kind !== "failed" || record.workerSession?.continuable !== true || record.currentIssue === undefined) return undefined;
+  const progress = issueProgress(record, record.currentIssue);
+  if (progress.state !== "current") return undefined;
+  const expectedType = progress.phase === "implement"
+    ? "implementer"
+    : progress.phase === "review" ? "pr-doctor-afk" : undefined;
+  if (expectedType === undefined || record.workerSession.type !== expectedType || record.workerSession.issueNumber !== record.currentIssue) return undefined;
+  return sessions.find((session) =>
+    session.identity.agentId === record.workerSession?.agentId
+    && session.sessionId === record.workerSession.sessionId
+    && session.identity.type === expectedType
+    && session.autoRunRestricted === true
+    && (session.lifecycle.status === "completed" || session.lifecycle.status === "failed")
+    && session.issueNumbers?.includes(record.currentIssue!) === true
+    && session.cwd === record.settings.workspaceRoot
+  );
 }
 
 function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> {
