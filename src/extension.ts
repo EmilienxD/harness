@@ -46,6 +46,7 @@ import { registerReopenCommand } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, DelegationError, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { ABOARD_MCP_TOOL_PATTERN, createMcpHandler } from "./bridge/mcp.js";
+import { GeneralPurposeQueue } from "./bridge/general-purpose-queue.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
 import {
   ManagerBriefings,
@@ -689,6 +690,25 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }),
   });
   const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
+  const generalPurposeQueue = new GeneralPurposeQueue({
+    git,
+    launcher: coordinator,
+    canLaunch: () => initialized && autoRun.state() === undefined,
+    isAgentLive: (agentId) => {
+      const session = fleet.get(agentId);
+      return session !== undefined && isLiveSession(session);
+    },
+    onLaunch: (agentId, remaining) => {
+      const message = `Queued general-purpose task launched as agent ${agentId}${remaining === 0 ? "." : `; ${remaining} task(s) remain queued.`}`;
+      output.appendLine(message);
+      const managerAgentId = managerIdentity.current();
+      if (managerAgentId !== undefined && fleet.get(managerAgentId)?.identity.type === "manager") {
+        fleet.enqueueNotification(managerAgentId, message, new Date().toISOString() as IsoTimestamp);
+      }
+    },
+    onError: (message) => output.appendLine(`General-purpose queue is waiting: ${message}.`),
+  });
+  context.subscriptions.push({ dispose: () => generalPurposeQueue.dispose() });
   const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
     startAutoRun: (options) => options?.dry === true
       ? autoRun.dryRun({
@@ -699,7 +719,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         }),
     reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
     reopenSession: (selector) => reopen.reopenLatest(selector),
-  }, terminals, roadmapReminders);
+  }, terminals, roadmapReminders, generalPurposeQueue);
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);
   commandEndpointRegistry = commandEndpoint;
@@ -893,6 +913,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (initialized && !next) {
       initialized = false;
       const runtimeDrained = runtimeAdmission.close();
+      generalPurposeQueue.clear();
       const reason = scaffoldState === "uninitialized" ? "project state was removed" : "project assets became incompatible";
       autoRun.stop(reason);
       await autoRun.settle();

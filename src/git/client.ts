@@ -154,7 +154,9 @@ export class ProcessGitClient implements GitClient {
   }
 
   public async status(): Promise<GitStatus> {
-    const output = await this.run(["status", "--porcelain"]);
+    // Admission must see untracked/submodule changes even when personal Git
+    // display settings normally hide them.
+    const output = await this.run(["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"]);
     const entries = output.split(/\r?\n/u).flatMap((line) => {
       if (line.trim().length === 0) return [];
       return [{ status: line.slice(0, 2).trim(), path: line.slice(3).trim() }];

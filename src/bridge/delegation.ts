@@ -203,6 +203,11 @@ export class DelegationCoordinator {
     return this.#launch(input, { mode: "none" }, origin, true);
   }
 
+  /** Starts a prompted, unattended session without making the Manager wait for a report. */
+  public async launchQueued(input: DelegationLaunchInput, beforeTerminal?: () => Promise<void>): Promise<InteractiveLaunchHandles> {
+    return this.#launch(input, { mode: "none" }, "manager", false, beforeTerminal);
+  }
+
   /** Reopens a persisted active worker after the extension host restarted. */
   public async resumePersisted(session: AgentSession): Promise<InteractiveLaunchHandles> {
     if (session.identity.type === "manager") {
@@ -469,7 +474,7 @@ export class DelegationCoordinator {
     return result;
   }
 
-  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean): Promise<{
+  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, beforeTerminal?: () => Promise<void>): Promise<{
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
     readonly terminalId: AgentSession["terminal"]["terminalId"];
@@ -513,6 +518,9 @@ export class DelegationCoordinator {
     try {
       await this.options.spills.prepare(plan, cwd);
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill, cwd);
+      // Queue admission is rechecked after potentially slow launch preparation,
+      // while holding the write lease, immediately before opening the terminal.
+      await beforeTerminal?.();
       if (this.options.admission?.() === false) throw new Error("aboard runtime is not initialized");
       const terminal = this.options.terminals.create({
         agentId,

@@ -1089,6 +1089,36 @@ test("builtin types run unattended: foreground blocks, and read-only Explore run
   assert.equal(lease.current(), undefined);
 });
 
+test("a queued launch receives its prompt without making the Manager wait for a report", async () => {
+  const { coordinator, fleet, lease, host } = setup();
+  const launched = await coordinator.launchQueued({
+    type: "general-purpose",
+    prompt: "fix the retry bug and commit the result",
+    description: "queued retry bug fix",
+  });
+  const session = fleet.get(launched.agentId)!;
+
+  assert.equal(session.identity.type, "general-purpose");
+  assert.equal(session.attended, undefined);
+  assert.deepEqual(session.resultDelivery, { mode: "none" });
+  assert.equal(lease.current()?.agentId, launched.agentId);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /fix the retry bug and commit the result/u);
+});
+
+test("queue admission is checked under the lease immediately before terminal creation", async () => {
+  const { coordinator, lease, host, fleet } = setup();
+  await assert.rejects(coordinator.launchQueued({
+    type: "general-purpose", prompt: "work", description: "queued general purpose task",
+  }, async () => {
+    assert.ok(lease.current());
+    assert.equal(host.created.length, 0);
+    throw new Error("tree became dirty");
+  }), /tree became dirty/);
+  assert.equal(host.created.length, 0);
+  assert.equal(fleet.list().length, 1, "only the Manager remains");
+  assert.equal(lease.current(), undefined);
+});
+
 test("background general-purpose runs attended, focused, and reports only through /done", async () => {
   const { launch, host } = setup();
   const launched = await launch({ type: "general-purpose", description: "browse the auth flow", interactive: true, run_in_background: true });

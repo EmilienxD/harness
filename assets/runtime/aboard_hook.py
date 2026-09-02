@@ -43,9 +43,10 @@ BLOCKING_ROUTE: str = "manager-prompt"
 WORKER_AGENT_TYPES: frozenset[str] = frozenset({"webresearcher", "implementer", "pr-doctor-afk", "Explore"})
 
 # Commands the bridge handles itself. `/done` is available in every aboard
-# terminal; the remaining commands belong only to the Manager. These expressions
+# terminal; the remaining commands belong only to the Manager. `/queue` also
+# requires a Manager because its admission and sequencing live there. These expressions
 # match the bridge-side parsers.
-MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|prototype|done|auto|review-pr|reopen)(?:\s[\s\S]*)?$")
+MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|queue|prototype|done|auto|review-pr|reopen)(?:\s[\s\S]*)?$")
 SESSION_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(done|prototype)(?:\s[\s\S]*)?$")
 
 # Leads every roadmap injection the bridge emits, on the session-start briefing

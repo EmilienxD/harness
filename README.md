@@ -55,6 +55,7 @@ Then try one of these in the Manager terminal:
 | :-- | :-- |
 | `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
 | `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet |
+| `/queue Fix the parser and commit the change` | Queue a prompted general-purpose session; later tasks wait for the prior task to finish, a new commit, and a completely clean working tree |
 | `/prototype Try the parser API` | A user-driven prototyper opens, follows the project's prototype-location convention (or asks you where to write), and reports back here when you run `/done` |
 | `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, address, commit, PR, merge — one issue at a time, onto a branch of the run's own |
 | `/auto --dry` | Read-only forecast: show the issues found, their dependency-aware order and branches, settings-driven review/merge behavior, blockers, and every point where you will need to act |
@@ -66,6 +67,8 @@ Then try one of these in the Manager terminal:
 When a session delegates work, its Stop hook waits so the result can arrive without another prompt. Press **Escape** whenever you want the terminal back before that work finishes. Escape cancels only the wait: the eventual report stays queued and is delivered by the next hook that fires.
 
 aboard does not choose or hide a prototype location. The prototyper uses a dedicated scratch, temporary, playground, spike, experiment, demo, or prototype location established by project instructions or architecture; if the project defines none, it asks before writing code. That location may be tracked or ignored, so the user controls whether the work is committed. This is a prompt-level working convention, not a security sandbox: the prototyper's shell can still reach the project. `/done` uses the last complete assistant message aboard observed; if the final turn ended abnormally before its Stop hook ran, that fallback can be older than the terminal's last visible output, so pass explicit report text when that distinction matters.
+
+`/queue <message>` is a lightweight FIFO, separate from auto-run. Enter it repeatedly in the Manager terminal to supply separate tasks. Every task gets a fresh, visible default Claude session in this checkout; aboard does not create or switch branches, commit, push, or open a PR for it. The first task waits for a clean Git tree (including staged, unstaged, and untracked files; ignored files are excluded). Later tasks also require the preceding task to finish and `HEAD` to advance to a new descendant commit; several commits count, but an unchanged or rewound `HEAD` does not. If a task makes no commit, the queue keeps waiting. Queued tasks respect the write lease and wait while auto-run is active. They do not hold the Manager's Stop hook open, so you can keep submitting messages. Pending prompts live only in memory and are cleared on extension reload or project reset; re-enter them afterwards. Existing `/general-purpose` behavior is unchanged.
 
 ## The auto-run, honestly
 

@@ -6,6 +6,7 @@ import type { AutoRunDryRunResult } from "../domain/auto-run.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 import { describeReopenOutcome, type ReopenOutcome } from "../claude/reopen.js";
 import type { DelegationLaunchInput } from "./delegation.js";
+import type { GeneralPurposeQueue, GeneralPurposeQueueOutcome } from "./general-purpose-queue.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 
 export const HOOK_OUTPUT_LIMIT = 10_000;
@@ -447,6 +448,7 @@ export class ManagerPromptService {
     private readonly actions?: ManagerCommandActions,
     private readonly terminals?: InvokingTerminalKiller,
     private readonly reminders?: RoadmapReminderService,
+    private readonly generalPurposeQueue?: Pick<GeneralPurposeQueue, "enqueue">,
   ) {
     this.#now = now ?? (() => new Date());
   }
@@ -460,6 +462,8 @@ export class ManagerPromptService {
     // must not widen Manager-owned commands merely because a non-Manager has a
     // queued report and therefore pays the prompt-hook round trip.
     const managerCaller = this.fleet.get(agentId)?.identity.type === "manager";
+    const queued = managerCaller ? parseQueuedGeneralPurposeCommand(prompt) : undefined;
+    if (queued !== undefined) return this.#queueGeneralPurpose(queued.prompt);
     const action = managerCaller ? parseActionCommand(prompt) : undefined;
     if (action !== undefined) return this.#runAction(agentId, action);
     const command = managerCaller ? parseInteractiveCommand(prompt) : undefined;
@@ -507,6 +511,16 @@ export class ManagerPromptService {
         ? `${opened} It takes no arguments, so the text you typed after /${command.command} was not sent; type it in the new terminal.`
         : opened,
     };
+  }
+
+  async #queueGeneralPurpose(prompt: string | undefined): Promise<Record<string, unknown>> {
+    if (prompt === undefined) return { intercepted: true, message: "/queue requires a message for the general-purpose agent." };
+    if (this.generalPurposeQueue === undefined) return { intercepted: true, message: "aboard cannot queue a general-purpose task right now." };
+    const outcome: GeneralPurposeQueueOutcome = await this.generalPurposeQueue.enqueue(prompt);
+    if (outcome.status === "cancelled") return { intercepted: true, message: "The queue was cleared because aboard stopped or project admission changed. Resubmit after restarting aboard." };
+    return outcome.status === "launched"
+      ? { intercepted: true, message: `Queued task launched in general-purpose agent ${outcome.agentId}.` }
+      : { intercepted: true, message: `Task queued at position ${outcome.position}; ${outcome.reason}.` };
   }
 
   #done(agentId: AgentId, command: ParsedDoneCommand): Record<string, unknown> {
@@ -818,6 +832,13 @@ function parseInteractiveCommand(prompt: string): {
         input: { type: "general-purpose", description: "general purpose interactive session" },
       }
     : { type: "brainstormer", command, invalidArguments: false, ignoredArguments: trailing.length > 0, input: { type: "brainstormer", description: "interactive brainstorm session" } };
+}
+
+function parseQueuedGeneralPurposeCommand(prompt: string): { readonly prompt?: string } | undefined {
+  const match = /^\s*\/queue(?:\s+([\s\S]*?))?\s*$/.exec(prompt);
+  if (match === null) return undefined;
+  const trailing = match[1]?.trim() ?? "";
+  return trailing.length === 0 ? {} : { prompt: trailing };
 }
 
 export type ManagerTranscriptCheckpoint = (agentId: AgentId) => void;

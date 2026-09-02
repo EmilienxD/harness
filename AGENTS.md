@@ -94,9 +94,10 @@ User <-> VS Code UI and terminals <-> extension host
 - The aboard MCP server is exposed only to roles with an explicit catalog, currently Manager and brainstormer, through per-launch configuration stored outside the workspace. The server derives the caller's role from the fleet and refuses roles without a catalog. Never register it in `.mcp.json`, agent frontmatter, or another project-scoped location.
 - Start and resume must preserve the same launch policy, including isolated definitions, capability limits, model/effort policy, issue-derived Chrome policy, and any role-scoped MCP access.
 - Resolve an automated worker's context before launch and pass its first prompt as a CLI argument. Never inject an automated prompt by typing into a live TUI.
+- `/queue <message>` starts or queues an unattended default `general-purpose` session without changing branches. The first item requires a completely clean working tree; every later item also waits for the prior task to finish and for clean `HEAD` to advance from the commit observed at its launch. The queue is ephemeral and is cleared when project admission closes.
 - Claude in Chrome is enabled only for an auto-run implementer whose frozen issue carries `[AI]-chrome`. The label-derived fact must survive resume; general-purpose and other sessions expose no Chrome launch option.
 - Every project-scoped hook first guards on `ABOARD_AGENT_ID`; role-specific hooks also guard on `ABOARD_AGENT_TYPE`. A hook not addressed to the current session exits successfully and silently.
-- Every launched session records its report recipient when it has one. Unattended sessions report on completion; attended sessions report only through `/done`. A recipient's Stop hook waits while live sessions owe it reports, and Escape reclaims the terminal without discarding later delivery.
+- Every launched session records its report recipient when it has one. Unattended delegated sessions report on completion; queued one-shots deliberately have no recipient so they do not block further Manager input. Attended sessions report only through `/done`. A recipient's Stop hook waits while live sessions owe it reports, and Escape reclaims the terminal without discarding later delivery.
 - A prototyper works from the project root and resolves its write location from explicit user guidance or the project's own scratch, temporary, playground, spike, experiment, demo, or prototype convention. If none exists, it asks the user where to write before creating code. aboard neither allocates nor gitignores that location, so the user controls whether prototype work is committed. The prompt is not a filesystem security boundary, and prototypers take no write lease.
 
 ### Human Control and Write Safety
@@ -120,7 +121,7 @@ User <-> VS Code UI and terminals <-> extension host
 | `pr-doctor-afk` | Reviews and directly fixes an implementation when unattended review is allowed | Auto-run or `review_pr` |
 | `pr-doctor-hitl` | Reports findings, waits for the user, then applies only approved fixes | Auto-run or `review_pr` |
 | `Explore` | Built-in read-only repository exploration | Delegated exploration only |
-| `general-purpose` | Claude Code's unmodified default session, interactive or result-delivering | Manager or user workflow |
+| `general-purpose` | Claude Code's unmodified default session, interactive, result-delivering, or a queued one-shot | Manager or user workflow |
 
 The scaffolded definitions are the detailed authority for role prompts, tool allowlists, models, effort, and colors. Keep automated worker prompts self-sufficient. The Manager cannot directly launch `implementer` or either pr-doctor.
 

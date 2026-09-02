@@ -53,7 +53,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     // `/prototype` is also intercepted from brainstormer terminals (the hook and
     // bridge both admit it there), so a brainstormer bundle must ship it too.
     const skills = plan.agentType === "manager"
-      ? ["auto", "brainstorm", "done", "general-purpose", "prototype", "reopen", "review-pr", "update-todo"]
+      ? ["auto", "brainstorm", "done", "general-purpose", "prototype", "queue", "reopen", "review-pr", "update-todo"]
       : plan.agentType === "brainstormer"
         ? ["done", "prototype"]
         : ["done"];

@@ -662,6 +662,28 @@ test("interactive commands are argumentless terminal handoffs", async () => {
   assert.equal(launches.length, 2);
 });
 
+test("/queue requires a prompt and delegates queue admission without waking the Manager", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const queued: string[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("/queue uses the one-shot queue launcher") },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { enqueue: async (prompt) => {
+      queued.push(prompt);
+      return { status: "queued", position: 2, reason: "the preceding task must finish with a new commit and a clean working tree" };
+    } },
+  );
+
+  assert.match(String((await prompts.handle(managerId, "/queue")).message), /requires a message/u);
+  const result = await prompts.handle(managerId, "/queue fix the parser and commit it");
+  assert.match(String(result.message), /position 2/u);
+  assert.deepEqual(queued, ["fix the parser and commit it"]);
+});
+
 test("/prototype launches from Manager and brainstormer, notifies the caller, and is refused elsewhere", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const brainstormerId = agent("brainstormer-prototype");
@@ -1057,12 +1079,12 @@ test("Python report hooks serve Stop re-entry and cheap opportunistic delivery f
 
 test("aboard-owned command skills are user-only shims and general-purpose has no aboard definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
-  for (const name of ["brainstorm", "general-purpose", "prototype", "done", "auto", "review-pr", "reopen"]) {
+  for (const name of ["brainstorm", "general-purpose", "queue", "prototype", "done", "auto", "review-pr", "reopen"]) {
     const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
     // `/auto` advertises dry-run/guideline input; `/review-pr` and `/reopen`
     // advertise their selectors. General-purpose is explicitly argumentless.
-    if (["auto", "review-pr", "reopen", "prototype", "done"].includes(name)) assert.match(skill, /argument-hint:/);
+    if (["auto", "review-pr", "reopen", "prototype", "done", "queue"].includes(name)) assert.match(skill, /argument-hint:/);
     else assert.doesNotMatch(skill, /argument-hint:/);
     const body = skill.replace(/^---\n[\s\S]*?\n---\n/u, "").replace(/<!--[\s\S]*?-->/gu, "").trim();
     assert.notEqual(body, "", `${name} SKILL.md must explain the hook failure rather than leave an empty body`);
@@ -1075,7 +1097,7 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
 });
 
 test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
-  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/brainstorm", "/brainstorm caching layer", "/prototype test parser", "/done", "/done close now", "/auto", "/review-pr", "/auto the next issue", "/reopen", "/reopen brainstorm"]) {
+  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/queue fix the parser", "/brainstorm", "/brainstorm caching layer", "/prototype test parser", "/done", "/done close now", "/auto", "/review-pr", "/auto the next issue", "/reopen", "/reopen brainstorm"]) {
     const result = await runPromptHook(500, { error: "boom" }, prompt);
     assert.equal(result.status, 2, `${prompt} must erase the prompt even when the bridge fails`);
     assert.equal(result.stdout, "");

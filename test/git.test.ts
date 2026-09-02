@@ -39,6 +39,16 @@ test("the git boundary reports branch, status, and branch existence", async () =
   assert.equal(await client.branchExists("aboard/34-nothing"), false);
 });
 
+test("clean-tree admission sees untracked files despite personal status settings", async () => {
+  const root = await repository();
+  await run("git", ["config", "status.showUntrackedFiles", "no"], { cwd: root, windowsHide: true });
+  await mkdir(join(root, "new-directory"));
+  await writeFile(join(root, "new-directory", "file.ts"), "untracked\n");
+  const status = await new ProcessGitClient(root).status();
+  assert.equal(isWorkingTreeClean(status), false);
+  assert.deepEqual(dirtyPaths(status), ["new-directory/file.ts"]);
+});
+
 test("createBranch, add, and commit leave the branch carrying the issue's commit", async () => {
   const root = await repository();
   const client = new ProcessGitClient(root);
