@@ -11,6 +11,8 @@ import type {
 import {
   FleetRegistry,
   FleetStateError,
+  MAX_DEFERRED_NOTIFICATIONS,
+  MAX_FLEET_EVENTS,
   MAX_QUEUED_REPORT_CHARACTERS,
   MAX_QUEUED_REPORTS,
 } from "../src/domain/fleet.js";
@@ -209,6 +211,24 @@ test("drains deferred notifications in order with an explicit large-queue summar
     lastOccurredAt: "2026-07-29T10:02:00.000Z",
   });
   assert.deepEqual(fleet.drainNotifications(managerId, finishedAt), { notifications: [] });
+});
+
+test("bounds deferred notifications and persisted event history", () => {
+  const fleet = new FleetRegistry();
+  const managerId = agent("manager-1");
+  fleet.register(
+    createSession("manager-1", "140b5c21-eb37-4147-b5cb-6a5ca2592146", { mode: "none" }, "manager"),
+    startedAt,
+  );
+  for (let index = 0; index < MAX_FLEET_EVENTS + 25; index += 1) {
+    fleet.enqueueNotification(managerId, `event ${index}`, startedAt);
+  }
+
+  assert.equal(fleet.events().length, MAX_FLEET_EVENTS);
+  const delivery = fleet.drainNotifications(managerId, finishedAt, { maxDetailedEntries: MAX_DEFERRED_NOTIFICATIONS });
+  assert.equal(delivery.notifications.length, MAX_DEFERRED_NOTIFICATIONS);
+  assert.equal(delivery.notifications[0]?.message, `event ${MAX_FLEET_EVENTS + 25 - MAX_DEFERRED_NOTIFICATIONS}`);
+  assert.equal(delivery.summarized, undefined);
 });
 
 test("round-trips fleet persistence through unknown boundary validation", () => {

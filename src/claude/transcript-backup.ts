@@ -7,9 +7,6 @@ import { pipeline } from "node:stream/promises";
 import type { SessionId } from "../domain/contracts.js";
 import { claudeConfigDirectory, sessionTranscriptPath, transcriptHoldsConversation } from "./sessions.js";
 
-/** Relative to the workspace root, under the gitignored runtime directory. */
-export const TRANSCRIPT_BACKUP_DIRECTORY = join(".aboard", "runtime", "transcripts");
-
 /** Manager transcripts retained by default; older ones are pruned as sessions turn over. */
 export const DEFAULT_TRANSCRIPT_BACKUPS = 5;
 
@@ -43,8 +40,8 @@ export interface TranscriptBackupOptions {
   readonly retain?: () => number;
   /** Overridden by tests; resolved per call because `CLAUDE_CONFIG_DIR` is environment, not launch state. */
   readonly configDirectory?: () => string;
-  /** Absolute override for the backup directory; defaults to the workspace's runtime directory. */
-  readonly directory?: string;
+  /** Absolute directory in VS Code's workspace storage. */
+  readonly directory: string;
   readonly log?: (message: string) => void;
 }
 
@@ -55,7 +52,7 @@ export class TranscriptBackupStore {
 
   public constructor(options: TranscriptBackupOptions) {
     this.#options = options;
-    this.#directory = options.directory ?? join(options.workspaceRoot, TRANSCRIPT_BACKUP_DIRECTORY);
+    this.#directory = options.directory;
   }
 
   /** Where this session's copy lives. Exposed so a caller can report the path. */
@@ -70,6 +67,18 @@ export class TranscriptBackupStore {
 
   public async checkpoint(sessionId: SessionId): Promise<TranscriptCheckpointOutcome> {
     return this.#serialize(() => this.#checkpoint(sessionId), "failed");
+  }
+
+  /** Applies retention even when no new transcript has just been created. */
+  public async prune(): Promise<void> {
+    await this.#serialize(async () => {
+      const retain = this.#retain();
+      if (retain <= 0) {
+        await rm(this.#directory, { recursive: true, force: true });
+        return;
+      }
+      await this.#prune(retain);
+    }, undefined);
   }
 
   public async restore(sessionId: SessionId): Promise<TranscriptRestoreOutcome> {
@@ -136,7 +145,7 @@ export class TranscriptBackupStore {
     await pipeline(createReadStream(source, { start: from, end: to - 1 }), createWriteStream(target, { flags: "a" }));
   }
 
-  async #prune(retain: number, keepPath: string): Promise<void> {
+  async #prune(retain: number, keepPath?: string): Promise<void> {
     let entries: readonly string[];
     try { entries = await readdir(this.#directory); }
     catch { return; }

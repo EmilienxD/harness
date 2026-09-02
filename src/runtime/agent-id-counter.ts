@@ -13,8 +13,8 @@ export class WorkspaceAgentIdCounter {
     this.#next = next;
   }
 
-  public static load(projectRoot: string, seeder?: () => Iterable<string>, admission: () => boolean = () => true): WorkspaceAgentIdCounter {
-    const path = join(projectRoot, ".aboard", "runtime", AGENT_COUNTER_FILE_NAME);
+  public static load(runtimeRoot: string, seeder?: () => Iterable<string>, admission: () => boolean = () => true): WorkspaceAgentIdCounter {
+    const path = join(runtimeRoot, "state", AGENT_COUNTER_FILE_NAME);
     const persisted = this.#readCeiling(path);
     const fleet = seeder === undefined ? 0 : this.#fleetCeiling(seeder());
     return new WorkspaceAgentIdCounter(path, Math.max(persisted, fleet) + 1, admission);

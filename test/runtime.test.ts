@@ -57,7 +57,7 @@ test("fleet runtime metadata saves atomically and ignores corrupt recovery data"
   const fleet = new FleetRegistry();
   await store.save(fleet.toPersistenceDto());
   assert.deepEqual(await store.load(), fleet.toPersistenceDto());
-  const path = join(root, ".aboard", "runtime", "fleet.json");
+  const path = join(root, "state", "fleet.json");
   await writeFile(path, "truncated", "utf8");
   assert.equal(await store.load(), undefined);
   assert.equal((await readFile(path, "utf8")), "truncated");
@@ -73,7 +73,7 @@ test("persistence drains queued writes and performs a final save on disposal", a
   assert.equal(listener, undefined);
 });
 
-test("removing the project state drops the activity cache instead of resurrecting it", async () => {
+test("removing private runtime state drops the activity cache instead of resurrecting it", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-activity-"));
   let initialized = true;
   let changes = 0;
@@ -89,15 +89,15 @@ test("removing the project state drops the activity cache instead of resurrectin
   await recorder.settle();
   assert.equal(recorder.entries().length, 1);
 
-  // The user deletes `.aboard/`: admission closes, then the directory goes.
+  // Project reset closes admission, then removes private runtime state.
   initialized = false;
   await admission.close();
-  await rm(join(root, ".aboard"), { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
   const before = changes;
   await recorder.reset();
   assert.deepEqual(recorder.entries(), []);
   assert.equal(changes, before + 1);
-  assert.equal(existsSync(join(root, ".aboard")), false);
+  assert.equal(existsSync(root), false);
 
   // Initializing again starts from the store on disk, not from this process.
   initialized = true;
@@ -106,7 +106,7 @@ test("removing the project state drops the activity cache instead of resurrectin
   assert.deepEqual(recorder.entries(), []);
   recorder.recordRun({ runId: "run_after", attempt: 1, outcome: "started" });
   await recorder.settle();
-  const persisted = JSON.parse(await readFile(join(root, ".aboard", "runtime", "activity.json"), "utf8")) as ActivityDto;
+  const persisted = JSON.parse(await readFile(join(root, "state", "activity.json"), "utf8")) as ActivityDto;
   assert.deepEqual(persisted.entries.map((entry) => entry.kind === "run" ? entry.runId : entry.kind), ["run_after"]);
 });
 
@@ -159,7 +159,7 @@ test("a version-2 record round-trips every discriminated state it can hold", asy
   const record = fixedPlanRecord();
   await store.save(record);
   assert.deepEqual(await store.load(), record);
-  const raw = await readFile(join(root, ".aboard", "runtime", "auto-run.json"), "utf8");
+  const raw = await readFile(join(root, "state", "auto-run.json"), "utf8");
   assert.match(raw, /"additionalGuideline": "keep fixtures small"/);
   await store.clear();
   assert.equal(await store.load(), undefined);

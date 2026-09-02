@@ -1,6 +1,7 @@
 import type { EffortLevel, LaunchConfiguration } from "../claude/launch.js";
 import { planLaunch, planSessionResume } from "../claude/launch.js";
 import type { ResolvedPrompt } from "../claude/prompts.js";
+import { dirname } from "node:path";
 import type { PromptSpillStore } from "../claude/spill.js";
 import type { ShellKind } from "../claude/shell.js";
 import type { TerminalController } from "../claude/terminals.js";
@@ -104,6 +105,8 @@ export interface DelegationCoordinatorOptions {
   /** Runtime admission gate; closed synchronously before reset cleanup begins. */
   readonly admission?: () => boolean;
   readonly workspaceRoot: string;
+  /** Absolute mutable-state root supplied by the extension host. */
+  readonly runtimeDirectory?: string;
   /** Tests transcript availability before deciding between resume and a fresh session. */
   readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>;
   readonly fleet: FleetRegistry;
@@ -244,6 +247,7 @@ export class DelegationCoordinator {
       attended,
       ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration,
+      runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
       ...(target.prompt === undefined ? {} : { prompt: target.prompt }),
       ...(mcpConfigPath === undefined ? {} : { mcpConfigPath }),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
@@ -428,6 +432,7 @@ export class DelegationCoordinator {
       attended,
       ...(input.type === "implementer" && input.chrome === true ? { chrome: true } : {}),
       configuration,
+      runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       ...(mcpConfigPath === undefined ? {} : { mcpConfigPath }),
       prompt,
       disallowedTools: [
@@ -447,6 +452,7 @@ export class DelegationCoordinator {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
     }
     const cwd = input.isolation?.cwd;
+    let terminalStarted = false;
     try {
       await this.options.spills.prepare(plan, cwd);
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill, cwd);
@@ -464,6 +470,7 @@ export class DelegationCoordinator {
         // SessionStart pid report is the only trustworthy proof the TUI is up.
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
       });
+      terminalStarted = true;
       this.options.fleet.register({
         identity: { agentId, type: input.type },
         sessionId,
@@ -484,6 +491,7 @@ export class DelegationCoordinator {
       return { agentId, sessionId, terminalId: terminal.terminalId };
     } catch (error) {
       this.options.lease.release(agentId, occurredAt, "launch failed");
+      if (!terminalStarted) await this.options.spills.remove?.(agentId).catch(() => undefined);
       throw error;
     }
   }

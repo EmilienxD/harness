@@ -46,8 +46,8 @@ export class AtomicJsonFile<T> {
 }
 
 export class FileFleetStore extends AtomicJsonFile<FleetPersistenceDto> {
-  public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
-    super(join(workspaceRoot, ".aboard", "runtime", "fleet.json"), (value) => {
+  public constructor(runtimeRoot: string, admission?: RuntimeAdmission) {
+    super(join(runtimeRoot, "state", "fleet.json"), (value) => {
       const result = parseFleetPersistenceDto(value);
       return result.ok ? result.value : undefined;
     }, admission);
@@ -55,8 +55,8 @@ export class FileFleetStore extends AtomicJsonFile<FleetPersistenceDto> {
 }
 
 export class FileActivityStore extends AtomicJsonFile<ActivityDto> {
-  public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
-    super(join(workspaceRoot, ".aboard", "runtime", "activity.json"), (value) => {
+  public constructor(runtimeRoot: string, admission?: RuntimeAdmission) {
+    super(join(runtimeRoot, "state", "activity.json"), (value) => {
       const result = parseActivityDto(value);
       return result.ok ? result.value : undefined;
     }, admission);
@@ -68,8 +68,8 @@ export class FileActivityStore extends AtomicJsonFile<ActivityDto> {
 }
 
 export class FileLegacySessionLedger extends AtomicJsonFile<LegacySessionLedgerDto> {
-  public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
-    super(join(workspaceRoot, ".aboard", "runtime", "sessions.json"), (value) => {
+  public constructor(runtimeRoot: string, admission?: RuntimeAdmission) {
+    super(join(runtimeRoot, "state", "sessions.json"), (value) => {
       const result = parseLegacySessionLedger(value);
       return result.ok ? result.value : undefined;
     }, admission);
@@ -333,8 +333,8 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
 }
 
 export class FileAutoRunStore extends AtomicJsonFile<PersistedAutoRunRecord> {
-  public constructor(workspaceRoot: string, admission?: RuntimeAdmission) {
-    super(join(workspaceRoot, ".aboard", "runtime", "auto-run.json"), parseAutoRunRecord, admission);
+  public constructor(runtimeRoot: string, admission?: RuntimeAdmission) {
+    super(join(runtimeRoot, "state", "auto-run.json"), parseAutoRunRecord, admission);
   }
 
   public async clear(): Promise<void> {

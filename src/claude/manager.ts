@@ -17,7 +17,7 @@ export const MANAGER_STARTUP_PROOF_TIMEOUT_MS = 120_000;
 export interface ManagerStore { load(): Promise<ManagerPersistenceDto | undefined>; save(value: ManagerPersistenceDto): Promise<void>; }
 export class FileManagerStore implements ManagerStore {
   readonly #path: string;
-  public constructor(workspaceRoot: string, private readonly admission: RuntimeAdmission = new RuntimeAdmission(true)) { this.#path = join(workspaceRoot, ".aboard", "runtime", "manager.json"); }
+  public constructor(runtimeRoot: string, private readonly admission: RuntimeAdmission = new RuntimeAdmission(true)) { this.#path = join(runtimeRoot, "state", "manager.json"); }
   public async load(): Promise<ManagerPersistenceDto | undefined> {
     let contents: string;
     try { contents = await readFile(this.#path, "utf8"); }
@@ -80,7 +80,7 @@ export async function readManagerLaunchDefinition(workspaceRoot: string): Promis
 }
 
 /** `command` and `effort` are callbacks so a settings change applies to the next launch without reloading the window. */
-export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly shell: ShellKind; readonly admission?: () => boolean; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout;
+export interface ManagerLifecycleOptions { readonly store: ManagerStore; readonly terminals: TerminalController; readonly workspaceRoot: string; readonly runtimeDirectory?: string; readonly shell: ShellKind; readonly admission?: () => boolean; readonly command?: () => readonly string[] | undefined; readonly effort?: () => EffortLevel | undefined; readonly definition?: (workspaceRoot: string) => Promise<ManagerLaunchDefinition>; readonly files: PromptSpillStore; readonly disallowedTools?: readonly string[]; readonly now?: () => Date; readonly agentIdFactory?: () => AgentId; readonly sessionIdFactory?: () => SessionId; readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>; readonly restoreTranscript?: (sessionId: SessionId) => Promise<unknown>; readonly preflight?: (command: readonly string[] | undefined) => Promise<void>; readonly wrapper?: SessionWrapperLayout;
   readonly mcpConfig?: () => Promise<string>; }
 export class ManagerLifecycle {
   readonly #now: () => Date;
@@ -110,14 +110,23 @@ export class ManagerLifecycle {
     const wrapper = this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper };
     const mcpConfigPath = await this.options.mcpConfig?.();
     const mcpConfig = mcpConfigPath === undefined ? {} : { mcpConfigPath };
-    const shared = { agentId, sessionId, shell: this.options.shell, configuration, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper, ...mcpConfig };
+    const runtimeDirectory = this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId))));
+    const shared = { agentId, sessionId, shell: this.options.shell, configuration, runtimeDirectory, disallowedTools: this.options.disallowedTools, ...command, ...effort, ...wrapper, ...mcpConfig };
     const plan = resumable ? planManagerResume(shared) : planLaunch({ ...shared, agentType: "manager" });
     await this.options.preflight?.(plan.command);
     // `--agent` names this file; a missing one is a refused launch rather than a
     // Manager on Claude Code's default persona.
-    await this.options.files.prepare(plan);
-    if (this.options.admission?.() === false) throw new Error("aboard runtime reset while preparing Manager launch");
-    const terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine, attended: true, startupTimeoutMs: MANAGER_STARTUP_PROOF_TIMEOUT_MS });
+    let terminalStarted = false;
+    let terminal: TerminalSnapshot;
+    try {
+      await this.options.files.prepare(plan);
+      if (this.options.admission?.() === false) throw new Error("aboard runtime reset while preparing Manager launch");
+      terminal = this.options.terminals.create({ agentId, sessionId, agentType: "manager", name: "aboard: Manager", initialCommand: plan.commandLine, attended: true, startupTimeoutMs: MANAGER_STARTUP_PROOF_TIMEOUT_MS });
+      terminalStarted = true;
+    } catch (error) {
+      if (!terminalStarted) await this.options.files.remove?.(agentId).catch(() => undefined);
+      throw error;
+    }
     const updatedAt = this.#now().toISOString() as IsoTimestamp;
     try { await this.options.store.save({ version: 1, agentId, sessionId, terminalId: terminal.terminalId, updatedAt }); }
     catch (error) {

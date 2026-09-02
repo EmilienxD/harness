@@ -245,7 +245,6 @@ test("an existing session branch is checked out rather than created a second tim
   const { provider, git } = fixture({ git: { branches: ["aboard/run/test"] } });
   await provider.prepare(REQUEST);
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  assert.ok(git.calls.includes("trackedPathsUnder aboard/run/test .aboard/runtime"), git.calls.join(", "));
   assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test`), git.calls.join(", "));
 });
 
@@ -290,36 +289,7 @@ test("untracked aboard hooks are supplied by the project configuration overlay",
   assert.deepEqual(overlays, [workspace.root]);
 });
 
-test("tracked runtime state refuses a new checkout at its exact start point before creation", async () => {
-  const trackedRuntime = Array.from({ length: 25 }, (_, index) => `.aboard/runtime/file-${index + 1}.json`);
-  trackedRuntime[0] = ".aboard/runtime/.gitkeep";
-  const { provider, git, overlays } = fixture({ git: { trackedRuntime } });
-  await assert.rejects(provider.prepare(REQUEST), (error: unknown) => {
-    assert.ok(error instanceof RunWorkspaceError);
-    assert.match(error.message, /main tracks 25 path/u);
-    assert.match(error.message, /\.gitkeep/u, "even an empty keeper is tracked runtime state");
-    assert.match(error.message, /git rm -r --cached/u);
-    assert.doesNotMatch(error.message, /file-21\.json/u, "the diagnostic is bounded");
-    return true;
-  });
-  assert.ok(git.calls.includes("trackedPathsUnder main .aboard/runtime"), git.calls.join(", "));
-  assert.ok(!git.calls.some((call) => call.startsWith("addWorktree")), "the unsafe checkout is never created");
-  assert.deepEqual(overlays, [], "no source configuration is read after the preflight fails");
-});
-
-test("a resumed checkout refuses runtime state tracked at its own HEAD", async () => {
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  const { provider, git } = fixture({
-    git: {
-      trackedRuntime: [".aboard/runtime/session.json"],
-      worktrees: [{ path, branch: "aboard/run/test" }],
-    },
-  });
-  await assert.rejects(provider.prepare(REQUEST), /HEAD tracks 1 path/u);
-  assert.ok(git.calls.includes("trackedPathsUnder HEAD .aboard/runtime"), git.calls.join(", "));
-});
-
-test("the project overlay copies ignored Claude and aboard files, preserves checkout files, and is a one-time snapshot", async (context) => {
+test("the project overlay copies ignored Claude and aboard files and preserves checkout files", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "aboard-overlay-"));
   context.after(async () => { await rm(root, { recursive: true, force: true }); });
   const project = join(root, "project");
@@ -328,11 +298,9 @@ test("the project overlay copies ignored Claude and aboard files, preserves chec
   await mkdir(join(project, ".claude", "skills", "local"), { recursive: true });
   await mkdir(join(project, ".claude", "worktrees", "other"), { recursive: true });
   await mkdir(join(project, ".aboard", "agents"), { recursive: true });
-  await mkdir(join(project, ".aboard", "runtime", "events"), { recursive: true });
   await mkdir(join(project, ".aboard", "prototypes", "7-parser"), { recursive: true });
   await mkdir(join(checkout, ".claude"), { recursive: true });
   await mkdir(join(checkout, ".aboard"), { recursive: true });
-  await mkdir(join(checkout, ".aboard", "runtime"), { recursive: true });
   await writeFile(join(project, ".claude", "settings.json"), "from project\n");
   await writeFile(join(project, ".claude", "settings.local.json"), "local settings\n");
   await writeFile(join(project, ".claude", "hooks", "aboard_hook.py"), "hook\n");
@@ -342,7 +310,6 @@ test("the project overlay copies ignored Claude and aboard files, preserves chec
   await writeFile(join(project, ".aboard", "agents", "manager.md"), "manager\n");
   await writeFile(join(project, ".aboard", "session-setup.ps1"), "from project\n");
   await writeFile(join(project, ".aboard", "settings.json"), "local aboard settings\n");
-  await writeFile(join(project, ".aboard", "runtime", "events", "secret.json"), "runtime\n");
   await writeFile(join(project, ".aboard", "prototypes", "7-parser", "experiment.ts"), "scratch\n");
   await writeFile(join(checkout, ".claude", "settings.json"), "from git\n");
   await writeFile(join(checkout, ".aboard", "session-setup.ps1"), "from git\n");
@@ -362,14 +329,8 @@ test("the project overlay copies ignored Claude and aboard files, preserves chec
   assert.equal(await readFile(join(checkout, ".aboard", "session-setup.ps1"), "utf8"), "from git\n");
   assert.ok(requested.includes(".claude/settings.local.json"), "settings.local.json is deliberately copied");
   await assert.rejects(readFile(join(checkout, ".claude", "worktrees", "other", "secret")), { code: "ENOENT" });
-  await assert.rejects(readFile(join(checkout, ".aboard", "runtime", "events", "secret.json")), { code: "ENOENT" });
   assert.equal(await readFile(join(checkout, ".aboard", "prototypes", "7-parser", "experiment.ts"), "utf8"), "scratch\n");
 
-  await writeFile(join(project, ".claude", "settings.local.json"), "changed later\n");
-  await writeFile(join(project, ".claude", "new-after-creation.md"), "later\n");
-  await overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git });
-  assert.equal(await readFile(join(checkout, ".claude", "settings.local.json"), "utf8"), "local settings\n");
-  await assert.rejects(readFile(join(checkout, ".claude", "new-after-creation.md")), { code: "ENOENT" });
 });
 
 test("the project overlay refuses unignored local configuration before copying any of it", async (context) => {

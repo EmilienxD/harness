@@ -6,17 +6,17 @@ import type { SessionWrapperLayout } from "../claude/launch.js";
 
 export const lockMarkerPresent: LockMarkerProbe = (lockFile) => existsSync(lockFile);
 
-/** `.aboard/scripts/aboard_wrapper.py` is extension-owned scaffold state; markers live under gitignored runtime state. */
-export function sessionWrapperLayout(workspaceRoot: string): SessionWrapperLayout {
+/** The extension-owned wrapper and its markers live outside the user's repository. */
+export function sessionWrapperLayout(runtimeRoot: string, wrapperScript: string): SessionWrapperLayout {
   return {
-    script: join(workspaceRoot, ".aboard", "scripts", "aboard_wrapper.py"),
-    lockPathFor: (agentId) => join(workspaceRoot, ".aboard", "runtime", "locks", `${agentId}.lock`),
+    script: wrapperScript,
+    lockPathFor: (agentId) => join(runtimeRoot, "locks", `${agentId}.lock`),
     mintLaunchCode: () => randomUUID(),
   };
 }
 
-export function lockMarkerDirectory(workspaceRoot: string): string {
-  return join(workspaceRoot, ".aboard", "runtime", "locks");
+export function lockMarkerDirectory(runtimeRoot: string): string {
+  return join(runtimeRoot, "locks");
 }
 
 /** What the wrapper recorded about its child's ending. */

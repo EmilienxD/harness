@@ -16,9 +16,12 @@ import {
   type ResolvedPrompt,
 } from "./prompts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
-export const DEFAULT_RUNTIME_DIRECTORY = ".aboard/runtime";
+/** Planner-only fallback; production supplies VS Code's workspace storage root. */
+export const DEFAULT_RUNTIME_DIRECTORY = join(tmpdir(), "aboard-runtime");
 /** `aboard.launch.maxInlinePromptChars` — conservative, below every known ceiling. */
 export const DEFAULT_MAX_INLINE_PROMPT_CHARS = 4000;
 
@@ -412,6 +415,7 @@ interface CommonPlanRequest {
   /** Set only for an auto-run implementer whose frozen issue has `[AI]-chrome`. */
   readonly chrome?: true | undefined;
   readonly maxInlinePromptChars?: number | undefined;
+  /** Absolute root in VS Code's workspace storage. */
   readonly runtimeDirectory?: string | undefined;
   readonly wrapper?: SessionWrapperLayout | undefined;
 }
@@ -835,8 +839,8 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       agentId: request.agentId,
       shell: request.shell,
       threshold: promptThreshold,
-      runtimeDirectory,
-      stem: request.agentId,
+      runtimeDirectory: launchRuntimeDirectory,
+      stem: "prompt",
     });
     const args = [...fixedArguments, ...plan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
@@ -959,8 +963,8 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       agentId: request.agentId,
       shell: request.shell,
       threshold: promptThreshold,
-      runtimeDirectory,
-      stem: `${request.agentId}-continue`,
+      runtimeDirectory: launchRuntimeDirectory,
+      stem: "continue",
     });
     const args = [...fixedArguments, ...promptPlan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);

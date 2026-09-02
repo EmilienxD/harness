@@ -407,7 +407,7 @@ test("long poll observes abort and route validates stop input", async () => {
 });
 
 test("Python Manager hook silently self-guards non-addressed sessions", () => {
-  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
   for (const env of [{}, { ABOARD_AGENT_ID: "worker", ABOARD_AGENT_TYPE: "implementer" }]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "manager-brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
@@ -415,7 +415,7 @@ test("Python Manager hook silently self-guards non-addressed sessions", () => {
 });
 
 test("hook registration covers cold start, resume, and explicit timeouts in one briefing call", async () => {
-  const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "aboard-hooks.json"), "utf8"));
+  const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "runtime", "aboard-hooks.json"), "utf8"));
   const parsed = JSON.parse(hooks) as any;
   // Index 0 is the proof-of-life session-start hook (pid report); index 1 is
   // the manager briefing call.
@@ -934,9 +934,9 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address !== null && typeof address !== "string");
-  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
   const child = spawn("uv", ["run", "--no-project", "python", script, "manager-prompt"], {
-    env: { ...process.env, ABOARD_AGENT_ID: workspaceRoot === undefined ? "manager-1" : "recipient-1", ABOARD_AGENT_TYPE: agentType, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token, ...(workspaceRoot === undefined ? {} : { ABOARD_WORKSPACE_ROOT: workspaceRoot }) },
+    env: { ...process.env, ABOARD_AGENT_ID: workspaceRoot === undefined ? "manager-1" : "recipient-1", ABOARD_AGENT_TYPE: agentType, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token, ...(workspaceRoot === undefined ? {} : { ABOARD_RUNTIME_ROOT: workspaceRoot }) },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = ""; let stderr = "";
@@ -972,7 +972,7 @@ async function runReportHook(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address !== null && typeof address !== "string");
-  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
   const child = spawn("uv", ["run", "--no-project", "python", script, route], {
     env: {
       ...process.env,
@@ -980,7 +980,7 @@ async function runReportHook(
       ABOARD_AGENT_TYPE: options.agentType ?? "brainstormer",
       ABOARD_BRIDGE_PORT: String(address.port),
       ABOARD_BRIDGE_TOKEN: "secret",
-      ...(options.workspaceRoot === undefined ? {} : { ABOARD_WORKSPACE_ROOT: options.workspaceRoot }),
+      ...(options.workspaceRoot === undefined ? {} : { ABOARD_RUNTIME_ROOT: options.workspaceRoot }),
       ...(options.attended ? { ABOARD_ATTENDED: "1" } : {}),
     },
     stdio: ["pipe", "pipe", "pipe"],
@@ -1029,9 +1029,9 @@ test("Python report hooks serve Stop re-entry and cheap opportunistic delivery f
 
   const workspaceRoot = await mkdtemp(join(tmpdir(), "aboard-report-hook-"));
   try {
-    const runtime = join(workspaceRoot, ".aboard", "runtime");
-    await mkdir(runtime, { recursive: true });
-    await writeFile(join(runtime, "fleet.json"), JSON.stringify({
+    const state = join(workspaceRoot, "state");
+    await mkdir(state, { recursive: true });
+    await writeFile(join(state, "fleet.json"), JSON.stringify({
       mailboxes: [{ recipientAgentId: "recipient-1", entries: [{ kind: "ended-without-report", agentId: "child-1", agentType: "Explore" }] }],
     }), "utf8");
     const delivery = await runReportHook("report-delivery", { hook_event_name: "PostToolUse" }, { workspaceRoot });
@@ -1044,7 +1044,7 @@ test("Python report hooks serve Stop re-entry and cheap opportunistic delivery f
     await rm(workspaceRoot, { recursive: true, force: true });
   }
 
-  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
   const skipped = spawnSync("uv", ["run", "--no-project", "python", script, "report-delivery"], {
     input: JSON.stringify({ hook_event_name: "PostToolUse" }),
     encoding: "utf8",
@@ -1084,7 +1084,7 @@ test("Python prompt hook blocks both intercepted commands and never blocks other
   assert.equal(refusedPrototype.status, 2);
   // A bridge that wrongly reports interception on a Stop poll must not exit 2:
   // that would refuse to let the Manager stop, looping the session forever.
-  const script = join(process.cwd(), "assets", "scaffold", ".aboard", "scripts", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
   const stop = spawnSync("uv", ["run", "--no-project", "python", script, "report-stop"], {
     input: JSON.stringify({ hook_event_name: "Stop", stop_hook_active: false }),
     encoding: "utf8",

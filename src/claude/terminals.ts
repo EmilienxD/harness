@@ -78,6 +78,7 @@ export interface BridgeTerminalEnvironment {
   readonly port: number;
   readonly token: string;
   readonly workspaceRoot: string;
+  readonly runtimeRoot?: string;
   readonly managerMcpTimeoutMs: number;
   readonly managerRoadmapReminderBytes: number;
 }
@@ -224,6 +225,7 @@ export class TerminalController {
       ABOARD_WORKSPACE_ROOT: cwd,
       CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: ABOARD_STOP_HOOK_BLOCK_CAP,
     };
+    if (environment.runtimeRoot !== undefined) env.ABOARD_RUNTIME_ROOT = environment.runtimeRoot;
     if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
       env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");
     }

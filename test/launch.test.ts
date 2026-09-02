@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   BY_DIFFICULTY,
+  DEFAULT_RUNTIME_DIRECTORY,
   DEFAULT_MAX_INLINE_PROMPT_CHARS,
   DIFFICULTY_LAUNCH_POLICIES,
   EFFORT_LEVELS,
@@ -63,7 +64,8 @@ function definition(
   });
 }
 
-const runtimeDir = `.aboard/runtime/agents/${agentId}`;
+const RUNTIME_ROOT = DEFAULT_RUNTIME_DIRECTORY.replaceAll("\\", "/");
+const runtimeDir = `${RUNTIME_ROOT}/agents/${agentId}`;
 const runtimeName = (agentName: string) => `aboard-${agentName}-${agentId}`;
 const runtimePath = (agentName: string) => `${runtimeDir}/.claude/agents/${runtimeName(agentName)}.md`;
 const runtimeArgs = ["--add-dir", runtimeDir, "--settings", `${runtimeDir}/settings.json`] as const;
@@ -82,6 +84,7 @@ function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest 
     agentType: "implementer",
     shell: "powershell",
     configuration: definition("implementer", IMPLEMENTER_TOOLS),
+    runtimeDirectory: RUNTIME_ROOT,
     prompt: "Address issue #47.",
     ...overrides,
   };
@@ -225,15 +228,15 @@ test("the Manager MCP registration resolves the live port and token", () => {
 
 test("wrapper layout keeps child argv out of the visible launch and resume lines", () => {
   const wrapper = {
-    script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py",
-    lockPathFor: (id: typeof agentId) => `C:\\repo\\.aboard\\runtime\\locks\\${id}.lock`,
+    script: "C:\\extension\\assets\\runtime\\aboard_wrapper.py",
+    lockPathFor: (id: typeof agentId) => `C:\\storage\\runtime\\locks\\${id}.lock`,
     mintLaunchCode: () => "start-code",
   };
   const plan = planLaunch(request({ wrapper }));
   // plan.args keeps the claude-side view; only the command line changes.
   assert.equal(plan.args[2], "--add-dir");
-  assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\repo\\\.aboard\\scripts\\aboard_wrapper\.py' /);
-  assert.ok(plan.commandLine.includes(`'C:\\repo\\.aboard\\runtime\\locks\\${agentId}.lock' --request .aboard/runtime/agents/${agentId}/launch-start-code.json`));
+  assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\extension\\assets\\runtime\\aboard_wrapper\.py' /);
+  assert.ok(plan.commandLine.includes(`'C:\\storage\\runtime\\locks\\${agentId}.lock' --request ${RUNTIME_ROOT}/agents/${agentId}/launch-start-code.json`));
   assert.doesNotMatch(plan.commandLine, /--allowedTools|--session-id/);
   assert.deepEqual(JSON.parse(plan.wrapperRequest!.contents), { command: ["claude", ...plan.args] });
 
@@ -241,13 +244,13 @@ test("wrapper layout keeps child argv out of the visible launch and resume lines
     agentId, sessionId, agentType: "implementer", shell: "powershell",
     configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
   });
-  assert.match(resumed.commandLine, /aboard_wrapper\.py' .* --request \.aboard\/runtime\/agents\/a1b2c3\/launch-start-code\.json/);
+  assert.match(resumed.commandLine, new RegExp(`aboard_wrapper\\.py' .* --request ${RUNTIME_ROOT.replaceAll("/", "\\/")}\\/agents\\/a1b2c3\\/launch-start-code\\.json`));
   assert.deepEqual(JSON.parse(resumed.wrapperRequest!.contents), { command: ["claude", ...resumed.args] });
 });
 
 test("wrapper tokens are validated like the launch command", () => {
   const wrapper = {
-    script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py",
+    script: "C:\\extension\\assets\\runtime\\aboard_wrapper.py",
     lockPathFor: () => 'has "quote".lock',
     mintLaunchCode: () => "start-code",
   };
@@ -267,7 +270,7 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   // headline and a pointer at the spilled file.
   const stub = plan.args.at(-1)!;
   assert.ok(stub.includes("#47"));
-  assert.ok(stub.includes("@.aboard/runtime/prompts/a1b2c3.md"));
+  assert.ok(stub.includes(`@${runtimeDir}/prompts/prompt.md`));
   assert.deepEqual(plan.args.slice(0, -1), [
     "--session-id",
     sessionId,
@@ -276,7 +279,7 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   ]);
   assert.ok(plan.commandLine.includes(`'${stub}'`));
   assert.equal(plan.promptDelivery, "spilled");
-  assert.equal(plan.spill?.relativePath, ".aboard/runtime/prompts/a1b2c3.md");
+  assert.equal(plan.spill?.relativePath, `${runtimeDir}/prompts/prompt.md`);
   assert.equal(plan.spill?.contents, `${prompt.text}\n`);
   assert.equal(plan.requiresWriteLease, true);
 });
@@ -720,7 +723,7 @@ test("an agent-defined launch registers its definition where only that launch ca
   // The directory and the name both carry the agent id, so one launch's
   // definition is never inside another's `--add-dir`.
   const other = planLaunch(request({ agentId: "z9" as AgentId, configuration, prompt: "Go." }));
-  assert.equal(other.agentDefinition?.relativePath, ".aboard/runtime/agents/z9/.claude/agents/aboard-implementer-z9.md");
+  assert.equal(other.agentDefinition?.relativePath, `${RUNTIME_ROOT}/agents/z9/.claude/agents/aboard-implementer-z9.md`);
 });
 
 test("model and effort ride the command line as well as the rewritten file, on start and resume", () => {
@@ -939,7 +942,7 @@ test("spills what a shell cannot represent, per shell", () => {
     }),
   );
   const stub = plan.args.at(-1)!;
-  assert.ok(stub.includes("@.aboard/runtime/prompts/a1b2c3.md"));
+  assert.ok(stub.includes(`@${runtimeDir}/prompts/prompt.md`));
   assert.equal(stub.includes("auth"), false);
 });
 
@@ -1049,9 +1052,9 @@ test("a definition's command replaces the configured launch command for that age
   // The wrapper still owns the outermost program; the override is what it runs.
   const wrapped = planLaunch(request({
     configuration, prompt: "Go.",
-    wrapper: { script: "C:\\repo\\.aboard\\scripts\\aboard_wrapper.py", lockPathFor: () => "C:\\repo\\lock", mintLaunchCode: () => "start-code" },
+    wrapper: { script: "C:\\extension\\assets\\runtime\\aboard_wrapper.py", lockPathFor: () => "C:\\storage\\runtime\\locks\\a1b2c3.lock", mintLaunchCode: () => "start-code" },
   }));
-  assert.ok(wrapped.commandLine.includes("'C:\\repo\\lock' --request .aboard/runtime/agents/a1b2c3/launch-start-code.json"));
+  assert.ok(wrapped.commandLine.includes(`'C:\\storage\\runtime\\locks\\a1b2c3.lock' --request ${RUNTIME_ROOT}/agents/a1b2c3/launch-start-code.json`));
   assert.deepEqual(JSON.parse(wrapped.wrapperRequest!.contents), { command: ["wrapper", "run", "MyProfile", "--", ...wrapped.args] });
 });
 
@@ -1126,18 +1129,22 @@ test("describes a plan without leaking prompt content", () => {
   );
 });
 
-test("writes spill files under the workspace runtime directory", async () => {
+test("writes spill files under private workspace storage", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-spill-"));
-  const store = new FileSystemPromptSpillStore(root);
-  const plan = planLaunch(request({ prompt: "line one\nline two" }));
+  const runtimeRoot = join(root, "storage", "runtime");
+  const store = new FileSystemPromptSpillStore(root, runtimeRoot, {
+    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+  });
+  const plan = planLaunch(request({ prompt: "line one\nline two", runtimeDirectory: runtimeRoot }));
   assert.ok(plan.spill !== undefined);
 
   const path = await store.write(plan.spill);
-  assert.equal(path, join(root, ".aboard", "runtime", "prompts", "a1b2c3.md"));
+  assert.equal(path, join(runtimeRoot, "agents", agentId, "prompts", "prompt.md"));
   assert.equal(await readFile(path, "utf8"), "line one\nline two\n");
 
   await assert.rejects(
-    () => store.write({ ...plan.spill!, relativePath: "../outside.md" }),
+    () => store.write({ ...plan.spill!, relativePath: join(root, "outside.md") }),
     (error: unknown) => error instanceof PromptSpillPathError,
   );
 });
@@ -1145,19 +1152,28 @@ test("writes spill files under the workspace runtime directory", async () => {
 test("runtime bundles give every launch done and reserve Manager commands for Manager", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-bundle-"));
   await cp(join(process.cwd(), "assets", "scaffold", ".aboard"), join(root, ".aboard"), { recursive: true });
-  const store = new FileSystemPromptSpillStore(root);
-  const manager = planLaunch(request({ agentType: "manager", configuration: definition("manager", MANAGER_TOOLS), prompt: undefined }));
+  const runtimeRoot = join(root, "storage", "runtime");
+  const store = new FileSystemPromptSpillStore(root, runtimeRoot, {
+    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+  });
+  const manager = planLaunch(request({ agentType: "manager", configuration: definition("manager", MANAGER_TOOLS), prompt: undefined, runtimeDirectory: runtimeRoot }));
   await store.prepare(manager);
-  assert.deepEqual((await readdir(join(root, manager.runtimeDirectory, ".claude", "skills"))).sort(), [
+  assert.deepEqual((await readdir(join(manager.runtimeDirectory, ".claude", "skills"))).sort(), [
     "auto", "brainstorm", "done", "general-purpose", "prototype", "reopen", "review-pr", "update-todo",
   ]);
-  const brainstormer = planLaunch(request({ agentId: "brainstormer-1" as AgentId, agentType: "brainstormer", configuration: definition("brainstormer", BRAINSTORMER_TOOLS) }));
+  const brainstormer = planLaunch(request({ agentId: "brainstormer-1" as AgentId, agentType: "brainstormer", configuration: definition("brainstormer", BRAINSTORMER_TOOLS), runtimeDirectory: runtimeRoot }));
   await store.prepare(brainstormer);
-  assert.deepEqual((await readdir(join(root, brainstormer.runtimeDirectory, ".claude", "skills"))).sort(), ["done", "prototype"]);
-  const worker = planLaunch(request({ agentId: "worker-2" as AgentId }));
+  assert.deepEqual((await readdir(join(brainstormer.runtimeDirectory, ".claude", "skills"))).sort(), ["done", "prototype"]);
+  const worker = planLaunch(request({ agentId: "worker-2" as AgentId, runtimeDirectory: runtimeRoot }));
   await store.prepare(worker);
-  assert.deepEqual(await readdir(join(root, worker.runtimeDirectory, ".claude", "skills")), ["done"]);
-  assert.equal((JSON.parse(await readFile(join(root, worker.runtimeDirectory, "settings.json"), "utf8")) as { hooks?: unknown }).hooks !== undefined, true);
+  assert.deepEqual(await readdir(join(worker.runtimeDirectory, ".claude", "skills")), ["done"]);
+  assert.equal((JSON.parse(await readFile(join(worker.runtimeDirectory, "settings.json"), "utf8")) as { hooks?: unknown }).hooks !== undefined, true);
+  await store.prune(new Set(["worker-2"]));
+  await assert.rejects(readdir(manager.runtimeDirectory), { code: "ENOENT" });
+  assert.deepEqual(await readdir(join(worker.runtimeDirectory, ".claude", "skills")), ["done"]);
+  await store.remove("worker-2");
+  await assert.rejects(readdir(worker.runtimeDirectory), { code: "ENOENT" });
 });
 
 test("derives write capability from the effective tool set", () => {
@@ -1186,12 +1202,16 @@ test("a prompt under the inline threshold still spills when the command line wou
 
   assert.equal(plan.promptDelivery, "spilled");
   assert.ok(plan.commandLine.length <= MAX_COMMAND_LINE_CHARS.cmd, `command line was ${plan.commandLine.length} characters`);
-  assert.match(plan.commandLine, /@\.aboard\/runtime\/prompts\/a1b2c3\.md/);
+  assert.ok(plan.commandLine.includes(`@${runtimeDir}/prompts/prompt.md`));
   assert.equal(plan.spill?.contents.trim(), text.trim());
 
   // The spilled file is what the agent actually reads, so it must round-trip.
   const root = await mkdtemp(join(tmpdir(), "aboard-spill-"));
-  const path = await new FileSystemPromptSpillStore(root).write(plan.spill!);
+  const store = new FileSystemPromptSpillStore(root, RUNTIME_ROOT, {
+    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+  });
+  const path = await store.write(plan.spill!);
   assert.equal((await readFile(path, "utf8")).trim(), text.trim());
 });
 
@@ -1234,7 +1254,7 @@ test("a long prompt is spilled once and the stub keeps its headline when it fits
   assert.equal(plan.promptDelivery, "spilled");
   // The stub is the whole prompt argument; the body never reaches the line.
   assert.ok(!plan.commandLine.includes("x".repeat(100)));
-  assert.equal(plan.spill?.relativePath, ".aboard/runtime/prompts/a1b2c3.md");
+  assert.equal(plan.spill?.relativePath, `${runtimeDir}/prompts/prompt.md`);
 });
 
 // Permissions are the user's to manage: aboard never puts a permission flag on

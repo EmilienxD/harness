@@ -36,7 +36,7 @@ npm run build
 npm run package          # Produces and inspects dist/aboard-0.0.0.vsix
 ```
 
-`npm run package` fails if runtime code or required scaffold assets are absent, or if local `.aboard` state, environment files, tokens, session data, temporary prompts, tests, or source files would be included in the VSIX.
+`npm run package` fails if required runtime programs or scaffold assets are absent, or if mutable workspace state, environment files, tokens, session data, temporary prompts, tests, or source files would be included in the VSIX.
 
 Add focused tests with each behavior change. At minimum, cover write-lease transitions, hook guards for non-aboard sessions, bridge authentication and loopback binding, prompt resolution and command construction, scaffold merge behavior that preserves user configuration, session resume and typed failures, and auto-run phase transitions including resume from an interrupted run.
 
@@ -47,5 +47,5 @@ Do not run an end-to-end test inside this repository — it would create real is
 ## Scope notes
 
 - aboard owns only the `update-todo`, `brainstorm`, `raw`, `auto`, and `review-pr` skills. The user-owned skills are installed from upstream and must not be reimplemented here.
-- Never commit bridge tokens, session data, prompts, or anything else under `.aboard/runtime/`.
+- Never commit bridge tokens, session data, prompts, or other contents of VS Code's private aboard workspace storage.
 - Keep changes scoped to one behavior, and update the architecture or product docs when a decision changes.

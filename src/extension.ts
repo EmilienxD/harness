@@ -89,6 +89,7 @@ import { WorktreeRunWorkspaces } from "./auto/worktree.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "./auto/permissions.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
 import { RuntimeAdmission, RuntimeStartup } from "./runtime/admission.js";
+import { RuntimeLayout } from "./runtime/layout.js";
 import { planSessionResume, resolveLaunchConfiguration, type LaunchConfiguration } from "./claude/launch.js";
 import { deriveWriteCapability } from "./domain/capability.js";
 
@@ -249,6 +250,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (workspaceRoot === undefined) return undefined;
   const storageRoot = (context.storageUri ?? context.globalStorageUri).fsPath;
+  const runtime = new RuntimeLayout(storageRoot);
 
   const output = window.createOutputChannel("aboard");
   context.subscriptions.push(output);
@@ -293,6 +295,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       return {
         ...bridgeEnvironment,
         workspaceRoot,
+        runtimeRoot: runtime.root,
         // A foreground MCP delegation and the Manager's Stop hook share one
         // operator-controlled wall-clock bound.
         managerMcpTimeoutMs: currentConfiguration.managerStopTimeoutSeconds * 1000,
@@ -348,13 +351,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     directoryExists: (path) => existsSync(path),
   });
   context.subscriptions.push({ dispose: () => commandTerminals.dispose() });
-  const fleetStore = new FileFleetStore(workspaceRoot, runtimeAdmission);
+  const fleetStore = new FileFleetStore(runtime.root, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
   const activityListeners = new Set<() => void>();
   const activity = new ActivityRecorder({
-    store: new FileActivityStore(workspaceRoot, runtimeAdmission),
-    legacy: new FileLegacySessionLedger(workspaceRoot, runtimeAdmission),
+    store: new FileActivityStore(runtime.root, runtimeAdmission),
+    legacy: new FileLegacySessionLedger(runtime.root, runtimeAdmission),
     admission: () => initialized,
     now: () => new Date(),
     log: (message) => output.appendLine(message),
@@ -385,10 +388,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       ...(terminalId === undefined ? {} : { terminalId }),
     });
   };
-  const managerStore = new FileManagerStore(workspaceRoot, runtimeAdmission);
+  const managerStore = new FileManagerStore(runtime.root, runtimeAdmission);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   let recordedManager = initialized ? await managerStore.load() : undefined;
-  let agentIdCounter = WorkspaceAgentIdCounter.load(workspaceRoot, () => [
+  let agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => [
     ...fleet.list().map((session) => session.identity.agentId as string),
     ...(recordedManager === undefined ? [] : [recordedManager.agentId as string]),
   ], runtimeAdmission.isOpen);
@@ -396,15 +399,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const managerIdentity = new ManagerIdentity(recordedManager?.agentId, () => agentIdCounter.next());
   const transcripts = new TranscriptBackupStore({
     workspaceRoot,
+    directory: runtime.transcripts(),
     retain: () => currentConfiguration.managerTranscriptBackups,
     log: (message) => output.appendLine(message),
   });
+  if (initialized) await transcripts.prune();
   if (initialized && recordedManager !== undefined) void runtimeAdmission.run(() => transcripts.checkpoint(recordedManager!.sessionId));
   const launchConfigurations = workerConfigurations(workspaceRoot);
-  // Every command line that reads a file — a spilled prompt, an agent's system
-  // prompt — gets it from here, so all of them land under `.aboard/runtime/`.
-  const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot, runtimeAdmission);
-  const wrapperLayout = sessionWrapperLayout(workspaceRoot);
+  const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot, runtime.root, {
+    settings: join(context.extensionPath, "assets", "runtime", "aboard-hooks.json"),
+    script: join(context.extensionPath, "assets", "runtime", "aboard_hook.py"),
+  }, runtimeAdmission);
+  await runtimeFiles.prune?.(new Set(fleet.list().map((session) => session.identity.agentId as string)));
+  const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "aboard_wrapper.py"));
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
@@ -465,6 +472,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       // The exit record is consumed either way, so a spent one can never be
       // read back against a later launch of the same agent.
       const exit = takeSessionExitRecord(observation.lockFile);
+      void runtimeFiles.remove?.(observation.agentId).catch(() => undefined);
       void agentMcpConfigs.clear(observation.agentId).catch(() => undefined);
       if (observation.phase === "launching") {
         reportFailedLaunch(observation.agentId, observation.sessionId, exit);
@@ -515,7 +523,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push({ dispose: () => sessionLifecycle?.dispose() });
   sessionMonitor.start(SESSION_LIVENESS_POLL_MS);
   try {
-    const markerWatch = watchLockMarkers(lockMarkerDirectory(workspaceRoot), () => sessionMonitor.poll());
+    const markerWatch = watchLockMarkers(lockMarkerDirectory(runtime.root), () => sessionMonitor.poll());
     context.subscriptions.push({ dispose: () => markerWatch.dispose() });
   } catch (error) {
     output.appendLine(`Could not watch session lock markers; falling back to polling only. ${error instanceof Error ? error.message : "unknown error"}`);
@@ -594,6 +602,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         attended: true,
         command: currentConfiguration.claudeCommand,
         configuration,
+        runtimeDirectory: runtime.root,
         disallowedTools: [ABOARD_MCP_TOOL_PATTERN, ...AUTO_RUN_DISALLOWED_TOOLS],
         ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
         // The session resumes at the tier it was launched under, so a doctor the
@@ -601,8 +610,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         ...(owner.difficulty === undefined ? {} : { difficulty: owner.difficulty }),
         wrapper: wrapperLayout,
       });
-      // Written and reopened where the session ran: a run with its own checkout
-      // left both its runtime files and its transcript under that directory.
+      // User-authored skills come from the checkout where this session ran;
+      // generated launch files stay in VS Code workspace storage.
       await runtimeFiles.prepare(plan, owner.cwd);
       if (!runtimeAdmission.isOpen()) throw new Error("aboard runtime reset while preparing review resume");
       const at = new Date().toISOString() as IsoTimestamp;
@@ -650,8 +659,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     {
       write: async (slice: "state" | "roadmap", content: string) => {
         return runtimeAdmission.run(async () => {
-          const path = join(workspaceRoot, ".aboard", "runtime", "events", `brief-${slice}.txt`);
-          await mkdir(join(workspaceRoot, ".aboard", "runtime", "events"), { recursive: true });
+          const path = join(runtime.events(), `brief-${slice}.txt`);
+          await mkdir(runtime.events(), { recursive: true });
           await writeFile(path, content, "utf8");
           return path;
         });
@@ -817,7 +826,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // awaits it so queued writes are flushed on a normal shutdown.
   context.subscriptions.push({ dispose: () => void persistence?.dispose() });
   const manager = new ManagerLifecycle({
-    store: managerStore, terminals, workspaceRoot, files: runtimeFiles, admission: runtimeAdmission.isOpen,
+    store: managerStore, terminals, workspaceRoot, runtimeDirectory: runtime.root, files: runtimeFiles, admission: runtimeAdmission.isOpen,
     shell: process.platform === "win32" ? "powershell" : "git-bash",
     disallowedTools: currentConfiguration.managerDisallowedTools,
     preflight: (command) => claudeProbe.require(command),
@@ -868,6 +877,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       // write-capable launch.
       lease.releaseForTerminalOutcome(session.identity.agentId, at, "session did not survive the extension host");
       fleet.remove(session.identity.agentId, at);
+      void runtimeFiles.remove?.(session.identity.agentId).catch(() => undefined);
       output.appendLine(`Removed interrupted ${session.identity.type} (agent ${session.identity.agentId}) from the fleet.`);
     }
   };
@@ -904,7 +914,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         agentMcpConfigs.clearAll().catch(() => undefined),
         commandEndpoint.clear().catch(() => undefined),
       ]);
-      await rm(join(workspaceRoot, ".aboard", "runtime"), { recursive: true, force: true });
+      await rm(runtime.root, { recursive: true, force: true });
       output.appendLine(scaffoldState === "uninitialized"
         ? "Project state directory .aboard/ was removed; the aboard session was discarded."
         : "aboard's project assets no longer match this extension; runtime access was closed until they are updated.");
@@ -914,7 +924,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       runtimeAdmission.open();
       recordedManager = await managerStore.load();
       managerIdentity.restore(recordedManager?.agentId);
-      agentIdCounter = WorkspaceAgentIdCounter.load(workspaceRoot, () => [
+      agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => [
         ...fleet.list().map((session) => session.identity.agentId as string),
         ...(recordedManager === undefined ? [] : [recordedManager.agentId as string]),
       ], runtimeAdmission.isOpen);
@@ -1011,6 +1021,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const next = configuration(projectSettings.values);
     const previous = currentConfiguration;
     currentConfiguration = next.value;
+    if (previous.managerTranscriptBackups !== next.value.managerTranscriptBackups) void transcripts.prune();
     fleetUi?.checkAutoRun();
     for (const diagnostic of [...projectSettings.diagnostics, ...next.diagnostics]) output.appendLine(`Configuration: ${diagnostic.message}`);
     if (restartHint(previous, next.value)) void window.showInformationMessage("Manager launch settings changed. Restart the Manager to apply them.");

@@ -10,10 +10,9 @@ const output = join(root, "dist", "aboard-0.0.0.vsix");
 const required = [
   "dist/extension.js",
   "assets/aboard.svg",
-  "assets/scaffold/.aboard/scripts/aboard_hook.py",
-  "assets/scaffold/.aboard/aboard-hooks.json",
-  "assets/scaffold/.aboard/.gitignore",
-  "assets/scaffold/.aboard/scripts/aboard_wrapper.py",
+  "assets/runtime/aboard_hook.py",
+  "assets/runtime/aboard-hooks.json",
+  "assets/runtime/aboard_wrapper.py",
   // Under `.aboard/`, not `.claude/agents/`: a definition in the latter is a
   // subagent type every session in the workspace can discover and spawn.
   "assets/scaffold/.aboard/agents/manager.md",
@@ -30,9 +29,7 @@ const required = [
 ];
 
 const forbidden = [
-  // Runtime state belongs to a live project and must never ship, but
-  // `assets/scaffold/.aboard/scripts/` is extension-owned and legitimately
-  // packaged (it is installed by the scaffolder like every other asset).
+  // Runtime state belongs to a live workspace and must never ship.
   /(^|\/)\.aboard\/runtime(\/|$)/,
   /(^|\/)\.env(?:\.|$)/,
   /(^|\/)bridge\.json$/,

@@ -174,9 +174,6 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
     }
   }
 
-  // `agents` holds the derived system-prompt files every agent-defined launch
-  // and resume points `--system-prompt-file` at.
-  await Promise.all(["prompts", "events", "agents"].map((directory) => mkdir(join(projectRoot, ".aboard", "runtime", directory), { recursive: true })));
   await writeJson(manifestPath, { version: 2, revision: catalog.revision, assets: next });
   if (options.autoCompactEnabled === false) warnings.push("Claude Code autoCompact is disabled; aboard workers may exhaust their context window.");
   return { created, updated, removed, preserved, warnings };

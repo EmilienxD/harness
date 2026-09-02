@@ -18,12 +18,12 @@ test("fresh scaffold installs every aboard-owned asset under .aboard only", asyn
   const root = await project();
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets });
   await assert.rejects(readFile(join(root, ".gitignore")));
-  assert.equal(await readFile(join(root, ".aboard", ".gitignore"), "utf8"), "runtime/\n");
-  await assert.rejects(readFile(join(root, ".aboard", "scripts", "aboard_cli.py")));
+  await assert.rejects(readFile(join(root, ".aboard", ".gitignore")));
+  await assert.rejects(readFile(join(root, ".aboard", "scripts", "aboard_hook.py")));
+  await assert.rejects(readFile(join(root, ".aboard", "runtime")));
   await assert.rejects(readFile(join(root, ".mcp.json")));
   await assert.rejects(readFile(join(root, ".claude", "settings.json")));
-  assert.equal((await json(join(root, ".aboard", "aboard-hooks.json"))).UserPromptSubmit !== undefined, true);
-  assert.match(await readFile(join(root, ".aboard", "scripts", "aboard_hook.py"), "utf8"), /ABOARD_AGENT_ID/u);
+  await assert.rejects(readFile(join(root, ".aboard", "aboard-hooks.json")));
   assert.match(await readFile(join(root, ".aboard", "skills", "brainstorm", "SKILL.md"), "utf8"), /brainstorm/u);
   await assert.rejects(readFile(join(root, "TODO.md")));
   // CLAUDE.md is the user's file: aboard's Manager persona ships as an agent

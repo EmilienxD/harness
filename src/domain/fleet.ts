@@ -126,6 +126,8 @@ export type ReportEntry = MailboxEntry | EndedWithoutReportEntry;
 
 export const MAX_QUEUED_REPORTS = 20;
 export const MAX_QUEUED_REPORT_CHARACTERS = 9_500;
+export const MAX_FLEET_EVENTS = 100;
+export const MAX_DEFERRED_NOTIFICATIONS = 20;
 
 export interface FleetPersistenceDto {
   readonly version: 1;
@@ -186,7 +188,7 @@ export class FleetRegistry {
     for (const queue of dto.deferredNotifications) {
       registry.notifications.set(queue.recipientAgentId, [...queue.entries]);
     }
-    registry.eventHistory.push(...dto.events);
+    registry.eventHistory.push(...dto.events.slice(-MAX_FLEET_EVENTS));
     registry.nextNotificationId = dto.nextNotificationId;
     registry.nextEventSequence = dto.nextEventSequence;
     return registry;
@@ -499,6 +501,7 @@ export class FleetRegistry {
     this.requireSession(recipientAgentId);
     const queue = this.notifications.get(recipientAgentId) ?? [];
     queue.push({ id: this.nextNotificationId++, occurredAt, message });
+    while (queue.length > MAX_DEFERRED_NOTIFICATIONS) queue.shift();
     this.notifications.set(recipientAgentId, queue);
     this.record({ type: "notification-enqueued", recipientAgentId, count: 1 }, occurredAt);
   }
@@ -574,6 +577,7 @@ export class FleetRegistry {
   ): void {
     const recorded = { ...event, sequence: this.nextEventSequence++, occurredAt } as FleetEvent;
     this.eventHistory.push(recorded);
+    if (this.eventHistory.length > MAX_FLEET_EVENTS) this.eventHistory.shift();
     for (const listener of this.listeners) listener(recorded);
   }
 }

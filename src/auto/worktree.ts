@@ -9,9 +9,6 @@ import { isWorkingTreeClean, type GitClient } from "../git/client.js";
 
 export const RUN_WORKSPACE_CONTAINER = ".aboard-sessions";
 
-const PROJECT_OVERLAY_MARKER = ".aboard/runtime/project-overlay-v2";
-const RUNTIME_DIRECTORY = ".aboard/runtime";
-
 interface ProjectOverlayFile {
   readonly source: string;
   readonly target: string;
@@ -25,13 +22,10 @@ export interface ProjectConfigurationOverlayRequest {
 }
 
 export async function overlayProjectConfiguration(request: ProjectConfigurationOverlayRequest): Promise<void> {
-  const marker = join(request.worktreeRoot, ...PROJECT_OVERLAY_MARKER.split("/"));
-  if (await pathStat(marker) !== undefined) return;
-
   const files: ProjectOverlayFile[] = [];
   for (const root of [
     { name: ".claude", excludedDirectories: ["worktrees"] },
-    { name: ".aboard", excludedDirectories: ["runtime"] },
+    { name: ".aboard", excludedDirectories: [] },
   ] as const) {
     const sourceRoot = join(request.workspaceRoot, root.name);
     const targetRoot = join(request.worktreeRoot, root.name);
@@ -42,7 +36,7 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
     await planProjectOverlay(sourceRoot, targetRoot, [root.name], root.excludedDirectories, files);
   }
 
-  const paths = [PROJECT_OVERLAY_MARKER, ...files.map((file) => file.repositoryPath)];
+  const paths = files.map((file) => file.repositoryPath);
   const ignored = new Set(await request.git.ignoredPaths(paths));
   const exposed = paths.filter((path) => !ignored.has(path));
   if (exposed.length > 0) {
@@ -59,10 +53,6 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
       if (!hasCode(error, "EEXIST")) throw error;
     }
   }
-  await mkdir(dirname(marker), { recursive: true });
-  await writeFile(marker, "", { flag: "wx" }).catch((error: unknown) => {
-    if (!hasCode(error, "EEXIST")) throw error;
-  });
 }
 
 async function planProjectOverlay(
@@ -73,8 +63,7 @@ async function planProjectOverlay(
   files: ProjectOverlayFile[],
 ): Promise<void> {
   for (const entry of await readdir(sourceDirectory, { withFileTypes: true })) {
-    // Claude's own checkouts and aboard's runtime are live state rather than
-    // project configuration. Neither belongs in another run checkout.
+    // Claude's own worktrees are live state rather than project configuration.
     if (segments.length === 1 && excludedDirectories.some((directory) => entry.name.toLowerCase() === directory.toLowerCase())) continue;
     const nextSegments = [...segments, entry.name];
     const source = join(sourceDirectory, entry.name);
@@ -326,15 +315,14 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
       root: settings.root,
     });
     const created = await this.#checkout(path, request);
-    if (!created) await this.#requireRuntimeUntracked(this.options.gitFor(path), "HEAD");
-    await this.#directories.create(join(path, ".aboard", "runtime", "agents"));
-    await this.#directories.create(join(path, ".aboard", "runtime", "prompts"));
-    await this.#overlayProjectConfiguration({
-      workspaceRoot: this.options.workspaceRoot,
-      worktreeRoot: path,
-      git: this.options.gitFor(path),
-    });
-    if (created) await this.#runSetup(path, request);
+    if (created) {
+      await this.#overlayProjectConfiguration({
+        workspaceRoot: this.options.workspaceRoot,
+        worktreeRoot: path,
+        git: this.options.gitFor(path),
+      });
+      await this.#runSetup(path, request);
+    }
     await this.#requireCleanCheckout(path, created);
     this.options.notify(autoRunMessage.workspace(path));
     return {
@@ -385,7 +373,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     await this.#directories.create(dirname(path));
     await this.options.git.fetch();
     if (await this.options.git.branchExists(request.sessionBranch)) {
-      await this.#requireRuntimeUntracked(this.options.git, request.sessionBranch);
       await this.options.git.addWorktree(path, request.sessionBranch);
       return true;
     }
@@ -395,17 +382,8 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     const startPoint = await this.options.git.branchExists(request.base)
       ? request.base
       : `origin/${request.base}`;
-    await this.#requireRuntimeUntracked(this.options.git, startPoint);
     await this.options.git.addWorktree(path, request.sessionBranch, startPoint);
     return true;
-  }
-
-  async #requireRuntimeUntracked(git: GitClient, ref: string): Promise<void> {
-    const tracked = await git.trackedPathsUnder(ref, RUNTIME_DIRECTORY);
-    if (tracked.length === 0) return;
-    throw new RunWorkspaceError(
-      `${ref} tracks ${tracked.length} path(s) under ${RUNTIME_DIRECTORY} (${tracked.slice(0, 20).join(", ")}). Remove the directory from Git tracking (for example, git rm -r --cached -- ${RUNTIME_DIRECTORY}), keep it ignored, commit and publish that change to the inspected branch, then retry. aboard did not modify these files.`,
-    );
   }
 
   async #runSetup(path: string, request: RunWorkspaceRequest): Promise<void> {

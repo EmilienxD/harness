@@ -93,11 +93,11 @@ def roadmap_reminder_due(payload: dict[str, Any]) -> bool:
 
 def mailbox_has_entries(agent_id: str) -> bool:
     """Cheap common-path check before a PostToolUse/prompt bridge round trip."""
-    root = os.environ.get("ABOARD_WORKSPACE_ROOT") or os.environ.get("CLAUDE_PROJECT_DIR")
-    if not root:
+    runtime_root = os.environ.get("ABOARD_RUNTIME_ROOT")
+    if not runtime_root:
         return False
     try:
-        with open(os.path.join(root, ".aboard", "runtime", "fleet.json"), encoding="utf-8") as source:
+        with open(os.path.join(runtime_root, "state", "fleet.json"), encoding="utf-8") as source:
             fleet = json.load(source)
     except (OSError, ValueError):
         return False
@@ -199,8 +199,7 @@ def main() -> int:
     body: dict[str, Any]
     if endpoint == "/hooks/session-start":
         # Proof-of-life only: the liveness signal itself is the wrapper's lock
-        # file (`.aboard/runtime/locks/<agentId>.lock`), owned by
-        # `.aboard/scripts/aboard_wrapper.py` for the child's exact lifetime.
+        # file owned by aboard's launch wrapper for the child's exact lifetime.
         # No pid, no process-table scraping.
         if event != "SessionStart":
             return 0

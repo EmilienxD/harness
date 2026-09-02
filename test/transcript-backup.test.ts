@@ -40,11 +40,12 @@ async function fixture(retain = 5): Promise<Fixture> {
   await mkdir(workspaceRoot, { recursive: true });
   const projects = join(configDirectory, "projects", projectSlug(workspaceRoot));
   await mkdir(projects, { recursive: true });
-  const store = new TranscriptBackupStore({ workspaceRoot, configDirectory: () => configDirectory, retain: () => retain });
+  const directory = join(root, "storage", "runtime", "transcripts");
+  const store = new TranscriptBackupStore({ workspaceRoot, directory, configDirectory: () => configDirectory, retain: () => retain });
   const livePath = (id: SessionId): string => join(projects, `${id}.jsonl`);
   return {
     store,
-    directory: join(workspaceRoot, ".aboard", "runtime", "transcripts"),
+    directory,
     live: livePath(sessionId),
     backup: store.backupPath(sessionId),
     livePath,
@@ -137,6 +138,14 @@ test("retention 0 turns off both the backup and the restore", async () => {
   assert.equal(await fake.store.checkpoint(sessionId), "disabled");
   await assert.rejects(() => stat(fake.backup));
   assert.equal(await fake.store.restore(sessionId), "disabled");
+});
+
+test("retention 0 removes copies already on disk", async () => {
+  const fake = await fixture(0);
+  await mkdir(fake.directory, { recursive: true });
+  await writeFile(fake.store.backupPath(sessionId), "old backup\n", "utf8");
+  await fake.store.prune();
+  await assert.rejects(stat(fake.store.backupPath(sessionId)), { code: "ENOENT" });
 });
 
 test("a live transcript holding a conversation wins over the backup", async () => {

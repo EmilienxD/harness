@@ -465,7 +465,7 @@
           "type": "integer",
           "default": 4000,
           "minimum": 0,
-          "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to .aboard/runtime/prompts and are referenced with @path."
+          "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to private VS Code workspace storage and are referenced with @path."
         },
         "aboard.launch.effort": {
           "type": "string",
@@ -512,7 +512,7 @@
           "default": 5,
           "minimum": 0,
           "maximum": 100,
-          "description": "How many Manager session transcripts aboard keeps under .aboard/runtime/transcripts. Claude Code deletes its own session files older than cleanupPeriodDays at startup and offers no way to disable that sweep, so aboard copies the Manager's transcript at every turn boundary and restores it if a resume finds it gone. 0 turns both the backup and the restore off; copies already on disk are left alone."
+          "description": "How many Manager session transcripts aboard keeps in private VS Code workspace storage. Claude Code deletes its own session files older than cleanupPeriodDays at startup and offers no way to disable that sweep, so aboard copies the Manager's transcript at every turn boundary and restores it if a resume finds it gone. 0 disables backup and restore and removes existing copies."
         },
         "aboard.autoRun.review": {
           "type": "boolean",
@@ -569,7 +569,7 @@
         "aboard.autoRun.worktree.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout beside the project, carries ignored local .claude and non-runtime .aboard configuration into it without replacing tracked files, and leaves your working tree and branch exactly as they are. It refuses any Git-tracked .aboard/runtime content. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
+          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout beside the project, carries ignored local .claude and .aboard configuration into it without replacing tracked files, and leaves your working tree and branch exactly as they are. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
         },
         "aboard.autoRun.worktree.root": {
           "type": "string",
@@ -621,6 +621,7 @@
     "dist/extension.js.map",
     "assets/aboard.svg",
     "assets/scaffold/",
+    "assets/runtime/",
     "README.md",
     "LICENSE"
   ],

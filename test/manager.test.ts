@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FileManagerStore, ManagerIdentity, ManagerLifecycle } from "../src/claude/manager.js";
 import { WorkspaceAgentIdCounter } from "../src/runtime/agent-id-counter.js";
-import { planManagerResume, resolveLaunchConfiguration } from "../src/claude/launch.js";
+import { DEFAULT_RUNTIME_DIRECTORY, planManagerResume, resolveLaunchConfiguration } from "../src/claude/launch.js";
 import type { ManagerLaunchDefinition } from "../src/claude/manager.js";
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import type { TerminalController, TerminalSnapshot } from "../src/claude/terminals.js";
@@ -15,7 +15,8 @@ const agentId = "manager-1" as AgentId;
 
 const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"];
 /** The runtime definition every Manager command line points at. */
-const RUNTIME_DIRECTORY = `.aboard/runtime/agents/${agentId}`;
+const RUNTIME_ROOT = DEFAULT_RUNTIME_DIRECTORY.replaceAll("\\", "/");
+const RUNTIME_DIRECTORY = `${RUNTIME_ROOT}/agents/${agentId}`;
 const RUNTIME_AGENT = `aboard-manager-${agentId}`;
 const RUNTIME_PATH = `${RUNTIME_DIRECTORY}/.claude/agents/${RUNTIME_AGENT}.md`;
 /** The two flags every Manager command line carries, in their shell form. */
@@ -73,7 +74,7 @@ test("manager metadata persists and corrupt metadata recovers as missing", async
   const value = { version: 1 as const, agentId, sessionId, terminalId: "terminal-1" as TerminalId, updatedAt: "2026-07-30T10:00:00.000Z" as IsoTimestamp };
   await store.save(value);
   assert.deepEqual(await store.load(), value);
-  const path = join(root, ".aboard", "runtime", "manager.json");
+  const path = join(root, "state", "manager.json");
   assert.deepEqual(JSON.parse(await readFile(path, "utf8")), value);
   await writeFile(path, "not json", "utf8");
   assert.equal(await store.load(), undefined);
@@ -155,11 +156,11 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
   assert.ok((records[1] as any).request.initialCommand.includes(
-    "--add-dir .aboard/runtime/agents/manager-2 --settings .aboard/runtime/agents/manager-2/settings.json --agent aboard-manager-manager-2",
+    `--add-dir ${RUNTIME_ROOT}/agents/manager-2 --settings ${RUNTIME_ROOT}/agents/manager-2/settings.json --agent aboard-manager-manager-2`,
   ));
   assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
   // Both the resume and the fresh start write the file `--agent` resolves.
-  assert.deepEqual(files.written, [RUNTIME_PATH, ".aboard/runtime/agents/manager-2/.claude/agents/aboard-manager-manager-2.md"]);
+  assert.deepEqual(files.written, [RUNTIME_PATH, `${RUNTIME_ROOT}/agents/manager-2/.claude/agents/aboard-manager-manager-2.md`]);
 });
 
 test("the lifecycle never puts a permission flag on a Manager launch, start or resume", async () => {

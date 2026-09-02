@@ -57,6 +57,7 @@ const telemetry = { totalTokens: 12, totalDurationMs: 34, totalToolUseCount: 2, 
 const success: WorkerResult = { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "finished", telemetry };
 
 const MANAGER = agent("manager-1");
+const RUNTIME_ROOT = "C:/storage/runtime";
 
 function managerSession(): AgentSession {
   return {
@@ -83,6 +84,7 @@ function setup() {
       port: 4823,
       token: "secret",
       workspaceRoot: "C:\\repo",
+      runtimeRoot: RUNTIME_ROOT,
       managerMcpTimeoutMs: 3_600_000,
       managerRoadmapReminderBytes: 150_000,
     }),
@@ -105,6 +107,7 @@ function setup() {
   const spills: { path: string; root: string | undefined }[] = [];
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\repo",
+    runtimeDirectory: RUNTIME_ROOT,
     isResumable: async () => true,
     fleet,
     lease,
@@ -915,7 +918,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir \.aboard\/runtime\/agents\/worker-1 --settings \.aboard\/runtime\/agents\/worker-1\/settings\.json --agent aboard-implementer-worker-1 /);
+  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json --agent aboard-implementer-worker-1 /);
   // Role alone does not impose auto-run's fence: this launch is Manager-driven.
   assert.doesNotMatch(host.created[0]!.terminal.sent.at(-1)!, /Bash\(git commit\*\)/);
 });
@@ -977,9 +980,7 @@ test("an isolated launch runs in its own directory, writes its runtime files the
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(host.created[0]?.options.cwd, CHECKOUT);
-  // The rewritten agent definition is referenced relatively by `--add-dir`, so
-  // it has to be written under the directory the session actually runs in.
-  assert.deepEqual(spills, [{ path: ".aboard/runtime/agents/worker-1/.claude/agents/aboard-implementer-worker-1.md", root: CHECKOUT }]);
+  assert.deepEqual(spills, [{ path: `${RUNTIME_ROOT}/agents/worker-1/.claude/agents/aboard-implementer-worker-1.md`, root: CHECKOUT }]);
   // The isolation rules join the infrastructure and auto-run denials rather than replacing them.
   const line = host.created[0]!.terminal.sent.at(-1)!;
   assert.match(line, /--disallowedTools 'mcp__aboard__\*,Bash\(git -\*\),/);
@@ -1015,7 +1016,7 @@ test("webresearcher runs unattended, reports a result, and takes no lease", asyn
   assert.equal(researcher.resultDelivery.mode, "mailbox");
   assert.equal(lease.current(), undefined);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, undefined);
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir \.aboard\/runtime\/agents\/worker-1 --settings \.aboard\/runtime\/agents\/worker-1\/settings\.json --agent aboard-webresearcher-worker-1/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json --agent aboard-webresearcher-worker-1/);
   assert.deepEqual(host.created.at(-1)!.terminal.shown, []);
 });
 
