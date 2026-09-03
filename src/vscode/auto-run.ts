@@ -355,7 +355,7 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
   return {
     label: `#${issue.number} ${title}`,
     description: state,
-    icon: progress.state === "done" ? "pass" : progress.state === "current" ? "sync~spin" : "circle-outline",
+    icon: progress.state === "done" ? "pass" : progress.state === "current" ? "circle-filled" : "circle-outline",
     tooltip: [
       `Issue #${issue.number}`,
       `Disposition: ${issue.disposition}`,
