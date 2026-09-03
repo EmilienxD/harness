@@ -8,6 +8,7 @@ import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from 
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
 import { FleetTreeModel } from "../../src/vscode/fleet.js";
+import { createVsCodeTerminalHost } from "../../src/vscode/terminals.js";
 
 interface CommandEndpoint { readonly port: number; readonly workspaceRoot: string; readonly commandToken: string; readonly pid: number }
 interface AboardApi { readonly commandEndpointDirectory: string }
@@ -66,6 +67,29 @@ export async function run(): Promise<void> {
 
   const root = workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.ok(root, "integration workspace is open");
+
+  // Exercise the actual VS Code title handling: a fake host accepting a
+  // proposed option does not prove that packaged extensions can use it.
+  const title = "Claude Code: aboard terminal test";
+  const titleTerminals = new Set(window.terminals);
+  const titleProbe = createVsCodeTerminalHost().createTerminal({
+    cwd: root,
+    env: {},
+    shellPath: process.platform === "win32" ? "pwsh" : "/bin/sh",
+    shellArgs: process.platform === "win32"
+      ? ["-NoLogo", "-NoProfile", "-Command", `[Console]::Write([char]27 + ']0;${title}' + [char]7); Start-Sleep -Seconds 30`]
+      : ["-c", `printf '\\033]0;${title}\\007'; sleep 30`],
+  });
+  try {
+    titleProbe.show(true);
+    await eventually(
+      () => window.terminals.some((terminal) => !titleTerminals.has(terminal) && terminal.name === title),
+      "VS Code did not display the process's title through the stable terminal API",
+    );
+  } finally {
+    titleProbe.dispose();
+  }
+
   await commands.executeCommand("aboard.initializeProject");
   await eventually(() => workspace.workspaceFolders !== undefined, "workspace stayed available");
 
