@@ -53,8 +53,8 @@ Design notes:
   ".issues-gateway/.state.json", under "published", keyed exactly like an
   in-body reference. It is seeded back into the resolver at the start of a
   run, so a reference to an issue published in an *earlier* run still
-  resolves. Reads and writes of the state file run under a portalocker lock
-  (falling back to no lock when portalocker is unavailable), so two
+  resolves. Reads and writes of the state file run under a file lock
+  (using native OS locking when portalocker is unavailable), so two
   concurrent Claude Code sessions publishing in the same project cannot
   lose each other's entries; the loser of the race gets a warning in the
   report instead of clobbered state.
@@ -95,10 +95,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
+
 # The shared state is read and written by any session publishing in the
 # same project, so every read-modify-write cycle runs under a file lock
-# (same pattern as src/harness_cli): portalocker when installed, no lock
-# otherwise - the fallback loses cross-session safety but never the hook.
+# portalocker when installed, native OS locking otherwise.
 with contextlib.suppress(ImportError):
     import portalocker
 
@@ -113,6 +117,36 @@ STATE_NAME = ".state.json"
 # never replaced or renamed, so a lock on it always names the same file,
 # unlike the state file itself.
 LOCK_NAME = ".state.lock"
+
+
+@contextlib.contextmanager
+def file_lock(lock_path: Path):
+    """Try an OS file lock that is released even if the process is killed."""
+    with lock_path.open("a+b") as lock:
+        if lock.tell() == 0:
+            lock.write(b"\0")
+            lock.flush()
+        lock.seek(0)
+        try:
+            if sys.platform == "win32":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            lock.seek(0)
+            if sys.platform == "win32":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def publication_lock(batch_dir: Path):
+    return file_lock(batch_dir.parent / f".publish-{batch_dir.name}.lock")
 
 # Legacy files from versions before the state file was consolidated. They are
 # read as migration inputs only.
@@ -186,7 +220,7 @@ LABEL_LINE_PATTERN = re.compile(
 # an "[AI]-" prefix so they can't collide with a repo's own labels, and so the
 # same labels can be shared across projects that use this tool as a dependency.
 # They are created immediately before the run's first remote mutation if
-# missing; an oversized publication reserves state first. Existing labels are
+# missing; a publication reserves state first. Existing labels are
 # left alone, so the user's own styling is never overwritten.
 CANONICAL_LABELS = {
     "[AI]-routine-difficulty": (
@@ -265,31 +299,37 @@ def _write_json_dict(path: Path, data: dict) -> None:
 
 @contextlib.contextmanager
 def _locked_state(gateway_dir: Path = GATEWAY_DIR):
-    """Yield (path, state) under the portalocker lock, or (None, {}).
+    """Yield (path, state) under a file lock, or (None, {}).
 
     The lock is taken on a sidecar file, ".state.lock" - locking the state
     file itself would let Windows deny the state file's own atomic replace
     (leaving it empty) and truncate it on contention, and a POSIX fcntl lock
     would not survive the state file being unlinked by a replace. Failing to
-    take the lock (another session holds it) never blocks publishing: the
-    caller gets None and reports a warning when durable state cannot be
-    updated.
+    take the lock gives the caller None, so it can retain a draft whose
+    publication cannot be reserved durably.
     Read-modify-write happens entirely inside the lock, so two sessions
     publishing at once merge instead of one clobbering the other's entries.
     """
     path = gateway_dir / STATE_NAME
+    if not gateway_dir.is_dir():
+        yield path, {}
+        return
     if "portalocker" not in sys.modules:
-        yield path, _read_state(gateway_dir)
+        with file_lock(gateway_dir / LOCK_NAME) as acquired:
+            yield (path, _read_state(gateway_dir)) if acquired else (None, {})
         return
     lock_path = gateway_dir / LOCK_NAME
+    lock = portalocker.Lock(str(lock_path), mode="a", timeout=10, fail_when_locked=True)
     try:
         lock_path.touch(exist_ok=True)
-        with portalocker.Lock(
-            str(lock_path), mode="a", timeout=10, fail_when_locked=True
-        ):
-            yield path, _read_state(gateway_dir)
+        lock.acquire()
     except (portalocker.exceptions.LockException, OSError):
         yield None, {}
+        return
+    try:
+        yield path, _read_state(gateway_dir)
+    finally:
+        lock.release()
 
 
 def _read_state(gateway_dir: Path = GATEWAY_DIR) -> dict:
@@ -849,6 +889,13 @@ def render_oversized_parts(body: str, key: str) -> list[str]:
             raise ValueError("generated continuation metadata exceeds payload target")
 
 
+def render_publication_parts(body: str, key: str) -> list[str]:
+    marked = f"{body}\n\n{part_marker(key, content_digest(body), 1, 1)}"
+    if len(marked) <= GITHUB_BODY_LIMIT:
+        return [marked]
+    return render_oversized_parts(body, key)
+
+
 def publication_fingerprint(
     repository: str, title: str, labels: list[str], parent: str | None, body: str
 ) -> str:
@@ -895,6 +942,23 @@ def gh_create_issue(
 
     stdout = result.stdout.strip()
     url = stdout.splitlines()[-1] if stdout else ""
+    if not re.fullmatch(r"https://[^/]+/[^/]+/[^/]+/issues/\d+", url):
+        return False, "gh returned no valid issue URL; rerun to recover the reserved issue"
+    verified = subprocess.run(
+        ["gh", "issue", "view", url, "--json", "title,body"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    try:
+        issue = json.loads(verified.stdout)
+    except (ValueError, TypeError):
+        issue = None
+    if (
+        verified.returncode != 0
+        or not isinstance(issue, dict)
+        or issue.get("title") != title
+        or str(issue.get("body", "")).replace("\r\n", "\n").rstrip() != body.rstrip()
+    ):
+        return False, f"could not verify created issue content at {url}; rerun to recover"
     return True, url
 
 
@@ -932,21 +996,27 @@ def _gh_json(args: list[str]) -> tuple[bool, list[dict] | str]:
 def gh_find_reserved_issue(
     repository: str, started_at: str, marker: str
 ) -> tuple[bool, dict | None | str]:
-    date = started_at[:10]
     ok, data = _gh_json(
         [
             "gh", "issue", "list", "--repo", repository, "--state", "all",
-            "--limit", "1000", "--search", f"created:>={date}",
+            "--limit", "1000",
             "--json", "number,url,body,createdAt",
         ]
     )
     if not ok:
         return False, data
+    matches = []
     for issue in data:
         if not isinstance(issue, dict) or marker not in str(issue.get("body") or ""):
             continue
         if str(issue.get("createdAt") or "") >= started_at:
-            return True, issue
+            matches.append(issue)
+    if len(matches) > 1:
+        return False, "multiple issues carry this draft marker; reconcile them before retrying"
+    if matches:
+        return True, matches[0]
+    if len(data) >= 1000:
+        return False, "issue recovery scan reached its limit; refusing a potentially duplicate create"
     return True, None
 
 
@@ -983,7 +1053,7 @@ def gh_existing_comment_parts(
 def reserve_inflight(
     key: str, reservation: dict, gateway_dir: Path
 ) -> tuple[bool, dict | None]:
-    """Durably reserve an oversized publication before any remote mutation."""
+    """Durably reserve a publication before any remote mutation."""
     with _locked_state(gateway_dir) as (path, state):
         if path is None:
             return False, None
@@ -1070,7 +1140,22 @@ def finish_inflight(key: str, gateway_dir: Path) -> bool:
     return True
 
 
-def publish_oversized_issue(
+def mark_creation_attempted(key: str, gateway_dir: Path) -> bool:
+    with _locked_state(gateway_dir) as (path, state):
+        if path is None:
+            return False
+        entry = state.get("inflight", {}).get(key)
+        if not isinstance(entry, dict) or entry.get("creation_attempted"):
+            return False
+        entry["creation_attempted"] = True
+        try:
+            _write_state(path, state)
+        except OSError:
+            return False
+    return True
+
+
+def publish_reserved_issue(
     *,
     key: str,
     title: str,
@@ -1081,8 +1166,8 @@ def publish_oversized_issue(
     report: list[str],
     mutation_prelude=None,
 ) -> tuple[bool, dict | None, str]:
-    """Create or resume one marker-backed multi-part issue publication."""
-    parts = render_oversized_parts(body, key)
+    """Create or resume one marker-backed issue publication of any size."""
+    parts = render_publication_parts(body, key)
     digest = content_digest(body)
     ok, repository_or_error = gh_repository()
     if not ok:
@@ -1147,6 +1232,13 @@ def publish_oversized_issue(
 
     keep_parent_in_body = bool(parent) and not parent_flag_supported()
     if not issue_url:
+        if entry.get("creation_attempted"):
+            return False, None, (
+                "a previous create may have succeeded, but its marker was not found; "
+                "refusing another create. Retry recovery later or reconcile the reserved draft."
+            )
+        if not mark_creation_attempted(key, gateway_dir):
+            return False, None, "could not record creation attempt; no issue was created"
         created_ok, info = gh_create_issue(title, parts[0], labels, parent)
         if not created_ok:
             return False, None, f"issue creation failed: {info}"
@@ -1170,7 +1262,7 @@ def publish_oversized_issue(
     if recovered:
         report.append(f"  Recovered partial issue: {issue_url}")
 
-    if keep_parent_in_body and parent:
+    if parent and (keep_parent_in_body or recovered):
         linked, error = gh_link_parent(issue_number, parent)
         if not linked:
             record["parent"] = None
@@ -1178,6 +1270,9 @@ def publish_oversized_issue(
             report.append(
                 f"  WARN  #{issue_number} created, but linking it under #{parent} failed: {error}"
             )
+
+    if len(parts) == 1:
+        return True, record, ""
 
     inspected, existing_or_error = gh_existing_comment_parts(
         repository, issue_number, key, digest, len(parts)
@@ -1206,12 +1301,27 @@ def publish_oversized_issue(
                 f"partial issue {issue_url}: part {index} posted but progress could not be recorded",
             )
 
-    if not finish_inflight(key, gateway_dir):
-        return False, record, f"all parts exist at {issue_url}, but completion state could not be saved"
     return True, record, ""
 
 
 def publish_batch(
+    batch_dir: Path,
+    dry: bool,
+    report: list[str],
+    created: list[dict] | None = None,
+    seed: dict[str, str] | None = None,
+    mutation_prelude=None,
+) -> tuple[int, int]:
+    if dry:
+        return _publish_batch(batch_dir, dry, report, created, seed, mutation_prelude)
+    with publication_lock(batch_dir) as acquired:
+        if not acquired:
+            report.append("  SKIP  Another publisher is already processing this batch. Retry after it finishes.")
+            return 0, 1
+        return _publish_batch(batch_dir, dry, report, created, seed, mutation_prelude)
+
+
+def _publish_batch(
     batch_dir: Path,
     dry: bool,
     report: list[str],
@@ -1237,6 +1347,8 @@ def publish_batch(
     # Entries published here are added as the run proceeds, so later drafts
     # in this batch can resolve references without re-reading shared state.
     resolved = seed if seed is not None else seed_from_state(gateway_dir)
+    if seed is not None:
+        resolved.update(seed_from_state(gateway_dir))
     batch_header = f"Batch: {len(files)} draft issue(s)"
     report.append(batch_header)
     report.append("")
@@ -1297,8 +1409,8 @@ def publish_batch(
 
             if dry:
                 suffix = f" -> sub-issue of #{parent_number}" if parent_number else ""
-                if len(body) > GITHUB_BODY_LIMIT:
-                    part_count = len(render_oversized_parts(body, key))
+                part_count = len(render_publication_parts(body, key))
+                if part_count > 1:
                     suffix += (
                         f" -> {part_count} parts "
                         f"({part_count - 1} continuation comment(s))"
@@ -1319,92 +1431,34 @@ def publish_batch(
             if keep_parent_in_body:
                 body, _ = resolve_references(body_keeping_parent, resolved)
 
-            if len(body) <= GITHUB_BODY_LIMIT:
-                existing_inflight = read_inflight(key, gateway_dir)
-                if existing_inflight is not None:
-                    partial_url = existing_inflight.get("issue_url") or (
-                        "issue URL not recorded yet"
-                    )
-                    failed_entries.append(
-                        f"  FAIL  {path.name}: draft changed while publication is "
-                        "incomplete; refusing to create a replacement. Existing partial "
-                        f"issue: {partial_url}"
-                    )
-                    made_progress = True
-                    continue
-
-            if len(body) > GITHUB_BODY_LIMIT:
-                oversized_ok, record, error = publish_oversized_issue(
-                    key=key,
-                    title=title,
-                    body=body,
-                    labels=labels,
-                    parent=parent_number,
-                    gateway_dir=gateway_dir,
-                    report=report,
-                    mutation_prelude=mutation_prelude,
-                )
-                if record is not None:
-                    resolved[key] = str(record["number"])
-                if oversized_ok and record is not None:
-                    report.append(
-                        f"  Created: {record['url']} "
-                        f"({len(render_oversized_parts(body, key))} parts)"
-                    )
-                    if record.get("parent"):
-                        report.append(f"        sub-issue of #{record['parent']}")
-                    if created is not None:
-                        created.append(record)
-                    delete_published_draft(path)
-                    published += 1
-                else:
-                    failed_entries.append(f"  FAIL  {path.name}: {error}")
-                made_progress = True
-                continue
-
-            if mutation_prelude is not None:
-                report.extend(mutation_prelude())
-            ok, info = gh_create_issue(title, body, labels, parent_number)
-            if ok:
-                number_match = re.search(r"/issues/(\d+)", info)
-                resolved_number = number_match.group(1) if number_match else "?"
-                resolved[key] = resolved_number
-                report.append(f"  Created: {info}")
-                linked_parent = parent_number
-                if parent_number and keep_parent_in_body:
-                    linked, err = gh_link_parent(resolved_number, parent_number)
-                    if not linked:
-                        # The issue exists and still names its parent in the
-                        # body; only the structural link is missing.
-                        linked_parent = None
-                        report.append(
-                            f"  WARN  #{resolved_number} created, but linking it "
-                            f"under #{parent_number} failed: {err}"
-                        )
-                if linked_parent:
-                    report.append(f"        sub-issue of #{linked_parent}")
-                record = {
-                    "number": resolved_number,
-                    "url": info,
-                    "title": title,
-                    "labels": labels,
-                    "parent": linked_parent,
-                }
-                if not record_published(key, record, gateway_dir):
-                    # The issue exists on the tracker; losing the state
-                    # entry only means a rerun cannot resolve references
-                    # to it. A warning, never a failure.
-                    report.append(
-                        f"  WARN  #{resolved_number} could not be recorded in "
-                        "the shared state (locked by another publish?)"
-                    )
+            ok, record, error = publish_reserved_issue(
+                key=key,
+                title=title,
+                body=body,
+                labels=labels,
+                parent=parent_number,
+                gateway_dir=gateway_dir,
+                report=report,
+                mutation_prelude=mutation_prelude,
+            )
+            if record is not None:
+                resolved[key] = str(record["number"])
+            if ok and record is not None:
+                part_count = len(render_publication_parts(body, key))
+                suffix = f" ({part_count} parts)" if part_count > 1 else ""
+                report.append(f"  Created: {record['url']}{suffix}")
+                if record.get("parent"):
+                    report.append(f"        sub-issue of #{record['parent']}")
                 if created is not None:
                     created.append(record)
+                # Keep recovery state until deletion succeeds, including a crash
+                # after GitHub creation or a Windows file-sharing violation.
                 delete_published_draft(path)
+                if not finish_inflight(key, gateway_dir):
+                    report.append(f"  WARN  Could not clear recovery state for {record['url']}")
                 published += 1
             else:
-                rewrite_known_references(path, resolved)
-                failed_entries.append(f"  FAIL  {path.name}: {info}")
+                failed_entries.append(f"  FAIL  {path.name}: {error}")
             made_progress = True
 
         pending = still_pending

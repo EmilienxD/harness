@@ -383,7 +383,7 @@ def test_it_sleeps_until_the_reset_then_returns_when_usage_drops(monkeypatch):
         exhausted, now=clock.time, sleep=clock.sleep, refresh=lambda: refreshed
     )
     assert clock.slept == [3600 + hook.GRACE_SECONDS]
-    assert waited == pytest.approx(3610)
+    assert waited == pytest.approx(3600 + hook.GRACE_SECONDS)
     assert kind == "session"
 
 
@@ -420,7 +420,7 @@ def test_it_keeps_polling_while_the_limit_holds(monkeypatch):
         exhausted, now=clock.time, sleep=clock.sleep, refresh=lambda: answers.pop(0)
     )
     assert len(clock.slept) == 2
-    assert waited == pytest.approx(3610 + 600)
+    assert waited == pytest.approx(3600 + hook.GRACE_SECONDS + 600)
     assert answers == []
 
 

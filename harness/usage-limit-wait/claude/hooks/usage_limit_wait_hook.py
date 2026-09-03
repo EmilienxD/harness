@@ -63,9 +63,10 @@ PROVIDER_ENV = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_COD
 
 FALSEY = ("", "0", "false", "no", "off")
 
-# Wake a little after the announced reset: the server's clock and ours are not
-# the same clock, and coming back one second early wastes a whole poll cycle.
-GRACE_SECONDS = 10.0
+# Wait two minutes after the announced reset before resuming. This gives the
+# usage service time to apply the reset, avoiding a request that lands at the
+# wall and wastes a whole poll cycle.
+GRACE_SECONDS = 120.0
 
 # Never re-poll faster than this, even when the announced reset is already in
 # the past (which happens, and would otherwise spin on the network).

@@ -83,20 +83,26 @@ GitHub's sub-issue graph is structural — so the hook makes the link itself and
 from the published body, since GitHub renders the parent natively. This costs no model call: the
 reference is one line in a file the drafting skill was already writing.
 
-**Oversized issues.** A processed body up to GitHub's 65,536-character limit keeps the existing
-single-create behavior byte for byte. A larger body is split at a conservative 60,000-character
-payload target after labels, cross-references, and parent handling are resolved. Part 1 is the issue
+**Oversized issues.** A processed body plus its hidden recovery marker fits in one issue up to
+GitHub's 65,536-character limit. A larger payload is split at a conservative 60,000-character
+target after labels, cross-references, and parent handling are resolved. Part 1 is the issue
 body and identifies the total part count; the remaining parts are visibly numbered continuation
 comments. Splitting prefers paragraphs, then lines, and only hard-splits exceptionally long lines.
 Fenced code blocks are kept together where possible and are closed/reopened with the same language
 when a block itself cannot fit.
 
-Every oversized part also carries a hidden draft-key/content-digest/index marker. Before creating
+Every issue and continuation part carries a hidden draft-key/content-digest/index marker. Before creating
 the issue, the hook reserves an `inflight` state entry. If a run stops after creation or between
 comments, rerunning `/publish-issues` finds the existing marker-bearing issue and comments, skips
 parts already present, and continues without duplicating content. The draft is retained until every
 continuation exists. Editing its processed title, labels, parent, or body while it is incomplete
 causes the rerun to stop that draft and report the partial issue URL rather than mixing versions.
+The returned issue URL is checked against its title and body before any number enters the state.
+If a create response is lost and recovery cannot find its marker yet, the hook refuses another
+create and retains the draft for later recovery. This also covers a failed parent-link operation
+after GitHub has already created the issue. Recovery lists issues directly, without GitHub search
+indexing delays. An OS file lock allows only one publisher per batch, even without `portalocker`;
+an overlapping invocation reports that the batch is already being processed.
 
 ### Spec → sub-issues, without a round trip
 
@@ -110,7 +116,7 @@ failure modes:
   at the start of the next run. So a `{session-id}/{i}` reference — in `Blocked by` or under
   `## Parent` — to an issue published in an *earlier* run resolves too, even though its draft file
   is long gone. Every state read/write runs under a file lock on a `.state.lock` sidecar
-  (portalocker when available, no lock otherwise), so two sessions publishing at once in the same
+  (portalocker when available, native OS locking otherwise), so two sessions publishing at once in the same
   project merge their entries instead of clobbering each other.
 - **A one-shot notice.** Each run queues what it created in the same `.state.json`, under
   `pending_notice`.
@@ -224,11 +230,11 @@ At runtime the drafting skills create a gateway folder at the project root — `
   batch — one shared map for the whole project, because reference keys already carry their session
   id. It is written after each successful create, immediately, so an interrupted run still leaves
   behind the numbers it did create, and it is what makes references resolve across runs, once the
-  draft files themselves are gone. Read-modify-write cycles hold a portalocker lock on a
+  draft files themselves are gone. Read-modify-write cycles hold a file lock on a
   `.state.lock` sidecar (the sidecar — not the state file — carries the lock, so the state file's
   own atomic temp-file replace can't be blocked or truncated by lock semantics, on Windows or
-  POSIX). A session that loses the lock race still publishes its issues; only the state record is
-  skipped, with a warning in the report. Corrupt or malformed published state degrades to "nothing
+  POSIX). If the state reservation cannot be saved, publishing stops before creating that issue
+  and retains its draft. Corrupt or malformed published state degrades to "nothing
   known yet" rather than blocking a publish.
 - **Pending notice**: `.state.json` also has a `pending_notice` object that collects what each run
   published (and how many drafts failed). The next prompt that isn't a publish command injects it as
@@ -236,15 +242,15 @@ At runtime the drafting skills create a gateway folder at the project root — `
   not keyed by session id — a `/clear` between publishing and the next prompt must not strand it —
   and two publish runs in a row accumulate rather than overwrite. A malformed notice is dropped,
   never raised: this hook sees every prompt in the session and must not be able to fail one.
-- **Inflight oversized publication**: the `inflight` object is keyed by `{session-id}/{i}` and stores
+- **Inflight publication**: the `inflight` object is keyed by `{session-id}/{i}` and stores
   the repository, reservation time, publication fingerprint, processed issue metadata, complete-body
-  SHA-256, part count, issue URL/number once known, and completed part indexes. The reservation is
+  SHA-256, part count, whether creation was attempted, issue URL/number once known, and completed part indexes. The reservation is
   written under the same lock before issue creation. The issue is added to `published` as soon as
   its URL is known so later references resolve even while comments are pending. Marker inspection
   makes issue creation and comment posting resumable; malformed inflight entries are ignored without
   disturbing valid `published` or `pending_notice` data.
-- **Successful publish cleanup**: a normal issue is recorded after `gh issue create` succeeds and
-  its draft is then deleted. An oversized draft is deleted, removed from `inflight`, counted as
+- **Successful publish cleanup**: every issue is recorded after creation is verified, then its
+  draft is deleted before its recovery state is cleared. An oversized draft is deleted, removed from `inflight`, counted as
   published, and queued for the normal agent notice only after all continuation markers exist. A
   continuation failure retains the draft and progress, reports the partial URL and failed part, and
   does not prevent unrelated drafts from being processed. If another draft fails later in the same

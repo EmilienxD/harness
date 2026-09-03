@@ -22,6 +22,8 @@ Claude's own usage endpoint reports every window's utilization and its
 window is at or over the threshold it simply blocks — `time.sleep` — until the
 window resets, re-polling along the way so an early reset (Anthropic grants
 those), a cancelled subscription, or a revoked token ends the wait promptly.
+After the announced reset, it keeps the pause for a further two minutes so
+Claude's usage service has time to apply the new allowance before work resumes.
 
 It runs on two events, which between them cover every point where the next
 request is about to be sent:
@@ -147,7 +149,7 @@ block of `.claude/settings.json`.
 | `USAGE_LIMIT_WAIT_NOTIFY_EVERY` | `600` | Seconds before the same warning may repeat in one session |
 | `USAGE_LIMIT_WAIT_OS_NOTIFICATION` | on | Set to `0` to disable the start and completion desktop notifications |
 | `USAGE_LIMIT_WAIT_MAX_WAIT` | `604800` | Longest wait, in seconds (7 days). A reset beyond this is treated as "no subscription" |
-| `USAGE_LIMIT_WAIT_POLL` | `60` | Seconds between re-checks while waiting |
+| `USAGE_LIMIT_WAIT_POLL` | `60` | Seconds between re-checks while waiting; the final re-check happens after the fixed two-minute post-reset buffer |
 | `USAGE_LIMIT_WAIT_CACHE_TTL` | `300` | How long a below-threshold reading stays usable |
 | `USAGE_LIMIT_WAIT_IGNORE` | — | Comma-separated window kinds never waited on, e.g. `weekly_all` to accept multi-day waits never happening |
 | `USAGE_LIMIT_WAIT_FALLBACK` | on | Set to `0` to forbid the `claude -p /usage` fallback |

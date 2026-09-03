@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import portalocker
+import pytest
 
 HOOK = (
     Path(__file__).resolve().parent.parent
@@ -33,6 +34,13 @@ sys.path.insert(0, str(HOOK.parent))
 import issues_core as hook  # noqa: E402
 
 SID = "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55"
+
+
+@pytest.fixture(autouse=True)
+def publication_remote(monkeypatch):
+    monkeypatch.setattr(hook, "gh_repository", lambda: (True, "x/y"))
+    monkeypatch.setattr(hook, "gh_find_reserved_issue", lambda *args: (True, None))
+    monkeypatch.setattr(hook, "gh_existing_comment_parts", lambda *args: (True, set()))
 
 
 def _labels(body: str):
@@ -210,7 +218,7 @@ def test_publish_uses_exact_parsed_labels(tmp_path, monkeypatch):
     report: list[str] = []
     count, failures = hook.publish_batch(batch, dry=False, report=report)
     assert count == 1 and failures == 0
-    assert created == [("T", "Body with {ref} kept", ["ci", "[AI]-afk"])]
+    assert created == [("T", hook.render_publication_parts("Body with {ref} kept", f"{SID}/0")[0], ["ci", "[AI]-afk"])]
     assert not (batch / "issue-0.md").exists()
     # The label line is stripped from the body that gets posted.
     assert "mode:afk" not in created[0][1]
@@ -354,7 +362,7 @@ def test_declared_parent_reaches_gh_and_is_stripped_from_the_body(tmp_path, monk
 
     assert (count, failures) == (1, 0)
     assert created[0]["parent"] == "42"
-    assert created[0]["body"] == "## What to build\n\nthing"
+    assert created[0]["body"] == hook.render_publication_parts("## What to build\n\nthing", f"{SID}/0")[0]
     assert any("sub-issue of #42" in line for line in report)
 
 
@@ -480,10 +488,16 @@ def test_dry_run_previews_the_sub_issue_link(tmp_path):
 
 
 def _fake_gh(monkeypatch, calls, help_text="", returncode=0, stdout=""):
+    issue = {}
+
     def fake_run(args, **kwargs):
         calls.append(args)
         if args[:4] == ["gh", "issue", "create", "--help"]:
             return type("R", (), {"returncode": 0, "stdout": help_text, "stderr": ""})()
+        if args[:3] == ["gh", "issue", "create"]:
+            issue.update(title=args[args.index("--title") + 1], body=Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8"))
+        if args[:3] == ["gh", "issue", "view"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps(issue), "")
         return type("R", (), {"returncode": returncode, "stdout": stdout, "stderr": ""})()
 
     monkeypatch.setattr(hook.subprocess, "run", fake_run)
@@ -528,6 +542,103 @@ def test_gh_create_issue_omits_parent_when_there_is_none(monkeypatch):
     assert "--parent" not in calls[0]
 
 
+@pytest.mark.parametrize("issue", [
+    {"title": "Another issue", "body": "body"},
+    {"title": "T", "body": "Another body"},
+    None,
+])
+def test_create_rejects_a_url_whose_issue_does_not_match(monkeypatch, issue):
+    def run(args, **kwargs):
+        output = json.dumps(issue) if args[2] == "view" else "https://github.com/x/y/issues/336\n"
+        return subprocess.CompletedProcess(args, 0, output, "")
+
+    monkeypatch.setattr(hook.subprocess, "run", run)
+    ok, error = hook.gh_create_issue("T", "body", [])
+    assert not ok
+    assert "could not verify" in error and "/336" in error
+
+
+def test_small_issue_recovers_lost_response_without_recreating(tmp_path, monkeypatch):
+    path = _draft(tmp_path, "issue-0.md", "# Runtime\n\n> mode:afk\n\nbody")
+    attempts = []
+
+    def create(*args):
+        attempts.append(args)
+        return False, "response lost after creation"
+
+    monkeypatch.setattr(hook, "gh_create_issue", create)
+    assert hook.publish_batch(path.parent, False, []) == (0, 1)
+    assert path.exists()
+    assert not _state(path.parent.parent).get("published")
+
+    # An absent marker after an ambiguous response must never trigger a retrying create.
+    assert hook.publish_batch(path.parent, False, []) == (0, 1)
+    assert len(attempts) == 1
+    monkeypatch.setattr(hook, "gh_find_reserved_issue", lambda *args: (
+        True, {"number": 335, "url": "https://github.com/x/y/issues/335"}
+    ))
+    assert hook.publish_batch(path.parent, False, []) == (1, 0)
+    assert len(attempts) == 1
+    assert not path.exists()
+    record = _state(path.parent.parent)["published"][f"{SID}/0"]
+    assert record["number"] == "335" and record["title"] == "Runtime"
+
+
+def test_cleanup_failure_retains_recovery_state(tmp_path, monkeypatch):
+    path = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody")
+    created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/335"])
+    with monkeypatch.context() as patch:
+        def fail_delete(path):
+            raise PermissionError("draft is open in another process")
+        patch.setattr(hook, "delete_published_draft", fail_delete)
+        with pytest.raises(PermissionError):
+            hook.publish_batch(path.parent, False, [])
+    assert path.exists()
+    assert _state(path.parent.parent)["inflight"][f"{SID}/0"]["issue_number"] == "335"
+    assert hook.publish_batch(path.parent, False, []) == (1, 0)
+    assert len(created) == 1
+    assert not path.exists()
+
+
+def test_recovery_retries_parent_link_after_partial_native_create(tmp_path, monkeypatch):
+    path = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n## Parent\n\n#332\n\nbody")
+    monkeypatch.setattr(hook, "parent_flag_supported", lambda: True)
+    monkeypatch.setattr(hook, "gh_create_issue", lambda *args: (False, "parent link failed after create"))
+    assert hook.publish_batch(path.parent, False, []) == (0, 1)
+    monkeypatch.setattr(hook, "gh_find_reserved_issue", lambda *args: (
+        True, {"number": 335, "url": "https://github.com/x/y/issues/335"}
+    ))
+    links = []
+    monkeypatch.setattr(hook, "gh_link_parent", lambda child, parent: (links.append((child, parent)) or True, ""))
+    assert hook.publish_batch(path.parent, False, []) == (1, 0)
+    assert links == [("335", "332")]
+    assert _state(path.parent.parent)["published"][f"{SID}/0"]["parent"] == "332"
+
+
+def test_overlapping_publish_does_not_create_twice_without_portalocker(tmp_path, monkeypatch):
+    path = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody")
+    monkeypatch.delitem(sys.modules, "portalocker")
+    overlapping_report = []
+
+    def create(*args):
+        assert hook.publish_batch(path.parent, False, overlapping_report) == (0, 1)
+        return True, "https://github.com/x/y/issues/335"
+
+    monkeypatch.setattr(hook, "gh_create_issue", create)
+    assert hook.publish_batch(path.parent, False, []) == (1, 0)
+    assert any("already processing" in line for line in overlapping_report)
+    assert _state(path.parent.parent)["published"][f"{SID}/0"]["number"] == "335"
+
+
+def test_native_state_lock_rejects_overlapping_writer(tmp_path, monkeypatch):
+    gateway = _gateway(tmp_path)
+    monkeypatch.delitem(sys.modules, "portalocker")
+    with hook.file_lock(gateway / hook.LOCK_NAME) as acquired:
+        assert acquired
+        assert not hook.record_published(f"{SID}/0", {"number": "335"}, gateway)
+    assert hook.record_published(f"{SID}/0", {"number": "335"}, gateway)
+
+
 # --- oversized bodies and resumable continuation comments -----------------
 
 
@@ -535,7 +646,8 @@ def _rendered_content(payload: str) -> str:
     return payload.split("\n\n", 1)[1].rsplit("\n\n<!-- issues-gateway:", 1)[0]
 
 
-def test_body_at_hard_limit_keeps_the_single_create_path(tmp_path, monkeypatch):
+def test_body_at_hard_limit_splits_to_leave_room_for_recovery_marker(tmp_path, monkeypatch):
+    monkeypatch.setattr(hook, "gh_comment_issue", lambda *args: (True, ""))
     body = "é" * hook.GITHUB_BODY_LIMIT
     created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     _draft(tmp_path, "issue-0.md", f"# T\n\n> mode:afk\n\n{body}\n")
@@ -545,8 +657,9 @@ def test_body_at_hard_limit_keeps_the_single_create_path(tmp_path, monkeypatch):
     )
 
     assert (count, failures) == (1, 0)
-    assert created[0]["body"] == body
-    assert "issues-gateway:" not in created[0]["body"]
+    assert created[0]["body"] == hook.render_publication_parts(body, f"{SID}/0")[0]
+    assert len(created[0]["body"]) <= hook.GITHUB_BODY_LIMIT
+    assert "Part 1 of 2" in created[0]["body"]
 
 
 def test_rendered_parts_are_ordered_complete_and_below_both_limits():
@@ -772,7 +885,7 @@ def test_shrinking_partial_draft_below_limit_still_refuses_duplicate(tmp_path, m
     )
     report = []
     assert hook.publish_batch(batch, dry=False, report=report) == (0, 1)
-    assert any("refusing to create a replacement" in line and "/42" in line for line in report)
+    assert any("refusing to mix versions" in line and "/42" in line for line in report)
 
 
 def test_failed_reservation_makes_no_remote_issue_or_comment(tmp_path, monkeypatch):
@@ -965,9 +1078,7 @@ def test_record_published_warns_instead_of_clobbering_locked_state(tmp_path):
     assert hook.seed_from_state(gateway) == {}
 
 
-def test_publish_under_state_contention_warns_but_still_creates(tmp_path, monkeypatch):
-    """A locked state file must not block the gh work: the issue is still
-    created and its draft deleted; only the state record warns."""
+def test_publish_under_state_contention_keeps_draft_without_creating(tmp_path, monkeypatch):
     created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
     batch = tmp_path / ".issues-gateway" / SID
@@ -978,9 +1089,10 @@ def test_publish_under_state_contention_warns_but_still_creates(tmp_path, monkey
     with portalocker.Lock(str(lock_path), mode="a", timeout=10, fail_when_locked=True):
         count, failures = hook.publish_batch(batch, dry=False, report=report)
 
-    assert (count, failures) == (1, 0)
-    assert not (batch / "issue-0.md").exists()
-    assert any("could not be recorded in the shared state" in line for line in report)
+    assert (count, failures) == (0, 1)
+    assert (batch / "issue-0.md").exists()
+    assert created == []
+    assert any("could not reserve shared state" in line for line in report)
 
 
 def test_notice_stays_under_the_additional_context_cap(tmp_path):
