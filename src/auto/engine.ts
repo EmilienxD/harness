@@ -1447,7 +1447,7 @@ export class AutoRunEngine {
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
-      prompt: `Address issue #${issue.number} on branch \`${workingBranch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree: aboard commits and pushes it${this.#current.settings.branchMode !== "single-branch" ? " and opens the issue pull request" : " to the cumulative run pull request"} for you. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to test and debug." : ""}`,
+      prompt: `Address issue #${issue.number} on branch \`${workingBranch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to visualize, test, debug." : ""}`,
       ...(await this.#guidance(issue)),
       expectsUncommittedTree: true,
       ...this.#isolation(),

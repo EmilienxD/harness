@@ -396,6 +396,8 @@ export interface LaunchPlan {
   readonly requiresWriteLease: boolean;
   readonly promptDelivery: PromptDelivery;
   readonly spill?: PromptSpillFile;
+  /** Original worker task, preserved independently of resume messages. */
+  readonly task?: PromptSpillFile;
   readonly agentDefinition?: AgentDefinitionFile;
   readonly wrapperRequest?: WrapperRequestFile;
   /** Per-launch directory selected with `--settings` and `--add-dir`. */
@@ -536,6 +538,12 @@ function normalizePrompt(
 export function promptSpillRoot(runtimeDirectory: string): string {
   const identity = createHash("sha256").update(resolve(runtimeDirectory)).digest("hex");
   return join(tmpdir(), "aboard-prompts", identity);
+}
+
+export function taskPromptPath(runtimeDirectory: string, agentId: AgentId): string {
+  const path = `${promptSpillRoot(runtimeDirectory).replaceAll("\\", "/")}/${agentId}/task.md`;
+  if (/\s/.test(path)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${path}`);
+  return path;
 }
 
 function spillRelativePath(runtimeDirectory: string, agentId: AgentId, stem: string): string {
@@ -799,6 +807,9 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
+  const task = prompt !== undefined && (agentType === "implementer" || agentType === "pr-doctor-afk" || agentType === "pr-doctor-hitl")
+    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId), contents: `${prompt.text.trim()}\n` }
+    : undefined;
   const shapeArguments: string[] = [
     ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration)),
     "--add-dir", launchRuntimeDirectory,
@@ -876,6 +887,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     promptDelivery: promptPlan.delivery,
     runtimeDirectory: launchRuntimeDirectory,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
+    ...(task === undefined ? {} : { task }),
     ...(agentDefinition === undefined ? {} : { agentDefinition }),
     ...(built.request === undefined ? {} : { wrapperRequest: built.request }),
   };

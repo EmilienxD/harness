@@ -38,7 +38,7 @@ function request(path: string, body: unknown): AuthenticatedBridgeRequest {
 }
 
 test("tracks child lifecycle and merges optional Agent telemetry", async () => {
-  const fleet = fleetWithWorker(); const service = new WorkerHookService(fleet, { current: async () => "issue-15" }, () => new Date(timestamp));
+  const fleet = fleetWithWorker(); const service = new WorkerHookService(fleet, undefined, () => new Date(timestamp));
   const route = createWorkerHookRoutes(service);
   assert.equal((await route(request("/hooks/worker/subagent-start", { parentAgentId: parentId, childAgentId: "explore-1", agentType: "Explore" }))).status, 200);
   assert.equal(fleet.listChildren(parentId)[0]?.status, "running");
@@ -54,18 +54,26 @@ test("leaves non-worker POST routes for the next bridge adapter", async () => {
   assert.equal((await route(request("/terminals", {}))).status, 404);
 });
 
-test("records compact summaries, repeat count, and precise re-grounding", async () => {
-  const fleet = fleetWithWorker(); const service = new WorkerHookService(fleet, { current: async (cwd) => { assert.equal(cwd, "C:\\repo"); return "feat/issue-15"; } }, () => new Date(timestamp));
+test("records compact telemetry and reinjects the original task on each continuation", async () => {
+  const task = { path: "C:/Temp/prompts/worker-15/task.md", contents: "Implement the token refresh contract.\n\nRun the browser checks." };
+  const fleet = fleetWithWorker(); const service = new WorkerHookService(fleet, { task: async (id) => { assert.equal(id, parentId); return task; } }, () => new Date(timestamp));
   service.compact(parentId, "first summary"); service.compact(parentId, "second summary");
   assert.equal(fleet.get(parentId)?.telemetry.compactionCount, 2);
   assert.deepEqual(fleet.get(parentId)?.compactSummaries, ["first summary", "second summary"]);
-  assert.equal(await service.reground(parentId, "C:\\repo"), "You are aboard worker worker-15, addressing issue #15 on branch feat/issue-15. Continue from the resolved issue context supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.");
+  const route = createWorkerHookRoutes(service);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await route(request("/hooks/worker/reground", { parentAgentId: parentId }));
+    assert.equal(result.status, 200);
+    const context = (result.body as { additionalContext: string }).additionalContext;
+    assert.ok(context.includes("issue #15"));
+    assert.ok(context.includes(`@${task.path}`));
+    assert.ok(context.includes(task.contents));
+  }
   const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
   assert.equal((await import("../src/domain/validation.js")).parseFleetPersistenceDto(serialized).ok, true);
 });
 
 test("re-grounding names every bound issue and refuses a worker bound to none", async () => {
-  const branches = { current: async () => "feat/issue-15" };
   const bound = (agentId: string, issueNumbers: readonly number[]): AgentSession => ({
     identity: { agentId: agentId as AgentId, type: "implementer" },
     sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId,
@@ -76,12 +84,12 @@ test("re-grounding names every bound issue and refuses a worker bound to none", 
   });
   const many = fleetWithWorker();
   many.register(bound("worker-16", [15, 18]), timestamp);
-  const service = new WorkerHookService(many, branches, () => new Date(timestamp));
-  assert.match(await service.reground("worker-16" as AgentId, "C:\\repo"), /addressing issues #15, #18 on branch feat\/issue-15/);
+  const service = new WorkerHookService(many, undefined, () => new Date(timestamp));
+  assert.match(await service.reground("worker-16" as AgentId), /issues #15, #18/);
 
   const unbound = fleetWithWorker();
   unbound.register(bound("worker-17", []), timestamp);
-  await assert.rejects(() => new WorkerHookService(unbound, branches, () => new Date(timestamp)).reground("worker-17" as AgentId, "C:\\repo"));
+  await assert.rejects(() => new WorkerHookService(unbound, undefined, () => new Date(timestamp)).reground("worker-17" as AgentId));
 });
 
 test("worker Python hook is silent for non-aboard and wrong-role sessions", () => {

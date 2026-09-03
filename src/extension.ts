@@ -411,7 +411,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     settings: join(context.extensionPath, "assets", "runtime", "aboard-hooks.json"),
     script: join(context.extensionPath, "assets", "runtime", "aboard_hook.py"),
   }, runtimeAdmission);
-  await runtimeFiles.prune?.(new Set(fleet.list().map((session) => session.identity.agentId as string)));
+  const liveTaskAgents = new Set(fleet.list().map((session) => session.identity.agentId as string));
+  await runtimeFiles.prune(liveTaskAgents, new Set([
+    ...liveTaskAgents,
+    ...activity.entries().flatMap((entry) => entry.kind === "agent" && entry.reopen !== undefined ? [entry.agentId as string] : []),
+  ]));
   const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "aboard_wrapper.py"));
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
@@ -749,7 +753,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     } }, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
       const session = fleet.get(agentId);
       if (session?.identity.type === "manager") void runtimeAdmission.run(() => transcripts.checkpoint(session.sessionId));
-    }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
+    }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet, runtimeFiles)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
     bridgeEnvironment = { port: bridge.port, token: bridge.token };

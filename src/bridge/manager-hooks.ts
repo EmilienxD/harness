@@ -397,7 +397,7 @@ export class ManagerStopService {
   #format(entries: readonly ReportEntry[], deliveredAt: IsoTimestamp): string {
     const omitted = Math.max(0, entries.length - this.#maxResults);
     const selected = entries.slice(omitted);
-    const lines = [`At ${deliveredAt}, aboard received ${entries.length} report(s).`];
+    const lines = [`At ${deliveredAt}, ${entries.length} report(s) received.`];
     if (omitted > 0) lines.push(`${omitted} older report(s) were omitted from this bounded batch.`);
     for (const entry of selected) lines.push(formatReport(entry));
     const joined = lines.join("\n");

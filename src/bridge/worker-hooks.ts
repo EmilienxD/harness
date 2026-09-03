@@ -1,25 +1,17 @@
 import type { AgentId, AgentTelemetry, AgentTokenUsage, IsoTimestamp } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
-import { ProcessGitClient, type GitClient } from "../git/client.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 import type { BridgeRequestHandler } from "./protocol.js";
 import { protocolError } from "./protocol.js";
 
 const EMPTY_TELEMETRY: AgentTelemetry = { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 };
 
-export interface WorkerBranchResolver { current(cwd: string): Promise<string>; }
-export class GitWorkerBranchResolver implements WorkerBranchResolver {
-  public constructor(private readonly client: (cwd: string) => GitClient = (cwd) => new ProcessGitClient(cwd)) {}
-
-  public async current(cwd: string): Promise<string> {
-    const branch = await this.client(cwd).currentBranch();
-    if (branch === undefined) throw new Error("Worker is not on a named branch");
-    return branch;
-  }
+export interface WorkerTaskSource {
+  task(agentId: AgentId): Promise<{ readonly path: string; readonly contents: string } | undefined>;
 }
 
 export class WorkerHookService {
-  public constructor(private readonly fleet: FleetRegistry, private readonly branches: WorkerBranchResolver = new GitWorkerBranchResolver(), private readonly now: () => Date = () => new Date()) {}
+  public constructor(private readonly fleet: FleetRegistry, private readonly tasks: WorkerTaskSource = { task: async () => undefined }, private readonly now: () => Date = () => new Date()) {}
 
   public start(parentAgentId: AgentId, childAgentId: string, type: string): void {
     const at = this.timestamp();
@@ -49,14 +41,15 @@ export class WorkerHookService {
 
   public compact(parentAgentId: AgentId, summary: string): void { this.fleet.recordCompaction(parentAgentId, summary, this.timestamp()); }
 
-  public async reground(parentAgentId: AgentId, cwd: string): Promise<string> {
+  public async reground(parentAgentId: AgentId): Promise<string> {
     const worker = this.fleet.get(parentAgentId);
     if (worker === undefined || worker.identity.type === "manager" || worker.issueNumbers === undefined || worker.issueNumbers.length === 0) {
       throw new Error("Compaction re-grounding requires a registered issue-bound worker");
     }
-    const branch = await this.branches.current(cwd);
-    const contract = worker.issueNumbers.length === 1 ? "resolved issue context" : "resolved issues and related context";
-    return `You are aboard worker ${parentAgentId}, addressing ${describeIssueNumbers(worker.issueNumbers)} on branch ${branch}. Continue from the ${contract} supplied in your first message. If that contract is no longer available after compaction, stop and report that plainly; do not fetch it with gh.`;
+    const continuation = `Continue addressing ${describeIssueNumbers(worker.issueNumbers)} from where you stopped.`;
+    const task = await this.tasks.task(parentAgentId);
+    // Hook context has no documented @ expansion; include the task itself too.
+    return task === undefined ? continuation : `${continuation}\n\nReminder: full task is in @${task.path} — follow it.\n\n${task.contents.trim()}`;
   }
 
   private timestamp(): IsoTimestamp { return this.now().toISOString() as IsoTimestamp; }
@@ -74,7 +67,7 @@ export function createWorkerHookRoutes(service: WorkerHookService): BridgeReques
         case "/hooks/worker/subagent-stop": service.stop(parent, requiredString(body.childAgentId, "childAgentId"), optionalString(body.result)); return { status: 200, body: { ok: true } };
         case "/hooks/worker/agent-tool": service.agentTool(parent, object(body.toolResponse)); return { status: 200, body: { ok: true } };
         case "/hooks/worker/post-compact": service.compact(parent, requiredString(body.compactSummary, "compactSummary")); return { status: 200, body: { ok: true } };
-        case "/hooks/worker/reground": return { status: 200, body: { ok: true, additionalContext: await service.reground(parent, requiredString(body.cwd, "cwd")) } };
+        case "/hooks/worker/reground": return { status: 200, body: { ok: true, additionalContext: await service.reground(parent) } };
         default: return protocolError(404, "not-found", "Route not found");
       }
     } catch (error) { return protocolError(400, "invalid-request", error instanceof Error ? error.message : "Invalid worker hook event"); }

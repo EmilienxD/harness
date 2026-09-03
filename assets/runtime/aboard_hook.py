@@ -224,7 +224,6 @@ def main() -> int:
         if endpoint.endswith("/reground"):
             if not (event == "SessionStart" and payload.get("source") == "compact"):
                 return 0
-            body["cwd"] = payload.get("cwd")
     elif endpoint == "/hooks/stop":
         # A worker reporting its own completion. `last_assistant_message` is
         # required by the bridge and is the documented way to read the final

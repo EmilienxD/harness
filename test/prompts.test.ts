@@ -5,14 +5,13 @@ import {
   PromptResolutionError,
   PromptResolver,
   describeResolvedPrompt,
-  issueDisposition,
   normalizeGeneratedPrompt,
   resolvedPromptFromText,
   type GitHubPromptSource,
   type IssueSnapshot,
   type PullRequestSnapshot,
 } from "../src/claude/prompts.js";
-import { issueDifficulty } from "../src/shared/labels.js";
+import { issueDifficulty, issueDisposition } from "../src/shared/labels.js";
 
 interface FakeData {
   readonly issues?: readonly IssueSnapshot[];
@@ -80,7 +79,7 @@ test("normalizes slash-prefixed words in generated prompts", () => {
   assert.equal(normalized.body, "Then done; leave / alone.");
 });
 
-test("resolves an implementation prompt from issue, parent issue, and labels", async () => {
+test("resolves an implementation prompt from issue and parent issue", async () => {
   const github = new FakeGitHub({ issues: [issue47, parent31] });
   const resolver = new PromptResolver({ github });
 
@@ -105,9 +104,24 @@ test("resolves an implementation prompt from issue, parent issue, and labels", a
   assert.deepEqual(github.issueRequests, [47, 31]);
 });
 
-test("carries the disposition each label implies", () => {
-  // The mapping is data, tested at the data level; the prose each disposition
-  // resolves into is free to change.
+test("implementation prompts omit disposition guidance regardless of issue labels", async () => {
+  const prompts = [];
+  for (const labels of [[], ["[AI]-afk"], ["[AI]-hitl"], ["[AI]-afk", "[AI]-hitl"]]) {
+    const resolver = new PromptResolver({
+      github: new FakeGitHub({ issues: [{ ...issue47, labels }, parent31] }),
+    });
+    const prompt = await resolver.resolve({
+      kind: "implementation",
+      instruction: "Keep the change small.",
+      issueNumbers: [47],
+    });
+    assert.ok(prompt !== undefined);
+    prompts.push(prompt);
+  }
+  for (const prompt of prompts) assert.deepEqual(prompt, prompts[0]);
+});
+
+test("classifies the disposition each label implies", () => {
   assert.equal(issueDisposition(["[AI]-afk"]), "afk");
   assert.equal(issueDisposition(["[AI]-hitl"]), "hitl");
   assert.equal(issueDisposition([]), "unclassified");

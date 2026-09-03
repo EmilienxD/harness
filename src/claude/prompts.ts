@@ -1,8 +1,3 @@
-
-import { issueDisposition } from "../shared/labels.js";
-
-export { issueDisposition };
-
 /** Everything a worker needs to know about an issue, already parsed. */
 export interface IssueSnapshot {
   readonly number: number;
@@ -32,9 +27,6 @@ export interface GitHubPromptSource {
   getPullRequest(number: number): Promise<PullRequestSnapshot | undefined>;
   getPullRequestDiff(number: number): Promise<string>;
 }
-
-/** The `afk`/`hitl` classification of the work-model section. Absence is legitimate. */
-export type IssueDisposition = "afk" | "hitl" | "unclassified";
 
 export type PromptSourceKind =
   | "issue"
@@ -121,7 +113,7 @@ function excerpt(text: string, limit: number, pointer?: string): Excerpt {
   const trimmed = text.trim();
   if (trimmed.length <= limit) return { text: trimmed, truncated: false };
   const suffix = pointer === undefined
-    ? "…truncated by aboard. Base the task only on the supplied context."
+    ? "…truncated. Base the task only on the supplied context."
     : `…truncated. Read the rest with \`${pointer}\`.`;
   return {
     text: `${trimmed.slice(0, limit).trimEnd()}\n\n${suffix}`,
@@ -138,17 +130,6 @@ function requireInstruction(instruction: string): string {
     );
   }
   return trimmed;
-}
-
-function dispositionGuidance(disposition: IssueDisposition): string {
-  switch (disposition) {
-    case "afk":
-      return "This issue is labelled `[AI]-afk`: aboard will commit your change, open a pull request, and merge it without further human review. Leave the work in the working tree and make sure the checks you can run pass first.";
-    case "hitl":
-      return "This issue is labelled `[AI]-hitl`: aboard will commit your change and open a pull request, then wait for the user to review and merge it. Leave the work in the working tree, and make your final message a clear account of what you changed and why.";
-    case "unclassified":
-      return "This issue carries neither `[AI]-afk` nor `[AI]-hitl`, which is a legitimate but unresolved state. Leave the work in the working tree and say in your final message that the issue is unclassified.";
-  }
 }
 
 class PromptBuilder {
@@ -333,9 +314,6 @@ export class PromptResolver {
     builder.section(undefined, instruction);
 
     await this.#issueSections(builder, issues, true, request.recursiveIssueReferences);
-    // The disposition is the primary issue's: it decides what happens to the
-    // change, and the engine launches one implementer per issue.
-    builder.section("Disposition", dispositionGuidance(issueDisposition(primary.labels)));
     return builder.build(`Address issue #${primary.number} — ${primary.title}.`);
   }
 

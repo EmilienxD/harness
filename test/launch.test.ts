@@ -1187,6 +1187,43 @@ test("writes fresh temporary prompts for starts and resumes and cleans them up",
   assert.equal(await readFile(otherPath, "utf8"), "other workspace\ncontext\n");
 });
 
+test("worker tasks survive continuation and bundle cleanup until their conversation is forgotten", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-task-"));
+  const runtimeRoot = join(root, "storage", "runtime");
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+    await rm(promptSpillRoot(runtimeRoot), { recursive: true, force: true });
+  });
+  await cp(join(process.cwd(), "assets", "scaffold", ".aboard"), join(root, ".aboard"), { recursive: true });
+  const store = new FileSystemPromptSpillStore(root, runtimeRoot, {
+    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+  });
+  for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"] as const) {
+    const original = `Resolve issue #15 as ${type}.${type === "implementer" ? "\n\n" : " "}Run the migration and browser checks.`;
+    const plan = planLaunch(request({ agentType: type, configuration: definition(type, IMPLEMENTER_TOOLS), prompt: original, runtimeDirectory: runtimeRoot }));
+    assert.equal(plan.promptDelivery, type === "implementer" ? "spilled" : "inline");
+    if (plan.spill !== undefined) assert.equal(plan.task?.contents, plan.spill.contents);
+    await store.prepare(plan);
+    const task = await store.task(agentId);
+    assert.ok(task !== undefined);
+    assert.equal(task.contents.trim(), original);
+    assert.equal(await readFile(task.path, "utf8"), task.contents);
+
+    const resumed = planSessionResume(request({ agentType: type, configuration: definition(type, IMPLEMENTER_TOOLS), prompt: "Continue", runtimeDirectory: runtimeRoot }));
+    await store.prepare(resumed);
+    assert.deepEqual(await store.task(agentId), task);
+    await store.remove(agentId);
+    await assert.rejects(readFile(task.path), { code: "ENOENT" });
+    await store.prune(new Set(), new Set([agentId]));
+    await store.prepare(resumed);
+    assert.deepEqual(await store.task(agentId), task);
+    assert.equal(await readFile(task.path, "utf8"), task.contents);
+    await store.prune(new Set());
+    assert.equal(await store.task(agentId), undefined);
+  }
+});
+
 test("runtime bundles give every launch done and reserve Manager commands for Manager", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-bundle-"));
   await cp(join(process.cwd(), "assets", "scaffold", ".aboard"), join(root, ".aboard"), { recursive: true });
