@@ -1,11 +1,25 @@
 
 export type WriteCapability = "write-capable" | "read-only";
 
-/** Tools that edit workspace files directly. */
-const WRITE_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "NotebookEdit"]);
+/**
+ * Tools that cannot mutate the workspace. Every other name is write-capable,
+ * so a tool set aboard does not recognize can never silently lose its lease.
+ */
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "Read",
+  "Grep",
+  "Glob",
+  "LSP",
+  "Agent",
+  "WebSearch",
+  "WebFetch",
+]);
 
 /** Shells that can write anything unless the rule narrows them to a command. */
 const SHELL_TOOLS: ReadonlySet<string> = new Set(["Bash", "PowerShell"]);
+
+/** Rules for the aboard MCP, whose tools orchestrate rather than edit files. */
+const ABOARD_MCP_PREFIX = "mcp__aboard__";
 
 export interface ToolRule {
   readonly name: string;
@@ -124,10 +138,13 @@ export function deriveWriteCapability(
     const parsed = parseToolRule(rule);
     if (parsed === undefined) return "write-capable";
     if (parsed.name === "*") return "write-capable";
-    if (WRITE_TOOLS.has(parsed.name)) return "write-capable";
-    if (SHELL_TOOLS.has(parsed.name) && isUnrestricted(parsed.specifier)) {
-      return "write-capable";
+    if (SHELL_TOOLS.has(parsed.name)) {
+      if (isUnrestricted(parsed.specifier)) return "write-capable";
+      continue;
     }
+    if (READ_ONLY_TOOLS.has(parsed.name)) continue;
+    if (parsed.name.startsWith(ABOARD_MCP_PREFIX)) continue;
+    return "write-capable";
   }
   return "read-only";
 }

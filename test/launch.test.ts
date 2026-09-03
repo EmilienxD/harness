@@ -1265,6 +1265,18 @@ test("derives write capability from the effective tool set", () => {
   assert.equal(deriveWriteCapability([]), "read-only");
 });
 
+test("a tool set aboard does not recognize is never read-only", () => {
+  // A second runtime names its editor and shell differently. Deriving read-only
+  // from unrecognized names would hand a writer no lease at all, so every name
+  // outside the read-only set has to resolve to write-capable.
+  assert.equal(deriveWriteCapability(["apply_patch"]), "write-capable");
+  assert.equal(deriveWriteCapability(["exec_command"]), "write-capable");
+  assert.equal(deriveWriteCapability(["Read", "shell"]), "write-capable");
+  assert.equal(deriveWriteCapability(["Read", "Grep", "unified_exec"]), "write-capable");
+  // The aboard MCP orchestrates and does not edit, so it stays read-only.
+  assert.equal(deriveWriteCapability(["mcp__aboard__*", "Read"]), "read-only");
+});
+
 test("a prompt under the inline threshold still spills when the command line would be too long", async (t) => {
   // The threshold measures the prompt; the shell's limit applies to the whole
   // assembled line. A generous threshold must not be able to defeat it.
