@@ -30,6 +30,7 @@ const execFileAsync = promisify(execFile);
 
 export type GitHubErrorCode =
   | "command-failed"
+  | "issue-not-found"
   | "malformed-output"
   | "missing-todo"
   | "unknown-task"
@@ -53,24 +54,50 @@ export interface GhExecutor {
 }
 
 export class ProcessGhExecutor implements GhExecutor {
-  public constructor(private readonly cwd: string) {}
+  public constructor(
+    private readonly cwd: string,
+    private readonly execute: (args: readonly string[], cwd: string) => Promise<string> = runGhProcess,
+  ) {}
 
   public async run(args: readonly string[]): Promise<string> {
     try {
-      const result = await execFileAsync("gh", [...args], {
-        cwd: this.cwd,
-        windowsHide: true,
-        maxBuffer: 16 * 1024 * 1024,
-        encoding: "utf8",
-      });
-      return result.stdout;
+      return await this.execute(args, this.cwd);
     } catch (error) {
-      const cause = error as { code?: unknown; stderr?: unknown };
-      throw new GitHubBoundaryError("command-failed", "GitHub CLI command failed", {
+      const cause = error as { code?: unknown; stderr?: unknown; stdout?: unknown };
+      // gh exits nonzero for a missing issue, even though GraphQL supplies the
+      // expected null. Only that exact lookup failure is optional context.
+      const missingIssue = args[0] === "api" && args[1] === "graphql" && isMissingIssueResponse(cause.stdout);
+      throw new GitHubBoundaryError(missingIssue ? "issue-not-found" : "command-failed", "GitHub CLI command failed", {
         exitCode: typeof cause.code === "number" ? cause.code : undefined,
         stderr: typeof cause.stderr === "string" ? cause.stderr.trim().slice(0, 2_000) : undefined,
       });
     }
+  }
+}
+
+async function runGhProcess(args: readonly string[], cwd: string): Promise<string> {
+  const result = await execFileAsync("gh", [...args], {
+    cwd,
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024,
+    encoding: "utf8",
+  });
+  return result.stdout;
+}
+
+function isMissingIssueResponse(stdout: unknown): boolean {
+  if (typeof stdout !== "string") return false;
+  try {
+    const response = record(JSON.parse(stdout) as unknown, "GraphQL response");
+    const repository = repositoryFromGraphql(response);
+    const errors = array(response.errors, "GraphQL errors");
+    return repository.issue === null && errors.length > 0 && errors.every((value) => {
+      const error = record(value, "GraphQL error");
+      return error.type === "NOT_FOUND" && Array.isArray(error.path)
+        && error.path.length === 2 && error.path[0] === "repository" && error.path[1] === "issue";
+    });
+  } catch {
+    return false;
   }
 }
 
@@ -527,7 +554,13 @@ export class GitHubClient implements GitHubPromptSource {
 
   public async getIssue(number: number): Promise<IssueSnapshot | undefined> {
     const repository = await this.#ownerRepo();
-    const data = await this.#graphql(ISSUE_QUERY, { number });
+    let data: unknown;
+    try {
+      data = await this.#graphql(ISSUE_QUERY, { number });
+    } catch (error) {
+      if (error instanceof GitHubBoundaryError && error.code === "issue-not-found") return undefined;
+      throw error;
+    }
     const issue = repositoryFromGraphql(data).issue;
     if (issue === null) return undefined;
     const parsed = parseIssue(issue, "data.repository.issue", repository);

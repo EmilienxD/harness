@@ -7,6 +7,7 @@ import type { AutoRunRecord } from "../src/domain/run-plan.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import type { LaunchOrigin } from "../src/domain/lease.js";
 import { GitBoundaryError, type GitClient, type GitStatus } from "../src/git/client.js";
+import { GitHubBoundaryError } from "../src/github/client.js";
 import type { RunWorkspaceOutcome, RunWorkspaceProvider } from "../src/auto/worktree.js";
 import { observeRun } from "../src/auto/observation.js";
 import { parseAutoRunRecord } from "../src/runtime/persistence.js";
@@ -704,6 +705,20 @@ test("all run observations serialize their ref-mutating fetches", async () => {
   ]);
 
   assert.equal(maximumActiveFetches, 1);
+});
+
+test("GitHub failures retain their diagnostic without credential-bearing URLs", async () => {
+  const context = harness();
+  context.seed(plannedRecord());
+  context.github.listImplementableIssues = async () => {
+    throw new GitHubBoundaryError("command-failed", "GitHub CLI command failed", {
+      stderr: "\ngh: request failed https://user:secret@example.com/graphql\nsecond line",
+    });
+  };
+  assert.deepEqual(await context.engine.refresh(), { state: "checking" });
+  assert.equal(context.record()?.outcome?.kind, "interrupted");
+  assert.ok(context.logs.some((line) => line.endsWith("GitHub CLI command failed: gh: request failed <remote>")));
+  assert.doesNotMatch(context.logs.join("\n"), /secret|second line/);
 });
 
 test("a transient recovery fetch failure stays unavailable rather than becoming broken", async () => {

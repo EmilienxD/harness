@@ -45,6 +45,7 @@ import { planDiscard, type DiscardBehavior, type DiscardPlan, type DiscardResult
 import type { AgentId, AgentSession, SessionId, TerminalId } from "../domain/contracts.js";
 import type { LaunchOrigin } from "../domain/lease.js";
 import { GitBoundaryError, type GitClient, type GitStatus } from "../git/client.js";
+import { GitHubBoundaryError } from "../github/client.js";
 import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles, LaunchIsolation } from "../bridge/delegation.js";
 import { runWorkspacePath, type RunWorkspace, type RunWorkspaceOutcome, type RunWorkspaceProvider } from "./worktree.js";
 import { checkRun, type RunObservationSources } from "./observation.js";
@@ -2076,14 +2077,14 @@ function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> 
 
 function message(error: unknown): string {
   if (!(error instanceof Error)) return "unknown error";
-  if (!(error instanceof GitBoundaryError)) return error.message;
+  if (!(error instanceof GitBoundaryError) && !(error instanceof GitHubBoundaryError)) return error.message;
   const details = error.details;
   if (typeof details !== "object" || details === null || !("stderr" in details)) return error.message;
   const stderr = (details as { readonly stderr?: unknown }).stderr;
   if (typeof stderr !== "string") return error.message;
   const firstLine = stderr.split(/\r?\n/u).map((line) => line.trim()).find((line) => line.length > 0);
   if (firstLine === undefined) return error.message;
-  // Git diagnostics are useful for ref-lock and network failures, but a remote
+  // Git/GitHub diagnostics explain lookup and network failures, but a remote
   // URL may contain credentials. Keep the diagnostic while dropping whole URLs.
   return `${error.message}: ${firstLine.replace(/\b(?:https?|ssh):\/\/\S+/giu, "<remote>")}`;
 }

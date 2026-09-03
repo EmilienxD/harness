@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { GitHubBoundaryError, GitHubClient, type GhExecutor } from "../src/github/client.js";
+import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor, type GhExecutor } from "../src/github/client.js";
+import { PromptResolutionError, PromptResolver } from "../src/claude/prompts.js";
 
 class FixtureGh implements GhExecutor {
   private readonly mutableCalls: string[][] = [];
@@ -16,6 +17,65 @@ class FixtureGh implements GhExecutor {
 const repo = JSON.stringify({ owner: { login: "EmilienxD" }, name: "aboard" });
 const graph = (value: unknown) => JSON.stringify({ data: { repository: value } });
 const endPage = { hasNextPage: false, endCursor: null };
+
+const missingIssueResponse = {
+  data: { repository: { issue: null } },
+  errors: [{ type: "NOT_FOUND", path: ["repository", "issue"] }],
+};
+
+test("a CLI lookup failure for a missing context issue does not block implementation", async () => {
+  const fetched: number[] = [];
+  const github = new GitHubClient(new ProcessGhExecutor("fixture", async (args) => {
+    if (args[0] === "repo") return repo;
+    const number = Number(args.find((arg) => arg.startsWith("number="))?.slice(7));
+    fetched.push(number);
+    if (number === 336) {
+      throw { code: 1, stdout: JSON.stringify(missingIssueResponse), stderr: "gh: missing issue" };
+    }
+    assert.ok(number === 337 || number === 332);
+    return graph({ issue: {
+      number, title: `Issue ${number}`, body: number === 337 ? "Depends on #336." : "Parent context",
+      state: "OPEN", labels: { nodes: [], pageInfo: endPage },
+      parent: number === 337 ? { number: 332 } : null,
+    } });
+  }));
+  const resolver = new PromptResolver({ github });
+  const prompt = await resolver.resolve({
+    kind: "implementation", instruction: "Implement the issue", issueNumbers: [337], recursiveIssueReferences: false,
+  });
+  assert.deepEqual(fetched, [337, 332, 336]);
+  assert.deepEqual(prompt?.sources.map((source) => source.number), [337, 332]);
+  await assert.rejects(
+    resolver.resolve({ kind: "implementation", instruction: "Implement", issueNumbers: [336] }),
+    (error: unknown) => error instanceof PromptResolutionError && error.code === "issue-not-found",
+  );
+});
+
+test("only an exact GraphQL issue NOT_FOUND response becomes an absent issue", async () => {
+  const failures = [
+    { stdout: "not JSON" },
+    { stdout: JSON.stringify({ data: { repository: { issue: null } }, errors: [] }) },
+    { stdout: JSON.stringify({ ...missingIssueResponse, errors: [{ type: "FORBIDDEN", path: ["repository", "issue"] }] }) },
+    { stdout: JSON.stringify({ data: { repository: null }, errors: [{ type: "NOT_FOUND", path: ["repository"] }] }) },
+    { stdout: JSON.stringify({ ...missingIssueResponse, errors: [{ type: "NOT_FOUND", path: ["repository", "issue", "parent"] }] }) },
+    { stdout: JSON.stringify({ ...missingIssueResponse, errors: [...missingIssueResponse.errors, { type: "RATE_LIMITED" }] }) },
+    { stdout: JSON.stringify({ ...missingIssueResponse, data: { repository: { issue: { number: 337 } } } }) },
+    { code: "ENOENT" },
+  ];
+  for (const failure of failures) {
+    const github = new GitHubClient(new ProcessGhExecutor("fixture", async (args) => {
+      if (args[0] === "repo") return repo;
+      throw { code: 1, stderr: "diagnostic", ...failure };
+    }));
+    await assert.rejects(github.getIssue(337), (error: unknown) => {
+      assert.ok(error instanceof GitHubBoundaryError);
+      assert.equal(error.code, "command-failed");
+      assert.equal((error.details as { stderr: string }).stderr, "diagnostic");
+      assert.equal(Object.hasOwn(error.details as object, "stdout"), false);
+      return true;
+    });
+  }
+});
 
 test("authentication preflight is fresh, targets the workspace repository, and primes GraphQL identity", async () => {
   let failing = true;
