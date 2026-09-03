@@ -347,7 +347,7 @@ test("a live run outranks any recovery question about its own record", () => {
   const { item } = rootItem({ persisted: record(), state: state() });
   assert.equal(item.contextValue, "aboard.autoRun.active");
   assert.match(item.description, /await-approval · issue #35 · 1\/3/);
-  assert.equal(item.icon, "sync~spin");
+  assert.equal(item.icon, "circle-filled");
 });
 
 test("a run waiting for the user is its own state, with its own actions", () => {
