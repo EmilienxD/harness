@@ -67,7 +67,7 @@
       },
       {
         "command": "aboard.continueAutoRun",
-        "title": "Auto Run — Continue Now",
+        "title": "Continue Auto Run",
         "category": "Aboard",
         "icon": "$(debug-continue)"
       },
@@ -107,25 +107,25 @@
       },
       {
         "command": "aboard.autoRun.refresh",
-        "title": "Auto Run — Check Now",
+        "title": "Check Now",
         "category": "Aboard",
         "icon": "$(refresh)"
       },
       {
         "command": "aboard.autoRun.openCurrentIssue",
-        "title": "Auto Run — Open Current Issue",
+        "title": "Open Current Issue",
         "category": "Aboard",
         "icon": "$(issues)"
       },
       {
         "command": "aboard.autoRun.openPullRequest",
-        "title": "Auto Run — Open Pull Request",
+        "title": "Open Pull Request",
         "category": "Aboard",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "aboard.autoRun.focusImplementer",
-        "title": "Auto Run — Focus Implementer",
+        "title": "Focus Implementer",
         "category": "Aboard",
         "icon": "$(terminal)"
       },
