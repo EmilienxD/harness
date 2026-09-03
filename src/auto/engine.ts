@@ -1436,7 +1436,6 @@ export class AutoRunEngine {
   }
 
   async #implement(issue: FrozenIssue, signal: AbortSignal): Promise<ImplementerCompletion> {
-    const workingBranch = this.#current.settings.branchMode === "single-branch" ? this.#current.sessionBranch : issue.branch;
     const continued = this.#takeContinuation("implementer", issue.number);
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
       ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
@@ -1447,7 +1446,7 @@ export class AutoRunEngine {
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
-      prompt: `Address issue #${issue.number} on branch \`${workingBranch}\`, which is already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to visualize, test, debug." : ""}`,
+      prompt: `Address issue #${issue.number} on the branch already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to visualize, test, debug." : ""}`,
       ...(await this.#guidance(issue)),
       expectsUncommittedTree: true,
       ...this.#isolation(),
@@ -1556,7 +1555,7 @@ export class AutoRunEngine {
     const originalGuidance = await this.#guidance(issue);
     const progress = issueProgress(this.#current, issue.number);
     const scope = this.#current.settings.branchMode === "single-branch" && progress.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined
-      ? `Review only issue #${issue.number}'s changes in exact range ${progress.beforeSha}..${progress.implementationSha} on the cumulative run PR. Do not re-review earlier commits.`
+      ? `Review only issue #${issue.number}'s changes in exact range ${progress.beforeSha}..${progress.implementationSha} on this pull request. Do not re-review earlier commits.`
       : undefined;
     const guidance = scope === undefined ? originalGuidance : {
       ...originalGuidance,

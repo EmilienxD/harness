@@ -21,6 +21,7 @@ interface FakeData {
 
 class FakeGitHub implements GitHubPromptSource {
   public readonly issueRequests: number[] = [];
+  public diffRequests = 0;
 
   public constructor(private readonly data: FakeData) {}
 
@@ -34,6 +35,7 @@ class FakeGitHub implements GitHubPromptSource {
   }
 
   public async getPullRequestDiff(): Promise<string> {
+    this.diffRequests += 1;
     return this.data.diff ?? "";
   }
 
@@ -152,10 +154,14 @@ test("carries the difficulty each label implies", () => {
   assert.equal(issueDifficulty(["[AI]-expert-difficulty", "[AI]-basic-difficulty"]), "expert");
 });
 
-test("truncates long bodies and marks the source truncated", async () => {
+test("preserves complete primary, parent, and related issue bodies", async () => {
+  const bodies = ["primary", "parent", "related"].map((label) => `${label}\n${"x".repeat(25_000)}\n${label} end`);
   const resolver = new PromptResolver({
-    github: new FakeGitHub({ issues: [{ ...issue47, body: "x".repeat(500) }] }),
-    limits: { issueBodyChars: 100 },
+    github: new FakeGitHub({ issues: [
+      { ...issue47, body: bodies[0]!, dependencyIssueNumbers: [52] },
+      { ...parent31, body: bodies[1]! },
+      { ...issue47, number: 52, body: bodies[2]! },
+    ] }),
   });
   const prompt = await resolver.resolve({
     kind: "implementation",
@@ -163,8 +169,79 @@ test("truncates long bodies and marks the source truncated", async () => {
     issueNumbers: [47],
   });
 
-  assert.equal(prompt?.sources[0]?.truncated, true);
-  assert.equal(prompt?.text.includes("x".repeat(500)), false);
+  assert.ok(prompt);
+  for (const body of bodies) assert.ok(prompt.text.includes(body));
+  assert.deepEqual(prompt.sources.map((source) => source.chars), bodies.map((body) => body.length));
+  assert.doesNotMatch(prompt.text, /truncated/);
+});
+
+test("a global review budget stops only after a complete issue, description, or diff", async () => {
+  const body = `Contract\n${"x".repeat(25_000)}\nFinal requirement.`;
+  const description = `Description\n${"y".repeat(25_000)}\nDescription end.`;
+  const diff = `--- a/file\n+++ b/file\n+${"z".repeat(45_000)}\n+final change`;
+  const data = { issues: [{ ...issue47, body }], pullRequests: [{ ...pull42, body: description }], diff };
+  const request = { kind: "review", instruction: "Review.", pullRequestNumber: 42 } as const;
+  const full = await new PromptResolver({
+    github: new FakeGitHub(data), limits: { maxPromptChars: 200_000 },
+  }).resolve(request);
+  assert.ok(full);
+  const issueEnd = full.text.indexOf(body) + body.length;
+  const descriptionEnd = full.text.indexOf(description) + description.length;
+
+  for (const [maxPromptChars, end, count] of [
+    [1, issueEnd, 1],
+    [1_000, issueEnd, 1],
+    [issueEnd, issueEnd, 1],
+    [issueEnd + 1, descriptionEnd, 2],
+    [descriptionEnd - 1, descriptionEnd, 2],
+    [descriptionEnd, descriptionEnd, 2],
+    [descriptionEnd + 1, full.text.length, 3],
+    [full.text.length - 1, full.text.length, 3],
+    [full.text.length + 1, full.text.length, 3],
+  ] as const) {
+    const github = new FakeGitHub(data);
+    const prompt = await new PromptResolver({ github, limits: { maxPromptChars } }).resolve(request);
+    assert.ok(prompt);
+    assert.equal(prompt.text, full.text.slice(0, end), `budget ${maxPromptChars}`);
+    assert.deepEqual(prompt.sources.map((source) => source.kind), ["issue", "pull-request", "pull-request-diff"].slice(0, count));
+    assert.equal(github.diffRequests, count === 3 ? 1 : 0);
+  }
+});
+
+test("the global budget counts headings and instructions and stops related issue traversal", async () => {
+  const request = { kind: "implementation", instruction: "Go.", issueNumbers: [47] } as const;
+  const primary = await new PromptResolver({ github: new FakeGitHub({ issues: [issue47] }) }).resolve(request);
+  assert.ok(primary);
+  const github = new FakeGitHub({ issues: [issue47, parent31] });
+  const prompt = await new PromptResolver({
+    github, limits: { maxPromptChars: primary.text.length },
+  }).resolve(request);
+  assert.equal(prompt?.text, primary.text);
+  assert.deepEqual(github.issueRequests, [47]);
+});
+
+test("a document crossing the budget is complete and later primary issues are omitted", async () => {
+  const body = `${"x".repeat(500)}\nFinal requirement.`;
+  const prompt = await new PromptResolver({
+    github: new FakeGitHub({ issues: [{ ...issue47, body }, parent31] }),
+    limits: { maxPromptChars: 100 },
+  }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47, 31] });
+  assert.ok(prompt?.text.includes(body));
+  assert.equal(prompt?.text.includes(parent31.body), false);
+  assert.deepEqual(prompt?.sources.map((source) => source.number), [47]);
+});
+
+test("brainstorm context preserves complete issue bodies", async () => {
+  const body = `Context\n${"x".repeat(25_000)}\nFinal requirement.`;
+  const prompt = await new PromptResolver({
+    github: new FakeGitHub({ issues: [{ ...issue47, body }, parent31] }),
+    limits: { maxPromptChars: 100 },
+  }).resolve({ kind: "brainstorm", relatedIssueNumbers: [47, 31] });
+
+  assert.ok(prompt);
+  assert.ok(prompt.text.includes(body));
+  assert.deepEqual(prompt.sources.map((source) => source.number), [47]);
+  assert.equal(prompt.text.includes(parent31.body), false);
 });
 
 test("resolves a review prompt with the contract and the diff", async () => {
@@ -190,7 +267,7 @@ test("resolves a review prompt with the contract and the diff", async () => {
   assert.ok(prompt?.text.includes("--- a/src/auth.ts"));
   assert.deepEqual(
     prompt?.sources.map((source) => source.kind),
-    ["pull-request", "issue", "pull-request-diff"],
+    ["issue", "pull-request", "pull-request-diff"],
   );
 });
 
@@ -382,7 +459,11 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
 test("auto-agent guidance is the final section after resolved issue and pull-request context", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
-    github: new FakeGitHub({ issues: [issue47, parent31], pullRequests: [pull42], diff: "+ refreshEarly();" }),
+    github: new FakeGitHub({
+      issues: [issue47, parent31],
+      pullRequests: [{ ...pull42, headBranch: "aboard/47-token-refresh", baseBranch: "aboard/run/test" }],
+      diff: "+ refreshEarly();",
+    }),
   }));
   const permanentPrompt = "run the full browser suite";
   const guideline = "no unit tests needed";
@@ -397,6 +478,7 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
     additionalGuideline: guideline,
   }, { interactive: false });
   const implementerText = implementer?.text ?? "";
+  assert.doesNotMatch(implementerText, /aboard|auto[ -]?run|automated|automation/i);
   assert.equal(implementerText.trimEnd().endsWith(guideline), true);
   // The resolved issue context comes first.
   assert.equal(implementerText.indexOf("Refresh the access token before it expires.") < implementerText.indexOf(guideline), true);
@@ -411,6 +493,7 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
       additionalGuideline: guideline,
     }, { interactive: type === "pr-doctor-hitl" });
     const doctorText = doctor?.text ?? "";
+    assert.doesNotMatch(doctorText, /aboard|auto[ -]?run|automated|automation/i);
     assert.equal(doctorText.trimEnd().endsWith(guideline), true, type);
     // The resolved diff comes first.
     assert.equal(doctorText.indexOf("+ refreshEarly();") < doctorText.indexOf(guideline), true, type);

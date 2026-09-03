@@ -40,7 +40,6 @@ export interface PromptSource {
   readonly kind: PromptSourceKind;
   readonly number: number;
   readonly chars: number;
-  readonly truncated: boolean;
 }
 
 export interface ResolvedPrompt {
@@ -73,19 +72,14 @@ export type PromptResolutionRequest =
   | { readonly kind: "free-form"; readonly instruction: string };
 
 export interface PromptResolutionLimits {
-  readonly issueBodyChars: number;
-  readonly parentIssueChars: number;
-  readonly relatedIssueChars: number;
-  readonly diffChars: number;
+  /** Soft limit on the resolved prompt, enforced only after a complete document. */
+  readonly maxPromptChars: number;
   /** Hard bound on recursively resolved parents/dependencies. */
   readonly relatedIssueCount: number;
 }
 
 export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
-  issueBodyChars: 20_000,
-  parentIssueChars: 8_000,
-  relatedIssueChars: 1_500,
-  diffChars: 40_000,
+  maxPromptChars: 60_000,
   relatedIssueCount: 50,
 };
 
@@ -104,23 +98,6 @@ export class PromptResolutionError extends Error {
   }
 }
 
-interface Excerpt {
-  readonly text: string;
-  readonly truncated: boolean;
-}
-
-function excerpt(text: string, limit: number, pointer?: string): Excerpt {
-  const trimmed = text.trim();
-  if (trimmed.length <= limit) return { text: trimmed, truncated: false };
-  const suffix = pointer === undefined
-    ? "…truncated. Base the task only on the supplied context."
-    : `…truncated. Read the rest with \`${pointer}\`.`;
-  return {
-    text: `${trimmed.slice(0, limit).trimEnd()}\n\n${suffix}`,
-    truncated: true,
-  };
-}
-
 function requireInstruction(instruction: string): string {
   const trimmed = instruction.trim();
   if (trimmed.length === 0) {
@@ -135,27 +112,42 @@ function requireInstruction(instruction: string): string {
 class PromptBuilder {
   readonly #sections: string[] = [];
   readonly #sources: PromptSource[] = [];
+  #chars: number;
+
+  public constructor(private readonly headline: string, private readonly maxChars: number) {
+    this.#chars = headline.length;
+  }
+
+  public get canIncludeDocument(): boolean {
+    return this.#sources.length === 0 || this.#chars < this.maxChars;
+  }
 
   public section(heading: string | undefined, content: string): void {
     const trimmed = content.trim();
     if (trimmed.length === 0) return;
-    this.#sections.push(heading === undefined ? trimmed : `## ${heading}\n\n${trimmed}`);
+    const section = heading === undefined ? trimmed : `## ${heading}\n\n${trimmed}`;
+    this.#sections.push(section);
+    this.#chars += 2 + section.length;
   }
 
-  public source(
+  public document(
     kind: PromptSourceKind,
     number: number,
-    content: Excerpt,
+    heading: string,
+    content: string,
   ): void {
+    if (!this.canIncludeDocument) return;
+    const text = content.trim();
+    this.section(heading, kind === "pull-request-diff" ? `\`\`\`diff\n${text}\n\`\`\`` : text);
     this.#sources.push({
       kind,
       number,
-      chars: content.text.length,
-      truncated: content.truncated,
+      chars: text.length,
     });
   }
 
-  public build(headline: string): ResolvedPrompt {
+  public build(): ResolvedPrompt {
+    const headline = this.headline;
     const body = this.#sections.join("\n\n");
     return {
       headline,
@@ -248,17 +240,10 @@ export class PromptResolver {
   async #issueSections(
     builder: PromptBuilder,
     issues: readonly IssueSnapshot[],
-    pointers: boolean,
     recursiveIssueReferences = true,
   ): Promise<void> {
     for (const issue of issues) {
-      const body = excerpt(
-        issue.body,
-        this.#limits.issueBodyChars,
-        pointers ? `gh issue view ${issue.number}` : undefined,
-      );
-      builder.section(`Issue #${issue.number}; ${issue.title}`, body.text);
-      builder.source("issue", issue.number, body);
+      builder.document("issue", issue.number, `Issue #${issue.number}; ${issue.title}`, issue.body);
     }
 
     const visited = new Set(issues.map((issue) => issue.number));
@@ -276,26 +261,19 @@ export class PromptResolver {
     }
 
     let attempted = 0;
-    while (pending.length > 0 && attempted < this.#limits.relatedIssueCount) {
+    while (builder.canIncludeDocument && pending.length > 0 && attempted < this.#limits.relatedIssueCount) {
       const next = pending.shift()!;
       attempted += 1;
       const related = await this.#github.getIssue(next.number);
       // A missing link may name a pull request or deleted issue. It stays in
       // `visited`, so a cycle through it still cannot trigger repeated reads.
       if (related === undefined) continue;
-      const limit = next.kind === "parent-issue"
-        ? this.#limits.parentIssueChars
-        : this.#limits.relatedIssueChars;
-      const relatedBody = excerpt(
-        related.body,
-        limit,
-        pointers ? `gh issue view ${related.number}` : undefined,
-      );
-      builder.section(
+      builder.document(
+        next.kind,
+        related.number,
         `${next.kind === "parent-issue" ? "Parent issue" : "Related issue"} #${related.number}; ${related.title}`,
-        relatedBody.text,
+        related.body,
       );
-      builder.source(next.kind, related.number, relatedBody);
       if (recursiveIssueReferences) {
         enqueue(related.parentIssueNumber, "parent-issue");
         for (const number of related.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
@@ -309,12 +287,12 @@ export class PromptResolver {
     const instruction = requireInstruction(request.instruction);
     const issues = await this.#fetchIssues(request.issueNumbers);
     const [primary] = issues;
-    const builder = new PromptBuilder();
+    const builder = new PromptBuilder(`Address issue #${primary.number}; ${primary.title}.`, this.#limits.maxPromptChars);
 
     builder.section(undefined, instruction);
 
-    await this.#issueSections(builder, issues, true, request.recursiveIssueReferences);
-    return builder.build(`Address issue #${primary.number}; ${primary.title}.`);
+    await this.#issueSections(builder, issues, request.recursiveIssueReferences);
+    return builder.build();
   }
 
   async #resolveReview(
@@ -322,55 +300,40 @@ export class PromptResolver {
   ): Promise<ResolvedPrompt> {
     const instruction = requireInstruction(request.instruction);
     const pullRequest = await this.#requirePullRequest(request.pullRequestNumber);
-    const builder = new PromptBuilder();
+    const builder = new PromptBuilder(`Review pull request #${pullRequest.number}; ${pullRequest.title}.`, this.#limits.maxPromptChars);
 
     builder.section(
       undefined,
-      `You are reviewing pull request #${pullRequest.number} (\`${pullRequest.headBranch}\` into \`${pullRequest.baseBranch}\`), and that branch is already checked out.`,
+      `Review pull request #${pullRequest.number} on the branch already checked out.`,
     );
     builder.section(undefined, instruction);
     if (request.focus !== undefined && request.focus.trim().length > 0) {
       builder.section("Requested focus", request.focus);
     }
 
-    const description = excerpt(
-      pullRequest.body,
-      this.#limits.issueBodyChars,
-      `gh pr view ${pullRequest.number}`,
-    );
-    builder.section(
-      `Pull request #${pullRequest.number}; ${pullRequest.title}`,
-      description.text,
-    );
-    builder.source("pull-request", pullRequest.number, description);
-
     if (pullRequest.issueNumber !== undefined) {
       const issue = await this.#github.getIssue(pullRequest.issueNumber);
       if (issue !== undefined) {
-        const issueBody = excerpt(
-          issue.body,
-          this.#limits.issueBodyChars,
-          `gh issue view ${issue.number}`,
-        );
-        builder.section(
+        builder.document(
+          "issue",
+          issue.number,
           `Contract; issue #${issue.number}; ${issue.title}`,
-          issueBody.text,
+          issue.body,
         );
-        builder.source("issue", issue.number, issueBody);
       }
     }
 
-    const diff = excerpt(
-      await this.#github.getPullRequestDiff(pullRequest.number),
-      this.#limits.diffChars,
-      `gh pr diff ${pullRequest.number}`,
+    builder.document(
+      "pull-request",
+      pullRequest.number,
+      `Pull request #${pullRequest.number}; ${pullRequest.title}`,
+      pullRequest.body,
     );
-    builder.section("Diff", `\`\`\`diff\n${diff.text}\n\`\`\``);
-    builder.source("pull-request-diff", pullRequest.number, diff);
+    if (builder.canIncludeDocument) {
+      builder.document("pull-request-diff", pullRequest.number, "Diff", await this.#github.getPullRequestDiff(pullRequest.number));
+    }
 
-    return builder.build(
-      `Review pull request #${pullRequest.number}; ${pullRequest.title}.`,
-    );
+    return builder.build();
   }
 
   async #resolveBrainstorm(
@@ -381,29 +344,27 @@ export class PromptResolver {
     // A bare `/brainstorm` opens an empty prompt for the user.
     if (topic.length === 0 && relatedNumbers.length === 0) return undefined;
 
-    const builder = new PromptBuilder();
-    if (topic.length > 0) builder.section(undefined, topic);
-
-    for (const number of relatedNumbers) {
-      const issue = await this.#github.getIssue(number);
-      if (issue === undefined) continue;
-      const body = excerpt(
-        issue.body,
-        this.#limits.relatedIssueChars,
-        `gh issue view ${issue.number}`,
-      );
-      builder.section(
-        `Related issue #${issue.number}; ${issue.title} (${issue.state})`,
-        body.text,
-      );
-      builder.source("related-issue", issue.number, body);
-    }
-
-    return builder.build(
+    const builder = new PromptBuilder(
       topic.length === 0
         ? "Brainstorm the related issues below."
         : `Brainstorm: ${resolvedPromptFromText(topic).headline}`,
+      this.#limits.maxPromptChars,
     );
+    if (topic.length > 0) builder.section(undefined, topic);
+
+    for (const number of relatedNumbers) {
+      if (!builder.canIncludeDocument) break;
+      const issue = await this.#github.getIssue(number);
+      if (issue === undefined) continue;
+      builder.document(
+        "related-issue",
+        issue.number,
+        `Related issue #${issue.number}; ${issue.title} (${issue.state})`,
+        issue.body,
+      );
+    }
+
+    return builder.build();
   }
 }
 
@@ -413,7 +374,7 @@ export function describeResolvedPrompt(prompt: ResolvedPrompt | undefined): stri
   const sources = prompt.sources
     .map(
       (source) =>
-        `${source.kind}#${source.number}(${source.chars}${source.truncated ? ",truncated" : ""})`,
+        `${source.kind}#${source.number}(${source.chars})`,
     )
     .join(",");
   return `prompt=${prompt.text.length} chars${sources.length === 0 ? "" : ` sources=${sources}`}`;

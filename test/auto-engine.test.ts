@@ -748,7 +748,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(context.launches[0]?.description, "address issue 34");
   // The issue number and branch reach the prompt; the wording around them is free.
   assert.equal(context.launches[0]?.prompt?.includes("#34"), true);
-  assert.equal(context.launches[0]?.prompt?.includes("aboard/34-add-retry-backoff"), true);
+  assert.doesNotMatch(context.launches[0]?.prompt ?? "", /aboard|auto[ -]?run|automated|automation/i);
   assert.deepEqual(context.gitCalls.filter((call) => call !== "fetch"), [
     // The session branch carries the user's local branch, including commits not
     // published yet, and is published before any issue starts.
@@ -1032,7 +1032,8 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
 
   assert.equal(context.launches[0]?.type, "implementer");
   assert.equal(context.launches[0]?.chrome, true);
-  assert.match(context.launches[0]?.prompt ?? "", /Use Claude in Chrome to test and debug\./);
+  assert.match(context.launches[0]?.prompt ?? "", /Claude in Chrome.*test.*debug/);
+  assert.doesNotMatch(context.launches[0]?.prompt ?? "", /aboard|auto[ -]?run|automated|automation/i);
   assert.equal(context.launches[1]?.type, "pr-doctor-afk");
   assert.equal(context.launches[1]?.chrome, undefined);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);

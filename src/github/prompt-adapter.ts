@@ -46,7 +46,7 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
 }
 
 const ADDITIONAL_GUIDELINE_HEADING = "# Additional User Guideline For this Session";
-const PERMANENT_PROMPT_HEADING = "# Configured Auto Run Note";
+const PERMANENT_PROMPT_HEADING = "# User Guidance";
 
 /** Appends configured guidance first and the per-run guidance literally last. */
 function appendAutoRunGuidance(

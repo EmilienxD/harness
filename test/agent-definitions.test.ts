@@ -78,6 +78,13 @@ test("ships the Manager, six worker definitions, and the Explore builtin profile
   assert.equal(files.includes("explorer.md"), false);
 });
 
+test("auto-run definitions describe the task without exposing orchestration", async () => {
+  for (const name of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"] as const) {
+    const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");
+    assert.doesNotMatch(source, /aboard|auto[ -]?run|automated|automation|the extension|the system (?:has|commits)|becomes the pull request body/i, name);
+  }
+});
+
 test("the Explore profile configures launch policy without copying Claude's prompt or tools", async () => {
   assert.deepEqual(BUILTIN_AGENT_NAMES, ["Explore"]);
   const source = await readFile(join(agentsRoot, "Explore.md"), "utf8");
