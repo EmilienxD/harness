@@ -24,7 +24,7 @@ const ENABLED: WorktreeSettings = { enabled: true, root: "", keep: false, setupT
 
 test("a run's checkout is a sibling of the project, named after the repository", () => {
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123" });
-  assert.equal(dirname(dirname(path)), join(dirname(PROJECT), ".aboard-sessions"));
+  assert.equal(dirname(dirname(path)), join(dirname(PROJECT), ".abd-sessions"));
   // The leaf is the repository's own name: from inside, the checkout looks like
   // an ordinary clone rather than something an agent should reason about.
   assert.equal(basename(path), basename(PROJECT));
@@ -44,7 +44,7 @@ test("a configured root is honoured, and one inside the project is refused", () 
     runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123", root: "../elsewhere" }),
     join(resolve(PROJECT, "../elsewhere"), "run_abc123", basename(PROJECT)),
   );
-  for (const inside of [".aboard/checkouts", "build", "."]) {
+  for (const inside of [".abd/checkouts", "build", "."]) {
     assert.throws(
       () => runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123", root: inside }),
       RunWorkspaceError,
@@ -72,13 +72,13 @@ test("an untouched setup file asks for nothing", () => {
 });
 
 test("the setup file and its interpreter follow the platform", () => {
-  assert.equal(setupCommandPath("win32"), ".aboard/session-setup.ps1");
-  assert.equal(setupCommandPath("linux"), ".aboard/session-setup.sh");
-  assert.deepEqual(setupCommandLine("C:/p/.aboard/session-setup.ps1", "win32"), {
+  assert.equal(setupCommandPath("win32"), ".abd/session-setup.ps1");
+  assert.equal(setupCommandPath("linux"), ".abd/session-setup.sh");
+  assert.deepEqual(setupCommandLine("C:/p/.abd/session-setup.ps1", "win32"), {
     command: "powershell.exe",
-    args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/p/.aboard/session-setup.ps1"],
+    args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/p/.abd/session-setup.ps1"],
   });
-  assert.deepEqual(setupCommandLine("/p/.aboard/session-setup.sh", "darwin"), { command: "bash", args: ["/p/.aboard/session-setup.sh"] });
+  assert.deepEqual(setupCommandLine("/p/.abd/session-setup.sh", "darwin"), { command: "bash", args: ["/p/.abd/session-setup.sh"] });
 });
 
 interface FakeGitOptions {
@@ -104,7 +104,7 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     currentBranch: async () => "main",
     defaultBranch: async () => "main",
     status: async (): Promise<GitStatus> => ({
-      branch: "aboard/run/test",
+      branch: "abd/run/test",
       entries: (options.dirty ?? []).map((path) => ({ status: "??", path })),
     }),
     codebase: async () => ({ sourceFileCount: 1, languages: ["ts"], commitCount: 1 }),
@@ -205,7 +205,7 @@ function fixture(options: {
   return { provider, git, notifications, setups, created, removed, overlays };
 }
 
-const REQUEST = { runId: "run_test", sessionBranch: "aboard/run/test", base: "main" } as const;
+const REQUEST = { runId: "run_test", sessionBranch: "abd/run/test", base: "main" } as const;
 
 test("worktree mode off leaves the run in the user's own checkout", async () => {
   const { provider, git } = fixture({ settings: { enabled: false } });
@@ -223,14 +223,14 @@ test("preparing a checkout creates it from the local base and installs into it",
   assert.equal(workspace.root, path);
   assert.equal(workspace.isolated, true);
   assert.deepEqual(workspace.denyTools, isolationDenyRules(PROJECT));
-  assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test main`), git.calls.join(", "));
+  assert.ok(git.calls.includes(`addWorktree ${path} abd/run/test main`), git.calls.join(", "));
   // The setup command runs in the new checkout, from the project's own copy of
   // the file; the one the user edits, not whatever the branch carries.
   assert.equal(setups.length, 1);
   assert.equal(setups[0]?.cwd, path);
-  assert.equal(setups[0]?.args.at(-1), join(PROJECT, ".aboard", "session-setup.ps1"));
+  assert.equal(setups[0]?.args.at(-1), join(PROJECT, ".abd", "session-setup.ps1"));
   assert.equal(setups[0]?.env.ABOARD_PROJECT_ROOT, PROJECT);
-  assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "aboard/run/test");
+  assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "abd/run/test");
   assert.ok(notifications.some((message) => message.includes(path)));
 });
 
@@ -238,14 +238,14 @@ test("a checkout falls back to the remote base when no local base ref exists", a
   const { provider, git } = fixture({ git: { branches: [] } });
   await provider.prepare(REQUEST);
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test origin/main`), git.calls.join(", "));
+  assert.ok(git.calls.includes(`addWorktree ${path} abd/run/test origin/main`), git.calls.join(", "));
 });
 
 test("an existing session branch is checked out rather than created a second time", async () => {
-  const { provider, git } = fixture({ git: { branches: ["aboard/run/test"] } });
+  const { provider, git } = fixture({ git: { branches: ["abd/run/test"] } });
   await provider.prepare(REQUEST);
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test`), git.calls.join(", "));
+  assert.ok(git.calls.includes(`addWorktree ${path} abd/run/test`), git.calls.join(", "));
 });
 
 test("a resumed run re-attaches to its checkout without setting it up again", async () => {
@@ -253,7 +253,7 @@ test("a resumed run re-attaches to its checkout without setting it up again", as
   const { provider, git, setups } = fixture({
     setupFile: "npm ci\n",
     // Spelled as git reports it on Windows, which is not how Node spells it.
-    git: { worktrees: [{ path: path.split(sep).join("/"), branch: "aboard/run/test" }] },
+    git: { worktrees: [{ path: path.split(sep).join("/"), branch: "abd/run/test" }] },
     // A resumed run's checkout legitimately holds an implementer's work.
     ...{},
   });
@@ -297,22 +297,22 @@ test("the project overlay copies ignored Claude and aboard files and preserves c
   await mkdir(join(project, ".claude", "hooks"), { recursive: true });
   await mkdir(join(project, ".claude", "skills", "local"), { recursive: true });
   await mkdir(join(project, ".claude", "worktrees", "other"), { recursive: true });
-  await mkdir(join(project, ".aboard", "agents"), { recursive: true });
-  await mkdir(join(project, ".aboard", "prototypes", "7-parser"), { recursive: true });
+  await mkdir(join(project, ".abd", "agents"), { recursive: true });
+  await mkdir(join(project, ".abd", "prototypes", "7-parser"), { recursive: true });
   await mkdir(join(checkout, ".claude"), { recursive: true });
-  await mkdir(join(checkout, ".aboard"), { recursive: true });
+  await mkdir(join(checkout, ".abd"), { recursive: true });
   await writeFile(join(project, ".claude", "settings.json"), "from project\n");
   await writeFile(join(project, ".claude", "settings.local.json"), "local settings\n");
-  await writeFile(join(project, ".claude", "hooks", "aboard_hook.py"), "hook\n");
+  await writeFile(join(project, ".claude", "hooks", "abd_hook.py"), "hook\n");
   await writeFile(join(project, ".claude", "skills", "local", "SKILL.md"), "skill\n");
   await writeFile(join(project, ".claude", "worktrees", "other", "secret"), "transient\n");
-  await writeFile(join(project, ".aboard", "scaffold.json"), "scaffold\n");
-  await writeFile(join(project, ".aboard", "agents", "manager.md"), "manager\n");
-  await writeFile(join(project, ".aboard", "session-setup.ps1"), "from project\n");
-  await writeFile(join(project, ".aboard", "settings.json"), "local aboard settings\n");
-  await writeFile(join(project, ".aboard", "prototypes", "7-parser", "experiment.ts"), "scratch\n");
+  await writeFile(join(project, ".abd", "scaffold.json"), "scaffold\n");
+  await writeFile(join(project, ".abd", "agents", "manager.md"), "manager\n");
+  await writeFile(join(project, ".abd", "session-setup.ps1"), "from project\n");
+  await writeFile(join(project, ".abd", "settings.json"), "local aboard settings\n");
+  await writeFile(join(project, ".abd", "prototypes", "7-parser", "experiment.ts"), "scratch\n");
   await writeFile(join(checkout, ".claude", "settings.json"), "from git\n");
-  await writeFile(join(checkout, ".aboard", "session-setup.ps1"), "from git\n");
+  await writeFile(join(checkout, ".abd", "session-setup.ps1"), "from git\n");
   const requested: string[] = [];
   const git = {
     ignoredPaths: async (paths: readonly string[]) => { requested.push(...paths); return paths; },
@@ -321,15 +321,15 @@ test("the project overlay copies ignored Claude and aboard files and preserves c
   await overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git });
   assert.equal(await readFile(join(checkout, ".claude", "settings.json"), "utf8"), "from git\n");
   assert.equal(await readFile(join(checkout, ".claude", "settings.local.json"), "utf8"), "local settings\n");
-  assert.equal(await readFile(join(checkout, ".claude", "hooks", "aboard_hook.py"), "utf8"), "hook\n");
+  assert.equal(await readFile(join(checkout, ".claude", "hooks", "abd_hook.py"), "utf8"), "hook\n");
   assert.equal(await readFile(join(checkout, ".claude", "skills", "local", "SKILL.md"), "utf8"), "skill\n");
-  assert.equal(await readFile(join(checkout, ".aboard", "scaffold.json"), "utf8"), "scaffold\n");
-  assert.equal(await readFile(join(checkout, ".aboard", "agents", "manager.md"), "utf8"), "manager\n");
-  assert.equal(await readFile(join(checkout, ".aboard", "settings.json"), "utf8"), "local aboard settings\n");
-  assert.equal(await readFile(join(checkout, ".aboard", "session-setup.ps1"), "utf8"), "from git\n");
+  assert.equal(await readFile(join(checkout, ".abd", "scaffold.json"), "utf8"), "scaffold\n");
+  assert.equal(await readFile(join(checkout, ".abd", "agents", "manager.md"), "utf8"), "manager\n");
+  assert.equal(await readFile(join(checkout, ".abd", "settings.json"), "utf8"), "local aboard settings\n");
+  assert.equal(await readFile(join(checkout, ".abd", "session-setup.ps1"), "utf8"), "from git\n");
   assert.ok(requested.includes(".claude/settings.local.json"), "settings.local.json is deliberately copied");
   await assert.rejects(readFile(join(checkout, ".claude", "worktrees", "other", "secret")), { code: "ENOENT" });
-  assert.equal(await readFile(join(checkout, ".aboard", "prototypes", "7-parser", "experiment.ts"), "utf8"), "scratch\n");
+  assert.equal(await readFile(join(checkout, ".abd", "prototypes", "7-parser", "experiment.ts"), "utf8"), "scratch\n");
 
 });
 
@@ -339,8 +339,8 @@ test("the project overlay refuses unignored local configuration before copying a
   const project = join(root, "project");
   const checkout = join(root, "checkout");
   await mkdir(join(project, ".claude"), { recursive: true });
-  await mkdir(join(project, ".aboard"), { recursive: true });
-  await mkdir(join(checkout, ".aboard", "runtime"), { recursive: true });
+  await mkdir(join(project, ".abd"), { recursive: true });
+  await mkdir(join(checkout, ".abd", "runtime"), { recursive: true });
   await writeFile(join(project, ".claude", "settings.local.json"), "local settings\n");
   const git = { ignoredPaths: async () => [] } as Pick<GitClient, "ignoredPaths"> as GitClient;
   await assert.rejects(
@@ -356,8 +356,8 @@ test("the project overlay never follows a missing symbolic link", async (context
   const project = join(root, "project");
   const checkout = join(root, "checkout");
   await mkdir(join(project, ".claude"), { recursive: true });
-  await mkdir(join(project, ".aboard"), { recursive: true });
-  await mkdir(join(checkout, ".aboard", "runtime"), { recursive: true });
+  await mkdir(join(project, ".abd"), { recursive: true });
+  await mkdir(join(checkout, ".abd", "runtime"), { recursive: true });
   const outside = join(root, "outside.json");
   await writeFile(outside, "secret\n");
   try {
@@ -420,11 +420,11 @@ test("an in-place run's release never touches anything", async () => {
 
 test("recorded checkout removal requires a registered clean checkout", async () => {
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  const clean = fixture({ git: { worktrees: [{ path, branch: "aboard/run/test" }] } });
+  const clean = fixture({ git: { worktrees: [{ path, branch: "abd/run/test" }] } });
   assert.equal(await clean.provider.removeRecorded(path), true);
   assert.ok(clean.git.calls.includes(`removeWorktree ${path} --force`));
 
-  const dirty = fixture({ git: { worktrees: [{ path, branch: "aboard/run/test" }], dirty: ["src/a.ts"] } });
+  const dirty = fixture({ git: { worktrees: [{ path, branch: "abd/run/test" }], dirty: ["src/a.ts"] } });
   assert.equal(await dirty.provider.removeRecorded(path), false);
   assert.equal(dirty.git.calls.some((call) => call.startsWith("removeWorktree")), false);
 

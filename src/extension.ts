@@ -109,7 +109,7 @@ function configuration(project: ReadonlyMap<string, unknown>) {
 }
 
 async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettings> {
-  try { return parseProjectSettings(await readFile(join(workspaceRoot, ".aboard", "settings.json"), "utf8")); }
+  try { return parseProjectSettings(await readFile(join(workspaceRoot, ".abd", "settings.json"), "utf8")); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return EMPTY_PROJECT_SETTINGS;
     return { values: new Map(), diagnostics: [{ setting: PROJECT_SETTINGS_PATH, severity: "error", message: `Unable to read ${PROJECT_SETTINGS_PATH}: ${error instanceof Error ? error.message : "unknown error"}. Project overrides are ignored.` }] };
@@ -284,7 +284,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const requireInitialized = (): boolean => {
     if (initialized) return true;
     void window.showInformationMessage(scaffoldState === "update-required"
-      ? "aboard's project assets must be updated before this extension version can use them. Run Update .aboard/."
+      ? "aboard's project assets must be updated before this extension version can use them. Run Update .abd/."
       : "aboard is not initialized in this workspace. Initialize it from the Get Started view first.");
     return false;
   };
@@ -408,15 +408,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   if (initialized && recordedManager !== undefined) void runtimeAdmission.run(() => transcripts.checkpoint(recordedManager!.sessionId));
   const launchConfigurations = workerConfigurations(workspaceRoot);
   const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot, runtime.root, {
-    settings: join(context.extensionPath, "assets", "runtime", "aboard-hooks.json"),
-    script: join(context.extensionPath, "assets", "runtime", "aboard_hook.py"),
+    settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
+    script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
   }, runtimeAdmission);
   const liveTaskAgents = new Set(fleet.list().map((session) => session.identity.agentId as string));
   await runtimeFiles.prune(liveTaskAgents, new Set([
     ...liveTaskAgents,
     ...activity.entries().flatMap((entry) => entry.kind === "agent" && entry.reopen !== undefined ? [entry.agentId as string] : []),
   ]));
-  const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "aboard_wrapper.py"));
+  const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "abd_wrapper.py"));
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
@@ -843,7 +843,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     await commands.executeCommand("setContext", "aboard.autoRunWaiting", state?.waiting === true);
   };
   await publishAutoRunState(undefined);
-  // Persisting into an uninitialized project would recreate `.aboard/` behind the
+  // Persisting into an uninitialized project would recreate `.abd/` behind the
   // user's back; including right after they deleted it.
   persistence = new PersistOnChange((listener) => fleet.onDidChange(listener), async () => { if (initialized) await fleetStore.save(fleet.toPersistenceDto()); }, (error) => output.appendLine(`Fleet persistence failed: ${error instanceof Error ? error.message : "unknown error"}`));
   // Disposed through subscriptions like every other resource; `deactivate` also
@@ -941,7 +941,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       ]);
       await rm(runtime.root, { recursive: true, force: true });
       output.appendLine(scaffoldState === "uninitialized"
-        ? "Project state directory .aboard/ was removed; the aboard session was discarded."
+        ? "Project state directory .abd/ was removed; the aboard session was discarded."
         : "aboard's project assets no longer match this extension; runtime access was closed until they are updated.");
     }
     initialized = next;
@@ -963,13 +963,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (scaffoldState !== "update-required") scaffoldUpdateWarningShown = false;
     if (scaffoldState === "update-required" && !scaffoldUpdateWarningShown) {
       scaffoldUpdateWarningShown = true;
-      void window.showWarningMessage("aboard's project assets were created by another extension version. Update .aboard/ before starting or resuming aboard.");
+      void window.showWarningMessage("aboard's project assets were created by another extension version. Update .abd/ before starting or resuming aboard.");
     }
     fleetUi.refresh();
     await publishManagerState();
   };
   await publishScaffoldState();
-  const scaffoldWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, ".aboard/**"));
+  const scaffoldWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, ".abd/**"));
   for (const event of [scaffoldWatcher.onDidCreate, scaffoldWatcher.onDidChange, scaffoldWatcher.onDidDelete]) {
     context.subscriptions.push(event(() => void publishScaffoldState()));
   }
@@ -1005,7 +1005,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         "Update aboard's project assets?",
         {
           modal: true,
-          detail: "aboard updates the current agents, hooks, and skills it owns under .aboard/. Files you have not touched are replaced with this version's copies, and unchanged files this version retired are removed. Assets you edited yourself are kept and listed afterwards rather than overwritten. Running sessions keep their already-prepared launch bundles.",
+          detail: "aboard updates the current agents, hooks, and skills it owns under .abd/. Files you have not touched are replaced with this version's copies, and unchanged files this version retired are removed. Assets you edited yourself are kept and listed afterwards rather than overwritten. Running sessions keep their already-prepared launch bundles.",
         },
         "Update",
       );

@@ -1,8 +1,8 @@
 """aboard's launch wrapper: owns a lock-marker file for exactly the child's lifetime.
 
 Usage:
-    python aboard_wrapper.py <lock-file> -- <command> [args...]
-    python aboard_wrapper.py <lock-file> --request <launch.json>
+    python abd_wrapper.py <lock-file> -- <command> [args...]
+    python abd_wrapper.py <lock-file> --request <launch.json>
 
 The extension launches every Claude session through this wrapper. A request
 path is a one-time launch capability: it is claimed before it is read, so a

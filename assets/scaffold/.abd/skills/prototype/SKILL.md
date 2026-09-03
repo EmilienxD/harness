@@ -9,4 +9,4 @@ disable-model-invocation: true
 
 `/prototype` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt. No prototyper terminal was opened.
 
-Do not try to carry it out yourself: do not perform the experiment in this conversation, choose or create a prototype location, or repair the hook except if the user explicitly asks in a future message. Tell the user that `/prototype` did not run, that it is available only from a live Manager or brainstormer terminal, and that **Update .aboard/** reinstalls the owned command skill and hook before they retry.
+Do not try to carry it out yourself: do not perform the experiment in this conversation, choose or create a prototype location, or repair the hook except if the user explicitly asks in a future message. Tell the user that `/prototype` did not run, that it is available only from a live Manager or brainstormer terminal, and that **Update .abd/** reinstalls the owned command skill and hook before they retry.

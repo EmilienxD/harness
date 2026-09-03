@@ -12,7 +12,7 @@ import {
 } from "../src/domain/run-validation.js";
 import type { AutoRunRecord, IssueProgress } from "../src/domain/run-plan.js";
 
-const SESSION = "aboard/run/test";
+const SESSION = "abd/run/test";
 const SHA = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
@@ -32,8 +32,8 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
     plan: [
-      { number: 34, title: "Add retry backoff", branch: "aboard/34-add-retry-backoff", disposition: "afk", difficulty: "basic", dependsOn: [] },
-      { number: 35, title: "Migrate the queue", branch: "aboard/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
+      { number: 34, title: "Add retry backoff", branch: "abd/34-add-retry-backoff", disposition: "afk", difficulty: "basic", dependsOn: [] },
+      { number: 35, title: "Migrate the queue", branch: "abd/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
     ],
     progress: { "34": { state: "pending" }, "35": { state: "pending" } },
     sessionBranch: SESSION,
@@ -68,7 +68,7 @@ function observations(overrides: Partial<RunObservations> = {}): RunObservations
     gitHubAuthenticated: true,
     targetBranchExists: true,
     workspacePresent: undefined,
-    branches: [branch(SESSION, SHA("a")), branch("aboard/34-add-retry-backoff", undefined), branch("aboard/35-migrate-the-queue", undefined)],
+    branches: [branch(SESSION, SHA("a")), branch("abd/34-add-retry-backoff", undefined), branch("abd/35-migrate-the-queue", undefined)],
     issues: [issue(34), issue(35, { openBlockedByNumbers: [34] })],
     pullRequests: [],
     workingTree: { branch: SESSION, dirtyPaths: [] },
@@ -112,9 +112,9 @@ test("a run-owned branch that moved fails the whole run", () => {
 
 test("a branch belonging to work the run has not started is a branch it did not create", () => {
   const squatted = observations({
-    branches: [branch(SESSION, SHA("a")), branch("aboard/34-add-retry-backoff", SHA("c"))],
+    branches: [branch(SESSION, SHA("a")), branch("abd/34-add-retry-backoff", SHA("c"))],
   });
-  assert.match(reason(record(), squatted) ?? "", /aboard\/34-add-retry-backoff already exists but this run did not create it/);
+  assert.match(reason(record(), squatted) ?? "", /abd\/34-add-retry-backoff already exists but this run did not create it/);
 });
 
 test("the current issue's branch is required only once the run recorded a SHA for it", () => {
@@ -128,9 +128,9 @@ test("the current issue's branch is required only once the run recorded a SHA fo
 
   const committed = record({
     ...started,
-    branchShas: { [SESSION]: SHA("a"), "aboard/34-add-retry-backoff": SHA("c") },
+    branchShas: { [SESSION]: SHA("a"), "abd/34-add-retry-backoff": SHA("c") },
   });
-  assert.match(reason(committed, observations()) ?? "", /aboard\/34-add-retry-backoff no longer exists/);
+  assert.match(reason(committed, observations()) ?? "", /abd\/34-add-retry-backoff no longer exists/);
 });
 
 test("a plan issue that closed, vanished, or changed classification fails the run", () => {
@@ -177,19 +177,19 @@ test("a dependency edge that reaches outside the plan fails, because the plan cl
 // --- pull requests ----------------------------------------------------------
 
 function pullRequest(overrides: Partial<PullRequestObservation> & { readonly number: number }): PullRequestObservation {
-  return { state: "open", head: "aboard/34-add-retry-backoff", base: SESSION, approvedByOther: false, ...overrides };
+  return { state: "open", head: "abd/34-add-retry-backoff", base: SESSION, approvedByOther: false, ...overrides };
 }
 
 function working(progress: IssueProgress, number = 34): AutoRunRecord {
   return record({
     currentIssue: number,
     checkpoint: "issue",
-    branchShas: { [SESSION]: SHA("a"), [`aboard/${number}-${number === 34 ? "add-retry-backoff" : "migrate-the-queue"}`]: SHA("c") },
+    branchShas: { [SESSION]: SHA("a"), [`abd/${number}-${number === 34 ? "add-retry-backoff" : "migrate-the-queue"}`]: SHA("c") },
     progress: { "34": { state: "pending" }, "35": { state: "pending" }, [String(number)]: progress },
   });
 }
 
-const withIssueBranch = (number = 34, name = "aboard/34-add-retry-backoff") => observations({
+const withIssueBranch = (number = 34, name = "abd/34-add-retry-backoff") => observations({
   branches: [branch(SESSION, SHA("a")), branch(name, SHA("c"))],
 });
 
@@ -198,8 +198,8 @@ test("a recorded pull request must still be the pull request the record describe
   const base = withIssueBranch();
 
   assert.match(reason(current, { ...base, pullRequests: [] }) ?? "", /#56 no longer exists/);
-  assert.match(reason(current, { ...base, pullRequests: [pullRequest({ number: 56, head: "somebody/else" })] }) ?? "", /#56 no longer comes from aboard\/34-add-retry-backoff/);
-  assert.match(reason(current, { ...base, pullRequests: [pullRequest({ number: 56, base: "main" })] }) ?? "", /#56 no longer targets aboard\/run\/test/);
+  assert.match(reason(current, { ...base, pullRequests: [pullRequest({ number: 56, head: "somebody/else" })] }) ?? "", /#56 no longer comes from abd\/34-add-retry-backoff/);
+  assert.match(reason(current, { ...base, pullRequests: [pullRequest({ number: 56, base: "main" })] }) ?? "", /#56 no longer targets abd\/run\/test/);
   assert.match(reason(current, { ...base, pullRequests: [pullRequest({ number: 56, state: "closed" })] }) ?? "", /#56 for issue #34 was closed without merging/);
 });
 
@@ -211,10 +211,10 @@ test("an afk pull request merged by somebody else fails the run", () => {
   assert.match(reason(current, merged) ?? "", /#56 for issue #34 was merged outside the run/);
 
   // Unless the journal says the run had begun exactly that merge when it died.
-  const journalled = { ...current, pendingAction: { kind: "merge-issue-pr" as const, prNumber: 56, head: "aboard/34-add-retry-backoff", base: SESSION, headSha: SHA("c"), baseSha: SHA("a") } };
+  const journalled = { ...current, pendingAction: { kind: "merge-issue-pr" as const, prNumber: 56, head: "abd/34-add-retry-backoff", base: SESSION, headSha: SHA("c"), baseSha: SHA("a") } };
   const exactMerge = {
     ...merged,
-    branches: [branch(SESSION, SHA("d")), branch("aboard/34-add-retry-backoff", SHA("c"))],
+    branches: [branch(SESSION, SHA("d")), branch("abd/34-add-retry-backoff", SHA("c"))],
     pullRequests: [pullRequest({ number: 56, state: "merged", headSha: SHA("c"), mergeCommitSha: SHA("d") })],
   };
   assert.equal(reason(journalled, exactMerge), undefined);
@@ -225,18 +225,18 @@ test("a journalled merge explains the CLI having deleted its issue branch", () =
     currentIssue: 34,
     checkpoint: "issue",
     progress: { "34": { state: "current", phase: "merge", prNumber: 56 }, "35": { state: "pending" } },
-    branchShas: { [SESSION]: SHA("a"), "aboard/34-add-retry-backoff": SHA("c") },
+    branchShas: { [SESSION]: SHA("a"), "abd/34-add-retry-backoff": SHA("c") },
     pendingAction: {
       kind: "merge-issue-pr",
       prNumber: 56,
-      head: "aboard/34-add-retry-backoff",
+      head: "abd/34-add-retry-backoff",
       base: SESSION,
       headSha: SHA("c"),
       baseSha: SHA("a"),
     },
   });
   const observed = observations({
-    branches: [branch(SESSION, SHA("d")), branch("aboard/34-add-retry-backoff", undefined)],
+    branches: [branch(SESSION, SHA("d")), branch("abd/34-add-retry-backoff", undefined)],
     pullRequests: [pullRequest({ number: 56, state: "merged", headSha: SHA("c"), mergeCommitSha: SHA("d") })],
   });
   assert.equal(reason(current, observed), undefined);
@@ -245,14 +245,14 @@ test("a journalled merge explains the CLI having deleted its issue branch", () =
 test("a hitl pull request the user merged or another account approved is allowed", () => {
   // These two are the whole point of the hitl disposition.
   const current = working({ state: "current", phase: "await-approval", prNumber: 57 }, 35);
-  const observed = observations({ branches: [branch(SESSION, SHA("a")), branch("aboard/35-migrate-the-queue", SHA("c"))] });
+  const observed = observations({ branches: [branch(SESSION, SHA("a")), branch("abd/35-migrate-the-queue", SHA("c"))] });
 
   const mergedByUser = {
     ...observed,
-    branches: [branch(SESSION, SHA("d")), branch("aboard/35-migrate-the-queue", SHA("c"))],
+    branches: [branch(SESSION, SHA("d")), branch("abd/35-migrate-the-queue", SHA("c"))],
     pullRequests: [pullRequest({
       number: 57,
-      head: "aboard/35-migrate-the-queue",
+      head: "abd/35-migrate-the-queue",
       state: "merged",
       headSha: SHA("c"),
       mergeCommitSha: SHA("d"),
@@ -264,7 +264,7 @@ test("a hitl pull request the user merged or another account approved is allowed
     ...mergedByUser,
     pullRequests: [pullRequest({
       number: 57,
-      head: "aboard/35-migrate-the-queue",
+      head: "abd/35-migrate-the-queue",
       state: "merged",
       headSha: SHA("e"),
       mergeCommitSha: SHA("d"),
@@ -274,11 +274,11 @@ test("a hitl pull request the user merged or another account approved is allowed
 
   const movedAgain = {
     ...mergedByUser,
-    branches: [branch(SESSION, SHA("e")), branch("aboard/35-migrate-the-queue", SHA("c"))],
+    branches: [branch(SESSION, SHA("e")), branch("abd/35-migrate-the-queue", SHA("c"))],
   };
   assert.match(reason(current, movedAgain) ?? "", new RegExp(`${SESSION} has moved`));
 
-  const approved = { ...observed, pullRequests: [pullRequest({ number: 57, head: "aboard/35-migrate-the-queue", approvedByOther: true })] };
+  const approved = { ...observed, pullRequests: [pullRequest({ number: 57, head: "abd/35-migrate-the-queue", approvedByOther: true })] };
   assert.equal(reason(current, approved), undefined);
 });
 
@@ -320,7 +320,7 @@ test("uncommitted work is trusted only on the branch the run's current issue bel
   const current = working({ state: "current", phase: "implement" });
   const observed = withIssueBranch();
 
-  const onIssueBranch = { ...observed, workingTree: { branch: "aboard/34-add-retry-backoff", dirtyPaths: ["src/a.ts"] } };
+  const onIssueBranch = { ...observed, workingTree: { branch: "abd/34-add-retry-backoff", dirtyPaths: ["src/a.ts"] } };
   assert.equal(reason(current, onIssueBranch), undefined);
   assert.equal(hasTrustedDirtyWork(current, onIssueBranch), true);
 

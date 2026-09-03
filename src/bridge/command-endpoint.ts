@@ -23,13 +23,13 @@ export function commandEndpointDirectory(
   homeDirectory: string,
 ): string {
   if (platform === "win32") {
-    return join(environment.LOCALAPPDATA ?? join(homeDirectory, "AppData", "Local"), "aboard", COMMAND_ENDPOINT_DIRECTORY_NAME);
+    return join(environment.LOCALAPPDATA ?? join(homeDirectory, "AppData", "Local"), "abd", COMMAND_ENDPOINT_DIRECTORY_NAME);
   }
   if (platform === "darwin") {
-    return join(homeDirectory, "Library", "Application Support", "aboard", COMMAND_ENDPOINT_DIRECTORY_NAME);
+    return join(homeDirectory, "Library", "Application Support", "abd", COMMAND_ENDPOINT_DIRECTORY_NAME);
   }
   const state = environment.XDG_STATE_HOME;
-  return join(state === undefined || state === "" ? join(homeDirectory, ".local", "state") : state, "aboard", COMMAND_ENDPOINT_DIRECTORY_NAME);
+  return join(state === undefined || state === "" ? join(homeDirectory, ".local", "state") : state, "abd", COMMAND_ENDPOINT_DIRECTORY_NAME);
 }
 
 function recordFileName(workspaceRoot: string): string {

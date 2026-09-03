@@ -10,33 +10,33 @@ const output = join(root, "dist", "aboard-0.0.0.vsix");
 const required = [
   "dist/extension.js",
   "assets/aboard.svg",
-  "assets/runtime/aboard_hook.py",
-  "assets/runtime/aboard-hooks.json",
-  "assets/runtime/aboard_wrapper.py",
-  // Under `.aboard/`, not `.claude/agents/`: a definition in the latter is a
+  "assets/runtime/abd_hook.py",
+  "assets/runtime/abd-hooks.json",
+  "assets/runtime/abd_wrapper.py",
+  // Under `.abd/`, not `.claude/agents/`: a definition in the latter is a
   // subagent type every session in the workspace can discover and spawn.
-  "assets/scaffold/.aboard/agents/manager.md",
-  "assets/scaffold/.aboard/agents/implementer.md",
-  "assets/scaffold/.aboard/agents/Explore.md",
+  "assets/scaffold/.abd/agents/manager.md",
+  "assets/scaffold/.abd/agents/implementer.md",
+  "assets/scaffold/.abd/agents/Explore.md",
   // Both ship: the project is cloned on every platform, and the file for the
   // one aboard is not running on is still the user's to edit.
-  "assets/scaffold/.aboard/session-setup.ps1",
-  "assets/scaffold/.aboard/session-setup.sh",
-  "assets/scaffold/.aboard/skills/update-todo/SKILL.md",
-  "assets/scaffold/.aboard/skills/brainstorm/SKILL.md",
-  "assets/scaffold/.aboard/skills/general-purpose/SKILL.md",
+  "assets/scaffold/.abd/session-setup.ps1",
+  "assets/scaffold/.abd/session-setup.sh",
+  "assets/scaffold/.abd/skills/update-todo/SKILL.md",
+  "assets/scaffold/.abd/skills/brainstorm/SKILL.md",
+  "assets/scaffold/.abd/skills/general-purpose/SKILL.md",
   "LICENSE",
 ];
 
 const forbidden = [
   // Runtime state belongs to a live workspace and must never ship.
-  /(^|\/)\.aboard\/runtime(\/|$)/,
+  /(^|\/)\.abd\/runtime(\/|$)/,
   /(^|\/)\.env(?:\.|$)/,
   /(^|\/)bridge\.json$/,
   /(^|\/)manager\.json$/,
   /(^|\/)fleet\.json$/,
   /(^|\/)prompts(\/|$)/,
-  /(^|\/)aboard_cli\.py$/,
+  /(^|\/)abd_cli\.py$/,
   /(^|\/)test(\/|$)/,
   /(^|\/)src(\/|$)/,
 ];

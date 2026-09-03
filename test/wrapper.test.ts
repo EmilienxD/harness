@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../src/runtime/lock-markers.js";
 
-const WRAPPER = join(process.cwd(), "assets", "runtime", "aboard_wrapper.py");
+const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
 
 test("each Aboard launch gets a fresh one-time code", () => {
   const layout = sessionWrapperLayout("C:\\storage\\runtime", WRAPPER);
@@ -88,8 +88,8 @@ test("the watch leaves an uninitialized workspace untouched and attaches once th
   let sweeps = 0;
   const watching = watchLockMarkers(directory, () => { sweeps += 1; }, 10, 20);
   try {
-    // Activation in a project that was never initialized must not create `.aboard/`.
-    assert.equal(existsSync(join(root, ".aboard")), false);
+    // Activation in a project that was never initialized must not create `.abd/`.
+    assert.equal(existsSync(join(root, ".abd")), false);
 
     // A launch creates it, as the wrapper does; the watch must pick it up.
     mkdirSync(directory, { recursive: true });

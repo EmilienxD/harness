@@ -461,7 +461,7 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
     github: new FakeGitHub({
       issues: [issue47, parent31],
-      pullRequests: [{ ...pull42, headBranch: "aboard/47-token-refresh", baseBranch: "aboard/run/test" }],
+      pullRequests: [{ ...pull42, headBranch: "abd/47-token-refresh", baseBranch: "abd/run/test" }],
       diff: "+ refreshEarly();",
     }),
   }));

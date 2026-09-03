@@ -17,7 +17,7 @@ import {
 /** The Manager runs as the main session agent. */
 export const MANAGER_AGENT_NAME = "manager";
 
-export const AGENT_DEFINITION_DIRECTORY = ".aboard/agents";
+export const AGENT_DEFINITION_DIRECTORY = ".abd/agents";
 
 
 export const NATIVE_SUBAGENT_TYPES = ["Explore", "general-purpose"] as const;

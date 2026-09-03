@@ -26,7 +26,7 @@ interface Manifest {
   readonly assets: Readonly<Record<string, InstalledAsset>>;
 }
 
-const MANIFEST_PATH = ".aboard/scaffold.json";
+const MANIFEST_PATH = ".abd/scaffold.json";
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -63,7 +63,7 @@ function portable(path: string): string { return path.split(sep).join("/"); }
 
 function isOwnedAssetPath(path: string): boolean {
   const segments = path.split("/");
-  return segments.length > 2 && segments[0] === ".aboard"
+  return segments.length > 2 && segments[0] === ".abd"
     && segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\\"));
 }
 
@@ -108,7 +108,7 @@ async function isDeletionInsideOwnedDirectory(projectRoot: string, destination: 
   try {
     const [canonicalProject, canonicalParent] = await Promise.all([realpath(projectRoot), realpath(dirname(destination))]);
     const parentFromProject = relative(canonicalProject, canonicalParent);
-    return parentFromProject === ".aboard" || parentFromProject.startsWith(`.aboard${sep}`);
+    return parentFromProject === ".abd" || parentFromProject.startsWith(`.abd${sep}`);
   } catch {
     return false;
   }

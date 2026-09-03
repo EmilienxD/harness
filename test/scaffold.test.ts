@@ -14,27 +14,27 @@ async function state(projectRoot: string, assetRoot: string): Promise<ScaffoldSt
   return readScaffoldState(projectRoot, await scaffoldCatalogRevision(assetRoot));
 }
 
-test("fresh scaffold installs every aboard-owned asset under .aboard only", async () => {
+test("fresh scaffold installs every aboard-owned asset under .abd only", async () => {
   const root = await project();
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets });
   await assert.rejects(readFile(join(root, ".gitignore")));
-  await assert.rejects(readFile(join(root, ".aboard", ".gitignore")));
-  await assert.rejects(readFile(join(root, ".aboard", "scripts", "aboard_hook.py")));
-  await assert.rejects(readFile(join(root, ".aboard", "runtime")));
+  await assert.rejects(readFile(join(root, ".abd", ".gitignore")));
+  await assert.rejects(readFile(join(root, ".abd", "scripts", "abd_hook.py")));
+  await assert.rejects(readFile(join(root, ".abd", "runtime")));
   await assert.rejects(readFile(join(root, ".mcp.json")));
   await assert.rejects(readFile(join(root, ".claude", "settings.json")));
-  await assert.rejects(readFile(join(root, ".aboard", "aboard-hooks.json")));
-  assert.match(await readFile(join(root, ".aboard", "skills", "brainstorm", "SKILL.md"), "utf8"), /brainstorm/u);
+  await assert.rejects(readFile(join(root, ".abd", "abd-hooks.json")));
+  assert.match(await readFile(join(root, ".abd", "skills", "brainstorm", "SKILL.md"), "utf8"), /brainstorm/u);
   await assert.rejects(readFile(join(root, "TODO.md")));
   // CLAUDE.md is the user's file: aboard's Manager persona ships as an agent
   // definition instead, so no scaffolded instruction applies to every session.
   await assert.rejects(readFile(join(root, "CLAUDE.md")));
-  assert.match(await readFile(join(root, ".aboard", "agents", "manager.md"), "utf8"), /name: manager/);
-  const explore = await readFile(join(root, ".aboard", "agents", "Explore.md"), "utf8");
+  assert.match(await readFile(join(root, ".abd", "agents", "manager.md"), "utf8"), /name: manager/);
+  const explore = await readFile(join(root, ".abd", "agents", "Explore.md"), "utf8");
   assert.match(explore, /name: Explore/);
   assert.doesNotMatch(explore, /^tools\s*:/mu);
   await assert.rejects(readFile(join(root, ".claude", "agents", "manager.md")));
-  for (const name of ["general-purpose", "explorer"]) await assert.rejects(readFile(join(root, ".aboard", "agents", `${name}.md`)));
+  for (const name of ["general-purpose", "explorer"]) await assert.rejects(readFile(join(root, ".abd", "agents", `${name}.md`)));
   assert.equal("todo" in report, false);
   // An existing installation upgrades the same way, with nothing to reconcile.
   assert.equal("todo" in await scaffoldProject({ projectRoot: root, assetRoot: assets }), false);
@@ -44,8 +44,8 @@ test("fresh scaffold installs every aboard-owned asset under .aboard only", asyn
 test("scaffold state distinguishes a first initialize from a later update", async () => {
   const root = await project();
   assert.equal(await state(root, assets), "uninitialized");
-  await mkdir(join(root, ".aboard"), { recursive: true });
-  await writeFile(join(root, ".aboard", "scaffold.json"), "not json at all");
+  await mkdir(join(root, ".abd"), { recursive: true });
+  await writeFile(join(root, ".abd", "scaffold.json"), "not json at all");
   assert.equal(await state(root, assets), "uninitialized");
   await scaffoldProject({ projectRoot: root, assetRoot: assets });
   assert.equal(await state(root, assets), "ready");
@@ -53,13 +53,13 @@ test("scaffold state distinguishes a first initialize from a later update", asyn
 
 test("a legacy or changed scaffold requires an explicit update", async () => {
   const root = await project(); const source = await project();
-  const sourceAgent = join(source, ".aboard", "agents", "implementer.md");
+  const sourceAgent = join(source, ".abd", "agents", "implementer.md");
   await mkdir(dirname(sourceAgent), { recursive: true });
   await writeFile(sourceAgent, "v1");
   await scaffoldProject({ projectRoot: root, assetRoot: source });
   assert.equal(await state(root, source), "ready");
 
-  const manifestPath = join(root, ".aboard", "scaffold.json");
+  const manifestPath = join(root, ".abd", "scaffold.json");
   const manifest = await json(manifestPath);
   delete manifest.revision;
   await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
@@ -99,11 +99,11 @@ test("rerun is idempotent and never changes user Claude or MCP configuration", a
 test("owned assets upgrade only when unchanged and quietly preserve local edits", async () => {
   const root = await project();
   await scaffoldProject({ projectRoot: root, assetRoot: assets });
-  const target = join(root, ".aboard", "agents", "implementer.md");
+  const target = join(root, ".abd", "agents", "implementer.md");
   await writeFile(target, "local edit\n");
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets, autoCompactEnabled: false });
   assert.equal(await readFile(target, "utf8"), "local edit\n");
-  assert.ok(report.preserved.includes(".aboard/agents/implementer.md"));
+  assert.ok(report.preserved.includes(".abd/agents/implementer.md"));
   // Preserving a local edit is non-destructive and needs no user action, so it
   // is not a warning; the autoCompact check remains the only warning here.
   assert.deepEqual(report.warnings.filter((warning) => warning.toLowerCase().includes("preserved")), []);
@@ -112,8 +112,8 @@ test("owned assets upgrade only when unchanged and quietly preserve local edits"
 
 test("preserving a local edit does not advance its installed-version baseline", async () => {
   const root = await project(); const source = await project();
-  const sourceAgent = join(source, ".aboard", "agents", "implementer.md");
-  const installedAgent = join(root, ".aboard", "agents", "implementer.md");
+  const sourceAgent = join(source, ".abd", "agents", "implementer.md");
+  const installedAgent = join(root, ".abd", "agents", "implementer.md");
   await mkdir(dirname(sourceAgent), { recursive: true });
   await writeFile(sourceAgent, "v1");
   await scaffoldProject({ projectRoot: root, assetRoot: source });
@@ -121,46 +121,46 @@ test("preserving a local edit does not advance its installed-version baseline", 
   await writeFile(installedAgent, "local edit");
   await writeFile(sourceAgent, "v2");
   const preserved = await scaffoldProject({ projectRoot: root, assetRoot: source });
-  assert.ok(preserved.preserved.includes(".aboard/agents/implementer.md"));
+  assert.ok(preserved.preserved.includes(".abd/agents/implementer.md"));
 
   await writeFile(installedAgent, "v1");
   const updated = await scaffoldProject({ projectRoot: root, assetRoot: source });
   assert.equal(await readFile(installedAgent, "utf8"), "v2");
-  assert.ok(updated.updated.includes(".aboard/agents/implementer.md"));
+  assert.ok(updated.updated.includes(".abd/agents/implementer.md"));
 });
 
 test("a pre-existing conflicting asset is preserved without claiming its source version was installed", async () => {
   const root = await project(); const source = await project();
-  const sourceAgent = join(source, ".aboard", "agents", "implementer.md");
-  const installedAgent = join(root, ".aboard", "agents", "implementer.md");
+  const sourceAgent = join(source, ".abd", "agents", "implementer.md");
+  const installedAgent = join(root, ".abd", "agents", "implementer.md");
   await mkdir(dirname(sourceAgent), { recursive: true });
   await mkdir(dirname(installedAgent), { recursive: true });
   await writeFile(sourceAgent, "shipped");
   await writeFile(installedAgent, "pre-existing");
 
   const report = await scaffoldProject({ projectRoot: root, assetRoot: source });
-  const manifest = await json(join(root, ".aboard", "scaffold.json"));
-  assert.ok(report.preserved.includes(".aboard/agents/implementer.md"));
-  assert.equal(Object.hasOwn(manifest.assets as object, ".aboard/agents/implementer.md"), false);
+  const manifest = await json(join(root, ".abd", "scaffold.json"));
+  assert.ok(report.preserved.includes(".abd/agents/implementer.md"));
+  assert.equal(Object.hasOwn(manifest.assets as object, ".abd/agents/implementer.md"), false);
 });
 
 test("retired owned assets are removed only when they are unchanged", async () => {
   const root = await project(); const source = await project();
-  await mkdir(join(source, ".aboard", "scripts"), { recursive: true });
-  await writeFile(join(source, ".aboard", "scripts", "aboard_hook.py"), "recorded hook");
+  await mkdir(join(source, ".abd", "scripts"), { recursive: true });
+  await writeFile(join(source, ".abd", "scripts", "abd_hook.py"), "recorded hook");
   await scaffoldProject({ projectRoot: root, assetRoot: source });
-  await rm(join(source, ".aboard", "scripts", "aboard_hook.py"));
+  await rm(join(source, ".abd", "scripts", "abd_hook.py"));
   const report = await scaffoldProject({ projectRoot: root, assetRoot: source });
-  await assert.rejects(readFile(join(root, ".aboard", "scripts", "aboard_hook.py")));
-  assert.ok(report.removed.includes(".aboard/scripts/aboard_hook.py"));
-  const manifest = await json(join(root, ".aboard", "scaffold.json"));
-  assert.equal(Object.hasOwn(manifest.assets as object, ".aboard/scripts/aboard_hook.py"), false);
+  await assert.rejects(readFile(join(root, ".abd", "scripts", "abd_hook.py")));
+  assert.ok(report.removed.includes(".abd/scripts/abd_hook.py"));
+  const manifest = await json(join(root, ".abd", "scaffold.json"));
+  assert.equal(Object.hasOwn(manifest.assets as object, ".abd/scripts/abd_hook.py"), false);
 });
 
 test("locally changed retired assets are preserved and relinquished", async () => {
   const root = await project(); const source = await project();
-  const sourceHook = join(source, ".aboard", "scripts", "old_hook.py");
-  const installedHook = join(root, ".aboard", "scripts", "old_hook.py");
+  const sourceHook = join(source, ".abd", "scripts", "old_hook.py");
+  const installedHook = join(root, ".abd", "scripts", "old_hook.py");
   await mkdir(dirname(sourceHook), { recursive: true });
   await writeFile(sourceHook, "shipped");
   await scaffoldProject({ projectRoot: root, assetRoot: source });
@@ -168,20 +168,20 @@ test("locally changed retired assets are preserved and relinquished", async () =
   await rm(sourceHook);
   const report = await scaffoldProject({ projectRoot: root, assetRoot: source });
   assert.equal(await readFile(installedHook, "utf8"), "local edit");
-  assert.ok(report.preserved.includes(".aboard/scripts/old_hook.py"));
-  const manifest = await json(join(root, ".aboard", "scaffold.json"));
-  assert.equal(Object.hasOwn(manifest.assets as object, ".aboard/scripts/old_hook.py"), false);
+  assert.ok(report.preserved.includes(".abd/scripts/old_hook.py"));
+  const manifest = await json(join(root, ".abd", "scaffold.json"));
+  assert.equal(Object.hasOwn(manifest.assets as object, ".abd/scripts/old_hook.py"), false);
 });
 
-test("retired cleanup ignores manifest paths outside .aboard", async () => {
+test("retired cleanup ignores manifest paths outside .abd", async () => {
   const root = await project(); const source = await project();
-  const sourceAsset = join(source, ".aboard", "owned.txt");
+  const sourceAsset = join(source, ".abd", "owned.txt");
   await mkdir(dirname(sourceAsset), { recursive: true });
   await writeFile(sourceAsset, "owned");
   await scaffoldProject({ projectRoot: root, assetRoot: source });
   const outside = join(root, "outside.txt");
   await writeFile(outside, "outside");
-  const manifestPath = join(root, ".aboard", "scaffold.json");
+  const manifestPath = join(root, ".abd", "scaffold.json");
   const manifest = await json(manifestPath);
   (manifest.assets as Record<string, unknown>)["../outside.txt"] = {
     sourceHash: "31207c361cda63e8340254ff308c0a170d6dc7d35a07303a2fd0abde6bda225f",
@@ -193,12 +193,12 @@ test("retired cleanup ignores manifest paths outside .aboard", async () => {
 
 test("unchanged owned files upgrade to the shipped version", async () => {
   const root = await project(); const source = await project();
-  await mkdir(join(source, ".aboard", "agents"), { recursive: true }); await mkdir(join(source, ".claude", "hooks"), { recursive: true });
-  await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v1");
-  await writeFile(join(source, ".claude", "hooks", "aboard-hooks.json"), "{}");
+  await mkdir(join(source, ".abd", "agents"), { recursive: true }); await mkdir(join(source, ".claude", "hooks"), { recursive: true });
+  await writeFile(join(source, ".abd", "agents", "implementer.md"), "v1");
+  await writeFile(join(source, ".claude", "hooks", "abd-hooks.json"), "{}");
   await scaffoldProject({ projectRoot: root, assetRoot: source });
-  await writeFile(join(source, ".aboard", "agents", "implementer.md"), "v2");
+  await writeFile(join(source, ".abd", "agents", "implementer.md"), "v2");
   const report = await scaffoldProject({ projectRoot: root, assetRoot: source });
-  assert.equal(await readFile(join(root, ".aboard", "agents", "implementer.md"), "utf8"), "v2");
-  assert.ok(report.updated.includes(".aboard/agents/implementer.md"));
+  assert.equal(await readFile(join(root, ".abd", "agents", "implementer.md"), "utf8"), "v2");
+  assert.ok(report.updated.includes(".abd/agents/implementer.md"));
 });

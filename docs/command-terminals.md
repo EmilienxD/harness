@@ -9,7 +9,7 @@ This is for scripts; a project's own setup command, a backend or frontend
 bootstrap, a task runner in another repository. A command terminal is not an
 aboard agent: it gets no fleet row, no write lease, no `ABOARD_*` credentials, no
 resume, and it never appears in the fleet view. The endpoint is published only
-while the project is initialized. Deleting `.aboard/` removes the endpoint and
+while the project is initialized. Deleting `.abd/` removes the endpoint and
 turns this surface off with the rest of aboard.
 
 ## Endpoints
@@ -81,9 +81,9 @@ every workspace:
 
 | Platform | Directory |
 | :-- | :-- |
-| Windows | `%LOCALAPPDATA%\aboard\endpoints` |
-| macOS | `~/Library/Application Support/aboard/endpoints` |
-| Linux | `${XDG_STATE_HOME:-~/.local/state}/aboard/endpoints` |
+| Windows | `%LOCALAPPDATA%\abd\endpoints` |
+| macOS | `~/Library/Application Support/abd/endpoints` |
+| Linux | `${XDG_STATE_HOME:-~/.local/state}/abd/endpoints` |
 
 Each file is one window:
 
@@ -104,8 +104,8 @@ record whose `workspaceRoot` contains your working directory. File names are an
 implementation detail; never parse them, and never try to reproduce them.
 
 ```bash
-dir="${LOCALAPPDATA:+$LOCALAPPDATA/aboard/endpoints}"
-dir="${dir:-${XDG_STATE_HOME:-$HOME/.local/state}/aboard/endpoints}"
+dir="${LOCALAPPDATA:+$LOCALAPPDATA/abd/endpoints}"
+dir="${dir:-${XDG_STATE_HOME:-$HOME/.local/state}/abd/endpoints}"
 record=$(grep -l -F "$(pwd)" "$dir"/*.json | head -1)   # or match properly in your language
 port=$(node -p "require('$record').port")
 token=$(node -p "require('$record').commandToken")

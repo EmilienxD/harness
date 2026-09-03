@@ -14,6 +14,6 @@ For now, just notify the user of this problem:
 
 - `/general-purpose` did not run, so no session was opened. aboard's `UserPromptSubmit` hook should have intercepted it and did not.
 - Ask them to open the **aboard** view in VS Code's activity bar and check that the **Agents** panel shows a live Manager (use **+ New Manager** otherwise).
-- If a Manager is live and the command still falls through, suggest clicking the **Update .aboard/** button at the top of that view to reinstall aboard's hooks, then retrying `/general-purpose`.
+- If a Manager is live and the command still falls through, suggest clicking the **Update .abd/** button at the top of that view to reinstall aboard's hooks, then retrying `/general-purpose`.
 
 Then stop and wait for them.

@@ -131,7 +131,7 @@ test("a launch given its own directory starts there, cds there, and calls it the
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     agentType: "implementer",
     cwd: "C:\\sessions\\run_test\\aboard",
-    initialCommand: "claude --add-dir .aboard/runtime/agents/agent-7",
+    initialCommand: "claude --add-dir .abd/runtime/agents/agent-7",
   });
 
   assert.equal(created.cwd, "C:\\sessions\\run_test\\aboard");

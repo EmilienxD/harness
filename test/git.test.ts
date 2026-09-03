@@ -36,7 +36,7 @@ test("the git boundary reports branch, status, and branch existence", async () =
   assert.deepEqual(dirtyPaths(dirty), ["src.ts"]);
 
   assert.equal(await client.branchExists("main"), true);
-  assert.equal(await client.branchExists("aboard/34-nothing"), false);
+  assert.equal(await client.branchExists("abd/34-nothing"), false);
 });
 
 test("clean-tree admission sees untracked files despite personal status settings", async () => {
@@ -67,7 +67,7 @@ for (const create of [false, true]) {
   test(`${create ? "createBranch" : "checkout"} waits for a temporary index lock`, async () => {
     const root = await repository();
     const client = new ProcessGitClient(root);
-    const branch = "aboard/run/lock-test";
+    const branch = "abd/run/lock-test";
     if (!create) await run("git", ["branch", branch], { cwd: root, windowsHide: true });
     const lock = join(root, ".git", "index.lock");
     await writeFile(lock, "held by another process");
@@ -85,7 +85,7 @@ test("a persistent index lock stops checkout without deleting the lock or creati
   const client = new ProcessGitClient(root);
   const lock = join(root, ".git", "index.lock");
   await writeFile(lock, "held by another process");
-  const branch = "aboard/run/locked";
+  const branch = "abd/run/locked";
   await assert.rejects(client.createBranch(branch, "main"), (error: unknown) => {
     assert.ok(error instanceof GitBoundaryError);
     assert.equal(error.code, "command-failed");
@@ -103,16 +103,16 @@ test("a failing post-checkout hook is not retried after the branch has changed",
   const hookDirectory = join(root, ".git", "hooks");
   await run("git", ["config", "core.hooksPath", hookDirectory], { cwd: root, windowsHide: true });
   await writeFile(join(hookDirectory, "post-checkout"), "#!/bin/sh\nprintf x >> .git/checkout-count\nexit 1\n", { mode: 0o755 });
-  await assert.rejects(client.createBranch("aboard/run/hook-failed", "main"), GitBoundaryError);
-  assert.equal(await client.currentBranch(), "aboard/run/hook-failed");
+  await assert.rejects(client.createBranch("abd/run/hook-failed", "main"), GitBoundaryError);
+  assert.equal(await client.currentBranch(), "abd/run/hook-failed");
   assert.equal(await readFile(join(root, ".git", "checkout-count"), "utf8"), "x");
 });
 
 test("createBranch, add, and commit leave the branch carrying the issue's commit", async () => {
   const root = await repository();
   const client = new ProcessGitClient(root);
-  await client.createBranch("aboard/34-add-retry-backoff", "main");
-  assert.equal(await client.currentBranch(), "aboard/34-add-retry-backoff");
+  await client.createBranch("abd/34-add-retry-backoff", "main");
+  assert.equal(await client.currentBranch(), "abd/34-add-retry-backoff");
 
   await writeFile(join(root, "src.ts"), "export const a = 1;\n");
   await client.add();
@@ -132,18 +132,18 @@ test("createBranch, add, and commit leave the branch carrying the issue's commit
 test("deleteBranch removes only a fully merged local branch", async () => {
   const root = await repository();
   const client = new ProcessGitClient(root);
-  await client.createBranch("aboard/34-no-change", "main");
+  await client.createBranch("abd/34-no-change", "main");
   await client.checkout("main");
-  await client.deleteBranch("aboard/34-no-change");
-  assert.equal(await client.branchExists("aboard/34-no-change"), false);
+  await client.deleteBranch("abd/34-no-change");
+  assert.equal(await client.branchExists("abd/34-no-change"), false);
 
-  await client.createBranch("aboard/35-has-work", "main");
+  await client.createBranch("abd/35-has-work", "main");
   await writeFile(join(root, "src.ts"), "export const changed = true;\n");
   await client.add();
   await client.commit("Unexpected work", "");
   await client.checkout("main");
-  await assert.rejects(client.deleteBranch("aboard/35-has-work"));
-  assert.equal(await client.branchExists("aboard/35-has-work"), true);
+  await assert.rejects(client.deleteBranch("abd/35-has-work"));
+  assert.equal(await client.branchExists("abd/35-has-work"), true);
 });
 
 async function trackRemote(root: string, branch: string, at: string = branch): Promise<void> {
@@ -166,7 +166,7 @@ test("remote branch existence is a separate question from being pushed", async (
   await client.commit("Move on", "");
   assert.equal(await client.remoteBranchExists("main"), true);
   assert.equal(await client.isPushed("main"), false);
-  assert.equal(await client.remoteBranchExists("aboard/run/nothing"), false);
+  assert.equal(await client.remoteBranchExists("abd/run/nothing"), false);
 });
 
 test("mergeFromRemote brings the branch up to date with its base", async () => {
@@ -174,7 +174,7 @@ test("mergeFromRemote brings the branch up to date with its base", async () => {
   const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
   const client = new ProcessGitClient(root);
 
-  await client.createBranch("aboard/34-add-retry-backoff", "main");
+  await client.createBranch("abd/34-add-retry-backoff", "main");
   await writeFile(join(root, "src.ts"), "export const a = 1;\n");
   await client.add();
   await client.commit("Add retry backoff", "Implements #34.");
@@ -185,7 +185,7 @@ test("mergeFromRemote brings the branch up to date with its base", async () => {
   await client.commit("Move on", "");
   await trackRemote(root, "main");
 
-  await client.checkout("aboard/34-add-retry-backoff");
+  await client.checkout("abd/34-add-retry-backoff");
   assert.equal(await client.mergeFromRemote("main"), true);
   assert.equal(isWorkingTreeClean(await client.status()), true);
   assert.match((await git("log", "--format=%s")).stdout, /Move on/);
@@ -195,7 +195,7 @@ test("a conflicting mergeFromRemote reports false and puts the tree back", async
   const root = await repository();
   const client = new ProcessGitClient(root);
 
-  await client.createBranch("aboard/34-add-retry-backoff", "main");
+  await client.createBranch("abd/34-add-retry-backoff", "main");
   await writeFile(join(root, "README.md"), "branch\n");
   await client.add();
   await client.commit("Rewrite the readme", "Implements #34.");
@@ -206,7 +206,7 @@ test("a conflicting mergeFromRemote reports false and puts the tree back", async
   await client.commit("Rewrite it differently", "");
   await trackRemote(root, "main");
 
-  await client.checkout("aboard/34-add-retry-backoff");
+  await client.checkout("abd/34-add-retry-backoff");
   assert.equal(await client.mergeFromRemote("main"), false);
   // Aborted, not abandoned half-merged: no conflict markers, nothing staged.
   assert.equal(isWorkingTreeClean(await client.status()), true);
@@ -269,16 +269,16 @@ test("the git boundary creates, lists, and removes a checkout beside the reposit
   const client = new ProcessGitClient(root);
   const checkout = join(await mkdtemp(join(tmpdir(), "aboard-sessions-")), "repo");
 
-  await client.addWorktree(checkout, "aboard/run/test", "main");
+  await client.addWorktree(checkout, "abd/run/test", "main");
   const listed = await client.worktrees();
   assert.equal(listed.length, 2, JSON.stringify(listed));
   // Git prints its own spelling of the path, so a caller compares resolved
   // paths rather than strings; what matters here is the branch it reports.
-  assert.equal(listed.some((worktree) => worktree.branch === "aboard/run/test"), true, JSON.stringify(listed));
+  assert.equal(listed.some((worktree) => worktree.branch === "abd/run/test"), true, JSON.stringify(listed));
   // The branch is real and the checkout works on its own: a client bound there
   // sees it as the current branch while the repository stays on main.
-  assert.equal(await client.branchExists("aboard/run/test"), true);
-  assert.equal(await new ProcessGitClient(checkout).currentBranch(), "aboard/run/test");
+  assert.equal(await client.branchExists("abd/run/test"), true);
+  assert.equal(await new ProcessGitClient(checkout).currentBranch(), "abd/run/test");
   assert.equal(await client.currentBranch(), "main");
 
   await client.removeWorktree(checkout, true);
@@ -302,14 +302,14 @@ test("ignored paths identify local configuration that git add cannot stage", asy
 test("tracked paths under a directory are read from the requested tree without reading contents", async () => {
   const root = await repository();
   const client = new ProcessGitClient(root);
-  await mkdir(join(root, ".aboard", "runtime"), { recursive: true });
-  await writeFile(join(root, ".aboard", "runtime", ".gitkeep"), "");
-  await writeFile(join(root, ".aboard", "runtime", "session.json"), "private\n");
-  await run("git", ["add", "-f", ".aboard/runtime"], { cwd: root, windowsHide: true });
+  await mkdir(join(root, ".abd", "runtime"), { recursive: true });
+  await writeFile(join(root, ".abd", "runtime", ".gitkeep"), "");
+  await writeFile(join(root, ".abd", "runtime", "session.json"), "private\n");
+  await run("git", ["add", "-f", ".abd/runtime"], { cwd: root, windowsHide: true });
   await run("git", ["commit", "-m", "bad runtime"], { cwd: root, windowsHide: true });
   assert.deepEqual(
-    await client.trackedPathsUnder("HEAD", ".aboard/runtime"),
-    [".aboard/runtime/.gitkeep", ".aboard/runtime/session.json"],
+    await client.trackedPathsUnder("HEAD", ".abd/runtime"),
+    [".abd/runtime/.gitkeep", ".abd/runtime/session.json"],
   );
 });
 
@@ -325,7 +325,7 @@ test("full SHAs answer for local and remote refs, and for neither when absent", 
   assert.equal(head, await client.headSha(false));
   assert.notEqual(head, await client.headSha());
 
-  assert.equal(await client.branchSha("aboard/nothing"), undefined);
+  assert.equal(await client.branchSha("abd/nothing"), undefined);
   assert.equal(await client.remoteBranchSha("main"), undefined, "nothing has been pushed anywhere");
 
   // A bare remote makes `origin/main` real without a network.
@@ -381,23 +381,23 @@ test("branch deletion is refused unless the ref still points where the run left 
   const root = await repository();
   const git = (...args: string[]) => run("git", args, { cwd: root, windowsHide: true });
   const client = new ProcessGitClient(root);
-  await client.createBranch("aboard/34-one", "main");
+  await client.createBranch("abd/34-one", "main");
   await writeFile(join(root, "src.ts"), "export const a = 1;\n");
   await client.add();
   await client.commit("Add retry backoff", "Addresses #34.");
-  const recorded = await client.branchSha("aboard/34-one");
+  const recorded = await client.branchSha("abd/34-one");
   await git("checkout", "main");
 
   // A ref that moved is no longer a branch this run can prove it created.
-  assert.equal(await client.deleteBranchAt("aboard/34-one", "0".repeat(40)), false);
-  assert.equal(await client.branchExists("aboard/34-one"), true);
+  assert.equal(await client.deleteBranchAt("abd/34-one", "0".repeat(40)), false);
+  assert.equal(await client.branchExists("abd/34-one"), true);
   // Absent entirely is the same answer, not a crash.
-  assert.equal(await client.deleteBranchAt("aboard/never-existed", "0".repeat(40)), false);
+  assert.equal(await client.deleteBranchAt("abd/never-existed", "0".repeat(40)), false);
 
   // The SHA check, not git's merge heuristic, is what makes this safe: the
   // branch is unmerged, and deleting it is exactly what the user asked for.
-  assert.equal(await client.deleteBranchAt("aboard/34-one", recorded!), true);
-  assert.equal(await client.branchExists("aboard/34-one"), false);
+  assert.equal(await client.deleteBranchAt("abd/34-one", recorded!), true);
+  assert.equal(await client.branchExists("abd/34-one"), false);
 });
 
 test("remote branch deletion is guarded the same way, over a real remote", async () => {
@@ -409,40 +409,40 @@ test("remote branch deletion is guarded the same way, over a real remote", async
   await git("remote", "add", "origin", remote);
   await git("push", "-u", "origin", "main");
 
-  await client.createBranch("aboard/34-one", "main");
+  await client.createBranch("abd/34-one", "main");
   await writeFile(join(root, "src.ts"), "export const a = 1;\n");
   await client.add();
   await client.commit("Add retry backoff", "Addresses #34.");
-  await client.push("aboard/34-one", true);
-  const recorded = await client.remoteBranchSha("aboard/34-one");
+  await client.push("abd/34-one", true);
+  const recorded = await client.remoteBranchSha("abd/34-one");
   assert.match(recorded ?? "", /^[0-9a-f]{40}$/);
 
-  assert.equal(await client.deleteRemoteBranchAt("aboard/34-one", "0".repeat(40)), false);
-  assert.equal(await client.remoteBranchExists("aboard/34-one"), true);
+  assert.equal(await client.deleteRemoteBranchAt("abd/34-one", "0".repeat(40)), false);
+  assert.equal(await client.remoteBranchExists("abd/34-one"), true);
 
-  assert.equal(await client.deleteRemoteBranchAt("aboard/34-one", recorded!), true);
+  assert.equal(await client.deleteRemoteBranchAt("abd/34-one", recorded!), true);
   await client.fetch();
-  assert.equal(await client.remoteBranchExists("aboard/34-one"), false);
+  assert.equal(await client.remoteBranchExists("abd/34-one"), false);
 });
 
 test("existingBranches answers local and remote membership in one read", async () => {
   const root = await repository();
   const client = new ProcessGitClient(root);
-  await client.createBranch("aboard/34-local-only", "main");
+  await client.createBranch("abd/34-local-only", "main");
   await client.checkout("main");
-  await client.createBranch("aboard/35-both", "main");
+  await client.createBranch("abd/35-both", "main");
   await client.checkout("main");
-  await trackRemote(root, "aboard/35-both");
-  await trackRemote(root, "aboard/36-remote-only", "main");
+  await trackRemote(root, "abd/35-both");
+  await trackRemote(root, "abd/36-remote-only", "main");
 
   const found = await client.existingBranches([
-    "aboard/34-local-only",
-    "aboard/35-both",
-    "aboard/36-remote-only",
-    "aboard/37-nowhere",
+    "abd/34-local-only",
+    "abd/35-both",
+    "abd/36-remote-only",
+    "abd/37-nowhere",
   ]);
-  assert.deepEqual([...found.local].sort(), ["aboard/34-local-only", "aboard/35-both"]);
-  assert.deepEqual([...found.remote].sort(), ["aboard/35-both", "aboard/36-remote-only"]);
+  assert.deepEqual([...found.local].sort(), ["abd/34-local-only", "abd/35-both"]);
+  assert.deepEqual([...found.remote].sort(), ["abd/35-both", "abd/36-remote-only"]);
 
   // An empty ask never reaches git.
   assert.deepEqual(await client.existingBranches([]), { local: new Set(), remote: new Set() });

@@ -55,7 +55,7 @@ test("runtime startup is single-flight and reset drains endpoint publication", a
 });
 
 test("fleet runtime metadata saves atomically and ignores corrupt recovery data", async () => {
-  const root = await mkdtemp(join(tmpdir(), "aboard-runtime-"));
+  const root = await mkdtemp(join(tmpdir(), "abd-runtime-"));
   const store = new FileFleetStore(root);
   const fleet = new FleetRegistry();
   await store.save(fleet.toPersistenceDto());
@@ -134,23 +134,23 @@ function fixedPlanRecord(): AutoRunRecord {
       additionalGuideline: "keep fixtures small",
     },
     plan: [
-      { number: 34, title: "Add retry backoff", branch: "aboard/34-add-retry-backoff", disposition: "afk", difficulty: "advanced", chrome: true, dependsOn: [] },
-      { number: 35, title: "Migrate the queue", branch: "aboard/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
+      { number: 34, title: "Add retry backoff", branch: "abd/34-add-retry-backoff", disposition: "afk", difficulty: "advanced", chrome: true, dependsOn: [] },
+      { number: 35, title: "Migrate the queue", branch: "abd/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
     ],
     progress: {
       "34": { state: "done", result: "landed", prNumber: 56, issueClosed: true },
       "35": { state: "current", phase: "await-approval", prNumber: 57, headSha: "b".repeat(40), reviewed: true },
     },
-    sessionBranch: "aboard/run/return",
+    sessionBranch: "abd/run/return",
     targetBranch: "feature/wip",
     targetHeadSha: "c".repeat(40),
     unpublishedTargetCommits: 2,
-    branchShas: { "aboard/run/return": "a".repeat(40), "aboard/35-migrate-the-queue": "b".repeat(40) },
+    branchShas: { "abd/run/return": "a".repeat(40), "abd/35-migrate-the-queue": "b".repeat(40) },
     currentIssue: 35,
     checkpoint: "issue",
     runPullRequest: 60,
     reviewedIssues: [35],
-    pendingAction: { kind: "merge-issue-pr", prNumber: 57, head: "aboard/35-migrate-the-queue", base: "aboard/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    pendingAction: { kind: "merge-issue-pr", prNumber: 57, head: "abd/35-migrate-the-queue", base: "abd/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
     outcome: { kind: "failed", reason: "push rejected" },
     workspaceCreated: true,
   };
@@ -187,7 +187,7 @@ test("auto-run persistence leaves the project clean and recovers from private wo
   await store.save(record);
   assert.deepEqual(JSON.parse(await readFile(join(storageRoot, "runtime", "state", "auto-run.json"), "utf8")), record);
   assert.equal(existsSync(join(workspaceRoot, "state")), false);
-  assert.equal(existsSync(join(workspaceRoot, ".aboard")), false);
+  assert.equal(existsSync(join(workspaceRoot, ".abd")), false);
   assert.equal(await status(), "");
 
   const reopened = new FileAutoRunStore(new RuntimeLayout(storageRoot));
@@ -214,13 +214,13 @@ test("every pending-action and progress shape survives a round trip", async () =
   const root = await mkdtemp(join(tmpdir(), "aboard-autorun-actions-"));
   const store = new FileAutoRunStore(new RuntimeLayout(root));
   const actions = [
-    { kind: "create-branch", branch: "aboard/34-x", base: "aboard/run/return", baseSha: "c".repeat(40) },
-    { kind: "commit", branch: "aboard/34-x", parentSha: "d".repeat(40), message: "Add retry backoff", treeSha: "e".repeat(40), fingerprint: ["src/a.ts", "src/b.ts"] },
-    { kind: "push", branch: "aboard/34-x", sha: "e".repeat(40) },
-    { kind: "create-issue-pr", issue: 34, head: "aboard/34-x", base: "aboard/run/return" },
-    { kind: "merge-issue-pr", prNumber: 56, head: "aboard/34-x", base: "aboard/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
-    { kind: "create-run-pr", head: "aboard/run/return", base: "feature/wip" },
-    { kind: "merge-run-pr", prNumber: 60, head: "aboard/run/return", base: "feature/wip", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    { kind: "create-branch", branch: "abd/34-x", base: "abd/run/return", baseSha: "c".repeat(40) },
+    { kind: "commit", branch: "abd/34-x", parentSha: "d".repeat(40), message: "Add retry backoff", treeSha: "e".repeat(40), fingerprint: ["src/a.ts", "src/b.ts"] },
+    { kind: "push", branch: "abd/34-x", sha: "e".repeat(40) },
+    { kind: "create-issue-pr", issue: 34, head: "abd/34-x", base: "abd/run/return" },
+    { kind: "merge-issue-pr", prNumber: 56, head: "abd/34-x", base: "abd/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    { kind: "create-run-pr", head: "abd/run/return", base: "feature/wip" },
+    { kind: "merge-run-pr", prNumber: 60, head: "abd/run/return", base: "feature/wip", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
   ] as const;
   for (const pendingAction of actions) {
     const record = { ...fixedPlanRecord(), pendingAction };
@@ -253,8 +253,8 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, settings: { ...valid.settings, recursiveIssueReferences: "yes" } },
     { ...valid, settings: undefined },
     { ...valid, plan: [{ number: 34 }] },
-    { ...valid, branchShas: { "aboard/run/return": "short" } },
-    { ...valid, pendingAction: { kind: "push", branch: "aboard/run/return", sha: "short" } },
+    { ...valid, branchShas: { "abd/run/return": "short" } },
+    { ...valid, pendingAction: { kind: "push", branch: "abd/run/return", sha: "short" } },
     { ...valid, progress: { ...valid.progress, "35": { state: "current", phase: "commit", headSha: "short" } } },
     { ...valid, outcome: { kind: "failed" } },
     { ...valid, workerSession: { agentId: "worker-19", sessionId: "session", type: "implementer", issueNumber: 35, continuable: false } },

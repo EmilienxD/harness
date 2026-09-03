@@ -18,7 +18,7 @@ import {
   type WorkerAgentName,
 } from "../src/scaffold/agent-definition.js";
 
-const agentsRoot = join(process.cwd(), "assets", "scaffold", ".aboard", "agents");
+const agentsRoot = join(process.cwd(), "assets", "scaffold", ".abd", "agents");
 const taskTools = ["TaskCreate", "TaskGet", "TaskList", "TaskStop", "TaskUpdate", "TodoWrite"] as const;
 
 const expected = {
@@ -304,5 +304,5 @@ test("only Manager and brainstormer definitions admit their role-scoped aboard M
   }
 
   assert.equal(ABOARD_MCP_TOOLS, "mcp__aboard__*");
-  assert.equal(AGENT_DEFINITION_DIRECTORY, ".aboard/agents");
+  assert.equal(AGENT_DEFINITION_DIRECTORY, ".abd/agents");
 });

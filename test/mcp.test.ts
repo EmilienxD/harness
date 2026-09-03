@@ -561,7 +561,7 @@ test("brainstormer run_agent supports background research and automated or atten
   assert.equal(prototypeSession?.attended, undefined);
   const prototypeCommand = host.created.at(-1)!.terminal.sent.at(-1)!;
   assert.match(prototypeCommand, /Try the parser API/u);
-  assert.doesNotMatch(prototypeCommand, /\.aboard[\\/]prototypes/u);
+  assert.doesNotMatch(prototypeCommand, /\.abd[\\/]prototypes/u);
 
   const attended = await mcpCall(handler, "run_agent", {
     type: "prototyper", description: "direct parser api experiment", interactive: true, run_in_background: true,
@@ -790,7 +790,7 @@ test("Manager run_agent can launch automated and attended prototypers", async ()
   assert.equal(automatedSession?.attended, undefined);
   const prototypeCommand = host.created.at(-1)!.terminal.sent.at(-1)!;
   assert.match(prototypeCommand, /Try the parser API/u);
-  assert.doesNotMatch(prototypeCommand, /\.aboard[\\/]prototypes/u);
+  assert.doesNotMatch(prototypeCommand, /\.abd[\\/]prototypes/u);
 
   const attended = await launch({
     type: "prototyper",
@@ -953,7 +953,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json --agent aboard-implementer-worker-1 /);
+  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json --agent abd-implementer-worker-1 /);
   // Role alone does not impose auto-run's fence: this launch is Manager-driven.
   assert.doesNotMatch(host.created[0]!.terminal.sent.at(-1)!, /Bash\(git commit\*\)/);
 });
@@ -1015,7 +1015,7 @@ test("an isolated launch runs in its own directory, writes its runtime files the
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(host.created[0]?.options.cwd, CHECKOUT);
-  assert.deepEqual(spills, [{ path: `${RUNTIME_ROOT}/agents/worker-1/.claude/agents/aboard-implementer-worker-1.md`, root: CHECKOUT }]);
+  assert.deepEqual(spills, [{ path: `${RUNTIME_ROOT}/agents/worker-1/.claude/agents/abd-implementer-worker-1.md`, root: CHECKOUT }]);
   // The isolation rules join the infrastructure and auto-run denials rather than replacing them.
   const line = host.created[0]!.terminal.sent.at(-1)!;
   assert.match(line, /--disallowedTools 'mcp__aboard__\*,Bash\(git -\*\),/);
@@ -1030,7 +1030,7 @@ test("interactive mode makes the prompt optional", async () => {
   const omitted = await launch({ type: "brainstormer", description: "open a brainstorm session", interactive: true, run_in_background: true });
   assert.equal(omitted.status, 200, JSON.stringify(omitted.body));
   // No positional argument after the flags: the terminal opens empty.
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--mcp-config 'C:\\storage\\agent-mcp\\worker-1\.json'.*--agent aboard-brainstormer-worker-1 --allowedTools 'mcp__aboard__run_agent,mcp__aboard__continue_agent'\s*$/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--mcp-config 'C:\\storage\\agent-mcp\\worker-1\.json'.*--agent abd-brainstormer-worker-1 --allowedTools 'mcp__aboard__run_agent,mcp__aboard__continue_agent'\s*$/);
 
   const withTopic = await launch({ type: "brainstormer", prompt: "caching layer", description: "brainstorm the caching layer", interactive: true, run_in_background: true });
   assert.equal(withTopic.status, 200, JSON.stringify(withTopic.body));
@@ -1051,7 +1051,7 @@ test("webresearcher runs unattended, reports a result, and takes no lease", asyn
   assert.equal(researcher.resultDelivery.mode, "mailbox");
   assert.equal(lease.current(), undefined);
   assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, undefined);
-  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json --agent aboard-webresearcher-worker-1/);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json --agent abd-webresearcher-worker-1/);
   assert.deepEqual(host.created.at(-1)!.terminal.shown, []);
 });
 

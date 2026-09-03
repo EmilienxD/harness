@@ -79,8 +79,8 @@ export class ProcessAboardBranchRepository implements AboardBranchRepository {
 
   public async discover(): Promise<Omit<AboardBranchDiscovery, "pullRequests">> {
     const defaultBranch = await this.defaultBranch();
-    const refs = await this.run(["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/heads/aboard/"]);
-    const remoteRefs = await this.run(["ls-remote", "--heads", "origin", "refs/heads/aboard/*"]);
+    const refs = await this.run(["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/heads/abd/"]);
+    const remoteRefs = await this.run(["ls-remote", "--heads", "origin", "refs/heads/abd/*"]);
     const byName = new Map<string, { localSha?: string; remoteSha?: string }>();
     for (const line of refs.split(/\r?\n/u).filter(Boolean)) {
       const [ref, sha] = line.split("\t");
@@ -155,7 +155,7 @@ export class ProcessAboardBranchRepository implements AboardBranchRepository {
 }
 
 export function describeAboardBranchDiscovery(snapshot: AboardBranchDiscovery): string {
-  if (snapshot.branches.length === 0) return "No local or GitHub aboard/* branches were found.";
+  if (snapshot.branches.length === 0) return "No local or GitHub abd/* branches were found.";
   const lines = snapshot.branches.map((branch) => {
     const location = branch.localSha !== undefined && branch.remoteSha !== undefined ? (branch.localSha === branch.remoteSha ? "local + GitHub, in sync" : "local + GitHub, diverged") : branch.localSha !== undefined ? "local only" : "GitHub only";
     const checkout = branch.checkout === undefined ? "" : branch.checkout.dirtyPaths.length > 0 ? `; checked out with ${branch.checkout.dirtyPaths.length} uncommitted path(s): ${branch.checkout.dirtyPaths.join(", ")}` : `; checked out at ${branch.checkout.path} (clean)`;

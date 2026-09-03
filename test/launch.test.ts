@@ -67,7 +67,7 @@ function definition(
 
 const RUNTIME_ROOT = DEFAULT_RUNTIME_DIRECTORY.replaceAll("\\", "/");
 const runtimeDir = `${RUNTIME_ROOT}/agents/${agentId}`;
-const runtimeName = (agentName: string) => `aboard-${agentName}-${agentId}`;
+const runtimeName = (agentName: string) => `abd-${agentName}-${agentId}`;
 const runtimePath = (agentName: string) => `${runtimeDir}/.claude/agents/${runtimeName(agentName)}.md`;
 const runtimeArgs = ["--add-dir", runtimeDir, "--settings", `${runtimeDir}/settings.json`] as const;
 
@@ -130,7 +130,7 @@ test("plans the Manager from its definition rather than a discoverable agent", (
 });
 
 test("the aboard MCP server is registered only for catalog-owning defined roles", () => {
-  const mcpConfigPath = "C:\\storage\\aboard\\manager-mcp.json";
+  const mcpConfigPath = "C:\\storage\\abd\\manager-mcp.json";
   const configuration = definition("manager", MANAGER_TOOLS);
   const plan = planLaunch(request({ agentType: "manager", configuration, prompt: undefined, mcpConfigPath }));
 
@@ -157,7 +157,7 @@ test("the aboard MCP server is registered only for catalog-owning defined roles"
   ]);
 
   const brainstormer = definition("brainstormer", BRAINSTORMER_TOOLS);
-  const brainstormPath = "C:\\storage\\aboard\\agent-mcp\\brain-1.json";
+  const brainstormPath = "C:\\storage\\abd\\agent-mcp\\brain-1.json";
   const brainstormLaunch = planLaunch(request({
     agentType: "brainstormer",
     configuration: brainstormer,
@@ -229,14 +229,14 @@ test("the Manager MCP registration resolves the live port and token", () => {
 
 test("wrapper layout keeps child argv out of the visible launch and resume lines", () => {
   const wrapper = {
-    script: "C:\\extension\\assets\\runtime\\aboard_wrapper.py",
+    script: "C:\\extension\\assets\\runtime\\abd_wrapper.py",
     lockPathFor: (id: typeof agentId) => `C:\\storage\\runtime\\locks\\${id}.lock`,
     mintLaunchCode: () => "start-code",
   };
   const plan = planLaunch(request({ wrapper }));
   // plan.args keeps the claude-side view; only the command line changes.
   assert.equal(plan.args[2], "--add-dir");
-  assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\extension\\assets\\runtime\\aboard_wrapper\.py' /);
+  assert.match(plan.commandLine, /^& uv run --no-project --no-managed-python 'C:\\extension\\assets\\runtime\\abd_wrapper\.py' /);
   assert.ok(plan.commandLine.includes(`'C:\\storage\\runtime\\locks\\${agentId}.lock' --request ${RUNTIME_ROOT}/agents/${agentId}/launch-start-code.json`));
   assert.doesNotMatch(plan.commandLine, /--allowedTools|--session-id/);
   assert.deepEqual(JSON.parse(plan.wrapperRequest!.contents), { command: ["claude", ...plan.args] });
@@ -245,13 +245,13 @@ test("wrapper layout keeps child argv out of the visible launch and resume lines
     agentId, sessionId, agentType: "implementer", shell: "powershell",
     configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
   });
-  assert.match(resumed.commandLine, new RegExp(`aboard_wrapper\\.py' .* --request ${RUNTIME_ROOT.replaceAll("/", "\\/")}\\/agents\\/a1b2c3\\/launch-start-code\\.json`));
+  assert.match(resumed.commandLine, new RegExp(`abd_wrapper\\.py' .* --request ${RUNTIME_ROOT.replaceAll("/", "\\/")}\\/agents\\/a1b2c3\\/launch-start-code\\.json`));
   assert.deepEqual(JSON.parse(resumed.wrapperRequest!.contents), { command: ["claude", ...resumed.args] });
 });
 
 test("wrapper tokens are validated like the launch command", () => {
   const wrapper = {
-    script: "C:\\extension\\assets\\runtime\\aboard_wrapper.py",
+    script: "C:\\extension\\assets\\runtime\\abd_wrapper.py",
     lockPathFor: () => 'has "quote".lock',
     mintLaunchCode: () => "start-code",
   };
@@ -720,7 +720,7 @@ test("an agent-defined launch registers its definition where only that launch ca
   // The directory and the name both carry the agent id, so one launch's
   // definition is never inside another's `--add-dir`.
   const other = planLaunch(request({ agentId: "z9" as AgentId, configuration, prompt: "Go." }));
-  assert.equal(other.agentDefinition?.relativePath, `${RUNTIME_ROOT}/agents/z9/.claude/agents/aboard-implementer-z9.md`);
+  assert.equal(other.agentDefinition?.relativePath, `${RUNTIME_ROOT}/agents/z9/.claude/agents/abd-implementer-z9.md`);
 });
 
 test("model and effort ride the command line as well as the rewritten file, on start and resume", () => {
@@ -1048,7 +1048,7 @@ test("a definition's command replaces the configured launch command for that age
   // The wrapper still owns the outermost program; the override is what it runs.
   const wrapped = planLaunch(request({
     configuration, prompt: "Go.",
-    wrapper: { script: "C:\\extension\\assets\\runtime\\aboard_wrapper.py", lockPathFor: () => "C:\\storage\\runtime\\locks\\a1b2c3.lock", mintLaunchCode: () => "start-code" },
+    wrapper: { script: "C:\\extension\\assets\\runtime\\abd_wrapper.py", lockPathFor: () => "C:\\storage\\runtime\\locks\\a1b2c3.lock", mintLaunchCode: () => "start-code" },
   }));
   assert.ok(wrapped.commandLine.includes(`'C:\\storage\\runtime\\locks\\a1b2c3.lock' --request ${RUNTIME_ROOT}/agents/a1b2c3/launch-start-code.json`));
   assert.deepEqual(JSON.parse(wrapped.wrapperRequest!.contents), { command: ["wrapper", "run", "MyProfile", "--", ...wrapped.args] });
@@ -1135,8 +1135,8 @@ test("writes fresh temporary prompts for starts and resumes and cleans them up",
     await rm(promptSpillRoot(otherRuntimeRoot), { recursive: true, force: true });
   });
   const store = new FileSystemPromptSpillStore(root, runtimeRoot, {
-    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
-    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+    settings: join(process.cwd(), "assets", "runtime", "abd-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "abd_hook.py"),
   });
   const plan = planLaunch(request({ prompt: "line one\nline two", runtimeDirectory: runtimeRoot }));
   assert.ok(plan.spill !== undefined);
@@ -1171,8 +1171,8 @@ test("writes fresh temporary prompts for starts and resumes and cleans them up",
   assert.equal(await readFile(resumedPath, "utf8"), "continue\nwith context\n");
 
   const otherStore = new FileSystemPromptSpillStore(root, otherRuntimeRoot, {
-    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
-    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+    settings: join(process.cwd(), "assets", "runtime", "abd-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "abd_hook.py"),
   });
   const otherPlan = planLaunch(request({ prompt: "other workspace\ncontext", runtimeDirectory: otherRuntimeRoot }));
   const otherPath = await otherStore.write(otherPlan.spill!);
@@ -1194,10 +1194,10 @@ test("worker tasks survive continuation and bundle cleanup until their conversat
     await rm(root, { recursive: true, force: true });
     await rm(promptSpillRoot(runtimeRoot), { recursive: true, force: true });
   });
-  await cp(join(process.cwd(), "assets", "scaffold", ".aboard"), join(root, ".aboard"), { recursive: true });
+  await cp(join(process.cwd(), "assets", "scaffold", ".abd"), join(root, ".abd"), { recursive: true });
   const store = new FileSystemPromptSpillStore(root, runtimeRoot, {
-    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
-    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+    settings: join(process.cwd(), "assets", "runtime", "abd-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "abd_hook.py"),
   });
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"] as const) {
     const original = `Resolve issue #15 as ${type}.${type === "implementer" ? "\n\n" : " "}Run the migration and browser checks.`;
@@ -1226,11 +1226,11 @@ test("worker tasks survive continuation and bundle cleanup until their conversat
 
 test("runtime bundles give every launch done and reserve Manager commands for Manager", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-bundle-"));
-  await cp(join(process.cwd(), "assets", "scaffold", ".aboard"), join(root, ".aboard"), { recursive: true });
+  await cp(join(process.cwd(), "assets", "scaffold", ".abd"), join(root, ".abd"), { recursive: true });
   const runtimeRoot = join(root, "storage", "runtime");
   const store = new FileSystemPromptSpillStore(root, runtimeRoot, {
-    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
-    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+    settings: join(process.cwd(), "assets", "runtime", "abd-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "abd_hook.py"),
   });
   const manager = planLaunch(request({ agentType: "manager", configuration: definition("manager", MANAGER_TOOLS), prompt: undefined, runtimeDirectory: runtimeRoot }));
   await store.prepare(manager);
@@ -1283,8 +1283,8 @@ test("a prompt under the inline threshold still spills when the command line wou
   // The spilled file is what the agent actually reads, so it must round-trip.
   const root = await mkdtemp(join(tmpdir(), "aboard-spill-"));
   const store = new FileSystemPromptSpillStore(root, RUNTIME_ROOT, {
-    settings: join(process.cwd(), "assets", "runtime", "aboard-hooks.json"),
-    script: join(process.cwd(), "assets", "runtime", "aboard_hook.py"),
+    settings: join(process.cwd(), "assets", "runtime", "abd-hooks.json"),
+    script: join(process.cwd(), "assets", "runtime", "abd_hook.py"),
   });
   const path = await store.write(plan.spill!);
   t.after(() => rm(path, { force: true }));

@@ -17,7 +17,7 @@ const MANAGER_TOOLS = ["mcp__aboard__*", "Read", "Grep", "Glob", "Bash", "Skill"
 /** The runtime definition every Manager command line points at. */
 const RUNTIME_ROOT = DEFAULT_RUNTIME_DIRECTORY.replaceAll("\\", "/");
 const RUNTIME_DIRECTORY = `${RUNTIME_ROOT}/agents/${agentId}`;
-const RUNTIME_AGENT = `aboard-manager-${agentId}`;
+const RUNTIME_AGENT = `abd-manager-${agentId}`;
 const RUNTIME_PATH = `${RUNTIME_DIRECTORY}/.claude/agents/${RUNTIME_AGENT}.md`;
 /** The two flags every Manager command line carries, in their shell form. */
 const DEFINITION_FLAGS = `--add-dir ${RUNTIME_DIRECTORY} --settings ${RUNTIME_DIRECTORY}/settings.json --agent ${RUNTIME_AGENT}`;
@@ -156,11 +156,11 @@ test("resume keeps the recorded identity and new replaces the session", async ()
   await lifecycle.start("new");
   assert.notEqual(saved[1].sessionId, sessionId);
   assert.ok((records[1] as any).request.initialCommand.includes(
-    `--add-dir ${RUNTIME_ROOT}/agents/manager-2 --settings ${RUNTIME_ROOT}/agents/manager-2/settings.json --agent aboard-manager-manager-2`,
+    `--add-dir ${RUNTIME_ROOT}/agents/manager-2 --settings ${RUNTIME_ROOT}/agents/manager-2/settings.json --agent abd-manager-manager-2`,
   ));
   assert.match((records[1] as any).request.initialCommand, /--disallowedTools 'Bash\(git push\*\)'/);
   // Both the resume and the fresh start write the file `--agent` resolves.
-  assert.deepEqual(files.written, [RUNTIME_PATH, `${RUNTIME_ROOT}/agents/manager-2/.claude/agents/aboard-manager-manager-2.md`]);
+  assert.deepEqual(files.written, [RUNTIME_PATH, `${RUNTIME_ROOT}/agents/manager-2/.claude/agents/abd-manager-manager-2.md`]);
 });
 
 test("the lifecycle never puts a permission flag on a Manager launch, start or resume", async () => {

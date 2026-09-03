@@ -30,23 +30,23 @@ async function directory(): Promise<string> {
 test("resolves one deterministic per-user directory per platform", () => {
   assert.equal(
     commandEndpointDirectory("win32", { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" }, "C:\\Users\\me"),
-    join("C:\\Users\\me\\AppData\\Local", "aboard", "endpoints"),
+    join("C:\\Users\\me\\AppData\\Local", "abd", "endpoints"),
   );
   assert.equal(
     commandEndpointDirectory("win32", {}, "C:\\Users\\me"),
-    join("C:\\Users\\me", "AppData", "Local", "aboard", "endpoints"),
+    join("C:\\Users\\me", "AppData", "Local", "abd", "endpoints"),
   );
   assert.equal(
     commandEndpointDirectory("darwin", {}, "/Users/me"),
-    join("/Users/me", "Library", "Application Support", "aboard", "endpoints"),
+    join("/Users/me", "Library", "Application Support", "abd", "endpoints"),
   );
   assert.equal(
     commandEndpointDirectory("linux", { XDG_STATE_HOME: "/run/user/1000/state" }, "/home/me"),
-    join("/run/user/1000/state", "aboard", "endpoints"),
+    join("/run/user/1000/state", "abd", "endpoints"),
   );
   assert.equal(
     commandEndpointDirectory("linux", { XDG_STATE_HOME: "" }, "/home/me"),
-    join("/home/me", ".local", "state", "aboard", "endpoints"),
+    join("/home/me", ".local", "state", "abd", "endpoints"),
   );
 });
 

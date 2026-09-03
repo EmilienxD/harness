@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { autoRunMessage, type WorktreeSettings } from "../domain/auto-run.js";
 import { isWorkingTreeClean, type GitClient } from "../git/client.js";
 
-export const RUN_WORKSPACE_CONTAINER = ".aboard-sessions";
+export const RUN_WORKSPACE_CONTAINER = ".abd-sessions";
 
 interface ProjectOverlayFile {
   readonly source: string;
@@ -25,7 +25,7 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
   const files: ProjectOverlayFile[] = [];
   for (const root of [
     { name: ".claude", excludedDirectories: ["worktrees"] },
-    { name: ".aboard", excludedDirectories: [] },
+    { name: ".abd", excludedDirectories: [] },
   ] as const) {
     const sourceRoot = join(request.workspaceRoot, root.name);
     const targetRoot = join(request.worktreeRoot, root.name);
@@ -41,7 +41,7 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
   const exposed = paths.filter((path) => !ignored.has(path));
   if (exposed.length > 0) {
     throw new RunWorkspaceError(
-      `The run cannot copy ${exposed.length} local project configuration path(s) because git does not ignore them (${exposed.slice(0, 20).join(", ")}). Ignore the local .claude or .aboard content, or commit it before using worktree mode; otherwise git add -A could publish it.`,
+      `The run cannot copy ${exposed.length} local project configuration path(s) because git does not ignore them (${exposed.slice(0, 20).join(", ")}). Ignore the local .claude or .abd content, or commit it before using worktree mode; otherwise git add -A could publish it.`,
     );
   }
 
@@ -190,7 +190,7 @@ export function isolationDenyRules(projectRoot: string): readonly string[] {
 
 /** The scaffolded setup command for this platform, relative to the project root. */
 export function setupCommandPath(platform: NodeJS.Platform = process.platform): string {
-  return platform === "win32" ? ".aboard/session-setup.ps1" : ".aboard/session-setup.sh";
+  return platform === "win32" ? ".abd/session-setup.ps1" : ".abd/session-setup.sh";
 }
 
 export function hasSetupCommands(source: string): boolean {

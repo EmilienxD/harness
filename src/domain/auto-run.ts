@@ -17,7 +17,7 @@ export type AutoRunPhase = (typeof AUTO_RUN_PHASES)[number];
 export type IssueDisposition = "afk" | "hitl";
 
 /** Branches in this namespace are automation artifacts, never run targets. */
-export const ABOARD_BRANCH_PREFIX = "aboard/";
+export const ABOARD_BRANCH_PREFIX = "abd/";
 
 export function isAboardBranch(branch: string): boolean {
   return branch.startsWith(ABOARD_BRANCH_PREFIX);
@@ -107,7 +107,7 @@ export type AutoRunDryRunResult =
       readonly additionalGuideline?: string;
       readonly isolatedWorkspace: boolean;
       readonly keepsWorkspace: boolean;
-      readonly sessionBranch: "aboard/run/<run-id>";
+      readonly sessionBranch: "abd/run/<run-id>";
       readonly sessionBase: string;
       /** Full local target tip inspected for this forecast. */
       readonly targetHeadSha: string;

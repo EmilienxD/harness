@@ -245,7 +245,7 @@ export class FleetRegistry {
     this.record({ type: "agent-removed", agentId, sessionId: session.sessionId }, occurredAt);
   }
 
-  /** Discards all live state, used when the project's `.aboard/` directory disappears. */
+  /** Discards all live state, used when the project's `.abd/` directory disappears. */
   public clear(occurredAt: IsoTimestamp): void {
     for (const agentId of [...this.sessionsByAgent.keys()]) this.remove(agentId, occurredAt);
     this.childAgentsById.clear();

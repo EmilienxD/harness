@@ -20,7 +20,7 @@ const session = (value: string) => value as SessionId;
 const terminal = (value: string) => value as TerminalId;
 const startedAt = at("2026-08-01T09:00:00.000Z");
 
-const LOCK = "C:\\repo\\.aboard\\runtime\\locks\\a1.lock";
+const LOCK = "C:\\repo\\.abd\\runtime\\locks\\a1.lock";
 
 function registerAgent(fleet: FleetRegistry, agentId: AgentId, sessionId: SessionId, type: AgentSession["identity"]["type"] = "implementer"): void {
   fleet.register({

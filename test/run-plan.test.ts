@@ -158,7 +158,7 @@ test("a plan freezes the title its branch is named from", () => {
   assert.deepEqual(plan.issues[0], {
     number: 34,
     title: "Add retry backoff",
-    branch: "aboard/34-add-retry-backoff",
+    branch: "abd/34-add-retry-backoff",
     disposition: "afk",
     dependsOn: [],
   } satisfies FrozenIssue);
@@ -183,11 +183,11 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
     plan: [
-      { number: 34, title: "One", branch: "aboard/34-one", disposition: "afk", dependsOn: [] },
-      { number: 35, title: "Two", branch: "aboard/35-two", disposition: "hitl", dependsOn: [] },
+      { number: 34, title: "One", branch: "abd/34-one", disposition: "afk", dependsOn: [] },
+      { number: 35, title: "Two", branch: "abd/35-two", disposition: "hitl", dependsOn: [] },
     ],
     progress: { "34": { state: "pending" }, "35": { state: "pending" } },
-    sessionBranch: "aboard/run/test",
+    sessionBranch: "abd/run/test",
     targetBranch: "main",
     branchShas: {},
     currentIssue: undefined,

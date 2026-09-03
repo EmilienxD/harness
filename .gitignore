@@ -6,7 +6,7 @@ coverage/
 *.vsix
 
 # Runtime state written by aboard. Never commit bridge credentials or sessions.
-.aboard/runtime/
+.abd/runtime/
 
 # Local secrets and environment overrides.
 .env
@@ -27,11 +27,12 @@ __pycache__/
 # Scaffold templates contain a project .claude directory intentionally.
 !assets/scaffold/.claude/
 !assets/scaffold/.claude/**
-# .aboard/ holds live runtime state in user projects; the scaffold's
+# .abd/ holds live runtime state in user projects; the scaffold's
 # extension-owned scripts must still be committable.
 .aboard/
-!assets/scaffold/.aboard/
-!assets/scaffold/.aboard/**
+.abd/
+!assets/scaffold/.abd/
+!assets/scaffold/.abd/**
 .claude/settings.local.json
 
 private-notes/

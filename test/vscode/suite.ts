@@ -126,7 +126,7 @@ export async function run(): Promise<void> {
   });
   assert.equal(refused.status, 403);
 
-  await rm(join(root, ".aboard"), { recursive: true, force: true });
+  await rm(join(root, ".abd"), { recursive: true, force: true });
   let recordSurvives = true;
   for (let attempt = 0; attempt < 100 && recordSurvives; attempt += 1) {
     const entries = await readdir(api.commandEndpointDirectory).catch(() => []);
@@ -134,7 +134,7 @@ export async function run(): Promise<void> {
     recordSurvives = records.some((candidate) => candidate.workspaceRoot === root);
     if (recordSurvives) await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.equal(recordSurvives, false, "deleting .aboard clears the published endpoint");
-  await assert.rejects(fetch(`http://127.0.0.1:${endpoint.port}/commands`), "deleting .aboard stops the bridge");
-  await assert.rejects(access(join(root, ".aboard")), "reset cannot recreate .aboard after bridge shutdown");
+  assert.equal(recordSurvives, false, "deleting .abd clears the published endpoint");
+  await assert.rejects(fetch(`http://127.0.0.1:${endpoint.port}/commands`), "deleting .abd stops the bridge");
+  await assert.rejects(access(join(root, ".abd")), "reset cannot recreate .abd after bridge shutdown");
 }

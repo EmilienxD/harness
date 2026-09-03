@@ -413,7 +413,7 @@ export class AutoRunEngine {
       ...guidelineProperty(options.additionalGuideline),
       isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
       keepsWorkspace: settings.worktree.keep,
-      sessionBranch: "aboard/run/<run-id>",
+      sessionBranch: "abd/run/<run-id>",
       sessionBase,
       targetHeadSha: publication.headSha,
       unpublishedTargetCommits: publication.unpublishedCommits,

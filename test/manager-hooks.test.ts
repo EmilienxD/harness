@@ -407,7 +407,7 @@ test("long poll observes abort and route validates stop input", async () => {
 });
 
 test("Python Manager hook silently self-guards non-addressed sessions", () => {
-  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   for (const env of [{}, { ABOARD_AGENT_ID: "worker", ABOARD_AGENT_TYPE: "implementer" }]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "manager-brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
@@ -415,7 +415,7 @@ test("Python Manager hook silently self-guards non-addressed sessions", () => {
 });
 
 test("hook registration covers cold start, resume, and explicit timeouts in one briefing call", async () => {
-  const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "runtime", "aboard-hooks.json"), "utf8"));
+  const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "runtime", "abd-hooks.json"), "utf8"));
   const parsed = JSON.parse(hooks) as any;
   // Index 0 is the proof-of-life session-start hook (pid report); index 1 is
   // the manager briefing call.
@@ -861,14 +861,14 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
           additionalGuideline: options?.additionalGuideline,
           isolatedWorkspace: false,
           keepsWorkspace: false,
-          sessionBranch: "aboard/run/<run-id>",
+          sessionBranch: "abd/run/<run-id>",
           sessionBase: "feature/wip",
           targetHeadSha: "a".repeat(40),
           unpublishedTargetCommits: 0,
           mergesItsOwnPullRequest: false,
           issues: [
-            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff", chrome: true },
-            { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "aboard/35-migrate-the-queue", difficulty: "advanced" },
+            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "abd/34-add-retry-backoff", chrome: true },
+            { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "abd/35-migrate-the-queue", difficulty: "advanced" },
           ],
           skipped: [
             { number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
@@ -886,7 +886,7 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
 
   assert.deepEqual(starts, [{ dry: true, additionalGuideline: "keep generated files out of commits" }]);
   assert.match(String(result.message), /no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed/);
-  assert.match(String(result.message), /1\. #34 Add retry backoff.*aboard\/34-add-retry-backoff/);
+  assert.match(String(result.message), /1\. #34 Add retry backoff.*abd\/34-add-retry-backoff/);
   assert.match(String(result.message), /#34 Add retry backoff.*\[AI\]-chrome/);
   assert.match(String(result.message), /2\. #35 Migrate the queue.*You must merge its PR/);
   assert.match(String(result.message), /interactive pr-doctor/);
@@ -895,7 +895,7 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
   // actionable "blocked by" entry keeps its per-issue reason.
   assert.match(String(result.message), /Skipped for this forecast: 1 unclassified \(neither \[AI\]-afk nor \[AI\]-hitl\); #41: blocked by open #99, which this run cannot address\./);
   assert.doesNotMatch(String(result.message), /#36: unclassified/);
-  assert.match(String(result.message), /opens one PR from aboard\/run\/<run-id> into feature\/wip; you must review and merge/);
+  assert.match(String(result.message), /opens one PR from abd\/run\/<run-id> into feature\/wip; you must review and merge/);
   assert.deepEqual(await prompts.handle(managerId, "show me the plan"), {}, "a dry-run forecast is not replayed through the Manager mailbox");
 });
 
@@ -917,12 +917,12 @@ test("/auto --dry reports blockers while preserving the inspected issue plan", a
         pauseAfterHitl: false,
         isolatedWorkspace: false,
         keepsWorkspace: false,
-        sessionBranch: "aboard/run/<run-id>",
+        sessionBranch: "abd/run/<run-id>",
         sessionBase: "main",
         targetHeadSha: "a".repeat(40),
         unpublishedTargetCommits: 0,
         mergesItsOwnPullRequest: false,
-        issues: [{ number: 34, title: "Add retry backoff", disposition: "afk", branch: "aboard/34-add-retry-backoff" }],
+        issues: [{ number: 34, title: "Add retry backoff", disposition: "afk", branch: "abd/34-add-retry-backoff" }],
         skipped: [],
         dependencyCycles: [],
       }),
@@ -956,7 +956,7 @@ async function runPromptHook(responseStatus: number, responseBody: unknown, prom
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address !== null && typeof address !== "string");
-  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   const child = spawn("uv", ["run", "--no-project", "python", script, "manager-prompt"], {
     env: { ...process.env, ABOARD_AGENT_ID: workspaceRoot === undefined ? "manager-1" : "recipient-1", ABOARD_AGENT_TYPE: agentType, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token, ...(workspaceRoot === undefined ? {} : { ABOARD_RUNTIME_ROOT: workspaceRoot }) },
     stdio: ["pipe", "pipe", "pipe"],
@@ -994,7 +994,7 @@ async function runReportHook(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address !== null && typeof address !== "string");
-  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   const child = spawn("uv", ["run", "--no-project", "python", script, route], {
     env: {
       ...process.env,
@@ -1066,7 +1066,7 @@ test("Python report hooks serve Stop re-entry and cheap opportunistic delivery f
     await rm(workspaceRoot, { recursive: true, force: true });
   }
 
-  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   const skipped = spawnSync("uv", ["run", "--no-project", "python", script, "report-delivery"], {
     input: JSON.stringify({ hook_event_name: "PostToolUse" }),
     encoding: "utf8",
@@ -1080,7 +1080,7 @@ test("Python report hooks serve Stop re-entry and cheap opportunistic delivery f
 test("aboard-owned command skills are user-only shims and general-purpose has no aboard definition", async () => {
   const { readFile, access } = await import("node:fs/promises");
   for (const name of ["brainstorm", "general-purpose", "queue", "prototype", "done", "auto", "review-pr", "reopen"]) {
-    const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".aboard", "skills", name, "SKILL.md"), "utf8");
+    const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".abd", "skills", name, "SKILL.md"), "utf8");
     assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
     // `/auto` advertises dry-run/guideline input; `/review-pr` and `/reopen`
     // advertise their selectors. General-purpose is explicitly argumentless.
@@ -1091,9 +1091,9 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
     assert.match(body, /is broken; report that to the user and stop/, `${name} SKILL.md body must announce it is an error state`);
     assert.match(body, /Do not try to carry it out yourself/, `${name} SKILL.md body must forbid simulating the command`);
     assert.match(body, /except if the user explicitly asks/, `${name} SKILL.md body must forbid fixing the installation unprompted`);
-    assert.match(body, /Update \.aboard\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);
+    assert.match(body, /Update \.abd\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);
   }
-  await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".aboard", "agents", "general-purpose.md")));
+  await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".abd", "agents", "general-purpose.md")));
 });
 
 test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
@@ -1106,7 +1106,7 @@ test("Python prompt hook blocks both intercepted commands and never blocks other
   assert.equal(refusedPrototype.status, 2);
   // A bridge that wrongly reports interception on a Stop poll must not exit 2:
   // that would refuse to let the Manager stop, looping the session forever.
-  const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   const stop = spawnSync("uv", ["run", "--no-project", "python", script, "report-stop"], {
     input: JSON.stringify({ hook_event_name: "Stop", stop_hook_active: false }),
     encoding: "utf8",

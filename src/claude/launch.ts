@@ -22,7 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 /** Planner-only fallback; production supplies VS Code's workspace storage root. */
-export const DEFAULT_RUNTIME_DIRECTORY = join(tmpdir(), "aboard-runtime");
+export const DEFAULT_RUNTIME_DIRECTORY = join(tmpdir(), "abd-runtime");
 /** `aboard.launch.maxInlinePromptChars`; conservative, below every known ceiling. */
 export const DEFAULT_MAX_INLINE_PROMPT_CHARS = 4000;
 
@@ -537,7 +537,7 @@ function normalizePrompt(
 /** Namespace temp prompts by workspace storage so cleanup cannot affect another project. */
 export function promptSpillRoot(runtimeDirectory: string): string {
   const identity = createHash("sha256").update(resolve(runtimeDirectory)).digest("hex");
-  return join(tmpdir(), "aboard-prompts", identity);
+  return join(tmpdir(), "abd-prompts", identity);
 }
 
 export function taskPromptPath(runtimeDirectory: string, agentId: AgentId): string {
@@ -566,7 +566,7 @@ function agentRuntimeDirectory(runtimeDirectory: string, agentId: AgentId): stri
 }
 
 export function runtimeAgentName(agentName: string, agentId: AgentId): string {
-  return `aboard-${agentName}-${agentId}`;
+  return `abd-${agentName}-${agentId}`;
 }
 
 /** One `key: value` line, or nothing when the value is absent. */
@@ -766,14 +766,14 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 
   if (agentType === "manager") {
     // The Manager's persona and tool list both live in
-    // .aboard/agents/manager.md; it never launches from a bare tool list.
+    // .abd/agents/manager.md; it never launches from a bare tool list.
     if (
       configuration.shape !== "agent-defined" ||
       configuration.agentName !== MANAGER_AGENT_NAME
     ) {
       throw new LaunchPlanError(
         "shape-not-allowed",
-        "The Manager launches from .aboard/agents/manager.md",
+        "The Manager launches from .abd/agents/manager.md",
       );
     }
   }
@@ -901,7 +901,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
   ) {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      "The Manager resumes from .aboard/agents/manager.md",
+      "The Manager resumes from .abd/agents/manager.md",
     );
   }
   const policy = launchPolicy(request.configuration, request);

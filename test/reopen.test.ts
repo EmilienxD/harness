@@ -254,7 +254,7 @@ test("an ended brainstormer is reopened with its own definition re-emitted, not 
   const line = host.created[0]!.terminal.sent.at(-1) ?? "";
   assert.match(line, /--resume 4db0ed4c/);
   assert.match(line, /--add-dir/);
-  assert.match(line, /--agent aboard-brainstormer-7/);
+  assert.match(line, /--agent abd-brainstormer-7/);
 
   // The fleet forgot this session when it ended, so it comes back as a fresh
   // record under the same identity; same agent id, same session id.
@@ -315,7 +315,7 @@ test("an [AI]-chrome implementer is reopened with its recorded launch fact", asy
   const line = host.created[0]!.terminal.sent.at(-1) ?? "";
   assert.match(line, /--resume af817a6c/);
   assert.match(line, /--chrome/);
-  assert.match(line, /--agent aboard-implementer-9/);
+  assert.match(line, /--agent abd-implementer-9/);
 });
 
 test("a live session is focused rather than relaunched", async () => {

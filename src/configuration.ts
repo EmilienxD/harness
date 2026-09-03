@@ -54,7 +54,7 @@ export type AboardSetting = (typeof ABOARD_SETTINGS)[number];
 const KNOWN_SETTINGS: ReadonlySet<string> = new Set(ABOARD_SETTINGS);
 
 /** Project-scoped override file, relative to the workspace root. */
-export const PROJECT_SETTINGS_PATH = ".aboard/settings.json";
+export const PROJECT_SETTINGS_PATH = ".abd/settings.json";
 
 export interface ProjectSettings {
   /** Recognised settings, keyed by their fully qualified `aboard.*` name. */
@@ -101,7 +101,7 @@ export interface LayeredConfigurationSources {
   readonly user: ConfigurationReader;
   /** Values VS Code resolves from an explicit workspace or folder scope (`.vscode/settings.json`). */
   readonly workspace?: ConfigurationReader;
-  /** Recognised values parsed from `.aboard/settings.json`. */
+  /** Recognised values parsed from `.abd/settings.json`. */
   readonly project?: ReadonlyMap<string, unknown>;
 }
 

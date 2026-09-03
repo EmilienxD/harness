@@ -43,7 +43,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     const directory = this.#resolvePath(plan.runtimeDirectory);
     await mkdir(directory, { recursive: true });
     const hookDirectory = join(directory, "scripts");
-    const hookScript = join(hookDirectory, "aboard_hook.py");
+    const hookScript = join(hookDirectory, "abd_hook.py");
     await mkdir(hookDirectory, { recursive: true });
     await cp(this.hookAssets.script, hookScript, { force: true });
     const hooks = replaceHookScript(
@@ -59,7 +59,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
         ? ["done", "prototype"]
         : ["done"];
     for (const skill of skills) {
-      await cp(join(sourceRoot, ".aboard", "skills", skill), join(directory, ".claude", "skills", skill), {
+      await cp(join(sourceRoot, ".abd", "skills", skill), join(directory, ".claude", "skills", skill), {
         recursive: true,
         force: true,
       });

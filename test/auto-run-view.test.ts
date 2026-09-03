@@ -6,7 +6,7 @@ import type { AutoRunState } from "../src/auto/engine.js";
 import type { AutoRunDryRunResult } from "../src/domain/auto-run.js";
 import type { AutoRunRecord, PersistedAutoRunRecord, RecoveryEligibility } from "../src/domain/run-plan.js";
 
-const SESSION = "aboard/run/test";
+const SESSION = "abd/run/test";
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
@@ -25,9 +25,9 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
     plan: [
-      { number: 34, title: "Add retry backoff", branch: "aboard/34-add-retry-backoff", disposition: "afk", dependsOn: [] },
-      { number: 35, title: "Migrate the queue", branch: "aboard/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
-      { number: 36, title: "Trim the cache", branch: "aboard/36-trim-the-cache", disposition: "afk", dependsOn: [] },
+      { number: 34, title: "Add retry backoff", branch: "abd/34-add-retry-backoff", disposition: "afk", dependsOn: [] },
+      { number: 35, title: "Migrate the queue", branch: "abd/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
+      { number: 36, title: "Trim the cache", branch: "abd/36-trim-the-cache", disposition: "afk", dependsOn: [] },
     ],
     progress: {
       "34": { state: "done", result: "landed", prNumber: 56, issueClosed: true },
@@ -89,7 +89,7 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     pauseAfterHitl: false,
     isolatedWorkspace: false,
     keepsWorkspace: false,
-    sessionBranch: "aboard/run/<run-id>",
+    sessionBranch: "abd/run/<run-id>",
     sessionBase: "feature/wip",
     targetHeadSha: "a".repeat(40),
     unpublishedTargetCommits: 0,
@@ -415,9 +415,9 @@ test("every auto-run card is a status display with no row action", () => {
 });
 
 test("a broken run shows the short reason and nothing to resume with", () => {
-  const { item } = rootItem({ persisted: record(), eligibility: { state: "broken", reason: "aboard/run/test has moved since the run last pushed it" } });
+  const { item } = rootItem({ persisted: record(), eligibility: { state: "broken", reason: "abd/run/test has moved since the run last pushed it" } });
   assert.equal(item.contextValue, "aboard.autoRun.broken");
-  assert.match(item.description, /cannot be resumed; aboard\/run\/test has moved/);
+  assert.match(item.description, /cannot be resumed; abd\/run\/test has moved/);
   assert.match(item.tooltip, /Nothing has been rolled back/);
 });
 
@@ -490,14 +490,14 @@ test("a row shows the latest observed title while the plan keeps the one it froz
   const rows = model.children(root);
   assert.equal(model.item(rows[0]!).label, "#34 Add retry backoff, with jitter");
   // The frozen title is what branches and commits are named from, untouched.
-  assert.equal(rows[0]!.kind === "issue" ? rows[0]!.issue.branch : "", "aboard/34-add-retry-backoff");
+  assert.equal(rows[0]!.kind === "issue" ? rows[0]!.issue.branch : "", "abd/34-add-retry-backoff");
   assert.equal(rows[0]!.kind === "issue" ? rows[0]!.issue.title : "", "Add retry backoff");
 });
 
 test("the tooltip names where the work goes and what the run froze", () => {
   const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true } });
   const { item } = rootItem({ persisted: isolated, state: state() });
-  assert.match(item.tooltip, /Session branch: aboard\/run\/test/);
+  assert.match(item.tooltip, /Session branch: abd\/run\/test/);
   assert.match(item.tooltip, /Target branch: feature\/wip/);
   assert.match(item.tooltip, /Working in C:\/checkouts\/run_test\/repo/);
   assert.match(item.tooltip, /Review on/);

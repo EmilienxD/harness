@@ -39,7 +39,7 @@
       },
       {
         "command": "aboard.updateProject",
-        "title": "Update .aboard/",
+        "title": "Update .abd/",
         "icon": "$(cloud-download)"
       },
       {
@@ -218,7 +218,7 @@
       },
       {
         "view": "aboard.welcome",
-        "contents": "This project's aboard assets were created by another extension version. Update them before starting or resuming aboard. Files you have edited are preserved and listed for review.\n[Update .aboard/](command:aboard.updateProject)",
+        "contents": "This project's aboard assets were created by another extension version. Update them before starting or resuming aboard. Files you have edited are preserved and listed for review.\n[Update .abd/](command:aboard.updateProject)",
         "when": "aboard.scaffoldUpdateRequired"
       },
       {
@@ -486,7 +486,7 @@
             "Launch with --effort max."
           ],
           "default": "inherit",
-          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, including the Manager, passed as `--effort`. Available levels depend on the model.\n\nThis is the session level: an agent definition that sets `effort:` in its `.aboard/agents/<name>.md` frontmatter overrides it while that agent is active, so use the setting for built-in agent launches, which have no aboard definition to read, and resumed sessions. Applies to the next launch; a running agent keeps its level."
+          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, including the Manager, passed as `--effort`. Available levels depend on the model.\n\nThis is the session level: an agent definition that sets `effort:` in its `.abd/agents/<name>.md` frontmatter overrides it while that agent is active, so use the setting for built-in agent launches, which have no aboard definition to read, and resumed sessions. Applies to the next launch; a running agent keeps its level."
         },
         "aboard.terminals.closeOnSessionEnd": {
           "type": "boolean",
@@ -580,7 +580,7 @@
         "aboard.autoRun.worktree.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout beside the project, carries ignored local .claude and .aboard configuration into it without replacing tracked files, and leaves your working tree and branch exactly as they are. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
+          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout beside the project, carries ignored local .claude and .abd configuration into it without replacing tracked files, and leaves your working tree and branch exactly as they are. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
         },
         "aboard.autoRun.worktree.root": {
           "type": "string",
@@ -597,7 +597,7 @@
           "default": 600,
           "minimum": 1,
           "maximum": 86400,
-          "description": "How long .aboard/session-setup.ps1 or .aboard/session-setup.sh may take in a fresh checkout. Those files ship empty; put your own installation steps in them (copying an .env, npm install, uv sync) and aboard runs the one for this platform once, right after creating the checkout. A failure refuses the run rather than starting agents in a half-installed tree."
+          "description": "How long .abd/session-setup.ps1 or .abd/session-setup.sh may take in a fresh checkout. Those files ship empty; put your own installation steps in them (copying an .env, npm install, uv sync) and aboard runs the one for this platform once, right after creating the checkout. A failure refuses the run rather than starting agents in a half-installed tree."
         },
         "aboard.timeouts.managerStop": {
           "type": "integer",
