@@ -107,7 +107,7 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
 
 test("worker Python hook guards attended sessions and completes unattended sessions", async () => {
   const script = join(process.cwd(), "assets", "runtime", "aboard_hook.py");
-  const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "Changed the boundary — safely." });
+  const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "Changed the boundary; safely." });
   // An interactive general-purpose session reports nothing: without the delivery flag
   // the guard exits 0 with no output, exactly like a brainstormer.
   const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose", ABOARD_ATTENDED: "1" } });
@@ -161,10 +161,10 @@ test("worker Python hook guards attended sessions and completes unattended sessi
     assert.deepEqual(JSON.parse(received[0]!.body ?? "{}"), {
       agentId: "gp-1",
       cwd: "C:\\repo",
-      lastAssistantMessage: "Changed the boundary — safely.",
+      lastAssistantMessage: "Changed the boundary; safely.",
     });
     assert.equal(received[1]!.url, "/hooks/stop");
-    assert.equal((JSON.parse(received[1]!.body ?? "{}") as { lastAssistantMessage?: unknown }).lastAssistantMessage, "Changed the boundary — safely.");
+    assert.equal((JSON.parse(received[1]!.body ?? "{}") as { lastAssistantMessage?: unknown }).lastAssistantMessage, "Changed the boundary; safely.");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
   }

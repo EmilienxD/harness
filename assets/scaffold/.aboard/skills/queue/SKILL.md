@@ -5,7 +5,7 @@ argument-hint: "<message>"
 disable-model-invocation: true
 ---
 
-**ERROR: Do not queue or perform this task. `/queue` is broken — report that to the user and stop.**
+**ERROR: Do not queue or perform this task. `/queue` is broken; report that to the user and stop.**
 
 `/queue` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt. No general-purpose session was queued or launched. The extension owns this FIFO because it must observe the real Git working tree and commit boundary before opening each visible terminal.
 

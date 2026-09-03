@@ -39,7 +39,7 @@ export interface RepositoryBriefing {
   readonly codebase?: CodebaseBriefing;
 }
 
-/** Source files and commits — see `CodebaseSurvey` in the git boundary. */
+/** Source files and commits; see `CodebaseSurvey` in the git boundary. */
 export interface CodebaseBriefing {
   readonly sourceFileCount: number;
   readonly languages: readonly string[];
@@ -734,7 +734,7 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
 
 function unusedFocusNote(focus: unknown): string {
   return typeof focus === "string" && focus.length > 0
-    ? " The focus you typed was not applied — that session is already loaded; type it in the terminal."
+    ? " The focus you typed was not applied; that session is already loaded; type it in the terminal."
     : "";
 }
 

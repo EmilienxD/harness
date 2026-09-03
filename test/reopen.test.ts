@@ -100,7 +100,7 @@ function setup(options: {
   });
   const openTerminals = new Set<string>();
   // Terminals a test declares live for an agent the real controller never
-  // created — a fleet record restored from a previous extension host.
+  // created; a fleet record restored from a previous extension host.
   const liveTerminals = new Map<AgentId, TerminalId>();
   const shown: TerminalId[] = [];
   const reopen = new ReopenCoordinator({
@@ -257,7 +257,7 @@ test("an ended brainstormer is reopened with its own definition re-emitted, not 
   assert.match(line, /--agent aboard-brainstormer-7/);
 
   // The fleet forgot this session when it ended, so it comes back as a fresh
-  // record under the same identity — same agent id, same session id.
+  // record under the same identity; same agent id, same session id.
   const restored = fleet.get(agent("7"));
   assert.equal(restored?.sessionId, BRAINSTORM_SESSION);
   assert.equal(restored?.identity.type, "brainstormer");
@@ -348,7 +348,7 @@ test("a pick made stale while the picker was open focuses the session instead of
   assert.equal(options[0]!.candidate.origin, "ended");
 
   // The user sat on the QuickPick, and the session came back to life meanwhile.
-  // Relaunching would be refused downstream — one live terminal per agent.
+  // Relaunching would be refused downstream; one live terminal per agent.
   liveTerminals.set(agent("7"), terminalId("came-back"));
   const outcome = await reopen.reopen(options[0]!.candidate);
   assert.equal(outcome.action, "focused");

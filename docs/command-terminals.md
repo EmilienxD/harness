@@ -5,7 +5,7 @@ script asks aboard to run a shell command, and the extension opens a real VS Cod
 terminal for it so the output is visible where the user already watches
 everything else.
 
-This is for scripts — a project's own setup command, a backend or frontend
+This is for scripts; a project's own setup command, a backend or frontend
 bootstrap, a task runner in another repository. A command terminal is not an
 aboard agent: it gets no fleet row, no write lease, no `ABOARD_*` credentials, no
 resume, and it never appears in the fleet view. The endpoint is published only
@@ -37,15 +37,15 @@ All requests go to the loopback bridge and carry the bearer token
 }
 ```
 
-- `command` (required) — one shell command line, sent to the terminal as typed
+- `command` (required); one shell command line, sent to the terminal as typed
   input. A terminal receives one line, so newlines and other control characters
   are rejected rather than escaped; chain steps with your own shell's operator.
   It runs in VS Code's default shell for the platform.
-- `name` — the terminal tab's label. Defaults to `aboard: command`.
-- `cwd` — defaults to the workspace root. A directory that does not exist is a
+- `name`; the terminal tab's label. Defaults to `aboard: command`.
+- `cwd`; defaults to the workspace root. A directory that does not exist is a
   `400`, not a terminal that opens and immediately fails.
-- `env` — extra string environment on top of the one VS Code gives terminals.
-- `show` — reveal the terminal. Defaults to `true`; pass `false` for a background
+- `env`; extra string environment on top of the one VS Code gives terminals.
+- `show`; reveal the terminal. Defaults to `true`; pass `false` for a background
   step that should not steal focus.
 
 `201` returns the terminal's record:
@@ -101,7 +101,7 @@ Each file is one window:
 
 The reader's whole job is: read every `*.json` in the directory, and keep the
 record whose `workspaceRoot` contains your working directory. File names are an
-implementation detail — never parse them, and never try to reproduce them.
+implementation detail; never parse them, and never try to reproduce them.
 
 ```bash
 dir="${LOCALAPPDATA:+$LOCALAPPDATA/aboard/endpoints}"
@@ -123,7 +123,7 @@ Notes for a robust reader:
   walk up if you start in a subdirectory.
 - **A record can be stale.** A window that crashed leaves one behind; `pid` tells
   you whether that extension host still exists, and the next activation prunes
-  dead records. A `401` also means stale — the token is new on every activation,
+  dead records. A `401` also means stale; the token is new on every activation,
   so re-read the file rather than caching the value.
 - **No record means no window.** aboard writes one only while a window is open on
   that project. Fall back to running the command yourself.
@@ -139,7 +139,7 @@ The bridge mints two per-activation credentials:
 - The **full token** reaches every route. It stays in memory and in the
   environment of processes aboard started; only ephemeral MCP configurations
   for catalog-owning roles contain resolved copies while initialized. It is not published.
-- The **command token** reaches `/commands` and nothing else — a request to any
+- The **command token** reaches `/commands` and nothing else; a request to any
   other path is `403 forbidden`. This is the one that gets published, because a
   credential a script can find is a credential anything running as that user can
   find. Scoping it means what finds it can run a command in a visible terminal;

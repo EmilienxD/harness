@@ -160,7 +160,7 @@ export interface SessionLifecycleServiceOptions {
   readonly fleet: FleetRegistry;
   readonly monitor: SessionProcessMonitor;
   readonly settlement: SessionEndSettlement;
-  /** The wrapper's marker path for an agent — launch-time state the hook knows nothing about. */
+  /** The wrapper's marker path for an agent; launch-time state the hook knows nothing about. */
   readonly lockPathFor: (agentId: AgentId) => string;
   readonly onSessionStarted?: (observation: SessionStartObservation) => void;
   /** Injected timers keep the `/resume` grace window deterministic in tests. */
@@ -327,7 +327,7 @@ export class SessionStartTimeoutError extends Error {
     public readonly agentId: AgentId,
     public readonly timeoutMs: number,
   ) {
-    super(`Claude session did not start within ${Math.round(timeoutMs / 1000)}s — no SessionStart hook fired. Check the terminal for a CLI error.`);
+    super(`Claude session did not start within ${Math.round(timeoutMs / 1000)}s; no SessionStart hook fired. Check the terminal for a CLI error.`);
     this.name = "SessionStartTimeoutError";
   }
 }

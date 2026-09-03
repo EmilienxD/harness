@@ -66,7 +66,7 @@ def roadmap_reminder_due(payload: dict[str, Any]) -> bool:
 
     Stateless by construction. The question is not "where was the last
     reminder", which would need a counter to persist, re-seed on resume, and
-    lose in a crash, but "is one inside the tail window" — one `getsize`, one
+    lose in a crash, but "is one inside the tail window"; one `getsize`, one
     bounded read, constant work whether the transcript is 200 KB or 40 MB. The
     session-start and post-compact briefings carry the same marker, so they
     reset the window for free and there is no separate reset rule.
@@ -183,8 +183,8 @@ def main() -> int:
         )
     ):
         return 0
-    # The reminder's entire cost on the common path — a reminder already inside
-    # the tail window — is one `getsize` and one bounded read. No bridge call, no
+    # The reminder's entire cost on the common path; a reminder already inside
+    # the tail window; is one `getsize` and one bounded read. No bridge call, no
     # `gh`, no output.
     if route == "manager-roadmap" and not roadmap_reminder_due(payload):
         return 0

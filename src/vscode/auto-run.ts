@@ -329,7 +329,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
     case "broken":
       return {
         label: `Auto-run ${card.record.runId}`,
-        description: `cannot be resumed — ${card.reason}`,
+        description: `cannot be resumed; ${card.reason}`,
         tooltip: `${runTooltip(card.record)}\n\nThis run cannot continue: ${card.reason}. Nothing has been rolled back; discarding forgets the record.`,
         icon: "error",
         contextValue: "aboard.autoRun.broken",
@@ -338,7 +338,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
     case "unsupported":
       return {
         label: "Interrupted auto-run",
-        description: `cannot be resumed — ${card.reason}`,
+        description: `cannot be resumed; ${card.reason}`,
         tooltip: "This record was written before fixed-plan recovery and carries no plan to validate. Its branches and pull requests are untouched; discard the record when you have finished with them.",
         icon: "error",
         contextValue: "aboard.autoRun.unsupported",
@@ -442,7 +442,7 @@ function describeOutcome(record: AutoRunRecord): string {
   switch (outcome.kind) {
     case "cancelled": return "stopped by you";
     case "interrupted": return "interrupted";
-    case "failed": return `failed — ${outcome.reason}`;
+    case "failed": return `failed; ${outcome.reason}`;
   }
 }
 

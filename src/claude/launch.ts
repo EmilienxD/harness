@@ -23,7 +23,7 @@ import { createHash, randomUUID } from "node:crypto";
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 /** Planner-only fallback; production supplies VS Code's workspace storage root. */
 export const DEFAULT_RUNTIME_DIRECTORY = join(tmpdir(), "aboard-runtime");
-/** `aboard.launch.maxInlinePromptChars` — conservative, below every known ceiling. */
+/** `aboard.launch.maxInlinePromptChars`; conservative, below every known ceiling. */
 export const DEFAULT_MAX_INLINE_PROMPT_CHARS = 4000;
 
 export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
@@ -117,7 +117,7 @@ export function difficultyLaunchPolicy(difficulty: IssueDifficulty | undefined):
 interface ResolvedLaunchPolicy {
   readonly declaredModel: string | undefined;
   readonly declaredEffort: EffortLevel | undefined;
-  /** What the command line carries — the declaration, or the session default behind it. */
+  /** What the command line carries; the declaration, or the session default behind it. */
   readonly model: string | undefined;
   readonly effort: EffortLevel | undefined;
 }
@@ -636,7 +636,7 @@ function planPrompt(
   }
 
   const relativePath = spillRelativePath(options.runtimeDirectory, options.agentId, options.stem);
-  const reference = `Your full task is in @${relativePath} — follow it.`;
+  const reference = `Your full task is in @${relativePath}; follow it.`;
   const withHeadline = `${prompt.headline} ${reference}`;
   const stub =
     withHeadline.length <= options.threshold && canQuoteArgument(options.shell, withHeadline)

@@ -107,7 +107,7 @@ test("a marker inside the tail window costs one bounded read and nothing else", 
   assert.deepEqual({ status: inside.status, stdout: inside.stdout, requests: inside.requests.length }, { status: 0, stdout: "", requests: 0 });
 
   // The same transcript with a 10 KB window: the marker has fallen out of the
-  // tail, so one is due. This is the whole pacing rule — no counter, no state.
+  // tail, so one is due. This is the whole pacing rule; no counter, no state.
   const outside = await runHook({ route: "manager-roadmap", transcript: marked, span: "10000" });
   assert.equal(outside.status, 0);
   assert.deepEqual(outside.requests, [{ agentId: "manager-1" }]);
@@ -171,7 +171,7 @@ test("the reminder is registered on PostToolUse with no matcher, alongside the A
   assert.equal(parsed.PostToolUse.some((entry) => entry.matcher === "Agent"), true);
 
   // The compact briefing re-injects the roadmap, which is what resets the
-  // reminder window with no separate rule — so `compact` must stay matched.
+  // reminder window with no separate rule; so `compact` must stay matched.
   const brief = parsed.SessionStart.find((entry) => entry.hooks.some((hook) => hook.args.at(-1) === "manager-brief"));
   assert.match(brief?.matcher ?? "", /compact/);
 });

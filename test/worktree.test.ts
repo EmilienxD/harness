@@ -39,7 +39,7 @@ test("a configured root is honoured, and one inside the project is refused", () 
   const custom = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123", root: resolve("D:/checkouts") });
   assert.equal(custom, join(resolve("D:/checkouts"), "run_abc123", basename(PROJECT)));
   // A relative root resolves against the project, which is exactly how a user
-  // writes "next to it" — and how they could accidentally write "inside it".
+  // writes "next to it"; and how they could accidentally write "inside it".
   assert.equal(
     runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123", root: "../elsewhere" }),
     join(resolve(PROJECT, "../elsewhere"), "run_abc123", basename(PROJECT)),
@@ -225,7 +225,7 @@ test("preparing a checkout creates it from the local base and installs into it",
   assert.deepEqual(workspace.denyTools, isolationDenyRules(PROJECT));
   assert.ok(git.calls.includes(`addWorktree ${path} aboard/run/test main`), git.calls.join(", "));
   // The setup command runs in the new checkout, from the project's own copy of
-  // the file — the one the user edits, not whatever the branch carries.
+  // the file; the one the user edits, not whatever the branch carries.
   assert.equal(setups.length, 1);
   assert.equal(setups[0]?.cwd, path);
   assert.equal(setups[0]?.args.at(-1), join(PROJECT, ".aboard", "session-setup.ps1"));

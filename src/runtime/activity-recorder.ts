@@ -96,7 +96,7 @@ export class ActivityRecorder {
 
   #append(entry: ActivityEntry): void {
     // Writing into an uninitialized project would recreate `.aboard/` behind the
-    // user's back — including right after they deleted it.
+    // user's back; including right after they deleted it.
     if (!this.options.admission()) return;
     this.#cache = appendActivity(this.#cache, entry);
     this.options.onDidChange();

@@ -366,7 +366,7 @@ function harness(options: HarnessOptions = {}): Harness {
     },
     getPullRequest: async (number) => {
       const pr = pullRequests.get(number);
-      const waiting = notifications.some((entry) => entry.includes("is hitl — PR"));
+      const waiting = notifications.some((entry) => entry.includes("is hitl; PR"));
       if (pr?.state === "open" && waiting && isHitl(number)) {
         hitlPolls += 1;
         // The doctor applies what the user approved once, mid-wait and uncommitted.
@@ -971,7 +971,7 @@ test("a run's pull request that will not merge is left open with the reason", as
   await context.engine.settle();
 
   // #34's conflict stops the whole run, so nothing lands and there is no run
-  // pull request to merge — the alert is about the issue that would not merge.
+  // pull request to merge; the alert is about the issue that would not merge.
   assert.match(
     context.alerts.map((alert) => alert.message).join("\n"),
     new RegExp(`PR #56 conflicts with ${SESSION} and the conflict is not one aboard can resolve`),
@@ -1066,7 +1066,7 @@ test("the end-of-run restore does not trigger on the mid-run cleanup checkout", 
   await context.engine.settle();
 
   const cleanups = context.gitCalls.filter((call) => call === "checkout feature/wip");
-  assert.equal(cleanups.length, 1, "only the terminal restore touches the original branch — per-issue cleanup still uses the default");
+  assert.equal(cleanups.length, 1, "only the terminal restore touches the original branch; per-issue cleanup still uses the default");
 });
 
 test("a failed run keeps its current branch active when the tree is clean", async () => {
@@ -1277,7 +1277,7 @@ test("a hitl issue waits at its pull request and continues once the user merges"
   await context.engine.start();
   await context.engine.settle();
 
-  assert.match(context.notifications.join("\n"), /issue #35 is hitl — PR #56 is open and waiting for you/);
+  assert.match(context.notifications.join("\n"), /issue #35 is hitl; PR #56 is open and waiting for you/);
   assert.match(context.notifications.join("\n"), /PR #56 merged by you; continuing/);
   assert.equal(
     context.saved.some((record) => record.branchShas[SESSION] === context.sha(SESSION)),
@@ -1447,7 +1447,7 @@ test("a run with its own checkout works there, launches there, and never moves t
   assert.equal((await context.engine.start()).started, true);
   await context.engine.settle();
 
-  // Every effect of the run — the branch, the commit, the push — belongs to the
+  // Every effect of the run; the branch, the commit, the push; belongs to the
   // checkout it was given.
   for (const effect of ["checkout", "createBranch", "add", "commit", "push"]) {
     assert.ok(context.workspaceGitCalls.includes(effect), `${effect} must happen in the run's own checkout`);
@@ -1816,7 +1816,7 @@ test("a dependency cycle is visible and drains in deterministic order", async ()
 test("resume re-enters at the first unsatisfied checkpoint and keeps the run's frozen guidance", async () => {
   const context = harness();
   // The record has a plan and nothing built yet, so the run starts from the
-  // session branch — and the guidance it froze reaches the fresh worker.
+  // session branch; and the guidance it froze reaches the fresh worker.
   context.seed(plannedRecord({ settings: { ...plannedRecord().settings, additionalGuideline: "keep fixtures small" } }));
   assert.equal((await context.engine.resume()).started, true);
   await context.engine.settle();

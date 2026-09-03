@@ -263,7 +263,7 @@ test("wrapper tokens are validated like the launch command", () => {
 
 test("plans an agent-defined implementer and spills a multi-line prompt", () => {
   const prompt = resolvedPromptFromText(
-    "Address issue #47 — Add token refresh.\n\n## Issue #47\n\nRotate the token.",
+    "Address issue #47; Add token refresh.\n\n## Issue #47\n\nRotate the token.",
   );
   const plan = planLaunch(request({ shell: "git-bash", prompt }));
 
@@ -391,8 +391,8 @@ test("passes the session effort level on every launch shape and refuses an unkno
     "Address issue #47.",
   ]);
 
-  // A resume re-passes the definition's own flags too — see the resume test
-  // below for why — so the session level only fills the gap it leaves.
+  // A resume re-passes the definition's own flags too; see the resume test
+  // below for why; so the session level only fills the gap it leaves.
   assert.deepEqual(
     planManagerResume({
       agentId, sessionId, shell: "powershell", effort: "low",
@@ -540,7 +540,7 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
     ["--model", "opus", "--effort", "high", "Address issue #47."],
   );
   // ...and the session-wide setting does not get to fill the gap either, since
-  // the definition did choose — it chose to ask the label.
+  // the definition did choose; it chose to ask the label.
   assert.deepEqual(
     planLaunch(request({ configuration: routed, model: "haiku", effort: "low" })).args.slice(8, 12),
     ["--model", "opus", "--effort", "high"],
@@ -802,7 +802,7 @@ test("pins each launch shape to the agent types allowed to use it", () => {
   rejects({ agentType: "manager", configuration: resolveLaunchConfiguration({ agentName: "Explore" }) });
   rejects({ agentType: "manager", configuration: definition("implementer", IMPLEMENTER_TOOLS) });
 
-  // Every other type has a definition — aboard's or Claude Code's — and a bare
+  // Every other type has a definition; aboard's or Claude Code's; and a bare
   // inline launch would leave it without persona and tool list alike.
   for (const agentType of ["webresearcher", "implementer", "pr-doctor-afk", "pr-doctor-hitl", "brainstormer"] as const) {
     rejects({ agentType, configuration: resolveLaunchConfiguration({ agentName: "Explore" }) });
@@ -1055,7 +1055,7 @@ test("a definition's command replaces the configured launch command for that age
 });
 
 test("a declared command is validated like the setting, and requires a definition or builtin profile", () => {
-  // `--` is a legal token here — it is how a wrapper ends its own arguments —
+  // `--` is a legal token here; it is how a wrapper ends its own arguments —
   // while an empty or unquotable one would launch the wrong program.
   for (const command of [[" "], ['say "hi"'], ["line\nbreak"]]) {
     assert.throws(

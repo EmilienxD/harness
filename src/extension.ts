@@ -844,7 +844,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   await publishAutoRunState(undefined);
   // Persisting into an uninitialized project would recreate `.aboard/` behind the
-  // user's back — including right after they deleted it.
+  // user's back; including right after they deleted it.
   persistence = new PersistOnChange((listener) => fleet.onDidChange(listener), async () => { if (initialized) await fleetStore.save(fleet.toPersistenceDto()); }, (error) => output.appendLine(`Fleet persistence failed: ${error instanceof Error ? error.message : "unknown error"}`));
   // Disposed through subscriptions like every other resource; `deactivate` also
   // awaits it so queued writes are flushed on a normal shutdown.

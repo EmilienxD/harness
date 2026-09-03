@@ -42,14 +42,14 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         "complex or planned implementation goes through `start_auto_run` instead, " +
         "which owns branches, commits, and pull requests. " +
         "It can be automated or handed to the user. " +
-        "An instruction addressed to you in the imperative — build this, fix this, change this, try this — " +
+        "An instruction addressed to you in the imperative; build this, fix this, change this, try this; " +
         "asks for this launch. It is neither yours to carry out nor an occasion to explain that you do not implement: " +
         "carry the user's own instruction through as the opening `prompt`, " +
         "adding the context they did not have to repeat, " +
         "and pass `interactive: true` when they will want to iterate on the result themselves.\n" +
       "- `Explore`: Read-only search agent for code exploration. " +
         "Use it to get up-to-date codebase reports. " +
-        "Do NOT use it for code review or design-doc auditing — it is not meant to make judgments; it is impartial and only surfaces facts. " +
+        "Do NOT use it for code review or design-doc auditing; it is not meant to make judgments; it is impartial and only surfaces facts. " +
         "When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, " +
         "or \"very thorough\" to search across multiple locations and naming conventions.\n" +
       "- `webresearcher`: automated, read-only research for cutoff-sensitive external facts. " +
@@ -74,9 +74,9 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         "`brainstormer` is interactive only; `webresearcher` and `Explore` are automated only and reject `interactive`. " +
         "`prototyper` can be automated or interactive. If an automated prototyper finds no project-defined location, " +
         "it returns without writing so you can ask the user where the prototype should live.\n" +
-      "- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can proceed — " +
+      "- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can proceed; " +
         "e.g., research agents whose findings inform your next steps. Use background when you have genuinely independent work to do in parallel. " +
-        "When an agent runs in the background, you will be automatically notified when it completes — " +
+        "When an agent runs in the background, you will be automatically notified when it completes; " +
         "do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.\n" +
       "- When you launch multiple agents for independent work, send them in a single message " +
         "with multiple tool uses so they run concurrently. " +
@@ -86,7 +86,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "## Writing the prompt\n\n" +
       "`prompt` is the agent's opening message. It is required for an automated launch; " +
       "for an interactive one, omit it unless the user gave an explicit opening topic.\n\n" +
-      "Brief the agent like a smart colleague who just walked into the room — " +
+      "Brief the agent like a smart colleague who just walked into the room; " +
       "it has not seen this conversation, does not know what you have tried, does not understand why this task matters.\n" +
       "- Explain what you are trying to accomplish and why.\n" +
       "- Describe what you have already learned or ruled out, including rejected approaches.\n" +
@@ -94,13 +94,13 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
         "rather than just following a narrow instruction.\n" +
       "- Name the exact question or bounded task, and what output or validation proves completion.\n" +
       "- If you need a short response, say so (\"report in under 200 words\").\n" +
-      "- Lookups: hand over the exact command. Investigations: hand over the question — " +
+      "- Lookups: hand over the exact command. Investigations: hand over the question; " +
         "prescribed steps become dead weight when the premise is wrong.\n\n" +
       "Terse command-style prompts produce shallow, generic work. " +
       "Never delegate understanding: do not write \"based on your findings, fix the bug\" " +
       "or \"based on the research, implement it.\" " +
       "Those phrases push synthesis onto the agent instead of doing it yourself. " +
-      "Write prompts that prove you understood — what specifically to change.\n\n" +
+      "Write prompts that prove you understood; what specifically to change.\n\n" +
 
       "<example>\n" +
       "user: \"What's left on this branch before we can ship?\"\n" +
@@ -110,7 +110,7 @@ export const CORE_MCP_TOOLS: readonly McpTool[] = [
       "  description: \"Audit branch ship readiness\",\n" +
       "  prompt: \"Audit what's left before this branch can ship. Check: uncommitted changes, commits ahead of main, " +
         "whether tests exist, whether the GrowthBook gate is wired up, whether CI-relevant files changed. " +
-        "Report a punch list — done vs. missing. Under 200 words.\"\n" +
+        "Report a punch list; done vs. missing. Under 200 words.\"\n" +
       "})\n" +
       "<commentary>\n" +
       "The prompt is self-contained: it states the goal, lists what to check, and caps the response length. " +
@@ -329,7 +329,7 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
     "`type` is required and must name one of the evidence-gathering roles below.\n" +
     "- `Explore`: Read-only search agent for code exploration. " +
       "Use it to get up-to-date codebase reports. " +
-      "Do NOT use it for code review or design-doc auditing — it is not meant to make judgments; it is impartial and only surfaces facts. " +
+      "Do NOT use it for code review or design-doc auditing; it is not meant to make judgments; it is impartial and only surfaces facts. " +
       "When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, " +
       "or \"very thorough\" to search across multiple locations and naming conventions.\n" +
     "- `webresearcher`: automated, read-only research for cutoff-sensitive external facts. " +
@@ -352,16 +352,16 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
       "Use it when the experiment is one the user should direct. " +
       "`webresearcher` and `Explore` are non-interactive and reject `interactive: true`. " +
       "If an automated prototyper finds no project-defined location, it returns without writing so you can ask the user where the prototype should live.\n" +
-    "- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can proceed — " +
+    "- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can proceed; " +
       "e.g., research agents whose findings inform your next steps. Use background when you have genuinely independent work to do in parallel. " +
-      "When an agent runs in the background, you will be automatically notified when it completes — " +
+      "When an agent runs in the background, you will be automatically notified when it completes; " +
       "do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.\n" +
     "- Summarize an automated result for the user. Check the evidence before using it to settle the brainstorm.\n\n" +
 
     "## Writing the prompt\n\n" +
     "`prompt` is the agent's opening message. It is required for a non-interactive launch; " +
     "for an interactive one, omit it unless the user gave an explicit opening topic.\n\n" +
-    "Brief the agent like a smart colleague who just walked into the room — " +
+    "Brief the agent like a smart colleague who just walked into the room; " +
     "it has not seen this conversation, does not know what you have tried, does not understand why this task matters.\n" +
     "- Explain what you are trying to accomplish and why.\n" +
     "- Describe what you have already learned or ruled out, including rejected approaches.\n" +
@@ -369,13 +369,13 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
       "rather than just following a narrow instruction.\n" +
     "- Name the exact question or bounded task, and what output or validation proves completion.\n" +
     "- If you need a short response, say so (\"report in under 200 words\").\n" +
-    "- Lookups: hand over the exact command. Investigations: hand over the question — " +
+    "- Lookups: hand over the exact command. Investigations: hand over the question; " +
       "prescribed steps become dead weight when the premise is wrong.\n\n" +
     "Terse command-style prompts produce shallow, generic work. " +
     "Never delegate understanding: do not write \"based on your findings, fix the bug\" " +
     "or \"based on the research, implement it.\" " +
     "Those phrases push synthesis onto the agent instead of doing it yourself. " +
-    "Write prompts that prove you understood — what specifically to change.\n\n" +
+    "Write prompts that prove you understood; what specifically to change.\n\n" +
 
     "<example>\n" +
     "user: \"Does this extension already have a boundary for persisting launch policy?\"\n" +
@@ -446,7 +446,7 @@ const CONTINUE_AGENT: McpTool = {
   name: "continue_agent",
   description:
     "Resume an agent session and provide one follow-up message, appended to its current transcript. " +
-    "Your plain text output is NOT visible to other agents — " +
+    "Your plain text output is NOT visible to other agents; " +
     "to communicate, you MUST call this tool. Messages from agents are delivered automatically; you don't check an inbox. " +
     "Refer to agents by the agent_id returned by `run_agent` or by a manual run notification.\n" +
     "The tool call may fail if it is used at an inappropriate time; for example, if the agent is still running and has not delivered a report.",

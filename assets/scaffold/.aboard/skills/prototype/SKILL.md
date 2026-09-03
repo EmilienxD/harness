@@ -5,7 +5,7 @@ argument-hint: "<experiment>"
 disable-model-invocation: true
 ---
 
-**ERROR: Do not run or emulate a prototype. `/prototype` is broken — report that to the user and stop.**
+**ERROR: Do not run or emulate a prototype. `/prototype` is broken; report that to the user and stop.**
 
 `/prototype` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt. No prototyper terminal was opened.
 

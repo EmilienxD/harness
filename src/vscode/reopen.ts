@@ -44,10 +44,10 @@ function detailFor(option: ReopenOption, now: Date): string {
   const { candidate } = option;
   const chrome = candidate.chromeEnabled === true ? " · Chrome" : "";
   if (!option.resumable) {
-    return `Cannot be reopened — Claude Code no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
+    return `Cannot be reopened; Claude Code no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
   }
   switch (candidate.origin) {
-    case "live": return `Running now — opens its terminal${chrome}`;
+    case "live": return `Running now; opens its terminal${chrome}`;
     case "ended": return `Ended ${age(candidate.at, now)}${chrome}`;
   }
 }
@@ -74,7 +74,7 @@ export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoo
       return;
     }
     if (items.length === 0) {
-      host.info("aboard has no recorded sessions to reopen yet. Sessions you are handed — brainstormer, general-purpose, pr-doctor-hitl — appear here after they end.");
+      host.info("aboard has no recorded sessions to reopen yet. Sessions you are handed; brainstormer, general-purpose, pr-doctor-hitl; appear here after they end.");
       return;
     }
     const chosen = await host.pick(items, "Reopen an aboard session");

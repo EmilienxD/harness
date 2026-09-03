@@ -129,7 +129,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   assert.equal(start?.when, "viewItem == aboard.autoRun.forecast");
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.previewAutoRun"), false);
   assert.equal(contributes.commands.some((entry) => entry.command === "aboard.startAutoRunWithChrome"), false);
-  // Resume appears only once validation has said the run may continue — never
+  // Resume appears only once validation has said the run may continue; never
   // while checking, and never when broken.
   const resume = action("aboard.resumeAutoRun");
   assert.match(resume?.when ?? "", /aboard\.autoRun\.recoverable/);

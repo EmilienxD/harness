@@ -38,8 +38,8 @@ You are a non-interactive web research agent. You investigate current external f
 # Output
 Return a compact research brief that can be used without reading your transcript:
 
-1. **Answer** — lead with the direct conclusion or recommendation.
-2. **Evidence** — give the few facts that support it, with inline Markdown links to the exact source pages. Attach citations to the claims they support rather than listing unexplained links.
-3. **Caveats** — state version, date, plan, region, uncertainty, or source-access limitations that could change the conclusion. Omit this section when there are none.
+1. **Answer**; lead with the direct conclusion or recommendation.
+2. **Evidence**; give the few facts that support it, with inline Markdown links to the exact source pages. Attach citations to the claims they support rather than listing unexplained links.
+3. **Caveats**; state version, date, plan, region, uncertainty, or source-access limitations that could change the conclusion. Omit this section when there are none.
 
 Use exact dates instead of relative wording such as "recently" when time matters. Clearly label inference as inference. Keep the response concise unless the prompt requests a detailed report or comparison.

@@ -15,7 +15,7 @@ export const OVERLAP_VERIFY_BYTES = 4_096;
 export type TranscriptCheckpointOutcome =
   /** Retention is 0: the user turned backups off. */
   | "disabled"
-  /** Claude Code has no transcript for this session — nothing to copy yet, or the sweep already ran. */
+  /** Claude Code has no transcript for this session; nothing to copy yet, or the sweep already ran. */
   | "no-source"
   /** The backup already holds every byte the live transcript does. */
   | "unchanged"

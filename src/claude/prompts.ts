@@ -257,7 +257,7 @@ export class PromptResolver {
         this.#limits.issueBodyChars,
         pointers ? `gh issue view ${issue.number}` : undefined,
       );
-      builder.section(`Issue #${issue.number} — ${issue.title}`, body.text);
+      builder.section(`Issue #${issue.number}; ${issue.title}`, body.text);
       builder.source("issue", issue.number, body);
     }
 
@@ -292,7 +292,7 @@ export class PromptResolver {
         pointers ? `gh issue view ${related.number}` : undefined,
       );
       builder.section(
-        `${next.kind === "parent-issue" ? "Parent issue" : "Related issue"} #${related.number} — ${related.title}`,
+        `${next.kind === "parent-issue" ? "Parent issue" : "Related issue"} #${related.number}; ${related.title}`,
         relatedBody.text,
       );
       builder.source(next.kind, related.number, relatedBody);
@@ -314,7 +314,7 @@ export class PromptResolver {
     builder.section(undefined, instruction);
 
     await this.#issueSections(builder, issues, true, request.recursiveIssueReferences);
-    return builder.build(`Address issue #${primary.number} — ${primary.title}.`);
+    return builder.build(`Address issue #${primary.number}; ${primary.title}.`);
   }
 
   async #resolveReview(
@@ -339,7 +339,7 @@ export class PromptResolver {
       `gh pr view ${pullRequest.number}`,
     );
     builder.section(
-      `Pull request #${pullRequest.number} — ${pullRequest.title}`,
+      `Pull request #${pullRequest.number}; ${pullRequest.title}`,
       description.text,
     );
     builder.source("pull-request", pullRequest.number, description);
@@ -353,7 +353,7 @@ export class PromptResolver {
           `gh issue view ${issue.number}`,
         );
         builder.section(
-          `Contract — issue #${issue.number} — ${issue.title}`,
+          `Contract; issue #${issue.number}; ${issue.title}`,
           issueBody.text,
         );
         builder.source("issue", issue.number, issueBody);
@@ -369,7 +369,7 @@ export class PromptResolver {
     builder.source("pull-request-diff", pullRequest.number, diff);
 
     return builder.build(
-      `Review pull request #${pullRequest.number} — ${pullRequest.title}.`,
+      `Review pull request #${pullRequest.number}; ${pullRequest.title}.`,
     );
   }
 
@@ -393,7 +393,7 @@ export class PromptResolver {
         `gh issue view ${issue.number}`,
       );
       builder.section(
-        `Related issue #${issue.number} — ${issue.title} (${issue.state})`,
+        `Related issue #${issue.number}; ${issue.title} (${issue.state})`,
         body.text,
       );
       builder.source("related-issue", issue.number, body);

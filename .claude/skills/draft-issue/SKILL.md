@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 Turn a plan, spec or conversation into a single GitHub **issue**.
 
-This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
+This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as a markdown file. The gateway handles publishing automatically; you are not allowed to call `gh issue create`.
 
 ## Process
 
@@ -36,16 +36,16 @@ Decide the labels:
 
 Both the difficulty and mode labels are defaults, not requirements: if the user explicitly says not to use one or both of them, leave them off the declaration line entirely rather than forcing a value.
 
-If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
+If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels; if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
 
 ### 2. Write one file
 
 Create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md` where {i} is:
 !`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
 
-Do not spend time checking whether the folder exists or what it already contains — just write the file.
+Do not spend time checking whether the folder exists or what it already contains; just write the file.
 
-Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels and must contain nothing else:
+Use this template. The title is the first `# ` header. The line directly below it; the first non-empty line after the title; declares this issue's labels and must contain nothing else:
 
 <issue-template>
 # {Issue title}
@@ -54,13 +54,13 @@ Use this template. The title is the first `# ` header. The line directly below i
 
 ## Parent
 
-One bare reference and nothing else — see below. Omit this whole section when the issue has no parent.
+One bare reference and nothing else; see below. Omit this whole section when the issue has no parent.
 
 ## What to build
 
 A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
 
-Avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it here and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo.
+Avoid specific file paths or code snippets; they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it here and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo.
 
 ## Acceptance criteria
 
@@ -70,7 +70,7 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 ## Blocked by
 
-A reference to each blocking issue (see instructions below), or "None — can start immediately".
+A reference to each blocking issue (see instructions below), or "None; can start immediately".
 
 </issue-template>
 
@@ -89,4 +89,4 @@ Examples:
 
 ### 3. Hand off to the user
 
-Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing.  Ask if they want you to make changes. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real.
+Tell the user the relative file path you created and that they can review it. They can edit the file directly; title, labels, body, blockers; before publishing.  Ask if they want you to make changes. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real.

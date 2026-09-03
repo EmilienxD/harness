@@ -1088,7 +1088,7 @@ test("aboard-owned command skills are user-only shims and general-purpose has no
     else assert.doesNotMatch(skill, /argument-hint:/);
     const body = skill.replace(/^---\n[\s\S]*?\n---\n/u, "").replace(/<!--[\s\S]*?-->/gu, "").trim();
     assert.notEqual(body, "", `${name} SKILL.md must explain the hook failure rather than leave an empty body`);
-    assert.match(body, /is broken — report that to the user and stop/, `${name} SKILL.md body must announce it is an error state`);
+    assert.match(body, /is broken; report that to the user and stop/, `${name} SKILL.md body must announce it is an error state`);
     assert.match(body, /Do not try to carry it out yourself/, `${name} SKILL.md body must forbid simulating the command`);
     assert.match(body, /except if the user explicitly asks/, `${name} SKILL.md body must forbid fixing the installation unprompted`);
     assert.match(body, /Update \.aboard\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);

@@ -37,5 +37,5 @@ function describe(outcome: ReviewOutcome): string {
 function unusedFocusNote(focus: string | undefined): string {
   return focus === undefined
     ? ""
-    : " The focus text was not applied — that session is already loaded; type it in the terminal.";
+    : " The focus text was not applied; that session is already loaded; type it in the terminal.";
 }

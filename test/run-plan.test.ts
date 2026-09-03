@@ -89,7 +89,7 @@ test("[AI]-chrome configures one planned implementer without admitting work", ()
 });
 
 test("the plan is ordered by creation date, not by number, with ties on the lower number", () => {
-  // The newer issue holds the lower number — filed later, numbered first is
+  // The newer issue holds the lower number; filed later, numbered first is
   // impossible on GitHub, but a transferred issue reproduces exactly this.
   const plan = planRun([
     candidate({ number: 12, createdAt: "2026-03-01T00:00:00.000Z" }),

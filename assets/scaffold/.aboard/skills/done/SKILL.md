@@ -5,11 +5,11 @@ argument-hint: "[further notes]"
 disable-model-invocation: true
 ---
 
-**ERROR: Do not close or kill anything. `/done` is broken — report that to the user and stop.**
+**ERROR: Do not close or kill anything. `/done` is broken; report that to the user and stop.**
 
-`/done` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt — the hook is either unregistered, does not apply to this terminal, or never ran, and **this terminal was not closed**. Closing an aboard terminal is the extension's job: it releases the session's write lease and records the end.
+`/done` is handled entirely by aboard's `UserPromptSubmit` hook, which should have intercepted the prompt; the hook is either unregistered, does not apply to this terminal, or never ran, and **this terminal was not closed**. Closing an aboard terminal is the extension's job: it releases the session's write lease and records the end.
 
-Do not try to carry it out yourself — do not exit or kill your own process, tell the user their session is done, or fix the hook registration, the settings file, or the extension. Exiting from here would strand the lease state. Don't try fixing any of it yourself except if the user explicitly asks it in future messages.
+Do not try to carry it out yourself; do not exit or kill your own process, tell the user their session is done, or fix the hook registration, the settings file, or the extension. Exiting from here would strand the lease state. Don't try fixing any of it yourself except if the user explicitly asks it in future messages.
 
 For now, just notify the user of this problem:
 

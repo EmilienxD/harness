@@ -49,7 +49,7 @@ export class WorkerHookService {
     const continuation = `Continue addressing ${describeIssueNumbers(worker.issueNumbers)} from where you stopped.`;
     const task = await this.tasks.task(parentAgentId);
     // Hook context has no documented @ expansion; include the task itself too.
-    return task === undefined ? continuation : `${continuation}\n\nReminder: full task is in @${task.path} — follow it.\n\n${task.contents.trim()}`;
+    return task === undefined ? continuation : `${continuation}\n\nReminder: full task is in @${task.path}; follow it.\n\n${task.contents.trim()}`;
   }
 
   private timestamp(): IsoTimestamp { return this.now().toISOString() as IsoTimestamp; }

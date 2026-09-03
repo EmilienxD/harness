@@ -805,7 +805,7 @@ export class AutoRunEngine {
           current,
           status.entries.map((entry) => entry.path),
         ));
-        this.options.log?.(`auto-run: not returning to ${branch} — the working tree on ${status.branch ?? "a detached HEAD"} has uncommitted changes`);
+        this.options.log?.(`auto-run: not returning to ${branch}; the working tree on ${status.branch ?? "a detached HEAD"} has uncommitted changes`);
         return;
       }
       await this.options.git.checkout(branch);
@@ -1696,7 +1696,7 @@ export class AutoRunEngine {
           return { reason: `PR #${prNumber} conflicts with ${base}`, pullRequestUrl: after.url };
         } else {
           await this.#settled();
-          throw new Error(`merging PR #${prNumber} failed (${message(error)}). If the branch requires a review, auto-run cannot approve its own pull request — merge it yourself and resume the run.`);
+          throw new Error(`merging PR #${prNumber} failed (${message(error)}). If the branch requires a review, auto-run cannot approve its own pull request; merge it yourself and resume the run.`);
         }
       }
       await this.#git.fetch({ fresh: true }).catch(() => undefined);

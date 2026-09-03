@@ -388,7 +388,7 @@ export interface CandidateIssue {
 /** Notification lines. Kept terse on purpose; they are read in bulk. */
 export const autoRunMessage = {
   started: (afk: number, hitl: number, review: boolean): string =>
-    `auto-run: started — ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}.`,
+    `auto-run: started; ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}.`,
   implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} addressed on ${branch}.`,
   unchanged: (issue: number): string =>
     `auto-run: issue #${issue} finished with no changes; deleted its empty branch and continuing.`,
@@ -436,8 +436,8 @@ export const autoRunMessage = {
   reconciled: (issue: number, pr: number, base: string): string =>
     `auto-run: issue #${issue} conflicted with ${base}; merged ${base} into its branch and pushed before retrying PR #${pr}.`,
   parked: (issue: number, pr: number, reason: string): string =>
-    `auto-run: issue #${issue} parked — PR #${pr} needs you (${reason}). Its branch, terminals, and pull request are left in place; the run continues with the next issue.`,
-  waiting: (issue: number, pr: number): string => `auto-run: issue #${issue} is hitl — PR #${pr} is open and waiting for you. The run is paused.`,
+    `auto-run: issue #${issue} parked; PR #${pr} needs you (${reason}). Its branch, terminals, and pull request are left in place; the run continues with the next issue.`,
+  waiting: (issue: number, pr: number): string => `auto-run: issue #${issue} is hitl; PR #${pr} is open and waiting for you. The run is paused.`,
   resolved: (pr: number): string => `auto-run: PR #${pr} merged by you; continuing.`,
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,

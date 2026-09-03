@@ -837,7 +837,7 @@ def render_oversized_parts(body: str, key: str) -> list[str]:
                     "continuation comments."
                 )
             else:
-                heading = f"## Continuation — Part {index} of {total}"
+                heading = f"## Continuation; Part {index} of {total}"
             rendered.append(f"{heading}\n\n{chunk}\n\n{marker}")
         largest = max(map(len, rendered))
         if largest <= CHUNK_TARGET:

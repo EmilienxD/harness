@@ -22,8 +22,8 @@ marker survives a single Ctrl+C exactly as it must.
 Beside the marker the wrapper leaves an exit record, `<agent-id>.exit`, written
 *before* the marker is removed so whoever reacts to the removal finds it. It
 carries the child's exit code, or the spawn error when the command could not be
-run at all. A Claude CLI that dies before its TUI exists — bad flag, missing
-binary, unresumable session id — reports through this file, since it never
+run at all. A Claude CLI that dies before its TUI exists; bad flag, missing
+binary, unresumable session id; reports through this file, since it never
 reaches the point of firing a SessionStart hook.
 
 """

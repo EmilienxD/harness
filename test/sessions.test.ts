@@ -20,7 +20,7 @@ const sessionId = "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId;
 const BRIDGE_SESSION = `{"type":"bridge-session","sessionId":"${sessionId}","bridgeSessionId":"cse_015Ufcwm","lastSequenceNum":0}`;
 const MODE = `{"type":"mode","mode":"normal","sessionId":"${sessionId}"}`;
 const LAST_PROMPT = `{"type":"last-prompt","prompt":"hi"}`;
-// A cancelled /resume writes only system rows, no user message — and resumes.
+// A cancelled /resume writes only system rows, no user message; and resumes.
 const SYSTEM = `{"type":"system","parentUuid":null,"isSidechain":false,"subtype":"local_command","content":"<command-name>/resume</command-name>","uuid":"5f044bf2-92ad-4df9-9e36-e9690c5fc09f","isMeta":false}`;
 
 async function transcript(lines: readonly string[]): Promise<string> {

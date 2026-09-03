@@ -1,8 +1,8 @@
 {
   "name": "aboard",
-  "displayName": "aboard — visible agents for Claude Code",
+  "displayName": "aboard; visible agents for Claude Code",
   "publisher": "aboard",
-  "description": "Turn Claude Code's invisible sub-agents into terminals you can watch, interrupt, and take over — coordinated by one Manager, with GitHub as the work state.",
+  "description": "Turn Claude Code's invisible sub-agents into terminals you can watch, interrupt, and take over; coordinated by one Manager, with GitHub as the work state.",
   "version": "0.0.0",
   "private": true,
   "repository": {
@@ -213,7 +213,7 @@
     "viewsWelcome": [
       {
         "view": "aboard.welcome",
-        "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over — coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
+        "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over; coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
         "when": "!aboard.scaffoldUpdateRequired"
       },
       {
@@ -590,7 +590,7 @@
         "aboard.autoRun.worktree.keep": {
           "type": "boolean",
           "default": false,
-          "description": "Keep a run's own checkout after the run ends. Off by default, in which case aboard removes it once the queue drains — but always keeps it when the run stopped or parked an issue, because its terminals and unfinished work are in there."
+          "description": "Keep a run's own checkout after the run ends. Off by default, in which case aboard removes it once the queue drains; but always keeps it when the run stopped or parked an issue, because its terminals and unfinished work are in there."
         },
         "aboard.autoRun.worktree.setupTimeoutSeconds": {
           "type": "integer",

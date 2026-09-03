@@ -64,7 +64,7 @@ test("one section lists the Manager and its workers, with the Manager pinned fir
   const model = new FleetTreeModel(fleet, lease, { refresh: () => {} });
   assert.deepEqual(model.roots(), []);
   // Workers with no Manager are a valid state, so the section is not empty then
-  // and its welcome actions are unavailable — the view title menu carries them.
+  // and its welcome actions are unavailable; the view title menu carries them.
   fleet.register(worker, startedAt);
   assert.equal(model.roots().length, 1);
   fleet.register({ ...worker, identity: { agentId: agent("manager-1"), type: "manager" }, sessionId: session("session-2"), resultDelivery: { mode: "none" } }, startedAt);

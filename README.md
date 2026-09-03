@@ -2,7 +2,7 @@
 
 **Stop trusting summaries. Watch your agents work.**
 
-aboard is a VS Code extension for Claude Code that turns invisible sub-agents into **real terminals you can read, interrupt, and take over** — coordinated by one long-lived Manager, with GitHub holding the work state.
+aboard is a VS Code extension for Claude Code that turns invisible sub-agents into **real terminals you can read, interrupt, and take over**; coordinated by one long-lived Manager, with GitHub holding the work state.
 
 ---
 
@@ -31,13 +31,13 @@ aboard ─ Agents                                       claude --agent implement
 └─ raw                   running                      └───────────────────────────┘
 ```
 
-You talk to the **Manager**. It plans, delegates, and reports — and it cannot edit your code. Each delegated task opens as its own terminal. Click a node and you're inside it. One agent at a time is the *lease holder*: no two delegated tasks touch your working tree at once, and the status bar always names the one that holds it.
+You talk to the **Manager**. It plans, delegates, and reports; and it cannot edit your code. Each delegated task opens as its own terminal. Click a node and you're inside it. One agent at a time is the *lease holder*: no two delegated tasks touch your working tree at once, and the status bar always names the one that holds it.
 
 The panel has three views, and each answers exactly one question:
 
-- **Agents** — what is running right now. A row appears only while its terminal is open, so everything you see is something you can go and look at.
-- **Auto Run** — the next run's issue forecast, the current run's fixed plan and progress, or the recovery card for one that stopped. The forecast loads when first revealed and **Check Now** refreshes it on demand. Start appears only for a ready preview and performs one final read: if the plan changed, aboard shows the update for review instead of starting. Resume appears only after aboard has checked that git and GitHub still match what the run recorded; when they don't, you get the reason and Discard.
-- **Recent Activity** — the last twenty agent and run outcomes, including the conversations you can reopen.
+- **Agents**; what is running right now. A row appears only while its terminal is open, so everything you see is something you can go and look at.
+- **Auto Run**; the next run's issue forecast, the current run's fixed plan and progress, or the recovery card for one that stopped. The forecast loads when first revealed and **Check Now** refreshes it on demand. Start appears only for a ready preview and performs one final read: if the plan changed, aboard shows the update for review instead of starting. Resume appears only after aboard has checked that git and GitHub still match what the run recorded; when they don't, you get the reason and Discard.
+- **Recent Activity**; the last twenty agent and run outcomes, including the conversations you can reopen.
 
 ## Quick start
 
@@ -53,15 +53,15 @@ Then try one of these in the Manager terminal:
 
 | You type | What happens |
 | :-- | :-- |
-| `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk — the Manager never sees the prompt |
+| `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk; the Manager never sees the prompt |
 | `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet |
 | `/queue Fix the parser and commit the change` | Queue a prompted general-purpose session; later tasks wait for the prior task to finish, a new commit, and a completely clean working tree |
 | `/prototype Try the parser API` | A user-driven prototyper opens, follows the project's prototype-location convention (or asks you where to write), and reports back here when you run `/done` |
-| `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, address, commit, PR, merge — one issue at a time, onto a branch of the run's own |
+| `/auto` | The extension walks every open `afk`/`hitl` issue, dependencies first and then oldest first: branch, address, commit, PR, merge; one issue at a time, onto a branch of the run's own |
 | `/auto --dry` | Read-only forecast: show the issues found, their dependency-aware order and branches, settings-driven review/merge behavior, blockers, and every point where you will need to act |
 | `/auto no unit tests needed` | Start the same run and append that guideline to every implementer and pr-doctor prompt |
 | `/done` or `/done <report>` | Close this session and report its last complete answer, or your replacement text, to the session that launched it |
-| `/reopen` | The last session you were handed comes back — same conversation, same agent definition. `/reopen brainstorm` picks by type, `/reopen 7` by agent id, and **Aboard: Reopen a Session** lists them all |
+| `/reopen` | The last session you were handed comes back; same conversation, same agent definition. `/reopen brainstorm` picks by type, `/reopen 7` by agent id, and **Aboard: Reopen a Session** lists them all |
 | *"Address issue #14"* | One implementer terminal, one branch, one PR, `Closes #14` |
 
 When a session delegates work, its Stop hook waits so the result can arrive without another prompt. Press **Escape** whenever you want the terminal back before that work finishes. Escape cancels only the wait: the eventual report stays queued and is delivered by the next hook that fires.
@@ -78,14 +78,14 @@ aboard does not choose or hide a prototype location. The prototyper uses a dedic
 
 - **Add guidance permanently or for one run.** Set `aboard.autoRun.prompt` for a persistent note, or put free-form text after the optional `--dry` flag, for example `/auto no unit tests needed`. aboard appends the configured note first and the command's note last to every implementer and pr-doctor prompt. Both are kept in private VS Code workspace storage so interrupted runs resume with the same instructions; `/auto --dry <guideline>` previews them without persisting anything.
 
-- **The extension does every git and GitHub side effect** — branch, commit, push, PR, merge. Agents only produce content. A branch name and a `Closes #N` trailer derived from the issue are correct by construction; an agent writing them is a sampling operation that drifts silently.
-- **Nothing lands on your branch behind your back.** A run cuts one session branch, `aboard/run/<id>`, from the branch you were on. Every issue branches off that, merges back into it, and the run closes the issue itself — GitHub only honours `Closes #N` on the default branch, and a run never merges there. When the queue drains, you get **one** pull request from the session branch into the branch you started on. `aboard.autoRun.mergeRunPullRequest` decides whether aboard tries to merge that one; it is off by default.
+- **The extension does every git and GitHub side effect**; branch, commit, push, PR, merge. Agents only produce content. A branch name and a `Closes #N` trailer derived from the issue are correct by construction; an agent writing them is a sampling operation that drifts silently.
+- **Nothing lands on your branch behind your back.** A run cuts one session branch, `aboard/run/<id>`, from the branch you were on. Every issue branches off that, merges back into it, and the run closes the issue itself; GitHub only honours `Closes #N` on the default branch, and a run never merges there. When the queue drains, you get **one** pull request from the session branch into the branch you started on. `aboard.autoRun.mergeRunPullRequest` decides whether aboard tries to merge that one; it is off by default.
 - **Or use one working branch.** Set `aboard.autoRun.branchMode` to `single-branch` to commit issues sequentially on the session branch and update one cumulative pull request. AFK issues advance automatically; HITL issues stop at an explicit **Continue** acceptance gate showing their recorded commit range. The default remains `per-issue`.
 - **`aboard/*` is reserved.** Issue and session branches are run-owned artifacts, so a new auto-run refuses to use one as the branch that receives its final pull request. Check out the human-owned integration branch you want before starting another run.
 - **One issue at a time, and one fixed list.** No parallel fan-out: merge conflicts and self-contradicting agents destroy more value than concurrency creates. Before Start, the Auto Run view continuously forecasts the current queue. The list is settled once Start performs its final read; label something `afk` an hour later and it waits for the next run. The frozen list remains visible while the run works.
-- **Optionally, out of your way entirely.** With `aboard.autoRun.worktree.enabled`, the run takes a second checkout of the repository beside your project and works there — your files and your branch are untouched, a dirty tree of yours no longer refuses the run, and you can keep working while it does. It costs a full checkout plus whatever your `.aboard/session-setup.*` installs into it, so it is off by default. Agents get deny rules covering your checkout; that stops the accident, not a determined shell command.
-- **Labels decide how far it goes.** `afk` means an issue may be merged unattended. `hitl` means the run opens the PR and stops — your merge *is* the approval. Parent issues and sub-issues use the same classification rules; there is no special planning label.
-- **And how much it costs.** A difficulty label on the issue — `routine`, `basic`, `advanced`, `expert` — picks the model and reasoning level its implementer and reviewer run at, so a rename is not addressed at the price of a redesign. It is the definition's own choice to ask: any agent whose `model:` or `effort:` names a value keeps it, and an unlabelled issue gets the most capable tier rather than the cheapest.
+- **Optionally, out of your way entirely.** With `aboard.autoRun.worktree.enabled`, the run takes a second checkout of the repository beside your project and works there; your files and your branch are untouched, a dirty tree of yours no longer refuses the run, and you can keep working while it does. It costs a full checkout plus whatever your `.aboard/session-setup.*` installs into it, so it is off by default. Agents get deny rules covering your checkout; that stops the accident, not a determined shell command.
+- **Labels decide how far it goes.** `afk` means an issue may be merged unattended. `hitl` means the run opens the PR and stops; your merge *is* the approval. Parent issues and sub-issues use the same classification rules; there is no special planning label.
+- **And how much it costs.** A difficulty label on the issue; `routine`, `basic`, `advanced`, `expert`; picks the model and reasoning level its implementer and reviewer run at, so a rename is not addressed at the price of a redesign. It is the definition's own choice to ask: any agent whose `model:` or `effort:` names a value keeps it, and an unlabelled issue gets the most capable tier rather than the cheapest.
 - **Every phase is idempotent.** Close your laptop mid-run. Resume picks up at the first step that didn't finish, and every mutation is journalled beforehand so a crash between "the push succeeded" and "the record saved" is recognised rather than repeated.
 
 - **It refuses to guess.** Before each step, aboard checks the whole plan against git and GitHub. A run-owned branch that moved, an issue closed or relabelled under it, a pull request retargeted or merged by somebody else: any of these stops the run and says which. It doesn't roll anything back, and it doesn't quietly carry on with a plan that no longer describes reality. Stopping costs you a click; continuing costs you work you never approved.
@@ -116,13 +116,13 @@ This list is a feature, and it's [written into the contract](./AGENTS.md#mission
 
 | | |
 | :-- | :-- |
-| [AGENTS.md](./AGENTS.md) | The product, behavior, and architecture contract — the reasoning behind every decision above, the auto-run phase by phase, and the module layout |
+| [AGENTS.md](./AGENTS.md) | The product, behavior, and architecture contract; the reasoning behind every decision above, the auto-run phase by phase, and the module layout |
 | [docs/configuration.md](./docs/configuration.md) | Every `aboard.*` setting and how the three config layers resolve |
 | [docs/command-terminals.md](./docs/command-terminals.md) | Running a script's command in a visible VS Code terminal over the bridge |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Build, test, package |
 
 ## Status
 
-Pre-1.0 and moving. The runtime works end to end; the API, scaffold assets, and settings may still change between versions. Issues and discussion are welcome — [AGENTS.md](./AGENTS.md) is the best place to argue with a decision, and it names its open questions.
+Pre-1.0 and moving. The runtime works end to end; the API, scaffold assets, and settings may still change between versions. Issues and discussion are welcome; [AGENTS.md](./AGENTS.md) is the best place to argue with a decision, and it names its open questions.
 
 Licensed under [MIT](./LICENSE).

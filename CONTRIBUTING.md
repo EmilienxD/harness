@@ -4,12 +4,12 @@ Thanks for looking. aboard is pre-1.0 and the fastest way to help is to use it o
 
 ## Before you write code
 
-Read [`AGENTS.md`](./AGENTS.md) — it is the product, behavior, and architecture contract, and it is binding. Then read the relevant reference material:
+Read [`AGENTS.md`](./AGENTS.md); it is the product, behavior, and architecture contract, and it is binding. Then read the relevant reference material:
 
-- [`docs/configuration.md`](./docs/configuration.md) — every `aboard.*` setting and how the three config layers resolve.
-- [`docs/CLAUDE-REFERENCES/`](./docs/CLAUDE-REFERENCES/) — Claude Code documentation snapshots. Verify hook, settings, tool, agent, and CLI behavior there rather than from memory.
+- [`docs/configuration.md`](./docs/configuration.md); every `aboard.*` setting and how the three config layers resolve.
+- [`docs/CLAUDE-REFERENCES/`](./docs/CLAUDE-REFERENCES/); Claude Code documentation snapshots. Verify hook, settings, tool, agent, and CLI behavior there rather than from memory.
 
-If implementation convenience conflicts with a load-bearing decision in `AGENTS.md`, follow `AGENTS.md`. A change that reduces the user's visibility or removes a decision point is a regression no matter how much time it saves — open an issue and argue the decision instead of quietly reinterpreting it.
+If implementation convenience conflicts with a load-bearing decision in `AGENTS.md`, follow `AGENTS.md`. A change that reduces the user's visibility or removes a decision point is a regression no matter how much time it saves; open an issue and argue the decision instead of quietly reinterpreting it.
 
 ## Development baseline
 
@@ -42,7 +42,7 @@ Add focused tests with each behavior change. At minimum, cover write-lease trans
 
 ## Trying it safely
 
-Do not run an end-to-end test inside this repository — it would create real issues and PRs and merge hooks into `.claude/settings.json`. Scaffold a throwaway repo instead; [`user-guide.md`](./user-guide.md) walks through a full sandbox run phase by phase.
+Do not run an end-to-end test inside this repository; it would create real issues and PRs and merge hooks into `.claude/settings.json`. Scaffold a throwaway repo instead; [`user-guide.md`](./user-guide.md) walks through a full sandbox run phase by phase.
 
 ## Scope notes
 

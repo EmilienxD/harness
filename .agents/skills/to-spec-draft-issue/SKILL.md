@@ -1,13 +1,13 @@
 ---
 name: to-spec-draft-issue
-description: Turn the current conversation into a spec, as a draft issue — no interview, just synthesis of what you've already discussed.
+description: Turn the current conversation into a spec, as a draft issue; no interview, just synthesis of what you've already discussed.
 ---
 
 The invocation's surrounding user text is this skill's input. A `UserPromptSubmit` hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as developer context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
 
 Turn the current conversation context and codebase understanding into a single GitHub **spec issue**. Do NOT interview the user; just synthesize what you already know.
 
-This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at spec drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
+This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at spec drafting, as a markdown file. The gateway handles publishing automatically; you are not allowed to call `gh issue create`.
 
 ## Process
 
@@ -22,7 +22,7 @@ Look for prefactoring opportunities that make the implementation easier. "Make t
 
 ### 3. Pin down the spec
 
-Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better — the ideal number is one. Check with the user that these seams match their expectations.
+Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better; the ideal number is one. Check with the user that these seams match their expectations.
 
 If the feature is too unclear to write a useful spec, say what is missing instead of inventing requirements.
 
@@ -31,9 +31,9 @@ If the feature is too unclear to write a useful spec, say what is missing instea
 Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
 <next-free-issue-index>
 
-Do not spend time checking whether the folder exists or what it already contains — just write the file.
+Do not spend time checking whether the folder exists or what it already contains; just write the file.
 
-Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels and must contain nothing else:
+Use this template. The title is the first `# ` header. The line directly below it; the first non-empty line after the title; declares this issue's labels and must contain nothing else:
 
 <spec-template>
 # {Spec title}
@@ -74,7 +74,7 @@ A list of implementation decisions that were made, such as:
 
 Do NOT include specific file paths or code snippets. They may end up being outdated very quickly.
 
-Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
+Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts; not a working demo, just the important bits.
 
 ## Testing Decisions
 
@@ -98,7 +98,7 @@ Any further notes about the feature.
 
 Keep `spec` as a mandatory label.
 
-If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
+If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels; if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
 
 Examples:
 ```
@@ -111,5 +111,5 @@ Examples:
 
 ### 3. Hand off to the user
 
-Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention they can run `$publish-issues --dry` first to preview what would be created without touching the tracker, or `$publish-issues` to publish for real.
+Tell the user the relative file path you created and that they can review it. They can edit the file directly; title, labels, body, parent; before publishing. Ask if they want you to make changes. Mention they can run `$publish-issues --dry` first to preview what would be created without touching the tracker, or `$publish-issues` to publish for real.
 

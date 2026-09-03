@@ -422,7 +422,7 @@ test("a builtin type's prompt follows its launch mode, not its type", async () =
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
   // Interactive: the terminal opens empty even though the type can also run
-  // unattended — the user types the first message.
+  // unattended; the user types the first message.
   assert.equal(await adapter.resolve({ type: "general-purpose", description: "d" }, { interactive: true }), undefined);
   assert.equal(await adapter.resolve({ type: "Explore", description: "d" }, { interactive: true }), undefined);
   const topic = await adapter.resolve({ type: "Explore", description: "d", prompt: "auth flow" }, { interactive: true });

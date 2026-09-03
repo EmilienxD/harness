@@ -372,7 +372,7 @@ test("a resumable run names how it ended and how far it got", () => {
   assert.match(cancelled.item.description, /stopped by you · 1\/3 done/);
 
   const failed = rootItem({ persisted: record({ outcome: { kind: "failed", reason: "push rejected" } }), eligibility: { state: "resumable" } });
-  assert.match(failed.item.description, /failed — push rejected/);
+  assert.match(failed.item.description, /failed; push rejected/);
   assert.equal(failed.item.icon, "error");
 
   const interrupted = rootItem({ persisted: record({ outcome: { kind: "interrupted" } }), eligibility: { state: "resumable" } });
@@ -417,7 +417,7 @@ test("every auto-run card is a status display with no row action", () => {
 test("a broken run shows the short reason and nothing to resume with", () => {
   const { item } = rootItem({ persisted: record(), eligibility: { state: "broken", reason: "aboard/run/test has moved since the run last pushed it" } });
   assert.equal(item.contextValue, "aboard.autoRun.broken");
-  assert.match(item.description, /cannot be resumed — aboard\/run\/test has moved/);
+  assert.match(item.description, /cannot be resumed; aboard\/run\/test has moved/);
   assert.match(item.tooltip, /Nothing has been rolled back/);
 });
 

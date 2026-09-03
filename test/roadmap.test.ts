@@ -160,7 +160,7 @@ test("identical subjects are addressed by position and the duplication is report
   assert.deepEqual(parsed.tasks.map((task) => task.position), [1, 2]);
   assert.deepEqual(parsed.duplicateSubjects, ["Same task"]);
   // Position disambiguates what text alone cannot, so completing one leaves the
-  // other pending — duplicates are a defect in the document, not in addressing.
+  // other pending; duplicates are a defect in the document, not in addressing.
   const edited = updateTask(body, { task: 2, expect: "Same task", status: "completed" });
   assert.ok(edited.ok);
   assert.equal(edited.body, "- [ ] Same task\n- [x] Same task");
