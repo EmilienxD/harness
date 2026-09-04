@@ -727,7 +727,7 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
         ? `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase}; an automatic squash/rebase merge waits until you push the target's unpublished commits, while a merge commit remains safe.`
         : `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase} and attempts to merge it; you act if reconciliation or the merge fails.`
       : `After the queue: aboard opens one PR from ${result.sessionBranch} into ${result.sessionBase}; you must review and merge that final PR.`,
-    "The order is a forecast: aboard re-reads GitHub after every issue, so newly unblocked, closed, or relabelled work can change what comes next.",
+    "This is a forecast. A run discovers and freezes one whole plan when it starts; later GitHub changes wait for the next run.",
   );
   return lines.join("\n");
 }

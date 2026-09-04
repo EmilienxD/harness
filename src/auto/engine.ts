@@ -186,7 +186,7 @@ interface TargetPublication {
 }
 
 export type AutoRunPreviewedStartResult = AutoRunStartResult
-  | { readonly started: false; readonly reason: string; readonly preview: InspectedAutoRunPreview };
+  | { readonly started: false; readonly reason: string; readonly refreshPreview: true };
 
 /** Terminal for one attempt: how the loop left the run. */
 type AttemptEnd = { readonly outcome: RunAttemptOutcome | "succeeded" };
@@ -204,6 +204,11 @@ class AutomatedWorkerCancelled extends Error {}
 
 function samePreview(left: InspectedAutoRunPreview, right: InspectedAutoRunPreview): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sameGitHubPlan(left: InspectedAutoRunPreview, right: InspectedAutoRunPreview): boolean {
+  return JSON.stringify({ issues: left.issues, skipped: left.skipped, dependencyCycles: left.dependencyCycles })
+    === JSON.stringify({ issues: right.issues, skipped: right.skipped, dependencyCycles: right.dependencyCycles });
 }
 
 export class AutoRunEngine {
@@ -358,6 +363,13 @@ export class AutoRunEngine {
   }
 
   public async dryRun(options: { readonly additionalGuideline?: string } = {}): Promise<AutoRunDryRunResult> {
+    return this.#dryRun(this.options.settings(), options);
+  }
+
+  async #dryRun(
+    settings: AutoRunSettings,
+    options: { readonly additionalGuideline?: string },
+  ): Promise<AutoRunDryRunResult> {
     if (this.#state !== undefined) return { dryRun: true, inspected: false, reason: "a run is already active" };
 
     let status;
@@ -380,7 +392,6 @@ export class AutoRunEngine {
     }
 
     const plan = planRun((await this.options.github.listImplementableIssues()).candidates);
-    const settings = this.options.settings();
     const blockers: string[] = [];
     const warnings = publication.unpublishedCommits === 0
       ? []
@@ -451,40 +462,44 @@ export class AutoRunEngine {
     return this.#startPlan(plan, settings, returnBranch, publication, options);
   }
 
-  /**
-   * Re-discovers the queue immediately before Start. A changed result is
-   * returned to the UI for review; only the exact result the user already saw
-   * may be frozen into a run.
-   */
-  public async startPreviewed(
-    expected: InspectedAutoRunPreview,
-    options: { readonly additionalGuideline?: string } = {},
-  ): Promise<AutoRunPreviewedStartResult> {
+  /** Validates the visible preview, then freezes that exact issue plan. */
+  public async startPreviewed(expected: InspectedAutoRunPreview): Promise<AutoRunPreviewedStartResult> {
     if (this.#state !== undefined) return { started: false, reason: "a run is already active", active: this.#state };
     const existing = await this.options.store.load().catch(() => undefined);
     if (existing !== undefined) {
       return { started: false, reason: "a previous run is still unresolved; resume or discard it first" };
     }
 
-    const confirmed = await this.dryRun(options);
+    const settings = this.options.settings();
+    const options = guidelineProperty(expected.additionalGuideline);
+    const confirmed = await this.#dryRun(settings, options);
     if (!confirmed.inspected) return { started: false, reason: confirmed.reason };
-    if (!samePreview(expected, confirmed)) {
-      return { started: false, reason: "the auto-run plan changed; review the updated preview before starting", preview: confirmed };
-    }
-    if (!confirmed.ready) {
+    if (!sameGitHubPlan(expected, confirmed)) {
       return {
         started: false,
-        reason: confirmed.blockers[0] ?? confirmed.emptyReason ?? "there is nothing ready to run",
-        preview: confirmed,
+        reason: "GitHub issue state changed; use Check Now to refresh the preview before starting",
+        refreshPreview: true,
+      };
+    }
+    if (!samePreview(expected, confirmed)) {
+      return {
+        started: false,
+        reason: "the auto-run preview is out of date; use Check Now to refresh it before starting",
+        refreshPreview: true,
+      };
+    }
+    if (!expected.ready) {
+      return {
+        started: false,
+        reason: expected.blockers[0] ?? expected.emptyReason ?? "there is nothing ready to run",
       };
     }
 
-    const settings = this.options.settings();
     return this.#startPlan(
-      { issues: confirmed.issues as readonly FrozenIssue[], skipped: confirmed.skipped, dependencyCycles: confirmed.dependencyCycles },
+      { issues: expected.issues as readonly FrozenIssue[], skipped: expected.skipped, dependencyCycles: expected.dependencyCycles },
       settings,
-      confirmed.sessionBase,
-      { headSha: confirmed.targetHeadSha, unpublishedCommits: confirmed.unpublishedTargetCommits },
+      expected.sessionBase,
+      { headSha: expected.targetHeadSha, unpublishedCommits: expected.unpublishedTargetCommits },
       options,
     );
   }

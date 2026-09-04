@@ -778,17 +778,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   await startRuntimeBridge();
   const startAutoRun = async (preview: AutoRunPreview) => {
     if (!requireInitialized()) return { started: false as const, reason: "the project is not initialized" };
-    try {
-      const result = await autoRun.startPreviewed(preview);
-      if (!result.started) void window.showWarningMessage("preview" in result
-        ? "The auto-run plan changed. Review the updated preview, then start again."
-        : `aboard cannot start an auto-run: ${result.reason}.`);
-      return result;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "Unable to start the auto-run";
-      void window.showErrorMessage(reason);
-      return { started: false as const, reason };
-    }
+    return autoRun.startPreviewed(preview);
   };
   fleetUi = registerNativeFleetUi(context, {
     port: () => bridge?.port,

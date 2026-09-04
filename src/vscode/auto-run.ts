@@ -51,13 +51,6 @@ export class AutoRunForecastController {
     this.onDidChange();
   }
 
-  public replace(preview: AutoRunPreview): void {
-    this.#generation += 1;
-    this.#inFlight = undefined;
-    this.#value = { preview, checking: false, stale: false, checkedAt: this.now().toISOString(), error: undefined };
-    this.onDidChange();
-  }
-
   public fail(error: string): void {
     this.#generation += 1;
     this.#inFlight = undefined;
@@ -97,7 +90,7 @@ export class AutoRunForecastController {
 export type AutoRunCard =
   /** No record at all: the only thing to offer is a new run. */
   | { readonly kind: "idle" }
-  /** Start was clicked and the engine is still discovering the GitHub queue. */
+  /** Start was clicked and the engine is validating the visible preview. */
   | { readonly kind: "starting" }
   /** The view is discovering the next run for the first time. */
   | { readonly kind: "checking-next" }
@@ -240,9 +233,9 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
       };
     case "starting":
       return {
-        label: "Starting auto-run",
-        description: "loading issues from GitHub…",
-        tooltip: "aboard is loading and ordering the GitHub issues this run will process.",
+        label: "Validating auto-run",
+        description: "checking the preview against GitHub…",
+        tooltip: "aboard is checking that GitHub still matches the issues shown in the preview.",
         icon: "loading~spin",
         contextValue: "aboard.autoRun.starting",
         collapsible: false,
@@ -398,8 +391,8 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
   const { preview } = forecast;
   return [
     forecast.checkedAt === undefined ? "" : `Updated at: ${formatTimestamp(forecast.checkedAt)}`,
-    "Start checks once more and runs only if the plan is unchanged.",
-    forecast.stale ? "Settings changed. Use Check Now to update this preview." : "",
+    "Start verifies GitHub still matches this preview, then runs exactly the issues listed below.",
+    forecast.stale ? "This preview may be outdated. Use Check Now to refresh it." : "",
     forecast.error === undefined ? "" : `Last refresh failed: ${forecast.error}. The list below is the last successful result.`,
     `Target branch: ${preview.sessionBase}`,
     `Branch mode: ${preview.branchMode ?? "per-issue"}`,

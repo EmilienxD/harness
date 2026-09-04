@@ -226,16 +226,35 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       if (card.kind !== "forecast" || autoRunCardMenuState(card) !== "forecast") return;
       autoRunStarting = true;
       renderAutoRun();
+      let warning: string | undefined;
+      let refreshPreview = false;
+      let failure: string | undefined;
       try {
         const result = await options.autoRun.start(card.forecast.preview);
         if (!result.started) {
-          if ("preview" in result) forecast.replace(result.preview);
+          if ("refreshPreview" in result) {
+            forecast.markStale();
+            refreshPreview = true;
+          }
           else forecast.fail(result.reason);
+          warning = `aboard cannot start an auto-run: ${result.reason}.`;
         }
+      }
+      catch (error) {
+        failure = error instanceof Error ? error.message : "Unable to start the auto-run";
+        forecast.fail(failure);
       }
       finally {
         autoRunStarting = false;
         renderAutoRun();
+      }
+      if (failure !== undefined) {
+        void window.showErrorMessage(failure);
+      } else if (warning !== undefined && refreshPreview) {
+        const choice = await window.showWarningMessage(warning, "Refresh Preview");
+        if (choice === "Refresh Preview") await checkAutoRun(true);
+      } else if (warning !== undefined) {
+        void window.showWarningMessage(warning);
       }
     }),
     commands.registerCommand("aboard.resumeAutoRun", async () => {

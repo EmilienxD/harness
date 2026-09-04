@@ -1553,9 +1553,9 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.deepEqual(context.createdPullRequests, []);
 });
 
-test("a previewed start freezes the exact plan confirmed by its final discovery", async () => {
+test("a previewed start freezes the exact visible plan after its final validation", async () => {
   const context = harness();
-  const preview = await context.engine.dryRun();
+  const preview = await context.engine.dryRun({ additionalGuideline: "visible guidance" });
   assert.equal(preview.inspected, true);
   if (!preview.inspected) return;
   context.githubCalls.splice(0);
@@ -1565,11 +1565,12 @@ test("a previewed start freezes the exact plan confirmed by its final discovery"
   assert.equal(result.started, true);
   if (!result.started) return;
   assert.deepEqual(context.record()?.plan, preview.issues);
-  assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"], "Start confirms once and freezes that result without a third discovery");
+  assert.equal(context.record()?.settings.additionalGuideline, "visible guidance");
+  assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"], "Start validates once and freezes the visible plan without a third discovery");
   await context.engine.settle();
 });
 
-test("a previewed start returns a changed plan for review without creating a run", async () => {
+test("a previewed start keeps the visible plan stale when GitHub state changed", async () => {
   const context = harness();
   const preview = await context.engine.dryRun();
   assert.equal(preview.inspected, true);
@@ -1580,10 +1581,10 @@ test("a previewed start returns a changed plan for review without creating a run
   const result = await context.engine.startPreviewed(preview);
 
   assert.equal(result.started, false);
-  assert.equal("preview" in result, true);
-  if (result.started || !("preview" in result)) return;
-  assert.equal(result.preview.issues[0]?.disposition, "hitl");
-  assert.match(result.reason, /plan changed/);
+  assert.equal("refreshPreview" in result, true);
+  if (result.started || !("refreshPreview" in result)) return;
+  assert.equal(result.refreshPreview, true);
+  assert.match(result.reason, /GitHub issue state changed.*refresh the preview/);
   assert.deepEqual(context.githubCalls, ["checkAuthentication", "listImplementableIssues"]);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
