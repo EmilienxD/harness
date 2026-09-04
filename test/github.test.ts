@@ -453,6 +453,38 @@ test("resolves issue parent, PR state, diff, and publishes line comments", async
   assert.equal(gh.calls.some((args) => args.includes("path=src/a.ts") && args.includes("line=7")), true);
 });
 
+test("resolves issue comments in API order across every page", async () => {
+  const gh = new FixtureGh((args) => {
+    if (args[0] === "repo") return repo;
+    const query = args.find((arg) => arg.startsWith("query=")) ?? "";
+    if (query.includes("comments(first:100,after:$after)")) {
+      return graph({ issue: { comments: {
+        nodes: [{ author: null, body: "Newest" }],
+        pageInfo: endPage,
+      } } });
+    }
+    return graph({ issue: {
+      number: 17,
+      title: "Review",
+      body: "Contract",
+      state: "OPEN",
+      labels: { nodes: [], pageInfo: endPage },
+      parent: null,
+      subIssues: { nodes: [], pageInfo: endPage },
+      comments: {
+        nodes: [{ author: { login: "alice" }, body: "Oldest" }],
+        pageInfo: { hasNextPage: true, endCursor: "comments-100" },
+      },
+    } });
+  });
+
+  assert.deepEqual((await new GitHubClient(gh).getIssue(17))?.comments, [
+    { authorLogin: "alice", body: "Oldest" },
+    { body: "Newest" },
+  ]);
+  assert.equal(gh.calls.some((args) => args.includes("after=comments-100")), true);
+});
+
 test("mergeability GitHub has not computed yet reads as unknown rather than as a failure", async () => {
   const gh = new FixtureGh((args) => {
     if (args[0] === "repo") return repo;

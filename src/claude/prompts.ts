@@ -1,3 +1,8 @@
+export interface IssueCommentSnapshot {
+  readonly authorLogin?: string | undefined;
+  readonly body: string;
+}
+
 /** Everything a worker needs to know about an issue, already parsed. */
 export interface IssueSnapshot {
   readonly number: number;
@@ -5,6 +10,7 @@ export interface IssueSnapshot {
   readonly body: string;
   readonly labels: readonly string[];
   readonly state: "open" | "closed";
+  readonly comments: readonly IssueCommentSnapshot[];
   /** The parent issue GitHub associates with this issue, when there is one. */
   readonly parentIssueNumber?: number | undefined;
   /** Sub-issues and same-repository issue references inferred from the body. */
@@ -76,11 +82,14 @@ export interface PromptResolutionLimits {
   readonly maxPromptChars: number;
   /** Hard bound on recursively resolved parents/dependencies. */
   readonly relatedIssueCount: number;
+  /** Maximum number of newest comments rendered for each issue. */
+  readonly issueCommentCount: number;
 }
 
 export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
   maxPromptChars: 60_000,
   relatedIssueCount: 50,
+  issueCommentCount: 20,
 };
 
 export type PromptResolutionErrorCode =
@@ -237,13 +246,26 @@ export class PromptResolver {
     return [primary, ...others];
   }
 
+  #issueDocument(issue: IssueSnapshot): string {
+    const count = Math.max(0, this.#limits.issueCommentCount);
+    const comments = count === 0 ? [] : issue.comments.slice(-count);
+    if (comments.length === 0 && issue.comments.length === 0) return issue.body;
+
+    const omitted = issue.comments.length - comments.length;
+    const heading = omitted === 0
+      ? "### Comments"
+      : `### Comments\n\n_${omitted} older comment${omitted === 1 ? " was" : "s were"} omitted; showing the newest ${comments.length}._`;
+    const rendered = comments.map((comment) => `#### @${comment.authorLogin ?? "ghost"}\n\n${comment.body.trim()}`);
+    return [issue.body, heading, ...rendered].filter((part) => part.trim().length > 0).join("\n\n");
+  }
+
   async #issueSections(
     builder: PromptBuilder,
     issues: readonly IssueSnapshot[],
     recursiveIssueReferences = true,
   ): Promise<void> {
     for (const issue of issues) {
-      builder.document("issue", issue.number, `Issue #${issue.number}; ${issue.title}`, issue.body);
+      builder.document("issue", issue.number, `Issue #${issue.number}; ${issue.title}`, this.#issueDocument(issue));
     }
 
     const visited = new Set(issues.map((issue) => issue.number));
@@ -272,7 +294,7 @@ export class PromptResolver {
         next.kind,
         related.number,
         `${next.kind === "parent-issue" ? "Parent issue" : "Related issue"} #${related.number}; ${related.title}`,
-        related.body,
+        this.#issueDocument(related),
       );
       if (recursiveIssueReferences) {
         enqueue(related.parentIssueNumber, "parent-issue");
@@ -318,7 +340,7 @@ export class PromptResolver {
           "issue",
           issue.number,
           `Contract; issue #${issue.number}; ${issue.title}`,
-          issue.body,
+          this.#issueDocument(issue),
         );
       }
     }
@@ -360,7 +382,7 @@ export class PromptResolver {
         "related-issue",
         issue.number,
         `Related issue #${issue.number}; ${issue.title} (${issue.state})`,
-        issue.body,
+        this.#issueDocument(issue),
       );
     }
 

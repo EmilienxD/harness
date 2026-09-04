@@ -47,6 +47,7 @@ const issue47: IssueSnapshot = {
   body: "Refresh the access token before it expires.",
   labels: ["[AI]-afk"],
   state: "open",
+  comments: [],
   parentIssueNumber: 31,
 };
 
@@ -56,6 +57,7 @@ const parent31: IssueSnapshot = {
   body: "The auth subsystem is replaced end to end.",
   labels: ["planning"],
   state: "open",
+  comments: [],
 };
 
 const pull42: PullRequestSnapshot = {
@@ -175,6 +177,55 @@ test("preserves complete primary, parent, and related issue bodies", async () =>
   assert.doesNotMatch(prompt.text, /truncated/);
 });
 
+test("renders issue comments with each implementation issue document", async () => {
+  const resolver = new PromptResolver({
+    github: new FakeGitHub({ issues: [
+      {
+        ...issue47,
+        comments: [{ authorLogin: "maintainer", body: "Use a five-minute refresh window." }],
+        dependencyIssueNumbers: [52],
+      },
+      {
+        ...parent31,
+        comments: [{ authorLogin: "architect", body: "Keep refresh state per account." }],
+      },
+      {
+        ...issue47,
+        number: 52,
+        title: "Related contract",
+        comments: [{ body: "The original author was deleted." }],
+      },
+    ] }),
+  });
+
+  const prompt = await resolver.resolve({
+    kind: "implementation",
+    instruction: "Go.",
+    issueNumbers: [47],
+  });
+
+  assert.ok(prompt?.text.includes("#### @maintainer\n\nUse a five-minute refresh window."));
+  assert.ok(prompt?.text.includes("#### @architect\n\nKeep refresh state per account."));
+  assert.ok(prompt?.text.includes("#### @ghost\n\nThe original author was deleted."));
+});
+
+test("caps each issue at its newest comments and marks omitted discussion", async () => {
+  const comments = Array.from({ length: 5 }, (_, index) => ({
+    authorLogin: `author-${index + 1}`,
+    body: `Comment ${index + 1}`,
+  }));
+  const prompt = await new PromptResolver({
+    github: new FakeGitHub({ issues: [{ ...issue47, comments }] }),
+    limits: { issueCommentCount: 2 },
+  }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47] });
+
+  assert.doesNotMatch(prompt?.text ?? "", /Comment [123]/);
+  assert.match(prompt?.text ?? "", /3 older comments were omitted; showing the newest 2/);
+  assert.ok(prompt?.text.includes("Comment 4"));
+  assert.ok(prompt?.text.includes("Comment 5"));
+  assert.ok((prompt?.text.indexOf("Comment 4") ?? -1) < (prompt?.text.indexOf("Comment 5") ?? -1));
+});
+
 test("a global review budget stops only after a complete issue, description, or diff", async () => {
   const body = `Contract\n${"x".repeat(25_000)}\nFinal requirement.`;
   const description = `Description\n${"y".repeat(25_000)}\nDescription end.`;
@@ -222,24 +273,36 @@ test("the global budget counts headings and instructions and stops related issue
 
 test("a document crossing the budget is complete and later primary issues are omitted", async () => {
   const body = `${"x".repeat(500)}\nFinal requirement.`;
+  const comment = "The final discussion remains part of the complete issue document.";
   const prompt = await new PromptResolver({
-    github: new FakeGitHub({ issues: [{ ...issue47, body }, parent31] }),
+    github: new FakeGitHub({ issues: [{
+      ...issue47,
+      body,
+      comments: [{ authorLogin: "maintainer", body: comment }],
+    }, parent31] }),
     limits: { maxPromptChars: 100 },
   }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47, 31] });
   assert.ok(prompt?.text.includes(body));
+  assert.ok(prompt?.text.includes(comment));
   assert.equal(prompt?.text.includes(parent31.body), false);
   assert.deepEqual(prompt?.sources.map((source) => source.number), [47]);
 });
 
 test("brainstorm context preserves complete issue bodies", async () => {
   const body = `Context\n${"x".repeat(25_000)}\nFinal requirement.`;
+  const comment = "Later discussion narrows the context.";
   const prompt = await new PromptResolver({
-    github: new FakeGitHub({ issues: [{ ...issue47, body }, parent31] }),
+    github: new FakeGitHub({ issues: [{
+      ...issue47,
+      body,
+      comments: [{ authorLogin: "maintainer", body: comment }],
+    }, parent31] }),
     limits: { maxPromptChars: 100 },
   }).resolve({ kind: "brainstorm", relatedIssueNumbers: [47, 31] });
 
   assert.ok(prompt);
   assert.ok(prompt.text.includes(body));
+  assert.ok(prompt.text.includes(comment));
   assert.deepEqual(prompt.sources.map((source) => source.number), [47]);
   assert.equal(prompt.text.includes(parent31.body), false);
 });
@@ -247,7 +310,10 @@ test("brainstorm context preserves complete issue bodies", async () => {
 test("resolves a review prompt with the contract and the diff", async () => {
   const resolver = new PromptResolver({
     github: new FakeGitHub({
-      issues: [issue47],
+      issues: [{
+        ...issue47,
+        comments: [{ authorLogin: "reviewer", body: "The timeout must remain configurable." }],
+      }],
       pullRequests: [pull42],
       diff: "--- a/src/auth.ts\n+++ b/src/auth.ts",
     }),
@@ -264,6 +330,7 @@ test("resolves a review prompt with the contract and the diff", async () => {
   assert.ok(prompt?.text.includes("#42"));
   assert.ok(prompt?.text.includes("Add token refresh"));
   assert.ok(prompt?.text.includes("error handling"));
+  assert.ok(prompt?.text.includes("#### @reviewer\n\nThe timeout must remain configurable."));
   assert.ok(prompt?.text.includes("--- a/src/auth.ts"));
   assert.deepEqual(
     prompt?.sources.map((source) => source.kind),
@@ -314,6 +381,7 @@ test("recursive issue context terminates across parent and reference cycles", as
     body: "Uses the auth contract.",
     labels: ["[AI]-afk"],
     state: "open",
+    comments: [],
     dependencyIssueNumbers: [31],
   };
   const github = new FakeGitHub({
@@ -343,6 +411,7 @@ test("implementation context can stop after the primary issue's direct reference
     body: "Only the recursively referenced body.",
     labels: ["[AI]-afk"],
     state: "open",
+    comments: [],
   };
   const github = new FakeGitHub({
     issues: [
@@ -373,6 +442,7 @@ test("recursive issue context has a hard node bound even without a cycle", async
     body: `Body ${index + 1}`,
     labels: ["[AI]-afk"],
     state: "open",
+    comments: [],
     dependencyIssueNumbers: index === 9 ? [] : [index + 2],
   }));
   const github = new FakeGitHub({ issues });

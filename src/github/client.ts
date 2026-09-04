@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 
 import type {
   GitHubPromptSource,
+  IssueCommentSnapshot,
   IssueSnapshot,
   PullRequestSnapshot,
 } from "../claude/prompts.js";
@@ -291,6 +292,32 @@ interface IssueNumberPage extends PageInfo {
   readonly numbers: readonly number[];
 }
 
+interface IssueCommentPage extends PageInfo {
+  readonly comments: IssueSnapshot["comments"];
+}
+
+function parseIssueCommentPage(value: unknown, context: string): IssueCommentPage {
+  if (value === undefined || value === null) {
+    return { comments: [], nextCursor: undefined };
+  }
+  const connection = record(value, context);
+  const nodes = connection.nodes === undefined ? [] : array(connection.nodes, `${context}.nodes`);
+  const comments = nodes.map((node, index) => {
+    const entry = record(node, `${context}.nodes[${index}]`);
+    const authorLogin = entry.author === undefined || entry.author === null
+      ? undefined
+      : string(record(entry.author, `${context}.nodes[${index}].author`).login, `${context}.nodes[${index}].author.login`);
+    return {
+      ...(authorLogin === undefined ? {} : { authorLogin }),
+      body: string(entry.body ?? "", `${context}.nodes[${index}].body`),
+    };
+  });
+  const paging = connection.pageInfo === undefined
+    ? { nextCursor: undefined }
+    : pageInfo(connection.pageInfo, `${context}.pageInfo`);
+  return { comments, nextCursor: paging.nextCursor };
+}
+
 function parseIssueNumberPage(value: unknown, context: string): IssueNumberPage {
   if (value === undefined || value === null) {
     return { numbers: [], nextCursor: undefined };
@@ -321,6 +348,7 @@ interface ParsedIssue {
   readonly snapshot: IssueSnapshot;
   readonly nextLabelCursor: string | undefined;
   readonly nextSubIssueCursor: string | undefined;
+  readonly nextCommentCursor: string | undefined;
 }
 
 function parseIssue(
@@ -331,6 +359,7 @@ function parseIssue(
   const item = record(value, context);
   const labelPage = parseLabelPage(item.labels, `${context}.labels`);
   const subIssuePage = parseIssueNumberPage(item.subIssues, `${context}.subIssues`);
+  const commentPage = parseIssueCommentPage(item.comments, `${context}.comments`);
   const parent = item.parent === null || item.parent === undefined
     ? undefined
     : integer(record(item.parent, `${context}.parent`).number, `${context}.parent.number`);
@@ -342,6 +371,7 @@ function parseIssue(
       body,
       labels: labelPage.labels,
       state: state(item.state, `${context}.state`),
+      comments: commentPage.comments,
       ...(parent === undefined ? {} : { parentIssueNumber: parent }),
       dependencyIssueNumbers: [...new Set([
         ...subIssuePage.numbers,
@@ -350,6 +380,7 @@ function parseIssue(
     },
     nextLabelCursor: labelPage.nextCursor,
     nextSubIssueCursor: subIssuePage.nextCursor,
+    nextCommentCursor: commentPage.nextCursor,
   };
 }
 
@@ -421,11 +452,12 @@ function repositoryFromGraphql(value: unknown): Record<string, unknown> {
   return record(record(record(value, "GraphQL response").data, "data").repository, "data.repository");
 }
 
-const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}}}}}`;
+const ISSUE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){number title body state labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} parent{number} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}} comments(first:100){nodes{author{login} body} pageInfo{hasNextPage endCursor}}}}}`;
 const OPEN_ISSUES_QUERY = `query($owner:String!,$repo:String!,$after:String){repository(owner:$owner,name:$repo){issues(first:100,after:$after,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number title body createdAt labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}} subIssues(first:100){nodes{number} pageInfo{hasNextPage endCursor}} blockedBy(first:100){nodes{number state} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}`;
 const ISSUE_LABELS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){labels(first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_BLOCKERS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){blockedBy(first:100,after:$after){nodes{number state} pageInfo{hasNextPage endCursor}}}}}`;
 const ISSUE_SUBISSUES_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){subIssues(first:100,after:$after){nodes{number} pageInfo{hasNextPage endCursor}}}}}`;
+const ISSUE_COMMENTS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$repo){issue(number:$number){comments(first:100,after:$after){nodes{author{login} body} pageInfo{hasNextPage endCursor}}}}}`;
 const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number title body state merged mergeable url headRefName baseRefName headRefOid mergeCommit{oid} closingIssuesReferences(first:10){nodes{number}} reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}`;
 
 export class GitHubClient implements GitHubPromptSource {
@@ -564,13 +596,15 @@ export class GitHubClient implements GitHubPromptSource {
     const issue = repositoryFromGraphql(data).issue;
     if (issue === null) return undefined;
     const parsed = parseIssue(issue, "data.repository.issue", repository);
-    const [remainingLabels, remainingSubIssues] = await Promise.all([
+    const [remainingLabels, remainingSubIssues, remainingComments] = await Promise.all([
       this.#remainingLabels(number, parsed.nextLabelCursor),
       this.#remainingSubIssues(number, parsed.nextSubIssueCursor),
+      this.#remainingComments(number, parsed.nextCommentCursor),
     ]);
     return {
       ...parsed.snapshot,
       labels: [...parsed.snapshot.labels, ...remainingLabels],
+      comments: [...parsed.snapshot.comments, ...remainingComments],
       dependencyIssueNumbers: [...new Set([
         ...(parsed.snapshot.dependencyIssueNumbers ?? []),
         ...remainingSubIssues,
@@ -918,6 +952,23 @@ export class GitHubClient implements GitHubPromptSource {
       found.push(...page.numbers);
       if (page.nextCursor !== undefined && page.nextCursor === cursor) {
         throw new GitHubBoundaryError("malformed-output", "data.repository.issue.subIssues.pageInfo did not advance its cursor");
+      }
+      cursor = page.nextCursor;
+    }
+    return found;
+  }
+
+  async #remainingComments(number: number, initialCursor: string | undefined): Promise<IssueSnapshot["comments"]> {
+    const found: IssueCommentSnapshot[] = [];
+    let cursor = initialCursor;
+    while (cursor !== undefined) {
+      const data = await this.#graphql(ISSUE_COMMENTS_QUERY, { number, after: cursor });
+      const issue = repositoryFromGraphql(data).issue;
+      if (issue === null || issue === undefined) break;
+      const page = parseIssueCommentPage(record(issue, "data.repository.issue").comments, "data.repository.issue.comments");
+      found.push(...page.comments);
+      if (page.nextCursor !== undefined && page.nextCursor === cursor) {
+        throw new GitHubBoundaryError("malformed-output", "data.repository.issue.comments.pageInfo did not advance its cursor");
       }
       cursor = page.nextCursor;
     }
