@@ -35,6 +35,7 @@ export const ABOARD_SETTINGS = [
   "aboard.manager.transcriptBackups",
   "aboard.autoRun.review",
   "aboard.autoRun.branchMode",
+  "aboard.autoRun.exploreBeforeImplement",
   "aboard.autoRun.recursiveIssueReferences",
   "aboard.autoRun.prompt",
   "aboard.autoRun.pauseAfterHitl",
@@ -179,6 +180,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       // Automated review stays opt-in so a run cannot silently expand its
       // authority from implementation into review.
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
+      exploreBeforeImplement: flag(reader, "aboard.autoRun.exploreBeforeImplement", false, diagnostics),
       recursiveIssueReferences: flag(reader, "aboard.autoRun.recursiveIssueReferences", false, diagnostics),
       permanentPrompt: text(reader, "aboard.autoRun.prompt", "", diagnostics),
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),

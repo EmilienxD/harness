@@ -123,6 +123,7 @@ function fixedPlanRecord(): AutoRunRecord {
     attempt: 2,
     settings: {
       review: true,
+      exploreBeforeImplement: true,
       recursiveIssueReferences: true,
       mergeStrategy: "merge",
       mergeRunPullRequest: true,
@@ -166,6 +167,7 @@ test("a version-2 record round-trips every discriminated state it can hold", asy
   assert.deepEqual(await store.load(), record);
   const raw = await readFile(runtime.state("auto-run.json"), "utf8");
   assert.match(raw, /"permanentPrompt": "run browser tests"/);
+  assert.match(raw, /"exploreBeforeImplement": true/);
   assert.match(raw, /"additionalGuideline": "keep fixtures small"/);
   await store.clear();
   assert.equal(await store.load(), undefined);
@@ -250,7 +252,9 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, checkpoint: "publishing" },
     { ...valid, attempt: 0 },
     { ...valid, settings: { ...valid.settings, mergeStrategy: "fast-forward" } },
+    { ...valid, settings: { ...valid.settings, exploreBeforeImplement: "yes" } },
     { ...valid, settings: { ...valid.settings, recursiveIssueReferences: "yes" } },
+    { ...valid, workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35, continuable: true } },
     { ...valid, settings: undefined },
     { ...valid, plan: [{ number: 34 }] },
     { ...valid, branchShas: { "abd/run/return": "short" } },
@@ -266,6 +270,15 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "recursiveIssueReferences")),
   });
   assert.equal(priorRecord?.version === 2 ? priorRecord.settings.recursiveIssueReferences : undefined, false);
+  const priorExplorationRecord = parseAutoRunRecord({
+    ...valid,
+    settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "exploreBeforeImplement")),
+  });
+  assert.equal(priorExplorationRecord?.version === 2 ? priorExplorationRecord.settings.exploreBeforeImplement : undefined, false);
+  assert.equal(parseAutoRunRecord({
+    ...valid,
+    workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35 },
+  })?.version, 2);
   // An authoritative record is all-or-nothing: silently turning damaged
   // progress into pending work could repeat an issue or a side effect.
   const damaged = parseAutoRunRecord({ ...valid, progress: { ...valid.progress, "35": { state: "halfway" } } });

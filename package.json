@@ -525,6 +525,11 @@
           "default": "per-issue",
           "description": "Use one branch and pull request per issue, or commit all issues directly to the run session branch and use only its cumulative pull request."
         },
+        "aboard.autoRun.exploreBeforeImplement": {
+          "type": "boolean",
+          "default": false,
+          "description": "Launch a visible read-only Explore agent immediately before each fresh auto-run implementer. Its bounded codebase report is passed directly to the implementer and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
+        },
         "aboard.autoRun.recursiveIssueReferences": {
           "type": "boolean",
           "default": false,

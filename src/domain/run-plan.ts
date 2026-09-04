@@ -28,6 +28,7 @@ export interface FrozenIssue {
 export interface FrozenRunSettings {
   readonly branchMode?: AutoRunBranchMode;
   readonly review: boolean;
+  readonly exploreBeforeImplement: boolean;
   readonly recursiveIssueReferences: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
@@ -142,7 +143,7 @@ export interface AutoRunRecord {
   readonly workerSession?: {
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
-    readonly type: "implementer" | "pr-doctor-afk";
+    readonly type: "implementer" | "pr-doctor-afk" | "Explore";
     readonly issueNumber: number;
     /** The worker itself failed or returned an unusable completion, rather than a later phase failing. */
     readonly continuable?: true;

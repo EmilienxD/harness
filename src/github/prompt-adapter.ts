@@ -29,12 +29,21 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
       if (instruction === undefined || instruction.length === 0) return undefined;
       return this.prompts.resolve({ kind: "free-form", instruction });
     }
+    if (input.type === "Explore" && input.issues !== undefined) {
+      return this.prompts.resolve({
+        kind: "exploration",
+        instruction: input.prompt ?? "Explore the issue's implementation context.",
+        issueNumbers: input.issues,
+        ...(input.recursiveIssueReferences === undefined ? {} : { recursiveIssueReferences: input.recursiveIssueReferences }),
+      });
+    }
     if (input.type === "implementer" && input.issues !== undefined) {
       return appendAutoRunGuidance(
         await this.prompts.resolve({
           kind: "implementation",
           instruction: input.prompt ?? "Address the issue.",
           issueNumbers: input.issues,
+          ...(input.codebaseContext === undefined ? {} : { codebaseContext: input.codebaseContext }),
           ...(input.recursiveIssueReferences === undefined ? {} : { recursiveIssueReferences: input.recursiveIssueReferences }),
         }),
         input.permanentPrompt,

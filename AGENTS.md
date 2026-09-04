@@ -121,10 +121,12 @@ User <-> VS Code UI and terminals <-> extension host
 | `implementer` | Implements one resolved issue and leaves changes uncommitted | Auto-run only |
 | `pr-doctor-afk` | Reviews and directly fixes an implementation when unattended review is allowed | Auto-run or `review_pr` |
 | `pr-doctor-hitl` | Reports findings, waits for the user, then applies only approved fixes | Auto-run or `review_pr` |
-| `Explore` | Built-in read-only repository exploration | Delegated exploration only |
+| `Explore` | Built-in read-only repository exploration | Delegated exploration or optional auto-run preflight |
 | `general-purpose` | Claude Code's unmodified default session, interactive, result-delivering, or a queued one-shot | Manager or user workflow |
 
 The scaffolded definitions are the detailed authority for role prompts, tool allowlists, models, effort, and colors. Keep automated worker prompts self-sufficient. The Manager cannot directly launch `implementer` or either pr-doctor.
+
+When `aboard.autoRun.exploreBeforeImplement` is enabled, auto-run launches a visible read-only Explore worker after preparing the current issue branch and immediately before each fresh implementer. The bounded report is passed directly to that implementer and published on the issue as best-effort durable context. Resuming the exact implementer session does not explore again.
 
 ### GitHub Work Model
 
@@ -150,7 +152,10 @@ flowchart TD
   SELECT -->|one issue at a time| VALIDATE{"Does the repository still<br/>match the frozen plan?"}
   VALIDATE -->|no| BREAK["Extension stops the run<br/>and shows it as broken"]
   VALIDATE -->|yes| BRANCH["Extension + local Git<br/>fast-forward the session branch and checkout/create aboard branch"]
-  BRANCH --> IMPLEMENTER["Visible implementer terminal"]
+  BRANCH --> EXPLORE{"Fresh exploration enabled?"}
+  EXPLORE -->|yes| EXPLORER["Visible read-only Explore terminal<br/>report passed to implementer<br/>and published on the issue"]
+  EXPLORE -->|no| IMPLEMENTER["Visible implementer terminal"]
+  EXPLORER --> IMPLEMENTER
   IMPLEMENTER -->|final message| COMMENT["Extension + GitHub<br/>post the implementer's summary on the issue"]
   IMPLEMENTER -->|uncommitted working-tree edits only| COMMIT["Extension + local Git<br/>stage, commit, and push"]
   COMMIT --> PR["Extension + GitHub<br/>open PR into the session branch, with Closes issue"]

@@ -17,6 +17,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 1,
     settings: {
       review: false,
+      exploreBeforeImplement: false,
       recursiveIssueReferences: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
@@ -86,6 +87,7 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     warnings: [],
     emptyReason: undefined,
     reviewMode: false,
+    exploresBeforeImplement: false,
     pauseAfterHitl: false,
     isolatedWorkspace: false,
     keepsWorkspace: false,
@@ -152,6 +154,7 @@ test("the live forecast shows loading feedback, then the planned issues in execu
   const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
     .format(new Date("2026-01-01T00:00:00.000Z"));
   assert.match(item.tooltip, new RegExp(`Updated at: ${formatted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(item.tooltip, /Fresh Explore context off/);
   assert.doesNotMatch(item.tooltip, /Live forecast|2026-01-01T00:00:00\.000Z/);
   assert.equal(item.collapsible, true);
   const rows = model.children(root).map((node) => model.item(node));
@@ -347,7 +350,7 @@ test("a live run outranks any recovery question about its own record", () => {
   const { item } = rootItem({ persisted: record(), state: state() });
   assert.equal(item.contextValue, "aboard.autoRun.active");
   assert.match(item.description, /await-approval · issue #35 · 1\/3/);
-  assert.equal(item.icon, "circle-filled");
+  assert.equal(item.icon, "sync~spin");
 });
 
 test("a run waiting for the user is its own state, with its own actions", () => {
@@ -438,7 +441,7 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
     "#36 Trim the cache",
   ]);
   assert.deepEqual(rows.map((row) => row.description), ["done · PR #56", "current · await-approval", "pending"]);
-  assert.deepEqual(rows.map((row) => row.icon), ["pass", "sync~spin", "circle-outline"]);
+  assert.deepEqual(rows.map((row) => row.icon), ["pass", "circle-filled", "circle-outline"]);
   assert.deepEqual(rows.map((row) => row.contextValue), [
     "aboard.autoRun.issue.done",
     "aboard.autoRun.issue.current",
@@ -495,12 +498,13 @@ test("a row shows the latest observed title while the plan keeps the one it froz
 });
 
 test("the tooltip names where the work goes and what the run froze", () => {
-  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true } });
+  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true, exploreBeforeImplement: true } });
   const { item } = rootItem({ persisted: isolated, state: state() });
   assert.match(item.tooltip, /Session branch: abd\/run\/test/);
   assert.match(item.tooltip, /Target branch: feature\/wip/);
   assert.match(item.tooltip, /Working in C:\/checkouts\/run_test\/repo/);
   assert.match(item.tooltip, /Review on/);
+  assert.match(item.tooltip, /Fresh Explore context on/);
 
   const inPlace = rootItem({ persisted: record(), state: state() });
   assert.match(inPlace.item.tooltip, /Working in your checkout/);

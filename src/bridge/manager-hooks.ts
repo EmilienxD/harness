@@ -687,7 +687,7 @@ function describeAutoRunDryRun(result: AutoRunDryRunResult): string {
     result.isolatedWorkspace
       ? `- Workspace: create a separate checkout; your checkout and branch stay untouched${result.keepsWorkspace ? ", and the checkout is kept when the run drains" : ", and the checkout is removed after a clean drain"}.`
       : "- Workspace: use this checkout; it must be clean, aboard moves HEAD during the run, restores the current branch after success, cancellation, or interruption, and keeps the active run branch on failure so you can fix it there.",
-    `- Agents: visible implementers run one at a time; [AI]-chrome issues enable Claude in Chrome; pull-request review is ${result.reviewMode ? "on" : "off"}.`,
+    `- Agents: visible implementers run one at a time; fresh Explore context is ${result.exploresBeforeImplement ? "on" : "off"}; [AI]-chrome issues enable Claude in Chrome; pull-request review is ${result.reviewMode ? "on" : "off"}.`,
     ...(result.permanentPrompt === undefined
       ? []
       : ["- Configured auto-run note: append this section to every implementer and pr-doctor prompt:", "", "# Configured Auto Run Note", "", result.permanentPrompt]),

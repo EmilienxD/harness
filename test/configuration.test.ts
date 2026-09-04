@@ -12,6 +12,7 @@ test("configuration validates untrusted values and reports actionable fallbacks"
     ["aboard.autoRun.mergeStrategy", "cherry-pick"],
     ["aboard.autoRun.review", "yes"],
     ["aboard.autoRun.branchMode", "one"],
+    ["aboard.autoRun.exploreBeforeImplement", "yes"],
     ["aboard.autoRun.recursiveIssueReferences", "yes"],
     ["aboard.autoRun.prompt", 42],
     ["aboard.autoRun.discardBehavior", "delete-everything"],
@@ -23,9 +24,9 @@ test("configuration validates untrusted values and reports actionable fallbacks"
   assert.deepEqual(result.value.managerDisallowedTools, []);
   // Discard falls back to the conservative behavior, not to the destructive one
   // an unrecognised value happens to look like.
-  assert.deepEqual(result.value.autoRun, { branchMode: "per-issue", review: false, recursiveIssueReferences: false, permanentPrompt: "", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30, discardBehavior: "record-only", worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } });
+  assert.deepEqual(result.value.autoRun, { branchMode: "per-issue", review: false, exploreBeforeImplement: false, recursiveIssueReferences: false, permanentPrompt: "", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 30, discardBehavior: "record-only", worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } });
   assert.equal(result.value.managerStopTimeoutSeconds, 3600);
-  assert.equal(result.diagnostics.length, 10);
+  assert.equal(result.diagnostics.length, 11);
   assert.ok(result.diagnostics.every((item) => item.message.includes(item.setting)));
 });
 
@@ -36,6 +37,7 @@ test("configuration accepts every supported launch and review setting", () => {
     "aboard.manager.disallowedTools": ["Bash", "Read(./src/**)"],
     "aboard.autoRun.review": true,
     "aboard.autoRun.branchMode": "single-branch",
+    "aboard.autoRun.exploreBeforeImplement": true,
     "aboard.autoRun.recursiveIssueReferences": true,
     "aboard.autoRun.prompt": "  run browser tests  ",
     "aboard.autoRun.pauseAfterHitl": true,
@@ -56,7 +58,7 @@ test("configuration accepts every supported launch and review setting", () => {
   assert.equal(result.value.bridgePort, 0);
   assert.deepEqual(result.value.managerDisallowedTools, ["Bash", "Read(./src/**)"]);
   assert.deepEqual(result.value.autoRun, {
-    branchMode: "single-branch", review: true, recursiveIssueReferences: true, permanentPrompt: "run browser tests", pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15,
+    branchMode: "single-branch", review: true, exploreBeforeImplement: true, recursiveIssueReferences: true, permanentPrompt: "run browser tests", pauseAfterHitl: true, mergeStrategy: "rebase", mergeRunPullRequest: true, pollSeconds: 15,
     discardBehavior: "full-cleanup",
     // The root is trimmed: it becomes a path, and a stray space in a settings
     // file would produce a directory nobody meant to create.

@@ -52,6 +52,8 @@ export type DiscardBehavior = (typeof DISCARD_BEHAVIORS)[number];
 export interface AutoRunSettings {
   readonly branchMode?: AutoRunBranchMode;
   readonly review: boolean;
+  /** Whether a read-only Explore worker prepares fresh context for each fresh implementer. */
+  readonly exploreBeforeImplement: boolean;
   /** Whether issue context follows references beyond the primary issue's direct references. */
   readonly recursiveIssueReferences: boolean;
   /** Persistent user-authored note added to every auto-run agent prompt. */
@@ -99,6 +101,7 @@ export type AutoRunDryRunResult =
        */
       readonly emptyReason: string | undefined;
       readonly reviewMode: boolean;
+      readonly exploresBeforeImplement: boolean;
       readonly branchMode?: AutoRunBranchMode;
       readonly pauseAfterHitl: boolean;
       /** Persistent configured note that would be added to every auto agent. */
@@ -366,6 +369,22 @@ export function issueCommentBody(summary: string, commitMessage?: string): strin
   const trimmed = [heading, report].filter((part) => part.length > 0).join("\n\n");
   if (trimmed.length === 0) return undefined;
   return trimmed.length <= ISSUE_COMMENT_MAX_CHARS ? trimmed : `${trimmed.slice(0, ISSUE_COMMENT_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+const AUTO_RUN_EXPLORATION_COMMENT_PREFIX = "<!-- aboard:auto-run-exploration ";
+
+export function isAutoRunExplorationComment(body: string): boolean {
+  return body.trimStart().startsWith(AUTO_RUN_EXPLORATION_COMMENT_PREFIX);
+}
+
+export function explorationCommentBody(input: {
+  readonly runId: string;
+  readonly issueNumber: number;
+  readonly headSha: string;
+  readonly report: string;
+}): string {
+  const body = `${AUTO_RUN_EXPLORATION_COMMENT_PREFIX}run=${input.runId} issue=${input.issueNumber} head=${input.headSha} -->\n\n## Aboard codebase context\n\n_Generated from \`${input.headSha.slice(0, 12)}\` and its current working tree immediately before implementation._\n\n${input.report.trim()}`;
+  return issueCommentBody(body) ?? body;
 }
 
 function escapeMarkdownInline(value: string): string {

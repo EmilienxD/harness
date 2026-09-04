@@ -209,6 +209,31 @@ test("renders issue comments with each implementation issue document", async () 
   assert.ok(prompt?.text.includes("#### @ghost\n\nThe original author was deleted."));
 });
 
+test("injects fresh Explore context once and omits generated context comments", async () => {
+  const report = "Use src/auth/refresh.ts and preserve per-account state.";
+  const generated = `<!-- aboard:auto-run-exploration run=run_test issue=47 head=${"a".repeat(40)} -->\n\n## Aboard codebase context\n\n${report}`;
+  const prompt = await new PromptResolver({
+    github: new FakeGitHub({ issues: [{
+      ...issue47,
+      parentIssueNumber: undefined,
+      comments: [
+        { authorLogin: "maintainer", body: "Keep the timeout configurable." },
+        { authorLogin: "maintainer", body: generated },
+      ],
+    }] }),
+  }).resolve({
+    kind: "implementation",
+    instruction: "Go.",
+    issueNumbers: [47],
+    codebaseContext: report,
+  });
+
+  assert.match(prompt?.text ?? "", /## Fresh codebase context/);
+  assert.match(prompt?.text ?? "", /Keep the timeout configurable/);
+  assert.doesNotMatch(prompt?.text ?? "", /aboard:auto-run-exploration/);
+  assert.equal((prompt?.text.match(/Use src\/auth\/refresh\.ts/g) ?? []).length, 1);
+});
+
 test("caps each issue at its newest comments and marks omitted discussion", async () => {
   const comments = Array.from({ length: 5 }, (_, index) => ({
     authorLogin: `author-${index + 1}`,
@@ -587,4 +612,22 @@ test("a builtin type's prompt follows its launch mode, not its type", async () =
   const fallback = await adapter.resolve({ type: "Explore", description: "d" }, { interactive: false });
   assert.notEqual(fallback, undefined);
   assert.ok(fallback!.text.length > 0);
+});
+
+test("an issue-bound Explore launch receives resolved issue context", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
+  const github = new FakeGitHub({ issues: [issue47, parent31] });
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github }));
+
+  const prompt = await adapter.resolve({
+    type: "Explore",
+    description: "explore issue 47",
+    issues: [47],
+    prompt: "Map relevant files and tests.",
+  }, { interactive: false });
+
+  assert.match(prompt?.text ?? "", /Explore implementation context for issue #47/);
+  assert.match(prompt?.text ?? "", /Refresh the access token before it expires/);
+  assert.match(prompt?.text ?? "", /The auth subsystem is replaced end to end/);
+  assert.deepEqual(github.issueRequests, [47, 31]);
 });

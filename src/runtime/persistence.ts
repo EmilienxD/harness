@@ -127,6 +127,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   const pollSeconds = positiveInteger(value.pollSeconds);
   if (
     typeof value.review !== "boolean"
+    || (value.exploreBeforeImplement !== undefined && typeof value.exploreBeforeImplement !== "boolean")
     || (value.recursiveIssueReferences !== undefined && typeof value.recursiveIssueReferences !== "boolean")
     || typeof value.mergeRunPullRequest !== "boolean" || typeof value.pauseAfterHitl !== "boolean"
     || mergeStrategy === undefined || pollSeconds === undefined
@@ -144,6 +145,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   return {
     ...(branchMode === undefined ? {} : { branchMode }),
     review: value.review,
+    exploreBeforeImplement: value.exploreBeforeImplement ?? false,
     recursiveIssueReferences: value.recursiveIssueReferences ?? false,
     mergeStrategy,
     mergeRunPullRequest: value.mergeRunPullRequest,
@@ -339,9 +341,9 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
     workerSession === undefined
     || nonEmptyString(workerSession.agentId) === undefined
     || nonEmptyString(workerSession.sessionId) === undefined
-    || (workerSession.type !== "implementer" && workerSession.type !== "pr-doctor-afk")
+    || (workerSession.type !== "implementer" && workerSession.type !== "pr-doctor-afk" && workerSession.type !== "Explore")
     || positiveInteger(workerSession.issueNumber) === undefined
-    || (workerSession.continuable !== undefined && workerSession.continuable !== true)
+    || (workerSession.continuable !== undefined && (workerSession.continuable !== true || workerSession.type === "Explore"))
   )) return undefined;
   if (currentIssue !== undefined && (!issueNumbers.has(String(currentIssue)) || progress[String(currentIssue)]?.state !== "current")) return undefined;
   return {
@@ -368,7 +370,7 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
     ...(workerSession === undefined ? {} : { workerSession: {
       agentId: workerSession.agentId as AgentId,
       sessionId: workerSession.sessionId as SessionId,
-      type: workerSession.type as "implementer" | "pr-doctor-afk",
+      type: workerSession.type as "implementer" | "pr-doctor-afk" | "Explore",
       issueNumber: workerSession.issueNumber as number,
       ...(workerSession.continuable === true ? { continuable: true as const } : {}),
     } }),

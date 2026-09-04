@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import {
   autoRunTargetBranchBlocker,
   autoRunMessage,
+  explorationCommentBody,
   issueClosedComment,
   issueCommentBody,
   nextStep,
@@ -155,7 +156,7 @@ export interface AutoRunEngineOptions {
 
 export interface AutoRunState {
   readonly runId: string;
-  readonly phase: AutoRunPhase;
+  readonly phase: AutoRunPhase | "explore";
   readonly currentIssue: number | undefined;
   readonly completedCount: number;
   readonly totalCount: number;
@@ -168,6 +169,7 @@ export type AutoRunStartResult =
       readonly started: true;
       readonly runId: string;
       readonly reviewMode: boolean;
+      readonly exploresBeforeImplement: boolean;
       readonly branchMode: "per-issue" | "single-branch";
       readonly sessionBranch: string;
       readonly sessionBase: string;
@@ -201,6 +203,8 @@ class StructuralError extends Error {
 
 /** The active auto-run worker settled because this attempt was aborted. */
 class AutomatedWorkerCancelled extends Error {}
+
+const EXPLORATION_REPORT_MAX_CHARS = 6_000;
 
 function samePreview(left: InspectedAutoRunPreview, right: InspectedAutoRunPreview): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -418,6 +422,7 @@ export class AutoRunEngine {
       warnings,
       emptyReason,
       reviewMode: settings.review,
+      exploresBeforeImplement: settings.exploreBeforeImplement,
       branchMode: settings.branchMode ?? "per-issue",
       pauseAfterHitl: settings.pauseAfterHitl,
       ...permanentPromptProperty(settings.permanentPrompt),
@@ -517,6 +522,7 @@ export class AutoRunEngine {
     const frozen: FrozenRunSettings = {
       branchMode: settings.branchMode ?? "per-issue",
       review: settings.review,
+      exploreBeforeImplement: settings.exploreBeforeImplement,
       recursiveIssueReferences: settings.recursiveIssueReferences,
       mergeStrategy: settings.mergeStrategy,
       mergeRunPullRequest: settings.mergeRunPullRequest,
@@ -568,6 +574,7 @@ export class AutoRunEngine {
       started: true,
       runId,
       reviewMode: frozen.review,
+      exploresBeforeImplement: frozen.exploreBeforeImplement,
       branchMode: frozen.branchMode ?? "per-issue",
       sessionBranch: record.sessionBranch,
       sessionBase: record.targetBranch ?? await this.options.git.defaultBranch(),
@@ -637,6 +644,7 @@ export class AutoRunEngine {
       started: true,
       runId: record.runId,
       reviewMode: record.settings.review,
+      exploresBeforeImplement: record.settings.exploreBeforeImplement,
       branchMode: record.settings.branchMode ?? "per-issue",
       sessionBranch: record.sessionBranch,
       sessionBase: record.targetBranch ?? await this.options.git.defaultBranch(),
@@ -1452,12 +1460,20 @@ export class AutoRunEngine {
 
   async #implement(issue: FrozenIssue, signal: AbortSignal): Promise<ImplementerCompletion> {
     const continued = this.#takeContinuation("implementer", issue.number);
+    const codebaseContext = continued === undefined && this.#current.settings.exploreBeforeImplement
+      ? await this.#explore(issue, signal)
+      : undefined;
+    if (codebaseContext !== undefined) {
+      await this.#validate();
+      this.#publishIssuePhase(issue, "implement");
+    }
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
       ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
       : await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
       recursiveIssueReferences: this.#current.settings.recursiveIssueReferences,
+      ...(codebaseContext === undefined ? {} : { codebaseContext }),
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
@@ -1486,6 +1502,47 @@ export class AutoRunEngine {
     return parsed.completion;
   }
 
+  async #explore(issue: FrozenIssue, signal: AbortSignal): Promise<string> {
+    await this.#validate();
+    this.#publishIssuePhase(issue, "explore");
+    const headSha = await this.#git.headSha(false);
+    const outcome = await this.options.launcher.runAutomated({
+      type: "Explore",
+      issues: [issue.number],
+      recursiveIssueReferences: this.#current.settings.recursiveIssueReferences,
+      description: `explore issue ${issue.number}`,
+      prompt: "Inspect the current checkout for implementation context relevant to this issue. Use medium thoroughness. Report facts, not an implementation plan, in under 800 words: relevant tracked files and symbols, current control or data flow, patterns and invariants to preserve, tests and fixtures, likely verification commands, and unresolved uncertainties. Do not report ignored local configuration, credentials, environment values, transcripts, or long source excerpts.",
+      ...this.#isolation(),
+    }, signal);
+    this.#openTerminals.add(outcome.terminalId);
+    await this.#rememberExploration(issue, outcome);
+    if (signal.aborted) {
+      this.#closeSettledTerminal(outcome.terminalId);
+      throw new AutomatedWorkerCancelled();
+    }
+    if (outcome.result.outcome === "failed") {
+      throw new Error(`Explore failed: ${outcome.result.failure.type}`);
+    }
+
+    await this.#validate();
+    const report = boundedExplorationReport(outcome.result.lastAssistantMessage);
+    await this.#commentExploration(issue.number, headSha, report);
+    this.#closeSettledTerminal(outcome.terminalId);
+    return report;
+  }
+
+  #publishIssuePhase(issue: FrozenIssue, phase: AutoRunState["phase"]): void {
+    this.#publish({
+      runId: this.#current.runId,
+      phase,
+      currentIssue: issue.number,
+      completedCount: completedCount(this.#current),
+      totalCount: this.#current.plan.length,
+      waiting: false,
+      currentPullRequest: this.#prForIssue(issue.number) ?? this.#current.runPullRequest,
+    });
+  }
+
   async #comment(issueNumber: number, summary: string, commitMessage: string): Promise<void> {
     const body = issueCommentBody(summary, commitMessage);
     if (body === undefined) return;
@@ -1493,6 +1550,19 @@ export class AutoRunEngine {
       await this.options.github.addIssueComment(issueNumber, body);
     } catch (error) {
       this.options.log?.(`auto-run could not comment on issue #${issueNumber}: ${message(error)}`);
+    }
+  }
+
+  async #commentExploration(issueNumber: number, headSha: string, report: string): Promise<void> {
+    try {
+      await this.options.github.addIssueComment(issueNumber, explorationCommentBody({
+        runId: this.#current.runId,
+        issueNumber,
+        headSha,
+        report,
+      }));
+    } catch (error) {
+      this.options.log?.(`auto-run could not publish codebase context on issue #${issueNumber}: ${message(error)}`);
     }
   }
 
@@ -1979,6 +2049,15 @@ export class AutoRunEngine {
     this.#attach(issue.number, this.#prForIssue(issue.number));
   }
 
+  async #rememberExploration(issue: FrozenIssue, outcome: AutomatedLaunchOutcome): Promise<void> {
+    await this.#save({ ...this.#current, workerSession: {
+      agentId: outcome.agentId,
+      sessionId: outcome.sessionId,
+      type: "Explore",
+      issueNumber: issue.number,
+    } });
+  }
+
   #takeContinuation(type: "implementer" | "pr-doctor-afk", issueNumber: number): AgentSession | undefined {
     const session = this.#continuedSession;
     if (session?.identity.type !== type || session.issueNumbers?.includes(issueNumber) !== true) return undefined;
@@ -2087,6 +2166,14 @@ function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> 
     const timer = setTimeout(resolve, milliseconds);
     signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
   });
+}
+
+function boundedExplorationReport(value: string): string {
+  const report = value.trim();
+  if (report.length === 0) throw new Error("Explore returned no codebase context");
+  if (report.length <= EXPLORATION_REPORT_MAX_CHARS) return report;
+  const suffix = "\n\n[Explore report truncated by aboard]";
+  return `${report.slice(0, EXPLORATION_REPORT_MAX_CHARS - suffix.length).trimEnd()}${suffix}`;
 }
 
 function message(error: unknown): string {

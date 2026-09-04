@@ -49,6 +49,8 @@ export interface DelegationLaunchInput {
   readonly issues?: readonly number[];
   /** Whether resolved issue context follows references found in directly related issues. */
   readonly recursiveIssueReferences?: boolean;
+  /** Fresh bounded codebase evidence supplied only to an implementer. */
+  readonly codebaseContext?: string;
   readonly pullRequest?: number;
   readonly focus?: string;
   /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */

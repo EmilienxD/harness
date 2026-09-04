@@ -14,7 +14,7 @@ import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
-const SETTINGS: AutoRunSettings = { review: false, recursiveIssueReferences: false, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
+const SETTINGS: AutoRunSettings = { review: false, exploreBeforeImplement: false, recursiveIssueReferences: false, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "abd/run/test";
@@ -94,6 +94,8 @@ interface HarnessOptions {
   /** Working-tree entries reported after an implementer runs. */
   readonly producesChanges?: boolean;
   readonly implementerFails?: boolean;
+  readonly exploreFails?: boolean;
+  readonly explorationReport?: string;
   /** Final message returned by the implementer. */
   readonly implementerMessage?: string;
   /** Called once a hitl pull request has been observed as open; returns its next state. */
@@ -126,7 +128,7 @@ interface HarnessOptions {
   /** Changes a frozen classification after the worker returns, before commit. */
   readonly relabelAfterImplementer?: boolean;
   /** Leaves this automated worker pending until the run aborts it. */
-  readonly pendingWorkerType?: "implementer" | "pr-doctor-afk";
+  readonly pendingWorkerType?: "implementer" | "pr-doctor-afk" | "Explore";
   /** Adds controllable latency or failure to every remote-ref observation. */
   readonly fetch?: () => Promise<void>;
   /** Head branches GitHub reports as already having a pull request, before the run opens any. */
@@ -442,8 +444,9 @@ function harness(options: HarnessOptions = {}): Harness {
   const launcher: AutoRunLauncher = {
     runAutomated: async (input, signal) => {
       launches.push(input);
-      // Both agent types leave their work in the working tree; the engine commits.
-      if (options.producesChanges !== false) dirty = true;
+      // Implementation and review agents leave their work in the working tree;
+      // Explore is read-only.
+      if (input.type !== "Explore" && options.producesChanges !== false) dirty = true;
       if (input.type === options.pendingWorkerType) {
         await new Promise<void>((resolve) => {
           if (signal?.aborted) resolve();
@@ -460,7 +463,8 @@ function harness(options: HarnessOptions = {}): Harness {
         queue.find((entry) => entry.number === input.issues?.[0])?.labels.splice(0, Infinity, "[AI]-hitl");
       }
       const implementer = input.type === "implementer";
-      const failed = implementer && options.implementerFails === true;
+      const failed = (implementer && options.implementerFails === true)
+        || (input.type === "Explore" && options.exploreFails === true);
       return {
         agentId: `agent-${launches.length}` as AgentId,
         sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
@@ -472,7 +476,9 @@ function harness(options: HarnessOptions = {}): Harness {
               exitCode: 0,
               lastAssistantMessage: implementer
                 ? options.implementerMessage ?? "Addressed the issue.\n\n<commit>Implement requested change</commit>"
-                : "Addressed the issue.",
+                : input.type === "Explore"
+                  ? options.explorationReport ?? "Relevant code lives in src/retry.ts; verify with retry tests."
+                  : "Addressed the issue.",
               telemetry: telemetry(),
             },
       };
@@ -640,6 +646,7 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 1,
     settings: {
       review: false,
+      exploreBeforeImplement: false,
       recursiveIssueReferences: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
@@ -768,6 +775,72 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
   assert.deepEqual(context.closedTerminals, ["terminal-1"], "the successful implementer is closed as soon as its result is accepted");
   assert.equal(context.state.cleared, true);
+});
+
+test("optional exploration runs just before a fresh implementer and publishes bounded context", async () => {
+  const report = `Relevant code lives in src/retry.ts; preserve RetryPolicy and run retry tests.\n${"x".repeat(7_000)}`;
+  const context = harness({
+    settings: { exploreBeforeImplement: true, recursiveIssueReferences: true },
+    explorationReport: report,
+  });
+
+  const result = await context.engine.start();
+  assert.equal(result.started, true);
+  assert.equal(result.started && result.exploresBeforeImplement, true);
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer"]);
+  assert.equal(context.launches[0]?.issues?.[0], 34);
+  assert.equal(context.launches[0]?.recursiveIssueReferences, true);
+  assert.match(context.launches[0]?.prompt ?? "", /under 800 words/);
+  assert.equal(context.launches[1]?.codebaseContext?.length, 6_000);
+  assert.match(context.launches[1]?.codebaseContext ?? "", /\[Explore report truncated by aboard\]$/);
+  assert.equal(context.saved.some((record) => record.settings.exploreBeforeImplement), true);
+  assert.equal(context.states.some((state) => state.phase === "explore"), true);
+  assert.match(context.comments[0]?.body ?? "", /^<!-- aboard:auto-run-exploration run=run_test issue=34 head=/);
+  assert.match(context.comments[0]?.body ?? "", /Relevant code lives in src\/retry\.ts/);
+  assert.deepEqual(context.closedTerminals.slice(0, 2), ["terminal-1", "terminal-2"]);
+});
+
+test("single-branch exploration is repeated immediately before each fresh implementer", async () => {
+  const context = harness({
+    settings: { branchMode: "single-branch", exploreBeforeImplement: true },
+    issues: [
+      { number: 34, title: "first", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 35, title: "second", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+    ],
+  });
+
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer", "Explore", "implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.issues?.[0]), [34, 34, 35, 35]);
+});
+
+test("Explore failure stops recoverably before implementation", async () => {
+  const context = harness({ settings: { exploreBeforeImplement: true }, exploreFails: true });
+
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore"]);
+  assert.equal(context.gitCalls.includes("commit"), false);
+  assert.equal(context.record()?.workerSession?.type, "Explore");
+  assert.equal(context.record()?.workerSession?.continuable, undefined);
+  const outcome = context.record()?.outcome;
+  assert.match(outcome?.kind === "failed" ? outcome.reason : "", /Explore failed/);
+});
+
+test("exploration comment failure does not withhold direct context", async () => {
+  const context = harness({ settings: { exploreBeforeImplement: true }, commentFails: true });
+
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer"]);
+  assert.match(context.launches[1]?.codebaseContext ?? "", /Relevant code lives/);
+  assert.match(context.logs.join("\n"), /could not publish codebase context/);
 });
 
 test("resume creates a missing session branch from the unpublished local target", async () => {
@@ -1409,7 +1482,10 @@ test("partial work without a commit marker stops and a resume sends it to a fres
 });
 
 test("a failed run can continue its exact ended worker with one Continue message", async () => {
-  const context = harness({ implementerMessage: "Implemented half, but dependency installation is blocked." });
+  const context = harness({
+    settings: { exploreBeforeImplement: true },
+    implementerMessage: "Implemented half, but dependency installation is blocked.",
+  });
   await context.engine.start();
   await context.engine.settle();
 
@@ -1437,6 +1513,7 @@ test("a failed run can continue its exact ended worker with one Continue message
   await context.engine.settle();
 
   assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1, "no fresh worker was launched");
+  assert.equal(context.launches.filter((launch) => launch.type === "Explore").length, 1, "continuation reuses its original exploration context");
   assert.equal(context.continuations.length, 1);
   assert.equal(context.continuations[0]?.session, session);
   assert.equal(context.continuations[0]?.prompt, "Continue");
@@ -1444,7 +1521,7 @@ test("a failed run can continue its exact ended worker with one Continue message
 });
 
 test("a run with its own checkout works there, launches there, and never moves the user's HEAD", async () => {
-  const context = harness({ worktree: true, producesChanges: true });
+  const context = harness({ worktree: true, producesChanges: true, settings: { exploreBeforeImplement: true } });
   assert.equal((await context.engine.start()).started, true);
   await context.engine.settle();
 
@@ -1517,7 +1594,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   const context = harness({
     startBranch: "feature/wip",
     startDirty: true,
-    settings: { review: true, pauseAfterHitl: true, mergeRunPullRequest: true, permanentPrompt: "  run browser tests  " },
+    settings: { review: true, exploreBeforeImplement: true, pauseAfterHitl: true, mergeRunPullRequest: true, permanentPrompt: "  run browser tests  " },
     issues: [
       { number: 41, title: "Ship the UI", labels: ["[AI]-hitl", "[AI]-advanced-difficulty", "[AI]-chrome"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [42], createdAt: "2026-01-01T00:00:00.000Z" },
       { number: 42, title: "Build the API", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
@@ -1534,6 +1611,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.equal(result.sessionBranch, "abd/run/<run-id>");
   assert.equal(result.sessionBase, "feature/wip");
   assert.equal(result.reviewMode, true);
+  assert.equal(result.exploresBeforeImplement, true);
   assert.equal(result.pauseAfterHitl, true);
   assert.equal(result.permanentPrompt, "run browser tests");
   assert.equal(result.additionalGuideline, "no unit tests needed");

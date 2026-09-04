@@ -24,6 +24,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     attempt: 2,
     settings: {
       review: false,
+      exploreBeforeImplement: false,
       recursiveIssueReferences: false,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
