@@ -5,7 +5,8 @@ reviewed issue, a whole plan → a dependency-linked batch, an audit → one evi
 per finding, or the current conversation → a spec (in chat, or as an issue). Nothing reaches the
 tracker before a human has looked at it.
 
-One install ships all six skills and one publishing hook. Claude Code remains
+One install ships six drafting/publishing skills, plus Claude Code's `/save-as-issue`
+command and response-cache hooks. Claude Code remains
 the default target; pass `--platform chatgpt` for the native ChatGPT payload:
 
 ```bash
@@ -39,7 +40,7 @@ including creating the workflow's labels and, for batches, rewriting cross-refer
 issue numbers. Bodies always go through LF-only `--body-file` temporary files, never inline, which
 avoids both the Windows command-length limit and Windows newline expansion.
 
-### Four flows
+### Drafting flows
 
 | Flow | Skills | Cost |
 |---|---|---|
@@ -58,6 +59,41 @@ index among pending drafts in that session. `/publish-issues` publishes every dr
 and deletes each draft file as soon as GitHub confirms creation, so a rerun never re-creates it. Once
 every draft in the session is published, it also removes the empty session folder; a later draft in
 the same session recreates it automatically.
+
+### Save the latest response as an issue (Claude Code)
+
+After reviewing Claude's final response, run `/save-as-issue`. The command immediately
+publishes that response to the current repository using the authenticated `gh` CLI and
+prints the issue URL. Invoking the command is the publication approval; there is no
+draft file or extra confirmation turn. This command currently ships only for Claude Code.
+
+The title is `Report <session-id> — <generated session title>`. The hook reads the last
+non-empty `aiTitle` from an `ai-title` transcript record matching the session ID. This is
+optional internal metadata: if the transcript is unavailable or contains no generated
+title, the title is simply `Report <session-id>`. Manual session names are not substituted.
+Whitespace is normalized and the issue title is capped at 256 characters.
+
+A `Stop` hook caches `last_assistant_message` under
+`.issues-gateway/.responses/<session-id>.json`. It copies the final text, without parsing
+thinking, tool calls, or intermediate commentary out of the transcript. Finish a response
+after installing the tool before saving. A new ordinary prompt, session start (including
+resume/clear/compaction), or failed turn invalidates the cache; an interrupted turn cannot
+silently publish an earlier response. Subagent responses are ignored.
+
+The body bypasses draft parsing: headings, apparent label lines, parent sections, and
+draft references are preserved as text. No labels or parent links are added. The publisher
+adds its hidden recovery marker; oversized responses use the existing numbered continuation
+comments. Repeating the command for the same cached response returns the existing issue,
+or resumes an incomplete publication, with its original title. A separate completed turn
+can be saved as a new issue even if its text is identical.
+
+The prompt hook blocks both successful and failed saves, so the command costs zero model
+calls. GitHub subprocesses have a 30-second timeout and share a 240-second deadline, below
+the hook's 300-second timeout. Unknown creation outcomes retain recovery state and refuse
+another create until the existing issue can be found. An externally canceled or disabled
+hook still cannot guarantee interception; the skill's fallback tells the agent to stop.
+
+### Batch and spec publishing
 
 **Batch.** `/draft-issues` first proposes a breakdown in chat and iterates until granularity,
 dependencies, difficulty, and mode look right. Once you approve the mapping, it proceeds directly to
@@ -152,13 +188,15 @@ additional API calls**.
 │   ├── draft-issues/SKILL.md           # maps, gets approval, then writes the issue batch
 │   ├── draft-audit-issues/SKILL.md     # writes one evidence-preserving draft per audit finding
 │   ├── publish-issues/SKILL.md         # user-invocable, empty body (hook does the work)
+│   ├── save-as-issue/SKILL.md          # publish the latest final response, no model turn
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
 │   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
 └── hooks/
-    └── publish_issues_UserPromptSubmit_hook.py  # UserPromptSubmit hook: gh calls, id resolution, labels, sub-issue links
+    ├── publish_issues_UserPromptSubmit_hook.py  # command dispatch and draft publishing
+    └── save_as_issue.py                        # response caching and direct report publishing
 ```
 
-The hook is registered on `UserPromptSubmit` and matches `/publish-issues` or `/publish-issue`
+The hook is registered on `UserPromptSubmit` and matches `/save-as-issue`, `/publish-issues` or `/publish-issue`
 (followed by end of string or whitespace), handling both singular and batch drafts. Every other
 prompt passes through untouched (exit 0) — carrying the pending-publish notice, if there is one —
 so it is safe alongside other `UserPromptSubmit` hooks. It is registered with `"timeout": 300`
@@ -285,16 +323,25 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `shared/hooks/issues_core.py` and
+1. Copy `shared/hooks/issues_core.py`, `claude/hooks/save_as_issue.py`, and
    `claude/hooks/publish_issues_UserPromptSubmit_hook.py` into your repository's `.claude/hooks/`,
    then copy the directories under `claude/skills/` into `.claude/skills/`. If you already have a
-   `.claude/settings.json`, merge the `hooks.UserPromptSubmit` array below into your existing file
+   `.claude/settings.json`, merge each hook event array below into your existing file
    instead of overwriting it — Claude Code merges hook arrays, not whole files, so an overwrite would
    silently drop any hooks you already had.
 
 ```json
 {
   "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python", "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/save_as_issue.py"]}]}
+    ],
+    "StopFailure": [
+      {"hooks": [{"type": "command", "command": "python", "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/save_as_issue.py"]}]}
+    ],
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "python", "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/save_as_issue.py"]}]}
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

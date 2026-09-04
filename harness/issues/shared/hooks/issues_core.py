@@ -92,6 +92,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -107,6 +109,18 @@ with contextlib.suppress(ImportError):
     import portalocker
 
 GATEWAY_DIR = Path(".issues-gateway")
+GH_DEADLINE: ContextVar[float | None] = ContextVar("issues_gh_deadline", default=None)
+
+
+def run_gh(args, **kwargs):
+    """Optionally bound all GitHub calls by one invocation's monotonic deadline."""
+    deadline = GH_DEADLINE.get()
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(args, 0)
+        kwargs["timeout"] = min(30, remaining)
+    return subprocess.run(args, **kwargs)
 
 # One state file for the whole project, at the gateway root. "published" is
 # durable reference resolution state; "pending_notice" is transient context
@@ -529,7 +543,7 @@ def ensure_labels(dry: bool) -> list[str]:
 
     warnings = []
     for name, (color, description) in CANONICAL_LABELS.items():
-        result = subprocess.run(
+        result = run_gh(
             [
                 "gh", "label", "create", name,
                 "--color", color,
@@ -743,7 +757,7 @@ def parent_flag_supported() -> bool:
     global _parent_flag_supported
     if _parent_flag_supported is None:
         try:
-            result = subprocess.run(
+            result = run_gh(
                 ["gh", "issue", "create", "--help"], capture_output=True, text=True
             )
             _parent_flag_supported = "--parent" in (
@@ -756,7 +770,7 @@ def parent_flag_supported() -> bool:
 
 def gh_link_parent(child: str, parent: str) -> tuple[bool, str]:
     """Attach an existing issue to a parent (the older-gh fallback path)."""
-    result = subprocess.run(
+    result = run_gh(
         ["gh", "issue", "edit", child, "--parent", parent],
         capture_output=True,
         text=True,
@@ -918,7 +932,7 @@ def _run_with_body_file(args: list[str], body: str) -> subprocess.CompletedProce
         tmp.write(body)
         tmp_path = tmp.name
     try:
-        return subprocess.run(
+        return run_gh(
             [*args, "--body-file", tmp_path], capture_output=True, text=True
         )
     finally:
@@ -944,7 +958,7 @@ def gh_create_issue(
     url = stdout.splitlines()[-1] if stdout else ""
     if not re.fullmatch(r"https://[^/]+/[^/]+/[^/]+/issues/\d+", url):
         return False, "gh returned no valid issue URL; rerun to recover the reserved issue"
-    verified = subprocess.run(
+    verified = run_gh(
         ["gh", "issue", "view", url, "--json", "title,body"],
         capture_output=True, text=True, encoding="utf-8",
     )
@@ -970,7 +984,7 @@ def gh_comment_issue(issue_url: str, body: str) -> tuple[bool, str]:
 
 
 def gh_repository() -> tuple[bool, str]:
-    result = subprocess.run(
+    result = run_gh(
         ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
         capture_output=True,
         text=True,
@@ -981,7 +995,7 @@ def gh_repository() -> tuple[bool, str]:
 
 
 def _gh_json(args: list[str]) -> tuple[bool, list[dict] | str]:
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = run_gh(args, capture_output=True, text=True)
     if result.returncode != 0:
         return False, (result.stderr or result.stdout or "unknown gh error").strip()
     try:

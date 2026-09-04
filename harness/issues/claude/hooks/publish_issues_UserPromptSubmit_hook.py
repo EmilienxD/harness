@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import issues_core as core
+import save_as_issue
 
 
 def main() -> None:
     payload = json.load(sys.stdin)
     prompt = payload.get("prompt", "").strip()
+
+    if save_as_issue.PROMPT_PATTERN.match(prompt):
+        try:
+            if payload.get("cwd"):
+                os.chdir(payload["cwd"])
+        except OSError as exc:
+            sys.stderr.write(f"Save failed: {exc}\n")
+            raise SystemExit(2)
+        save_as_issue.handle_save(payload)
 
     if core.PROMPT_PATTERN.match(prompt):
         dry = "--dry" in prompt.split()
@@ -18,6 +29,11 @@ def main() -> None:
         result = core.publish_issues(dry, session_id)
         sys.stderr.write("\n\n" + result)
         raise SystemExit(2)
+
+    try:
+        save_as_issue.invalidate(payload)
+    except (OSError, ValueError):
+        pass
 
     try:
         notice = core.flush_notice()

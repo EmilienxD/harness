@@ -76,7 +76,7 @@ surrounding user text instead of `$ARGUMENTS`.
 - `harness/improve-codebase-architecture/` — finds architectural friction and proposes refactors. See
   the platform `SKILL.md`.
 - `harness/issues/` — one bundle for the whole issue workflow: `/draft-issue`, `/publish-issue`,
-  `/draft-issues`, `/publish-issues`, `/to-spec`, `/to-spec-draft-issue`, plus the
+  `/draft-issues`, `/publish-issues`, `/save-as-issue` (Claude Code), `/to-spec`, `/to-spec-draft-issue`, plus the
   publishing hook. See `README.md`.
 - `harness/on-edit-block/` — PreToolUse hook denying Write/Edit/MultiEdit on paths matching
   gitignore-style patterns until user-picked files have been read that session. Same rules-file UX as
