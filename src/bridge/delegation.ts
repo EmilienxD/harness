@@ -163,6 +163,7 @@ const EMPTY_TELEMETRY: AgentTelemetry = {
 
 export class DelegationCoordinator {
   readonly #waiters = new Map<AgentId, (result: WorkerResult) => void>();
+  readonly #foregroundReturnTargets = new Map<AgentId, AgentId>();
   readonly #now: () => Date;
 
   public constructor(private readonly options: DelegationCoordinatorOptions) {
@@ -175,8 +176,8 @@ export class DelegationCoordinator {
     return this.#foregroundResult(launched.agentId, result);
   }
 
-  public async runInteractive(input: DelegationLaunchInput, signal?: AbortSignal): Promise<unknown> {
-    const launched = await this.#launch(input, { mode: "tool-result" }, "manager", true);
+  public async runInteractive(input: DelegationLaunchInput, signal?: AbortSignal, returnTargetAgentId?: AgentId): Promise<unknown> {
+    const launched = await this.#launch(input, { mode: "tool-result" }, "manager", true, undefined, returnTargetAgentId);
     const result = await this.#waitForResult(launched.agentId, signal);
     return this.#foregroundResult(launched.agentId, result);
   }
@@ -461,6 +462,7 @@ export class DelegationCoordinator {
     this.options.lease.releaseForTerminalOutcome(agentId, finishedAt, "agent finished");
     this.#waiters.get(agentId)?.(result);
     this.#waiters.delete(agentId);
+    this.#foregroundReturnTargets.delete(agentId);
     return true;
   }
 
@@ -471,10 +473,18 @@ export class DelegationCoordinator {
     this.options.lease.releaseForTerminalOutcome(agentId, occurredAt, "agent reported done");
     this.#waiters.get(agentId)?.(result);
     this.#waiters.delete(agentId);
+    const returnTarget = this.#foregroundReturnTargets.get(agentId);
+    this.#foregroundReturnTargets.delete(agentId);
+    if (returnTarget !== undefined) {
+      const caller = this.options.fleet.get(returnTarget);
+      if (caller !== undefined && ["starting", "running", "awaiting-user"].includes(caller.lifecycle.status)) {
+        try { this.options.terminals.show(caller.terminal.terminalId); } catch { /* caller terminal closed */ }
+      }
+    }
     return result;
   }
 
-  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, beforeTerminal?: () => Promise<void>): Promise<{
+  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, beforeTerminal?: () => Promise<void>, returnTargetAgentId?: AgentId): Promise<{
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
     readonly terminalId: AgentSession["terminal"]["terminalId"];
@@ -553,6 +563,9 @@ export class DelegationCoordinator {
         ...(cwd === undefined ? {} : { cwd }),
       }, occurredAt);
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
+      if (returnTargetAgentId !== undefined && this.options.fleet.get(returnTargetAgentId) !== undefined) {
+        this.#foregroundReturnTargets.set(agentId, returnTargetAgentId);
+      }
       return { agentId, sessionId, terminalId: terminal.terminalId };
     } catch (error) {
       this.options.lease.release(agentId, occurredAt, "launch failed");
@@ -598,6 +611,7 @@ export class DelegationCoordinator {
     return new Promise((resolve, reject) => {
       const abort = (): void => {
         this.#waiters.delete(agentId);
+        this.#foregroundReturnTargets.delete(agentId);
         reject(new DelegationError("aborted", `Foreground wait for ${agentId} was aborted`));
       };
       if (signal?.aborted) return abort();

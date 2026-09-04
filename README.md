@@ -49,11 +49,11 @@ The panel has three views, and each answers exactly one question:
 When an extension update ships different project assets, aboard pauses its runtime and offers **Update .abd/**. Unchanged owned files are upgraded, locally edited files are preserved and listed, and aboard starts again only after the project records the new scaffold revision.
 3. Click **+ New Manager** and ask it something: *"What's the state of this project?"*
 
-Then try one of these in the Manager terminal:
+Then try one of these in the Manager terminal. `/brainstorm`, `/prototype`, and `/done` are also available inside Brainstormer terminals:
 
 | You type | What happens |
 | :-- | :-- |
-| `/brainstorm caching strategy` | A brainstormer terminal opens, focused, ready to talk; the Manager never sees the prompt |
+| `/brainstorm` | A full brainstormer terminal opens, focused, ready to talk. A Brainstormer can use the same command to open another ordinary Brainstormer; after `/done`, its report is routed back and the caller is refocused when still open |
 | `/general-purpose` | Plain Claude Code, no workflow, tracked by the fleet |
 | `/queue Fix the parser and commit the change` | Queue a prompted general-purpose session; later tasks wait for the prior task to finish, a new commit, and a completely clean working tree |
 | `/prototype Try the parser API` | A user-driven prototyper opens, follows the project's prototype-location convention (or asks you where to write), and reports back here when you run `/done` |

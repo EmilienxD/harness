@@ -43,10 +43,11 @@ BLOCKING_ROUTE: str = "manager-prompt"
 WORKER_AGENT_TYPES: frozenset[str] = frozenset({"webresearcher", "implementer", "pr-doctor-afk", "Explore"})
 
 # Commands the bridge handles itself. `/done` is available in every aboard
-# terminal; the remaining commands belong only to the Manager. `/queue` also
-# requires a Manager because its admission and sequencing live there. These expressions
-# match the bridge-side parsers.
+# terminal; `/brainstorm` and `/prototype` are also available to Brainstormers.
+# The remaining commands belong only to the Manager. These expressions match
+# the bridge-side parsers.
 MANAGER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|general-purpose|queue|prototype|done|auto|review-pr|reopen)(?:\s[\s\S]*)?$")
+BRAINSTORMER_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(brainstorm|done|prototype)(?:\s[\s\S]*)?$")
 SESSION_INTERCEPTED_COMMAND: re.Pattern[str] = re.compile(r"^\s*/(done|prototype)(?:\s[\s\S]*)?$")
 
 # Leads every roadmap injection the bridge emits, on the session-start briefing
@@ -131,7 +132,12 @@ def finish(message: str) -> int:
 def intercepted_prompt(prompt: Any, agent_type: str | None) -> bool:
     if not isinstance(prompt, str):
         return False
-    command = MANAGER_INTERCEPTED_COMMAND if agent_type == "manager" else SESSION_INTERCEPTED_COMMAND
+    if agent_type == "manager":
+        command = MANAGER_INTERCEPTED_COMMAND
+    elif agent_type == "brainstormer":
+        command = BRAINSTORMER_INTERCEPTED_COMMAND
+    else:
+        command = SESSION_INTERCEPTED_COMMAND
     return command.match(prompt) is not None
 
 

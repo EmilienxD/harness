@@ -98,6 +98,7 @@ User <-> VS Code UI and terminals <-> extension host
 - Claude in Chrome is enabled only for an auto-run implementer whose frozen issue carries `[AI]-chrome`. The label-derived fact must survive resume; general-purpose and other sessions expose no Chrome launch option.
 - Every project-scoped hook first guards on `ABOARD_AGENT_ID`; role-specific hooks also guard on `ABOARD_AGENT_TYPE`. A hook not addressed to the current session exits successfully and silently.
 - Every launched session records its report recipient when it has one. Unattended delegated sessions report on completion; queued one-shots deliberately have no recipient so they do not block further Manager input. Attended sessions report only through `/done`. A recipient's Stop hook waits while live sessions owe it reports, and Escape reclaims the terminal without discarding later delivery.
+- `/brainstorm` is argumentless and available from live Manager and brainstormer terminals. Either opens an ordinary brainstormer that reports back to its caller; no child-specific role, prompt, depth, count, or persisted nesting state exists.
 - A prototyper works from the project root and resolves its write location from explicit user guidance or the project's own scratch, temporary, playground, spike, experiment, demo, or prototype convention. If none exists, it asks the user where to write before creating code. aboard neither allocates nor gitignores that location, so the user controls whether prototype work is committed. The prompt is not a filesystem security boundary, and prototypers take no write lease.
 
 ### Human Control and Write Safety
@@ -114,7 +115,7 @@ User <-> VS Code UI and terminals <-> extension host
 | Role | Purpose | Reachability |
 | :-- | :-- | :-- |
 | `manager` | Long-lived project continuity, planning, and delegation; never implementation | User starts or resumes it |
-| `brainstormer` | Interactive discovery that produces an implementation-ready durable specification | Manager or user workflow |
+| `brainstormer` | Interactive discovery that produces an implementation-ready durable specification | Manager, user, or brainstormer workflow |
 | `prototyper` | User-driven scratch experiment that reports evidence to its launching conversation | Manager or brainstormer workflow |
 | `webresearcher` | Non-interactive research of current external facts with citations | Delegated research only |
 | `implementer` | Implements one resolved issue and leaves changes uncommitted | Auto-run only |

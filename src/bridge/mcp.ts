@@ -169,9 +169,15 @@ function parseBrainstormerLaunch(value: unknown): ParsedLaunch | string {
   if (value.run_in_background !== undefined && typeof value.run_in_background !== "boolean") return "run_in_background must be a boolean";
   if (!nonEmptyString(value.description)) return "description must be a non-empty string";
   if (value.prompt !== undefined && !nonEmptyString(value.prompt)) return "prompt must be non-empty when provided";
-  const interactive = value.interactive === true;
+  const notices: string[] = [];
+  let interactive = value.interactive === true;
+  if (!interactive && type === "brainstormer") {
+    interactive = true;
+    notices.push(`${type} is an interactive type and was launched interactively; its report will arrive after the user runs /done.`);
+  }
   if (!interactive && !nonEmptyString(value.prompt)) return "prompt is required unless interactive is true";
   const label = normalizeDescription(value.description, value.prompt === undefined ? undefined : value.prompt as string, type);
+  if (label.notice !== undefined) notices.push(label.notice);
   return {
     input: {
       type,
@@ -180,7 +186,7 @@ function parseBrainstormerLaunch(value: unknown): ParsedLaunch | string {
     },
     interactive,
     background: value.run_in_background === true,
-    notices: label.notice === undefined ? [] : [label.notice],
+    notices,
   };
 }
 
@@ -228,7 +234,7 @@ async function callTool(
         const launched = parsed.interactive
           ? parsed.background
             ? coordinator.spawnInteractive(parsed.input, caller.agentId)
-            : coordinator.runInteractive(parsed.input, signal)
+            : coordinator.runInteractive(parsed.input, signal, caller.agentId)
           : parsed.background
             ? coordinator.spawn(parsed.input, caller.agentId)
             : coordinator.run(parsed.input, signal);

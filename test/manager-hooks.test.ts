@@ -639,6 +639,30 @@ test("/done queues the report when its recipient is no longer open", async () =>
   assert.equal(fleet.drainMailbox(managerId, timestamp).length, 1);
 });
 
+test("/done from a nested Brainstormer refocuses a live parent after queueing its report", async () => {
+  const fleet = new FleetRegistry(); const parentId = manager(fleet);
+  const childId = agent("nested-brainstormer");
+  fleet.register({
+    identity: { agentId: childId, type: "brainstormer" },
+    sessionId: session("fdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("nested-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "mailbox", recipientAgentId: parentId }, attended: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(childId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.observeAssistantMessage(childId, "Nested decision report.", timestamp);
+  const actions: string[] = [];
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => undefined }, undefined, undefined, {
+    kill: (terminalId) => actions.push(`kill:${terminalId}`),
+    show: (terminalId) => actions.push(`show:${terminalId}`),
+  });
+
+  assert.match(String((await prompts.handle(childId, "/done")).message), /being delivered/u);
+  assert.deepEqual(actions, ["kill:nested-terminal", "show:manager-terminal"]);
+  assert.equal(fleet.drainMailbox(parentId, timestamp).length, 1);
+});
+
 test("interactive commands are argumentless terminal handoffs", async () => {
   const fleet = new FleetRegistry(); const managerId = manager(fleet);
   const launches: unknown[] = [];
@@ -660,6 +684,36 @@ test("interactive commands are argumentless terminal handoffs", async () => {
     { type: "general-purpose", description: "general purpose interactive session" },
   ]);
   assert.equal(launches.length, 2);
+});
+
+test("/brainstorm launches from a Brainstormer without exposing Manager-only commands", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const brainstormerId = agent("brainstormer-parent");
+  fleet.register({
+    identity: { agentId: brainstormerId, type: "brainstormer" },
+    sessionId: session("edb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("brainstormer-parent-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" }, attended: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(brainstormerId, { status: "running", startedAt: timestamp }, timestamp);
+  const launches: Array<{ input: unknown; recipient: AgentId | undefined }> = [];
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input, recipient) => {
+    launches.push({ input, recipient }); return { agentId: "nested-brainstormer" };
+  } });
+
+  const launched = await prompts.handle(brainstormerId, "/brainstorm ignored topic");
+  assert.match(String(launched.message), /takes no arguments/u);
+  assert.deepEqual(launches, [{
+    input: { type: "brainstormer", description: "interactive brainstorm session" },
+    recipient: brainstormerId,
+  }]);
+  const refusedGeneral = await prompts.handle(brainstormerId, "/general-purpose");
+  assert.equal(refusedGeneral.intercepted, undefined);
+  assert.match(String(refusedGeneral.additionalContext), /you started a brainstormer/u);
+  assert.deepEqual(await prompts.handle(brainstormerId, "/auto"), {});
+  assert.deepEqual(await prompts.handle(brainstormerId, "/reopen"), {});
 });
 
 test("/queue requires a prompt and delegates queue admission without waking the Manager", async () => {
@@ -1104,6 +1158,12 @@ test("Python prompt hook blocks both intercepted commands and never blocks other
   }
   const refusedPrototype = await runPromptHook(500, { error: "boom" }, "/prototype recurse", "secret", "prototyper");
   assert.equal(refusedPrototype.status, 2);
+  const nestedBrainstorm = await runPromptHook(500, { error: "boom" }, "/brainstorm ignored", "secret", "brainstormer");
+  assert.equal(nestedBrainstorm.status, 2);
+  const refusedManagerCommand = await runPromptHook(500, { error: "boom" }, "/general-purpose", "secret", "brainstormer");
+  assert.equal(refusedManagerCommand.status, 0);
+  const refusedNestedBrainstorm = await runPromptHook(500, { error: "boom" }, "/brainstorm", "secret", "prototyper");
+  assert.equal(refusedNestedBrainstorm.status, 0);
   // A bridge that wrongly reports interception on a Stop poll must not exit 2:
   // that would refuse to let the Manager stop, looping the session forever.
   const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");

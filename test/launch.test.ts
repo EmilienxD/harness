@@ -1239,7 +1239,7 @@ test("runtime bundles give every launch done and reserve Manager commands for Ma
   ]);
   const brainstormer = planLaunch(request({ agentId: "brainstormer-1" as AgentId, agentType: "brainstormer", configuration: definition("brainstormer", BRAINSTORMER_TOOLS), runtimeDirectory: runtimeRoot }));
   await store.prepare(brainstormer);
-  assert.deepEqual((await readdir(join(brainstormer.runtimeDirectory, ".claude", "skills"))).sort(), ["done", "prototype"]);
+  assert.deepEqual((await readdir(join(brainstormer.runtimeDirectory, ".claude", "skills"))).sort(), ["brainstorm", "done", "prototype"]);
   const worker = planLaunch(request({ agentId: "worker-2" as AgentId, runtimeDirectory: runtimeRoot }));
   await store.prepare(worker);
   assert.deepEqual(await readdir(join(worker.runtimeDirectory, ".claude", "skills")), ["done"]);

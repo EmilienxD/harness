@@ -595,6 +595,56 @@ test("brainstormer research can run in the foreground", async () => {
   assert.equal((await response).status, 200);
 });
 
+test("a Brainstormer can launch ordinary nested Brainstormers in foreground or background", async () => {
+  const { coordinator, handler, fleet, host } = setup();
+  const parent = await coordinator.spawnInteractive({
+    type: "brainstormer", description: "resolve the parent design",
+  }) as { agentId: AgentId };
+
+  const background = await mcpCall(handler, "run_agent", {
+    type: "brainstormer",
+    prompt: "Objective: settle caching. Settled: bounded storage. Blocker: invalidation ownership. Constraints: no daemon. Rejected: polling. Expected: recommend one ownership model.",
+    description: "resolve cache invalidation ownership",
+    interactive: false,
+    run_in_background: true,
+  }, parent.agentId);
+  assert.equal(background.status, 200, JSON.stringify(background.body));
+  assert.match(JSON.stringify(background.body), /launched interactively/u);
+  const backgroundChild = fleet.list().filter((entry) => entry.identity.type === "brainstormer").at(-1)!;
+  assert.equal(backgroundChild.attended, true);
+  assert.deepEqual(backgroundChild.resultDelivery, { mode: "mailbox", recipientAgentId: parent.agentId });
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent abd-brainstormer-/u);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--mcp-config/u);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--allowedTools 'mcp__aboard__run_agent,mcp__aboard__continue_agent'/u);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /invalidation ownership/u);
+  assert.equal(host.created.at(-1)!.options.env.ABOARD_ATTENDED, "1");
+
+  const recursive = await mcpCall(handler, "run_agent", {
+    type: "brainstormer",
+    prompt: "Objective: validate recursion. Settled: nested sessions are ordinary. Blocker: another design fork. Constraints: no depth state. Rejected: special child mode. Expected: settle the fork.",
+    description: "resolve recursive design fork",
+    run_in_background: true,
+  }, backgroundChild.identity.agentId);
+  assert.equal(recursive.status, 200, JSON.stringify(recursive.body));
+  const grandchild = fleet.list().filter((entry) => entry.identity.type === "brainstormer").at(-1)!;
+  assert.deepEqual(grandchild.resultDelivery, { mode: "mailbox", recipientAgentId: backgroundChild.identity.agentId });
+
+  let settled = false;
+  const foreground = mcpCall(handler, "run_agent", {
+    type: "brainstormer",
+    prompt: "Objective: settle retries. Settled: bounded attempts. Blocker: backoff. Constraints: interactive UX. Rejected: fixed delay. Expected: choose a policy.",
+    description: "resolve retry backoff policy",
+  }, parent.agentId).then((value) => { settled = true; return value; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  const foregroundChild = fleet.list().find((entry) => entry.terminal.name.includes("resolve retry backoff policy"))!;
+  assert.equal(foregroundChild.attended, true);
+  assert.equal(foregroundChild.resultDelivery.mode, "tool-result");
+  coordinator.submitReport(foregroundChild.identity.agentId, "Use capped exponential backoff.");
+  assert.equal((await foreground).status, 200);
+  assert.deepEqual(host.created[0]!.terminal.shown, [false, false]);
+});
+
 test("continue_agent reopens the same supported session, re-points its report, and refuses live or one-shot targets", async () => {
   const { coordinator, fleet, host } = setup();
   const brainstormer = agent("brain-continue");
@@ -619,6 +669,20 @@ test("continue_agent reopens the same supported session, re-points its report, a
   assert.equal(restored?.attended, true);
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--resume 9fcc5264/u);
   assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /Now test malformed input/u);
+
+  const continuedBrainstormer = await coordinator.continue({
+    agentId: agent("old-brainstormer"),
+    type: "brainstormer",
+    sessionId: session("afcc5264-4009-4a55-954d-9613f73bf23e"),
+    terminalName: "aboard: resolve cache design",
+  }, "Reconsider the invalidation policy", brainstormer) as Record<string, unknown>;
+  assert.equal(continuedBrainstormer.agentId, "old-brainstormer");
+  const resumedBrainstormer = fleet.get(agent("old-brainstormer"));
+  assert.equal(resumedBrainstormer?.sessionId, session("afcc5264-4009-4a55-954d-9613f73bf23e"));
+  assert.deepEqual(resumedBrainstormer?.resultDelivery, { mode: "mailbox", recipientAgentId: brainstormer });
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--agent abd-brainstormer-old-brainstormer/u);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /--mcp-config/u);
+  assert.match(host.created.at(-1)!.terminal.sent.at(-1)!, /Reconsider the invalidation policy/u);
 
   await assert.rejects(
     coordinator.continue({

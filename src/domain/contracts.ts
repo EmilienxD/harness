@@ -18,7 +18,7 @@ export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT
   (type) => type !== "implementer" && type !== "pr-doctor-afk" && type !== "pr-doctor-hitl",
 );
 
-export const BRAINSTORMER_LAUNCHABLE_AGENT_TYPES = ["Explore", "webresearcher", "prototyper"] as const;
+export const BRAINSTORMER_LAUNCHABLE_AGENT_TYPES = ["Explore", "webresearcher", "prototyper", "brainstormer"] as const;
 
 export const MCP_DEFAULT_AGENT_TYPE: AgentType = "general-purpose";
 
@@ -47,7 +47,7 @@ export function isNonRestorablePersistedAgentType(type: AgentType): boolean {
 }
 
 /** Conversations a live MCP caller may ask to continue after their report lands. */
-export const CONTINUABLE_AGENT_TYPES = ["webresearcher", "prototyper"] as const;
+export const CONTINUABLE_AGENT_TYPES = ["webresearcher", "prototyper", "brainstormer"] as const;
 
 export function isContinuableAgentType(type: AgentType): type is (typeof CONTINUABLE_AGENT_TYPES)[number] {
   return (CONTINUABLE_AGENT_TYPES as readonly AgentType[]).includes(type);

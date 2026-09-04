@@ -428,6 +428,7 @@ export interface InteractiveManagerLauncher {
 
 export interface InvokingTerminalKiller {
   kill(terminalId: AgentSession["terminal"]["terminalId"]): void;
+  show?(terminalId: AgentSession["terminal"]["terminalId"]): void;
 }
 
 /** The extension-owned actions `/auto`, `/review-pr`, and `/reopen` trigger. */
@@ -461,12 +462,14 @@ export class ManagerPromptService {
     // The route also serves report injection for every aboard session. That
     // must not widen Manager-owned commands merely because a non-Manager has a
     // queued report and therefore pays the prompt-hook round trip.
-    const managerCaller = this.fleet.get(agentId)?.identity.type === "manager";
+    const callerType = this.fleet.get(agentId)?.identity.type;
+    const managerCaller = callerType === "manager";
     const queued = managerCaller ? parseQueuedGeneralPurposeCommand(prompt) : undefined;
     if (queued !== undefined) return this.#queueGeneralPurpose(queued.prompt);
     const action = managerCaller ? parseActionCommand(prompt) : undefined;
     if (action !== undefined) return this.#runAction(agentId, action);
-    const command = managerCaller ? parseInteractiveCommand(prompt) : undefined;
+    const parsedInteractive = managerCaller || callerType === "brainstormer" ? parseInteractiveCommand(prompt) : undefined;
+    const command = callerType === "brainstormer" && parsedInteractive?.type !== "brainstormer" ? undefined : parsedInteractive;
     if (command === undefined) {
       const deliveredAt = this.#now().toISOString() as IsoTimestamp;
       const reports = this.fleet.drainMailbox(agentId, deliveredAt);
@@ -536,6 +539,7 @@ export class ManagerPromptService {
     }
     try {
       const recipientAgentId = session.resultDelivery.mode === "mailbox" ? session.resultDelivery.recipientAgentId : undefined;
+      let returnTerminalId: AgentSession["terminal"]["terminalId"] | undefined;
       const report = composeDoneReport(session.lastObservedAssistantMessage, command.furtherNotes);
       let reporting: string;
       if (session.resultDelivery.mode === "tool-result" && report !== undefined && this.launcher.submitReport !== undefined) {
@@ -548,11 +552,17 @@ export class ManagerPromptService {
       } else {
         this.fleet.submitReport(agentId, report, this.#now().toISOString() as IsoTimestamp);
         const recipient = this.fleet.get(recipientAgentId);
+        if (session.identity.type === "brainstormer" && recipient !== undefined && active(recipient)) {
+          returnTerminalId = recipient.terminal.terminalId;
+        }
         reporting = recipient === undefined || !active(recipient)
           ? `The report is queued for ${recipientAgentId}, which is not currently open.`
           : `The report is being delivered to ${recipientAgentId}.`;
       }
       this.terminals.kill(session.terminal.terminalId);
+      if (returnTerminalId !== undefined) {
+        try { this.terminals.show?.(returnTerminalId); } catch { /* parent terminal closed */ }
+      }
       return {
         intercepted: true,
         message: `Closing this terminal. ${reporting}`,

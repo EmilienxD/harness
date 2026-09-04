@@ -326,7 +326,7 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
     "and the user should be able to watch, interrupt, or take over.\n\n" +
 
     "## Choosing the agent type\n\n" +
-    "`type` is required and must name one of the evidence-gathering roles below.\n" +
+    "`type` is required and must name one of the roles below.\n" +
     "- `Explore`: Read-only search agent for code exploration. " +
       "Use it to get up-to-date codebase reports. " +
       "Do NOT use it for code review or design-doc auditing; it is not meant to make judgments; it is impartial and only surfaces facts. " +
@@ -336,7 +336,11 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
       "Use for current documentation, versions, pricing, standards, advisories, " +
       "or vendor behavior that may have changed; it returns cited current evidence.\n" +
     "- `prototyper`: a throwaway experiment that produces evidence for the brainstorm in the project's own prototype location, asking the user where to write when the project defines none. " +
-      "It can run independently or as a user-driven interactive session.\n\n" +
+      "It can run independently or as a user-driven interactive session.\n" +
+    "- `brainstormer`: a full, ordinary brainstorming conversation for a separate design blocker. " +
+      "Explain why a separate branch is warranted and obtain explicit user confirmation before launching it. " +
+      "Give it a self-contained opening prompt with the objective, settled decisions, exact blocker, constraints, rejected directions, and expected result. " +
+      "Do not identify or configure it as a child. It is always interactive and may recursively use the same tools and commands.\n\n" +
 
     "## When to use or not use\n\n" +
     "If the target is already known, use the direct tool: Read for a known path, " +
@@ -348,12 +352,12 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
     "- When you launch multiple agents for independent work, send them in a single message " +
       "with multiple tool uses so they run concurrently. " +
       "If the user asks for agents \"in parallel\", you MUST send one message with several `run_agent` calls in it.\n" +
-    "- `interactive: true` hands a `prototyper` session to the user. Its report arrives after the user runs `/done`. " +
-      "Use it when the experiment is one the user should direct. " +
+    "- `interactive: true` hands a session to the user. Its report arrives after the user runs `/done`. " +
+      "Use it when the experiment is one the user should direct. Brainstormers are always interactive, even when this field is omitted or false. " +
       "`webresearcher` and `Explore` are non-interactive and reject `interactive: true`. " +
       "If an automated prototyper finds no project-defined location, it returns without writing so you can ask the user where the prototype should live.\n" +
-    "- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can proceed; " +
-      "e.g., research agents whose findings inform your next steps. Use background when you have genuinely independent work to do in parallel. " +
+    "- **Foreground vs background**: Foreground (default) is the normal switch-and-return workflow for a temporary brainstorming branch and is also useful when research results are needed before proceeding. " +
+      "Background remains available when the user and agent want to manage concurrent context or have genuinely independent work to do. " +
       "When an agent runs in the background, you will be automatically notified when it completes; " +
       "do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.\n" +
     "- Summarize an automated result for the user. Check the evidence before using it to settle the brainstorm.\n\n" +
@@ -416,7 +420,7 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
       type: {
         type: "string",
         enum: BRAINSTORMER_LAUNCHABLE_AGENT_TYPES,
-        description: "Evidence-gathering role to launch.",
+        description: "Role to launch, including a full ordinary Brainstormer for a separately confirmed design branch.",
       },
       prompt: {
         type: "string",
@@ -430,7 +434,7 @@ const BRAINSTORMER_RUN_AGENT: McpTool = {
       },
       interactive: {
         type: "boolean",
-        description: "Whether to hand a prototyper session to the user instead of running it automated. Explore and webresearcher reject true.",
+        description: "Whether to hand the session to the user. Brainstormer is always interactive; Explore and webresearcher reject true.",
       },
       run_in_background: {
         type: "boolean",
@@ -449,6 +453,7 @@ const CONTINUE_AGENT: McpTool = {
     "Your plain text output is NOT visible to other agents; " +
     "to communicate, you MUST call this tool. Messages from agents are delivered automatically; you don't check an inbox. " +
     "Refer to agents by the agent_id returned by `run_agent` or by a manual run notification.\n" +
+    "Supported reported conversations include webresearchers, prototypers, and Brainstormers. The resumed session keeps its identity, transcript, role definition, tool catalog, and report route. " +
     "The tool call may fail if it is used at an inappropriate time; for example, if the agent is still running and has not delivered a report.",
   inputSchema: {
     type: "object",
