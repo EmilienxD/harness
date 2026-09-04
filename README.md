@@ -106,6 +106,7 @@ skills.
 | [`redirect-subagents`](harness/redirect-subagents/README.md) | Redirects Agent subagents to alternate providers, sparing subscription usage |
 | [`senior-advisor`](harness/senior-advisor/shared/skills/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
 | [`usage-limit-wait`](harness/usage-limit-wait/README.md) | Warns as a subscription usage limit fills, then waits it out instead of failing the turn |
+| [`validate-request`](harness/validate-request/README.md) | Explores and clarifies an idea into a chat report for user validation |
 | [`zoom-out`](harness/zoom-out/shared/skills/zoom-out/SKILL.md) | Higher-level map of a codebase area |
 
 Skill-only tools keep portable payloads under `shared/skills/` and only use

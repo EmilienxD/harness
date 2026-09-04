@@ -98,6 +98,7 @@ surrounding user text instead of `$ARGUMENTS`.
 - `harness/usage-limit-wait/` — `UserPromptSubmit` + `PostToolBatch` hook that warns as a Claude
   subscription usage window fills and blocks the session until it resets. See `README.md`.
 - `harness/zoom-out/` — gives a higher-level map of a codebase area. See the platform `SKILL.md`.
+- `harness/validate-request/` — clarifies a request into a chat report, with an oldest-labelled-issue fallback. See `README.md`.
 - `harness/itsclaudehistory/` — nested git repo; leave its internals alone unless asked.
 
 ## Other directories

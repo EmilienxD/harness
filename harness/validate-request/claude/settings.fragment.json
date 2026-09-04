@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/validate_request_UserPromptSubmit_hook.py"],
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
