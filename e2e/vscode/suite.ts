@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 
 interface CommandEndpoint { readonly port: number; readonly workspaceRoot: string; readonly commandToken: string }
 interface AboardApi { readonly commandEndpointDirectory: string }
-interface Observation { readonly scenario: string | null; readonly checkpoint: string | null; readonly sessionHash: string | null; readonly toolNamesOffered: readonly string[]; readonly result: string }
+interface Observation { readonly scenario: string | null; readonly checkpoint: string | null; readonly sessionHash: string | null; readonly model: string | null; readonly toolNamesOffered: readonly string[]; readonly result: string }
 interface Diagnostics { readonly upstreamMode: string; readonly observations: readonly Observation[] }
 
 async function eventually<T>(read: () => Promise<T | undefined> | T | undefined, message: string, attempts = 240): Promise<T> {
@@ -94,6 +94,7 @@ export async function run(): Promise<void> {
     assert.ok(rows.find((item) => item.checkpoint === "auto-afk-read")?.toolNamesOffered.includes("Read"));
     assert.ok(rows.find((item) => item.checkpoint === "auto-afk-edit")?.toolNamesOffered.includes("Edit"));
     assert.equal(rows.some((item) => item.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__"))), false);
+    assert.equal(rows.every((item) => item.model?.includes("haiku") === true), true, "routine implementer, Explore, and reviewer use their configured Haiku routing");
 
     await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(issueNumber), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
@@ -105,12 +106,17 @@ export async function run(): Promise<void> {
       assert.deepEqual(issue.labels, []);
     }
     const pullRequests = await eventually(async () => {
-      const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "all", "--limit", "20", "--json", "number,state,headRefName,baseRefName,body"], { encoding: "utf8" })).stdout) as { state?: string; headRefName?: string; baseRefName?: string; body?: string }[];
+      const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "all", "--limit", "20", "--json", "number,state,headRefName,baseRefName,body,mergeCommit"], { encoding: "utf8" })).stdout) as { state?: string; headRefName?: string; baseRefName?: string; body?: string; mergeCommit?: { oid?: string } }[];
       const issuePullRequest = rows.find((row) => row.body?.includes(`Closes #${issueNumber}`));
       const runPullRequest = rows.find((row) => row.headRefName?.startsWith("abd/run/") && row.baseRefName === "main");
       return issuePullRequest?.state === "MERGED" && runPullRequest?.state === "MERGED" ? { issuePullRequest, runPullRequest } : undefined;
     }, "auto-run did not merge its issue and run pull requests", 480);
     assert.ok(pullRequests.runPullRequest.headRefName?.startsWith("abd/run/"));
+    for (const pullRequest of [pullRequests.issuePullRequest, pullRequests.runPullRequest]) {
+      assert.ok(pullRequest.mergeCommit?.oid, "merged pull request exposes its merge commit");
+      const commit = JSON.parse((await execFileAsync("gh", ["api", `repos/${repository}/git/commits/${pullRequest.mergeCommit.oid}`], { encoding: "utf8" })).stdout) as { parents?: unknown[] };
+      assert.equal(commit.parents?.length, 2, "merge strategy produces a two-parent merge commit");
+    }
     await eventually(async () => {
       const status = (await execFileAsync("git", ["status", "--porcelain=v1", "--branch"], { cwd: root, encoding: "utf8" })).stdout;
       return /^## main\.\.\.origin\/main(?: \[behind \d+\])?\s*$/u.test(status) ? status : undefined;
@@ -175,6 +181,7 @@ export async function run(): Promise<void> {
     ]);
     assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);
     assert.equal(successes.some((item) => item.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__"))), false);
+    assert.equal(successes.every((item) => item.model?.includes("opus") === true), true, "advanced and expert workers use their configured Opus routing");
     await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(followup), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
       return issue.state === "CLOSED" ? issue : undefined;
