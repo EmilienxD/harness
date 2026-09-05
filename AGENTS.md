@@ -245,8 +245,8 @@ npm run package           # verify and build the VSIX
 
 ## Tests
 
-- Test Python hooks as standalone stdin/environment programs, including their silent guard paths.
-- Do not run an end-to-end aboard workflow in this repository; it would create real GitHub state and modify project settings.
+- MANDATORY before writing unit or e2e tests: to know how to write tests and when, invoke the `tdd` skill.
+To operate, diagnose, or extend aboard's deterministic Claude Code E2E harness, invoke the `aboard-e2e` skill.
 
 ## Development Style
 
