@@ -246,7 +246,7 @@ npm run package           # verify and build the VSIX
 ## Tests
 
 - Test Python hooks as standalone stdin/environment programs, including their silent guard paths.
-- Do not run an end-to-end aboard workflow in this repository; it would create real GitHub state and modify project settings. Use a throwaway repository when end-to-end testing is explicitly needed.
+- Do not run an end-to-end aboard workflow in this repository; it would create real GitHub state and modify project settings.
 
 ## Development Style
 

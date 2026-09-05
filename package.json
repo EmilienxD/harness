@@ -650,7 +650,12 @@
     "test:vscode:build": "esbuild test/vscode/run.ts test/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/vscode-test",
     "test:vscode": "npm run build && npm run test:vscode:build && node dist/vscode-test/run.js",
     "package:build": "esbuild scripts/package.ts --bundle --packages=external --platform=node --format=cjs --target=node22 --outfile=dist/package.js",
-    "package": "npm run check && npm run build -- --minify && npm run package:build && node dist/package.js"
+    "package": "npm run check && npm run build -- --minify && npm run package:build && node dist/package.js",
+    "e2e:build": "esbuild e2e/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/e2e/cli.js --sourcemap",
+    "e2e:bootstrap": "npm run e2e:build && node dist/e2e/cli.js bootstrap",
+    "e2e:reset": "npm run e2e:build && node dist/e2e/cli.js reset",
+    "e2e:serve": "npm run e2e:build && node dist/e2e/cli.js serve",
+    "e2e:smoke": "npm run e2e:build && node dist/e2e/cli.js smoke"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
