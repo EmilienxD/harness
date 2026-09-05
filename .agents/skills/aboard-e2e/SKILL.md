@@ -46,12 +46,16 @@ npm run e2e:bootstrap
 npm run e2e:reset
 npm run e2e:serve
 npm run e2e:smoke
+npm run e2e:extension
+npm run e2e:full
 ```
 
 - `e2e:bootstrap` is the one-time destructive repository recreation and seed.
 - `e2e:reset` performs the repeatable remote and local operational reset.
 - `e2e:serve` runs only the local fake Anthropic endpoint and prints its ephemeral connection data to the invoking terminal.
 - `e2e:smoke` resets the local verified clone, launches the server and real CLI, validates the exchange, and intentionally leaves the edited fixture for inspection. A subsequent `e2e:reset` restores it.
+- `e2e:extension` uses two VS Code Extension Development Host launches. The first initializes the verified clone; the second runs the real Manager to foreground Explore return journey, then removes `.abd` and verifies admission closes.
+- `e2e:full` runs static checks, unit and native VS Code integration tests, two remote resets, the CLI smoke, the extension journey, and final resets. It excludes auto-run.
 
 ## Destructive bootstrap
 
@@ -145,6 +149,12 @@ The current scenario is selected by `[E2E:single-file-success]` and has three hi
 
 Tool results must immediately follow the corresponding assistant tool-use turn. In a user block array, tool results precede text. Do not match Claude Code's incidental line-number formatting more tightly than needed to prove the expected fixture marker was read.
 
+## Extension delegation scenario
+
+The non-auto extension journey uses `[E2E:manager-foreground-explore]` and `[E2E:explore-read-report]`. The disposable Manager definition receives its first prompt through `command: claude "<message>"`; do not type the prompt into the TUI. The fake endpoint makes the Manager call the real aboard `run_agent` MCP tool, and the launched Explore session uses the real `Read` tool before its report returns to the Manager.
+
+The test changes only the disposable clone's Manager command. Explore keeps its authored `command: claude`, so its prompt remains the positional prompt aboard resolved for that worker. The final local reset restores the canonical fixture.
+
 ## Real Claude Code launcher
 
 The smoke test requires installed Claude Code `>= 2.1.261` and checks required help structures before launch. Protocol drift must produce a structural compatibility failure; do not silently adapt to a newer incompatible CLI.
@@ -210,6 +220,8 @@ npm run build
 npm run e2e:reset
 npm run e2e:reset
 npm run e2e:smoke
+npm run e2e:reset
+npm run e2e:extension
 npm run e2e:reset
 ```
 

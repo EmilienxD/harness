@@ -76,13 +76,22 @@ export async function runSmoke(config: HarnessConfig): Promise<void> {
 
 export async function validateClaudeCli(): Promise<void> {
   const versionOutput = (await exec("claude", ["--version"])).trim();
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:\D|$)/.exec(versionOutput);
-  if (!match) throw new Error(`Could not parse Claude Code version from ${JSON.stringify(versionOutput)}`);
+  parseClaudeVersion(versionOutput);
+  const help = await exec("claude", ["--help"]);
+  const missing = missingClaudeHelpStructures(help);
+  if (missing.length > 0) throw new Error(`Claude Code protocol mismatch; missing required help structures: ${missing.join(", ")}`);
+}
+
+export function parseClaudeVersion(output: string): readonly [number, number, number] {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:\D|$)/.exec(output.trim());
+  if (!match) throw new Error(`Could not parse Claude Code version from ${JSON.stringify(output.trim())}`);
   const version = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
   if (compareVersions(version, MINIMUM_VERSION) < 0) throw new Error(`Claude Code >= ${MINIMUM_VERSION.join(".")} is required; found ${version.join(".")}`);
-  const help = await exec("claude", ["--help"]);
-  const missing = REQUIRED_HELP.filter((flag) => !help.includes(flag));
-  if (missing.length > 0) throw new Error(`Claude Code protocol mismatch; missing required help structures: ${missing.join(", ")}`);
+  return version;
+}
+
+export function missingClaudeHelpStructures(help: string): readonly string[] {
+  return REQUIRED_HELP.filter((flag) => !help.includes(flag));
 }
 
 export function childEnvironment(parent: NodeJS.ProcessEnv, overlay: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
@@ -118,7 +127,7 @@ async function spawnCaptured(file: string, args: readonly string[], cwd: string,
   });
 }
 
-function parseStreamJson(output: string): readonly unknown[] {
+export function parseStreamJson(output: string): readonly unknown[] {
   const lines = output.split(/\r?\n/).filter((line) => line.trim().length > 0);
   if (lines.length === 0) throw new Error("Claude Code emitted no stream-json records");
   return lines.map((line, index) => {
@@ -127,7 +136,7 @@ function parseStreamJson(output: string): readonly unknown[] {
   });
 }
 
-function findFinalText(events: readonly unknown[], raw: string): string {
+export function findFinalText(events: readonly unknown[], raw: string): string {
   const strings: string[] = [];
   const visit = (value: unknown): void => {
     if (typeof value === "string") strings.push(value);
@@ -138,7 +147,7 @@ function findFinalText(events: readonly unknown[], raw: string): string {
   return strings.join("\n") || raw;
 }
 
-function redactProcessError(stderr: string): string {
+export function redactProcessError(stderr: string): string {
   return stderr.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").slice(0, 1000).trim() || "no stderr";
 }
 

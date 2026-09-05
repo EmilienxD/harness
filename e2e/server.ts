@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname } from "node:path";
-import { parseMessagesRequest, ScenarioMismatch, transition, type MessagesRequest, type ScenarioResponse, isRecord } from "./scenario.js";
+import { parseMessagesRequest, ScenarioMismatch, transition, type MessagesRequest, type ScenarioId, type ScenarioResponse, isRecord } from "./scenario.js";
 
 const API_VERSION = "2023-06-01";
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -23,7 +23,7 @@ export interface StructuralObservation {
   readonly toolNamesOffered: readonly string[];
   readonly requestBodySha256: string | null;
   readonly requestBytes: number;
-  readonly scenario: "single-file-success" | null;
+  readonly scenario: ScenarioId | null;
   readonly checkpoint: string | null;
   readonly result: "success" | "rejected";
   readonly httpStatus: number;
@@ -58,6 +58,7 @@ export async function startFakeAnthropicServer(options: {
   let inferenceRequests = 0;
   let tokenCountRequests = 0;
   let sequence = 0;
+  await persist(options.diagnosticsPath, observations);
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -84,7 +85,7 @@ export async function startFakeAnthropicServer(options: {
         tokenCountRequests += 1;
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ input_tokens: 1000 }));
-        observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, 200, "success", null, null));
+        observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, 200, "success", null, null, null));
         await persist(options.diagnosticsPath, observations);
         return;
       }
@@ -93,14 +94,14 @@ export async function startFakeAnthropicServer(options: {
       const scenarioResponse = transition(messageRequest, options.repoRoot);
       checkpoints.add(scenarioResponse.checkpoint);
       writeMessage(response, messageRequest.model, scenarioResponse, messageRequest.stream);
-      observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, 200, "success", scenarioResponse.checkpoint, null));
+      observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, 200, "success", scenarioResponse.scenario, scenarioResponse.checkpoint, null));
       await persist(options.diagnosticsPath, observations);
     } catch (error) {
       unexpectedRequests += 1;
       const status = error instanceof AuthenticationError ? 401 : 400;
       const diagnostic = sanitizeDiagnostic(error);
       jsonError(response, status, status === 401 ? "authentication_error" : "invalid_request_error", diagnostic);
-      observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, status, "rejected", null, diagnostic));
+      observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, status, "rejected", null, null, diagnostic));
       await persist(options.diagnosticsPath, observations);
     }
   });
@@ -113,7 +114,7 @@ export async function startFakeAnthropicServer(options: {
   const baseUrl = `http://127.0.0.1:${address.port}`;
   if (options.readinessPath) {
     await mkdir(dirname(options.readinessPath), { recursive: true });
-    await writeFile(options.readinessPath, `${JSON.stringify({ port: address.port, processId: process.pid, scenarioCatalogHash: hash("single-file-success:v1"), protocolVersion: 1 }, null, 2)}\n`, "utf8");
+    await writeFile(options.readinessPath, `${JSON.stringify({ port: address.port, processId: process.pid, scenarioCatalogHash: hash("single-file-success:v1|manager-foreground-explore:v1|explore-read-report:v1"), protocolVersion: 1 }, null, 2)}\n`, "utf8");
   }
   return {
     baseUrl,
@@ -187,7 +188,7 @@ function jsonError(response: ServerResponse, status: number, type: string, messa
   response.end(JSON.stringify({ type: "error", error: { type, message }, request_id: `req_e2e_${hash(`${status}:${message}`).slice(0, 16)}` }));
 }
 
-function observation(request: IncomingMessage, url: URL, raw: Buffer, body: MessagesRequest | undefined, salt: Buffer, sequence: number, status: number, result: "success" | "rejected", checkpoint: string | null, diagnostic: string | null): StructuralObservation {
+function observation(request: IncomingMessage, url: URL, raw: Buffer, body: MessagesRequest | undefined, salt: Buffer, sequence: number, status: number, result: "success" | "rejected", scenario: ScenarioId | null, checkpoint: string | null, diagnostic: string | null): StructuralObservation {
   const messages = body?.messages ?? [];
   const blocks = messages.flatMap((message) => Array.isArray(message.content) ? message.content.filter(isRecord) : []);
   const beta = request.headers["anthropic-beta"];
@@ -201,7 +202,7 @@ function observation(request: IncomingMessage, url: URL, raw: Buffer, body: Mess
     contentBlockTypes: blocks.map((block) => typeof block.type === "string" ? block.type : "unknown"),
     toolNamesOffered: body?.tools.map((tool) => tool.name).filter((name): name is string => typeof name === "string").sort() ?? [],
     requestBodySha256: raw.length > 0 ? hash(raw) : null, requestBytes: raw.length,
-    scenario: body ? "single-file-success" : null, checkpoint, result, httpStatus: status,
+    scenario, checkpoint, result, httpStatus: status,
     ...(diagnostic ? { diagnostic } : {}),
   };
 }
