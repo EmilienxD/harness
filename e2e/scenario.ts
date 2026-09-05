@@ -5,13 +5,19 @@ import { contains } from "./config.js";
 export const SCENARIO_MARKER = "[E2E:single-file-success]";
 export const MANAGER_SCENARIO_MARKER = "[E2E:manager-foreground-explore]";
 export const EXPLORE_SCENARIO_MARKER = "[E2E:explore-read-report]";
+export const AUTO_RUN_AFK_MARKER = "[E2E:auto-run-afk]";
+export const AUTO_RUN_PERMANENT_NOTE = "E2E permanent auto-run guidance.";
+export const AUTO_RUN_NESTED_CONTEXT = "E2E recursively resolved nested issue context.";
+export const AUTO_RUN_EXPLORE_REPORT = "Explore verified deterministic.txt contains the canonical before fixture for this auto-run issue.";
+export const AUTO_RUN_HITL_MARKER = "[E2E:auto-run-hitl]";
+export const AUTO_RUN_FOLLOWUP_MARKER = "[E2E:auto-run-followup]";
 export const BEFORE_CONTENT = "aboard e2e fixture: before\n";
 export const AFTER_CONTENT = "aboard e2e fixture: after\n";
 export const FINAL_RESPONSE = "Fixture updated and verified.\n\n<commit>Update deterministic fixture</commit>";
 export const EXPLORE_REPORT = "Explore verified that deterministic.txt contains the canonical before fixture.";
 export const MANAGER_DELEGATION_RESULT = "Manager received the Explore report exactly once and verified the fixture.";
 
-export type ScenarioId = "single-file-success" | "manager-foreground-explore" | "explore-read-report";
+export type ScenarioId = "single-file-success" | "manager-foreground-explore" | "explore-read-report" | "auto-run-afk" | "auto-run-hitl" | "auto-run-followup";
 
 export const SCENARIO_MANIFEST = {
   schemaVersion: 1,
@@ -111,7 +117,154 @@ export function transition(request: MessagesRequest, repoRoot: string): Scenario
   const scenario = selectScenario(request.messages);
   if (scenario === "manager-foreground-explore") return managerTransition(request);
   if (scenario === "explore-read-report") return exploreTransition(request, repoRoot);
+  if (scenario === "auto-run-afk") return autoRunAfkTransition(request, repoRoot);
+  if (scenario === "auto-run-hitl") return autoRunSequentialTransition(request, repoRoot, {
+    scenario, checkpoint: "auto-hitl", readId: "toolu_e2e_auto_hitl_read", editId: "toolu_e2e_auto_hitl_edit",
+    before: BEFORE_CONTENT.trimEnd(), after: AFTER_CONTENT.trimEnd(),
+  });
+  if (scenario === "auto-run-followup") return autoRunSequentialTransition(request, repoRoot, {
+    scenario, checkpoint: "auto-followup", readId: "toolu_e2e_auto_followup_read", editId: "toolu_e2e_auto_followup_edit",
+    before: AFTER_CONTENT.trimEnd(), after: "aboard e2e fixture: complete",
+  });
   return singleFileTransition(request, repoRoot);
+}
+
+function autoRunSequentialTransition(request: MessagesRequest, repoRoot: string, input: {
+  readonly scenario: "auto-run-hitl" | "auto-run-followup";
+  readonly checkpoint: "auto-hitl" | "auto-followup";
+  readonly readId: string;
+  readonly editId: string;
+  readonly before: string;
+  readonly after: string;
+}): ScenarioResponse {
+  const results = scenarioSequenceResults(request.messages, [{ id: input.readId, name: "Read" }, { id: input.editId, name: "Edit" }], input.scenario);
+  const read = results.get(input.readId);
+  if (!read) {
+    requireScenarioTool(request, "Read", input.scenario);
+    return {
+      scenario: input.scenario,
+      checkpoint: `${input.checkpoint}-read`,
+      messageId: scenarioStableId(input.scenario, `${input.checkpoint}-read`),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: input.readId, name: "Read", input: { file_path: fixturePath(repoRoot) } }],
+    };
+  }
+  if (read.is_error === true || !contentContains(read.content, input.before)) throw new ScenarioMismatch("$.messages", "Read result omitted expected sequential fixture state", input.scenario);
+  const edit = results.get(input.editId);
+  if (!edit) {
+    requireScenarioTool(request, "Edit", input.scenario);
+    return {
+      scenario: input.scenario,
+      checkpoint: `${input.checkpoint}-edit`,
+      messageId: scenarioStableId(input.scenario, `${input.checkpoint}-edit`),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: input.editId, name: "Edit", input: { file_path: fixturePath(repoRoot), old_string: input.before, new_string: input.after, replace_all: false } }],
+    };
+  }
+  if (edit.is_error === true) throw new ScenarioMismatch("$.messages", "Edit tool_result reported an error", input.scenario);
+  return {
+    scenario: input.scenario,
+    checkpoint: `${input.checkpoint}-complete`,
+    messageId: scenarioStableId(input.scenario, `${input.checkpoint}-complete`),
+    stopReason: "end_turn",
+    content: [{ type: "text", text: FINAL_RESPONSE }],
+  };
+}
+
+function autoRunAfkTransition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
+  const scenario = "auto-run-afk" as const;
+  const history = messageText(request.messages);
+  if (history.includes("Explore implementation context")) return autoRunExploreTransition(request, repoRoot);
+  if (history.includes("Review pull request")) {
+    return {
+      scenario,
+      checkpoint: "auto-review-complete",
+      messageId: scenarioStableId(scenario, "auto-review-complete"),
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "Review complete; no fixes required." }],
+    };
+  }
+  if (!history.includes(AUTO_RUN_PERMANENT_NOTE)) throw new ScenarioMismatch("$.messages", "implementer prompt omitted permanent guidance", scenario);
+  if (!history.includes(AUTO_RUN_NESTED_CONTEXT)) throw new ScenarioMismatch("$.messages", "implementer prompt omitted recursive issue context", scenario);
+  if (history.includes("Fresh codebase context") && !history.includes(AUTO_RUN_EXPLORE_REPORT)) {
+    throw new ScenarioMismatch("$.messages", "implementer prompt omitted the Explore report", scenario);
+  }
+  const readId = "toolu_e2e_auto_afk_read";
+  const editId = "toolu_e2e_auto_afk_edit";
+  const results = scenarioSequenceResults(request.messages, [
+    { id: readId, name: "Read" },
+    { id: editId, name: "Edit" },
+  ], scenario);
+  const readResult = results.get(readId);
+  const editResult = results.get(editId);
+  if (!readResult) {
+    requireScenarioTool(request, "Read", scenario);
+    return {
+      scenario,
+      checkpoint: "auto-afk-read",
+      messageId: scenarioStableId(scenario, "auto-afk-read"),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: readId, name: "Read", input: { file_path: fixturePath(repoRoot) } }],
+    };
+  }
+  if (readResult.is_error === true || !contentContains(readResult.content, BEFORE_CONTENT.trimEnd())) {
+    throw new ScenarioMismatch("$.messages", "Read tool_result did not contain the expected fixture marker", scenario);
+  }
+  if (!editResult) {
+    requireScenarioTool(request, "Edit", scenario);
+    return {
+      scenario,
+      checkpoint: "auto-afk-edit",
+      messageId: scenarioStableId(scenario, "auto-afk-edit"),
+      stopReason: "tool_use",
+      content: [{
+        type: "tool_use",
+        id: editId,
+        name: "Edit",
+        input: {
+          file_path: fixturePath(repoRoot),
+          old_string: BEFORE_CONTENT.trimEnd(),
+          new_string: AFTER_CONTENT.trimEnd(),
+          replace_all: false,
+        },
+      }],
+    };
+  }
+  if (editResult.is_error === true) throw new ScenarioMismatch("$.messages", "Edit tool_result reported an error", scenario);
+  return {
+    scenario,
+    checkpoint: "auto-afk-complete",
+    messageId: scenarioStableId(scenario, "auto-afk-complete"),
+    stopReason: "end_turn",
+    content: [{ type: "text", text: FINAL_RESPONSE }],
+  };
+}
+
+function autoRunExploreTransition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
+  const scenario = "auto-run-afk" as const;
+  const toolName = "Read";
+  const toolUseId = "toolu_e2e_auto_explore_read";
+  const result = scenarioToolResult(request.messages, toolUseId, toolName, scenario);
+  if (!result) {
+    requireScenarioTool(request, toolName, scenario);
+    return {
+      scenario,
+      checkpoint: "auto-explore-read",
+      messageId: scenarioStableId(scenario, "auto-explore-read"),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: toolUseId, name: toolName, input: { file_path: fixturePath(repoRoot) } }],
+    };
+  }
+  if (result.is_error === true || !contentContains(result.content, BEFORE_CONTENT.trimEnd())) {
+    throw new ScenarioMismatch("$.messages", "Explore Read did not contain the expected fixture marker", scenario);
+  }
+  return {
+    scenario,
+    checkpoint: "auto-explore-complete",
+    messageId: scenarioStableId(scenario, "auto-explore-complete"),
+    stopReason: "end_turn",
+    content: [{ type: "text", text: AUTO_RUN_EXPLORE_REPORT }],
+  };
 }
 
 function singleFileTransition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
@@ -259,6 +412,46 @@ function scenarioToolResult(messages: readonly Message[], expectedId: string, ex
   return result;
 }
 
+function scenarioSequenceResults(
+  messages: readonly Message[],
+  expected: readonly { readonly id: string; readonly name: string }[],
+  scenario: ScenarioId,
+): ReadonlyMap<string, ContentBlock> {
+  const definitions = new Map(expected.map((entry) => [entry.id, entry.name]));
+  const uses = new Map<string, number>();
+  const results = new Map<string, ContentBlock>();
+  messages.forEach((message, messageIndex) => {
+    if (!Array.isArray(message.content)) return;
+    for (const block of message.content.filter(isRecord) as ContentBlock[]) {
+      if (block.type === "tool_use") {
+        const name = typeof block.id === "string" ? definitions.get(block.id) : undefined;
+        if (name === undefined) throw new ScenarioMismatch("$.messages", `unknown tool_use id hash ${hashValue(block.id)}`, scenario);
+        if (block.name !== name) throw new ScenarioMismatch("$.messages", "tool_use has unexpected tool name", scenario);
+        if (uses.has(block.id as string)) throw new ScenarioMismatch("$.messages", `duplicate tool_use id hash ${hashValue(block.id)}`, scenario);
+        uses.set(block.id as string, messageIndex);
+      }
+      if (block.type === "tool_result") {
+        const id = block.tool_use_id;
+        if (typeof id !== "string" || !definitions.has(id)) throw new ScenarioMismatch("$.messages", `unknown tool_result id hash ${hashValue(id)}`, scenario);
+        if (results.has(id)) throw new ScenarioMismatch("$.messages", `duplicate tool_result id hash ${hashValue(id)}`, scenario);
+        const useMessage = uses.get(id);
+        if (useMessage === undefined || messageIndex !== useMessage + 1 || messages[useMessage]?.role !== "assistant" || message.role !== "user") {
+          throw new ScenarioMismatch("$.messages", "tool_result must immediately follow its assistant tool_use turn", scenario);
+        }
+        results.set(id, block);
+      }
+    }
+  });
+  for (let index = 1; index < expected.length; index += 1) {
+    const priorResult = results.get(expected[index - 1]!.id);
+    const currentUse = uses.get(expected[index]!.id);
+    if (currentUse !== undefined && priorResult === undefined) {
+      throw new ScenarioMismatch("$.messages", `${expected[index]!.name} appeared before the prior tool result`, scenario);
+    }
+  }
+  return results;
+}
+
 function fixturePath(repoRoot: string): string {
   const root = resolve(repoRoot);
   const path = resolve(root, "deterministic.txt");
@@ -283,10 +476,15 @@ function flattenBlocks(messages: readonly Message[]): ContentBlock[] {
 }
 
 function selectScenario(messages: readonly Message[]): ScenarioId {
+  const text = messageText(messages);
+  if (text.includes("Review pull request") && text.includes(AUTO_RUN_PERMANENT_NOTE)) return "auto-run-afk";
   const markers = [
     ["single-file-success", SCENARIO_MARKER],
     ["manager-foreground-explore", MANAGER_SCENARIO_MARKER],
     ["explore-read-report", EXPLORE_SCENARIO_MARKER],
+    ["auto-run-afk", AUTO_RUN_AFK_MARKER],
+    ["auto-run-hitl", AUTO_RUN_HITL_MARKER],
+    ["auto-run-followup", AUTO_RUN_FOLLOWUP_MARKER],
   ] as const;
   const counts = new Map<ScenarioId, number>(markers.map(([id]) => [id, 0]));
   for (const block of flattenBlocks(messages)) {
@@ -307,6 +505,19 @@ function selectScenario(messages: readonly Message[]): ScenarioId {
 
 function occurrences(value: string, needle: string): number {
   return value.split(needle).length - 1;
+}
+
+function messageText(messages: readonly Message[]): string {
+  const values: string[] = [];
+  for (const message of messages) {
+    if (typeof message.content === "string") values.push(message.content);
+    if (!Array.isArray(message.content)) continue;
+    for (const block of message.content.filter(isRecord)) {
+      if (typeof block.text === "string") values.push(block.text);
+      if (block.type === "tool_result" && typeof block.content === "string") values.push(block.content);
+    }
+  }
+  return values.join("\n");
 }
 
 function validateKnownUses(uses: readonly ContentBlock[]): void {

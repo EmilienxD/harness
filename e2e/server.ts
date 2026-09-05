@@ -47,6 +47,7 @@ export interface FakeAnthropicServer {
 
 export async function startFakeAnthropicServer(options: {
   readonly repoRoot: string;
+  readonly resolveRepoRoot?: () => Promise<string>;
   readonly diagnosticsPath?: string;
   readonly readinessPath?: string;
 }): Promise<FakeAnthropicServer> {
@@ -91,7 +92,7 @@ export async function startFakeAnthropicServer(options: {
       }
 
       inferenceRequests += 1;
-      const scenarioResponse = transition(messageRequest, options.repoRoot);
+      const scenarioResponse = transition(messageRequest, options.resolveRepoRoot ? await options.resolveRepoRoot() : options.repoRoot);
       checkpoints.add(scenarioResponse.checkpoint);
       writeMessage(response, messageRequest.model, scenarioResponse, messageRequest.stream);
       observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, 200, "success", scenarioResponse.scenario, scenarioResponse.checkpoint, null));

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { childEnvironment } from "../e2e/smoke.js";
+import { harnessWorktreePaths } from "../e2e/repository.js";
 import { FINAL_RESPONSE, SCENARIO_MARKER, ScenarioMismatch, parseMessagesRequest, transition, type Message } from "../e2e/scenario.js";
 import { startFakeAnthropicServer } from "../e2e/server.js";
 
@@ -87,4 +88,16 @@ test("smoke child environment clears paid and alternate provider selectors", () 
   assert.equal(env.AWS_ACCESS_KEY_ID, undefined);
   assert.equal(env.KEEP_ME, "yes");
   assert.equal(env.ANTHROPIC_AUTH_TOKEN, "dummy");
+});
+
+test("reset cleanup accepts only registered worktrees inside the dedicated runtime root", () => {
+  const runtimeRoot = "C:\\fixture\\runtime";
+  const cloneRoot = `${runtimeRoot}\\repository`;
+  const valid = `${runtimeRoot}\\worktrees\\run_123\\repository`;
+  const output = `worktree ${cloneRoot.replace(/\\/g, "/")}\nHEAD 1\n\nworktree ${valid.replace(/\\/g, "/")}\nHEAD 2\n`;
+  assert.deepEqual(harnessWorktreePaths(output, runtimeRoot, cloneRoot), [valid]);
+  assert.throws(
+    () => harnessWorktreePaths(`${output}\nworktree C:/fixture/unowned/repository\nHEAD 3\n`, runtimeRoot, cloneRoot),
+    /outside the dedicated harness worktree root/u,
+  );
 });

@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { DEFAULT_REPOSITORY, type HarnessConfig } from "./config.js";
+import { contains, DEFAULT_REPOSITORY, type HarnessConfig } from "./config.js";
 
 const execFileAsync = promisify(execFile);
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "e2e", "fixture", "repository");
@@ -167,6 +167,7 @@ async function reconcileClone(config: HarnessConfig): Promise<void> {
   if (await exists(config.cloneRoot)) {
     await verifyOwnership(config);
     await verifyCloneIdentity(config);
+    await removeHarnessWorktrees(config);
     await git(config.cloneRoot, ["fetch", "origin", "--prune"]);
   } else {
     if (await exists(config.ownershipPath)) {
@@ -180,6 +181,30 @@ async function reconcileClone(config: HarnessConfig): Promise<void> {
   await git(config.cloneRoot, ["checkout", "-B", "main", "origin/main"]);
   await git(config.cloneRoot, ["reset", "--hard", "origin/main"]);
   await git(config.cloneRoot, ["clean", "-ffdx"]);
+}
+
+async function removeHarnessWorktrees(config: HarnessConfig): Promise<void> {
+  const output = await git(config.cloneRoot, ["worktree", "list", "--porcelain"]);
+  for (const path of harnessWorktreePaths(output, config.runtimeRoot, config.cloneRoot)) {
+    await git(config.cloneRoot, ["worktree", "remove", "--force", path]);
+  }
+  await git(config.cloneRoot, ["worktree", "prune"]);
+}
+
+export function harnessWorktreePaths(output: string, runtimeRoot: string, cloneRoot: string): string[] {
+  const clone = resolve(cloneRoot);
+  const ownedRoot = resolve(runtimeRoot, "worktrees");
+  const paths: string[] = [];
+  for (const line of output.split(/\r?\n/u)) {
+    if (!line.startsWith("worktree ")) continue;
+    const candidate = resolve(line.slice("worktree ".length));
+    if (candidate.toLowerCase() === clone.toLowerCase()) continue;
+    if (!contains(ownedRoot, candidate) || candidate.toLowerCase() === ownedRoot.toLowerCase() || basename(candidate) !== basename(clone)) {
+      throw new Error(`Refusing reset cleanup for registered worktree outside the dedicated harness worktree root: ${candidate}`);
+    }
+    paths.push(candidate);
+  }
+  return paths;
 }
 
 async function verifyOwnership(config: HarnessConfig): Promise<void> {
@@ -210,6 +235,8 @@ async function verifyFinalState(config: HarnessConfig, seedSha: string): Promise
   const branch = (await git(config.cloneRoot, ["branch", "--show-current"])).trim();
   const status = await git(config.cloneRoot, ["status", "--porcelain"]);
   if (localHead !== seedSha || branch !== "main" || status !== "") throw new Error("Local reset postcondition failed");
+  const worktrees = harnessWorktreePaths(await git(config.cloneRoot, ["worktree", "list", "--porcelain"]), config.runtimeRoot, config.cloneRoot);
+  if (worktrees.length !== 0) throw new Error("Local reset left an auto-run worktree registered");
   const refs = parseRemoteRefs(await git(config.cloneRoot, ["ls-remote", "--heads", "origin"]));
   if (refs.size !== 1 || refs.get("main") !== seedSha) throw new Error("Remote branch reset postcondition failed");
   const prs = JSON.parse(await run("gh", ["pr", "list", "--repo", config.repository, "--state", "open", "--limit", "1", "--json", "number"])) as unknown[];

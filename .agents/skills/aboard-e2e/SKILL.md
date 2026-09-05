@@ -47,6 +47,7 @@ npm run e2e:reset
 npm run e2e:serve
 npm run e2e:smoke
 npm run e2e:extension
+npm run e2e:auto-run
 npm run e2e:full
 ```
 
@@ -55,7 +56,8 @@ npm run e2e:full
 - `e2e:serve` runs only the local fake Anthropic endpoint and prints its ephemeral connection data to the invoking terminal.
 - `e2e:smoke` resets the local verified clone, launches the server and real CLI, validates the exchange, and intentionally leaves the edited fixture for inspection. A subsequent `e2e:reset` restores it.
 - `e2e:extension` uses two VS Code Extension Development Host launches. The first initializes the verified clone; the second runs the real Manager to foreground Explore return journey, then removes `.abd` and verifies admission closes.
-- `e2e:full` runs static checks, unit and native VS Code integration tests, two remote resets, the CLI smoke, the extension journey, and final resets. It excludes auto-run.
+- `e2e:auto-run` creates fresh real GitHub issues and runs per-issue and single-branch auto-run journeys through real visible Claude Code terminals backed by the fake inference server. Each journey resets the disposable repository in `finally`.
+- `e2e:full` runs static checks, unit and native VS Code integration tests, two remote resets, the CLI smoke, the extension journey, both auto-run journeys, and final resets.
 
 ## Destructive bootstrap
 
@@ -99,6 +101,7 @@ It performs and verifies this outcome:
 - delete every non-`main` branch using its observed ref identity;
 - retain exactly the eight current `[AI]-*` labels and remove all other test labels;
 - clone when absent, or fetch, prune, clean, and hard-reset only the ownership-recorded checkout;
+- remove only Git-registered worktrees under `<runtime root>\worktrees`, refusing any registered external path;
 - finish on clean local `main`, exact `origin`, one remote `main`, no other branches, and no open issues or pull requests.
 
 Issue and pull request numbers are generated output, never fixture constants.
@@ -154,6 +157,14 @@ Tool results must immediately follow the corresponding assistant tool-use turn. 
 The non-auto extension journey uses `[E2E:manager-foreground-explore]` and `[E2E:explore-read-report]`. The disposable Manager definition receives its first prompt through `command: claude "<message>"`; do not type the prompt into the TUI. The fake endpoint makes the Manager call the real aboard `run_agent` MCP tool, and the launched Explore session uses the real `Read` tool before its report returns to the Manager.
 
 The test changes only the disposable clone's Manager command. Explore keeps its authored `command: claude`, so its prompt remains the positional prompt aboard resolved for that worker. The final local reset restores the canonical fixture.
+
+## Auto-run scenarios
+
+The auto-run runner uses fresh issue numbers on every journey and closes all remaining issues during reset. It temporarily commits the initialized `.abd` scaffold and test settings to the disposable repository so the auto-run clean-tree precondition is real. Test agent commands use `--permission-mode acceptEdits`; do not use bypass mode. A worktree journey trusts its exact generated checkout through the isolated test Claude config during `.abd/session-setup.ps1`.
+
+The per-issue journey covers recursive referenced-issue context, a permanent prompt, Explore before implementation, AFK review, issue and run pull requests, merge strategy, automatic run-PR merge, issue closure, and restoration of the human branch. The fake model must request `Read` before `Edit`.
+
+The single-branch journey covers worktree isolation, advanced and expert difficulty routing, HITL acceptance, pause after HITL, explicit resume, sequential implementers, cumulative pull-request refresh, an unmerged final run PR, issue closure, and removal of a drained worktree. Resolve each fake tool path from the one active Git-registered worktree; never allow the fake model to edit the original checkout to silence a permission prompt.
 
 ## Real Claude Code launcher
 
@@ -222,6 +233,8 @@ npm run e2e:reset
 npm run e2e:smoke
 npm run e2e:reset
 npm run e2e:extension
+npm run e2e:reset
+npm run e2e:auto-run
 npm run e2e:reset
 ```
 

@@ -1,25 +1,12 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { downloadAndUnzipVSCode, runTests } from "@vscode/test-electron";
+import { runTests } from "@vscode/test-electron";
 import { loadConfig } from "../config.js";
 import { resetLocal } from "../repository.js";
 import { startFakeAnthropicServer } from "../server.js";
 import { childEnvironment, validateClaudeCli } from "../smoke.js";
 import { MANAGER_SCENARIO_MARKER } from "../scenario.js";
-
-async function testExecutable(): Promise<string> {
-  const executable = await downloadAndUnzipVSCode("1.130.0");
-  if (process.platform !== "win32") return executable;
-  const archiveRoot = resolve(executable, "..");
-  const entries = await readdir(archiveRoot, { withFileTypes: true });
-  const commitDirectory = entries.find((entry) => entry.isDirectory() && /^[0-9a-f]{10}$/u.test(entry.name));
-  if (!commitDirectory) throw new Error("VS Code archive commit directory is missing");
-  const productPath = join(archiveRoot, commitDirectory.name, "resources", "app", "product.json");
-  const product = JSON.parse(await readFile(productPath, "utf8")) as Record<string, unknown>;
-  product.win32VersionedUpdate = false;
-  await writeFile(productPath, `${JSON.stringify(product, null, 2)}\n`);
-  return executable;
-}
+import { prepareInteractiveClaudeConfig, testExecutable } from "./support.js";
 
 export async function runExtensionJourney(): Promise<void> {
   const config = loadConfig();
@@ -70,38 +57,6 @@ export async function runExtensionJourney(): Promise<void> {
     await server.close();
     await resetLocal(config);
   }
-}
-
-async function prepareInteractiveClaudeConfig(configRoot: string, trustedRoots: readonly string[]): Promise<void> {
-  const path = join(configRoot, ".claude.json");
-  let value: Record<string, unknown> = {};
-  try { value = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>; }
-  catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-  }
-  const current = typeof value.projects === "object" && value.projects !== null && !Array.isArray(value.projects)
-    ? value.projects as Record<string, unknown>
-    : {};
-  const projects = { ...current };
-  for (const root of trustedRoots) {
-    projects[resolve(root).replace(/\\/g, "/")] = {
-      allowedTools: [],
-      mcpContextUris: [],
-      mcpServers: {},
-      enabledMcpjsonServers: [],
-      disabledMcpjsonServers: [],
-      hasTrustDialogAccepted: true,
-      hasClaudeMdExternalIncludesApproved: false,
-      hasClaudeMdExternalIncludesWarningShown: false,
-    };
-  }
-  await writeFile(path, `${JSON.stringify({
-    ...value,
-    hasCompletedOnboarding: true,
-    lastOnboardingVersion: "2.1.261",
-    shiftEnterKeyBindingInstalled: true,
-    projects,
-  }, null, 2)}\n`, "utf8");
 }
 
 void runExtensionJourney().catch((error: unknown) => {

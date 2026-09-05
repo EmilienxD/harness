@@ -87,6 +87,28 @@ test("message query parameters preserve routing and aggregate Messages structure
   }
 });
 
+test("fake server resolves the active repository root for each inference", async () => {
+  const originalRoot = join(tmpdir(), "aboard-e2e-original");
+  const activeRoot = join(tmpdir(), "aboard-e2e-active");
+  let resolutions = 0;
+  const server = await startFakeAnthropicServer({
+    repoRoot: originalRoot,
+    resolveRepoRoot: async () => {
+      resolutions += 1;
+      return activeRoot;
+    },
+  });
+  try {
+    const response = await fetch(`${server.baseUrl}/v1/messages`, { method: "POST", headers: headers(server), body: JSON.stringify(body()) });
+    const message = await response.json() as { content: Array<{ input?: { file_path?: string } }> };
+    assert.equal(response.status, 200);
+    assert.equal(resolutions, 1);
+    assert.equal(message.content[0]?.input?.file_path, join(activeRoot, "deterministic.txt"));
+  } finally {
+    await server.close();
+  }
+});
+
 test("count_tokens accepts its reduced shape without advancing a scenario", async () => {
   const server = await startFakeAnthropicServer({ repoRoot: tmpdir() });
   try {

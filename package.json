@@ -656,9 +656,10 @@
     "e2e:reset": "npm run e2e:build && node dist/e2e/cli.js reset",
     "e2e:serve": "npm run e2e:build && node dist/e2e/cli.js serve",
     "e2e:smoke": "npm run e2e:build && node dist/e2e/cli.js smoke",
-    "e2e:extension:build": "esbuild e2e/vscode/run.ts e2e/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/e2e/vscode --sourcemap",
+    "e2e:extension:build": "esbuild e2e/vscode/run.ts e2e/vscode/auto-run.ts e2e/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/e2e/vscode --sourcemap",
     "e2e:extension": "npm run build && npm run e2e:extension:build && node dist/e2e/vscode/run.js",
-    "e2e:full": "npm run check && npm run test:integration && npm run build && npm run e2e:reset && npm run e2e:reset && npm run e2e:smoke && npm run e2e:reset && npm run e2e:extension && npm run e2e:reset"
+    "e2e:auto-run": "npm run build && npm run e2e:build && npm run e2e:extension:build && node dist/e2e/vscode/auto-run.js",
+    "e2e:full": "npm run check && npm run test:integration && npm run build && npm run e2e:reset && npm run e2e:reset && npm run e2e:smoke && npm run e2e:reset && npm run e2e:extension && npm run e2e:reset && npm run e2e:auto-run && npm run e2e:reset"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
