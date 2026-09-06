@@ -40,6 +40,11 @@ including creating the workflow's labels and, for batches, rewriting cross-refer
 issue numbers. Bodies always go through LF-only `--body-file` temporary files, never inline, which
 avoids both the Windows command-length limit and Windows newline expansion.
 
+Drafting skill bodies are static so Claude Code can reuse its skill prompt cache. The same hook
+recognizes drafting invocations, prepares the session directory, finds the next free draft index,
+and adds those values as context. Because setup is no longer hidden inside pre-expanded skill shell
+syntax, the agent can inspect the draft directory again if it needs another fresh index.
+
 ### Drafting flows
 
 | Flow | Skills | Cost |
@@ -192,20 +197,20 @@ additional API calls**.
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
 │   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
 └── hooks/
-    ├── publish_issues_UserPromptSubmit_hook.py  # command dispatch and draft publishing
+    ├── publish_issues_UserPromptSubmit_hook.py  # drafting context, command dispatch, publishing
     └── save_as_issue.py                        # response caching and direct report publishing
 ```
 
-The hook is registered on `UserPromptSubmit` and matches `/save-as-issue`, `/publish-issues` or `/publish-issue`
-(followed by end of string or whitespace), handling both singular and batch drafts. Every other
-prompt passes through untouched (exit 0) — carrying the pending-publish notice, if there is one —
-so it is safe alongside other `UserPromptSubmit` hooks. It is registered with `"timeout": 300`
+The hook is registered on `UserPromptSubmit`. It intercepts `/save-as-issue`, `/publish-issues`, and
+`/publish-issue`, and adds setup context for the four explicit drafting skills. Every other prompt
+passes through untouched (exit 0) — carrying the pending-publish notice, if there is one — so it is
+safe alongside other `UserPromptSubmit` hooks. It is registered with `"timeout": 300`
 because `UserPromptSubmit` lowers the default command-hook timeout to 30 seconds, which a large
 batch of `gh` calls can exceed; a timed-out hook is canceled and the prompt reaches Claude anyway,
 which for this hook would mean a half-published batch and a literal `/publish-issues` for the model
 to interpret.
 
-At runtime the drafting skills create a gateway folder at the project root — `.issues-gateway/`:
+At runtime the hook creates a gateway folder at the project root — `.issues-gateway/`:
 
 ```
 .issues-gateway/
@@ -219,12 +224,11 @@ At runtime the drafting skills create a gateway folder at the project root — `
 
 ### File conventions the skills and hooks agree on
 
-- **Session id**: the Claude Code session id of the drafting run, injected straight into the
-  skill as `${CLAUDE_SESSION_ID}` (nothing to generate, and unique per session, so no collision
-  handling is needed). Each drafting skill runs a `` !`…` `` command before loading that creates
-  the session directory, drops a `.gitignore` containing `*` so drafts are never committed, and
-  (for single-issue and batch flows) resolves the next free `issue-{n}` index so pending drafts are
-  never overwritten.
+- **Session id**: the native session id of the drafting run. On Claude Code this is already a UUID;
+  on ChatGPT the adapter derives a stable UUID-shaped batch id from the thread id. The hook creates
+  the session directory, drops a `.gitignore` containing `*` so drafts are never committed, resolves
+  the next free `issue-{n}` index, and injects all three values as context. Skill files contain only
+  placeholders, so their bodies remain byte-for-byte stable between invocations.
 - **Filename**: `{session-id}/issue-{i}.md`. `{i}` is the next free index for single-issue and spec
   drafts; for a batch, numbering continues from that index in publish order (blockers before what
   they block).
@@ -308,12 +312,10 @@ uvx --from git+https://github.com/EmilienxD/harness harness install issues --pla
 
 That installs skills under `.agents/skills/`, the shared publishing core and a thin native adapter
 under `.codex/hooks/`, and registers the adapter in `.codex/hooks.json`. Review and trust the hook
-definition when ChatGPT prompts you. ChatGPT has no documented equivalent of Claude Code's
-pre-expanded `` !`command` `` skill syntax, so the adapter handles those commands on
-`UserPromptSubmit`: it derives a stable UUID-shaped batch id from the ChatGPT thread id, creates the
-gateway directory and `.gitignore`, computes the next free index, and injects those exact values as
-developer context before the drafting skill runs. The same adapter delegates publishing to the
-shared core, including 65,536-character splitting and resumable continuation comments.
+definition when ChatGPT prompts you. Its `UserPromptSubmit` adapter uses the same shared drafting
+setup as Claude Code, deriving a stable UUID-shaped batch id from the ChatGPT thread id and injecting
+the resulting values as developer context. The adapter also delegates publishing to the shared core,
+including 65,536-character splitting and resumable continuation comments.
 
 That copies the six skills and the hook into `.claude/` and merges the hook registration below
 into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry` first to

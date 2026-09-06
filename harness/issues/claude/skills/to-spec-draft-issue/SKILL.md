@@ -4,6 +4,8 @@ description: Turn the current conversation into a spec, as a draft issue — no 
 disable-model-invocation: true
 ---
 
+A `UserPromptSubmit` hook has supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them unless you need another fresh index later in the same turn.
+
 Turn the current conversation context and codebase understanding into a single GitHub **spec issue**. Do NOT interview the user; just synthesize what you already know.
 
 This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at spec drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
@@ -27,8 +29,8 @@ If the feature is too unclear to write a useful spec, say what is missing instea
 
 ### 2. Write 1 file
 
-Create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md` where {i} is:
-!`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
+Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
+`<next-free-issue-index>`
 
 Do not spend time checking whether the folder exists or what it already contains — just write the file.
 

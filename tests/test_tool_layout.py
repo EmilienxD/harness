@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
+from pathlib import Path
 
 from harness_cli.manifest import discover
 
 
 LAYERS = {"shared", "claude", "chatgpt"}
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_first_party_tools_use_explicit_layered_payloads():
@@ -28,3 +31,15 @@ def test_first_party_tools_use_explicit_layered_payloads():
                 assert normalized.startswith(f"{platform}/"), (
                     f"{tool.name}: {platform} fragment is outside its payload layer"
                 )
+
+
+def test_first_party_skills_do_not_use_dynamic_shell_injection():
+    dynamic_shell = re.compile(r"(?m)^\s*(?:!`|```!)")
+    for skill in (ROOT / "harness").rglob("SKILL.md"):
+        if "itsclaudehistory" in skill.parts:
+            continue
+        body = skill.read_text(encoding="utf-8")
+        assert not dynamic_shell.search(body), (
+            f"{skill.relative_to(ROOT)} uses dynamic shell injection; prepare dynamic "
+            "context in a hook so the skill body stays cacheable"
+        )

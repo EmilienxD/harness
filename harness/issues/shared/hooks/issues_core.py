@@ -7,10 +7,9 @@ work itself with `gh` and exits 2, which erases the prompt and shows stderr to
 the user only - zero API calls for this step.
 
 Design notes:
-- Each batch lives in its own directory: ".issues-gateway/{session-id}/",
-  where the session id is the Claude Code session id the drafting run had
-  (${CLAUDE_SESSION_ID}). It is unique per session by construction, so no
-  collision handling is needed.
+- Each batch lives in its own directory: ".issues-gateway/{session-id}/".
+  Native UserPromptSubmit adapters prepare that directory and inject its
+  session id and next free draft index before a drafting skill runs.
 - Draft files inside a batch dir are named "issue-{i}.md". Sorting by `i`
   gives a stable creation order, so an issue can only reference an issue
   created earlier in the same batch (no forward references), assuming
@@ -184,6 +183,9 @@ ISSUE_MARKER_PATTERN = re.compile(
 
 # "/publish-issue", "/publish-issues", and their "--dry" variants match.
 PROMPT_PATTERN = re.compile(r"^/publish-issues?(?:\s|$)")
+DRAFT_PATTERN = re.compile(
+    r"(?<![\w-])[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
+)
 
 # A batch directory name: a Claude Code session id (a UUID).
 SESSION_ID_PATTERN = re.compile(
@@ -213,6 +215,34 @@ PARENT_NONE_PATTERN = re.compile(r"^(none|n/a)\.?$", re.IGNORECASE)
 
 # The draft filename convention produced by /draft-issues: "issue-{i}.md"
 FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
+
+
+def prepare_drafting_context(root: Path, session_id: str) -> str:
+    """Prepare one draft batch and return the values skills must use."""
+    gateway = root / GATEWAY_DIR
+    batch = gateway / session_id
+    batch.mkdir(parents=True, exist_ok=True)
+    ignore = gateway / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n", encoding="utf-8", newline="\n")
+
+    indexes = []
+    for path in batch.glob("issue-*.md"):
+        match = FILENAME_PATTERN.match(path.name)
+        if match:
+            indexes.append(int(match.group(1)))
+    next_index = max(indexes, default=-1) + 1
+    relative = GATEWAY_DIR / session_id
+    return (
+        "Issues gateway drafting context:\n"
+        f"- issues session id: {session_id}\n"
+        f"- draft directory: {relative.as_posix()}\n"
+        f"- next free issue index: {next_index}\n"
+        "Use these exact values wherever the skill asks for its session id, "
+        "draft directory, or starting issue index. The directory and gateway "
+        ".gitignore already exist. If you need a fresh index later, inspect the "
+        "draft directory again before writing so you do not overwrite a draft."
+    )
 
 # The label declaration line every drafting skill produces - specs included:
 # "> " followed by a comma-separated list of label tokens in any order, with

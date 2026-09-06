@@ -1154,6 +1154,39 @@ def test_ordinary_prompt_without_a_notice_is_untouched(tmp_path):
     assert result.stdout == ""
 
 
+def test_claude_drafting_prompt_prepares_and_injects_context(tmp_path):
+    result = _run_hook(tmp_path, "/draft-issue add hook-based setup")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert f"issues session id: {SID}" in context
+    assert "next free issue index: 0" in context
+    batch = tmp_path / ".issues-gateway" / SID
+    assert batch.is_dir()
+    assert (tmp_path / ".issues-gateway/.gitignore").read_text() == "*\n"
+
+    (batch / "issue-0.md").write_text("# Existing\n", encoding="utf-8")
+    result = _run_hook(tmp_path, "/draft-issue add another")
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "next free issue index: 1" in context
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "/draft-audit-issues convert the audit",
+        "/draft-issues break this down",
+        "/to-spec-draft-issue",
+    ],
+)
+def test_all_claude_drafting_skills_trigger_context(prompt, tmp_path):
+    result = _run_hook(tmp_path, prompt)
+    assert result.returncode == 0
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "Issues gateway drafting context" in context
+
+
 def test_spec_then_breakdown_across_two_publish_runs(tmp_path, monkeypatch):
     """The whole workflow: spec published, then issues drafted under it.
 

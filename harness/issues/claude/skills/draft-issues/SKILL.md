@@ -4,6 +4,8 @@ description: Break a plan, spec, or the current conversation into a set of trace
 disable-model-invocation: true
 ---
 
+A `UserPromptSubmit` hook has supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them unless you need another fresh index later in the same turn.
+
 Break a plan, spec, or conversation into a set of GitHub **issues**: tracer-bullet vertical slices, each declaring the issues that **block** it.
 
 This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as markdown files. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
@@ -64,8 +66,7 @@ Iterate until the user approves the breakdown. Stop after presenting or revising
 
 ### 5. Write one file per issue
 
-For each approved issue, create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md` where `{i}` is the issue number starting at:
-!`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
+For each approved issue, create `.issues-gateway/<issues-session-id>/issue-{i}.md` where `{i}` starts at `<next-free-issue-index>`
 in the order you plan to publish them (blockers before what they block). Do not spend time checking whether the folder exists or what it already contains — just write the files using multiple Write tool calls in parallel.
 
 Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels, defined during mapping, and must contain nothing else:
@@ -108,7 +109,7 @@ Examples:
 > mode:afk
 ```
 
-In "Parent" and "Blocked by", reference other issues drafted in this turn by their plain-text `${CLAUDE_SESSION_ID}/{i}` token — never wrap it in backticks or braces; the system will rewrite it to a bare `#<number>` resolving to real issue numbers once the referenced issue is published. This works for references to issues from THIS TURN ONLY — a draft can't reference an issue from a different, unrelated turn. To reference an issue not drafted in this turn, use the real existing GitHub issue number. Once this turn's issues are published, you will be notified of the result and the actual GitHub numbers of the published issues, so you don't need any additional `gh` calls to get the issue numbers for the next turns in this session.
+In "Parent" and "Blocked by", reference other issues drafted in this turn by their plain-text `<issues-session-id>/{i}` token — never wrap it in backticks or braces; the system will rewrite it to a bare `#<number>` resolving to real issue numbers once the referenced issue is published. This works for references to issues from THIS TURN ONLY — a draft can't reference an issue from a different, unrelated turn. To reference an issue not drafted in this turn, use the real existing GitHub issue number. Once this turn's issues are published, you will be notified of the result and the actual GitHub numbers of the published issues, so you don't need any additional `gh` calls to get the issue numbers for the next turns in this session.
 
 ### 6. Hand off to the user
 

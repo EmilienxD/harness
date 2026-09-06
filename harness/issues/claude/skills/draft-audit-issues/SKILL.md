@@ -4,6 +4,8 @@ description: Turn an existing codebase audit into one evidence-preserving GitHub
 disable-model-invocation: true
 ---
 
+A `UserPromptSubmit` hook has supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them unless you need another fresh index later in the same turn.
+
 Turn the findings from an existing audit into GitHub issue drafts. Preserve a strict one-finding-to-one-issue mapping and the audit's evidence-oriented format.
 
 This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as markdown files. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
@@ -49,10 +51,9 @@ State the issue count and confirm that it equals the included finding count. Ask
 
 ## 4. Write one file per finding
 
-Create `.issues-gateway/${CLAUDE_SESSION_ID}/issue-{i}.md`, starting at:
-!`d="./.issues-gateway/${CLAUDE_SESSION_ID}"; mkdir -p "$d"; [ -e ./.issues-gateway/.gitignore ] || printf '*\n' > ./.issues-gateway/.gitignore; max=-1; for f in "$d"/issue-*.md; do [ -f "$f" ] || continue; i="${f##*/issue-}"; i="${i%%[^0-9]*}"; [ -n "$i" ] && [ "$i" -gt "$max" ] && max="$i"; done; echo $((max + 1))`
+Create `.issues-gateway/<issues-session-id>/issue-{i}.md`, starting at `<next-free-issue-index>`.
 
-Number consecutive files in audit finding order unless real dependencies require blockers first. Write all files using multiple Write tool calls in parallel. Do not inspect the gateway directory; the command above prepared it and selected the first free index.
+Number consecutive files in audit finding order unless real dependencies require blockers first. Write all files using multiple Write tool calls in parallel. Do not inspect the gateway directory; the hook prepared it and selected the first free index.
 
 Use this template, omitting optional sections that do not apply:
 
@@ -95,7 +96,7 @@ Only dependencies explicitly established by the user or audit. Omit otherwise.
 
 The first non-empty line after the title must be `> ` followed by the comma-separated labels. At least one label is required by the publisher. Workflow label tokens are `difficulty:{routine|basic|advanced|expert}`, `mode:{afk|hitl}`, and `chrome`; the publisher creates their canonical `[AI]-` labels when needed.
 
-For relationships between drafts from this turn, use the plain `${CLAUDE_SESSION_ID}/{i}` reference. Use an existing issue's real `#number` or URL for external relationships. Do not wrap references in backticks or braces; the publisher rewrites draft references to real issue numbers.
+For relationships between drafts from this turn, use the plain `<issues-session-id>/{i}` reference. Use an existing issue's real `#number` or URL for external relationships. Do not wrap references in backticks or braces; the publisher rewrites draft references to real issue numbers.
 
 ## 5. Hand off
 
