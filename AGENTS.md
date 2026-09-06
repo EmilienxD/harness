@@ -95,6 +95,7 @@ surrounding user text instead of `$ARGUMENTS`.
   to alternate providers (clauder, `claude -p`, custom CLIs) instead of consuming the Claude
   subscription. Config in `.claude/harness-redirect-subagents/subagents.json`. See `README.md`.
 - `harness/senior-advisor/` — read-only senior-developer advisory mode. See the platform `SKILL.md`.
+- `harness/tdd/` — test-driven development through behavior-focused red-green vertical slices. See the shared `SKILL.md`.
 - `harness/usage-limit-wait/` — `UserPromptSubmit` + `PostToolBatch` hook that warns as a Claude
   subscription usage window fills and blocks the session until it resets. See `README.md`.
 - `harness/zoom-out/` — gives a higher-level map of a codebase area. See the platform `SKILL.md`.

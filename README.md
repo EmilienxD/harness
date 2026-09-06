@@ -105,6 +105,7 @@ skills.
 | [`prefer-read-tool`](harness/prefer-read-tool/README.md) | Nudges Claude to use Read instead of `cat`/`sed` |
 | [`redirect-subagents`](harness/redirect-subagents/README.md) | Redirects Agent subagents to alternate providers, sparing subscription usage |
 | [`senior-advisor`](harness/senior-advisor/shared/skills/senior-advisor/SKILL.md) | Read-only senior-developer advisory mode |
+| [`tdd`](harness/tdd/shared/skills/tdd/SKILL.md) | Test-driven development through behavior-focused red-green vertical slices |
 | [`usage-limit-wait`](harness/usage-limit-wait/README.md) | Warns as a subscription usage limit fills, then waits it out instead of failing the turn |
 | [`validate-request`](harness/validate-request/README.md) | Explores and clarifies an idea into a chat report for user validation |
 | [`zoom-out`](harness/zoom-out/shared/skills/zoom-out/SKILL.md) | Higher-level map of a codebase area |
