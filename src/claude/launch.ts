@@ -578,11 +578,12 @@ function renderAgentDefinition(
   configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
   name: string,
   policy: ResolvedLaunchPolicy,
+  additionalTools: readonly string[] = [],
 ): string {
   const frontmatter = [
     `name: ${name}`,
     `description: ${configuration.declaredDescription ?? `aboard ${configuration.agentName} agent`}`,
-    `tools: ${configuration.declaredTools.join(", ")}`,
+    `tools: ${[...configuration.declaredTools, ...additionalTools].join(", ")}`,
     ...frontmatterLine("model", policy.declaredModel),
     ...frontmatterLine("effort", policy.declaredEffort),
     ...(configuration.extraFrontmatter ?? []),
@@ -595,6 +596,7 @@ function agentRuntimeArguments(
   agentId: AgentId,
   runtimeDirectory: string,
   policy: ResolvedLaunchPolicy,
+  additionalTools: readonly string[] = [],
 ): { readonly args: readonly string[]; readonly file: AgentDefinitionFile } {
   const directory = agentRuntimeDirectory(runtimeDirectory, agentId);
   const name = runtimeAgentName(configuration.agentName, agentId);
@@ -603,7 +605,7 @@ function agentRuntimeArguments(
     file: {
       agentId,
       relativePath: `${directory}/.claude/agents/${name}.md`,
-      contents: renderAgentDefinition(configuration, name, policy),
+      contents: renderAgentDefinition(configuration, name, policy, additionalTools),
     },
   };
 }
@@ -820,7 +822,13 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   let agentDefinition: AgentDefinitionFile | undefined;
   switch (configuration.shape) {
     case "agent-defined": {
-      const definition = agentRuntimeArguments(configuration, request.agentId, runtimeDirectory, policy);
+      const definition = agentRuntimeArguments(
+        configuration,
+        request.agentId,
+        runtimeDirectory,
+        policy,
+        request.chrome === true ? ["mcp__claude-in-chrome__*"] : [],
+      );
       shapeArguments.push(...definition.args);
       agentDefinition = definition.file;
       break;
@@ -945,7 +953,13 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
   const { configuration } = request;
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
   const definition = configuration.shape === "agent-defined"
-    ? agentRuntimeArguments(configuration, request.agentId, runtimeDirectory, policy)
+    ? agentRuntimeArguments(
+        configuration,
+        request.agentId,
+        runtimeDirectory,
+        policy,
+        request.chrome === true ? ["mcp__claude-in-chrome__*"] : [],
+      )
     : undefined;
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   // Claude Code restores a builtin's `--agent` selection with the conversation.

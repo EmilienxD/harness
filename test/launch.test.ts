@@ -335,9 +335,14 @@ test("Chrome is available only to implementers and is replayed on resume", () =>
   const implementer = planLaunch(request({ chrome: true }));
   assert.equal(implementer.args.includes("--chrome"), true);
   assert.equal(implementer.args.at(-2), "--chrome");
-  assert.equal(planLaunch(request()).args.includes("--no-chrome"), false);
+  assert.match(implementer.agentDefinition?.contents ?? "", /tools: .*mcp__claude-in-chrome__\*/);
+  const withoutChrome = planLaunch(request());
+  assert.equal(withoutChrome.args.includes("--no-chrome"), false);
+  assert.doesNotMatch(withoutChrome.agentDefinition?.contents ?? "", /mcp__claude-in-chrome__/);
   const { prompt: _prompt, ...resumeRequest } = request({ chrome: true });
-  assert.equal(planSessionResume(resumeRequest).args.includes("--chrome"), true);
+  const resumed = planSessionResume(resumeRequest);
+  assert.equal(resumed.args.includes("--chrome"), true);
+  assert.match(resumed.agentDefinition?.contents ?? "", /tools: .*mcp__claude-in-chrome__\*/);
 
   assert.throws(
     () => planLaunch({ ...generalPurpose, chrome: true }),
