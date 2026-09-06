@@ -915,14 +915,14 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
           additionalGuideline: options?.additionalGuideline,
           isolatedWorkspace: false,
           keepsWorkspace: false,
-          sessionBranch: "abd/run/<run-id>",
+          sessionBranch: "run/<run-id>",
           sessionBase: "feature/wip",
           targetHeadSha: "a".repeat(40),
           unpublishedTargetCommits: 0,
           mergesItsOwnPullRequest: false,
           issues: [
-            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "abd/34-add-retry-backoff", chrome: true },
-            { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "abd/35-migrate-the-queue", difficulty: "advanced" },
+            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "issue/34-add-retry-backoff", chrome: true },
+            { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "issue/35-migrate-the-queue", difficulty: "advanced" },
           ],
           skipped: [
             { number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
@@ -940,7 +940,7 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
 
   assert.deepEqual(starts, [{ dry: true, additionalGuideline: "keep generated files out of commits" }]);
   assert.match(String(result.message), /no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed/);
-  assert.match(String(result.message), /1\. #34 Add retry backoff.*abd\/34-add-retry-backoff/);
+  assert.match(String(result.message), /1\. #34 Add retry backoff.*issue\/34-add-retry-backoff/);
   assert.match(String(result.message), /#34 Add retry backoff.*\[AI\]-chrome/);
   assert.match(String(result.message), /2\. #35 Migrate the queue.*You must merge its PR/);
   assert.match(String(result.message), /interactive pr-doctor/);
@@ -949,7 +949,7 @@ test("/auto --dry reports the forecast and user gates without starting a run", a
   // actionable "blocked by" entry keeps its per-issue reason.
   assert.match(String(result.message), /Skipped for this forecast: 1 unclassified \(neither \[AI\]-afk nor \[AI\]-hitl\); #41: blocked by open #99, which this run cannot address\./);
   assert.doesNotMatch(String(result.message), /#36: unclassified/);
-  assert.match(String(result.message), /opens one PR from abd\/run\/<run-id> into feature\/wip; you must review and merge/);
+  assert.match(String(result.message), /opens one PR from run\/<run-id> into feature\/wip; you must review and merge/);
   assert.deepEqual(await prompts.handle(managerId, "show me the plan"), {}, "a dry-run forecast is not replayed through the Manager mailbox");
 });
 
@@ -971,12 +971,12 @@ test("/auto --dry reports blockers while preserving the inspected issue plan", a
         pauseAfterHitl: false,
         isolatedWorkspace: false,
         keepsWorkspace: false,
-        sessionBranch: "abd/run/<run-id>",
+        sessionBranch: "run/<run-id>",
         sessionBase: "main",
         targetHeadSha: "a".repeat(40),
         unpublishedTargetCommits: 0,
         mergesItsOwnPullRequest: false,
-        issues: [{ number: 34, title: "Add retry backoff", disposition: "afk", branch: "abd/34-add-retry-backoff" }],
+        issues: [{ number: 34, title: "Add retry backoff", disposition: "afk", branch: "issue/34-add-retry-backoff" }],
         skipped: [],
         dependencyCycles: [],
       }),

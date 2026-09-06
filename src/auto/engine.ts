@@ -429,7 +429,7 @@ export class AutoRunEngine {
       ...guidelineProperty(options.additionalGuideline),
       isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
       keepsWorkspace: settings.worktree.keep,
-      sessionBranch: "abd/run/<run-id>",
+      sessionBranch: "run/<run-id>",
       sessionBase,
       targetHeadSha: publication.headSha,
       unpublishedTargetCommits: publication.unpublishedCommits,
@@ -1477,7 +1477,7 @@ export class AutoRunEngine {
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
-      prompt: `Address issue #${issue.number} on the branch already checked out. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to visualize, test, debug." : ""}`,
+      prompt: `The checked-out branch is for issue #${issue.number}. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to visualize, test, debug." : ""}`,
       ...(await this.#guidance(issue)),
       expectsUncommittedTree: true,
       ...this.#isolation(),
@@ -2172,7 +2172,7 @@ function boundedExplorationReport(value: string): string {
   const report = value.trim();
   if (report.length === 0) throw new Error("Explore returned no codebase context");
   if (report.length <= EXPLORATION_REPORT_MAX_CHARS) return report;
-  const suffix = "\n\n[Explore report truncated by aboard]";
+  const suffix = "\n\n[Explore report truncated]";
   return `${report.slice(0, EXPLORATION_REPORT_MAX_CHARS - suffix.length).trimEnd()}${suffix}`;
 }
 

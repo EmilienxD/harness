@@ -7,8 +7,8 @@ test("branch cleanup discovers first and mutates only after Clear", async () => 
   let callback: (() => Promise<void>) | undefined;
   const calls: string[] = [];
   const cleanup = {
-    discover: async () => { calls.push("discover"); return { defaultBranch: "main", branches: [{ name: "abd/1-x", localSha: "a", ahead: 1, behind: 0 }], pullRequests: [] }; },
-    clear: async () => { calls.push("clear"); return { deletedLocal: ["abd/1-x"], deletedRemote: [], retained: [] }; },
+    discover: async () => { calls.push("discover"); return { defaultBranch: "main", branches: [{ name: "issue/1-x", localSha: "a", ahead: 1, behind: 0 }], pullRequests: [] }; },
+    clear: async () => { calls.push("clear"); return { deletedLocal: ["issue/1-x"], deletedRemote: [], retained: [] }; },
   };
   registerBranchCleanupCommand({
     registerCommand: (_command, registered) => { callback = registered; return { dispose() {} }; },
@@ -24,7 +24,7 @@ test("branch cleanup discovers first and mutates only after Clear", async () => 
     "preview true",
     "progress Clearing aboard branches…",
     "clear",
-    "info Aboard branch cleanup finished; removed local abd/1-x.",
+    "info Aboard branch cleanup finished; removed local issue/1-x.",
   ]);
 });
 
@@ -38,7 +38,7 @@ test("Cancel leaves every branch untouched", async () => {
     info: () => undefined,
     error: (message) => assert.fail(message),
   }, {
-    discover: async () => ({ defaultBranch: "main", branches: [{ name: "abd/1-x", localSha: "a", ahead: 0, behind: 0 }], pullRequests: [] }),
+    discover: async () => ({ defaultBranch: "main", branches: [{ name: "issue/1-x", localSha: "a", ahead: 0, behind: 0 }], pullRequests: [] }),
     clear: async () => { cleared = true; return { deletedLocal: [], deletedRemote: [], retained: [] }; },
   } as never);
   await callback!();

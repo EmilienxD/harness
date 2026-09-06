@@ -501,8 +501,8 @@ test("an issue comment is posted with the body it was given", async () => {
 
 test("an issue is closed as completed with the comment explaining the closure", async () => {
   const gh = new FixtureGh(() => "");
-  await new GitHubClient(gh).closeIssue(34, "Merged into `abd/run/k3f9x1`.");
-  assert.deepEqual(gh.calls, [["issue", "close", "34", "--reason", "completed", "--comment", "Merged into `abd/run/k3f9x1`."]]);
+  await new GitHubClient(gh).closeIssue(34, "Merged into `run/k3f9x1`.");
+  assert.deepEqual(gh.calls, [["issue", "close", "34", "--reason", "completed", "--comment", "Merged into `run/k3f9x1`."]]);
 });
 
 test("branch deletion on merge is the caller's decision, not the boundary's", async () => {
@@ -519,8 +519,8 @@ test("branch deletion on merge is the caller's decision, not the boundary's", as
 
 test("branch pull request recovery can observe closed and merged records", async () => {
   const gh = new FixtureGh(() => JSON.stringify([{ number: 58 }]));
-  assert.equal(await new GitHubClient(gh).findPullRequestForBranch("abd/34-fix"), 58);
-  assert.deepEqual(gh.calls, [["pr", "list", "--state", "all", "--head", "abd/34-fix", "--limit", "1", "--json", "number"]]);
+  assert.equal(await new GitHubClient(gh).findPullRequestForBranch("issue/34-fix"), 58);
+  assert.deepEqual(gh.calls, [["pr", "list", "--state", "all", "--head", "issue/34-fix", "--limit", "1", "--json", "number"]]);
 });
 
 test("a pull request snapshot carries its review decision without a second query", async () => {
@@ -537,23 +537,23 @@ test("head-branch pull request lookups batch into one GraphQL query", async () =
       b2: { nodes: [{ number: 61 }] },
     });
   });
-  const found = await new GitHubClient(gh).findPullRequestsByHead(["abd/34-fix", "abd/35-two", "abd/36-three"]);
-  assert.deepEqual([...found], [["abd/34-fix", 58], ["abd/36-three", 61]]);
+  const found = await new GitHubClient(gh).findPullRequestsByHead(["issue/34-fix", "issue/35-two", "issue/36-three"]);
+  assert.deepEqual([...found], [["issue/34-fix", 58], ["issue/36-three", 61]]);
   const query = gh.calls.map((args) => args.find((arg) => arg.startsWith("query=")) ?? "").find((q) => q.includes("pullRequests"));
   // One round trip: every branch is an aliased field carrying its own variable.
   assert.ok(query?.includes("b0:pullRequests(headRefName:$h0"));
   assert.ok(query?.includes("b2:pullRequests(headRefName:$h2"));
-  const variables = gh.calls.flatMap((args) => args).filter((arg) => arg.startsWith("h") && arg.includes("=abd/"));
+  const variables = gh.calls.flatMap((args) => args).filter((arg) => arg.startsWith("h") && arg.includes("=issue/"));
   assert.equal(variables.length, 3);
 });
 
 test("branch cleanup finds pull requests where an aboard branch is either head or base", async () => {
   const gh = new FixtureGh(() => JSON.stringify([
-    { number: 58, title: "Issue work", state: "OPEN", headRefName: "abd/34-fix", baseRefName: "abd/run/old" },
+    { number: 58, title: "Issue work", state: "OPEN", headRefName: "issue/34-fix", baseRefName: "run/old" },
     { number: 59, title: "Unrelated", state: "MERGED", headRefName: "feature/x", baseRefName: "main" },
   ]));
-  assert.deepEqual(await new GitHubClient(gh).listPullRequestsForBranches(["abd/run/old"]), [
-    { number: 58, title: "Issue work", state: "open", head: "abd/34-fix", base: "abd/run/old" },
+  assert.deepEqual(await new GitHubClient(gh).listPullRequestsForBranches(["run/old"]), [
+    { number: 58, title: "Issue work", state: "open", head: "issue/34-fix", base: "run/old" },
   ]);
   assert.deepEqual(gh.calls, [["pr", "list", "--state", "all", "--limit", "1000", "--json", "number,title,state,headRefName,baseRefName"]]);
 });
@@ -561,7 +561,7 @@ test("branch cleanup finds pull requests where an aboard branch is either head o
 test("closing a pull request checks its identity and state before mutating anything", async () => {
   const pullRequest = (overrides: Record<string, unknown>) => ({
     number: 57, title: "PR", body: "", merged: false, state: "OPEN", mergeable: "MERGEABLE",
-    url: "https://github.com/acme/app/pull/57", headRefName: "abd/35-two", baseRefName: "abd/run/test",
+    url: "https://github.com/acme/app/pull/57", headRefName: "issue/35-two", baseRefName: "run/test",
     headRefOid: "abc123", closingIssuesReferences: { nodes: [] }, reviewDecision: null, reviewThreads: { nodes: [] },
     ...overrides,
   });
@@ -572,23 +572,23 @@ test("closing a pull request checks its identity and state before mutating anyth
   const closed = (gh: FixtureGh) => gh.calls.some((args: readonly string[]) => args[0] === "pr" && args[1] === "close");
 
   const matching = client({});
-  assert.equal(await matching.github.closePullRequestIf(57, { head: "abd/35-two", base: "abd/run/test" }), true);
+  assert.equal(await matching.github.closePullRequestIf(57, { head: "issue/35-two", base: "run/test" }), true);
   assert.ok(matching.gh.calls.some((args) => args.join(" ") === "pr close 57"));
 
   const retargeted = client({ baseRefName: "main" });
-  assert.equal(await retargeted.github.closePullRequestIf(57, { head: "abd/35-two", base: "abd/run/test" }), false);
+  assert.equal(await retargeted.github.closePullRequestIf(57, { head: "issue/35-two", base: "run/test" }), false);
   assert.equal(closed(retargeted.gh), false);
 
   const rehomed = client({ headRefName: "somebody/else" });
-  assert.equal(await rehomed.github.closePullRequestIf(57, { head: "abd/35-two", base: "abd/run/test" }), false);
+  assert.equal(await rehomed.github.closePullRequestIf(57, { head: "issue/35-two", base: "run/test" }), false);
   assert.equal(closed(rehomed.gh), false);
 
   const merged = client({ merged: true });
-  assert.equal(await merged.github.closePullRequestIf(57, { head: "abd/35-two", base: "abd/run/test" }), false);
+  assert.equal(await merged.github.closePullRequestIf(57, { head: "issue/35-two", base: "run/test" }), false);
   assert.equal(closed(merged.gh), false);
 
   const gone = new FixtureGh((args) => args[0] === "repo" ? repo : graph({ pullRequest: null }));
-  assert.equal(await new GitHubClient(gone).closePullRequestIf(57, { head: "abd/35-two", base: "abd/run/test" }), false);
+  assert.equal(await new GitHubClient(gone).closePullRequestIf(57, { head: "issue/35-two", base: "run/test" }), false);
   assert.equal(closed(gone), false);
 });
 

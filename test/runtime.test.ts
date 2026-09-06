@@ -135,23 +135,23 @@ function fixedPlanRecord(): AutoRunRecord {
       additionalGuideline: "keep fixtures small",
     },
     plan: [
-      { number: 34, title: "Add retry backoff", branch: "abd/34-add-retry-backoff", disposition: "afk", difficulty: "advanced", chrome: true, dependsOn: [] },
-      { number: 35, title: "Migrate the queue", branch: "abd/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
+      { number: 34, title: "Add retry backoff", branch: "issue/34-add-retry-backoff", disposition: "afk", difficulty: "advanced", chrome: true, dependsOn: [] },
+      { number: 35, title: "Migrate the queue", branch: "issue/35-migrate-the-queue", disposition: "hitl", dependsOn: [34] },
     ],
     progress: {
       "34": { state: "done", result: "landed", prNumber: 56, issueClosed: true },
       "35": { state: "current", phase: "await-approval", prNumber: 57, headSha: "b".repeat(40), reviewed: true },
     },
-    sessionBranch: "abd/run/return",
+    sessionBranch: "run/return",
     targetBranch: "feature/wip",
     targetHeadSha: "c".repeat(40),
     unpublishedTargetCommits: 2,
-    branchShas: { "abd/run/return": "a".repeat(40), "abd/35-migrate-the-queue": "b".repeat(40) },
+    branchShas: { "run/return": "a".repeat(40), "issue/35-migrate-the-queue": "b".repeat(40) },
     currentIssue: 35,
     checkpoint: "issue",
     runPullRequest: 60,
     reviewedIssues: [35],
-    pendingAction: { kind: "merge-issue-pr", prNumber: 57, head: "abd/35-migrate-the-queue", base: "abd/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    pendingAction: { kind: "merge-issue-pr", prNumber: 57, head: "issue/35-migrate-the-queue", base: "run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
     outcome: { kind: "failed", reason: "push rejected" },
     workspaceCreated: true,
   };
@@ -216,13 +216,13 @@ test("every pending-action and progress shape survives a round trip", async () =
   const root = await mkdtemp(join(tmpdir(), "aboard-autorun-actions-"));
   const store = new FileAutoRunStore(new RuntimeLayout(root));
   const actions = [
-    { kind: "create-branch", branch: "abd/34-x", base: "abd/run/return", baseSha: "c".repeat(40) },
-    { kind: "commit", branch: "abd/34-x", parentSha: "d".repeat(40), message: "Add retry backoff", treeSha: "e".repeat(40), fingerprint: ["src/a.ts", "src/b.ts"] },
-    { kind: "push", branch: "abd/34-x", sha: "e".repeat(40) },
-    { kind: "create-issue-pr", issue: 34, head: "abd/34-x", base: "abd/run/return" },
-    { kind: "merge-issue-pr", prNumber: 56, head: "abd/34-x", base: "abd/run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
-    { kind: "create-run-pr", head: "abd/run/return", base: "feature/wip" },
-    { kind: "merge-run-pr", prNumber: 60, head: "abd/run/return", base: "feature/wip", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    { kind: "create-branch", branch: "issue/34-x", base: "run/return", baseSha: "c".repeat(40) },
+    { kind: "commit", branch: "issue/34-x", parentSha: "d".repeat(40), message: "Add retry backoff", treeSha: "e".repeat(40), fingerprint: ["src/a.ts", "src/b.ts"] },
+    { kind: "push", branch: "issue/34-x", sha: "e".repeat(40) },
+    { kind: "create-issue-pr", issue: 34, head: "issue/34-x", base: "run/return" },
+    { kind: "merge-issue-pr", prNumber: 56, head: "issue/34-x", base: "run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
+    { kind: "create-run-pr", head: "run/return", base: "feature/wip" },
+    { kind: "merge-run-pr", prNumber: 60, head: "run/return", base: "feature/wip", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
   ] as const;
   for (const pendingAction of actions) {
     const record = { ...fixedPlanRecord(), pendingAction };
@@ -257,8 +257,8 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35, continuable: true } },
     { ...valid, settings: undefined },
     { ...valid, plan: [{ number: 34 }] },
-    { ...valid, branchShas: { "abd/run/return": "short" } },
-    { ...valid, pendingAction: { kind: "push", branch: "abd/run/return", sha: "short" } },
+    { ...valid, branchShas: { "run/return": "short" } },
+    { ...valid, pendingAction: { kind: "push", branch: "run/return", sha: "short" } },
     { ...valid, progress: { ...valid.progress, "35": { state: "current", phase: "commit", headSha: "short" } } },
     { ...valid, outcome: { kind: "failed" } },
     { ...valid, workerSession: { agentId: "worker-19", sessionId: "session", type: "implementer", issueNumber: 35, continuable: false } },

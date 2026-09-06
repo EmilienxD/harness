@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 
-import { ABOARD_BRANCH_PREFIX } from "../domain/auto-run.js";
+import { RUN_OWNED_BRANCH_PREFIXES } from "../domain/auto-run.js";
 import type { GitHubClient } from "../github/client.js";
 
 const execFileAsync = promisify(execFile);
@@ -79,21 +79,21 @@ export class ProcessAboardBranchRepository implements AboardBranchRepository {
 
   public async discover(): Promise<Omit<AboardBranchDiscovery, "pullRequests">> {
     const defaultBranch = await this.defaultBranch();
-    const refs = await this.run(["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/heads/abd/"]);
-    const remoteRefs = await this.run(["ls-remote", "--heads", "origin", "refs/heads/abd/*"]);
+    const refs = await this.run(["for-each-ref", "--format=%(refname)%09%(objectname)", ...RUN_OWNED_BRANCH_PREFIXES.map((prefix) => `refs/heads/${prefix}`)]);
+    const remoteRefs = await this.run(["ls-remote", "--heads", "origin", ...RUN_OWNED_BRANCH_PREFIXES.map((prefix) => `refs/heads/${prefix}*`)]);
     const byName = new Map<string, { localSha?: string; remoteSha?: string }>();
     for (const line of refs.split(/\r?\n/u).filter(Boolean)) {
       const [ref, sha] = line.split("\t");
       if (ref === undefined || sha === undefined) continue;
       const name = ref.replace("refs/heads/", "");
-      if (!name.startsWith(ABOARD_BRANCH_PREFIX)) continue;
+      if (!RUN_OWNED_BRANCH_PREFIXES.some((prefix) => name.startsWith(prefix))) continue;
       byName.set(name, { ...byName.get(name), localSha: sha });
     }
     for (const line of remoteRefs.split(/\r?\n/u).filter(Boolean)) {
       const [sha, ref] = line.split("\t");
       if (ref === undefined || sha === undefined) continue;
       const name = ref.replace("refs/heads/", "");
-      if (!name.startsWith(ABOARD_BRANCH_PREFIX)) continue;
+      if (!RUN_OWNED_BRANCH_PREFIXES.some((prefix) => name.startsWith(prefix))) continue;
       byName.set(name, { ...byName.get(name), remoteSha: sha });
     }
     const worktrees = await this.worktrees();
@@ -155,7 +155,7 @@ export class ProcessAboardBranchRepository implements AboardBranchRepository {
 }
 
 export function describeAboardBranchDiscovery(snapshot: AboardBranchDiscovery): string {
-  if (snapshot.branches.length === 0) return "No local or GitHub abd/* branches were found.";
+  if (snapshot.branches.length === 0) return "No local or GitHub issue/* or run/* branches were found.";
   const lines = snapshot.branches.map((branch) => {
     const location = branch.localSha !== undefined && branch.remoteSha !== undefined ? (branch.localSha === branch.remoteSha ? "local + GitHub, in sync" : "local + GitHub, diverged") : branch.localSha !== undefined ? "local only" : "GitHub only";
     const checkout = branch.checkout === undefined ? "" : branch.checkout.dirtyPaths.length > 0 ? `; checked out with ${branch.checkout.dirtyPaths.length} uncommitted path(s): ${branch.checkout.dirtyPaths.join(", ")}` : `; checked out at ${branch.checkout.path} (clean)`;

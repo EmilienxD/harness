@@ -211,7 +211,7 @@ test("renders issue comments with each implementation issue document", async () 
 
 test("injects fresh Explore context once and omits generated context comments", async () => {
   const report = "Use src/auth/refresh.ts and preserve per-account state.";
-  const generated = `<!-- aboard:auto-run-exploration run=run_test issue=47 head=${"a".repeat(40)} -->\n\n## Aboard codebase context\n\n${report}`;
+  const generated = `## Codebase context\n\n_Generated from \`${"a".repeat(12)}\` and its current working tree immediately before implementation._\n\n${report}`;
   const prompt = await new PromptResolver({
     github: new FakeGitHub({ issues: [{
       ...issue47,
@@ -230,7 +230,7 @@ test("injects fresh Explore context once and omits generated context comments", 
 
   assert.match(prompt?.text ?? "", /## Fresh codebase context/);
   assert.match(prompt?.text ?? "", /Keep the timeout configurable/);
-  assert.doesNotMatch(prompt?.text ?? "", /aboard:auto-run-exploration/);
+  assert.doesNotMatch(prompt?.text ?? "", /## Codebase context/);
   assert.equal((prompt?.text.match(/Use src\/auth\/refresh\.ts/g) ?? []).length, 1);
 });
 
@@ -556,7 +556,7 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
     github: new FakeGitHub({
       issues: [issue47, parent31],
-      pullRequests: [{ ...pull42, headBranch: "abd/47-token-refresh", baseBranch: "abd/run/test" }],
+      pullRequests: [{ ...pull42, headBranch: "issue/47-token-refresh", baseBranch: "run/test" }],
       diff: "+ refreshEarly();",
     }),
   }));
@@ -569,11 +569,13 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
     type: "implementer",
     description: "address issue 47",
     issues: [47],
+    prompt: "The checked-out branch is for issue #47. Work only in the directory you started in.",
     permanentPrompt,
     additionalGuideline: guideline,
   }, { interactive: false });
   const implementerText = implementer?.text ?? "";
   assert.doesNotMatch(implementerText, /aboard|auto[ -]?run|automated|automation/i);
+  assert.equal((implementerText.match(/Address issue #47/giu) ?? []).length, 1);
   assert.equal(implementerText.trimEnd().endsWith(guideline), true);
   // The resolved issue context comes first.
   assert.equal(implementerText.indexOf("Refresh the access token before it expires.") < implementerText.indexOf(guideline), true);

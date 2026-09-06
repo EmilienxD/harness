@@ -104,7 +104,7 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     currentBranch: async () => "main",
     defaultBranch: async () => "main",
     status: async (): Promise<GitStatus> => ({
-      branch: "abd/run/test",
+      branch: "run/test",
       entries: (options.dirty ?? []).map((path) => ({ status: "??", path })),
     }),
     codebase: async () => ({ sourceFileCount: 1, languages: ["ts"], commitCount: 1 }),
@@ -205,7 +205,7 @@ function fixture(options: {
   return { provider, git, notifications, setups, created, removed, overlays };
 }
 
-const REQUEST = { runId: "run_test", sessionBranch: "abd/run/test", base: "main" } as const;
+const REQUEST = { runId: "run_test", sessionBranch: "run/test", base: "main" } as const;
 
 test("worktree mode off leaves the run in the user's own checkout", async () => {
   const { provider, git } = fixture({ settings: { enabled: false } });
@@ -223,14 +223,14 @@ test("preparing a checkout creates it from the local base and installs into it",
   assert.equal(workspace.root, path);
   assert.equal(workspace.isolated, true);
   assert.deepEqual(workspace.denyTools, isolationDenyRules(PROJECT));
-  assert.ok(git.calls.includes(`addWorktree ${path} abd/run/test main`), git.calls.join(", "));
+  assert.ok(git.calls.includes(`addWorktree ${path} run/test main`), git.calls.join(", "));
   // The setup command runs in the new checkout, from the project's own copy of
   // the file; the one the user edits, not whatever the branch carries.
   assert.equal(setups.length, 1);
   assert.equal(setups[0]?.cwd, path);
   assert.equal(setups[0]?.args.at(-1), join(PROJECT, ".abd", "session-setup.ps1"));
   assert.equal(setups[0]?.env.ABOARD_PROJECT_ROOT, PROJECT);
-  assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "abd/run/test");
+  assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "run/test");
   assert.ok(notifications.some((message) => message.includes(path)));
 });
 
@@ -238,14 +238,14 @@ test("a checkout falls back to the remote base when no local base ref exists", a
   const { provider, git } = fixture({ git: { branches: [] } });
   await provider.prepare(REQUEST);
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  assert.ok(git.calls.includes(`addWorktree ${path} abd/run/test origin/main`), git.calls.join(", "));
+  assert.ok(git.calls.includes(`addWorktree ${path} run/test origin/main`), git.calls.join(", "));
 });
 
 test("an existing session branch is checked out rather than created a second time", async () => {
-  const { provider, git } = fixture({ git: { branches: ["abd/run/test"] } });
+  const { provider, git } = fixture({ git: { branches: ["run/test"] } });
   await provider.prepare(REQUEST);
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  assert.ok(git.calls.includes(`addWorktree ${path} abd/run/test`), git.calls.join(", "));
+  assert.ok(git.calls.includes(`addWorktree ${path} run/test`), git.calls.join(", "));
 });
 
 test("a resumed run re-attaches to its checkout without setting it up again", async () => {
@@ -253,7 +253,7 @@ test("a resumed run re-attaches to its checkout without setting it up again", as
   const { provider, git, setups } = fixture({
     setupFile: "npm ci\n",
     // Spelled as git reports it on Windows, which is not how Node spells it.
-    git: { worktrees: [{ path: path.split(sep).join("/"), branch: "abd/run/test" }] },
+    git: { worktrees: [{ path: path.split(sep).join("/"), branch: "run/test" }] },
     // A resumed run's checkout legitimately holds an implementer's work.
     ...{},
   });
@@ -420,11 +420,11 @@ test("an in-place run's release never touches anything", async () => {
 
 test("recorded checkout removal requires a registered clean checkout", async () => {
   const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
-  const clean = fixture({ git: { worktrees: [{ path, branch: "abd/run/test" }] } });
+  const clean = fixture({ git: { worktrees: [{ path, branch: "run/test" }] } });
   assert.equal(await clean.provider.removeRecorded(path), true);
   assert.ok(clean.git.calls.includes(`removeWorktree ${path} --force`));
 
-  const dirty = fixture({ git: { worktrees: [{ path, branch: "abd/run/test" }], dirty: ["src/a.ts"] } });
+  const dirty = fixture({ git: { worktrees: [{ path, branch: "run/test" }], dirty: ["src/a.ts"] } });
   assert.equal(await dirty.provider.removeRecorded(path), false);
   assert.equal(dirty.git.calls.some((call) => call.startsWith("removeWorktree")), false);
 

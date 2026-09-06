@@ -17,7 +17,7 @@ const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSecond
 const SETTINGS: AutoRunSettings = { review: false, exploreBeforeImplement: false, recursiveIssueReferences: false, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
-const SESSION = "abd/run/test";
+const SESSION = "run/test";
 
 interface FakePullRequest {
   readonly state: "open" | "closed" | "merged";
@@ -150,7 +150,7 @@ test("single-branch processes sequential AFK issues without issue branches or is
   await context.engine.settle();
   assert.equal(context.createdPullRequests.length, 1);
   assert.equal(context.createdPullRequests[0]?.head, SESSION);
-  assert.equal(context.gitCalls.some((call) => call.includes("abd/34-") || call.includes("abd/35-")), false);
+  assert.equal(context.gitCalls.some((call) => call.includes("issue/34-") || call.includes("issue/35-")), false);
   assert.deepEqual(context.closures.map((closure) => closure.issue), [34, 35]);
 });
 
@@ -432,7 +432,7 @@ function harness(options: HarnessOptions = {}): Harness {
     return undefined;
   }
   function issueForBranch(branch: string): number {
-    return Number(/^abd\/(\d+)-/.exec(branch)?.[1] ?? 0);
+    return Number(/^issue\/(\d+)-/.exec(branch)?.[1] ?? 0);
   }
   function issueForPr(number: number): number {
     return issueForBranch(branchesByPr.get(number) ?? "");
@@ -654,7 +654,7 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       pollSeconds: 1,
       worktree: WORKTREE_OFF,
     },
-    plan: [{ number: 34, title: "Add retry backoff", branch: "abd/34-add-retry-backoff", disposition: "afk", dependsOn: [] }],
+    plan: [{ number: 34, title: "Add retry backoff", branch: "issue/34-add-retry-backoff", disposition: "afk", dependsOn: [] }],
     progress: { "34": { state: "pending" } },
     sessionBranch: SESSION,
     targetBranch: "main",
@@ -732,7 +732,7 @@ test("a transient recovery fetch failure stays unavailable rather than becoming 
   const context = harness({
     fetch: async () => {
       throw new GitBoundaryError("command-failed", "git fetch failed", {
-        stderr: "fatal: cannot lock ref 'refs/remotes/origin/abd/run/test'",
+        stderr: "fatal: cannot lock ref 'refs/remotes/origin/run/test'",
       });
     },
   });
@@ -755,19 +755,20 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(context.launches[0]?.description, "address issue 34");
   // The issue number and branch reach the prompt; the wording around them is free.
   assert.equal(context.launches[0]?.prompt?.includes("#34"), true);
+  assert.doesNotMatch(context.launches[0]?.prompt ?? "", /^Address issue/iu);
   assert.doesNotMatch(context.launches[0]?.prompt ?? "", /aboard|auto[ -]?run|automated|automation/i);
   assert.deepEqual(context.gitCalls.filter((call) => call !== "fetch"), [
     // The session branch carries the user's local branch, including commits not
     // published yet, and is published before any issue starts.
     `createBranch ${SESSION} main`, `push ${SESSION} -u`,
-    `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch abd/34-add-retry-backoff ${SESSION}`,
-    "add", "commit", "push abd/34-add-retry-backoff -u",
+    `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch issue/34-add-retry-backoff ${SESSION}`,
+    "add", "commit", "push issue/34-add-retry-backoff -u",
     // After the merge, so the record carries the session branch tip the merge
     // produced rather than the one it had before.
     `checkout ${SESSION}`, `fastForward ${SESSION}`,
     `checkout ${SESSION}`,
-    `deleteBranchAt abd/34-add-retry-backoff ${context.sha("abd/34-add-retry-backoff")}`,
-    `deleteRemoteBranchAt abd/34-add-retry-backoff ${context.sha("abd/34-add-retry-backoff")}`,
+    `deleteBranchAt issue/34-add-retry-backoff ${context.sha("issue/34-add-retry-backoff")}`,
+    `deleteRemoteBranchAt issue/34-add-retry-backoff ${context.sha("issue/34-add-retry-backoff")}`,
     "checkout main",
   ]);
   assert.equal(context.pullRequests.get(56)?.state, "merged");
@@ -794,10 +795,11 @@ test("optional exploration runs just before a fresh implementer and publishes bo
   assert.equal(context.launches[0]?.recursiveIssueReferences, true);
   assert.match(context.launches[0]?.prompt ?? "", /under 800 words/);
   assert.equal(context.launches[1]?.codebaseContext?.length, 6_000);
-  assert.match(context.launches[1]?.codebaseContext ?? "", /\[Explore report truncated by aboard\]$/);
+  assert.match(context.launches[1]?.codebaseContext ?? "", /\[Explore report truncated\]$/);
   assert.equal(context.saved.some((record) => record.settings.exploreBeforeImplement), true);
   assert.equal(context.states.some((state) => state.phase === "explore"), true);
-  assert.match(context.comments[0]?.body ?? "", /^<!-- aboard:auto-run-exploration run=run_test issue=34 head=/);
+  assert.match(context.comments[0]?.body ?? "", /^## Codebase context\n/);
+  assert.doesNotMatch(context.comments[0]?.body ?? "", /<!--|aboard|abd\//iu);
   assert.match(context.comments[0]?.body ?? "", /Relevant code lives in src\/retry\.ts/);
   assert.deepEqual(context.closedTerminals.slice(0, 2), ["terminal-1", "terminal-2"]);
 });
@@ -1089,8 +1091,8 @@ test("an externally closed hitl pull request creates no concluding side effect",
   // the run must not infer a new concluding side effect from a changed plan.
   assert.match(context.notifications.join("\n"), /stopped at issue #35/);
   assert.deepEqual(context.createdPullRequests.map((pullRequest) => pullRequest.head), [
-    "abd/34-add-retry-backoff",
-    "abd/35-migrate-the-queue",
+    "issue/34-add-retry-backoff",
+    "issue/35-migrate-the-queue",
   ]);
 });
 
@@ -1207,7 +1209,7 @@ test("cancelling a running implementer keeps its partial edits on the issue bran
   assert.deepEqual(context.record()?.outcome, { kind: "cancelled" });
   assert.deepEqual(context.closedTerminals, ["terminal-1"]);
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
-  assert.match(context.notifications.join("\n"), /stayed on abd\/34-add-retry-backoff.*uncommitted work remains/u);
+  assert.match(context.notifications.join("\n"), /stayed on issue\/34-add-retry-backoff.*uncommitted work remains/u);
 });
 
 test("cancelling a running automated reviewer uses the same owned-terminal path", async () => {
@@ -1262,7 +1264,7 @@ test("a conflicting pull request is reconciled with its base and then merged", a
 
   assert.equal(context.gitCalls.includes(`mergeFromRemote ${SESSION}`), true);
   // Pushed without `-u`: the branch already tracks by the time it is merged.
-  assert.equal(context.gitCalls.filter((call) => call === "push abd/34-add-retry-backoff").length, 1);
+  assert.equal(context.gitCalls.filter((call) => call === "push issue/34-add-retry-backoff").length, 1);
   assert.match(context.notifications.join("\n"), new RegExp(`conflicted with ${SESSION}; merged ${SESSION} into its branch and pushed`));
   assert.equal(context.pullRequests.get(56)?.state, "merged");
   // The run's own pull request is the only thing left for the user.
@@ -1424,7 +1426,7 @@ test("a hitl pull request closed unmerged stops the run and leaves the branch al
   await context.engine.settle();
 
   assert.match(context.notifications.join("\n"), /stopped at issue #35 .*closed without merging/);
-  const branchCreated = context.gitCalls.lastIndexOf(`createBranch abd/35-migrate-the-queue ${SESSION}`);
+  const branchCreated = context.gitCalls.lastIndexOf(`createBranch issue/35-migrate-the-queue ${SESSION}`);
   assert.notEqual(branchCreated, -1, "the issue branch was created");
   assert.deepEqual(
     context.gitCalls.slice(branchCreated + 1).filter((call) => call.startsWith("checkout ")),
@@ -1458,7 +1460,7 @@ test("an implementer completion marker without changes stops for user judgment",
   assert.equal(context.gitCalls.includes("commit"), false);
   assert.equal(context.pullRequests.size, 0);
   assert.equal(context.launches.length, 1);
-  assert.equal(context.gitCalls.includes("deleteBranch abd/34-add-retry-backoff"), false);
+  assert.equal(context.gitCalls.includes("deleteBranch issue/34-add-retry-backoff"), false);
   assert.equal(context.comments.length, 0);
   assert.match(context.notifications.join("\n"), /stopped at issue #34 .*confirmed issue #34 complete but produced no changes/);
   assert.equal(context.state.cleared, false);
@@ -1571,21 +1573,21 @@ test("a dirty working tree refuses the run and names the dirty paths", async () 
 });
 
 test("an aboard session branch cannot become another run's target", async () => {
-  const context = harness({ startBranch: "abd/run/old" });
+  const context = harness({ startBranch: "run/old" });
   const result = await context.engine.start();
 
   assert.equal(result.started, false);
-  assert.match((result as { reason: string }).reason, /cannot start from abd\/run\/old.*run-owned artifacts/);
+  assert.match((result as { reason: string }).reason, /cannot start from run\/old.*run-owned artifacts/);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
 });
 
 test("an aboard issue branch is refused as a target even in worktree mode", async () => {
-  const context = harness({ startBranch: "abd/34-old-issue", worktree: true });
+  const context = harness({ startBranch: "issue/34-old-issue", worktree: true });
   const result = await context.engine.start();
 
   assert.equal(result.started, false);
-  assert.match((result as { reason: string }).reason, /cannot start from abd\/34-old-issue/);
+  assert.match((result as { reason: string }).reason, /cannot start from issue\/34-old-issue/);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
 });
@@ -1608,7 +1610,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   if (!result.inspected) return;
   assert.equal(result.ready, false);
   assert.deepEqual(result.blockers, ["the working tree is not clean: src/a.ts"]);
-  assert.equal(result.sessionBranch, "abd/run/<run-id>");
+  assert.equal(result.sessionBranch, "run/<run-id>");
   assert.equal(result.sessionBase, "feature/wip");
   assert.equal(result.reviewMode, true);
   assert.equal(result.exploresBeforeImplement, true);
@@ -1617,8 +1619,8 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.equal(result.additionalGuideline, "no unit tests needed");
   assert.equal(result.mergesItsOwnPullRequest, true);
   assert.deepEqual(result.issues.map((issue) => [issue.number, issue.branch]), [
-    [42, "abd/42-build-the-api"],
-    [41, "abd/41-ship-the-ui"],
+    [42, "issue/42-build-the-api"],
+    [41, "issue/41-ship-the-ui"],
   ]);
   assert.equal(result.issues.find((issue) => issue.number === 41)?.chrome, true);
   assert.deepEqual(result.skipped, [{ number: 43, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" }]);
@@ -1699,41 +1701,41 @@ test("a dry run with nothing to run reports an empty queue, not a blocker", asyn
 });
 
 test("a dry run reports an aboard target branch as a blocker", async () => {
-  const context = harness({ startBranch: "abd/run/old", worktree: true });
+  const context = harness({ startBranch: "run/old", worktree: true });
   const result = await context.engine.dryRun();
 
   assert.equal(result.inspected, true);
   if (!result.inspected) return;
   assert.equal(result.ready, false);
-  assert.match(result.blockers.join("\n"), /cannot start from abd\/run\/old/);
-  assert.equal(result.sessionBase, "abd/run/old");
+  assert.match(result.blockers.join("\n"), /cannot start from run\/old/);
+  assert.equal(result.sessionBase, "run/old");
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
 });
 
 test("a dry run reports the same run-owned branch conflict that Start would refuse", async () => {
   const context = harness();
-  context.createBranch("abd/34-add-retry-backoff");
+  context.createBranch("issue/34-add-retry-backoff");
 
   const result = await context.engine.dryRun();
 
   assert.equal(result.inspected, true);
   if (!result.inspected) return;
   assert.equal(result.ready, false);
-  assert.match(result.blockers.join("\n"), /abd\/34-add-retry-backoff already exists/);
+  assert.match(result.blockers.join("\n"), /issue\/34-add-retry-backoff already exists/);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
 });
 
 test("a branch that already has a pull request refuses the run the same way", async () => {
   const context = harness({
-    preExistingPullRequestBranches: ["abd/34-add-retry-backoff"],
+    preExistingPullRequestBranches: ["issue/34-add-retry-backoff"],
   });
 
   const result = await context.engine.start();
 
   assert.equal(result.started, false);
-  assert.match((result as { reason: string }).reason, /a pull request already uses abd\/34-add-retry-backoff/);
+  assert.match((result as { reason: string }).reason, /a pull request already uses issue\/34-add-retry-backoff/);
   assert.deepEqual(context.launches, []);
   assert.deepEqual(context.saved, []);
 });
@@ -1813,8 +1815,8 @@ test("issues are processed serially and re-derived after every merge", async () 
   await context.engine.start();
   await context.engine.settle();
 
-  const branchOrder = context.gitCalls.filter((call) => call.startsWith("createBranch abd/3"));
-  assert.deepEqual(branchOrder, [`createBranch abd/34-add-retry-backoff ${SESSION}`, `createBranch abd/37-later ${SESSION}`]);
+  const branchOrder = context.gitCalls.filter((call) => call.startsWith("createBranch issue/3"));
+  assert.deepEqual(branchOrder, [`createBranch issue/34-add-retry-backoff ${SESSION}`, `createBranch issue/37-later ${SESSION}`]);
   assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
 });
 
@@ -1832,8 +1834,8 @@ test("the queue drains standalone and child issues while reporting an unclassifi
   await context.engine.settle();
 
   assert.deepEqual(
-    context.gitCalls.filter((call) => call.startsWith("createBranch abd/1") || call.startsWith("createBranch abd/4")),
-    [`createBranch abd/40-fix-the-parser ${SESSION}`, `createBranch abd/121-add-retry-backoff ${SESSION}`],
+    context.gitCalls.filter((call) => call.startsWith("createBranch issue/1") || call.startsWith("createBranch issue/4")),
+    [`createBranch issue/40-fix-the-parser ${SESSION}`, `createBranch issue/121-add-retry-backoff ${SESSION}`],
   );
   assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
   assert.match(context.notifications.join("\n"), /1 issue discarded \(not ready to run\)/);
@@ -1970,7 +1972,7 @@ test("a version-1 record is unsupported: it is neither resumed nor silently drop
     issueNumbers: [34],
     currentIssue: 34,
     phase: "branch",
-    branch: "abd/34-add-retry-backoff",
+    branch: "issue/34-add-retry-backoff",
     reviewMode: false,
     startedAt: "2026-01-01T00:00:00.000Z",
   });

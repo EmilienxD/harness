@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ABOARD_BRANCH_PREFIX,
+  RUN_OWNED_BRANCH_PREFIXES,
   autoRunTargetBranchBlocker,
   branchName,
   commitSubject,
+  explorationCommentBody,
+  isAutoRunExplorationComment,
   issueClosedComment,
   issueCommentBody,
   nextStep,
@@ -20,7 +22,7 @@ import {
   type RepositoryFacts,
 } from "../src/domain/auto-run.js";
 
-const issue: PlannedIssue = { number: 34, title: "Add retry backoff", disposition: "afk", branch: "abd/34-add-retry-backoff" };
+const issue: PlannedIssue = { number: 34, title: "Add retry backoff", disposition: "afk", branch: "issue/34-add-retry-backoff" };
 
 function facts(overrides: Partial<RepositoryFacts> = {}): RepositoryFacts {
   return {
@@ -46,7 +48,7 @@ function step(_expected: AutoRunPhase, overrides: Partial<RepositoryFacts> = {},
   });
 }
 
-const SESSION_BRANCH = "abd/run/abc123";
+const SESSION_BRANCH = "run/abc123";
 
 test("slug normalization collapses punctuation, trims, and never cuts mid-word", () => {
   assert.equal(slugify("Add retry backoff"), "add-retry-backoff");
@@ -61,16 +63,16 @@ test("slug normalization collapses punctuation, trims, and never cuts mid-word",
   assert.equal(slugify(`${"a".repeat(60)}`), "a".repeat(40));
 });
 
-test("branch names carry the issue number so a branch is greppable back to it", () => {
-  assert.equal(ABOARD_BRANCH_PREFIX, "abd/");
-  assert.equal(branchName(34, "Add retry backoff"), "abd/34-add-retry-backoff");
+test("run-owned branch names are generic and carry the issue number", () => {
+  assert.deepEqual(RUN_OWNED_BRANCH_PREFIXES, ["issue/", "run/"]);
+  assert.equal(branchName(34, "Add retry backoff"), "issue/34-add-retry-backoff");
   // Colliding slugs stay distinct because the number is part of the name.
   assert.notEqual(branchName(34, "Same title"), branchName(35, "Same title"));
 });
 
-test("aboard branches are reserved and cannot become auto-run targets", () => {
-  assert.match(autoRunTargetBranchBlocker("abd/run/old") ?? "", /run-owned artifacts/);
-  assert.match(autoRunTargetBranchBlocker("abd/34-old-issue") ?? "", /final run pull request/);
+test("run-owned branches are reserved and cannot become auto-run targets", () => {
+  assert.match(autoRunTargetBranchBlocker("run/old") ?? "", /run-owned artifacts/);
+  assert.match(autoRunTargetBranchBlocker("issue/34-old-issue") ?? "", /final run pull request/);
   assert.equal(autoRunTargetBranchBlocker("feature/wip"), undefined);
 });
 
@@ -83,11 +85,11 @@ test("commit subject and pull request body are bounded and carry the closing tra
 });
 
 test("a session branch is derived from the run id and stays out of the issue namespace", () => {
-  assert.equal(sessionBranchName("run_k3f9x1"), "abd/run/k3f9x1");
+  assert.equal(sessionBranchName("run_k3f9x1"), "run/k3f9x1");
   // Same id, same branch: a resumed run finds the branch it created.
   assert.equal(sessionBranchName("run_k3f9x1"), sessionBranchName("run_k3f9x1"));
   assert.notEqual(sessionBranchName("run_a"), sessionBranchName("run_b"));
-  assert.ok(sessionBranchName("run_k3f9x1").startsWith("abd/run/"));
+  assert.ok(sessionBranchName("run_k3f9x1").startsWith("run/"));
 });
 
 test("the run's pull request indexes what landed and closes nothing itself", () => {
@@ -95,31 +97,33 @@ test("the run's pull request indexes what landed and closes nothing itself", () 
     { number: 34, title: "Add retry backoff", prNumber: 56 },
     { number: 35, title: "Trim the cache", prNumber: 57 },
   ];
-  assert.equal(runPullRequestTitle(landed), "aboard auto-run: 2 issues");
-  assert.equal(runPullRequestTitle([landed[0]!]), "aboard auto-run: Add retry backoff");
-  const body = runPullRequestBody(landed, "abd/run/k3f9x1", "feature/wip");
+  assert.equal(runPullRequestTitle(landed), "2 issues");
+  assert.equal(runPullRequestTitle([landed[0]!]), "Add retry backoff");
+  const body = runPullRequestBody(landed, "run/k3f9x1", "feature/wip");
   assert.match(body, /- #34 Add retry backoff \(PR #56\)/);
   assert.match(body, /- #35 Trim the cache \(PR #57\)/);
-  assert.match(body, /abd\/run\/k3f9x1/);
+  assert.match(body, /run\/k3f9x1/);
+  assert.doesNotMatch(body, /aboard|abd\//iu);
   assert.match(body, /feature\/wip/);
   // The issues are already closed; a second closing reference on a branch where
   // GitHub would honour it only invites reopen/close churn.
   assert.equal(/closes #/iu.test(body), false);
-  const warned = runPullRequestBody(landed, "abd/run/k3f9x1", "feature/wip", 2);
+  const warned = runPullRequestBody(landed, "run/k3f9x1", "feature/wip", 2);
   assert.match(warned, /started with 2 commits on `feature\/wip` that `origin\/feature\/wip` did not contain/);
   assert.match(warned, /push `feature\/wip`.*use a merge commit/s);
   assert.ok(runPullRequestBody(
     Array.from({ length: 500 }, (_, index) => ({ number: index, title: "x".repeat(60), prNumber: index })),
-    "abd/run/k3f9x1",
+    "run/k3f9x1",
     "main",
   ).length <= 4_000);
 });
 
-test("an issue closed by aboard says who closed it and where the work is", () => {
-  const comment = issueClosedComment(56, "abd/run/k3f9x1", "feature/wip");
+test("an issue-closing comment says where the work is without product branding", () => {
+  const comment = issueClosedComment(56, "run/k3f9x1", "feature/wip");
   assert.match(comment, /#56/);
-  assert.match(comment, /abd\/run\/k3f9x1/);
+  assert.match(comment, /run\/k3f9x1/);
   assert.match(comment, /feature\/wip/);
+  assert.doesNotMatch(comment, /aboard|abd\//iu);
 });
 
 test("an issue comment is the agent's own text, bounded, and absent when there is none", () => {
@@ -127,6 +131,14 @@ test("an issue comment is the agent's own text, bounded, and absent when there i
   assert.equal(issueCommentBody("Rewrote the backoff.", "Fix *retry* handling"), "**Fix \\*retry\\* handling**\n\nRewrote the backoff.");
   assert.equal(issueCommentBody("   "), undefined);
   assert.ok((issueCommentBody("z".repeat(70_000)) ?? "").length <= 65_536);
+});
+
+test("exploration context is recognizable without hidden or product-specific markers", () => {
+  const comment = explorationCommentBody({ runId: "run_test", issueNumber: 34, headSha: "a".repeat(40), report: "Found the boundary." });
+  assert.match(comment, /^## Codebase context\n/);
+  assert.doesNotMatch(comment, /<!--|aboard|abd\//iu);
+  assert.equal(isAutoRunExplorationComment(comment), true);
+  assert.equal(isAutoRunExplorationComment("## Codebase context\n\nA user-authored note."), false);
 });
 
 test("implementer completion accepts one commit block anywhere and removes it from the report", () => {
@@ -203,7 +215,7 @@ test("a branch with a pull request but nothing to commit is a failure, not a com
 test("uncommitted work on the wrong branch stops the run instead of being checked out over", () => {
   const outcome = step("branch", { workingTreeDirty: true, currentBranch: "main" });
   assert.equal(outcome.action, "stop");
-  assert.match((outcome as { reason: string }).reason, /on main with uncommitted work.*belongs on abd\/34-add-retry-backoff/);
+  assert.match((outcome as { reason: string }).reason, /on main with uncommitted work.*belongs on issue\/34-add-retry-backoff/);
 });
 
 test("review runs only when enabled and only once", () => {
@@ -215,7 +227,7 @@ test("review runs only when enabled and only once", () => {
 });
 
 test("a hitl issue waits at the gate and continues on merge or third-party approval", () => {
-  const hitl: PlannedIssue = { ...issue, number: 35, disposition: "hitl", branch: "abd/35-migrate-the-queue" };
+  const hitl: PlannedIssue = { ...issue, number: 35, disposition: "hitl", branch: "issue/35-migrate-the-queue" };
   const base = { hasCommit: true, commitPushed: true, currentBranch: hitl.branch };
   const waiting = step("await-approval", { ...base, pullRequest: { number: 57, state: "open", approvedByOther: false } }, { issue: hitl });
   assert.deepEqual(waiting, { action: "await-approval", issue: hitl, prNumber: 57 });

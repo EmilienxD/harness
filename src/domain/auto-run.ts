@@ -17,15 +17,15 @@ export type AutoRunPhase = (typeof AUTO_RUN_PHASES)[number];
 export type IssueDisposition = "afk" | "hitl";
 
 /** Branches in this namespace are automation artifacts, never run targets. */
-export const ABOARD_BRANCH_PREFIX = "abd/";
+export const RUN_OWNED_BRANCH_PREFIXES = ["issue/", "run/"] as const;
 
 export function isAboardBranch(branch: string): boolean {
-  return branch.startsWith(ABOARD_BRANCH_PREFIX);
+  return RUN_OWNED_BRANCH_PREFIXES.some((prefix) => branch.startsWith(prefix));
 }
 
 export function autoRunTargetBranchBlocker(branch: string): string | undefined {
   if (!isAboardBranch(branch)) return undefined;
-  return `auto-run cannot start from ${branch} because ${ABOARD_BRANCH_PREFIX}* branches are run-owned artifacts; check out the branch that should receive the final run pull request and start again`;
+  return `auto-run cannot start from ${branch} because issue/* and run/* branches are run-owned artifacts; check out the branch that should receive the final run pull request and start again`;
 }
 
 export function unpublishedTargetWarning(base: string, count: number): string {
@@ -110,7 +110,7 @@ export type AutoRunDryRunResult =
       readonly additionalGuideline?: string;
       readonly isolatedWorkspace: boolean;
       readonly keepsWorkspace: boolean;
-      readonly sessionBranch: "abd/run/<run-id>";
+      readonly sessionBranch: "run/<run-id>";
       readonly sessionBase: string;
       /** Full local target tip inspected for this forecast. */
       readonly targetHeadSha: string;
@@ -237,11 +237,11 @@ function requirePullRequest(facts: RepositoryFacts, issue: PlannedIssue): PullRe
 }
 
 export function branchName(issueNumber: number, title: string): string {
-  return `${ABOARD_BRANCH_PREFIX}${issueNumber}-${slugify(title)}`;
+  return `issue/${issueNumber}-${slugify(title)}`;
 }
 
 export function sessionBranchName(runId: string): string {
-  return `${ABOARD_BRANCH_PREFIX}run/${slugify(runId.replace(/^run_/u, ""))}`;
+  return `run/${slugify(runId.replace(/^run_/u, ""))}`;
 }
 
 const SLUG_MAX_CHARS = 40;
@@ -327,8 +327,8 @@ export interface LandedIssue {
 
 export function runPullRequestTitle(landed: readonly LandedIssue[]): string {
   return landed.length === 1
-    ? `aboard auto-run: ${commitSubject(landed[0]!.title)}`
-    : `aboard auto-run: ${landed.length} issues`;
+    ? commitSubject(landed[0]!.title)
+    : `${landed.length} issues`;
 }
 
 export function runPullRequestBody(
@@ -345,7 +345,7 @@ export function runPullRequestBody(
     `> This run started with ${unpublishedTargetCommits} commit${unpublishedTargetCommits === 1 ? "" : "s"} on \`${base}\` that \`origin/${base}\` did not contain. Before squash- or rebase-merging, push \`${base}\` so GitHub removes those commits from this pull request. Otherwise use a merge commit to preserve their ancestry.`,
   ];
   const body = [
-    `Addressed by an aboard auto-run on \`${sessionBranch}\`, one issue at a time.`,
+    `Addresses the completed work on \`${sessionBranch}\`.`,
     ...warning,
     "",
     ...lines,
@@ -358,7 +358,7 @@ export function runPullRequestBody(
 }
 
 export function issueClosedComment(prNumber: number, sessionBranch: string, base: string): string {
-  return `Merged into \`${sessionBranch}\` by aboard auto-run (#${prNumber}), and closed here because a merge outside the default branch does not close its issue. The work reaches \`${base}\` when the run's pull request merges.`;
+  return `Merged into \`${sessionBranch}\` in pull request #${prNumber}, and closed here because a merge outside the default branch does not close its issue. The work reaches \`${base}\` when the run's pull request merges.`;
 }
 
 export const ISSUE_COMMENT_MAX_CHARS = 65_536;
@@ -371,10 +371,11 @@ export function issueCommentBody(summary: string, commitMessage?: string): strin
   return trimmed.length <= ISSUE_COMMENT_MAX_CHARS ? trimmed : `${trimmed.slice(0, ISSUE_COMMENT_MAX_CHARS - 1).trimEnd()}…`;
 }
 
-const AUTO_RUN_EXPLORATION_COMMENT_PREFIX = "<!-- aboard:auto-run-exploration ";
+const EXPLORATION_COMMENT_PREFIX = "## Codebase context\n\n_Generated from `";
+const EXPLORATION_COMMENT_PATTERN = /^## Codebase context\n\n_Generated from `[0-9a-f]{12}` and its current working tree immediately before implementation\._\n\n/u;
 
 export function isAutoRunExplorationComment(body: string): boolean {
-  return body.trimStart().startsWith(AUTO_RUN_EXPLORATION_COMMENT_PREFIX);
+  return EXPLORATION_COMMENT_PATTERN.test(body.trimStart());
 }
 
 export function explorationCommentBody(input: {
@@ -383,7 +384,7 @@ export function explorationCommentBody(input: {
   readonly headSha: string;
   readonly report: string;
 }): string {
-  const body = `${AUTO_RUN_EXPLORATION_COMMENT_PREFIX}run=${input.runId} issue=${input.issueNumber} head=${input.headSha} -->\n\n## Aboard codebase context\n\n_Generated from \`${input.headSha.slice(0, 12)}\` and its current working tree immediately before implementation._\n\n${input.report.trim()}`;
+  const body = `${EXPLORATION_COMMENT_PREFIX}${input.headSha.slice(0, 12)}\` and its current working tree immediately before implementation._\n\n${input.report.trim()}`;
   return issueCommentBody(body) ?? body;
 }
 
