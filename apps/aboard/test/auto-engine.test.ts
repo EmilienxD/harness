@@ -1107,7 +1107,7 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
 
   assert.equal(context.launches[0]?.type, "implementer");
   assert.equal(context.launches[0]?.chrome, true);
-  assert.match(context.launches[0]?.prompt ?? "", /Claude in Chrome.*test.*debug/);
+  assert.match(context.launches[0]?.prompt ?? "", /Chrome browser capability.*test.*debug/);
   assert.doesNotMatch(context.launches[0]?.prompt ?? "", /aboard|auto[ -]?run|automated|automation/i);
   assert.equal(context.launches[1]?.type, "reviewer");
   assert.equal(context.launches[1]?.reviewMode, "afk");

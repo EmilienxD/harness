@@ -103,7 +103,7 @@ export function isInteractiveLaunch(session: AgentSession): boolean {
   return session.attended === true && isReopenableType(session.identity.type);
 }
 
-/** Claude can hand this conversation back to the user after its original caller is gone. */
+/** The selected platform can hand this conversation back after its original caller is gone. */
 export function canReopenSession(session: AgentSession): boolean {
   return isReopenableType(session.identity.type);
 }

@@ -3,7 +3,6 @@ import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibl
 import type { AgentSession, TerminalId } from "../domain/contracts.js";
 
 import type { TerminalController } from "../claude/terminals.js";
-import { sessionIsResumable } from "../claude/sessions.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, LeaseSaveWarnings, registerFleetCommands, renderFleetStatus, type FleetTreeNode } from "./fleet.js";
@@ -47,6 +46,7 @@ export interface NativeUiOptions {
   readonly lease: WriteLease;
   readonly terminals: TerminalController;
   readonly isInitialized: () => boolean;
+  readonly isResumable: (sessionId: AgentSession["sessionId"], cwd: string) => Promise<boolean>;
   readonly autoRun: AutoRunUiHost;
   readonly activity: ActivityUiHost;
 }
@@ -268,7 +268,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       const candidate = persisted?.version === 2 ? continuationSessionFor(persisted, fleet.list()) : undefined;
       const cwd = candidate?.cwd ?? workspace.workspaceFolders?.[0]?.uri.fsPath;
       const canContinue = candidate !== undefined && cwd !== undefined
-        ? await sessionIsResumable(candidate.sessionId, cwd)
+        ? await options.isResumable(candidate.sessionId, cwd)
         : false;
       let continueSession: AgentSession | undefined;
       if (candidate !== undefined && canContinue) {

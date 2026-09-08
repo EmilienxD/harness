@@ -7,7 +7,7 @@ export type LockMarkerProbe = (lockFile: string) => boolean;
 export interface SessionRegistration {
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
-  /** Marker path owned by the launch wrapper; removed when the Claude child exits. */
+  /** Marker path owned by the launch wrapper; removed when the agent child exits. */
   readonly lockFile: string;
 }
 
@@ -327,7 +327,7 @@ export class SessionStartTimeoutError extends Error {
     public readonly agentId: AgentId,
     public readonly timeoutMs: number,
   ) {
-    super(`Claude session did not start within ${Math.round(timeoutMs / 1000)}s; no SessionStart hook fired. Check the terminal for a CLI error.`);
+    super(`Agent session did not start within ${Math.round(timeoutMs / 1000)}s; no SessionStart hook fired. Check the terminal for a CLI error.`);
     this.name = "SessionStartTimeoutError";
   }
 }

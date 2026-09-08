@@ -475,7 +475,7 @@ test("an [AI]-chrome issue says so in its frozen plan row", () => {
   const first = model.children(model.roots()[0]!)[0];
   assert.equal(first?.kind, "issue");
   if (first?.kind !== "issue") return;
-  assert.match(model.item(first).tooltip, /Claude in Chrome: enabled by \[AI\]-chrome/);
+  assert.match(model.item(first).tooltip, /Chrome browser: required by \[AI\]-chrome/);
 });
 
 test("a done row says whether it landed or correctly changed nothing", () => {

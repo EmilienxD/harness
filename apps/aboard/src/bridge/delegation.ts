@@ -1,10 +1,5 @@
-import type { AutoRunReviewMode, EffortLevel, LaunchConfiguration } from "../claude/launch.js";
-import { planLaunch, planSessionResume } from "../claude/launch.js";
-import type { ResolvedPrompt } from "../claude/prompts.js";
+import type { AgentPlatform, AgentPlatformId, AutoRunReviewMode, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
 import { dirname } from "node:path";
-import type { PromptSpillStore } from "../claude/spill.js";
-import type { ShellKind } from "../claude/shell.js";
-import type { TerminalController } from "../claude/terminals.js";
 import type { WriteCapability } from "../domain/capability.js";
 import {
 
@@ -26,8 +21,6 @@ import {
   type SessionObservation,
   type WriteLeaseHolder,
 } from "../domain/lease.js";
-import type { SessionWrapperLayout } from "../claude/launch.js";
-import { sessionIsResumable } from "../claude/sessions.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
@@ -100,7 +93,7 @@ export interface InteractiveLaunchHandles {
 }
 
 export interface DelegationConfigurationSource {
-  get(type: AgentType, reviewMode?: AutoRunReviewMode): Promise<LaunchConfiguration>;
+  get(type: AgentType, reviewMode?: AutoRunReviewMode): Promise<ConfiguredLaunch>;
 }
 
 export interface DelegationPromptResolver {
@@ -121,6 +114,8 @@ export interface DelegationCoordinatorOptions {
   readonly sessions?: { observe(agentId: AgentId): SessionObservation };
   readonly onStaleLeaseRecovered?: (holder: WriteLeaseHolder, observation: LeaseHolderObservation) => void;
   readonly configurations: DelegationConfigurationSource;
+  /** Installed runtime integrations, selected explicitly by launch.json. */
+  readonly platforms: ReadonlyMap<AgentPlatformId, AgentPlatform>;
   readonly prompts: DelegationPromptResolver;
   readonly spills: PromptSpillStore;
 
@@ -128,8 +123,6 @@ export interface DelegationCoordinatorOptions {
   /** Infrastructure-level denials applied to every delegated launch and resume. */
   readonly disallowedTools?: readonly string[];
   readonly command?: () => readonly string[] | undefined;
-  /** Verifies the Claude command runs at all; throws to refuse the launch. */
-  readonly preflight?: (command: readonly string[] | undefined) => Promise<void>;
   readonly effort?: () => EffortLevel | undefined;
   readonly agentIdFactory: () => AgentId;
   readonly sessionIdFactory: () => SessionId;
@@ -221,24 +214,28 @@ export class DelegationCoordinator {
   }
 
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
-    const configuration = await this.options.configurations.get(target.type);
+    const configured = await this.options.configurations.get(target.type);
+    const platform = this.#platform(configured.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
-    const resumable = await (this.options.isResumable ?? sessionIsResumable)(target.sessionId, cwd);
+    const resumable = await (
+      this.options.isResumable
+      ?? ((sessionId, directory) => platform.isResumable(sessionId, directory))
+    )(target.sessionId, cwd);
     if (!resumable) {
-      throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no Claude conversation to resume`);
+      throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no agent conversation to resume`);
     }
     const attended = target.attended ?? true;
 
-    const plan = planSessionResume({
+    const plan = platform.planSessionResume({
       agentId: target.agentId,
       sessionId: target.sessionId,
       agentType: target.type,
       shell: this.options.shell,
       attended,
       ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
-      configuration,
+      configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
       ...(target.prompt === undefined ? {} : { prompt: target.prompt }),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
@@ -251,7 +248,7 @@ export class DelegationCoordinator {
       ...(target.difficulty === undefined ? {} : { difficulty: target.difficulty }),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    await this.options.preflight?.(plan.command);
+    await platform.preflight(plan.command);
     const occurredAt = this.#timestamp();
     const origin = target.origin;
     if (origin !== undefined && leaseRequired(origin, attended)) {
@@ -413,21 +410,22 @@ export class DelegationCoordinator {
     const agentId = this.options.agentIdFactory();
     const sessionId = this.options.sessionIdFactory();
     const agentType = input.type;
-    const [configuration, prompt] = await Promise.all([
+    const [configured, prompt] = await Promise.all([
       this.options.configurations.get(
         agentType,
         input.reviewMode ?? (agentType === "reviewer" ? (attended ? "hitl" : "afk") : undefined),
       ),
       this.options.prompts.resolve(input, { interactive: attended }),
     ]);
-    const plan = planLaunch({
+    const platform = this.#platform(configured.platform);
+    const plan = platform.planLaunch({
       agentId,
       sessionId,
       agentType,
       shell: this.options.shell,
       attended,
       ...(agentType === "implementer" && input.chrome === true ? { chrome: true } : {}),
-      configuration,
+      configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       prompt,
       disallowedTools: [
@@ -441,7 +439,7 @@ export class DelegationCoordinator {
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    await this.options.preflight?.(plan.command);
+    await platform.preflight(plan.command);
     const occurredAt = this.#timestamp();
     if (leaseRequired(origin, attended)) {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));
@@ -547,6 +545,12 @@ export class DelegationCoordinator {
     const session = this.options.fleet.get(agentId);
     if (session === undefined) throw new DelegationError("unknown-agent", `Unknown agent ${agentId}`);
     return session;
+  }
+
+  #platform(id: AgentPlatformId): AgentPlatform {
+    const platform = this.options.platforms.get(id);
+    if (platform === undefined) throw new Error(`No agent platform implementation is registered for ${id}`);
+    return platform;
   }
 
   /** Spread so an unset command leaves the field absent under exactOptionalPropertyTypes. */

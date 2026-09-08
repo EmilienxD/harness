@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { DelegationCoordinator } from "../src/bridge/delegation.js";
+import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
+import type { AgentId, SessionId, TerminalId } from "../src/domain/contracts.js";
+import { FleetRegistry } from "../src/domain/fleet.js";
+import { WriteLease } from "../src/domain/lease.js";
+import type { AgentPlatform, PlatformLaunchRequest } from "../src/platform/agent-platform.js";
+
+class FakeTerminal implements TerminalHandle {
+  public readonly sent: string[] = [];
+  public readonly processId = Promise.resolve(123);
+  public readonly exitStatus = undefined;
+  public sendText(text: string): void { this.sent.push(text); }
+  public show(): void {}
+  public dispose(): void {}
+}
+
+class FakeTerminalHost implements TerminalHost {
+  public readonly terminals: FakeTerminal[] = [];
+  public createTerminal(_options: TerminalCreationOptions): TerminalHandle {
+    const terminal = new FakeTerminal();
+    this.terminals.push(terminal);
+    return terminal;
+  }
+  public onDidCloseTerminal(): { dispose(): void } { return { dispose: () => undefined }; }
+}
+
+test("shared delegation asks the selected platform for an executable launch plan", async () => {
+  const opaqueSettings = { ownedBy: "adapter" };
+  const planned: PlatformLaunchRequest[] = [];
+  const preflighted: readonly string[][] = [];
+  const mutablePreflighted = preflighted as string[][];
+  const platform: AgentPlatform = {
+    id: "claude",
+    capabilities: {
+      sessionIdentity: "client-assigned",
+      promptDelivery: ["none", "inline", "spilled"],
+      lifecycle: ["start", "stop", "end"],
+      models: ["test-model"],
+      reasoningEfforts: ["test-effort"],
+    },
+    planLaunch: (request) => {
+      planned.push(request);
+      return {
+        platform: "claude",
+        kind: "start",
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+        agentType: request.agentType,
+        shell: request.shell,
+        command: ["runtime-wrapper", "profile"],
+        args: ["--start"],
+        commandLine: "runtime-wrapper profile --start",
+        writeCapability: "write-capable",
+        requiresWriteLease: false,
+        promptDelivery: "none",
+        runtimeDirectory: "C:/runtime/agents/agent-1",
+      };
+    },
+    planSessionResume: () => { throw new Error("not used"); },
+    preflight: async (command) => { mutablePreflighted.push([...command]); },
+    isResumable: async () => false,
+  };
+  const host = new FakeTerminalHost();
+  const terminals = new TerminalController({
+    host,
+    shell: "powershell",
+    environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:\\work" }),
+    terminalIdFactory: () => "terminal-1" as TerminalId,
+  });
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:\\work",
+    fleet: new FleetRegistry(),
+    lease: new WriteLease(),
+    terminals,
+    configurations: { get: async () => ({ platform: "claude", settings: opaqueSettings }) },
+    platforms: new Map([["claude", platform]]),
+    prompts: { resolve: async () => undefined },
+    spills: { prepare: async () => undefined, write: async () => "unused" },
+    shell: "powershell",
+    agentIdFactory: () => "agent-1" as AgentId,
+    sessionIdFactory: () => "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
+  });
+
+  const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell" }, "user");
+
+  assert.equal(planned.length, 1);
+  assert.equal(planned[0]?.configuration, opaqueSettings);
+  assert.deepEqual(preflighted, [["runtime-wrapper", "profile"]]);
+  assert.equal(host.terminals[0]?.sent.at(-1), "runtime-wrapper profile --start");
+  assert.equal(launched.terminalId, "terminal-1");
+});
