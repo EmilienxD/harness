@@ -13,6 +13,6 @@ reason = "Aboard currently integrates with Claude Code."
 [[actions]]
 type = "vscode-extension"
 url = "https://github.com/EmilienxD/harness/releases/download/aboard-v0.0.0/aboard-0.0.0.vsix"
-size = 523159
-sha256 = "99c6cbac9eb4b9ecde645ba1a849363ca023c3bc6e3a12d54c3dbc023ca12387"
+size = 522731
+sha256 = "960bdf4780a3b2c8ca90ed78dbaa2239fc6fa008161ed1e7909b5a8fcda40dbc"
 extension_id = "aboard.aboard"

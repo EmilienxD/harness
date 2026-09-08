@@ -1,9 +1,9 @@
-name: Update documentation references
+name: Update Aboard documentation references
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *" # Daily at 06:00 UTC
+    - cron: "0 6 * * *"
 
 permissions:
   contents: write
@@ -11,30 +11,28 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-
+    defaults:
+      run:
+        working-directory: apps/aboard
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Update reference sets
         run: >-
           python scripts/update_references.py
           docs/CLAUDE-REFERENCES
           docs/CHATGPT-REFERENCES
-
       - name: Commit changes
+        working-directory: .
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-
-          if git diff --quiet; then
+          if git diff --quiet -- apps/aboard/docs; then
             echo "No changes."
             exit 0
           fi
-
-          git add docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES
-          git commit -m "Update documentation references"
+          git add apps/aboard/docs/CLAUDE-REFERENCES apps/aboard/docs/CHATGPT-REFERENCES
+          git commit -m "Update Aboard documentation references"
           git push

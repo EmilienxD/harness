@@ -13,8 +13,8 @@ Do not flatten Aboard into the Python project, publish the VSIX in the Python wh
 submodules, or copy only the current Aboard tree. A history-preserving subtree gives one clone and
 one issue/release surface while keeping the two build systems independent.
 
-After the Harness and Aboard redesign changes are committed on their respective branches, import
-Aboard without squashing:
+The initial history import was made without squashing from Aboard commit
+`1513d25ac268e35db5bbe4bcc0af0b26888af1d2`:
 
 ```bash
 git remote add aboard C:/Users/emb/dev/aboard
@@ -26,7 +26,7 @@ Omitting `--squash` is intentional: the subtree merge commit has both repositori
 ancestors, so blame and log remain useful. Run this with a clean Harness worktree because
 `git subtree add` creates the history-joining commit itself.
 
-Then make one monorepo follow-up commit that:
+The monorepo follow-up must:
 
 1. changes Aboard's `repository.url` to the Harness repository;
 2. updates Aboard workflows to run from `apps/aboard` and adds path filters;

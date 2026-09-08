@@ -19,6 +19,10 @@ The catalogue can independently select the persistent Harness CLI, Aboard, skill
 Aboard is a verified release artifact, not part of the Python wheel. Its manifest pins the URL,
 byte size, and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
 
+The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
+It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
+continue to use `v<version>` tags. Changes limited to Aboard run only its path-filtered workflow.
+
 ## Visible sessions
 
 When the persistent CLI is selected:
