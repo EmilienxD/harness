@@ -136,17 +136,105 @@ test("the ChatGPT adapter normalizes Codex lifecycle payloads with the runtime s
   assert.equal(platform.capabilities.lifecycle.includes("compaction"), true);
 });
 
-test("the ChatGPT adapter preflights the complete configured command", async () => {
+test("the ChatGPT adapter preflights the complete configured command and the session's policy needs", async () => {
   const calls: string[][] = [];
+  const required: string[] = [];
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async (program, args) => {
       calls.push([program, ...args]);
       return { code: 0, stdout: "codex-cli 0.153.4\n", stderr: "" };
     },
+    policyProbe: { require: async (agentType) => { required.push(agentType); } },
   });
-  await platform.preflight(["wrapper", "run", "codex"]);
+  const plan = platform.planLaunch({
+    agentId,
+    sessionId: provisional,
+    agentType: "Explore",
+    shell: "powershell",
+    configuration: { shape: "explore", declaredCommand: ["wrapper", "run", "codex"] },
+    prompt: "Report the implementation context for issue #14.",
+    runtimeDirectory: "C:/aboard/runtime",
+  });
+  await platform.preflight(plan);
   assert.deepEqual(calls, [["wrapper", "run", "codex", "--version"]]);
+  assert.deepEqual(required, ["Explore"]);
+});
+
+test("a ChatGPT Explore session is a visible top-level Codex session Codex cannot let write", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => provisional,
+  });
+
+  const plan = platform.planLaunch({
+    agentId,
+    sessionId: provisional,
+    agentType: "Explore",
+    shell: "powershell",
+    configuration: { shape: "explore", declaredCommand: ["codex"], declaredModel: "gpt-test", declaredEffort: "low" },
+    prompt: "Report the implementation context for issue #14.",
+    runtimeDirectory: "C:/aboard/runtime",
+  });
+
+  assert.equal(plan.agentType, "Explore");
+  assert.equal(plan.writeCapability, "read-only");
+  assert.equal(plan.requiresWriteLease, false);
+  assert.equal(plan.args.includes('sandbox_mode="read-only"'), true);
+  assert.equal(plan.args.includes('approval_policy="never"'), true);
+  assert.equal(plan.args.includes("--agent"), false);
+  assert.equal(plan.args.at(-2), "--");
+  assert.match(plan.spill?.contents ?? "", /^You are a read-only exploration agent\./u);
+  assert.match(plan.spill?.contents ?? "", /Report the implementation context for issue #14\./u);
+});
+
+test("a ChatGPT Explore session refuses to launch without an exploration task or as another shape", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const request = {
+    agentId,
+    sessionId: provisional,
+    agentType: "Explore",
+    shell: "powershell",
+    runtimeDirectory: "C:/aboard/runtime",
+  } as const;
+
+  assert.throws(
+    () => platform.planLaunch({ ...request, configuration: { shape: "explore", declaredCommand: ["codex"] } }),
+    /Explore cannot launch without its exploration task/u,
+  );
+  assert.throws(
+    () => platform.planLaunch({ ...request, configuration: { shape: "default", declaredCommand: ["codex"] }, prompt: "Report the context." }),
+    /Explore launches as a read-only Codex session/u,
+  );
+  assert.throws(
+    () => platform.planLaunch({ ...request, agentType: "implementer", configuration: { shape: "explore", declaredCommand: ["codex"] }, prompt: "Address the issue." }),
+    /ChatGPT does not support implementer sessions yet/u,
+  );
+});
+
+test("a spilled ChatGPT Explore task keeps its read-only role in the delivered file", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const plan = platform.planLaunch({
+    agentId,
+    sessionId: provisional,
+    agentType: "Explore",
+    shell: "powershell",
+    configuration: { shape: "explore", declaredCommand: ["codex"] },
+    prompt: "exploration task ".repeat(100),
+    runtimeDirectory: "C:/aboard/runtime",
+    maxInlinePromptChars: 20,
+  });
+
+  assert.equal(plan.promptDelivery, "spilled");
+  assert.match(plan.spill?.contents ?? "", /^You are a read-only exploration agent\./u);
+  assert.match(plan.spill?.contents ?? "", /exploration task/u);
 });
 
 test("the ChatGPT adapter resumes the exact Codex conversation with current launch policy", () => {

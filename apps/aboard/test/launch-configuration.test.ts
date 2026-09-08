@@ -84,6 +84,35 @@ test("launch.json selects an attended ChatGPT session with its Codex command", (
   });
 });
 
+test("launch.json selects a read-only ChatGPT Explore session and still refuses unsupported kinds", () => {
+  const parsed = parseLaunchFile(`{
+    "version": 1,
+    "platform": "chatgpt",
+    "command": ["codex"],
+    "explore": { "model": "gpt-test", "effort": "low" }
+  }`);
+
+  assert.deepEqual(parsed.diagnostics, []);
+  assert.deepEqual(parsed.value.configuration("Explore"), {
+    platform: "chatgpt",
+    settings: {
+      shape: "explore",
+      declaredCommand: ["codex"],
+      declaredModel: "gpt-test",
+      declaredEffort: "low",
+    },
+  });
+  assert.throws(() => parsed.value.configuration("implementer"), /chatgpt does not support implementer sessions yet/u);
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","explore":{"model":"opus"}}'),
+    /explore\.model is not valid for platform chatgpt.*Claude model/u,
+  );
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","explore":{"effort":"max"}}'),
+    /explore\.effort is not valid for platform chatgpt/u,
+  );
+});
+
 test("missing profile fields use defaults and unsupported fields produce one warning", () => {
   const parsed = parseLaunchFile(`{
     "version": 1,

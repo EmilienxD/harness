@@ -45,6 +45,10 @@ if (resumedSessionId !== undefined) {
   writeFileSync(statePath, `${JSON.stringify({ sessionId: actualSessionId })}\n`, "utf8");
 }
 
+const readOnly = process.argv.includes('sandbox_mode="read-only"');
+if (readOnly && !delivered.includes("read-only exploration agent")) process.exit(93);
+if (!readOnly) writeFileSync(join(process.cwd(), `write-attempt-${process.env.ABOARD_AGENT_ID}.txt`), "the session changed the checkout\n", "utf8");
+
 const script = join(process.env.ABOARD_RUNTIME_ROOT, "agents", process.env.ABOARD_AGENT_ID, "scripts", "abd_hook.py");
 function hook(route, payload) {
   const result = spawnSync("uv", ["run", "--no-project", "--no-managed-python", script, route], {
@@ -61,6 +65,8 @@ if (delivered.includes("[E2E:chatgpt-process-failure]")) process.exit(23);
 hook("worker-stop", {
   hook_event_name: "Stop",
   cwd: process.cwd(),
-  last_assistant_message: "Deterministic ChatGPT session completed.",
+  last_assistant_message: readOnly
+    ? "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts."
+    : "Deterministic ChatGPT session completed.",
 });
 hook("session-end", { hook_event_name: "SessionEnd", reason: "other" });

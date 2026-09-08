@@ -9,7 +9,7 @@ The clean-slate redesign deliberately has no compatibility layer. Do not restore
 ## Retained session kinds
 
 - `interactive`: an ordinary empty, user-controlled Claude TUI.
-- `Explore`: Claude Code's built-in read-only agent.
+- `Explore`: a read-only exploration session; Claude Code's built-in agent, or a top-level Codex session held read-only by sandbox and approval policy.
 - `implementer`: an Auto Run worker launched with `/implement`.
 - `reviewer`: an Auto Run worker launched with `/review-afk` or `/review-hitl`.
 

@@ -243,7 +243,7 @@ export class DelegationCoordinator {
       ...(target.difficulty === undefined ? {} : { difficulty: target.difficulty }),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    await platform.preflight(plan.command);
+    await platform.preflight(plan);
     const resumable = await platform.isResumable(target.sessionId, cwd, plan.command);
     if (!resumable) {
       throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no agent conversation to resume`);
@@ -447,7 +447,7 @@ export class DelegationCoordinator {
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    await platform.preflight(plan.command);
+    await platform.preflight(plan);
     const occurredAt = this.#timestamp();
     if (leaseRequired(origin, attended)) {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));

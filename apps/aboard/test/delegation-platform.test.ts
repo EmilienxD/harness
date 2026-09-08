@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DelegationCoordinator } from "../src/bridge/delegation.js";
+import { ChatGptAgentPlatform } from "../src/chatgpt/platform.js";
+import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type StartupProofTracker, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
@@ -68,7 +70,7 @@ test("shared delegation asks the selected platform for an executable launch plan
       };
     },
     planSessionResume: () => { throw new Error("not used"); },
-    preflight: async (command) => { mutablePreflighted.push([...command]); },
+    preflight: async (plan) => { mutablePreflighted.push([...plan.command]); },
     isResumable: async () => false,
   };
   const host = new FakeTerminalHost();
@@ -151,6 +153,51 @@ test("shared delegation does not report a runtime-assigned session until its act
 
   assert.equal((await launched).sessionId, actual);
   assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "running");
+});
+
+test("an auto-run ChatGPT Explore runs read-only and reports through the shared completion contract", async () => {
+  const agentId = "agent-1" as AgentId;
+  const delivered: string[] = [];
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
+    policyProbe: { require: async () => undefined },
+  });
+  const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
+  const terminals = new TerminalController({
+    host, shell: "powershell", environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:/work" }),
+    terminalIdFactory: () => "terminal-1" as TerminalId,
+  });
+  const lease = new WriteLease();
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:/work", fleet, lease, terminals,
+    configurations: { get: async () => ({ platform: "chatgpt", settings: { shape: "explore", declaredCommand: ["codex"] } }) },
+    platforms: new Map([["chatgpt", platform]]),
+    prompts: { resolve: async () => resolvedPromptFromText("Report the implementation context for issue #14.") },
+    spills: { prepare: async () => undefined, write: async (file) => { delivered.push(file.contents); return file.relativePath; } }, shell: "powershell",
+    agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
+  });
+
+  const run = coordinator.runAutomated({ type: "Explore", description: "explore issue 14", issues: [14] });
+  while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
+  const command = host.terminals[0]?.sent.at(-1) ?? "";
+  assert.match(command, /sandbox_mode="read-only"/u);
+  assert.match(command, /approval_policy="never"/u);
+  assert.match(delivered.at(-1) ?? "", /^You are a read-only exploration agent\./u);
+  assert.match(delivered.at(-1) ?? "", /Report the implementation context for issue #14\./u);
+  assert.equal(lease.current(), undefined);
+
+  coordinator.complete(agentId, {
+    outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Relevant files: src/chatgpt/launch.ts.",
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  });
+  const outcome = await run;
+
+  assert.equal(outcome.result.outcome, "succeeded");
+  assert.equal(outcome.result.outcome === "succeeded" ? outcome.result.lastAssistantMessage : undefined, "Relevant files: src/chatgpt/launch.ts.");
+  assert.equal(fleet.get(agentId)?.lifecycle.status, "completed");
 });
 
 test("a ChatGPT reopen preserves identity and ownership while waiting for resume startup proof", async () => {

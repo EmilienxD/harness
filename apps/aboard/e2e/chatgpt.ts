@@ -24,16 +24,26 @@ export async function runChatGptSmoke(config: HarnessConfig): Promise<void> {
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
   try {
-    await runScenario(root, "[E2E:chatgpt-success] complete the deterministic attended turn.", 0);
-    await runScenario(root, "", 0, true);
-    await runScenario(root, `${"large deterministic prompt ".repeat(300)}[E2E:chatgpt-process-failure]`, 23);
+    await runScenario(root, { prompt: "[E2E:chatgpt-success] complete the deterministic attended turn.", expectedExit: 0 });
+    await runScenario(root, { prompt: "", expectedExit: 0, resume: true });
+    await runScenario(root, { prompt: `${"large deterministic prompt ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 23 });
+    await runScenario(root, { prompt: "[E2E:chatgpt-explore] report the implementation context for this checkout.", expectedExit: 0, explore: true });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
-async function runScenario(root: string, prompt: string, expectedExit: number, resume = false): Promise<void> {
-  const agentId = `chatgpt-${expectedExit}` as AgentId;
+interface Scenario {
+  readonly prompt: string;
+  readonly expectedExit: number;
+  readonly resume?: boolean;
+  readonly explore?: boolean;
+}
+
+async function runScenario(root: string, scenario: Scenario): Promise<void> {
+  const { prompt, expectedExit, resume = false, explore = false } = scenario;
+  const agentType = explore ? "Explore" : "interactive";
+  const agentId = `chatgpt-${explore ? "explore" : expectedExit}` as AgentId;
   const runtimeRoot = join(root, agentId);
   const wrapper = sessionWrapperLayout(runtimeRoot, resolve(process.cwd(), "assets", "runtime", "abd_wrapper.py"));
   const platform = new ChatGptAgentPlatform({
@@ -48,8 +58,8 @@ async function runScenario(root: string, prompt: string, expectedExit: number, r
   const now = new Date().toISOString() as IsoTimestamp;
   const expectedSessionId = resume ? ACTUAL : PROVISIONAL;
   const session: AgentSession = {
-    platform: "chatgpt", identity: { agentId, type: "interactive" }, sessionId: expectedSessionId, sessionBinding: resume ? "bound" : "provisional",
-    terminal: { terminalId: `terminal-${expectedExit}` as TerminalId, name: "ChatGPT E2E" },
+    platform: "chatgpt", identity: { agentId, type: agentType }, sessionId: expectedSessionId, sessionBinding: resume ? "bound" : "provisional",
+    terminal: { terminalId: `terminal-${agentId}` as TerminalId, name: "ChatGPT E2E" },
     lifecycle: { status: "starting", startedAt: now }, resultDelivery: { mode: "none" }, attended: true,
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   };
@@ -73,14 +83,14 @@ async function runScenario(root: string, prompt: string, expectedExit: number, r
   try {
     const fakeCodex = resolve(process.cwd(), "e2e", "fake-codex.mjs");
     const request = {
-      agentId, sessionId: PROVISIONAL, agentType: "interactive", shell: process.platform === "win32" ? "powershell" : "git-bash",
-      configuration: { shape: "default", declaredCommand: [process.execPath, fakeCodex] }, prompt,
+      agentId, sessionId: PROVISIONAL, agentType, shell: process.platform === "win32" ? "powershell" : "git-bash",
+      configuration: { shape: explore ? "explore" : "default", declaredCommand: [process.execPath, fakeCodex] }, prompt,
       runtimeDirectory: runtimeRoot, maxInlinePromptChars: expectedExit === 0 ? 4000 : 20, wrapper,
     } as const;
     const plan = resume
       ? platform.planSessionResume({ ...request, sessionId: ACTUAL })
       : platform.planLaunch(request);
-    await platform.preflight(plan.command);
+    await platform.preflight(plan);
     if (resume) {
       if (!await platform.isResumable(ACTUAL, root, plan.command)) throw new Error("ChatGPT E2E could not discover its saved session");
       if (await platform.isResumable("c15badb6-d6c8-45a6-a59f-e931cd364332" as SessionId, root, plan.command)) {
@@ -96,7 +106,7 @@ async function runScenario(root: string, prompt: string, expectedExit: number, r
     const execution = spawnCaptured("uv", ["run", "--no-project", "--no-managed-python", wrapper.script, wrapper.lockPathFor(agentId), "--request", plan.wrapperRequest.relativePath], root, {
       ...process.env,
       ABOARD_BRIDGE_PORT: String(bridge.port), ABOARD_BRIDGE_TOKEN: bridge.token,
-      ABOARD_AGENT_ID: agentId, ABOARD_SESSION_ID: expectedSessionId, ABOARD_AGENT_TYPE: "interactive",
+      ABOARD_AGENT_ID: agentId, ABOARD_SESSION_ID: expectedSessionId, ABOARD_AGENT_TYPE: agentType,
       ABOARD_RUNTIME_ROOT: runtimeRoot, ABOARD_WORKSPACE_ROOT: root, ABOARD_ATTENDED: "1",
     });
     const started = await proof;
@@ -107,8 +117,12 @@ async function runScenario(root: string, prompt: string, expectedExit: number, r
     monitor.poll();
     if (ended.length !== 1 || ended[0]?.phase !== "live" || ended[0]?.sessionId !== ACTUAL) throw new Error("ChatGPT E2E did not observe the bound process ending");
     const final = fleet.get(agentId)?.lastObservedAssistantMessage;
-    if (expectedExit === 0 && final !== "Deterministic ChatGPT session completed.") throw new Error("ChatGPT E2E lost final assistant output");
+    const expectedFinal = explore ? "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts." : "Deterministic ChatGPT session completed.";
+    if (expectedExit === 0 && final !== expectedFinal) throw new Error("ChatGPT E2E lost final assistant output");
     if (expectedExit !== 0 && final !== undefined) throw new Error("ChatGPT E2E manufactured output for a failed process");
+    const attempted = existsSync(join(root, `write-attempt-${agentId}.txt`));
+    if (explore && attempted) throw new Error("ChatGPT E2E Explore session modified the checkout");
+    if (!explore && !resume && expectedExit === 0 && !attempted) throw new Error("ChatGPT E2E never proved an unsandboxed session can write");
   } finally {
     sessions.dispose();
     monitor.stop();

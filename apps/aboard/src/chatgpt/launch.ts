@@ -11,11 +11,16 @@ import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest }
 export const DEFAULT_CHATGPT_COMMAND = ["codex"] as const;
 
 export interface ChatGptLaunchConfiguration {
-  readonly shape: "default";
+  readonly shape: "default" | "explore";
   readonly declaredCommand?: readonly string[];
   readonly declaredModel?: string;
   readonly declaredEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
+
+export const CHATGPT_EXPLORE_ROLE =
+  "You are a read-only exploration agent. Codex runs this session in a read-only sandbox: do not create, modify, or delete files, and do not run commands that change this repository, its worktree, its git state, or GitHub. Inspect the checkout and end your turn with the requested report as your final message.";
+
+const READ_ONLY_POLICY = ["-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"'] as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
@@ -29,11 +34,14 @@ export function planChatGptSessionResume(request: PlatformResumeRequest): Platfo
 }
 
 function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeRequest, kind: "start" | "resume"): PlatformLaunchPlan {
-  if (request.agentType !== "interactive") throw new LaunchPlanError("shape-not-allowed", "ChatGPT currently supports attended interactive launches only");
+  const explore = request.agentType === "Explore";
+  if (!explore && request.agentType !== "interactive") throw new LaunchPlanError("shape-not-allowed", `ChatGPT does not support ${request.agentType} sessions yet`);
   if (!SAFE_ID.test(request.agentId)) throw new LaunchPlanError("unsafe-agent-id", `Agent id is not safe as a file name: ${request.agentId}`);
   if (!UUID.test(request.sessionId)) throw new LaunchPlanError("invalid-session-id", kind === "start" ? "Provisional session id must be a UUID minted before launch" : "Saved session id must be a UUID");
   const configuration = request.configuration as ChatGptLaunchConfiguration;
-  if (configuration.shape !== "default") throw new LaunchPlanError("shape-not-allowed", "interactive launches as Codex's default session");
+  if (configuration.shape !== (explore ? "explore" : "default")) {
+    throw new LaunchPlanError("shape-not-allowed", explore ? "Explore launches as a read-only Codex session" : "interactive launches as Codex's default session");
+  }
   const command = configuration.declaredCommand ?? request.command ?? DEFAULT_CHATGPT_COMMAND;
   if (command.length === 0 || command.some((token) => token.trim().length === 0 || !canQuoteArgument(request.shell, token))) {
     throw new LaunchPlanError("invalid-command", `Launch command cannot be passed on a ${request.shell} command line`);
@@ -53,6 +61,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   const fixed = [
     "--dangerously-bypass-hook-trust",
     "-c", "features.hooks=true",
+    ...(explore ? READ_ONLY_POLICY : []),
     ...config("SessionStart", [hookEntry("session-start", "startup|resume"), hookEntry("worker-reground", "compact")]),
     ...config("SessionEnd", [hookEntry("session-end")]),
     ...config("Stop", [hookEntry("worker-stop")]),
@@ -60,7 +69,9 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     ...(configuration.declaredModel === undefined ? [] : ["--model", configuration.declaredModel]),
     ...(configuration.declaredEffort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(configuration.declaredEffort)}`]),
   ];
-  const text = typeof request.prompt === "string" ? request.prompt.trim() : request.prompt?.text.trim();
+  const task = typeof request.prompt === "string" ? request.prompt.trim() : request.prompt?.text.trim();
+  if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "Explore cannot launch without its exploration task");
+  const text = explore && task !== undefined ? `${CHATGPT_EXPLORE_ROLE}\n\n${task}` : task;
   const planFor = (promptThreshold: number): { readonly promptDelivery: PromptDelivery; readonly spill?: RuntimeFile; readonly args: readonly string[]; readonly commandLine: string; readonly wrapperRequest?: RuntimeFile } => {
     let promptDelivery: PromptDelivery = "none";
     let spill: RuntimeFile | undefined;
@@ -92,7 +103,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   let built = planFor(threshold);
   if (built.commandLine.length > limit && built.promptDelivery === "inline") built = planFor(0);
   if (built.commandLine.length > limit) throw new LaunchPlanError("command-line-too-long", `ChatGPT launch command line is ${built.commandLine.length} characters, over the ${limit} the ${request.shell} shell accepts, even with the prompt spilled to a file`);
-  const writeCapability: WriteCapability = "write-capable";
+  const writeCapability: WriteCapability = explore ? "read-only" : "write-capable";
   return {
     platform: "chatgpt",
     kind,

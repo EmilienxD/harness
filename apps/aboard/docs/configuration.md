@@ -33,7 +33,7 @@ Initialization creates:
 }
 ```
 
-`platform` is required and selects the agent runtime explicitly. It is not inferred from `command`, because that command may begin with a wrapper, package runner, Windows path, or remote executor. This release supports `claude` for all session kinds and `chatgpt` for attended Interactive sessions. A missing or unknown platform blocks launches with a diagnostic that names the field to fix.
+`platform` is required and selects the agent runtime explicitly. It is not inferred from `command`, because that command may begin with a wrapper, package runner, Windows path, or remote executor. This release supports `claude` for all session kinds and `chatgpt` for attended Interactive and read-only Explore sessions. A missing or unknown platform blocks launches with a diagnostic that names the field to fix.
 
 The remaining fields are validated by the selected platform. For `claude`, `command` is a non-empty array containing the executable followed by wrapper arguments, and Aboard appends Claude Code's launch flags. `model` accepts `haiku`, `sonnet`, or `opus`; Interactive and Explore also accept `inherit`, while implementer and reviewer accept `by-difficulty`. `effort` accepts `low`, `medium`, `high`, `xhigh`, or `max`, with the same profile-specific `inherit` and `by-difficulty` values. Models or effort values belonging to another platform are rejected before a terminal is created.
 
@@ -47,13 +47,19 @@ For an attended ChatGPT session, select the Codex CLI explicitly:
   "interactive": {
     "model": "inherit",
     "effort": "inherit"
+  },
+  "explore": {
+    "model": "inherit",
+    "effort": "low"
   }
 }
 ```
 
-ChatGPT `command` has the same wrapper-friendly array shape and defaults to `["codex"]`. Its Interactive `model` accepts `inherit` or a non-empty Codex model slug; `effort` accepts `inherit`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Aboard launches the ordinary visible Codex TUI, waits for its lifecycle handshake, and replaces its provisional launch ownership with the actual Codex session id. Reopen checks the saved conversation with Codex App Server's supported `thread/read` operation, then starts the configured command as `codex resume <session-id>` and waits for the resume handshake before reporting it live. Missing conversations, unreadable saved state, runtime launch failures, and startup timeouts have separate diagnostics. Aboard passes only the hook-trust bypass needed by its generated lifecycle hooks; it never passes Codex's approvals-and-sandbox bypass. Explore, implementer, and reviewer remain unavailable for ChatGPT in this release and fail before terminal creation.
+ChatGPT `command` has the same wrapper-friendly array shape and defaults to `["codex"]`. Its Interactive and Explore `model` accepts `inherit` or a non-empty Codex model slug; `effort` accepts `inherit`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Aboard launches the ordinary visible Codex TUI, waits for its lifecycle handshake, and replaces its provisional launch ownership with the actual Codex session id. Reopen checks the saved conversation with Codex App Server's supported `thread/read` operation, then starts the configured command as `codex resume <session-id>` and waits for the resume handshake before reporting it live. Missing conversations, unreadable saved state, runtime launch failures, and startup timeouts have separate diagnostics. Aboard passes only the hook-trust bypass needed by its generated lifecycle hooks; it never passes Codex's approvals-and-sandbox bypass. Implementer and reviewer remain unavailable for ChatGPT in this release and fail before terminal creation.
 
-Interactive, implementer, and reviewer deny `Agent`, `WebSearch`, and `WebFetch` by default. Users may replace or clear those profile denials. Explore uses Claude Code's built-in policy and does not accept Aboard denials.
+A ChatGPT Explore session is an ordinary visible top-level Codex session carrying an exploration task, not a Codex subagent. Codex has no built-in Explore agent, so Aboard delivers the read-only role in the prompt and enforces it with `sandbox_mode="read-only"` and `approval_policy="never"`, which the session cannot escalate. Its report reaches Auto Run through the same completion contract Claude Explore uses. Before the terminal exists, Aboard checks the managed Codex requirements it depends on: `[features] hooks = false` and `allow_managed_hooks_only = true` are reported as policy rather than as a startup timeout, and an `allowed_sandbox_modes` allowlist without `read-only`, or an `allowed_approval_policies` allowlist without `never`, refuses the Explore launch by name.
+
+Interactive, implementer, and reviewer deny `Agent`, `WebSearch`, and `WebFetch` by default. Users may replace or clear those profile denials. Explore uses its platform's read-only policy and does not accept Aboard denials.
 
 Aboard reads this file for every new launch, resume, and reopen. Existing processes keep their current configuration. Invalid JSON, schema versions, platforms, commands, models, efforts, or denial lists block later launches. Unsupported fields are ignored with one warning. Before creating a terminal, the selected platform checks the complete configured command (including wrapper arguments) with its version operation.
 

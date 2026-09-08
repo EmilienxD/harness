@@ -111,10 +111,11 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 
 function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigurationSource): DelegationConfigurationSource {
   return { get: async (type, reviewMode?: AutoRunReviewMode) => {
-    if (type === "implementer" || type === "reviewer") {
+    const configured = await source.get(type, reviewMode);
+    if (configured.platform === "claude" && (type === "implementer" || type === "reviewer")) {
       await requireHarnessWorkerSkills(workspaceRoot);
     }
-    return source.get(type, reviewMode);
+    return configured;
   } };
 }
 

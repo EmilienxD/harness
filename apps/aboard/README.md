@@ -6,11 +6,11 @@ Aboard is a VS Code extension for visible coding-agent sessions. It supports att
 
 - Initializes and validates the extension-owned `.abd` scaffold.
 - Launches an empty **Run Agent** interactive TUI with the platform selected in `.abd/launch.json`.
-- Launches Claude Code's built-in `Explore` agent when Auto Run needs pre-implementation exploration.
+- Launches a read-only Explore session when Auto Run needs pre-implementation exploration: Claude Code's built-in `Explore` agent, or a top-level Codex session held read-only by its sandbox and approval policy.
 - Tracks Aboard-created sessions and supports resume/reopen with current launch configuration, including attended Codex conversations discovered through supported App Server operations.
 - Runs the complete Auto Run forecast, execution, recovery, validation, Git, and GitHub workflow.
 
-Aboard has four session kinds: Interactive, Explore, Auto Run implementer, and Auto Run reviewer. ChatGPT currently supports Interactive; the other kinds remain Claude-only until their dedicated platform work lands. Claude Interactive, implementer, and reviewer sessions deny `Agent`, `WebSearch`, and `WebFetch` by default through `.abd/launch.json`; users can change these profile denials.
+Aboard has four session kinds: Interactive, Explore, Auto Run implementer, and Auto Run reviewer. ChatGPT currently supports Interactive and Explore; implementer and reviewer remain Claude-only until their dedicated platform work lands. Claude Interactive, implementer, and reviewer sessions deny `Agent`, `WebSearch`, and `WebFetch` by default through `.abd/launch.json`; users can change these profile denials.
 
 ## Auto Run
 

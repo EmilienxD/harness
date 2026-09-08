@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   }
   if (command === "chatgpt") {
     await runChatGptSmoke(config);
-    process.stdout.write("Deterministic ChatGPT launch, resume, missing-session, completion, and process-failure scenarios passed\n");
+    process.stdout.write("Deterministic ChatGPT launch, resume, missing-session, completion, process-failure, and read-only Explore scenarios passed\n");
     return;
   }
   if (command === "serve") {

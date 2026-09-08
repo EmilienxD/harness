@@ -55,7 +55,7 @@ test("the Claude adapter owns launch planning, capabilities, preflight, and resu
   assert.equal(plan.args.includes("--model"), true);
   assert.equal(plan.args.includes("--effort"), true);
 
-  await platform.preflight(plan.command);
+  await platform.preflight(plan);
   assert.deepEqual(probes, [["wrapper", "claude", "--version"]]);
   assert.equal(await platform.isResumable(sessionId, "C:\\work"), true);
 });

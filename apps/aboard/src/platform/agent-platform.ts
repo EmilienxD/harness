@@ -49,7 +49,7 @@ export interface AgentPlatform {
   normalizeLifecycle(kind: PlatformLifecycleKind, payload: unknown): LifecycleObservation;
   planLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan;
   planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan;
-  preflight(command: readonly string[]): Promise<void>;
+  preflight(plan: PlatformLaunchPlan): Promise<void>;
   isResumable(sessionId: SessionId, cwd: string, command?: readonly string[]): Promise<boolean>;
 }
 
