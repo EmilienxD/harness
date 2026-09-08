@@ -40,7 +40,7 @@ function detailFor(option: ReopenOption, now: Date): string {
   const { candidate } = option;
   const chrome = candidate.chromeEnabled === true ? " · Chrome" : "";
   if (!option.resumable) {
-    return `Cannot be reopened; Claude Code no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
+    return `Cannot be reopened; the selected agent platform no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
   }
   switch (candidate.origin) {
     case "live": return `Running now; opens its terminal${chrome}`;
@@ -76,7 +76,7 @@ export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoo
     const chosen = await host.pick(items, "Reopen an aboard session");
     if (chosen === undefined) return;
     if (!chosen.option.resumable) {
-      host.warning(`Claude Code no longer has the conversation for ${chosen.label}, so it cannot be reopened.`);
+      host.warning(`The selected agent platform no longer has the conversation for ${chosen.label}, so it cannot be reopened.`);
       return;
     }
     try {

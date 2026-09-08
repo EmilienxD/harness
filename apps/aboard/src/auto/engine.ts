@@ -1477,7 +1477,7 @@ export class AutoRunEngine {
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
-      prompt: `The checked-out branch is for issue #${issue.number}. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use Claude in Chrome to visualize, test, debug." : ""}`,
+      prompt: `The checked-out branch is for issue #${issue.number}. Work only in the directory you started in; it holds the whole repository. Leave your work uncommitted in the working tree. Use git and gh only for read-only inspection.${issue.chrome === true ? " Use the required Chrome browser capability to visualize, test, debug." : ""}`,
       ...(await this.#guidance(issue)),
       expectsUncommittedTree: true,
       ...this.#isolation(),

@@ -14,8 +14,8 @@ import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/
 import { TerminalController } from "./claude/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
-import { sessionIsResumable } from "./claude/sessions.js";
-import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
+import { spawnCommandRunner } from "./claude/preflight.js";
+import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldCatalogRevision, scaffoldProject } from "./scaffold/project.js";
 import { join } from "node:path";
@@ -64,7 +64,7 @@ import { homedir } from "node:os";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 
 
-/** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the claude CLI boot. */
+/** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the agent CLI boot. */
 const STARTUP_PROOF_TIMEOUT_MS = 60_000;
 const SESSION_LIVENESS_POLL_MS = 5_000;
 
@@ -82,7 +82,7 @@ import {
   type AutoRunReviewMode,
 } from "./claude/launch.js";
 import { requireHarnessWorkerSkills } from "./claude/skills.js";
-import { FileLaunchConfigurationSource } from "./claude/launch-configuration.js";
+import { FileLaunchConfigurationSource } from "./platform/launch-configuration.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
@@ -228,6 +228,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     log: (message) => output.appendLine(message),
     onDidChange: () => { for (const listener of activityListeners) listener(); },
   });
+  const launchFile = new FileLaunchConfigurationSource(join(workspaceRoot, ".abd", "launch.json"));
+  const claudePlatform = new ClaudeAgentPlatform({ commandRunner: spawnCommandRunner(workspaceRoot) });
+  const platforms = new Map([[claudePlatform.id, claudePlatform]]);
+  // Conversation discovery belongs to the session's runtime, not today's launch
+  // selection. In particular, editing launch.json must not make an existing
+  // process disappear from Recent Activity when it ends.
+  const sessionIsResumable = async (sessionId: SessionId, cwd: string): Promise<boolean> => {
+    for (const platform of platforms.values()) {
+      if (await platform.isResumable(sessionId, cwd)) return true;
+    }
+    return false;
+  };
   if (initialized) await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
   const rememberEndedSession = async (
     session: AgentSession,
@@ -242,7 +254,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const conversationStarted = !isInteractiveLaunch(session)
       || await sessionIsResumable(session.sessionId, session.cwd ?? workspaceRoot);
     if (!shouldRecordEndedSession(session, conversationStarted)) {
-      output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no Claude conversation started.`);
+      output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no agent conversation started.`);
       return;
     }
     const classified = isInteractiveLaunch(session) ? outcome : outcome === "ended" ? "succeeded" : outcome;
@@ -254,7 +266,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   let agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => fleet.list().map((session) => session.identity.agentId as string), runtimeAdmission.isOpen);
   const lease = new WriteLease();
-  const launchFile = new FileLaunchConfigurationSource(join(workspaceRoot, ".abd", "launch.json"));
   const launchConfigurations = workerConfigurations(workspaceRoot, launchFile);
   let launchFileNotice: string | undefined;
   const validateLaunchFile = async (): Promise<void> => {
@@ -284,10 +295,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     ...activity.entries().flatMap((entry) => entry.kind === "agent" && entry.reopen !== undefined ? [entry.agentId as string] : []),
   ]));
   const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "abd_wrapper.py"));
-  const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -320,7 +330,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const cause = exit?.error !== undefined
       ? `could not be started (${exit.error})`
       : `exited with code ${exit?.exitCode ?? "unknown"} before starting a session`;
-    output.appendLine(`Launch failed for agent ${agentId} (session ${sessionId}): claude ${cause}. The terminal holds the error.`);
+    output.appendLine(`Launch failed for agent ${agentId} (session ${sessionId}): the configured agent command ${cause}. The terminal holds the error.`);
     // The launch is settled; the proof's timeout must not fire later and kill a
     // terminal whose error message is the whole point of keeping it.
     sessionProofs.cancel(agentId);
@@ -334,7 +344,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       fleet.remove(agentId, at);
     }
     releaseAbandonedTerminal(agentId);
-    void window.showWarningMessage(`aboard could not start Claude: it ${cause}. Check the terminal for the error.`);
+    void window.showWarningMessage(`aboard could not start the configured agent: it ${cause}. Check the terminal for the error.`);
   };
   const sessionMonitor = new SessionProcessMonitor({
     probe: lockMarkerPresent,
@@ -509,6 +519,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     lease,
     terminals,
     isInitialized: () => initialized,
+    isResumable: sessionIsResumable,
     autoRun: {
       engine: autoRun,
       discardBehavior: () => currentConfiguration.autoRun.discardBehavior,

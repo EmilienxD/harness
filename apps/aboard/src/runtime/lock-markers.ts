@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, watch } from "node:fs";
 import { join } from "node:path";
 import type { LockMarkerProbe } from "../bridge/session-lifecycle.js";
-import type { SessionWrapperLayout } from "../claude/launch.js";
+import type { SessionWrapperLayout } from "../platform/agent-platform.js";
 
 export const lockMarkerPresent: LockMarkerProbe = (lockFile) => existsSync(lockFile);
 

@@ -9,6 +9,7 @@ Initialization creates:
 ```json
 {
   "version": 1,
+  "platform": "claude",
   "command": ["claude"],
   "interactive": {
     "model": "inherit",
@@ -32,11 +33,13 @@ Initialization creates:
 }
 ```
 
-`command` is a non-empty array containing the executable followed by wrapper arguments. Aboard appends its own launch flags. `model` accepts `haiku`, `sonnet`, or `opus`; Interactive and Explore also accept `inherit`, while implementer and reviewer accept `by-difficulty`. `effort` accepts `low`, `medium`, `high`, `xhigh`, or `max`, with the same profile-specific `inherit` and `by-difficulty` values.
+`platform` is required and selects the agent runtime explicitly. It is not inferred from `command`, because that command may begin with a wrapper, package runner, Windows path, or remote executor. This release supports `claude`; a missing or unknown platform blocks launches with a diagnostic that names the field to fix.
+
+The remaining fields are validated by the selected platform. For `claude`, `command` is a non-empty array containing the executable followed by wrapper arguments, and Aboard appends Claude Code's launch flags. `model` accepts `haiku`, `sonnet`, or `opus`; Interactive and Explore also accept `inherit`, while implementer and reviewer accept `by-difficulty`. `effort` accepts `low`, `medium`, `high`, `xhigh`, or `max`, with the same profile-specific `inherit` and `by-difficulty` values. Models or effort values belonging to another platform are rejected before a terminal is created.
 
 Interactive, implementer, and reviewer deny `Agent`, `WebSearch`, and `WebFetch` by default. Users may replace or clear those profile denials. Explore uses Claude Code's built-in policy and does not accept Aboard denials.
 
-Aboard reads this file for every new launch, resume, and reopen. Existing processes keep their current configuration. Invalid JSON, schema versions, commands, models, efforts, or denial lists block later launches. Unsupported fields are ignored with one warning.
+Aboard reads this file for every new launch, resume, and reopen. Existing processes keep their current configuration. Invalid JSON, schema versions, platforms, commands, models, efforts, or denial lists block later launches. Unsupported fields are ignored with one warning. Before creating a terminal, the selected platform checks the complete configured command (including wrapper arguments) with its version operation.
 
 Auto Run always adds its Git and GitHub mutation restrictions. Worktree runs also add path restrictions for the user's original checkout. These extension-owned rules cannot be removed through `launch.json`. Aboard does not set an allowed-tool list or permission mode, so normal Claude Code permission configuration remains authoritative.
 
@@ -69,7 +72,7 @@ Precedence is `.vscode/settings.json`, `.abd/settings.json`, then user/profile/d
 | :-- | :-- | :-- |
 | `aboard.bridge.port` | `4823` | Preferred loopback bridge port. |
 | `aboard.launch.maxInlinePromptChars` | `4000` | Spill longer generated prompts to one-use temporary files. |
-| `aboard.terminals.closeOnSessionEnd` | `false` | Close the terminal after its Claude session ends. |
+| `aboard.terminals.closeOnSessionEnd` | `false` | Close the terminal after its agent session ends. |
 | `aboard.autoRun.review` | `false` | Run `/review-afk` or `/review-hitl` after implementation. |
 | `aboard.autoRun.branchMode` | `per-issue` | Use per-issue pull requests or one cumulative branch. |
 | `aboard.autoRun.exploreBeforeImplement` | `false` | Run built-in Explore before each fresh implementer. |

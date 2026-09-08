@@ -447,7 +447,7 @@
         "aboard.terminals.closeOnSessionEnd": {
           "type": "boolean",
           "default": false,
-          "description": "Close an agent's terminal when its Claude session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
+          "description": "Close an agent's terminal when its session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
         },
         "aboard.autoRun.review": {
           "type": "boolean",

@@ -135,6 +135,6 @@ export function describeReopenOutcome(outcome: ReopenOutcome): string {
     case "reopened":
       return `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
     case "unresumable":
-      return `Claude Code no longer has the conversation for agent ${outcome.candidate.agentId}, so it cannot be reopened.`;
+      return `The selected agent platform no longer has the conversation for agent ${outcome.candidate.agentId}, so it cannot be reopened.`;
   }
 }

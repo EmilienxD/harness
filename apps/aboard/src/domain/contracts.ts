@@ -1,7 +1,7 @@
 /**
  * Aboard session types after the REFACTOR.md redesign:
- * - interactive: Ordinary user-controlled Claude TUI
- * - Explore: Claude's built-in read-only agent
+ * - interactive: Ordinary user-controlled agent TUI
+ * - Explore: Read-only exploration session
  * - implementer: Auto Run worker that implements one frozen issue
  * - reviewer: Auto Run worker that reviews (both AFK and HITL use this profile)
  */
@@ -24,7 +24,7 @@ export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-/** Explore is Claude's built-in agent */
+/** Explore is the stable provider-neutral read-only role. */
 export const NAMED_BUILTIN_AGENT_TYPES = ["Explore"] as const;
 
 export function isNamedBuiltinAgentType(type: AgentType): boolean {
@@ -149,7 +149,7 @@ export interface AgentSession {
   /** The user drives this session. Absence is the persisted form of unattended. */
   readonly attended?: true;
   readonly telemetry: AgentTelemetry;
-  /** The launch explicitly enabled Claude in Chrome; absence means disabled. */
+  /** The launch explicitly required the Chrome browser capability; absence means disabled. */
   readonly chromeEnabled?: true;
   /** Every issue this agent's launch prompt resolved, in the order it was given them. */
   readonly issueNumbers?: readonly number[];
