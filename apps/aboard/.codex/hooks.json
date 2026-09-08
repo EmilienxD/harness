@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE run --no-project --no-managed-python \"C:/Users/emb/dev/aboard/.codex/hooks/issues_ChatGPT_hook.py\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+node_modules/
+dist/
+coverage/
+.vscode-test/
+*.tsbuildinfo
+*.vsix
+
+# Runtime state written by aboard. Never commit bridge credentials or sessions.
+.abd/runtime/
+
+# Local secrets and environment overrides.
+.env
+.env.*
+!.env.example
+
+# OS and editor noise.
+.DS_Store
+Thumbs.db
+
+.venv/
+.mypy_cache/
+.ruff/
+__pycache__/
+
+# -------------------------------------------------
+
+# Scaffold templates contain a project .claude directory intentionally.
+!assets/scaffold/.claude/
+!assets/scaffold/.claude/**
+# .abd/ holds live runtime state in user projects; the scaffold's
+# extension-owned scripts must still be committable.
+.aboard/
+.abd/
+!assets/scaffold/.abd/
+!assets/scaffold/.abd/**
+.claude/settings.local.json
+
+private-notes/
+
+# >>> harness:commit >>>
+.claude/commit-ai.key
+# <<< harness:commit <<<
+

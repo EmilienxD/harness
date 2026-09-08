@@ -1,0 +1,673 @@
+{
+  "name": "aboard",
+  "displayName": "aboard; visible agents for Claude Code",
+  "publisher": "aboard",
+  "description": "Turn Claude Code's invisible sub-agents into terminals you can watch, interrupt, and take over; coordinated by one Manager, with GitHub as the work state.",
+  "version": "0.0.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EmilienxD/aboard.git"
+  },
+  "engines": {
+    "node": ">=22",
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "agents",
+    "orchestration",
+    "ai"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "aboard.newManager",
+        "title": "New Manager",
+        "category": "Aboard"
+      },
+      {
+        "command": "aboard.initializeProject",
+        "title": "Initialize Project",
+        "category": "Aboard"
+      },
+      {
+        "command": "aboard.updateProject",
+        "title": "Update .abd/",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "aboard.reviewPr",
+        "title": "Review a Pull Request",
+        "category": "Aboard"
+      },
+      {
+        "command": "aboard.reopenSession",
+        "title": "Reopen a Session",
+        "category": "Aboard",
+        "icon": "$(history)"
+      },
+      {
+        "command": "aboard.startAutoRun",
+        "title": "Start Auto Run",
+        "category": "Aboard",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aboard.stopAutoRun",
+        "title": "Stop Auto Run",
+        "category": "Aboard",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "aboard.continueAutoRun",
+        "title": "Continue Auto Run",
+        "category": "Aboard",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "aboard.focusAgent",
+        "title": "Focus Agent",
+        "category": "Aboard",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "aboard.killAgent",
+        "title": "Kill Agent",
+        "category": "Aboard",
+        "icon": "$(close)"
+      },
+      {
+        "command": "aboard.forceReleaseLease",
+        "title": "Force Release Write Lease",
+        "category": "Aboard"
+      },
+      {
+        "command": "aboard.focusFleet",
+        "title": "Focus Fleet",
+        "category": "Aboard"
+      },
+      {
+        "command": "aboard.resumeAutoRun",
+        "title": "Resume Auto Run",
+        "category": "Aboard",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "aboard.discardAutoRun",
+        "title": "Discard Auto Run",
+        "category": "Aboard",
+        "icon": "$(close)"
+      },
+      {
+        "command": "aboard.autoRun.refresh",
+        "title": "Check Now",
+        "category": "Aboard",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aboard.autoRun.openCurrentIssue",
+        "title": "Open Current Issue",
+        "category": "Aboard",
+        "icon": "$(issues)"
+      },
+      {
+        "command": "aboard.autoRun.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "Aboard",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "aboard.autoRun.focusImplementer",
+        "title": "Focus Implementer",
+        "category": "Aboard",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "aboard.openIssue",
+        "title": "Open Issue",
+        "category": "Aboard",
+        "icon": "$(issues)"
+      },
+      {
+        "command": "aboard.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "Aboard"
+      },
+      {
+        "command": "aboard.activity.openTerminal",
+        "title": "Open Terminal",
+        "category": "Aboard",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "aboard.activity.openIssue",
+        "title": "Open Issue",
+        "category": "Aboard",
+        "icon": "$(issues)"
+      },
+      {
+        "command": "aboard.activity.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "Aboard",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "aboard.activity.reopen",
+        "title": "Reopen Session",
+        "category": "Aboard",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "aboard.activity.clear",
+        "title": "Clear Recent Activity",
+        "category": "Aboard",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "aboard.clearBranches",
+        "title": "Clear Remaining Branches",
+        "category": "Aboard",
+        "icon": "$(trash)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aboard",
+          "title": "aboard",
+          "icon": "assets/aboard.svg"
+        }
+      ]
+    },
+    "views": {
+      "aboard": [
+        {
+          "id": "aboard.welcome",
+          "name": "Get Started",
+          "when": "!aboard.initialized"
+        },
+        {
+          "id": "aboard.fleet",
+          "name": "Agent Fleet",
+          "when": "aboard.initialized"
+        },
+        {
+          "id": "aboard.autoRun",
+          "name": "Auto Run",
+          "when": "aboard.initialized"
+        },
+        {
+          "id": "aboard.recentActivity",
+          "name": "Recent Activity",
+          "when": "aboard.initialized"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "aboard.welcome",
+        "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over; coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
+        "when": "!aboard.scaffoldUpdateRequired"
+      },
+      {
+        "view": "aboard.welcome",
+        "contents": "This project's aboard assets were created by another extension version. Update them before starting or resuming aboard. Files you have edited are preserved and listed for review.\n[Update .abd/](command:aboard.updateProject)",
+        "when": "aboard.scaffoldUpdateRequired"
+      },
+      {
+        "view": "aboard.recentActivity",
+        "contents": "What aboard's agents and runs did most recently shows up here, including sessions you can reopen."
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "aboard.updateProject",
+          "when": "view == aboard.fleet",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aboard.reopenSession",
+          "when": "view == aboard.fleet",
+          "group": "navigation@2"
+        },
+        {
+          "command": "aboard.autoRun.refresh",
+          "when": "view == aboard.autoRun",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aboard.clearBranches",
+          "when": "view == aboard.autoRun && !aboard.autoRunActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "aboard.activity.clear",
+          "when": "view == aboard.recentActivity",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "aboard.initializeProject",
+          "when": "!aboard.initialized && !aboard.scaffoldUpdateRequired"
+        },
+        {
+          "command": "aboard.updateProject",
+          "when": "aboard.initialized || aboard.scaffoldUpdateRequired"
+        },
+        {
+          "command": "aboard.newManager",
+          "when": "aboard.initialized && !aboard.managerLive"
+        },
+        {
+          "command": "aboard.reviewPr",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.reopenSession",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.focusFleet",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.forceReleaseLease",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.startAutoRun",
+          "when": "aboard.initialized && aboard.autoRunCard == forecast"
+        },
+        {
+          "command": "aboard.stopAutoRun",
+          "when": "aboard.initialized && aboard.autoRunActive"
+        },
+        {
+          "command": "aboard.continueAutoRun",
+          "when": "aboard.initialized && aboard.autoRunWaiting"
+        },
+        {
+          "command": "aboard.focusAgent",
+          "when": "false"
+        },
+        {
+          "command": "aboard.killAgent",
+          "when": "false"
+        },
+        {
+          "command": "aboard.resumeAutoRun",
+          "when": "aboard.initialized && aboard.autoRunCard == recoverable"
+        },
+        {
+          "command": "aboard.discardAutoRun",
+          "when": "aboard.initialized && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken || aboard.autoRunCard == unsupported)"
+        },
+        {
+          "command": "aboard.autoRun.refresh",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.activity.clear",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.clearBranches",
+          "when": "aboard.initialized && !aboard.autoRunActive"
+        },
+        {
+          "command": "aboard.openIssue",
+          "when": "false"
+        },
+        {
+          "command": "aboard.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "aboard.autoRun.openCurrentIssue",
+          "when": "false"
+        },
+        {
+          "command": "aboard.autoRun.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "aboard.autoRun.focusImplementer",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.openTerminal",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.openIssue",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "aboard.activity.reopen",
+          "when": "false"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "aboard.focusAgent",
+          "when": "viewItem == aboard.agent.active"
+        },
+        {
+          "command": "aboard.killAgent",
+          "when": "viewItem == aboard.agent.active"
+        },
+        {
+          "command": "aboard.startAutoRun",
+          "when": "viewItem == aboard.autoRun.forecast",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.autoRun.openCurrentIssue",
+          "when": "viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting",
+          "group": "inline@3"
+        },
+        {
+          "command": "aboard.autoRun.openPullRequest",
+          "when": "(viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting) && aboard.autoRunHasPullRequest",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.autoRun.refresh",
+          "when": "viewItem == aboard.autoRun.waiting",
+          "group": "inline@4"
+        },
+        {
+          "command": "aboard.stopAutoRun",
+          "when": "viewItem == aboard.autoRun.active || viewItem == aboard.autoRun.waiting",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.resumeAutoRun",
+          "when": "viewItem == aboard.autoRun.recoverable",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.discardAutoRun",
+          "when": "viewItem =~ /aboard.autoRun.(recoverable|broken|unsupported)/",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.autoRun.focusImplementer",
+          "when": "viewItem =~ /aboard.autoRun.issue.\\w+.implementer/",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.openIssue",
+          "when": "viewItem =~ /aboard.autoRun.issue.\\w+/",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.activity.openTerminal",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\bterminal\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.activity.reopen",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\breopen\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "aboard.activity.openIssue",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\bissue\\b/",
+          "group": "inline@3"
+        },
+        {
+          "command": "aboard.activity.openPullRequest",
+          "when": "view == aboard.recentActivity && viewItem =~ /\\bpr\\b/",
+          "group": "inline@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "aboard",
+      "properties": {
+        "aboard.bridge.port": {
+          "type": "integer",
+          "default": 4823,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Preferred loopback port. If occupied, aboard selects an ephemeral port."
+        },
+        "aboard.launch.claudeCommand": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "default": "claude",
+          "markdownDescription": "Command that starts Claude Code. Defaults to `claude`; use it to point aboard at another binary or a wrapper, for example `openclaude` or `wrapper run MyProfile --`. aboard appends its own flags to this command unchanged.\n\nWritten as a string it is split on spaces, with `\"...\"` or `'...'` around a token that contains spaces (`\"C:\\tools\\my claude.exe\" run --`); an array of strings is used verbatim. It is a program and its arguments, not a shell expression: every token is quoted, so `&&` or `|` would be passed as literal text. Applies to the next launch; a running Manager keeps its command."
+        },
+        "aboard.launch.maxInlinePromptChars": {
+          "type": "integer",
+          "default": 4000,
+          "minimum": 0,
+          "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to one-use files in the OS temporary directory and are referenced with @path."
+        },
+        "aboard.launch.effort": {
+          "type": "string",
+          "enum": [
+            "inherit",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "enumDescriptions": [
+            "Pass no --effort flag; Claude Code's own effort level applies.",
+            "Launch with --effort low.",
+            "Launch with --effort medium.",
+            "Launch with --effort high.",
+            "Launch with --effort xhigh.",
+            "Launch with --effort max."
+          ],
+          "default": "inherit",
+          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, including the Manager, passed as `--effort`. Available levels depend on the model.\n\nThis is the session level: an agent definition that sets `effort:` in its `.abd/agents/<name>.md` frontmatter overrides it while that agent is active, so use the setting for built-in agent launches, which have no aboard definition to read, and resumed sessions. Applies to the next launch; a running agent keeps its level."
+        },
+        "aboard.terminals.closeOnSessionEnd": {
+          "type": "boolean",
+          "default": false,
+          "description": "Close an agent's terminal when its Claude session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
+        },
+        "aboard.manager.disallowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "aboard.manager.roadmapReminderBytes": {
+          "type": "integer",
+          "default": 150000,
+          "minimum": 0,
+          "maximum": 100000000,
+          "description": "How many transcript bytes may pass with no roadmap injection before the Manager is reminded of the pending tasks and their positions. Measured in bytes rather than turns because turn size varies far too much to pace on. 0 disables the reminder; the session-start and post-compact briefings still carry the full roadmap."
+        },
+        "aboard.manager.transcriptBackups": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How many Manager session transcripts aboard keeps in private VS Code workspace storage. Claude Code deletes its own session files older than cleanupPeriodDays at startup and offers no way to disable that sweep, so aboard copies the Manager's transcript at every turn boundary and restores it if a resume finds it gone. 0 disables backup and restore and removes existing copies."
+        },
+        "aboard.autoRun.review": {
+          "type": "boolean",
+          "default": false,
+          "description": "Launch a pr-doctor after each issue is addressed during an auto-run. Automated review stays opt-in; the explicit review action is always available."
+        },
+        "aboard.autoRun.branchMode": {
+          "type": "string",
+          "enum": ["per-issue", "single-branch"],
+          "default": "per-issue",
+          "description": "Use one branch and pull request per issue, or commit all issues directly to the run session branch and use only its cumulative pull request."
+        },
+        "aboard.autoRun.exploreBeforeImplement": {
+          "type": "boolean",
+          "default": false,
+          "description": "Launch a visible read-only Explore agent immediately before each fresh auto-run implementer. Its bounded codebase report is passed directly to the implementer and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
+        },
+        "aboard.autoRun.recursiveIssueReferences": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include issue bodies referenced by the primary issue's directly related issues in an auto-run implementer's initial context. Direct references are always included. Off by default, so traversal stops after that first level. This changes loaded issue bodies only, not the implementer's instructions."
+        },
+        "aboard.autoRun.prompt": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Persistent note added near the end of every auto-run implementer and pr-doctor prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
+        },
+        "aboard.autoRun.pauseAfterHitl": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stop the run after a hitl issue is accepted instead of continuing automatically. In per-issue mode acceptance comes from its merge or a third-party approval; in single-branch mode it is the explicit Aboard Continue action."
+        },
+        "aboard.autoRun.mergeStrategy": {
+          "type": "string",
+          "enum": [
+            "squash",
+            "merge",
+            "rebase"
+          ],
+          "default": "squash",
+          "description": "How auto-run merges a pull request. Squash by default because one issue is one logical change even when the engine made two commits. A final run pull request carrying unpublished target commits is left open for squash or rebase until those commits are pushed; merge preserves their ancestry and remains safe."
+        },
+        "aboard.autoRun.mergeRunPullRequest": {
+          "type": "boolean",
+          "default": false,
+          "description": "Merge the run's own pull request when the run ends. An auto-run addresses each issue on its own branch, merges those into one session branch, and opens a single pull request from it into the branch you were on when the run started. Off by default: that branch is one you are working on, so a conflict there is likely and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, reconciles a conflict it can resolve, and otherwise leaves the pull request open for you."
+        },
+        "aboard.autoRun.pollSeconds": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "How often auto-run checks a hitl pull request for resolution while waiting. Window focus and the Continue action poll immediately regardless."
+        },
+        "aboard.autoRun.discardBehavior": {
+          "type": "string",
+          "enum": [
+            "record-only",
+            "local-cleanup",
+            "full-cleanup"
+          ],
+          "default": "record-only",
+          "enumDescriptions": [
+            "Forget the run record only. Terminals, the checkout, branches, commits, pull requests, and issues are all left exactly as they are.",
+            "Also close the run's terminals, remove its own checkout when that checkout is clean, and delete its local branches when they still point where the run left them.",
+            "Local cleanup, plus close the run's still-open unmerged pull requests and delete its unmerged remote branches. Merged work, moved branches, and closed issues are never touched."
+          ],
+          "description": "What Discard removes besides the run record. Cleanup never deletes a dirty checkout, an artifact whose SHA or pull request identity changed, or anything that already merged."
+        },
+        "aboard.autoRun.worktree.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout beside the project, carries ignored local .claude and .abd configuration into it without replacing tracked files, and leaves your working tree and branch exactly as they are. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
+        },
+        "aboard.autoRun.worktree.root": {
+          "type": "string",
+          "default": "",
+          "description": "Where a run's own checkout is created. Empty uses a sibling of the project directory. The path must be outside the project, or the run would address issues in a directory the repository itself contains."
+        },
+        "aboard.autoRun.worktree.keep": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep a run's own checkout after the run ends. Off by default, in which case aboard removes it once the queue drains; but always keeps it when the run stopped or parked an issue, because its terminals and unfinished work are in there."
+        },
+        "aboard.autoRun.worktree.setupTimeoutSeconds": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "How long .abd/session-setup.ps1 or .abd/session-setup.sh may take in a fresh checkout. Those files ship empty; put your own installation steps in them (copying an .env, npm install, uv sync) and aboard runs the one for this platform once, right after creating the checkout. A failure refuses the run rather than starting agents in a half-installed tree."
+        },
+        "aboard.timeouts.managerStop": {
+          "type": "integer",
+          "default": 3600,
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "Manager Stop hook and foreground aboard MCP tool timeout in seconds."
+        },
+        "aboard.timeouts.managerPrompt": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 600,
+          "description": "Manager UserPromptSubmit hook timeout in seconds."
+        },
+        "aboard.timeouts.managerSessionStart": {
+          "type": "integer",
+          "default": 120,
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Manager SessionStart briefing timeout in seconds."
+        }
+      }
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "files": [
+    "dist/extension.js",
+    "dist/extension.js.map",
+    "assets/aboard.svg",
+    "assets/scaffold/",
+    "assets/runtime/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outfile=dist/extension.js --sourcemap",
+    "check": "tsc --noEmit",
+    "test:build": "node -e \"require('node:fs').rmSync('dist/test',{recursive:true,force:true})\" && esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test",
+    "test": "npm run test:build && node --test dist/test/*.test.js",
+    "test:integration": "npm run test && npm run test:vscode",
+    "test:vscode:build": "esbuild test/vscode/run.ts test/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/vscode-test",
+    "test:vscode": "npm run build && npm run test:vscode:build && node dist/vscode-test/run.js",
+    "package:build": "esbuild scripts/package.ts --bundle --packages=external --platform=node --format=cjs --target=node22 --outfile=dist/package.js",
+    "package": "npm run check && npm run build -- --minify && npm run package:build && node dist/package.js",
+    "e2e:build": "esbuild e2e/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/e2e/cli.js --sourcemap",
+    "e2e:bootstrap": "npm run e2e:build && node dist/e2e/cli.js bootstrap",
+    "e2e:reset": "npm run e2e:build && node dist/e2e/cli.js reset",
+    "e2e:serve": "npm run e2e:build && node dist/e2e/cli.js serve",
+    "e2e:smoke": "npm run e2e:build && node dist/e2e/cli.js smoke",
+    "e2e:extension:build": "esbuild e2e/vscode/run.ts e2e/vscode/auto-run.ts e2e/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/e2e/vscode --sourcemap",
+    "e2e:extension": "npm run build && npm run e2e:extension:build && node dist/e2e/vscode/run.js",
+    "e2e:auto-run": "npm run build && npm run e2e:build && npm run e2e:extension:build && node dist/e2e/vscode/auto-run.js",
+    "e2e:full": "npm run check && npm run test:integration && npm run build && npm run e2e:reset && npm run e2e:reset && npm run e2e:smoke && npm run e2e:reset && npm run e2e:extension && npm run e2e:reset && npm run e2e:auto-run && npm run e2e:reset"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/vscode": "1.125.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "0.28.1",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "npm@11.6.2"
+}

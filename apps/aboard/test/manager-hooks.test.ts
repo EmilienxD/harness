@@ -1,0 +1,1212 @@
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { EOL, tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { ManagerBriefings, codebaseLine, ManagerPromptService, ManagerStopService, RoadmapReminderService, createManagerHookRoutes, HOOK_OUTPUT_LIMIT, ROADMAP_INLINE_LIMIT, ROADMAP_MARKER, type BriefingSources, type RoadmapBriefing } from "../src/bridge/manager-hooks.js";
+import { parseRoadmap } from "../src/domain/roadmap.js";
+import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
+import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId, WorkerResult } from "../src/domain/contracts.js";
+import { FleetRegistry } from "../src/domain/fleet.js";
+import { WriteLease } from "../src/domain/lease.js";
+
+const at = (value: string) => value as IsoTimestamp;
+const agent = (value: string) => value as AgentId;
+const session = (value: string) => value as SessionId;
+const terminal = (value: string) => value as TerminalId;
+const timestamp = at("2026-07-30T12:00:00.000Z");
+
+function manager(fleet: FleetRegistry): AgentId {
+  const id = agent("manager-1");
+  fleet.register({
+    identity: { agentId: id, type: "manager" }, sessionId: session("140b5c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("manager-terminal"), name: "manager" }, lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(id, { status: "running", startedAt: timestamp }, timestamp);
+  return id;
+}
+
+function worker(fleet: FleetRegistry, recipientAgentId: AgentId, status: AgentSession["lifecycle"]["status"] = "running"): AgentId {
+  const id = agent(`worker-${fleet.list().length}`);
+  const lifecycle: AgentSession["lifecycle"] = status === "running"
+    ? { status, startedAt: timestamp }
+    : { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "done" };
+  fleet.register({ identity: { agentId: id, type: "implementer" }, sessionId: session(`4db0ed4c-5d9e-4ab5-a493-2b8575ab19e${fleet.list().length}`),
+    terminal: { terminalId: terminal(`${id}-terminal`), name: id }, lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "mailbox", recipientAgentId }, telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 }, issueNumbers: [12] }, timestamp);
+  fleet.transition(id, lifecycle, timestamp);
+  return id;
+}
+
+/** Long enough that the roadmap section alone exceeds its inline allowance. */
+const LONG_ROADMAP = Array.from({ length: 400 }, (_, index) => `- [ ] Roadmap task number ${index}`).join("\n");
+
+const EMPTY_GITHUB = { issues: [], openPullRequests: [], unreviewedMergeCount: 0 } as const;
+
+/** A roadmap briefing built from a real body, so ids are the ones the CLI derives. */
+function roadmapOf(body: string, overrides: Partial<RoadmapBriefing> = {}): RoadmapBriefing {
+  const parsed = parseRoadmap(body);
+  return { number: 9, tasks: parsed.tasks, duplicateSubjects: parsed.duplicateSubjects, carrierCount: 1, nearBound: false, ...overrides };
+}
+
+function sources(overrides: Partial<BriefingSources> = {}): BriefingSources {
+  return {
+    repository: async () => ({ name: "aboard", defaultBranch: "main", checks: ["npm run check"], codebase: { sourceFileCount: 132, languages: ["ts", "py"], commitCount: 87 } }),
+    git: async () => ({ branch: "main", head: "abc123", dirty: false }),
+    github: async () => EMPTY_GITHUB,
+    roadmap: async () => undefined,
+    autoRun: () => undefined,
+    ...overrides,
+  };
+}
+
+test("the state block carries the facts a Manager would otherwise fetch", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    github: async () => ({
+      issues: [
+        { number: 12, title: "Rework the fleet tree", disposition: "afk", blockedBy: [] },
+        { number: 14, title: "Rotate bridge tokens", disposition: "hitl", blockedBy: [12] },
+      ],
+      openPullRequests: [{ number: 21, title: "Fix lease recovery", reviewState: "no review yet" }],
+      unreviewedMergeCount: 2,
+    }),
+    roadmap: async () => roadmapOf("- [ ] Ship the bridge\n- [x] Rotate the tokens"),
+    autoRun: () => ({ phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+
+  assert.match(rendered, /^<aboard-state>/);
+  assert.match(rendered, /<\/aboard-state>$/);
+  // Titles, not bare numbers: a number alone costs a `gh` round trip per issue.
+  assert.match(rendered, /#12 Rework the fleet tree \(afk\)/);
+  assert.match(rendered, /#14 Rotate bridge tokens \(hitl\) - waits on #12/);
+  assert.match(rendered, /#21 Fix lease recovery \(no review yet\)/);
+  assert.match(rendered, /2 pull request\(s\) merged without review/);
+  assert.match(rendered, /## Roadmap\n<aboard-roadmap>\nIssue #9/);
+  assert.match(rendered, /^1\. \[ \] Ship the bridge$/m);
+  assert.match(rendered, /^2\. \[x\] Rotate the tokens$/m);
+  assert.match(rendered, /<\/aboard-roadmap>/);
+  assert.match(rendered, /PR #21 is hitl and waiting/);
+  assert.match(rendered, /phase await-approval, 1 issue\(s\) done/);
+  assert.match(rendered, /default branch main \| verify with npm run check/);
+});
+
+test("the fleet section names every issue an agent is bound to", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  worker(fleet, managerId);
+  fleet.register({
+    identity: { agentId: agent("worker-many"), type: "general-purpose" },
+    sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("worker-many-terminal"), name: "worker-many" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" },
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+    issueNumbers: [12, 14],
+  }, timestamp);
+  fleet.transition(agent("worker-many"), { status: "running", startedAt: timestamp }, timestamp);
+  const rendered = await new ManagerBriefings(sources(), fleet, new WriteLease()).render(new AbortController().signal);
+
+  assert.match(rendered, /issue #12(?!,)/);
+  assert.match(rendered, /issues #12, #14/);
+});
+
+test("hook output stays ASCII-only so the Claude TUI renders it cleanly", async () => {
+  const ascii = /^[\x20-\x7E\n]*$/;
+  const fleet = new FleetRegistry(); const managerId = manager(fleet); const workerId = worker(fleet, managerId);
+  fleet.register({
+    identity: { agentId: agent("general-purpose-1"), type: "general-purpose" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("general-purpose-terminal"), name: "general-purpose" }, lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(agent("general-purpose-1"), { status: "running", startedAt: timestamp }, timestamp);
+  const briefings = new ManagerBriefings(sources({
+    github: async () => ({
+      issues: [
+        { number: 12, title: "Rework the fleet tree", disposition: "afk", blockedBy: [] },
+        { number: 14, title: "Rotate bridge tokens", disposition: "hitl", blockedBy: [12] },
+        ...Array.from({ length: 20 }, (_, index) => ({ number: 100 + index, title: `Extra issue ${index}`, disposition: "afk" as const, blockedBy: [] })),
+      ],
+      openPullRequests: [{ number: 21, title: "Fix lease recovery", reviewState: "no review yet" }],
+      unreviewedMergeCount: 2,
+    }),
+    roadmap: async () => roadmapOf(LONG_ROADMAP),
+    autoRun: () => ({ phase: "await-approval", currentIssue: 14, completedCount: 1, waitingOnPullRequest: 21 }),
+  }), fleet, new WriteLease(), { write: async (_slice, content) => content });
+  // The briefing, including its truncated roadmap and oversized-block preview.
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.match(rendered, ascii, `non-ASCII briefing content: ${JSON.stringify(rendered.replace(/[\x20-\x7E\n]/g, ""))}`);
+  // Stop-hook mailbox results.
+  const stop = new ManagerStopService({ fleet, now: () => new Date(timestamp) });
+  fleet.transition(workerId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "implemented" }, timestamp);
+  fleet.recordResult(workerId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "implemented", telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 } }, timestamp);
+  const delivered = await stop.poll({ agentId: managerId, stopHookActive: false }, new AbortController().signal);
+  assert.equal(delivered.state, "results");
+  assert.match(delivered.state === "results" ? delivered.additionalContext : "", ascii);
+  // Intercepted-command messages and drained prompt notifications.
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => ({ agentId: "i-1" }) }, () => new Date("2026-07-30T14:31:00.000Z"), undefined, { kill: () => {} });
+  for (const prompt of ["/brainstorm extra", "/done reason", "/auto", "/review-pr"]) {
+    const result = await prompts.handle(managerId, prompt);
+    assert.match(String(result.message), ascii);
+  }
+  const drained = await prompts.handle(managerId, "what changed?");
+  assert.match(String(drained.additionalContext), ascii);
+});
+
+test("an idle project renders every section without a failure note", async () => {
+  const briefings = new ManagerBriefings(sources(), new FleetRegistry(), new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.match(rendered, /No run is active/);
+  assert.match(rendered, /Nothing is ready\./);
+  assert.match(rendered, /## Pull requests\nNone open\./);
+  assert.match(rendered, /No live agents/);
+  assert.match(rendered, /No open issue carries `\[AI\]-todo`, so this project has no roadmap yet/);
+  assert.match(rendered, /Recommend `\/update-todo`/);
+  assert.doesNotMatch(rendered, /Unavailable/);
+});
+
+test("one failing boundary costs its own section, not the block", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    github: async () => { throw new Error("gh unavailable"); },
+    roadmap: async () => roadmapOf("- [ ] still readable"),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.match(rendered, /## Work\nUnavailable: gh unavailable/);
+  assert.match(rendered, /still readable/);
+  assert.match(rendered, /## Repository/);
+});
+
+test("a cancelled briefing names the cancellation rather than a boundary error", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const briefings = new ManagerBriefings(sources({
+    github: async () => { throw new Error("aborted"); },
+  }), new FleetRegistry(), new WriteLease());
+  assert.match(await briefings.render(controller.signal), /Unavailable: the request was cancelled or timed out/);
+});
+
+test("an oversized roadmap spills alone, leaving the rest of the briefing inline", async () => {
+  const written: Record<string, string> = {};
+  const briefings = new ManagerBriefings(
+    sources({
+      roadmap: async () => roadmapOf(LONG_ROADMAP),
+      github: async () => ({ issues: [{ number: 12, title: "Rework the fleet tree", disposition: "afk", blockedBy: [] }], openPullRequests: [], unreviewedMergeCount: 0 }),
+    }),
+    new FleetRegistry(),
+    new WriteLease(),
+    { write: async (slice, content) => { written[slice] = content; return `C:\\runtime\\brief-${slice}.txt`; } },
+  );
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.ok(rendered.length <= HOOK_OUTPUT_LIMIT);
+  // Only the roadmap went to a file. Demoting the other sections for a reason
+  // that belongs to none of them would be the wrong trade.
+  assert.deepEqual(Object.keys(written), ["roadmap"]);
+  assert.match(rendered, /pre-rendered with its positions at C:\\runtime\\brief-roadmap\.txt/);
+  assert.match(rendered, /#12 Rework the fleet tree \(afk\)/);
+  assert.match(rendered, /## Repository/);
+  assert.doesNotMatch(rendered, /Full briefing:/);
+  // The spilled file carries the whole document with its positions, so reading
+  // it costs one Read and leaves nothing to compute.
+  assert.ok((written.roadmap as string).length > ROADMAP_INLINE_LIMIT);
+  assert.match(written.roadmap as string, /^400\. \[ \] Roadmap task number 399$/m);
+  // Positions in the inline head are absolute, so they agree with the file.
+  assert.match(rendered, /^1\. \[ \] Roadmap task number 0$/m);
+});
+
+test("a small roadmap stays inline and never touches the file store", async () => {
+  let writes = 0;
+  const briefings = new ManagerBriefings(
+    sources({ roadmap: async () => roadmapOf("- [ ] Ship the bridge", { carrierCount: 2, nearBound: true, duplicateSubjects: ["Ship the bridge"] }) }),
+    new FleetRegistry(),
+    new WriteLease(),
+    { write: async (_slice, content) => { writes += 1; return content; } },
+  );
+  const rendered = await briefings.render(new AbortController().signal);
+  assert.equal(writes, 0);
+  // Extra carriers and a near-full document are reported, never repaired.
+  assert.match(rendered, /2 issues carry `\[AI\]-todo`; #9 is in use\./);
+  assert.match(rendered, /Duplicate task text in the roadmap: "Ship the bridge"/);
+  assert.match(rendered, /near its size bound/);
+});
+
+test("an oversized block uses a bounded preview and file reference", async () => {
+  let written = "";
+  const briefings = new ManagerBriefings(
+    sources({ git: async () => ({ branch: "x".repeat(HOOK_OUTPUT_LIMIT), head: "h", dirty: true }) }),
+    new FleetRegistry(),
+    new WriteLease(),
+    { write: async (_slice, content) => { written = content; return "C:\\runtime\\brief-state.txt"; } },
+  );
+  const output = await briefings.render(new AbortController().signal);
+  assert.ok(written.length > HOOK_OUTPUT_LIMIT);
+  assert.ok(output.length <= HOOK_OUTPUT_LIMIT);
+  assert.match(output, /Full briefing: C:\\runtime\\brief-state.txt/);
+  // The block still closes, so the model never sees a dangling open tag.
+  assert.match(output, /<\/aboard-state>$/);
+});
+
+test("the briefing is served on one route", async () => {
+  const briefings = new ManagerBriefings(sources(), new FleetRegistry(), new WriteLease());
+  const stop = new ManagerStopService({ fleet: new FleetRegistry() });
+  const route = createManagerHookRoutes(briefings, stop);
+  const call = (path: string) => route({ method: "POST", url: new URL(`http://127.0.0.1${path}`), headers: {}, body: {}, signal: new AbortController().signal });
+  const served = await call("/hooks/manager/brief");
+  assert.equal(served.status, 200);
+  assert.match(String((served.body as { additionalContext: string }).additionalContext), /<aboard-state>/);
+  // The four per-slice routes are gone; nothing may quietly keep calling them.
+  for (const slice of ["git", "github", "fleet", "todo"]) {
+    assert.equal((await call(`/hooks/manager/brief-${slice}`)).status, 404);
+  }
+});
+
+test("the reminder carries pending tasks only, is self-dating, and leads with the marker", async () => {
+  let clock = Date.parse("2026-07-30T14:32:00.000Z");
+  const reminders = new RoadmapReminderService(
+    { roadmap: async () => roadmapOf("- [x] Replace the locator\n- [ ] Pace the reminders") },
+    { now: () => new Date(clock) },
+  );
+  const first = await reminders.serve(agent("manager-1"), new AbortController().signal);
+  const context = String(first.additionalContext);
+  // The marker leads the block so it survives the >10,000-character preview
+  // rule, and so the hook's tail search finds it wherever the block is cut.
+  assert.ok(context.startsWith(ROADMAP_MARKER));
+  assert.match(context, /Roadmap as of 2026-07-30T14:32:00\.000Z/);
+  assert.match(context, /^2\. \[ \] Pace the reminders$/m);
+  assert.doesNotMatch(context, /Replace the locator/);
+
+  // The transcript is written asynchronously, so a duplicate clusters right
+  // behind the first. The bridge refuses it.
+  assert.deepEqual(await reminders.serve(agent("manager-1"), new AbortController().signal), {});
+  // A different agent is not affected by another's window.
+  assert.notEqual((await reminders.serve(agent("manager-2"), new AbortController().signal)).additionalContext, undefined);
+  clock += 30_000;
+  assert.notEqual((await reminders.serve(agent("manager-1"), new AbortController().signal)).additionalContext, undefined);
+});
+
+test("a failed reminder fetch is a non-event, and a missing roadmap still says so", async () => {
+  const failing = new RoadmapReminderService({ roadmap: async () => { throw new Error("gh unavailable"); } });
+  assert.deepEqual(await failing.serve(agent("manager-1"), new AbortController().signal), {});
+
+  const empty = new RoadmapReminderService({ roadmap: async () => undefined }, { now: () => new Date("2026-07-30T14:32:00.000Z") });
+  const served = String((await empty.serve(agent("manager-1"), new AbortController().signal)).additionalContext);
+  assert.ok(served.startsWith(ROADMAP_MARKER));
+  assert.match(served, /no open issue carries `\[AI\]-todo`/);
+});
+
+test("a due reminder rides the existing prompt drain rather than opening a second channel", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const reminders = new RoadmapReminderService(
+    { roadmap: async () => roadmapOf("- [ ] Pace the reminders") },
+    { now: () => new Date("2026-07-30T14:32:00.000Z") },
+  );
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => ({ agentId: "i-1" }) },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    undefined,
+    undefined,
+    reminders,
+  );
+  // Not due: the drain behaves exactly as before, and an empty drain stays empty.
+  assert.deepEqual(await prompts.handle(managerId, "what changed?"), {});
+
+  fleet.enqueueNotification(managerId, "an auto-run merged PR #21.", at("2026-07-30T14:30:00.000Z"));
+  const both = await prompts.handle(managerId, "and now?", true);
+  assert.match(String(both.additionalContext), /an auto-run merged PR #21/);
+  assert.match(String(both.additionalContext), /<aboard-roadmap>/);
+
+  // A reminder with nothing else pending is still delivered on its own.
+  const alone = await prompts.handle(managerId, "still there?", true);
+  assert.equal(alone.additionalContext, undefined, "the 30s debounce suppresses the immediate repeat");
+});
+
+test("an intercepted command is erased, so no reminder is attached to it", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  let served = 0;
+  const reminders = new RoadmapReminderService({ roadmap: async () => { served += 1; return roadmapOf("- [ ] Pace"); } });
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => ({ agentId: "i-1" }) },
+    undefined, undefined, undefined, reminders,
+  );
+  assert.equal((await prompts.handle(managerId, "/brainstorm", true)).intercepted, true);
+  assert.equal(served, 0);
+});
+
+test("the reminder route validates its caller and is absent when no service is wired", async () => {
+  const briefings = new ManagerBriefings(sources(), new FleetRegistry(), new WriteLease());
+  const stop = new ManagerStopService({ fleet: new FleetRegistry() });
+  const request = (body: unknown): AuthenticatedBridgeRequest => ({ method: "POST", url: new URL("http://127.0.0.1/hooks/manager/roadmap"), headers: {}, body, signal: new AbortController().signal });
+  assert.equal((await createManagerHookRoutes(briefings, stop)(request({ agentId: "manager-1" }))).status, 404);
+
+  const reminders = new RoadmapReminderService({ roadmap: async () => roadmapOf("- [ ] Pace the reminders") });
+  const route = createManagerHookRoutes(briefings, stop, undefined, reminders);
+  assert.equal((await route(request({}))).status, 400);
+  const served = await route(request({ agentId: "manager-1" }));
+  assert.equal(served.status, 200);
+  assert.match(String((served.body as { additionalContext: string }).additionalContext), /<aboard-roadmap>/);
+});
+
+test("Manager Stop returns pending results, waits for running work, and permits idle stop", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet); const workerId = worker(fleet, managerId);
+  const running = new ManagerStopService({ fleet, now: () => new Date(timestamp) });
+  assert.deepEqual(await running.poll({ agentId: managerId, stopHookActive: false }, new AbortController().signal), { state: "running" });
+  fleet.transition(workerId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "implemented" }, timestamp);
+  const result: WorkerResult = { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "implemented", telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 } };
+  fleet.recordResult(workerId, result, timestamp);
+  const delivered = await running.poll({ agentId: managerId, stopHookActive: false }, new AbortController().signal);
+  assert.equal(delivered.state, "results");
+  assert.match(delivered.state === "results" ? delivered.additionalContext : "", /^At 2026-07-30T/);
+  assert.deepEqual(await running.poll({ agentId: managerId, stopHookActive: false }, new AbortController().signal), { state: "idle" });
+
+  const secondWorkerId = worker(fleet, managerId);
+  fleet.transition(secondWorkerId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "second" }, timestamp);
+  fleet.recordResult(secondWorkerId, { ...result, lastAssistantMessage: "second" }, timestamp);
+  const reentered = await running.poll({ agentId: managerId, stopHookActive: true, lastAssistantMessage: "Manager's complete answer" }, new AbortController().signal);
+  assert.equal(reentered.state, "results", "Stop re-entry must still deliver reports");
+  assert.equal(fleet.get(managerId)?.lastObservedAssistantMessage, "Manager's complete answer");
+});
+
+test("Stop waits across liveness changes and opportunistic delivery uses the same mailbox", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet); const workerId = worker(fleet, managerId);
+  let releaseWait: (() => void) | undefined;
+  const stop = new ManagerStopService({
+    fleet,
+    now: () => new Date(timestamp),
+    waitForChange: () => new Promise<void>((resolve) => { releaseWait = resolve; }),
+  });
+  const pending = stop.poll({ agentId: managerId, stopHookActive: false }, new AbortController().signal);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.ok(releaseWait !== undefined);
+  fleet.transition(workerId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "implemented" }, timestamp);
+  fleet.recordResult(workerId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "implemented", telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 } }, timestamp);
+  releaseWait();
+  assert.equal((await pending).state, "results");
+
+  const secondWorkerId = worker(fleet, managerId);
+  fleet.transition(secondWorkerId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "opportunistic" }, timestamp);
+  fleet.recordResult(secondWorkerId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "opportunistic", telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 } }, timestamp);
+  assert.match(String(stop.deliver(managerId).additionalContext), /opportunistic/);
+  assert.deepEqual(stop.deliver(managerId), {});
+});
+
+test("long poll observes abort and route validates stop input", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet); worker(fleet, managerId);
+  const stop = new ManagerStopService({ fleet, waitForChange: (signal) => new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })) });
+  const controller = new AbortController(); const pending = stop.poll({ agentId: managerId, stopHookActive: false }, controller.signal); controller.abort();
+  assert.deepEqual(await pending, { state: "idle" });
+  const briefings = new ManagerBriefings(sources(), fleet, new WriteLease());
+  const route = createManagerHookRoutes(briefings, stop);
+  const request = (body: unknown): AuthenticatedBridgeRequest => ({ method: "POST", url: new URL("http://127.0.0.1/hooks/reports/stop"), headers: {}, body, signal: new AbortController().signal });
+  assert.equal((await route(request({ agentId: managerId }))).status, 400);
+});
+
+test("Python Manager hook silently self-guards non-addressed sessions", () => {
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+  for (const env of [{}, { ABOARD_AGENT_ID: "worker", ABOARD_AGENT_TYPE: "implementer" }]) {
+    const result = spawnSync("uv", ["run", "--no-project", "python", script, "manager-brief-git"], { input: "{}", encoding: "utf8", env: { ...process.env, ...env } });
+    assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
+  }
+});
+
+test("hook registration covers cold start, resume, and explicit timeouts in one briefing call", async () => {
+  const hooks = await import("node:fs/promises").then(({ readFile }) => readFile(join(process.cwd(), "assets", "runtime", "abd-hooks.json"), "utf8"));
+  const parsed = JSON.parse(hooks) as any;
+  // Index 0 is the proof-of-life session-start hook (pid report); index 1 is
+  // the manager briefing call.
+  const proofOfLife = parsed.SessionStart[0];
+  assert.match(proofOfLife.matcher, /startup/); assert.match(proofOfLife.matcher, /resume/);
+  assert.deepEqual(proofOfLife.hooks.map((hook: any) => hook.args.at(-1)), ["session-start"]);
+  const brief = parsed.SessionStart[1];
+  assert.match(brief.matcher, /startup/); assert.match(brief.matcher, /resume/);
+  // One hook, so one `uv` spawn and one bridge round trip per session start.
+  assert.deepEqual(brief.hooks.map((hook: any) => hook.timeout), [120]);
+  assert.deepEqual(brief.hooks.map((hook: any) => hook.args.at(-1)), ["manager-brief"]);
+  assert.deepEqual(parsed.SessionEnd[0].hooks.map((hook: any) => hook.args.at(-1)), ["session-end"]);
+  assert.equal(parsed.Stop[0].hooks[0].timeout, 86400);
+  assert.deepEqual(parsed.Stop[0].hooks.map((hook: any) => hook.args.at(-1)), ["report-stop", "worker-stop"]);
+  assert.equal(parsed.PostToolUse[1].hooks[0].timeout, 120);
+  assert.equal(parsed.PostToolUse[1].hooks[0].args.at(-1), "report-delivery");
+  assert.equal(parsed.UserPromptSubmit[0].hooks[0].timeout, 60);
+});
+
+test("Manager prompt route launches both interactive command types and drains ordered notifications once", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const launches: unknown[] = [];
+  let next = 1;
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input) => {
+    launches.push(input); return { agentId: `interactive-${next++}` };
+  } }, () => new Date("2026-07-30T14:31:00.000Z"));
+  assert.deepEqual(await prompts.handle(managerId, "/brainstorm"), { intercepted: true, message: "Brainstorm session launched and focused." });
+  assert.deepEqual(await prompts.handle(managerId, "/general-purpose"), { intercepted: true, message: "General-purpose session launched and focused." });
+  // Neither launch carries a prompt: an interactive terminal has a user in
+  // front of it, and filler would burn a turn before the conversation starts.
+  assert.deepEqual(launches, [
+    { type: "brainstormer", description: "interactive brainstorm session" },
+    { type: "general-purpose", description: "general purpose interactive session" },
+  ]);
+  const drained = await prompts.handle(managerId, "what is the status?");
+  assert.match(String(drained.additionalContext), /At 2026-07-30T14:31:00.000Z: you started a brainstormer \(agent interactive-1\)/);
+  assert.match(String(drained.additionalContext), /general-purpose session \(agent interactive-2\)/);
+  assert.ok(String(drained.additionalContext).indexOf("interactive-1") < String(drained.additionalContext).indexOf("interactive-2"));
+  assert.deepEqual(await prompts.handle(managerId, "and now?"), {});
+});
+
+test("report injection does not widen Manager-only commands for another recipient", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const recipientId = agent("brainstormer-1");
+  fleet.register({
+    identity: { agentId: recipientId, type: "brainstormer" },
+    sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("brainstormer-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" },
+    attended: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(recipientId, { status: "running", startedAt: timestamp }, timestamp);
+  const reporterId = worker(fleet, recipientId);
+  fleet.transition(reporterId, { status: "completed", startedAt: timestamp, finishedAt: timestamp, exitCode: 0, lastAssistantMessage: "report" }, timestamp);
+  fleet.recordResult(reporterId, { outcome: "succeeded", exitCode: 0, lastAssistantMessage: "report", telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 } }, timestamp);
+  let actions = 0;
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => { actions += 1; } }, undefined, {
+    startAutoRun: async () => { actions += 1; },
+    reviewPullRequest: async () => { actions += 1; },
+    reopenSession: async () => { actions += 1; },
+  });
+
+  const delivered = await prompts.handle(recipientId, "/auto");
+  assert.match(String(delivered.additionalContext), /worker-2 succeeded: report/);
+  assert.equal(delivered.intercepted, undefined);
+  assert.equal(actions, 0);
+  assert.equal(fleet.get(managerId)?.identity.type, "manager");
+});
+
+test("/done closes the invoking Manager terminal without waking the model", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const generalPurposeId = agent("general-purpose-1");
+  fleet.register({
+    identity: { agentId: generalPurposeId, type: "general-purpose" }, sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("general-purpose-terminal"), name: "general-purpose" }, lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(generalPurposeId, { status: "running", startedAt: timestamp }, timestamp);
+  const killed: TerminalId[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("/done must not launch an agent") },
+    undefined,
+    undefined,
+    { kill: (terminalId) => killed.push(terminalId) },
+  );
+  assert.deepEqual(await prompts.handle(managerId, "/done"), { intercepted: true, message: "Closing this terminal. This session has no report recipient." });
+  assert.deepEqual(await prompts.handle(generalPurposeId, "/done"), { intercepted: true, message: "Closing this terminal. This session has no report recipient." });
+  assert.deepEqual(killed, [terminal("manager-terminal"), terminal("general-purpose-terminal")]);
+  assert.match(String((await prompts.handle(managerId, "/done trailing text")).message), /no report recipient/);
+});
+
+test("/done leaves an auto-run hitl reviewer open until its pull request lands", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const reviewerId = agent("pr-doctor-hitl-1");
+  fleet.register({
+    identity: { agentId: reviewerId, type: "pr-doctor-hitl" },
+    sessionId: session("adb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("pr-doctor-hitl-terminal"), name: "pr-doctor-hitl" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" },
+    attended: true,
+    autoRunRestricted: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(reviewerId, { status: "running", startedAt: timestamp }, timestamp);
+  const killed: TerminalId[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("/done must not launch an agent") },
+    undefined,
+    undefined,
+    { kill: (terminalId) => killed.push(terminalId) },
+  );
+
+  const result = await prompts.handle(reviewerId, "/done");
+
+  assert.match(String(result.message), /stays open.*awaits the user's merge/i);
+  assert.deepEqual(killed, []);
+  assert.equal(fleet.get(reviewerId)?.lifecycle.status, "running");
+});
+
+test("/done reports the last observed assistant message and appends optional further notes before closing", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const registerReporter = (id: string, sessionId: string): AgentId => {
+    const reporterId = agent(id);
+    fleet.register({
+      identity: { agentId: reporterId, type: "general-purpose" },
+      sessionId: session(sessionId),
+      terminal: { terminalId: terminal(`${id}-terminal`), name: id },
+      lifecycle: { status: "starting", startedAt: timestamp },
+      resultDelivery: { mode: "mailbox", recipientAgentId: managerId },
+      attended: true,
+      telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 },
+    }, timestamp);
+    fleet.transition(reporterId, { status: "running", startedAt: timestamp }, timestamp);
+    return reporterId;
+  };
+  const notedId = registerReporter("general-purpose-noted", "bdb05c21-eb37-4147-b5cb-6a5ca2592146");
+  const observedId = registerReporter("general-purpose-observed", "cdb05c21-eb37-4147-b5cb-6a5ca2592146");
+  const missingId = registerReporter("general-purpose-missing", "ddb05c21-eb37-4147-b5cb-6a5ca2592146");
+  fleet.observeAssistantMessage(notedId, "The complete response with context.", timestamp);
+  fleet.observeAssistantMessage(observedId, "The observed complete response.", timestamp);
+  const killed: TerminalId[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("/done must not launch an agent") },
+    () => new Date(timestamp),
+    undefined,
+    { kill: (terminalId) => killed.push(terminalId) },
+  );
+
+  assert.match(String((await prompts.handle(notedId, "/done One additional caveat.")).message), /being delivered to manager-1/);
+  assert.match(String((await prompts.handle(observedId, "/done")).message), /being delivered to manager-1/);
+  assert.match(String((await prompts.handle(missingId, "/done Notes cannot become the report.")).message), /No complete assistant message was available/);
+  const reports = fleet.drainMailbox(managerId, timestamp);
+  assert.deepEqual(reports.map((entry) => entry.kind === "result" && entry.result.outcome === "succeeded" ? entry.result.lastAssistantMessage : undefined), [
+    "The complete response with context.\n\nFurther notes:\nOne additional caveat.",
+    "The observed complete response.",
+  ]);
+  assert.deepEqual(killed, [
+    terminal("general-purpose-noted-terminal"),
+    terminal("general-purpose-observed-terminal"),
+    terminal("general-purpose-missing-terminal"),
+  ]);
+});
+
+test("/done returns a foreground interactive report through its waiting tool result", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const reporterId = agent("brainstormer-foreground");
+  fleet.register({
+    identity: { agentId: reporterId, type: "brainstormer" },
+    sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("brainstormer-foreground-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "tool-result" },
+    attended: true,
+    telemetry: { totalTokens: 1, totalDurationMs: 2, totalToolUseCount: 3, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(reporterId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.observeAssistantMessage(reporterId, "Foreground report.", timestamp);
+  const submitted: string[] = [];
+  const killed: TerminalId[] = [];
+  const prompts = new ManagerPromptService(fleet, {
+    spawnInteractive: async () => assert.fail("/done must not launch an agent"),
+    submitReport: (agentId, message) => {
+      submitted.push(message);
+      return fleet.submitReport(agentId, message, timestamp);
+    },
+  }, undefined, undefined, { kill: (terminalId) => killed.push(terminalId) });
+
+  const response = await prompts.handle(reporterId, "/done User-approved caveat.");
+  assert.match(String(response.message), /returned to the waiting caller/);
+  assert.deepEqual(submitted, ["Foreground report.\n\nFurther notes:\nUser-approved caveat."]);
+  const result = fleet.takeBlockingResult(reporterId, timestamp);
+  assert.equal(result?.outcome, "succeeded");
+  assert.equal(result?.outcome === "succeeded" ? result.lastAssistantMessage : undefined, "Foreground report.\n\nFurther notes:\nUser-approved caveat.");
+  assert.deepEqual(killed, [terminal("brainstormer-foreground-terminal")]);
+});
+
+test("/done queues the report when its recipient is no longer open", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const reporterId = agent("brainstormer-1");
+  fleet.register({
+    identity: { agentId: reporterId, type: "brainstormer" },
+    sessionId: session("bdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("brainstormer-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "mailbox", recipientAgentId: managerId },
+    attended: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(reporterId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.observeAssistantMessage(reporterId, "Durable report.", timestamp);
+  fleet.remove(managerId, timestamp);
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => undefined }, () => new Date(timestamp), undefined, { kill: () => {} });
+
+  assert.match(String((await prompts.handle(reporterId, "/done Durable note.")).message), /queued for manager-1, which is not currently open/);
+  assert.equal(fleet.drainMailbox(managerId, timestamp).length, 1);
+});
+
+test("/done from a nested Brainstormer refocuses a live parent after queueing its report", async () => {
+  const fleet = new FleetRegistry(); const parentId = manager(fleet);
+  const childId = agent("nested-brainstormer");
+  fleet.register({
+    identity: { agentId: childId, type: "brainstormer" },
+    sessionId: session("fdb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("nested-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "mailbox", recipientAgentId: parentId }, attended: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(childId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.observeAssistantMessage(childId, "Nested decision report.", timestamp);
+  const actions: string[] = [];
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => undefined }, undefined, undefined, {
+    kill: (terminalId) => actions.push(`kill:${terminalId}`),
+    show: (terminalId) => actions.push(`show:${terminalId}`),
+  });
+
+  assert.match(String((await prompts.handle(childId, "/done")).message), /being delivered/u);
+  assert.deepEqual(actions, ["kill:nested-terminal", "show:manager-terminal"]);
+  assert.equal(fleet.drainMailbox(parentId, timestamp).length, 1);
+});
+
+test("interactive commands are argumentless terminal handoffs", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const launches: unknown[] = [];
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input) => {
+    launches.push(input); return { agentId: "interactive-1" };
+  } });
+  const result = await prompts.handle(managerId, "/brainstorm caching layer");
+  assert.equal(result.intercepted, true);
+  assert.match(String(result.message), /takes no arguments/);
+  assert.match(String(result.message), /type it in the new terminal/);
+  // Still intercepted: leaking "/brainstorm caching layer" into the Manager's
+  // context is worse than declining to forward the topic.
+  assert.deepEqual(launches, [{ type: "brainstormer", description: "interactive brainstorm session" }]);
+
+  const general = await prompts.handle(managerId, "/general-purpose --chrome");
+  assert.match(String(general.message), /takes no arguments/);
+  assert.deepEqual(launches, [
+    { type: "brainstormer", description: "interactive brainstorm session" },
+    { type: "general-purpose", description: "general purpose interactive session" },
+  ]);
+  assert.equal(launches.length, 2);
+});
+
+test("/brainstorm launches from a Brainstormer without exposing Manager-only commands", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const brainstormerId = agent("brainstormer-parent");
+  fleet.register({
+    identity: { agentId: brainstormerId, type: "brainstormer" },
+    sessionId: session("edb05c21-eb37-4147-b5cb-6a5ca2592146"),
+    terminal: { terminalId: terminal("brainstormer-parent-terminal"), name: "brainstormer" },
+    lifecycle: { status: "starting", startedAt: timestamp },
+    resultDelivery: { mode: "none" }, attended: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, timestamp);
+  fleet.transition(brainstormerId, { status: "running", startedAt: timestamp }, timestamp);
+  const launches: Array<{ input: unknown; recipient: AgentId | undefined }> = [];
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input, recipient) => {
+    launches.push({ input, recipient }); return { agentId: "nested-brainstormer" };
+  } });
+
+  const launched = await prompts.handle(brainstormerId, "/brainstorm ignored topic");
+  assert.match(String(launched.message), /takes no arguments/u);
+  assert.deepEqual(launches, [{
+    input: { type: "brainstormer", description: "interactive brainstorm session" },
+    recipient: brainstormerId,
+  }]);
+  const refusedGeneral = await prompts.handle(brainstormerId, "/general-purpose");
+  assert.equal(refusedGeneral.intercepted, undefined);
+  assert.match(String(refusedGeneral.additionalContext), /you started a brainstormer/u);
+  assert.deepEqual(await prompts.handle(brainstormerId, "/auto"), {});
+  assert.deepEqual(await prompts.handle(brainstormerId, "/reopen"), {});
+});
+
+test("/queue requires a prompt and delegates queue admission without waking the Manager", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const queued: string[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("/queue uses the one-shot queue launcher") },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { enqueue: async (prompt) => {
+      queued.push(prompt);
+      return { status: "queued", position: 2, reason: "the preceding task must finish with a new commit and a clean working tree" };
+    } },
+  );
+
+  assert.match(String((await prompts.handle(managerId, "/queue")).message), /requires a message/u);
+  const result = await prompts.handle(managerId, "/queue fix the parser and commit it");
+  assert.match(String(result.message), /position 2/u);
+  assert.deepEqual(queued, ["fix the parser and commit it"]);
+});
+
+test("/prototype launches from Manager and brainstormer, notifies the caller, and is refused elsewhere", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const brainstormerId = agent("brainstormer-prototype");
+  const leafId = agent("general-purpose-prototype");
+  for (const [agentId, type, sessionId, terminalId] of [
+    [brainstormerId, "brainstormer", "0a9c5de5-a50a-4bf3-a2e6-c356f5f63522", "brain-prototype-terminal"],
+    [leafId, "general-purpose", "5ae9939c-d28f-45e0-920e-76b5093f4ad2", "leaf-prototype-terminal"],
+  ] as const) {
+    fleet.register({
+      identity: { agentId, type },
+      sessionId: session(sessionId),
+      terminal: { terminalId: terminal(terminalId), name: type },
+      lifecycle: { status: "starting", startedAt: timestamp },
+      resultDelivery: { mode: "mailbox", recipientAgentId: managerId },
+      attended: true,
+      telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+    }, timestamp);
+  }
+  const launches: unknown[] = [];
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async (input, recipient) => {
+    launches.push({ input, recipient }); return { agentId: `prototype-${launches.length}` };
+  } }, () => new Date(timestamp));
+
+  assert.match(String((await prompts.handle(managerId, "/prototype Try the parser API")).message), /prototype-1/u);
+  assert.match(String((await prompts.handle(brainstormerId, "/prototype Check streaming behavior")).message), /prototype-2/u);
+  assert.deepEqual(launches, [
+    { input: { type: "prototyper", prompt: "Try the parser API", description: "prototype Try the parser API" }, recipient: managerId },
+    { input: { type: "prototyper", prompt: "Check streaming behavior", description: "prototype Check streaming behavior" }, recipient: brainstormerId },
+  ]);
+  const managerNotification = await prompts.handle(managerId, "continue managing");
+  assert.match(String(managerNotification.additionalContext), /manually launched a prototype agent with agent ID: prototype-1/u);
+  assert.doesNotMatch(String(managerNotification.additionalContext), /continue_agent/u);
+  const notification = await prompts.handle(brainstormerId, "continue brainstorming");
+  assert.match(String(notification.additionalContext), /manually launched a prototype agent with agent ID: prototype-2/u);
+  assert.match(String(notification.additionalContext), /continue_agent/u);
+  assert.match(String((await prompts.handle(leafId, "/prototype recurse")).message), /only from a Manager or brainstormer/u);
+  assert.match(String((await prompts.handle(managerId, "/prototype")).message), /requires a prompt/u);
+});
+
+test("/auto and /review-pr are performed by the extension, reported to the user, and queued for the Manager", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const started: string[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("an extension action must not launch an agent") },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    {
+      startAutoRun: async () => { started.push("auto"); return { started: true, issues: [{ number: 34 }, { number: 35 }] }; },
+      reviewPullRequest: async () => { started.push("review"); return { action: "focused", prNumber: 56, type: "implementer" }; },
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+  const auto = await prompts.handle(managerId, "/auto");
+  assert.equal(auto.intercepted, true);
+  assert.equal(auto.message, "auto-run started with 2 issues queued.");
+  const review = await prompts.handle(managerId, "/review-pr");
+  assert.equal(review.message, "Focused the implementer terminal for PR #56.");
+  assert.deepEqual(started, ["auto", "review"]);
+
+  // The Manager is told later, batched into the next real prompt, rather than
+  // being woken to narrate a mechanical action.
+  const drained = await prompts.handle(managerId, "what changed?");
+  assert.match(String(drained.additionalContext), /you ran \/auto: auto-run started with 2 issues queued/);
+  assert.match(String(drained.additionalContext), /you ran \/review-pr: Focused the implementer terminal/);
+});
+
+test("/review-pr forwards its trailing text as the review focus, and reports it when unused", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const focuses: (string | undefined)[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("an extension action must not launch an agent") },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    {
+      startAutoRun: async () => assert.fail("no auto-run"),
+      reviewPullRequest: async (focus) => {
+        focuses.push(focus);
+        return focus === undefined
+          ? { action: "launched", prNumber: 56, notice: "Launched a fresh doctor for PR #56." }
+          : { action: "focused", prNumber: 56, type: "implementer", unusedFocus: focus };
+      },
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+
+  // Unlike /auto, this action has a real parameter, so the text is forwarded
+  // rather than matched and dropped.
+  const withFocus = await prompts.handle(managerId, "/review-pr the boundary validation");
+  assert.deepEqual(focuses, ["the boundary validation"]);
+  assert.equal(withFocus.intercepted, true);
+  assert.match(String(withFocus.message), /Focused the implementer terminal for PR #56\./);
+  assert.match(String(withFocus.message), /focus you typed was not applied/);
+  assert.doesNotMatch(String(withFocus.message), /takes no arguments/);
+
+  const bare = await prompts.handle(managerId, "/review-pr");
+  assert.deepEqual(focuses, ["the boundary validation", undefined]);
+  assert.equal(bare.message, "Launched a fresh doctor for PR #56.");
+});
+
+test("an extension action reports a refusal verbatim and rejects unknown option flags", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    () => new Date("2026-07-30T14:31:00.000Z"),
+    {
+      startAutoRun: async () => ({ started: false, reason: "the working tree is not clean: src/a.ts" }),
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+  const refused = await prompts.handle(managerId, "/auto");
+  assert.match(String(refused.message), /auto-run did not start: the working tree is not clean: src\/a\.ts/);
+  const invalid = await prompts.handle(managerId, "/auto --fast");
+  assert.match(String(invalid.message), /optional --dry flag before an optional session guideline/);
+});
+
+test("/auto rejects the removed --chrome option", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const starts: unknown[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }] }; },
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+  const result = await prompts.handle(managerId, "/auto --chrome");
+  assert.deepEqual(starts, []);
+  assert.match(String(result.message), /optional --dry flag/);
+});
+
+test("/auto forwards trailing text as one run-wide agent guideline", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const starts: unknown[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async (options) => { starts.push(options); return { started: true, issues: [{ number: 34 }] }; },
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+
+  const result = await prompts.handle(managerId, "/auto no unit tests needed");
+
+  assert.deepEqual(starts, [{ additionalGuideline: "no unit tests needed" }]);
+  assert.match(String(result.message), /additional session guideline will be appended to every implementer and pr-doctor prompt/);
+});
+
+test("/auto --dry reports the forecast and user gates without starting a run", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const starts: unknown[] = [];
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async (options) => {
+        starts.push(options);
+        return {
+          dryRun: true,
+          inspected: true,
+          ready: true,
+          blockers: [],
+          warnings: [],
+          emptyReason: undefined,
+          reviewMode: true,
+          pauseAfterHitl: false,
+          additionalGuideline: options?.additionalGuideline,
+          isolatedWorkspace: false,
+          keepsWorkspace: false,
+          sessionBranch: "run/<run-id>",
+          sessionBase: "feature/wip",
+          targetHeadSha: "a".repeat(40),
+          unpublishedTargetCommits: 0,
+          mergesItsOwnPullRequest: false,
+          issues: [
+            { number: 34, title: "Add retry backoff", disposition: "afk", branch: "issue/34-add-retry-backoff", chrome: true },
+            { number: 35, title: "Migrate the queue", disposition: "hitl", branch: "issue/35-migrate-the-queue", difficulty: "advanced" },
+          ],
+          skipped: [
+            { number: 36, reason: "unclassified: neither [AI]-afk nor [AI]-hitl" },
+            { number: 41, reason: "blocked by open #99, which this run cannot address" },
+          ],
+          dependencyCycles: [[34, 35]],
+        };
+      },
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+
+  const result = await prompts.handle(managerId, "/auto --dry keep generated files out of commits");
+
+  assert.deepEqual(starts, [{ dry: true, additionalGuideline: "keep generated files out of commits" }]);
+  assert.match(String(result.message), /no branches, worktrees, terminals, commits, pull requests, issues, or runtime state were changed/);
+  assert.match(String(result.message), /1\. #34 Add retry backoff.*issue\/34-add-retry-backoff/);
+  assert.match(String(result.message), /#34 Add retry backoff.*\[AI\]-chrome/);
+  assert.match(String(result.message), /2\. #35 Migrate the queue.*You must merge its PR/);
+  assert.match(String(result.message), /interactive pr-doctor/);
+  assert.match(String(result.message), /# Additional User Guideline For this Session\n\nkeep generated files out of commits/);
+  // Unclassified issues are counted, never listed one line each; the
+  // actionable "blocked by" entry keeps its per-issue reason.
+  assert.match(String(result.message), /Skipped for this forecast: 1 unclassified \(neither \[AI\]-afk nor \[AI\]-hitl\); #41: blocked by open #99, which this run cannot address\./);
+  assert.doesNotMatch(String(result.message), /#36: unclassified/);
+  assert.match(String(result.message), /opens one PR from run\/<run-id> into feature\/wip; you must review and merge/);
+  assert.deepEqual(await prompts.handle(managerId, "show me the plan"), {}, "a dry-run forecast is not replayed through the Manager mailbox");
+});
+
+test("/auto --dry reports blockers while preserving the inspected issue plan", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const prompts = new ManagerPromptService(
+    fleet,
+    { spawnInteractive: async () => assert.fail("no agent") },
+    undefined,
+    {
+      startAutoRun: async () => ({
+        dryRun: true,
+        inspected: true,
+        ready: false,
+        blockers: ["the working tree is not clean: src/a.ts"],
+        warnings: [],
+        emptyReason: undefined,
+        reviewMode: false,
+        pauseAfterHitl: false,
+        isolatedWorkspace: false,
+        keepsWorkspace: false,
+        sessionBranch: "run/<run-id>",
+        sessionBase: "main",
+        targetHeadSha: "a".repeat(40),
+        unpublishedTargetCommits: 0,
+        mergesItsOwnPullRequest: false,
+        issues: [{ number: 34, title: "Add retry backoff", disposition: "afk", branch: "issue/34-add-retry-backoff" }],
+        skipped: [],
+        dependencyCycles: [],
+      }),
+      reviewPullRequest: async () => ({ action: "none" }),
+      reopenSession: async () => assert.fail("no session reopen"),
+    },
+  );
+
+  const result = await prompts.handle(managerId, "/auto --dry");
+  assert.match(String(result.message), /Blocked: the working tree is not clean: src\/a\.ts/);
+  assert.match(String(result.message), /#34 Add retry backoff/);
+
+  const invalid = await prompts.handle(managerId, "/auto --dry --dry");
+  assert.match(String(invalid.message), /optional --dry flag/);
+});
+
+test("an unavailable extension action is reported instead of falling through to the Manager", async () => {
+  const fleet = new FleetRegistry(); const managerId = manager(fleet);
+  const prompts = new ManagerPromptService(fleet, { spawnInteractive: async () => assert.fail("no agent") });
+  const result = await prompts.handle(managerId, "/auto");
+  assert.equal(result.intercepted, true);
+  assert.match(String(result.message), /cannot handle \/auto right now/);
+});
+
+async function runPromptHook(responseStatus: number, responseBody: unknown, prompt: string, token = "secret", agentType = "manager", workspaceRoot?: string): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const server = createServer((request, response) => {
+    assert.equal(request.headers.authorization, `Bearer ${token}`);
+    response.writeHead(responseStatus, { "content-type": "application/json" });
+    response.end(JSON.stringify(responseBody));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+  const child = spawn("uv", ["run", "--no-project", "python", script, "manager-prompt"], {
+    env: { ...process.env, ABOARD_AGENT_ID: workspaceRoot === undefined ? "manager-1" : "recipient-1", ABOARD_AGENT_TYPE: agentType, ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: token, ...(workspaceRoot === undefined ? {} : { ABOARD_RUNTIME_ROOT: workspaceRoot }) },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = ""; let stderr = "";
+  child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  child.stdin.end(JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt }));
+  const status = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+  await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+  return { status, stdout, stderr };
+}
+
+async function runReportHook(
+  route: "report-stop" | "report-delivery",
+  payload: Record<string, unknown>,
+  options: { readonly agentType?: string; readonly workspaceRoot?: string; readonly attended?: boolean } = {},
+): Promise<{ readonly requestPath: string; readonly requestBody: Record<string, unknown>; readonly stdout: string; readonly stderr: string; readonly status: number | null }> {
+  let requestPath = "";
+  let requestBody: Record<string, unknown> = {};
+  const server = createServer((request, response) => {
+    requestPath = request.url ?? "";
+    let raw = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => { raw += chunk; });
+    request.on("end", () => {
+      requestBody = JSON.parse(raw) as Record<string, unknown>;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(route === "report-stop"
+        ? { state: "results", additionalContext: "queued stop report" }
+        : { additionalContext: "queued opportunistic report" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+  const child = spawn("uv", ["run", "--no-project", "python", script, route], {
+    env: {
+      ...process.env,
+      ABOARD_AGENT_ID: "recipient-1",
+      ABOARD_AGENT_TYPE: options.agentType ?? "brainstormer",
+      ABOARD_BRIDGE_PORT: String(address.port),
+      ABOARD_BRIDGE_TOKEN: "secret",
+      ...(options.workspaceRoot === undefined ? {} : { ABOARD_RUNTIME_ROOT: options.workspaceRoot }),
+      ...(options.attended ? { ABOARD_ATTENDED: "1" } : {}),
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = ""; let stderr = "";
+  child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  child.stdin.end(JSON.stringify(payload));
+  const status = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+  await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+  return { requestPath, requestBody, stdout, stderr, status };
+}
+
+test("Python prompt hook erases successful and failed commands with exact output channels", async () => {
+  const success = await runPromptHook(200, { intercepted: true, message: "Brainstorm session launched and focused." }, "/brainstorm caching layer");
+  assert.deepEqual(success, { status: 2, stdout: "", stderr: `${EOL}${EOL}Brainstorm session launched and focused.` });
+  const generalPurposeDone = await runPromptHook(200, { intercepted: true, message: "Closing this terminal." }, "/done", "secret", "general-purpose");
+  assert.deepEqual(generalPurposeDone, { status: 2, stdout: "", stderr: `${EOL}${EOL}Closing this terminal.` });
+  const authFailure = await runPromptHook(401, { ok: false }, "/general-purpose", "wrong-token");
+  assert.equal(authFailure.status, 2); assert.equal(authFailure.stdout, ""); assert.ok(authFailure.stderr.startsWith(`${EOL}${EOL}Aboard did not launch the requested session:`));
+});
+
+test("Python prompt hook injects a drained queue on a real prompt", async () => {
+  const context = "Since your last message:\nAt 2026-07-30T14:31:00.000Z: launched one.\nAt 2026-07-30T14:36:00.000Z: launched two.";
+  const result = await runPromptHook(200, { additionalContext: context }, "what changed?");
+  assert.equal(result.status, 0); assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } });
+});
+
+test("Python report hooks serve Stop re-entry and cheap opportunistic delivery for every role", async () => {
+  const stop = await runReportHook("report-stop", {
+    hook_event_name: "Stop",
+    stop_hook_active: true,
+    last_assistant_message: "A complete attended answer.",
+  }, { agentType: "general-purpose", attended: true });
+  assert.equal(stop.status, 0);
+  assert.equal(stop.requestPath, "/hooks/reports/stop");
+  assert.deepEqual(stop.requestBody, {
+    agentId: "recipient-1",
+    stopHookActive: true,
+    lastAssistantMessage: "A complete attended answer.",
+  });
+  assert.deepEqual(JSON.parse(stop.stdout), { hookSpecificOutput: { hookEventName: "Stop", additionalContext: "queued stop report" } });
+  assert.equal(stop.stderr, "");
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "aboard-report-hook-"));
+  try {
+    const state = join(workspaceRoot, "state");
+    await mkdir(state, { recursive: true });
+    await writeFile(join(state, "fleet.json"), JSON.stringify({
+      mailboxes: [{ recipientAgentId: "recipient-1", entries: [{ kind: "ended-without-report", agentId: "child-1", agentType: "Explore" }] }],
+    }), "utf8");
+    const delivery = await runReportHook("report-delivery", { hook_event_name: "PostToolUse" }, { workspaceRoot });
+    assert.equal(delivery.requestPath, "/hooks/reports/deliver");
+    assert.deepEqual(delivery.requestBody, { agentId: "recipient-1" });
+    assert.deepEqual(JSON.parse(delivery.stdout), { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "queued opportunistic report" } });
+    const prompt = await runPromptHook(200, { additionalContext: "queued prompt report" }, "What did the child find?", "secret", "brainstormer", workspaceRoot);
+    assert.deepEqual(JSON.parse(prompt.stdout), { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "queued prompt report" } });
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+  const skipped = spawnSync("uv", ["run", "--no-project", "python", script, "report-delivery"], {
+    input: JSON.stringify({ hook_event_name: "PostToolUse" }),
+    encoding: "utf8",
+    env: { ...process.env, ABOARD_AGENT_ID: "recipient-1", ABOARD_AGENT_TYPE: "brainstormer" },
+  });
+  assert.equal(skipped.status, 0);
+  assert.equal(skipped.stdout, "");
+  assert.equal(skipped.stderr, "");
+});
+
+test("aboard-owned command skills are user-only shims and general-purpose has no aboard definition", async () => {
+  const { readFile, access } = await import("node:fs/promises");
+  for (const name of ["brainstorm", "general-purpose", "queue", "prototype", "done", "auto", "review-pr", "reopen"]) {
+    const skill = await readFile(join(process.cwd(), "assets", "scaffold", ".abd", "skills", name, "SKILL.md"), "utf8");
+    assert.match(skill, /disable-model-invocation: true/); assert.match(skill, new RegExp(`/${name}`));
+    // `/auto` advertises dry-run/guideline input; `/review-pr` and `/reopen`
+    // advertise their selectors. General-purpose is explicitly argumentless.
+    if (["auto", "review-pr", "reopen", "prototype", "done", "queue"].includes(name)) assert.match(skill, /argument-hint:/);
+    else assert.doesNotMatch(skill, /argument-hint:/);
+    const body = skill.replace(/^---\n[\s\S]*?\n---\n/u, "").replace(/<!--[\s\S]*?-->/gu, "").trim();
+    assert.notEqual(body, "", `${name} SKILL.md must explain the hook failure rather than leave an empty body`);
+    assert.match(body, /is broken; report that to the user and stop/, `${name} SKILL.md body must announce it is an error state`);
+    assert.match(body, /Do not try to carry it out yourself/, `${name} SKILL.md body must forbid simulating the command`);
+    assert.match(body, /except if the user explicitly asks/, `${name} SKILL.md body must forbid fixing the installation unprompted`);
+    assert.match(body, /Update \.abd\//, `${name} SKILL.md body must steer the user to aboard's controls, not internal causes`);
+  }
+  await assert.rejects(access(join(process.cwd(), "assets", "scaffold", ".abd", "agents", "general-purpose.md")));
+});
+
+test("Python prompt hook blocks both intercepted commands and never blocks other routes", async () => {
+  for (const prompt of ["/general-purpose", "/general-purpose fix the parser", "/queue fix the parser", "/brainstorm", "/brainstorm caching layer", "/prototype test parser", "/done", "/done close now", "/auto", "/review-pr", "/auto the next issue", "/reopen", "/reopen brainstorm"]) {
+    const result = await runPromptHook(500, { error: "boom" }, prompt);
+    assert.equal(result.status, 2, `${prompt} must erase the prompt even when the bridge fails`);
+    assert.equal(result.stdout, "");
+  }
+  const refusedPrototype = await runPromptHook(500, { error: "boom" }, "/prototype recurse", "secret", "prototyper");
+  assert.equal(refusedPrototype.status, 2);
+  const nestedBrainstorm = await runPromptHook(500, { error: "boom" }, "/brainstorm ignored", "secret", "brainstormer");
+  assert.equal(nestedBrainstorm.status, 2);
+  const refusedManagerCommand = await runPromptHook(500, { error: "boom" }, "/general-purpose", "secret", "brainstormer");
+  assert.equal(refusedManagerCommand.status, 0);
+  const refusedNestedBrainstorm = await runPromptHook(500, { error: "boom" }, "/brainstorm", "secret", "prototyper");
+  assert.equal(refusedNestedBrainstorm.status, 0);
+  // A bridge that wrongly reports interception on a Stop poll must not exit 2:
+  // that would refuse to let the Manager stop, looping the session forever.
+  const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+  const stop = spawnSync("uv", ["run", "--no-project", "python", script, "report-stop"], {
+    input: JSON.stringify({ hook_event_name: "Stop", stop_hook_active: false }),
+    encoding: "utf8",
+    env: { ...process.env, ABOARD_AGENT_ID: "manager-1", ABOARD_AGENT_TYPE: "manager" },
+  });
+  assert.equal(stop.status, 0); assert.equal(stop.stderr, "");
+});
+
+test("the codebase line states outright when a repository holds no project yet", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    repository: async () => ({ name: "fresh", defaultBranch: "main", checks: [], codebase: { sourceFileCount: 0, languages: [], commitCount: 1 } }),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+
+  // Without this, "no roadmap, no issues, no PRs" reads as a project between
+  // milestones rather than one that has not started.
+  assert.match(rendered, /Codebase: no source files, 1 commit - there is no code in this repository yet\./);
+  assert.match(rendered, /has to come from the user instead/);
+});
+
+test("the codebase line reports composition, and flags a single commit as a possibility only", () => {
+  assert.equal(
+    codebaseLine({ sourceFileCount: 132, languages: ["ts", "py"], commitCount: 87 }),
+    "Codebase: 132 source files (ts, py), 87 commits",
+  );
+  const scaffold = codebaseLine({ sourceFileCount: 24, languages: ["tsx"], commitCount: 1 });
+  assert.match(scaffold, /^Codebase: 24 source files \(tsx\), 1 commit - at most one commit, so this may be an untouched scaffold/);
+  // Files but nothing recorded is the same signal, and phrased the same way.
+  assert.match(codebaseLine({ sourceFileCount: 3, languages: ["py"], commitCount: 0 }), /0 commits - at most one commit/);
+});
+
+test("a survey that could not be taken costs its line, not the Repository section", async () => {
+  const fleet = new FleetRegistry(); manager(fleet);
+  const briefings = new ManagerBriefings(sources({
+    repository: async () => ({ name: "aboard", defaultBranch: "main", checks: ["npm run check"] }),
+  }), fleet, new WriteLease());
+  const rendered = await briefings.render(new AbortController().signal);
+
+  assert.match(rendered, /default branch main \| verify with npm run check/);
+  assert.doesNotMatch(rendered, /Codebase:/);
+  assert.doesNotMatch(rendered, /## Repository\nUnavailable/);
+});
