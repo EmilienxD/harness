@@ -20,7 +20,7 @@ def test_first_party_tools_use_explicit_layered_payloads():
         assert "claude" in platforms, f"{tool.name} must declare Claude support explicitly"
         assert not (tool.root / "targets").exists(), f"{tool.name} still has a targets/ layer"
 
-        for file_spec in manifest["files"]:
+        for file_spec in manifest.get("files", []):
             layer = str(file_spec["src"]).replace("\\", "/").split("/", 1)[0]
             assert layer in LAYERS, f"{tool.name}: {file_spec['src']} is outside a payload layer"
 

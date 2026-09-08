@@ -1,0 +1,16 @@
+name = "websearch"
+version = "1.0.0"
+description = "Interactive web research workflow placeholder"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "This workflow currently targets Claude Code visible sessions."
+
+[[files]]
+src = "shared/skills/websearch/SKILL.md"
+dest = "websearch/SKILL.md"
+root = "skills"
+

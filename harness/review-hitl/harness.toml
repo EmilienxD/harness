@@ -1,0 +1,16 @@
+name = "review-hitl"
+version = "1.0.0"
+description = "Auto Run human-in-the-loop reviewer entry point"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "This workflow currently targets Claude Code visible sessions."
+
+[[files]]
+src = "shared/skills/review-hitl/SKILL.md"
+dest = "review-hitl/SKILL.md"
+root = "skills"
+

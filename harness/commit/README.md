@@ -208,13 +208,13 @@ python .claude/hooks/commit_UserPromptSubmit_hook.py \
 Claude Code (the backward-compatible default):
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install commit
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 ChatGPT:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install commit --platform chatgpt
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 After installing for ChatGPT, restart it and open `/hooks` to review and trust

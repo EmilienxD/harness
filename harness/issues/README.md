@@ -10,8 +10,7 @@ command and response-cache hooks. Claude Code remains
 the default target; pass `--platform chatgpt` for the native ChatGPT payload:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install issues
-uvx --from git+https://github.com/EmilienxD/harness harness install issues --platform chatgpt
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 ## Problem
@@ -301,13 +300,13 @@ At runtime the hook creates a gateway folder at the project root — `.issues-ga
 ## Installation
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install issues
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 For ChatGPT:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install issues --platform chatgpt
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 That installs skills under `.agents/skills/`, the shared publishing core and a thin native adapter

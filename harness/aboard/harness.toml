@@ -1,0 +1,18 @@
+name = "aboard"
+version = "0.0.0"
+description = "Aboard VS Code integration for visible agents and Auto Run"
+dependencies = ["auto>=1.0.0,<2.0.0", "implement>=1.0.0,<2.0.0", "review-afk>=1.0.0,<2.0.0", "review-hitl>=1.0.0,<2.0.0"]
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Aboard currently integrates with Claude Code."
+
+[[actions]]
+type = "vscode-extension"
+url = "https://github.com/EmilienxD/harness/releases/download/aboard-v0.0.0/aboard-0.0.0.vsix"
+size = 523159
+sha256 = "99c6cbac9eb4b9ecde645ba1a849363ca023c3bc6e3a12d54c3dbc023ca12387"
+extension_id = "aboard.aboard"

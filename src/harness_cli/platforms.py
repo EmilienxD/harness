@@ -43,7 +43,6 @@ class PlatformAdapter:
     config_name: str
     supports_local_config: bool
     restart_guidance: str
-    legacy_artifacts: tuple[str, ...] = ()
 
     def platform_root(self, scope_root: Path, is_user: bool) -> Path:
         return scope_root / (self.user_platform_dir if is_user else self.project_platform_dir)
@@ -104,13 +103,6 @@ class ClaudeAdapter(PlatformAdapter):
             values["${HOOKS_DIR}"] = f"{claude_dir}/hooks"
         return values
 
-    def prepare_config(self, base: dict, fragment: dict) -> dict:
-        healed = copy.deepcopy(base)
-        restore_proxied_hooks(healed)
-        rehome_moved_hooks(healed, fragment)
-        return healed
-
-
 class ChatGPTAdapter(PlatformAdapter):
     """Native ChatGPT layout.
 
@@ -139,7 +131,6 @@ ADAPTERS: dict[Platform, PlatformAdapter] = {
         config_name="settings.json",
         supports_local_config=True,
         restart_guidance="Restart Claude Code (or run /doctor) to pick up the changes.",
-        legacy_artifacts=(".harness.lock.json", "settings.json.bak", "settings.local.json.bak"),
     ),
     Platform.CHATGPT: ChatGPTAdapter(
         platform=Platform.CHATGPT,
@@ -157,67 +148,3 @@ ADAPTERS: dict[Platform, PlatformAdapter] = {
 
 def get_adapter(platform: Platform | str = Platform.CLAUDE) -> PlatformAdapter:
     return ADAPTERS[Platform.parse(platform)]
-
-
-def restore_proxied_hooks(settings: dict) -> None:
-    """Undo the retired Claude Code `stopHook` proxy convention, in place."""
-    hooks = settings.get("hooks")
-    if not isinstance(hooks, dict):
-        return
-    for groups in hooks.values():
-        if not isinstance(groups, list):
-            continue
-        for group in groups:
-            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
-                continue
-            restored = []
-            for entry in group["hooks"]:
-                if isinstance(entry, dict) and isinstance(entry.get("_proxied"), list):
-                    original = entry.pop("_proxied")
-                    entry = {k: v for k, v in entry.items() if k not in ("command", "args")}
-                    if original:
-                        entry["command"], entry["args"] = original[0], original[1:]
-                restored.append(entry)
-            group["hooks"] = restored
-
-
-def rehome_moved_hooks(settings: dict, fragment: dict) -> None:
-    """Drop a Claude fragment's hooks from matcher groups it no longer claims."""
-    hooks = settings.get("hooks")
-    fragment_hooks = fragment.get("hooks")
-    if not isinstance(hooks, dict) or not isinstance(fragment_hooks, dict):
-        return
-    for event, fragment_groups in fragment_hooks.items():
-        groups = hooks.get(event)
-        if not isinstance(groups, list) or not isinstance(fragment_groups, list):
-            continue
-        wanted: dict[tuple, set] = {}
-        for group in fragment_groups:
-            if not isinstance(group, dict):
-                continue
-            scope = settings_merge.normalize_scope(group)
-            for entry in group.get("hooks", []):
-                wanted.setdefault(settings_merge.identity(entry), set()).add(scope)
-        if not wanted:
-            continue
-        kept = []
-        for group in groups:
-            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
-                kept.append(group)
-                continue
-            scope = settings_merge.normalize_scope(group)
-            remaining = [
-                entry
-                for entry in group["hooks"]
-                if scope in wanted.get(settings_merge.identity(entry), {scope})
-            ]
-            if remaining == group["hooks"]:
-                kept.append(group)
-            elif remaining:
-                kept.append({**group, "hooks": remaining})
-        if kept:
-            hooks[event] = kept
-        else:
-            del hooks[event]
-    if not hooks:
-        del settings["hooks"]

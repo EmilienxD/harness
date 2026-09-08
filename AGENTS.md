@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-"harness" is a collection of installable Claude Code tools (skills, hooks, agents, packages, scripts),
-primarily authored for Claude Code but intended to be portable to other agent CLIs later.
+"harness" is the canonical catalogue and installer for agent skills, hooks, command-line tools, and
+optional apps. It also owns persistent visible-session commands and ask/reply state.
 
 Each tool lives under `harness/<tool-name>/`. Its root `README.md`, when present, is the product-neutral
 source of truth for what it does; otherwise consult the relevant platform's `SKILL.md`. This file only
 indexes them.
 
-Tools are installed individually with `uvx --from git+https://github.com/EmilienxD/harness harness
-install <tool>`, which copies files into the target project's `.claude/` and merges any settings the
-tool needs. The CLI is in `src/harness_cli/`; see the root `README.md`.
+`uvx --from <pinned source> harness` opens the only installer interface: one interactive catalogue
+menu. Do not add named install, uninstall, upgrade, list, or info commands. The only named commands
+are `run`, `ask`, `reply`, and `resume`. The CLI is in `src/harness_cli/`; see the root `README.md`.
 
 ## Adding or changing a tool
 
@@ -24,9 +24,9 @@ source tree for another or reintroduce a `targets/` override directory. Keep `ha
 product-neutral documentation at the tool root, and mirror logical roots such as `hooks/` and `skills/`
 inside each payload layer.
 
-Every installable tool needs a `harness.toml` in its directory declaring `name`, `version`,
-`description`, and one or more `[[files]]` entries (`src` relative to the tool dir and `dest` relative
-to its logical destination root). Claude Code settings default to a sibling `settings.fragment.json`;
+Every catalogue package needs a `harness.toml` declaring `name`, `version`, `description`, and one or
+more `[[files]]` or `[[actions]]` entries. Package dependencies belong in `dependencies` with explicit
+version constraints; `requires` is reserved for executables on PATH. Claude Code settings default to a sibling `settings.fragment.json`;
 platform-specific native JSON fragments are named by `[platforms.<name>].fragment`. They are merged
 as-is, with `${PYTHON}` and platform placeholders resolved at install time. `${PYTHON}` becomes
 `uv run --no-project --no-managed-python`
@@ -36,25 +36,22 @@ real interpreter, so actual execution is tested). A file the user is meant to ed
 config templates, like the `.rules` files — declares `starter = true` on its `[[files]]` entry: it is
 copied when absent and never overwritten afterwards. A tool without a manifest is invisible to the
 installer, so add one in the same change that adds the tool, and bump `version` whenever its files or
-fragment change. Run `uv run pytest` — the suite installs every manifest for real and round-trips
-uninstall.
+fragment, dependency, or action changes. Run `uv run pytest` — the suite exercises catalogue
+reconciliation and receipt-driven removal.
 
-A fragment is merged as written: the installer adds the entries a tool declares and removes them
-again on uninstall, and it does not rewrite hook entries belonging to anyone else. Changing a hook's
-`matcher` is safe — hook groups merge by matcher, so the installer moves an existing install's entry
-out of the old group rather than leaving both firing. Keys that Claude
-Code's settings schema doesn't define don't belong in a fragment either — project settings are
+A fragment is merged as written: the receipt stores the exact resolved fragment, and deselection
+removes only those entries. It does not rewrite hook entries belonging to anyone else. Keys that
+Claude Code's settings schema doesn't define don't belong in a fragment — project settings are
 validated strictly, and a file that fails validation is rejected whole.
 
-The installer has explicit `claude` and `chatgpt` platform adapters. Commands default to Claude Code
-for backward compatibility and select ChatGPT with `--platform chatgpt`. Legacy external manifests may
-implicitly support Claude Code only; first-party manifests declare `[platforms.claude]` explicitly.
+The installer has explicit `claude` and `chatgpt` platform adapters. The menu asks for its target and
+first-party manifests declare `[platforms.claude]` explicitly.
 Target support belongs in `[platforms.<name>]` with a `supported`,
 `replacement`, or `unsupported` status and, for native config, a target-specific `fragment`. File
 entries can use `root = "platform"`, `"skills"`, or `"hooks"`; omit `platforms` for a shared payload or
 set `platforms = ["chatgpt"]` (or `"claude"`) for a variant. The adapter maps those roots to `.claude`,
-`.agents`, and `.codex`; do not put platform-path conditionals in installer call sites. Legacy
-Claude-relative `dest` entries and `settings.fragment.json` remain supported unchanged.
+`.agents`, and `.codex`; do not put platform-path conditionals in installer call sites. There is no
+legacy manifest, installation, scaffold, or receipt compatibility layer.
 
 ChatGPT skill payloads place a variant `SKILL.md` (plus reference doc variants) under
 `chatgpt/skills/<skill>/` only when the content genuinely diverges, such as for Claude command
@@ -67,6 +64,12 @@ surrounding user text instead of `$ARGUMENTS`.
 
 ## Tools
 
+- `harness/aboard/` — verified Aboard VSIX host action with mandatory Auto Run dependencies.
+- `harness/harness-cli/` — persistent `run`, `ask`, `reply`, and `resume` CLI selection.
+- `harness/session-replies/` — parent reply delivery hooks used transitively by the CLI.
+- `harness/auto/` — user-facing, fail-closed `/auto` hook owned by Harness.
+- `harness/implement/`, `harness/review-afk/`, `harness/review-hitl/` — mandatory empty Auto Run skill placeholders; do not author their bodies during the structural refactor.
+- `harness/prototype/`, `harness/websearch/`, `harness/ask-agent-to-*/`, `harness/communicate-to-agent/` — empty workflow placeholders whose prompts remain user-owned.
 - `harness/audit/` — audits a codebase and reports evidence-backed findings. See the platform `SKILL.md`.
 - `harness/caveman/` — ultra-compressed communication mode skill. See the platform `SKILL.md`.
 - `harness/commit/` — zero-model-call `/commit` hook. See `README.md`.
@@ -103,6 +106,10 @@ surrounding user text instead of `$ARGUMENTS`.
 - `harness/itsclaudehistory/` — nested git repo; leave its internals alone unless asked.
 
 ## Other directories
+
+- `apps/aboard/` — target monorepo boundary for the Aboard extension. Merge its repository history
+  here without squashing; do not flatten its npm build into the Python package or bundle its VSIX in
+  the wheel.
 
 - `docs/CLAUDE-REFERENCES/` — mirrored upstream Claude Code docs, refreshed by
   `scripts/update_references.py` via the `update-references.yml` workflow. Consult these

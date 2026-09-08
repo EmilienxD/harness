@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli.installer import Target, apply_install, plan_install
+from harness_cli.installer import CatalogueInstaller, Target
 from harness_cli.manifest import discover
+from harness_cli.receipts import ReceiptStore
 
 ROOT = Path(__file__).resolve().parent.parent
 CORE = ROOT / "harness/issues/shared/hooks/issues_core.py"
@@ -37,7 +38,7 @@ def _run(payload, monkeypatch, capsys):
 def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
     tool = discover()["issues"]
     target = Target.for_project(tmp_path, platform="chatgpt")
-    apply_install(plan_install(tool, target))
+    CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
 
     assert (tmp_path / ".codex/hooks/issues_core.py").is_file()
     assert (tmp_path / ".codex/hooks/issues_ChatGPT_hook.py").is_file()

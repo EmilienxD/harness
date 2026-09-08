@@ -7,7 +7,7 @@ the backend you configured, with the result handed back to the agent as if
 the subagent had run normally.
 
 ```bash
-harness install redirect-subagents
+harness
 ```
 
 That installs three hooks into `.claude/hooks/` plus an example
@@ -146,20 +146,15 @@ project root `.gitignore` is untouched.
 ## Uninstall
 
 ```bash
-harness uninstall redirect-subagents
+harness
 ```
 
 Removes the hooks and their settings entries, leaving hooks you wrote
 yourself untouched. A `subagents.json` you modified is kept; an untouched
 one goes with the tool.
 
-> Version 1.0.0 briefly rewrote every other Stop/SubagentStop hook to run
-> through this tool's wait script, recording the argv it replaced under a
-> `_proxied` key. That is gone. Any `harness install` or `harness uninstall`
-> restores such an entry to what it was.
-
 ## Development
 
 ```bash
-uv run pytest tests/test_redirect_subagents_hook.py tests/test_installer.py
+uv run pytest tests/test_redirect_subagents_hook.py tests/test_catalogue.py
 ```

@@ -2,7 +2,7 @@
 """PreToolUse hook: intercepts the Agent tool whenever subagent_type is a
 configured redirected subagent.
 
-Installed into .claude/hooks/ by `harness install redirect-subagents`;
+Installed into .claude/hooks/ from the Harness catalogue;
 configuration lives in .claude/harness-redirect-subagents/subagents.json,
 runtime state alongside it — see README.md.
 """

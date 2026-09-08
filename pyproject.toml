@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness"
-version = "0.1.2"
-description = "Installer for the harness collection of agent tools (skills, hooks, agents)"
+version = "0.2.0"
+description = "Catalogue installer and visible-session CLI for agent skills, hooks, and apps"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

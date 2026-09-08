@@ -10,7 +10,7 @@ intercepted before this skill or the model ran. Do not stage, commit, or emulate
 the hook. Tell the user to open `/hooks`, trust the installed commit hook if it
 is awaiting review, or reinstall it with:
 
-`uvx --from git+https://github.com/EmilienxD/harness harness install commit --platform chatgpt --force`
+rerun `uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness` and reselect `commit`
 
 If that does not fix it, ask them to report the problem at
 https://github.com/EmilienxD/harness/issues.

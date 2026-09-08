@@ -8,8 +8,7 @@ implement the request or write an issue draft.
 ## Install
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install validate-request
-uvx --from git+https://github.com/EmilienxD/harness harness install validate-request --platform chatgpt
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 The skill is user-invocable only on both platforms. Restart the selected product after

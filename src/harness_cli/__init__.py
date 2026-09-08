@@ -1,3 +1,3 @@
-"""Installer for the harness collection of agent tools."""
+"""Catalogue installer and visible-session CLI."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"

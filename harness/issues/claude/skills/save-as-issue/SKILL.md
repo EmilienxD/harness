@@ -8,5 +8,5 @@ disable-model-invocation: true
 
 Do not create an issue or emulate the hook. It publishes the cached final response and
 tracks retries to avoid duplicates. Tell the user to reinstall the issues pack with
-`uvx --from git+https://github.com/EmilienxD/harness harness install issues --force`,
+rerun `uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness` and reselect `issues`,
 then finish a Claude response before invoking `/save-as-issue` again.

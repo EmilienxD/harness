@@ -5,7 +5,7 @@ the turn die. When the 5-hour or weekly window is exhausted, the session pauses
 until it resets — then carries on by itself.
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install usage-limit-wait
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 ## Problem
@@ -179,7 +179,7 @@ never blocks, so it keeps a small timeout of its own.
 ## Installation
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install usage-limit-wait
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 Add `--dry` first to see the exact file list and settings diff, `--user` to

@@ -1,0 +1,25 @@
+name = "auto"
+version = "1.0.0"
+description = "Routes /auto and /auto --dry to an active Aboard session"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Aboard currently integrates with Claude Code."
+
+[[files]]
+src = "claude/hooks/auto.py"
+dest = "auto.py"
+root = "hooks"
+platforms = ["claude"]
+executable = true
+
+[[files]]
+src = "claude/skills/auto/SKILL.md"
+dest = "auto/SKILL.md"
+root = "skills"
+platforms = ["claude"]
+

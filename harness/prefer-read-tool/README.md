@@ -49,7 +49,7 @@ intended trade-off: this hook is a nudge for file reads, not a command blocker.
 ## Installation
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install prefer-read-tool
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 That copies the hook into `.claude/hooks/`, marks it executable, and merges

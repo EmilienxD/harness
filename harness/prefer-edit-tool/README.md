@@ -81,7 +81,7 @@ than *never do this*.
 ## Installation
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install prefer-edit-tool
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 That copies the hook into `.claude/hooks/`, marks it executable, and merges the

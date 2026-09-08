@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli.installer import Target, apply_install, plan_install, uninstall
+from harness_cli.installer import CatalogueInstaller, Target
 from harness_cli.manifest import discover
+from harness_cli.receipts import ReceiptStore
 
 
 HOOK_NAME = "validate_request_UserPromptSubmit_hook.py"
@@ -159,7 +160,10 @@ def test_install_and_uninstall_preserve_other_hooks(platform, tmp_path):
     ]}]}}
     target.settings_path.parent.mkdir(parents=True)
     target.settings_path.write_text(json.dumps(existing), encoding="utf-8")
-    apply_install(plan_install(tool, target))
+    installer = CatalogueInstaller(
+        {tool.name: tool}, target, ReceiptStore.load(tmp_path / f"receipts-{platform}.json")
+    )
+    installer.reconcile({tool.name})
     platform_root = tmp_path / (".claude" if platform == "claude" else ".codex")
     skill_root = tmp_path / (".claude" if platform == "claude" else ".agents") / "skills/validate-request"
     skill = (skill_root / "SKILL.md").read_text(encoding="utf-8")
@@ -174,9 +178,8 @@ def test_install_and_uninstall_preserve_other_hooks(platform, tmp_path):
     assert HOOK_NAME in json.dumps(new_entry)
     assert "${PYTHON}" not in json.dumps(new_entry)
     assert "${HOOKS_DIR}" not in json.dumps(new_entry)
-    again = plan_install(tool, target)
-    assert not again.settings_changed
-    assert all(action.status == "unchanged" for action in again.files)
+    _, again = installer.plan({tool.name})
+    assert again == []
     # Execute the installed entrypoint as a real process; explicit input is offline.
     result = subprocess.run(
         [sys.executable, str(platform_root / "hooks" / HOOK_NAME)],
@@ -184,7 +187,7 @@ def test_install_and_uninstall_preserve_other_hooks(platform, tmp_path):
         capture_output=True, text=True, check=True,
     )
     assert result.stdout == result.stderr == ""
-    uninstall(tool, target)
+    installer.reconcile(set())
     assert json.loads(target.settings_path.read_text(encoding="utf-8")) == existing
     assert not skill_root.exists()
     assert not (platform_root / "hooks" / HOOK_NAME).exists()

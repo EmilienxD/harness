@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli.installer import Target, apply_install, plan_install
+from harness_cli.installer import CatalogueInstaller, Target
 from harness_cli.manifest import discover
+from harness_cli.receipts import ReceiptStore
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -50,7 +51,7 @@ def repo(tmp_path):
 def test_chatgpt_install_uses_native_hooks_and_skill_roots(tmp_path):
     tool = discover()["commit"]
     target = Target.for_project(tmp_path, platform="chatgpt")
-    apply_install(plan_install(tool, target))
+    CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
 
     assert (tmp_path / ".codex/hooks/commit_core.py").is_file()
     assert (tmp_path / ".codex/hooks/commit_ChatGPT_hook.py").is_file()

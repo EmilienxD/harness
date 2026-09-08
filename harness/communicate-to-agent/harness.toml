@@ -1,0 +1,16 @@
+name = "communicate-to-agent"
+version = "1.0.0"
+description = "Return a visible child session reply to its parent"
+dependencies = ["harness-cli>=0.2.0,<0.3.0"]
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "This workflow currently targets Claude Code visible sessions."
+
+[[files]]
+src = "shared/skills/communicate-to-agent/SKILL.md"
+dest = "communicate-to-agent/SKILL.md"
+root = "skills"

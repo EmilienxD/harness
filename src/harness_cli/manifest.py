@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,7 +36,7 @@ class FileSpec:
 
     ``root`` is a logical platform root: ``platform`` (``.claude`` or
     ``.codex``), ``skills`` (``.claude/skills`` or ``.agents/skills``), or
-    ``hooks``. Omitting it retains the original ``.claude``-relative syntax.
+    ``hooks``.
     ``platforms`` may select payload variants; omitted entries are shared by
     every platform the tool declares supported.
     """
@@ -59,12 +60,20 @@ class ExpandedFile:
     executable: bool
     starter: bool
 
-    def __iter__(self):
-        """Keep legacy four-value unpacking working for downstream callers."""
-        yield self.source
-        yield self.dest
-        yield self.executable
-        yield self.starter
+@dataclass(frozen=True)
+class PackageDependency:
+    """A catalogue package dependency with an optional version constraint."""
+
+    name: str
+    constraint: str = ""
+
+
+@dataclass(frozen=True)
+class HostAction:
+    """A machine-level action performed by the catalogue installer."""
+
+    type: str
+    data: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -76,10 +85,11 @@ class Tool:
     files: tuple[FileSpec, ...]
     requires: tuple[str, ...] = ()
     gitignore: tuple[str, ...] = ()
-    fragment: dict = field(default_factory=dict)
     platform_support: dict[Platform, PlatformSupport] = field(default_factory=dict)
     platform_fragments: dict[Platform, dict] = field(default_factory=dict)
     docs: str | None = None
+    dependencies: tuple[PackageDependency, ...] = ()
+    actions: tuple[HostAction, ...] = ()
 
     def resolve(self, spec: FileSpec) -> Path:
         return self.root / spec.src
@@ -87,15 +97,7 @@ class Tool:
     def support_for(self, platform: Platform | str) -> PlatformSupport:
         selected = Platform.parse(platform)
         return self.platform_support.get(
-            selected,
-            PlatformSupport(
-                SupportStatus.SUPPORTED if selected is Platform.CLAUDE else SupportStatus.UNSUPPORTED,
-                reason=(
-                    None
-                    if selected is Platform.CLAUDE
-                    else "No native ChatGPT implementation is available yet."
-                ),
-            ),
+            selected, PlatformSupport(SupportStatus.UNSUPPORTED, reason="No support is declared.")
         )
 
     def fragment_for(self, platform: Platform | str = Platform.CLAUDE) -> dict:
@@ -155,6 +157,63 @@ def _read_fragment(path: Path) -> dict:
     return fragment
 
 
+_DEPENDENCY_RE = re.compile(r"^([a-z0-9][a-z0-9-]*)(.*)$")
+
+
+def _parse_dependencies(data: dict, manifest_path: Path) -> tuple[PackageDependency, ...]:
+    raw = data.get("dependencies", [])
+    if not isinstance(raw, list):
+        raise ManifestError(f"{manifest_path}: 'dependencies' must be an array")
+    result: list[PackageDependency] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            match = _DEPENDENCY_RE.fullmatch(entry.strip())
+            if not match:
+                raise ManifestError(f"{manifest_path}: invalid dependency '{entry}'")
+            result.append(PackageDependency(match.group(1), match.group(2).strip()))
+        elif isinstance(entry, dict) and isinstance(entry.get("name"), str):
+            result.append(
+                PackageDependency(entry["name"].strip(), str(entry.get("version", "")).strip())
+            )
+        else:
+            raise ManifestError(f"{manifest_path}: invalid dependency entry {entry!r}")
+    return tuple(result)
+
+
+def _parse_actions(data: dict, manifest_path: Path) -> tuple[HostAction, ...]:
+    raw = data.get("actions", [])
+    if not isinstance(raw, list):
+        raise ManifestError(f"{manifest_path}: 'actions' must be an array of tables")
+    actions: list[HostAction] = []
+    for entry in raw:
+        if not isinstance(entry, dict) or not isinstance(entry.get("type"), str):
+            raise ManifestError(f"{manifest_path}: every [[actions]] entry needs a string 'type'")
+        kind = entry["type"]
+        if kind not in {"uv-tool", "vscode-extension"}:
+            raise ManifestError(f"{manifest_path}: unsupported host action type '{kind}'")
+        if kind == "uv-tool":
+            if not all(isinstance(entry.get(key), str) and entry[key] for key in ("source", "package")):
+                raise ManifestError(f"{manifest_path}: uv-tool action requires source and package")
+            source = entry["source"]
+            revision = source.rsplit("@", 1)[-1] if "@" in source else ""
+            if not revision or revision.lower() in {"main", "master", "head", "dev"}:
+                raise ManifestError(f"{manifest_path}: uv-tool source must pin an immutable revision")
+        else:
+            required_strings = ("url", "sha256", "extension_id")
+            if not all(isinstance(entry.get(key), str) and entry[key] for key in required_strings):
+                raise ManifestError(
+                    f"{manifest_path}: vscode-extension action requires url, sha256, and extension_id"
+                )
+            if not entry["url"].startswith("https://") or "/download/" not in entry["url"]:
+                raise ManifestError(f"{manifest_path}: VSIX URL must be an immutable HTTPS download")
+            if not isinstance(entry.get("size"), int) or entry["size"] <= 0:
+                raise ManifestError(f"{manifest_path}: VSIX size must be a positive integer")
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", entry["sha256"]):
+                raise ManifestError(f"{manifest_path}: VSIX sha256 must contain 64 hexadecimal digits")
+        actions.append(HostAction(kind, {key: value for key, value in entry.items() if key != "type"}))
+    return tuple(actions)
+
+
 def _parse_platforms(data: dict, manifest_path: Path) -> dict[Platform, PlatformSupport]:
     raw = data.get("platforms", {})
     if not isinstance(raw, dict):
@@ -202,8 +261,9 @@ def load_tool(directory: Path) -> Tool:
             raise ManifestError(f"{manifest_path}: missing required key '{key}'")
 
     raw_files = data.get("files") or []
-    if not raw_files:
-        raise ManifestError(f"{manifest_path}: at least one [[files]] entry is required")
+    raw_actions = data.get("actions") or []
+    if not raw_files and not raw_actions:
+        raise ManifestError(f"{manifest_path}: at least one [[files]] or [[actions]] entry is required")
 
     files = []
     for entry in raw_files:
@@ -232,13 +292,10 @@ def load_tool(directory: Path) -> Tool:
         )
 
     support = _parse_platforms(data, manifest_path)
-    support.setdefault(Platform.CLAUDE, PlatformSupport(SupportStatus.SUPPORTED))
+    if not support:
+        raise ManifestError(f"{manifest_path}: at least one [platforms.<name>] table is required")
 
     fragments: dict[Platform, dict] = {}
-    legacy_name = data.get("settings", "settings.fragment.json")
-    legacy_path = directory / legacy_name
-    if legacy_path.is_file():
-        fragments[Platform.CLAUDE] = _read_fragment(legacy_path)
     for platform, declaration in support.items():
         if not declaration.fragment_name:
             continue
@@ -262,10 +319,11 @@ def load_tool(directory: Path) -> Tool:
         files=tuple(files),
         requires=tuple(data.get("requires", [])),
         gitignore=tuple(ignores),
-        fragment=fragments.get(Platform.CLAUDE, {}),
         platform_support=support,
         platform_fragments=fragments,
         docs=data.get("docs"),
+        dependencies=_parse_dependencies(data, manifest_path),
+        actions=_parse_actions(data, manifest_path),
     )
 
 

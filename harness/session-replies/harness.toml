@@ -1,0 +1,20 @@
+name = "session-replies"
+version = "1.0.0"
+description = "Delivers replies from visible Harness child sessions"
+requires = []
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Visible session delivery currently targets Claude Code hooks."
+
+[[files]]
+src = "claude/hooks/reply_delivery.py"
+dest = "reply_delivery.py"
+root = "hooks"
+platforms = ["claude"]
+executable = true
+

@@ -7,7 +7,7 @@ leftovers: after a session with redirected background jobs ends, its job state
 under .claude/harness-redirect-subagents/ would sit on disk forever otherwise.
 Anything past a day old is removed here instead.
 
-Installed into .claude/hooks/ by `harness install redirect-subagents`.
+Installed into .claude/hooks/ from the Harness catalogue.
 """
 import json
 import sys

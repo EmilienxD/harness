@@ -13,5 +13,6 @@ reason = "The native capability is the maintained equivalent of this Claude Code
 
 [[files]]
 src = "claude/skills/create-skill/SKILL.md"
-dest = "skills/create-skill/SKILL.md"
+dest = "create-skill/SKILL.md"
+root = "skills"
 platforms = ["claude"]

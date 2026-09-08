@@ -119,7 +119,7 @@ whichever one matches how bad an unguided edit to it would be.
 ## Installation
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness harness install on-edit-reminder
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
 That copies the hook and starter rules file into `.claude/`, marks the hook
