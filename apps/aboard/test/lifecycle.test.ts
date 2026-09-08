@@ -27,15 +27,7 @@ function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result"
 
 function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }, expectsUncommittedTree = false) {
   const fleet = new FleetRegistry();
-  if (delivery.mode === "mailbox") {
-    fleet.register({
-      identity: { agentId: delivery.recipientAgentId, type: "manager" },
-      sessionId: session("140b5c21-eb37-4147-b5cb-6a5ca2592146"),
-      terminal: { terminalId: terminal("manager-terminal"), name: "manager" },
-      lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" },
-      telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
-    }, startedAt);
-  }
+
   fleet.register(worker(delivery, expectsUncommittedTree), startedAt);
   fleet.transition(agent("worker-10"), { status: "running", startedAt }, startedAt);
   const lease = new WriteLease();
@@ -75,12 +67,10 @@ test("clean Stop succeeds, uses the supplied last message, and releases the leas
   assert.equal(finished[0]?.result.outcome, "succeeded");
 });
 
-test("dirty write-capable Stop becomes no-commit and enters the Manager mailbox", async () => {
-  const manager = agent("manager-1");
-  const { reconciler, fleet, lease } = setup(false, { mode: "mailbox", recipientAgentId: manager });
+test("dirty write-capable Stop becomes no-commit", async () => {
+  const { reconciler, delivered, lease } = setup(false);
   await reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "done" });
-  const entries = fleet.drainMailbox(manager, at("2026-07-30T10:06:00.000Z"));
-  assert.equal(entries[0]?.kind === "result" && entries[0].result.outcome === "failed" && entries[0].result.failure.type, "no-commit");
+  assert.equal(delivered[0]?.outcome === "failed" && delivered[0].failure.type, "no-commit");
   assert.equal(lease.current(), undefined);
 });
 
@@ -148,23 +138,11 @@ test("hook routes validate identities and accept Claude snake-case result fields
   assert.equal((await handler(request("/hooks/stop", { agentId: "worker-10" }))).status, 400);
 });
 
-test("only unattended agents with a waiting caller are reconciled on terminal close", () => {
+test("only Auto Run workers with result delivery are reconciled on terminal close", () => {
   const automated = worker();
   assert.equal(reportsResult(automated), true);
-  assert.equal(reportsResult({ ...automated, resultDelivery: { mode: "mailbox", recipientAgentId: agent("manager-1") } }), true);
   assert.equal(reportsResult({ ...automated, resultDelivery: { mode: "none" } }), false);
-  for (const type of ["manager", "brainstormer"] as const) {
-    assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type }, attended: true }), false, type);
-  }
-  // The automated types always owe one; general-purpose owes one exactly when
-  // its launch does.
-  for (const type of ["webresearcher", "Explore"] as const) {
-    assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type } }), true, type);
-    // Defence in depth: the delivery half still decides, even though an
-    // automated type with no delivery is now rejected at the parse boundary.
-    assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type }, resultDelivery: { mode: "none" } }), false, type);
-  }
-  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "general-purpose" } }), true);
-  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "general-purpose" }, attended: true }), false);
-  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "general-purpose" }, resultDelivery: { mode: "none" } }), false);
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "reviewer" } }), true);
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "interactive" }, attended: true }), false);
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "Explore" }, resultDelivery: { mode: "none" } }), false);
 });

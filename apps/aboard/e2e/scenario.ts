@@ -3,8 +3,6 @@ import { resolve } from "node:path";
 import { contains } from "./config.js";
 
 export const SCENARIO_MARKER = "[E2E:single-file-success]";
-export const MANAGER_SCENARIO_MARKER = "[E2E:manager-foreground-explore]";
-export const EXPLORE_SCENARIO_MARKER = "[E2E:explore-read-report]";
 export const AUTO_RUN_AFK_MARKER = "[E2E:auto-run-afk]";
 export const AUTO_RUN_PERMANENT_NOTE = "E2E permanent auto-run guidance.";
 export const AUTO_RUN_NESTED_CONTEXT = "E2E recursively resolved nested issue context.";
@@ -14,10 +12,8 @@ export const AUTO_RUN_FOLLOWUP_MARKER = "[E2E:auto-run-followup]";
 export const BEFORE_CONTENT = "aboard e2e fixture: before\n";
 export const AFTER_CONTENT = "aboard e2e fixture: after\n";
 export const FINAL_RESPONSE = "Fixture updated and verified.\n\n<commit>Update deterministic fixture</commit>";
-export const EXPLORE_REPORT = "Explore verified that deterministic.txt contains the canonical before fixture.";
-export const MANAGER_DELEGATION_RESULT = "Manager received the Explore report exactly once and verified the fixture.";
 
-export type ScenarioId = "single-file-success" | "manager-foreground-explore" | "explore-read-report" | "auto-run-afk" | "auto-run-hitl" | "auto-run-followup";
+export type ScenarioId = "single-file-success" | "auto-run-afk" | "auto-run-hitl" | "auto-run-followup";
 
 export const SCENARIO_MANIFEST = {
   schemaVersion: 1,
@@ -115,8 +111,6 @@ function validateMessageShape(messages: readonly unknown[]): void {
 
 export function transition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
   const scenario = selectScenario(request.messages);
-  if (scenario === "manager-foreground-explore") return managerTransition(request);
-  if (scenario === "explore-read-report") return exploreTransition(request, repoRoot);
   if (scenario === "auto-run-afk") return autoRunAfkTransition(request, repoRoot);
   if (scenario === "auto-run-hitl") return autoRunSequentialTransition(request, repoRoot, {
     scenario, checkpoint: "auto-hitl", readId: "toolu_e2e_auto_hitl_read", editId: "toolu_e2e_auto_hitl_edit",
@@ -315,66 +309,6 @@ function toolResponse(checkpoint: "read-target" | "edit-target", id: string, nam
   };
 }
 
-function managerTransition(request: MessagesRequest): ScenarioResponse {
-  const scenario = "manager-foreground-explore" as const;
-  const toolName = "mcp__aboard__run_agent";
-  const toolUseId = "toolu_e2e_manager_delegate";
-  const result = scenarioToolResult(request.messages, toolUseId, toolName, scenario);
-  if (!result) {
-    requireScenarioTool(request, toolName, scenario);
-    return {
-      scenario,
-      checkpoint: "delegate-explore",
-      messageId: scenarioStableId(scenario, "delegate-explore"),
-      stopReason: "tool_use",
-      content: [{
-        type: "tool_use",
-        id: toolUseId,
-        name: toolName,
-        input: {
-          type: "Explore",
-          prompt: `${EXPLORE_SCENARIO_MARKER} Read deterministic.txt and report its exact fixture state.`,
-          description: "inspect the deterministic fixture",
-        },
-      }],
-    };
-  }
-  if (result.is_error === true) throw new ScenarioMismatch("$.messages", "run_agent tool_result reported an error", scenario);
-  if (!contentContains(result.content, EXPLORE_REPORT)) throw new ScenarioMismatch("$.messages", "run_agent tool_result did not contain the Explore report", scenario);
-  return {
-    scenario,
-    checkpoint: "manager-complete",
-    messageId: scenarioStableId(scenario, "manager-complete"),
-    stopReason: "end_turn",
-    content: [{ type: "text", text: MANAGER_DELEGATION_RESULT }],
-  };
-}
-
-function exploreTransition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
-  const scenario = "explore-read-report" as const;
-  const toolName = "Read";
-  const toolUseId = "toolu_e2e_explore_read";
-  const result = scenarioToolResult(request.messages, toolUseId, toolName, scenario);
-  if (!result) {
-    requireScenarioTool(request, toolName, scenario);
-    return {
-      scenario,
-      checkpoint: "explore-read",
-      messageId: scenarioStableId(scenario, "explore-read"),
-      stopReason: "tool_use",
-      content: [{ type: "tool_use", id: toolUseId, name: toolName, input: { file_path: fixturePath(repoRoot) } }],
-    };
-  }
-  if (result.is_error === true) throw new ScenarioMismatch("$.messages", "Read tool_result reported an error", scenario);
-  if (!contentContains(result.content, BEFORE_CONTENT.trimEnd())) throw new ScenarioMismatch("$.messages", "Read tool_result did not contain the expected fixture marker", scenario);
-  return {
-    scenario,
-    checkpoint: "explore-complete",
-    messageId: scenarioStableId(scenario, "explore-complete"),
-    stopReason: "end_turn",
-    content: [{ type: "text", text: EXPLORE_REPORT }],
-  };
-}
 
 function requireScenarioTool(request: MessagesRequest, name: string, scenario: ScenarioId): void {
   const offered = request.tools.some((tool) => tool.name === name);
@@ -480,8 +414,6 @@ function selectScenario(messages: readonly Message[]): ScenarioId {
   if (text.includes("Review pull request") && text.includes(AUTO_RUN_PERMANENT_NOTE)) return "auto-run-afk";
   const markers = [
     ["single-file-success", SCENARIO_MARKER],
-    ["manager-foreground-explore", MANAGER_SCENARIO_MARKER],
-    ["explore-read-report", EXPLORE_SCENARIO_MARKER],
     ["auto-run-afk", AUTO_RUN_AFK_MARKER],
     ["auto-run-hitl", AUTO_RUN_HITL_MARKER],
     ["auto-run-followup", AUTO_RUN_FOLLOWUP_MARKER],

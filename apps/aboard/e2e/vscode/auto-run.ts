@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { runTests } from "@vscode/test-electron";
@@ -19,6 +19,7 @@ export async function runAutoRunJourney(): Promise<void> {
   await clearTestAutoRunRecords();
   await mkdir(config.claudeConfigRoot, { recursive: true });
   await prepareInteractiveClaudeConfig(config.claudeConfigRoot, [config.cloneRoot, resolve(__dirname, "..", "..", "..")]);
+  await installHarnessWorkerSkills(config.claudeConfigRoot);
   const issues = await createIssues(config.repository);
   const server = await startFakeAnthropicServer({
     repoRoot: config.cloneRoot,
@@ -52,6 +53,7 @@ export async function runAutoRunJourney(): Promise<void> {
         launchArgs: [config.cloneRoot, "--disable-extensions"],
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
+        "aboard.launch.claudeCommand": ["claude", "--permission-mode", "acceptEdits"],
         "aboard.autoRun.review": true,
         "aboard.autoRun.exploreBeforeImplement": true,
         "aboard.autoRun.recursiveIssueReferences": true,
@@ -74,12 +76,6 @@ export async function runAutoRunJourney(): Promise<void> {
 }
 
 async function commitInitializedScaffold(root: string, settings: Readonly<Record<string, unknown>>): Promise<void> {
-  for (const name of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
-    const path = join(root, ".abd", "agents", `${name}.md`);
-    const definition = await readFile(path, "utf8");
-    if (!/^command: claude$/mu.test(definition)) throw new Error(`${name} does not expose the canonical Claude command`);
-    await writeFile(path, definition.replace(/^command: claude$/mu, "command: claude --permission-mode acceptEdits"), "utf8");
-  }
   const settingsPath = join(root, ".vscode", "settings.json");
   await mkdir(join(root, ".vscode"), { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
@@ -102,6 +98,15 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
     },
   });
   await execFileAsync("git", ["push", "origin", "main"], { cwd: root, encoding: "utf8", windowsHide: true });
+}
+
+async function installHarnessWorkerSkills(configRoot: string): Promise<void> {
+  const harnessRoot = resolve(__dirname, "..", "..", "..", "..", "..");
+  for (const name of ["implement", "review-afk", "review-hitl"]) {
+    const destination = join(configRoot, "skills", name, "SKILL.md");
+    await mkdir(join(configRoot, "skills", name), { recursive: true });
+    await copyFile(join(harnessRoot, "harness", name, "shared", "skills", name, "SKILL.md"), destination);
+  }
 }
 
 async function installWorktreeTrustSetup(root: string): Promise<void> {
@@ -200,6 +205,7 @@ async function runSingleBranchJourney(): Promise<void> {
         launchArgs: [config.cloneRoot, "--disable-extensions"],
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
+        "aboard.launch.claudeCommand": ["claude", "--permission-mode", "acceptEdits"],
         "aboard.autoRun.branchMode": "single-branch",
         "aboard.autoRun.review": false,
         "aboard.autoRun.exploreBeforeImplement": false,

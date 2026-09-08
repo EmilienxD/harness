@@ -1,15 +1,7 @@
 {
-  "UserPromptSubmit": [
-    { "hooks": [
-      { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "manager-prompt"], "timeout": 60 }
-    ] }
-  ],
   "SessionStart": [
     { "matcher": "startup|resume", "hooks": [
       { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "session-start"] }
-    ] },
-    { "matcher": "startup|resume|clear|compact|fork", "hooks": [
-      { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "manager-brief"], "timeout": 120 }
     ] },
     { "matcher": "compact", "hooks": [
       { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-reground"], "timeout": 120 }
@@ -20,23 +12,13 @@
       { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "session-end"], "timeout": 10 }
     ] }
   ],
-  "SubagentStart": [
-    { "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-subagent-start"] } ] }
-  ],
-  "SubagentStop": [
-    { "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-subagent-stop"] } ] }
-  ],
-  "PostToolUse": [
-    { "matcher": "Agent", "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-agent-tool"] } ] },
-    { "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "report-delivery"], "timeout": 120 } ] },
-    { "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "manager-roadmap"], "timeout": 60 } ] }
-  ],
   "PostCompact": [
-    { "matcher": "manual|auto", "hooks": [ { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-post-compact"] } ] }
+    { "matcher": "manual|auto", "hooks": [
+      { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-post-compact"] }
+    ] }
   ],
   "Stop": [
     { "hooks": [
-      { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "report-stop"], "timeout": 86400 },
       { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-stop"] }
     ] }
   ],

@@ -3,7 +3,7 @@ import {
   EMPTY_ACTIVITY,
   agentActivity,
   appendActivity,
-  migrateLegacySessions,
+
   runActivity,
   type ActivityDto,
   type ActivityEntry,
@@ -11,12 +11,11 @@ import {
   type RunOutcome,
 } from "../domain/activity.js";
 import type { AgentSession, IsoTimestamp, TerminalId } from "../domain/contracts.js";
-import type { FileActivityStore, FileLegacySessionLedger } from "./persistence.js";
+import type { FileActivityStore } from "./persistence.js";
 
 export interface ActivityRecorderOptions {
   readonly store: FileActivityStore;
-  /** Read once so its reopenable sessions survive; never written again. */
-  readonly legacy?: FileLegacySessionLedger;
+
   /** Writes are refused while the project is not initialized. */
   readonly admission: () => boolean;
   readonly now: () => Date;
@@ -39,13 +38,8 @@ export class ActivityRecorder {
   }
 
   public async load(): Promise<void> {
-    const current = await this.options.store.load().catch(() => undefined) ?? EMPTY_ACTIVITY;
-    const legacy = await this.options.legacy?.load().catch(() => undefined);
-    const merged = legacy === undefined ? current : migrateLegacySessions(current, legacy.sessions);
-    this.#cache = merged;
+    this.#cache = await this.options.store.load().catch(() => undefined) ?? EMPTY_ACTIVITY;
     this.options.onDidChange();
-    if (legacy !== undefined && merged !== current) this.#enqueue(() => merged);
-    if (legacy !== undefined) await this.options.legacy?.remove().catch(() => undefined);
   }
 
   public recordAgent(

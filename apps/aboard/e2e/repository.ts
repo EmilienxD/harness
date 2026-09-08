@@ -12,7 +12,7 @@ const FIXED_DATE = "2026-01-01T00:00:00Z";
 const REQUIRED_ACCOUNT = "EmilienxD";
 
 const LABELS = [
-  { name: "[AI]-todo", color: "1D76DB", description: "Project roadmap" },
+
   { name: "[AI]-afk", color: "0E8A16", description: "May run and merge unattended" },
   { name: "[AI]-hitl", color: "D93F0B", description: "Requires human review" },
   { name: "[AI]-chrome", color: "5319E7", description: "Enable Claude in Chrome for the implementer" },

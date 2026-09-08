@@ -2,7 +2,7 @@ import type { ExtensionContext } from "vscode";
 import { ProgressLocation, RelativePattern, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
-import { FileAgentMcpConfigs, FileManagerMcpConfig } from "./bridge/mcp-config.js";
+
 import {
   DEFAULT_BRIDGE_PORT,
   startBridge,
@@ -11,16 +11,14 @@ import {
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
-import { TerminalController, type TerminalSnapshot } from "./claude/terminals.js";
-import { isNamedBuiltinAgentType, type TerminalId } from "./domain/contracts.js";
+import { TerminalController } from "./claude/terminals.js";
+import type { TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
-import { FileManagerStore, ManagerIdentity, ManagerLifecycle } from "./claude/manager.js";
 import { sessionIsResumable } from "./claude/sessions.js";
-import { TranscriptBackupStore } from "./claude/transcript-backup.js";
 import { ClaudeCommandProbe, spawnCommandRunner } from "./claude/preflight.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldCatalogRevision, scaffoldProject } from "./scaffold/project.js";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
 import { registerNativeFleetUi, type NativeFleetUiRegistration } from "./vscode/native-ui.js";
@@ -28,15 +26,15 @@ import type { AutoRunPreview } from "./vscode/auto-run.js";
 import {
   ABOARD_SETTINGS,
   EMPTY_PROJECT_SETTINGS,
-  MANAGER_RESTART_SETTINGS,
+
   PROJECT_SETTINGS_PATH,
   createLayeredReader,
-  managerLaunchChanged,
+
   parseProjectSettings,
   readAboardConfiguration,
   type ProjectSettings,
 } from "./configuration.js";
-import { FileActivityStore, FileFleetStore, FileLegacySessionLedger, PersistOnChange } from "./runtime/persistence.js";
+import { FileActivityStore, FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
 import { isInteractiveLaunch, shouldRecordEndedSession } from "./domain/activity.js";
 import { completedCount, isUnsupportedRecord } from "./domain/run-plan.js";
@@ -44,19 +42,9 @@ import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
 import { registerReopenCommand } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
-import { DelegationCoordinator, DelegationError, type DelegationConfigurationSource } from "./bridge/delegation.js";
-import { ABOARD_MCP_TOOL_PATTERN, createMcpHandler } from "./bridge/mcp.js";
-import { GeneralPurposeQueue } from "./bridge/general-purpose-queue.js";
+import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
-import {
-  ManagerBriefings,
-  ManagerPromptService,
-  ManagerStopService,
-  RoadmapReminderService,
-  createManagerHookRoutes,
-  type BriefingSources,
-  type RoadmapBriefing,
-} from "./bridge/manager-hooks.js";
+
 import { GitWorkingTreeInspector, WorkerLifecycleReconciler, createWorkerLifecycleRoutes, reportsResult } from "./bridge/lifecycle.js";
 import {
   SessionLifecycleService,
@@ -70,32 +58,29 @@ import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore } from "./claude/spill.js";
-import { agentDefinitionPath, parseAgentDefinition, parseBuiltinAgentProfile, sanitizeAgentDefinition } from "./scaffold/agent-definition.js";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
-import { ReviewCoordinator, type PullRequestOwnership, type ReviewTerminals } from "./github/review.js";
+
 
 /** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the claude CLI boot. */
 const STARTUP_PROOF_TIMEOUT_MS = 60_000;
 const SESSION_LIVENESS_POLL_MS = 5_000;
-import { registerReviewCommand } from "./vscode/review.js";
+
 import { CachingGitClient, ProcessGitClient, type GitClient } from "./git/client.js";
 import { AboardBranchCleanup, ProcessAboardBranchRepository } from "./git/branch-cleanup.js";
 import { registerBranchCleanupCommand } from "./vscode/branch-cleanup.js";
-import { AutoRunEngine, type AutoRunState, type PullRequestOwner } from "./auto/engine.js";
+import { AutoRunEngine } from "./auto/engine.js";
 import { closeSettledAutoRunTerminal } from "./auto/terminal-cleanup.js";
 import { WorktreeRunWorkspaces } from "./auto/worktree.js";
-import { AUTO_RUN_DISALLOWED_TOOLS } from "./auto/permissions.js";
+
 import { FileAutoRunStore } from "./runtime/persistence.js";
 import { RuntimeAdmission, RuntimeStartup } from "./runtime/admission.js";
 import { RuntimeLayout } from "./runtime/layout.js";
 import {
   AUTO_RUN_WORKER_SKILLS,
   autoRunWorkerConfiguration,
-  planSessionResume,
-  resolveLaunchConfiguration,
   type AutoRunWorkerType,
   type LaunchConfiguration,
 } from "./claude/launch.js";
@@ -124,132 +109,14 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
   }
 }
 
-async function repositoryChecks(workspaceRoot: string): Promise<readonly string[]> {
-  const preferred = ["check", "lint", "test", "build"];
-  try {
-    const parsed: unknown = JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"));
-    if (typeof parsed !== "object" || parsed === null) return [];
-    const scripts = (parsed as { scripts?: unknown }).scripts;
-    if (typeof scripts !== "object" || scripts === null) return [];
-    const available = new Set(Object.keys(scripts as Record<string, unknown>));
-    return preferred.filter((name) => available.has(name)).map((name) => `npm run ${name}`);
-  } catch { return []; }
-}
-
-function roadmapBriefing(github: GitHubClient): (signal: AbortSignal) => Promise<RoadmapBriefing | undefined> {
-  return async () => {
-    const snapshot = await github.readRoadmap();
-    if (snapshot === undefined) return undefined;
-    return {
-      number: snapshot.number,
-      tasks: snapshot.tasks,
-      carrierCount: snapshot.carrierCount,
-      nearBound: snapshot.nearBound,
-      duplicateSubjects: snapshot.duplicateSubjects,
-    };
-  };
-}
-
-function briefingSources(
-  git: GitClient,
-  github: GitHubClient,
-  workspaceRoot: string,
-  previousSessionAt: () => string | undefined,
-  autoRunState: () => AutoRunState | undefined,
-): BriefingSources {
-  return {
-    repository: async () => {
-      const [defaultBranch, checks, codebase] = await Promise.all([
-        git.defaultBranch(),
-        repositoryChecks(workspaceRoot),
-        // Its own probe: a survey that fails costs its line, not the section
-        // that also carries the default branch and the baseline checks.
-        git.codebase().catch(() => undefined),
-      ]);
-      return { name: basename(workspaceRoot), defaultBranch, checks, ...(codebase === undefined ? {} : { codebase }) };
-    },
-    git: async () => {
-      const status = await git.status();
-      return {
-        branch: status.branch ?? "detached",
-        head: await git.headSha(),
-        dirty: status.entries.length > 0,
-      };
-    },
-    github: async () => {
-      const since = previousSessionAt();
-      const [roadmap, pullRequests, merges] = await Promise.all([
-        github.listRoadmapIssues(),
-        github.listOpenPullRequests(),
-        since === undefined ? Promise.resolve([]) : github.listUnreviewedMerges(since),
-      ]);
-      return {
-        issues: roadmap.map((issue) => ({
-          number: issue.number,
-          title: issue.title,
-          disposition: issue.disposition,
-          blockedBy: issue.ready ? [] : issue.dependencyNumbers,
-        })),
-        openPullRequests: pullRequests,
-        unreviewedMergeCount: merges.length,
-      };
-    },
-    roadmap: roadmapBriefing(github),
-    autoRun: () => {
-      const state = autoRunState();
-      if (state === undefined) return undefined;
-      return {
-        phase: state.phase,
-        currentIssue: state.currentIssue,
-        completedCount: state.completedCount,
-        ...(state.waiting && state.currentPullRequest !== undefined
-          ? { waitingOnPullRequest: state.currentPullRequest }
-          : {}),
-      };
-    },
-  };
-}
 
 function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
   return { get: async (type) => {
-    if (type === "general-purpose") return { shape: "default" };
-    if (type in AUTO_RUN_WORKER_SKILLS) {
-      const workerType = type as AutoRunWorkerType;
-      await requireHarnessSkill(workspaceRoot, AUTO_RUN_WORKER_SKILLS[workerType]);
-      return autoRunWorkerConfiguration(workerType);
-    }
-    if (isNamedBuiltinAgentType(type)) {
-      let source: string;
-      try {
-        source = await readFile(agentDefinitionPath(workspaceRoot, type), "utf8");
-      } catch (error) {
-        // Existing initialized projects may not have received the new profile
-        // yet. Preserve the old launch until the user updates the scaffold.
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return { shape: "builtin", agentName: type };
-        throw error;
-      }
-      const result = parseBuiltinAgentProfile(source);
-      if (!result.ok) throw new Error(`Invalid ${type} builtin profile: ${result.reason}`);
-      return resolveLaunchConfiguration({
-        agentName: type,
-        declaredModel: result.value.model,
-        declaredEffort: result.value.effort,
-        declaredCommand: result.value.command,
-      });
-    }
-    const result = parseAgentDefinition(await readFile(agentDefinitionPath(workspaceRoot, type), "utf8"));
-    if (!result.ok) throw new Error(`Invalid ${type} agent definition: ${result.reason}`);
-    const sanitized = sanitizeAgentDefinition(result.value);
-    return resolveLaunchConfiguration({
-      agentName: type,
-      systemPrompt: sanitized.prompt,
-      declaredTools: sanitized.tools,
-      declaredDescription: sanitized.description,
-      extraFrontmatter: sanitized.extraFrontmatter,
-      declaredModel: sanitized.model,
-      declaredEffort: sanitized.effort,
-      declaredCommand: sanitized.command,
-    });
+    if (type === "interactive") return { shape: "default" };
+    if (type === "Explore") return { shape: "builtin", agentName: "Explore" };
+    const workerType = type as AutoRunWorkerType;
+    await requireHarnessSkill(workspaceRoot, AUTO_RUN_WORKER_SKILLS[workerType]);
+    return autoRunWorkerConfiguration(workerType);
   } };
 }
 
@@ -287,13 +154,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let initialized = scaffoldState === "ready";
   let scaffoldUpdateWarningShown = false;
   const runtimeAdmission = new RuntimeAdmission(initialized);
-  const agentMcpConfigs = new FileAgentMcpConfigs(storageRoot, runtimeAdmission, () => initialized && bridge !== undefined);
-  // Clean the pre-role-catalog Manager filename as well as current per-agent
-  // registrations. New Manager launches use the same per-agent store as a
-  // brainstormer, so the existing session-end cleanup covers both roles.
-  const legacyManagerMcpConfig = new FileManagerMcpConfig(storageRoot, runtimeAdmission, () => initialized && bridge !== undefined);
-  await Promise.all([agentMcpConfigs.clearAll().catch(() => undefined), legacyManagerMcpConfig.clear().catch(() => undefined)]);
-  context.subscriptions.push({ dispose: () => { void agentMcpConfigs.clearAll(); void legacyManagerMcpConfig.clear(); } });
+
   const requireInitialized = (): boolean => {
     if (initialized) return true;
     void window.showInformationMessage(scaffoldState === "update-required"
@@ -310,10 +171,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         ...bridgeEnvironment,
         workspaceRoot,
         runtimeRoot: runtime.root,
-        // A foreground MCP delegation and the Manager's Stop hook share one
-        // operator-controlled wall-clock bound.
-        managerMcpTimeoutMs: currentConfiguration.managerStopTimeoutSeconds * 1000,
-        managerRoadmapReminderBytes: currentConfiguration.managerRoadmapReminderBytes,
       };
     },
     terminalIdFactory: () => randomUUID() as TerminalId,
@@ -342,7 +199,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         // later poll does not report it as dead when the shell dumped it.
         sessionMonitor.untrack(event.agentId);
         sessionProofs.cancel(event.agentId);
-        void agentMcpConfigs.clear(event.agentId).catch(() => undefined);
       }
       if (event.type !== "terminal-closed") return;
       const closed = fleet?.get(event.agentId);
@@ -371,7 +227,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const activityListeners = new Set<() => void>();
   const activity = new ActivityRecorder({
     store: new FileActivityStore(runtime.root, runtimeAdmission),
-    legacy: new FileLegacySessionLedger(runtime.root, runtimeAdmission),
     admission: () => initialized,
     now: () => new Date(),
     log: (message) => output.appendLine(message),
@@ -394,31 +249,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no Claude conversation started.`);
       return;
     }
-    const classified = session.identity.type === "manager" || isInteractiveLaunch(session)
-      ? outcome
-      : outcome === "ended" ? "succeeded" : outcome;
+    const classified = isInteractiveLaunch(session) ? outcome : outcome === "ended" ? "succeeded" : outcome;
     activity.recordAgent(session, classified, endedAt, {
       ...(reason === undefined ? {} : { reason }),
       ...(terminalId === undefined ? {} : { terminalId }),
     });
   };
-  const managerStore = new FileManagerStore(runtime.root, runtimeAdmission);
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
-  let recordedManager = initialized ? await managerStore.load() : undefined;
-  let agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => [
-    ...fleet.list().map((session) => session.identity.agentId as string),
-    ...(recordedManager === undefined ? [] : [recordedManager.agentId as string]),
-  ], runtimeAdmission.isOpen);
+  let agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => fleet.list().map((session) => session.identity.agentId as string), runtimeAdmission.isOpen);
   const lease = new WriteLease();
-  const managerIdentity = new ManagerIdentity(recordedManager?.agentId, () => agentIdCounter.next());
-  const transcripts = new TranscriptBackupStore({
-    workspaceRoot,
-    directory: runtime.transcripts(),
-    retain: () => currentConfiguration.managerTranscriptBackups,
-    log: (message) => output.appendLine(message),
-  });
-  if (initialized) await transcripts.prune();
-  if (initialized && recordedManager !== undefined) void runtimeAdmission.run(() => transcripts.checkpoint(recordedManager!.sessionId));
   const launchConfigurations = workerConfigurations(workspaceRoot);
   const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot, runtime.root, {
     settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
@@ -433,7 +272,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, managerAgentId: () => managerIdentity.require(), mcpConfig: async (agentId, type) => type === "brainstormer" ? agentMcpConfigs.write({ port: bridge!.port, token: bridge!.token, agentId }) : undefined, shell: process.platform === "win32" ? "powershell" : "git-bash", disallowedTools: [ABOARD_MCP_TOOL_PATTERN], command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -470,7 +309,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // The launch is settled; the proof's timeout must not fire later and kill a
     // terminal whose error message is the whole point of keeping it.
     sessionProofs.cancel(agentId);
-    void agentMcpConfigs.clear(agentId).catch(() => undefined);
     const at = new Date().toISOString() as IsoTimestamp;
     const failed = fleet.get(agentId);
     if (failed !== undefined) {
@@ -491,7 +329,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       // read back against a later launch of the same agent.
       const exit = takeSessionExitRecord(observation.lockFile);
       void runtimeFiles.remove?.(observation.agentId).catch(() => undefined);
-      void agentMcpConfigs.clear(observation.agentId).catch(() => undefined);
       if (observation.phase === "launching") {
         reportFailedLaunch(observation.agentId, observation.sessionId, exit);
         return;
@@ -516,7 +353,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const session = fleet.get(agentId);
     if (session === undefined) return;
     const at = new Date().toISOString() as IsoTimestamp;
-    void agentMcpConfigs.clear(agentId).catch(() => undefined);
     output.appendLine(`Conversation for agent ${agentId} ended (${reason}); the terminal stays open`);
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(agentId, at, `agent session ended (${reason})`);
@@ -560,7 +396,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       git,
       gitFor: (cwd) => new CachingGitClient(new ProcessGitClient(cwd)),
       settings: () => currentConfiguration.autoRun.worktree,
-      notify: (message) => enqueueManagerNotification(message),
+      notify: (message) => output.appendLine(message),
       log: (message) => output.appendLine(message),
     }),
     github,
@@ -568,7 +404,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     terminals: { close: (terminalId) => closeSettledAutoRunTerminal(terminals, fleet, terminalId) },
     store: new FileAutoRunStore(runtime, runtimeAdmission),
     notifier: {
-      notify: (message) => enqueueManagerNotification(message),
+      notify: (message) => output.appendLine(message),
       alert: (message, pullRequestUrl) => { alertAboutAutoRun(message, pullRequestUrl); },
     },
     activity: {
@@ -603,61 +439,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     onRecordChange: () => fleetUi?.refresh(),
   });
   activeAutoRun = autoRun;
-  const ownership: PullRequestOwnership = { owner: (prNumber) => autoRun.owner(prNumber) };
-  // `review_pr` focuses a live terminal or resumes a closed session. Resume is
-  // safe because the agent has already run, so a transcript exists.
-  const reviewTerminals: ReviewTerminals = {
-    focus: (terminalId) => { try { terminals.show(terminalId); return true; } catch { return false; } },
-    resume: async (owner: PullRequestOwner) => {
-      const configuration = await launchConfigurations.get(owner.type);
-      const plan = planSessionResume({
-        agentId: owner.agentId,
-        sessionId: owner.sessionId,
-        agentType: owner.type,
-        shell: process.platform === "win32" ? "powershell" : "git-bash",
-        // `review_pr` exists to hand the session back to the user, so the
-        // resumed terminal is driven by them even when it owned an afk worker.
-        attended: true,
-        command: currentConfiguration.claudeCommand,
-        configuration,
-        runtimeDirectory: runtime.root,
-        disallowedTools: [ABOARD_MCP_TOOL_PATTERN, ...AUTO_RUN_DISALLOWED_TOOLS],
-        ...(currentConfiguration.launchEffort === undefined ? {} : { effort: currentConfiguration.launchEffort }),
-        // The session resumes at the tier it was launched under, so a doctor the
-        // user reopens is the same agent they watched, not a cheaper one.
-        ...(owner.difficulty === undefined ? {} : { difficulty: owner.difficulty }),
-        wrapper: wrapperLayout,
-      });
-      // User-authored skills come from the checkout where this session ran;
-      // generated launch files stay in VS Code workspace storage.
-      await runtimeFiles.prepare(plan, owner.cwd);
-      if (!runtimeAdmission.isOpen()) throw new Error("aboard runtime reset while preparing review resume");
-      const at = new Date().toISOString() as IsoTimestamp;
-      const terminal = terminals.create({
-        agentId: owner.agentId,
-        sessionId: owner.sessionId,
-        agentType: owner.type,
-        issueNumbers: [owner.issueNumber],
-        name: `aboard: resume pull request ${owner.prNumber}`,
-        ...(owner.cwd === undefined ? {} : { cwd: owner.cwd }),
-        initialCommand: plan.commandLine,
-        attended: true,
-        startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS,
-      });
-      // The agent finished, so its fleet row is spent history; `restart` reuses
-      // the identity rather than leaving a live terminal untracked.
-      const recorded = fleet.get(owner.agentId);
-      if (recorded !== undefined && (recorded.lifecycle.status === "completed" || recorded.lifecycle.status === "failed")) {
-        fleet.restart(owner.agentId, { terminalId: terminal.terminalId, name: terminal.name }, at, undefined, true);
-        fleet.transition(owner.agentId, { status: "running", startedAt: at }, at);
-      }
-      terminals.show(terminal.terminalId);
-    },
-  };
-  const reviews = new ReviewCoordinator(github, coordinator, ownership, reviewTerminals);
-  // Assigned once the Manager lifecycle exists below; the coordinator only calls
-  // it when a manager is reopened, which cannot happen before activation ends.
-  let resumeManager: (() => Promise<void>) | undefined;
   const reopen = new ReopenCoordinator({
     activity: { entries: () => activity.store() },
     fleet,
@@ -668,75 +449,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
     launcher: coordinator,
     isResumable: (sessionId, cwd) => sessionIsResumable(sessionId, cwd ?? workspaceRoot),
-    reopenManager: async () => { await resumeManager?.(); },
   });
-  const briefings = new ManagerBriefings(
-    briefingSources(git, github, workspaceRoot, () => recordedManager?.updatedAt, () => autoRun.state()),
-    fleet,
-    lease,
-    {
-      write: async (slice: "state" | "roadmap", content: string) => {
-        return runtimeAdmission.run(async () => {
-          const path = join(runtime.events(), `brief-${slice}.txt`);
-          await mkdir(runtime.events(), { recursive: true });
-          await writeFile(path, content, "utf8");
-          return path;
-        });
-      },
-    },
-  );
-  // The Stop hook long-polls: it must keep waiting while background workers are
-  // live, and wake the moment one of them files a result.
-  const managerStop = new ManagerStopService({
-    fleet,
-    waitForChange: (signal, afterRevision) => new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = (): void => {
-        if (settled) return;
-        settled = true;
-        registration.dispose();
-        signal.removeEventListener("abort", onAbort);
-        resolve();
-      };
-      const registration = fleet.onDidChange(finish);
-      const onAbort = (): void => finish();
-      signal.addEventListener("abort", onAbort, { once: true });
-      // A report may have landed between the service checking the fleet and
-      // this listener being installed. The revision closes that lost wakeup.
-      if (signal.aborted || fleet.revision() !== afterRevision) finish();
-    }),
-  });
-  const roadmapReminders = new RoadmapReminderService({ roadmap: roadmapBriefing(github) });
-  const generalPurposeQueue = new GeneralPurposeQueue({
-    git,
-    launcher: coordinator,
-    canLaunch: () => initialized && autoRun.state() === undefined,
-    isAgentLive: (agentId) => {
-      const session = fleet.get(agentId);
-      return session !== undefined && isLiveSession(session);
-    },
-    onLaunch: (agentId, remaining) => {
-      const message = `Queued general-purpose task launched as agent ${agentId}${remaining === 0 ? "." : `; ${remaining} task(s) remain queued.`}`;
-      output.appendLine(message);
-      const managerAgentId = managerIdentity.current();
-      if (managerAgentId !== undefined && fleet.get(managerAgentId)?.identity.type === "manager") {
-        fleet.enqueueNotification(managerAgentId, message, new Date().toISOString() as IsoTimestamp);
-      }
-    },
-    onError: (message) => output.appendLine(`General-purpose queue is waiting: ${message}.`),
-  });
-  context.subscriptions.push({ dispose: () => generalPurposeQueue.dispose() });
-  const managerPrompts = new ManagerPromptService(fleet, coordinator, undefined, {
-    startAutoRun: (options) => options?.dry === true
-      ? autoRun.dryRun({
-          ...(options.additionalGuideline === undefined ? {} : { additionalGuideline: options.additionalGuideline }),
-        })
-      : autoRun.start({
-          ...(options?.additionalGuideline === undefined ? {} : { additionalGuideline: options.additionalGuideline }),
-        }),
-    reviewPullRequest: (focus) => reviews.review(focus === undefined ? {} : { focus }),
-    reopenSession: (selector) => reopen.reopenLatest(selector),
-  }, terminals, roadmapReminders, generalPurposeQueue);
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);
   commandEndpointRegistry = commandEndpoint;
@@ -748,25 +461,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!initialized || bridge !== undefined) return;
     bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createMcpHandler(coordinator, { fleet, services: { github, reviews, autoRun, continuations: { continue: async (callerAgentId, targetAgentId, prompt) => {
-      const option = await reopen.findContinuation(targetAgentId);
-      if (option === undefined) throw new DelegationError("unknown-agent", `Unknown agent ${targetAgentId}`);
-      if (!option.resumable) throw new DelegationError("unresumable-session", `Agent ${targetAgentId} no longer has a resumable conversation`);
-      const candidate = option.candidate;
-      return coordinator.continue({
-        agentId: candidate.agentId,
-        type: candidate.type,
-        sessionId: candidate.sessionId,
-        terminalName: `aboard: ${candidate.description}`,
-        ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
-        ...(candidate.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
-        ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
-        ...(candidate.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-      }, prompt, callerAgentId);
-    } }, log: (message) => output.appendLine(message) } }), createManagerHookRoutes(briefings, managerStop, managerPrompts, roadmapReminders, (agentId) => {
-      const session = fleet.get(agentId);
-      if (session?.identity.type === "manager") void runtimeAdmission.run(() => transcripts.checkpoint(session.sessionId));
-    }), createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet, runtimeFiles)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
+    handler: combineHandlers(createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet, runtimeFiles)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
     bridgeEnvironment = { port: bridge.port, token: bridge.token };
@@ -824,16 +519,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       onDidChange: (listener) => { activityListeners.add(listener); return { dispose: () => activityListeners.delete(listener) }; },
     },
   });
-  const enqueueManagerNotification = (message: string): void => {
-    output.appendLine(message);
-    const managerAgentId = managerIdentity.current();
-    if (managerAgentId === undefined) return;
-    if (fleet.get(managerAgentId)?.identity.type !== "manager") return;
-    try { fleet.enqueueNotification(managerAgentId, message, new Date().toISOString() as IsoTimestamp); }
-    catch (error) { output.appendLine(`Unable to queue auto-run notification: ${error instanceof Error ? error.message : "unknown error"}`); }
-  };
+
   const alertAboutAutoRun = (message: string, pullRequestUrl?: string): void => {
-    enqueueManagerNotification(message);
+    output.appendLine(message);
     const actions = pullRequestUrl === undefined ? ["Show Log"] : ["Open Pull Request", "Show Log"];
     void window.showWarningMessage(message, ...actions).then((choice) => {
       if (choice === "Open Pull Request" && pullRequestUrl !== undefined) void env.openExternal(Uri.parse(pullRequestUrl));
@@ -852,48 +540,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // Disposed through subscriptions like every other resource; `deactivate` also
   // awaits it so queued writes are flushed on a normal shutdown.
   context.subscriptions.push({ dispose: () => void persistence?.dispose() });
-  const manager = new ManagerLifecycle({
-    store: managerStore, terminals, workspaceRoot, runtimeDirectory: runtime.root, files: runtimeFiles, admission: runtimeAdmission.isOpen,
-    shell: process.platform === "win32" ? "powershell" : "git-bash",
-    disallowedTools: currentConfiguration.managerDisallowedTools,
-    preflight: (command) => claudeProbe.require(command),
-    command: () => currentConfiguration.claudeCommand,
-    effort: () => currentConfiguration.launchEffort,
-    agentIdFactory: () => managerIdentity.require(),
-    isResumable: sessionIsResumable,
-    restoreTranscript: (sessionId) => runtimeAdmission.run(() => transcripts.restore(sessionId)),
-    wrapper: wrapperLayout,
-    // The aboard MCP server is registered per Manager launch and nowhere in the
-    // project, so no catalog-less worker and no hand-started `claude` connects it.
-    mcpConfig: () => agentMcpConfigs.write({ port: bridge!.port, token: bridge!.token, agentId: managerIdentity.require() }),
-  });
-  // A launched Manager reuses its recorded identity: an unknown one registers,
-  // a live one reattaches to its new terminal, an ended one restarts.
-  const absorbLaunchedManager = (terminal: TerminalSnapshot): void => {
-    const startedAt = new Date().toISOString() as IsoTimestamp;
-    if (fleet.get(terminal.agentId) === undefined) {
-      fleet.register({ identity: { agentId: terminal.agentId, type: "manager" }, sessionId: terminal.sessionId, terminal: { terminalId: terminal.terminalId, name: terminal.name }, lifecycle: { status: "starting", startedAt }, resultDelivery: { mode: "none" }, attended: true, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } } satisfies AgentSession, startedAt);
-    } else {
-      const prior = fleet.get(terminal.agentId)!;
-      if (["starting", "running", "awaiting-user"].includes(prior.lifecycle.status)) {
-        fleet.reattach(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
-      } else {
-        fleet.restart(terminal.agentId, { terminalId: terminal.terminalId, name: terminal.name }, startedAt, terminal.sessionId);
-      }
-    }
-    fleet.transition(terminal.agentId, { status: "running", startedAt }, startedAt);
-  };
-  // The UI offers resume and new as separate actions, so the launch path never
-  // has to interrupt with a "which did you mean?" prompt.
-  const launch = async (mode: "resume" | "new") => {
+  const runAgent = async (): Promise<void> => {
     if (!requireInitialized()) return;
     try {
-      absorbLaunchedManager(await manager.start(mode));
-    } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch Manager"); }
-    finally { await publishManagerState(); }
+      await coordinator.launchInteractive({ type: "interactive", description: "Interactive" }, "user");
+    } catch (error) {
+      void window.showErrorMessage(error instanceof Error ? error.message : "Unable to run agent");
+    }
   };
-  // Reopening the Manager from a session-reopen surface is a resume under the hood.
-  resumeManager = async () => { await launch("resume"); };
   const reconcileStaleSessions = (): void => {
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
@@ -910,9 +564,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   reconcileStaleSessions();
 
-  const publishManagerState = async () => {
-    await commands.executeCommand("setContext", "aboard.managerLive", fleet.list().some((entry) => entry.identity.type === "manager"));
-  };
+
   const publishScaffoldState = async () => {
     const wasInitialized = initialized;
     scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
@@ -920,7 +572,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (initialized && !next) {
       initialized = false;
       const runtimeDrained = runtimeAdmission.close();
-      generalPurposeQueue.clear();
+
       const reason = scaffoldState === "uninitialized" ? "project state was removed" : "project assets became incompatible";
       autoRun.stop(reason);
       await autoRun.settle();
@@ -932,16 +584,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (lease.current() !== undefined) lease.forceRelease(at, reason);
       fleet.clear(at);
       await activity.reset();
-      managerIdentity.reset();
-      recordedManager = undefined;
+
       bridgeEnvironment = undefined;
       await bridge?.stop();
       bridge = undefined;
-      await Promise.all([
-        legacyManagerMcpConfig.clear().catch(() => undefined),
-        agentMcpConfigs.clearAll().catch(() => undefined),
-        commandEndpoint.clear().catch(() => undefined),
-      ]);
+      await commandEndpoint.clear().catch(() => undefined);
       await rm(runtime.root, { recursive: true, force: true });
       output.appendLine(scaffoldState === "uninitialized"
         ? "Project state directory .abd/ was removed; the aboard session was discarded."
@@ -950,15 +597,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     initialized = next;
     if (initialized && !wasInitialized) {
       runtimeAdmission.open();
-      recordedManager = await managerStore.load();
-      managerIdentity.restore(recordedManager?.agentId);
-      agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => [
-        ...fleet.list().map((session) => session.identity.agentId as string),
-        ...(recordedManager === undefined ? [] : [recordedManager.agentId as string]),
-      ], runtimeAdmission.isOpen);
+      agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => fleet.list().map((session) => session.identity.agentId as string), runtimeAdmission.isOpen);
       // The store on disk is the only history a newly initialized project has.
       await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
-      if (recordedManager !== undefined) void runtimeAdmission.run(() => transcripts.checkpoint(recordedManager!.sessionId));
+
     }
     if (initialized) await startRuntimeBridge();
     await commands.executeCommand("setContext", "aboard.initialized", next);
@@ -969,7 +611,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       void window.showWarningMessage("aboard's project assets were created by another extension version. Update .abd/ before starting or resuming aboard.");
     }
     fleetUi.refresh();
-    await publishManagerState();
   };
   await publishScaffoldState();
   const scaffoldWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, ".abd/**"));
@@ -979,7 +620,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push(
     scaffoldWatcher,
     window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState(); }),
-    fleet.onDidChange(() => void publishManagerState()),
   );
   const scaffold = async () => {
     try {
@@ -1008,13 +648,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         "Update aboard's project assets?",
         {
           modal: true,
-          detail: "aboard updates the current agents, hooks, and skills it owns under .abd/. Files you have not touched are replaced with this version's copies, and unchanged files this version retired are removed. Assets you edited yourself are kept and listed afterwards rather than overwritten. Running sessions keep their already-prepared launch bundles.",
+          detail: "aboard updates the extension-owned configuration and setup scripts under .abd/. Files you have not touched are replaced with this version's copies, and unchanged files this version retired are removed. Assets you edited yourself are kept and listed afterwards rather than overwritten. Running sessions continue unchanged.",
         },
         "Update",
       );
       if (confirmed === "Update") await scaffold();
     }),
-    commands.registerCommand("aboard.newManager", () => launch("new")),
+    commands.registerCommand("aboard.runAgent", runAgent),
     registerBranchCleanupCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, async () => {
         if (!requireInitialized()) return;
@@ -1026,7 +666,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       info: (message) => { void window.showInformationMessage(message); },
       error: (message) => { void window.showErrorMessage(message); },
     }, branchCleanup),
-    registerReviewCommand({ registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined), info: (message) => { void window.showInformationMessage(message); }, warning: (message) => { void window.showWarningMessage(message); }, error: (message) => { void window.showErrorMessage(message); } }, reviews),
+
     registerReopenCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined),
       // `matchOnDetail` so "ended", or an age, filters the list, which is how a
@@ -1052,19 +692,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const next = configuration(projectSettings.values);
     const previous = currentConfiguration;
     currentConfiguration = next.value;
-    if (previous.managerTranscriptBackups !== next.value.managerTranscriptBackups) void transcripts.prune();
+
     fleetUi?.checkAutoRun();
     for (const diagnostic of [...projectSettings.diagnostics, ...next.diagnostics]) output.appendLine(`Configuration: ${diagnostic.message}`);
-    if (restartHint(previous, next.value)) void window.showInformationMessage("Manager launch settings changed. Restart the Manager to apply them.");
+    if (restartHint(previous, next.value)) void window.showInformationMessage("Launch settings changed. New and reopened sessions use the updated values.");
   };
   context.subscriptions.push(workspace.onDidChangeConfiguration((event) => {
     if (!ABOARD_SETTINGS.some((setting) => event.affectsConfiguration(setting))) return;
-    reloadConfiguration(() => [...MANAGER_RESTART_SETTINGS].some((setting) => event.affectsConfiguration(setting)));
+    reloadConfiguration(() => false);
   }));
   const settingsWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, PROJECT_SETTINGS_PATH));
   const reloadProjectSettings = async () => {
     projectSettings = await readProjectSettings(workspaceRoot);
-    reloadConfiguration(managerLaunchChanged);
+    reloadConfiguration(() => false);
   };
   for (const event of [settingsWatcher.onDidCreate, settingsWatcher.onDidChange, settingsWatcher.onDidDelete]) {
     context.subscriptions.push(event(() => void reloadProjectSettings()));

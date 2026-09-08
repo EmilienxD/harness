@@ -115,13 +115,13 @@ export interface AutoRunActivitySink {
   runDiscarded(record: PersistedAutoRunRecord): void;
 }
 
-/** Who owns an open pull request, so `review_pr` can reopen that session. */
+/** Who owns an open pull request while Auto Run is active. */
 export interface PullRequestOwner {
   readonly prNumber: number;
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly terminalId: TerminalId;
-  readonly type: "implementer" | "pr-doctor-afk" | "pr-doctor-hitl";
+  readonly type: "implementer" | "reviewer";
   readonly issueNumber: number;
   readonly difficulty?: IssueDifficulty;
   /** Where the session ran, when the run had a checkout of its own. */
@@ -1648,7 +1648,8 @@ export class AutoRunEngine {
     };
     if (issue.disposition === "hitl") {
       const handles = await this.options.launcher.launchInteractive({
-        type: "pr-doctor-hitl",
+        type: "reviewer",
+        reviewMode: "hitl",
         issues: [issue.number],
         pullRequest: prNumber,
         description: `review pull request ${prNumber}`,
@@ -1657,14 +1658,15 @@ export class AutoRunEngine {
         ...this.#isolation(),
       }, "auto-run");
       this.#openTerminals.add(handles.terminalId);
-      this.#owners.set(prNumber, { prNumber, ...handles, type: "pr-doctor-hitl", issueNumber: issue.number, ...this.#difficulty(issue), ...this.#ownerCwd() });
+      this.#owners.set(prNumber, { prNumber, ...handles, type: "reviewer", issueNumber: issue.number, ...this.#difficulty(issue), ...this.#ownerCwd() });
       return;
     }
-    const continued = this.#takeContinuation("pr-doctor-afk", issue.number);
+    const continued = this.#takeContinuation("reviewer", issue.number);
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
       ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
       : await this.options.launcher.runAutomated({
-      type: "pr-doctor-afk",
+      type: "reviewer",
+      reviewMode: "afk",
       issues: [issue.number],
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
@@ -1674,14 +1676,14 @@ export class AutoRunEngine {
       ...this.#isolation(),
       }, signal);
     this.#openTerminals.add(outcome.terminalId);
-    await this.#remember(issue, outcome, "pr-doctor-afk");
+    await this.#remember(issue, outcome, "reviewer");
     if (signal.aborted) {
       this.#closeSettledTerminal(outcome.terminalId);
       throw new AutomatedWorkerCancelled();
     }
     if (outcome.result.outcome === "failed") {
       await this.#markWorkerContinuable();
-      throw new Error(`pr-doctor-afk failed: ${outcome.result.failure.type}`);
+      throw new Error(`reviewer failed: ${outcome.result.failure.type}`);
     }
 
     await this.#validate();
@@ -2031,7 +2033,7 @@ export class AutoRunEngine {
     }
   }
 
-  async #remember(issue: FrozenIssue, outcome: AutomatedLaunchOutcome, type: "implementer" | "pr-doctor-afk"): Promise<void> {
+  async #remember(issue: FrozenIssue, outcome: AutomatedLaunchOutcome, type: "implementer" | "reviewer"): Promise<void> {
     this.#pending.set(issue.number, {
       agentId: outcome.agentId,
       sessionId: outcome.sessionId,
@@ -2058,7 +2060,7 @@ export class AutoRunEngine {
     } });
   }
 
-  #takeContinuation(type: "implementer" | "pr-doctor-afk", issueNumber: number): AgentSession | undefined {
+  #takeContinuation(type: "implementer" | "reviewer", issueNumber: number): AgentSession | undefined {
     const session = this.#continuedSession;
     if (session?.identity.type !== type || session.issueNumbers?.includes(issueNumber) !== true) return undefined;
     this.#continuedSession = undefined;
@@ -2148,7 +2150,7 @@ export function continuationSessionFor(
   if (progress.state !== "current") return undefined;
   const expectedType = progress.phase === "implement"
     ? "implementer"
-    : progress.phase === "review" ? "pr-doctor-afk" : undefined;
+    : progress.phase === "review" ? "reviewer" : undefined;
   if (expectedType === undefined || record.workerSession.type !== expectedType || record.workerSession.issueNumber !== record.currentIssue) return undefined;
   return sessions.find((session) =>
     session.identity.agentId === record.workerSession?.agentId

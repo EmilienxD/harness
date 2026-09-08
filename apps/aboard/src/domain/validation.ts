@@ -8,10 +8,9 @@ import {
   type AgentLifecycle,
   type AgentSession,
   type AgentTelemetry,
-  type ChildAgentNode,
   type AgentType,
   type IsoTimestamp,
-  type ManagerPersistenceDto,
+
   type ResultDelivery,
   type SessionId,
   type TerminalId,
@@ -19,26 +18,15 @@ import {
   type WorkerFailure,
   type WorkerResult,
 } from "./contracts.js";
-import type {
-  DeferredNotification,
-  FleetEvent,
-  FleetPersistenceDto,
-  ReportEntry,
-} from "./fleet.js";
+import type { FleetEvent, FleetPersistenceDto } from "./fleet.js";
 import type {
   ActivityDto,
   ActivityEntry,
   AgentOutcome,
-  LegacySessionRecord,
   ReopenableSession,
   RunOutcome,
 } from "./activity.js";
 
-/** The legacy `sessions.json` file, read once so it can be folded into activity. */
-export interface LegacySessionLedgerDto {
-  readonly version: 1;
-  readonly sessions: readonly LegacySessionRecord[];
-}
 
 const AGENT_OUTCOMES: readonly AgentOutcome[] = [
   "succeeded", "failed", "cancelled", "ended", "killed", "launch-failed", "interrupted",
@@ -354,20 +342,9 @@ function parseResultDelivery(
     case "tool-result":
     case "none":
       return { mode: record.mode };
-    case "mailbox": {
-      // Accept the old field once at the persisted boundary; every new write
-      // uses the role-neutral recipient name.
-      const recipientAgentId = readNonEmptyString(
-        record.recipientAgentId ?? record.managerAgentId,
-        `${path}.recipientAgentId`,
-        issues,
-      );
-      return recipientAgentId === undefined
-        ? undefined
-        : { mode: "mailbox", recipientAgentId: recipientAgentId as AgentId };
-    }
+
     default:
-      issues.push(`${path}.mode must be one of: tool-result, mailbox, none`);
+      issues.push(`${path}.mode must be one of: tool-result, none`);
       return undefined;
   }
 }
@@ -547,20 +524,6 @@ export function parseFleetPersistenceDto(
     }
     return parsed.value;
   });
-  const childAgents = record.childAgents === undefined ? [] : parseArray(record.childAgents, "fleet.childAgents", (item, path, innerIssues): ChildAgentNode | undefined => {
-    const child = readRecord(item, path, innerIssues); if (child === undefined) return undefined;
-    const agentId = readNonEmptyString(child.agentId, `${path}.agentId`, innerIssues);
-    const parentAgentId = readNonEmptyString(child.parentAgentId, `${path}.parentAgentId`, innerIssues);
-    const type = readNonEmptyString(child.type, `${path}.type`, innerIssues);
-    const status = child.status === "running" || child.status === "completed" ? child.status : undefined;
-    if (status === undefined) innerIssues.push(`${path}.status must be running or completed`);
-    const startedAt = readTimestamp(child.startedAt, `${path}.startedAt`, innerIssues);
-    const finishedAt = child.finishedAt === undefined ? undefined : readTimestamp(child.finishedAt, `${path}.finishedAt`, innerIssues);
-    const result = child.result === undefined ? undefined : readNonEmptyString(child.result, `${path}.result`, innerIssues);
-    const telemetry = parseTelemetry(child.telemetry, `${path}.telemetry`, innerIssues);
-    if (agentId === undefined || parentAgentId === undefined || type === undefined || status === undefined || startedAt === undefined || telemetry === undefined) return undefined;
-    return { agentId, parentAgentId: parentAgentId as AgentId, type, status, startedAt, telemetry, ...(finishedAt === undefined ? {} : { finishedAt }), ...(result === undefined ? {} : { result }) };
-  });
 
   const parseResultEntry = (
     item: unknown,
@@ -581,73 +544,6 @@ export function parseFleetPersistenceDto(
     parseResultEntry,
   );
 
-  const parseMailboxEntry = (item: unknown, path: string, innerIssues: string[]): ReportEntry | undefined => {
-    const entry = readRecord(item, path, innerIssues);
-    if (entry === undefined) return undefined;
-    const agentId = readNonEmptyString(entry.agentId, `${path}.agentId`, innerIssues);
-    const agentType = entry.agentType === undefined ? undefined : parseAgentType(entry.agentType, `${path}.agentType`, innerIssues);
-    // Version-one fleet files predate the discriminant and agent type. They
-    // were Manager-only mailboxes, so infer the old result entry at load time.
-    if (entry.kind === undefined && entry.result !== undefined) {
-      const result = parseWorkerResult(entry.result, `${path}.result`, innerIssues);
-      return agentId === undefined || result === undefined
-        ? undefined
-        : { kind: "result", agentId: agentId as AgentId, agentType: agentType ?? "general-purpose", result };
-    }
-    if (agentId === undefined || agentType === undefined) return undefined;
-    if (entry.kind === "ended-without-report") return { kind: "ended-without-report", agentId: agentId as AgentId, agentType };
-    if (entry.kind !== "result") {
-      innerIssues.push(`${path}.kind must be result or ended-without-report`);
-      return undefined;
-    }
-    const result = parseWorkerResult(entry.result, `${path}.result`, innerIssues);
-    return result === undefined ? undefined : { kind: "result", agentId: agentId as AgentId, agentType, result };
-  };
-
-  const mailboxes = parseArray(record.mailboxes, "fleet.mailboxes", (item, path, innerIssues) => {
-    const mailbox = readRecord(item, path, innerIssues);
-    if (mailbox === undefined) return undefined;
-    const recipientAgentId = readNonEmptyString(
-      mailbox.recipientAgentId ?? mailbox.managerAgentId,
-      `${path}.recipientAgentId`,
-      innerIssues,
-    );
-    const entries = parseArray(mailbox.entries, `${path}.entries`, parseMailboxEntry);
-    return recipientAgentId === undefined || entries === undefined
-      ? undefined
-      : { recipientAgentId: recipientAgentId as AgentId, entries };
-  });
-
-  const deferredNotifications = parseArray(
-    record.deferredNotifications,
-    "fleet.deferredNotifications",
-    (item, path, innerIssues) => {
-      const queue = readRecord(item, path, innerIssues);
-      if (queue === undefined) return undefined;
-      const recipientAgentId = readNonEmptyString(
-        queue.recipientAgentId ?? queue.managerAgentId,
-        `${path}.recipientAgentId`,
-        innerIssues,
-      );
-      const entries = parseArray(
-        queue.entries,
-        `${path}.entries`,
-        (entryValue, entryPath, entryIssues): DeferredNotification | undefined => {
-          const entry = readRecord(entryValue, entryPath, entryIssues);
-          if (entry === undefined) return undefined;
-          const id = readNonNegativeInteger(entry.id, `${entryPath}.id`, entryIssues);
-          const occurredAt = readTimestamp(entry.occurredAt, `${entryPath}.occurredAt`, entryIssues);
-          const message = readNonEmptyString(entry.message, `${entryPath}.message`, entryIssues);
-          return id === undefined || occurredAt === undefined || message === undefined
-            ? undefined
-            : { id, occurredAt, message };
-        },
-      );
-      return recipientAgentId === undefined || entries === undefined
-        ? undefined
-        : { recipientAgentId: recipientAgentId as AgentId, entries };
-    },
-  );
 
   const events = parseArray(record.events, "fleet.events", (item, path, innerIssues) => {
     const event = readRecord(item, path, innerIssues);
@@ -678,56 +574,26 @@ export function parseFleetPersistenceDto(
       case "result-recorded":
       case "result-drained": {
         const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
-        const delivery: "tool-result" | "mailbox" | undefined =
-          event.delivery === "tool-result" || event.delivery === "mailbox"
-          ? event.delivery
-          : undefined;
-        if (delivery === undefined) innerIssues.push(`${path}.delivery must be tool-result or mailbox`);
+        const delivery: "tool-result" | undefined = event.delivery === "tool-result" ? "tool-result" : undefined;
+        if (delivery === undefined) innerIssues.push(`${path}.delivery must be tool-result`);
         return agentId === undefined || delivery === undefined
           ? undefined
           : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId, delivery };
       }
-      case "notification-enqueued":
-      case "notifications-drained": {
-        const recipientAgentId = readNonEmptyString(
-          event.recipientAgentId ?? event.managerAgentId,
-          `${path}.recipientAgentId`,
-          innerIssues,
-        );
-        const count = readNonNegativeInteger(event.count, `${path}.count`, innerIssues);
-        return recipientAgentId === undefined || count === undefined
-          ? undefined
-          : {
-              sequence,
-              occurredAt,
-              type: event.type,
-              recipientAgentId: recipientAgentId as AgentId,
-              count,
-            };
-      }
+
       case "telemetry-updated": {
         const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
         return agentId === undefined
           ? undefined
           : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId };
       }
-      case "child-agent-started":
-      case "child-agent-finished":
-      case "child-agent-telemetry-updated": {
-        const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
-        const childAgentId = readNonEmptyString(event.childAgentId, `${path}.childAgentId`, innerIssues);
-        return agentId === undefined || childAgentId === undefined ? undefined : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId, childAgentId };
-      }
+
       default:
         innerIssues.push(`${path}.type is not a recognized fleet event`);
         return undefined;
     }
   });
-  const nextNotificationId = readNonNegativeInteger(
-    record.nextNotificationId,
-    "fleet.nextNotificationId",
-    issues,
-  );
+
   const nextEventSequence = readNonNegativeInteger(
     record.nextEventSequence,
     "fleet.nextEventSequence",
@@ -737,12 +603,8 @@ export function parseFleetPersistenceDto(
   if (
     issues.length > 0 ||
     sessions === undefined ||
-    childAgents === undefined ||
     blockingResults === undefined ||
-    mailboxes === undefined ||
-    deferredNotifications === undefined ||
     events === undefined ||
-    nextNotificationId === undefined ||
     nextEventSequence === undefined
   ) {
     return { ok: false, issues };
@@ -765,12 +627,8 @@ export function parseFleetPersistenceDto(
     value: {
       version: 1,
       sessions,
-      childAgents,
       blockingResults,
-      mailboxes,
-      deferredNotifications,
       events,
-      nextNotificationId,
       nextEventSequence,
     },
   };
@@ -838,7 +696,7 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
     // A malformed reopen block costs the reopen action, not the row: the outcome
     // is still worth showing.
     const reopen = parseReopenable(entry.reopen);
-    const continuation = parseReopenable(entry.continuation);
+
     seen.add(id);
     entries.push({
       kind: "agent", id, at, agentId: agentId as AgentId, type, description, outcome,
@@ -848,7 +706,6 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
       ...(pullRequest === undefined ? {} : { pullRequest }),
       ...(typeof entry.terminalId === "string" && entry.terminalId.length > 0 ? { terminalId: entry.terminalId as TerminalId } : {}),
       ...(reopen === undefined ? {} : { reopen }),
-      ...(continuation === undefined ? {} : { continuation }),
     });
   }
   return { ok: true, value: { version: 1, entries } };
@@ -876,80 +733,4 @@ function parseReopenable(value: unknown): ReopenableSession | undefined {
   };
 }
 
-export function parseLegacySessionLedger(
-  value: unknown,
-): ValidationResult<LegacySessionLedgerDto> {
-  const issues: string[] = [];
-  const record = readRecord(value, "sessions", issues);
-  if (record === undefined) return { ok: false, issues };
-  if (record.version !== 1) issues.push("sessions.version must be 1");
-  if (!Array.isArray(record.sessions)) issues.push("sessions.sessions must be an array");
-  if (issues.length > 0) return { ok: false, issues };
 
-  const parsed: LegacySessionRecord[] = [];
-  for (const entry of record.sessions as readonly unknown[]) {
-    const dropped: string[] = [];
-    const session = readRecord(entry, "sessions.session", dropped);
-    if (session === undefined) continue;
-    const agentId = readNonEmptyString(session.agentId, "agentId", dropped);
-    const type = parseAgentType(session.type, "type", dropped);
-    const sessionId = parseSessionId(session.sessionId, "sessionId", dropped);
-    const description = readNonEmptyString(session.description, "description", dropped);
-    const endedAt = readTimestamp(session.endedAt, "endedAt", dropped);
-    const issueNumbers = session.issueNumbers === undefined
-      ? undefined
-      : Array.isArray(session.issueNumbers)
-        ? session.issueNumbers.map((number, index) => readNonNegativeInteger(number, `issueNumbers[${index}]`, dropped))
-        : (dropped.push("issueNumbers must be an array"), undefined);
-    if (
-      dropped.length > 0 || agentId === undefined || type === undefined || sessionId === undefined
-      || description === undefined || endedAt === undefined
-    ) continue;
-    parsed.push({
-      agentId: agentId as AgentId,
-      type,
-      sessionId,
-      description,
-      endedAt,
-      ...(issueNumbers === undefined ? {} : { issueNumbers: issueNumbers as number[] }),
-      ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
-      // A ledger entry is only ever a hint for the picker, so an unusable `cwd`
-      // drops to "the workspace" rather than dropping the whole entry.
-      ...(typeof session.cwd === "string" && session.cwd.trim().length > 0 ? { cwd: session.cwd } : {}),
-      ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-    });
-  }
-  return { ok: true, value: { version: 1, sessions: parsed } };
-}
-
-export function parseManagerPersistenceDto(
-  value: unknown,
-): ValidationResult<ManagerPersistenceDto> {
-  const issues: string[] = [];
-  const record = readRecord(value, "manager", issues);
-  if (record === undefined) return { ok: false, issues };
-  if (record.version !== 1) issues.push("manager.version must be 1");
-  const agentId = readNonEmptyString(record.agentId, "manager.agentId", issues);
-  const sessionId = parseSessionId(record.sessionId, "manager.sessionId", issues);
-  const terminalId = readNonEmptyString(record.terminalId, "manager.terminalId", issues);
-  const updatedAt = readTimestamp(record.updatedAt, "manager.updatedAt", issues);
-  if (
-    issues.length > 0 ||
-    agentId === undefined ||
-    sessionId === undefined ||
-    terminalId === undefined ||
-    updatedAt === undefined
-  ) {
-    return { ok: false, issues };
-  }
-  return {
-    ok: true,
-    value: {
-      version: 1,
-      agentId: agentId as AgentId,
-      sessionId,
-      terminalId: terminalId as TerminalId,
-      updatedAt,
-    },
-  };
-}

@@ -115,7 +115,7 @@ export async function startFakeAnthropicServer(options: {
   const baseUrl = `http://127.0.0.1:${address.port}`;
   if (options.readinessPath) {
     await mkdir(dirname(options.readinessPath), { recursive: true });
-    await writeFile(options.readinessPath, `${JSON.stringify({ port: address.port, processId: process.pid, scenarioCatalogHash: hash("single-file-success:v1|manager-foreground-explore:v1|explore-read-report:v1"), protocolVersion: 1 }, null, 2)}\n`, "utf8");
+    await writeFile(options.readinessPath, `${JSON.stringify({ port: address.port, processId: process.pid, scenarioCatalogHash: hash("single-file-success:v1|auto-run-afk:v1|auto-run-hitl:v1|auto-run-followup:v1"), protocolVersion: 1 }, null, 2)}\n`, "utf8");
   }
   return {
     baseUrl,

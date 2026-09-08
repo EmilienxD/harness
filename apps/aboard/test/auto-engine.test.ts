@@ -103,7 +103,7 @@ interface HarnessOptions {
   readonly startDirty?: boolean;
   readonly pushFails?: boolean;
   readonly githubAuthenticationFails?: boolean;
-  /** Simulates a hitl pr-doctor applying fixes the user approved, mid-wait. */
+  /** Simulates a HITL reviewer applying fixes the user approved, mid-wait. */
   readonly dirtyDuringWait?: boolean;
   /** The branch checked out when the run starts. Defaults to `main`. */
   readonly startBranch?: string;
@@ -128,7 +128,7 @@ interface HarnessOptions {
   /** Changes a frozen classification after the worker returns, before commit. */
   readonly relabelAfterImplementer?: boolean;
   /** Leaves this automated worker pending until the run aborts it. */
-  readonly pendingWorkerType?: "implementer" | "pr-doctor-afk" | "Explore";
+  readonly pendingWorkerType?: "implementer" | "reviewer" | "Explore";
   /** Adds controllable latency or failure to every remote-ref observation. */
   readonly fetch?: () => Promise<void>;
   /** Head branches GitHub reports as already having a pull request, before the run opens any. */
@@ -163,7 +163,7 @@ test("single-branch HITL waits for explicit Aboard acceptance and scopes review 
   for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(context.engine.state()?.waiting, true);
   assert.equal(context.closures.length, 0);
-  const review = context.launches.find((launch) => launch.type === "pr-doctor-hitl");
+  const review = context.launches.find((launch) => launch.type === "reviewer" && launch.reviewMode === "hitl");
   assert.match(review?.additionalGuideline ?? "", /Review only issue #35's changes in exact range .{40}\.\..{40}/);
   context.engine.continueNow();
   await context.engine.settle();
@@ -1109,7 +1109,8 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
   assert.equal(context.launches[0]?.chrome, true);
   assert.match(context.launches[0]?.prompt ?? "", /Claude in Chrome.*test.*debug/);
   assert.doesNotMatch(context.launches[0]?.prompt ?? "", /aboard|auto[ -]?run|automated|automation/i);
-  assert.equal(context.launches[1]?.type, "pr-doctor-afk");
+  assert.equal(context.launches[1]?.type, "reviewer");
+  assert.equal(context.launches[1]?.reviewMode, "afk");
   assert.equal(context.launches[1]?.chrome, undefined);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
 });
@@ -1119,7 +1120,8 @@ test("configured and per-run guidance are persisted and reach every auto agent s
   await context.engine.start({ additionalGuideline: "  no unit tests needed  " });
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.reviewMode), [undefined, "afk"]);
   assert.deepEqual(context.launches.map((launch) => launch.permanentPrompt), ["run browser tests", "run browser tests"]);
   assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["no unit tests needed", "no unit tests needed"]);
   assert.equal(context.saved.every((record) => record.settings.permanentPrompt === "run browser tests"), true);
@@ -1216,10 +1218,10 @@ test("cancelling a running automated reviewer uses the same owned-terminal path"
   const context = harness({
     startBranch: "feature/wip",
     settings: { review: true },
-    pendingWorkerType: "pr-doctor-afk",
+    pendingWorkerType: "reviewer",
   });
   await context.engine.start();
-  await waitForLaunch(context, "pr-doctor-afk");
+  await waitForLaunch(context, "reviewer");
 
   context.engine.stop();
   await context.engine.settle();
@@ -1311,13 +1313,14 @@ test("a merge refused for a reason other than a conflict still stops the whole r
   assert.equal(context.state.cleared, false);
 });
 
-test("review mode launches a pr-doctor-afk and commits its fixes as a second commit", async () => {
+test("review mode launches an AFK reviewer and commits its fixes as a second commit", async () => {
   const context = harness({ settings: { review: true } });
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
-  // Two commits: the implementation, then the doctor's fixes.
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.equal(context.launches[1]?.reviewMode, "afk");
+  // Two commits: the implementation, then the reviewer's fixes.
   assert.equal(context.gitCalls.filter((call) => call === "commit").length, 2);
   assert.match(context.notifications.join("\n"), /issue #34 reviewed; committing 1 changed path\(s\)/);
   assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
@@ -1331,9 +1334,9 @@ test("every agent sent at an issue is launched at that issue's difficulty", asyn
   await context.engine.start();
   await context.engine.settle();
 
-  // The doctor reviews the same change the implementer made, so it is rated the
+  // The reviewer checks the same change the implementer made, so it is rated the
   // same. What each tier costs is the launch planner's business.
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
   assert.deepEqual(context.launches.map((launch) => launch.difficulty), ["basic", "basic"]);
 });
 
@@ -1406,7 +1409,7 @@ test("a hitl reviewer stays open while the run awaits the user and closes after 
   }
 
   assert.equal(context.engine.state()?.waiting, true);
-  assert.equal(context.engine.owner(56)?.type, "pr-doctor-hitl");
+  assert.equal(context.engine.owner(56)?.type, "reviewer");
   assert.deepEqual(context.closedTerminals, ["terminal-1"], "only the completed implementer closes while review is active");
 
   context.advance(SESSION);
@@ -1987,7 +1990,7 @@ test("a version-1 record is unsupported: it is neither resumed nor silently drop
   assert.equal(context.launches.length, 0);
 });
 
-test("a hitl doctor's approved fixes are committed to the pull request before it merges", async () => {
+test("a HITL reviewer's approved fixes are committed to the pull request before it merges", async () => {
   // Without this the user merges a pull request that does not contain the
   // changes they just approved, and the work is stranded uncommitted.
   const context = harness({
@@ -1999,7 +2002,8 @@ test("a hitl doctor's approved fixes are committed to the pull request before it
   await context.engine.start({ additionalGuideline: "keep migration reversible" });
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-hitl"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.equal(context.launches[1]?.reviewMode, "hitl");
   assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["keep migration reversible", "keep migration reversible"]);
   // Handed to the user but still leased: the run is committing behind it, which
   // is exactly the collision the lease exists to prevent.
@@ -2049,7 +2053,8 @@ test("a resumed run uses the settings it froze, not the ones configured now", as
   await context.engine.resume();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "pr-doctor-afk"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.equal(context.launches[1]?.reviewMode, "afk");
 });
 
 test("a review already recorded is not repeated after a restart", async () => {

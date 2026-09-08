@@ -2,7 +2,7 @@
   "name": "aboard",
   "displayName": "aboard; visible agents for Claude Code",
   "publisher": "aboard",
-  "description": "Turn Claude Code's invisible sub-agents into terminals you can watch, interrupt, and take over; coordinated by one Manager, with GitHub as the work state.",
+  "description": "VS Code integration for Claude Code with visible terminals, fleet tracking, and Auto Run orchestration.",
   "version": "0.0.0",
   "private": true,
   "repository": {
@@ -29,8 +29,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "aboard.newManager",
-        "title": "New Manager",
+        "command": "aboard.runAgent",
+        "title": "Run Agent",
         "category": "Aboard"
       },
       {
@@ -42,11 +42,6 @@
         "command": "aboard.updateProject",
         "title": "Update .abd/",
         "icon": "$(cloud-download)"
-      },
-      {
-        "command": "aboard.reviewPr",
-        "title": "Review a Pull Request",
-        "category": "Aboard"
       },
       {
         "command": "aboard.reopenSession",
@@ -214,7 +209,7 @@
     "viewsWelcome": [
       {
         "view": "aboard.welcome",
-        "contents": "Stop trusting summaries. Watch your agents work.\n\naboard turns Claude Code's invisible sub-agents into real terminals you can read, interrupt, and take over; coordinated by one Manager that keeps the plan, while GitHub keeps the work state.\n\nOne click sets this workspace up: agents, skills, hooks, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
+        "contents": "aboard provides visible terminals for Claude Code sessions, fleet tracking, and Auto Run orchestration.\n\nOne click sets this workspace up: launch configuration, Auto Run setup, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
         "when": "!aboard.scaffoldUpdateRequired"
       },
       {
@@ -265,15 +260,11 @@
           "when": "aboard.initialized || aboard.scaffoldUpdateRequired"
         },
         {
-          "command": "aboard.newManager",
-          "when": "aboard.initialized && !aboard.managerLive"
-        },
-        {
-          "command": "aboard.reviewPr",
+          "command": "aboard.reopenSession",
           "when": "aboard.initialized"
         },
         {
-          "command": "aboard.reopenSession",
+          "command": "aboard.runAgent",
           "when": "aboard.initialized"
         },
         {
@@ -460,7 +451,7 @@
             }
           ],
           "default": "claude",
-          "markdownDescription": "Command that starts Claude Code. Defaults to `claude`; use it to point aboard at another binary or a wrapper, for example `openclaude` or `wrapper run MyProfile --`. aboard appends its own flags to this command unchanged.\n\nWritten as a string it is split on spaces, with `\"...\"` or `'...'` around a token that contains spaces (`\"C:\\tools\\my claude.exe\" run --`); an array of strings is used verbatim. It is a program and its arguments, not a shell expression: every token is quoted, so `&&` or `|` would be passed as literal text. Applies to the next launch; a running Manager keeps its command."
+          "markdownDescription": "Command that starts Claude Code. Defaults to `claude`; use it to point aboard at another binary or a wrapper, for example `openclaude` or `wrapper run MyProfile --`. aboard appends its own flags to this command unchanged.\n\nWritten as a string it is split on spaces, with `\"...\"` or `'...'` around a token that contains spaces (`\"C:\\tools\\my claude.exe\" run --`); an array of strings is used verbatim. It is a program and its arguments, not a shell expression: every token is quoted, so `&&` or `|` would be passed as literal text."
         },
         "aboard.launch.maxInlinePromptChars": {
           "type": "integer",
@@ -487,33 +478,12 @@
             "Launch with --effort max."
           ],
           "default": "inherit",
-          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, including the Manager, passed as `--effort`. Available levels depend on the model.\n\nThis is the session level: an agent definition that sets `effort:` in its `.abd/agents/<name>.md` frontmatter overrides it while that agent is active, so use the setting for built-in agent launches, which have no aboard definition to read, and resumed sessions. Applies to the next launch; a running agent keeps its level."
+          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, passed as `--effort`. Available levels depend on the model.\n\nApplies to the next launch; a running agent keeps its level."
         },
         "aboard.terminals.closeOnSessionEnd": {
           "type": "boolean",
           "default": false,
           "description": "Close an agent's terminal when its Claude session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
-        },
-        "aboard.manager.disallowedTools": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
-        },
-        "aboard.manager.roadmapReminderBytes": {
-          "type": "integer",
-          "default": 150000,
-          "minimum": 0,
-          "maximum": 100000000,
-          "description": "How many transcript bytes may pass with no roadmap injection before the Manager is reminded of the pending tasks and their positions. Measured in bytes rather than turns because turn size varies far too much to pace on. 0 disables the reminder; the session-start and post-compact briefings still carry the full roadmap."
-        },
-        "aboard.manager.transcriptBackups": {
-          "type": "integer",
-          "default": 5,
-          "minimum": 0,
-          "maximum": 100,
-          "description": "How many Manager session transcripts aboard keeps in private VS Code workspace storage. Claude Code deletes its own session files older than cleanupPeriodDays at startup and offers no way to disable that sweep, so aboard copies the Manager's transcript at every turn boundary and restores it if a resume finds it gone. 0 disables backup and restore and removes existing copies."
         },
         "aboard.autoRun.review": {
           "type": "boolean",
@@ -604,27 +574,6 @@
           "minimum": 1,
           "maximum": 86400,
           "description": "How long .abd/session-setup.ps1 or .abd/session-setup.sh may take in a fresh checkout. Those files ship empty; put your own installation steps in them (copying an .env, npm install, uv sync) and aboard runs the one for this platform once, right after creating the checkout. A failure refuses the run rather than starting agents in a half-installed tree."
-        },
-        "aboard.timeouts.managerStop": {
-          "type": "integer",
-          "default": 3600,
-          "minimum": 1,
-          "maximum": 86400,
-          "description": "Manager Stop hook and foreground aboard MCP tool timeout in seconds."
-        },
-        "aboard.timeouts.managerPrompt": {
-          "type": "integer",
-          "default": 60,
-          "minimum": 1,
-          "maximum": 600,
-          "description": "Manager UserPromptSubmit hook timeout in seconds."
-        },
-        "aboard.timeouts.managerSessionStart": {
-          "type": "integer",
-          "default": 120,
-          "minimum": 1,
-          "maximum": 3600,
-          "description": "Manager SessionStart briefing timeout in seconds."
         }
       }
     }

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Aboard E2E"
-  short_description: "Operate and extend the deterministic E2E harness"
-  default_prompt: "Use $aboard-e2e to run or extend the deterministic Claude Code E2E harness."

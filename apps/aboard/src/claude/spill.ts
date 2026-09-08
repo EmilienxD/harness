@@ -16,7 +16,7 @@ export class PromptSpillPathError extends Error {}
 
 export class FileSystemPromptSpillStore implements PromptSpillStore {
   public constructor(
-    private readonly projectRoot: string,
+    _projectRoot: string,
     private readonly runtimeRoot: string,
     private readonly hookAssets: { readonly settings: string; readonly script: string },
     private readonly admission: RuntimeAdmission = new RuntimeAdmission(true),
@@ -38,8 +38,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     return this.admission.run(() => this.#prepare(plan, root));
   }
 
-  async #prepare(plan: LaunchPlan, root?: string): Promise<void> {
-    const sourceRoot = root ?? this.projectRoot;
+  async #prepare(plan: LaunchPlan, _root?: string): Promise<void> {
     const directory = this.#resolvePath(plan.runtimeDirectory);
     await mkdir(directory, { recursive: true });
     const hookDirectory = join(directory, "scripts");
@@ -51,20 +50,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
       hookScript,
     );
     await writeFile(join(directory, "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    // `/brainstorm` and `/prototype` are also intercepted from brainstormer
-    // terminals, so a brainstormer bundle must ship both command shims.
-    const skills = plan.agentType === "manager"
-      ? ["auto", "brainstorm", "done", "general-purpose", "prototype", "queue", "reopen", "review-pr", "update-todo"]
-      : plan.agentType === "brainstormer"
-        ? ["brainstorm", "done", "prototype"]
-        : ["done"];
-    for (const skill of skills) {
-      await cp(join(sourceRoot, ".abd", "skills", skill), join(directory, ".claude", "skills", skill), {
-        recursive: true,
-        force: true,
-      });
-    }
-    if (plan.agentDefinition !== undefined) await this.#write(plan.agentDefinition);
+
     if (plan.wrapperRequest !== undefined) await this.#write(plan.wrapperRequest);
     if (plan.task !== undefined) {
       await this.#write({ ...plan.task, relativePath: this.#taskArchivePath(plan.agentId) });

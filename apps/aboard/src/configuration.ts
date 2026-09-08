@@ -1,6 +1,6 @@
 import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, parseClaudeCommand, type EffortLevel } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
-import { DEFAULT_TRANSCRIPT_BACKUPS } from "./claude/transcript-backup.js";
+
 import { AUTO_RUN_BRANCH_MODES, DISCARD_BEHAVIORS, MERGE_STRATEGIES, type AutoRunSettings, type AutoRunBranchMode, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";
 
 export interface ConfigurationReader { get(section: string): unknown; }
@@ -11,14 +11,8 @@ export interface AboardConfiguration {
   readonly claudeCommand: readonly string[];
   /** `aboard.launch.effort`; absent means aboard passes no `--effort` and Claude Code's own setting stands. */
   readonly launchEffort?: EffortLevel;
-  readonly managerDisallowedTools: readonly string[];
-  readonly managerRoadmapReminderBytes: number;
-  readonly managerTranscriptBackups: number;
   readonly closeTerminalOnSessionEnd: boolean;
   readonly autoRun: AutoRunSettings;
-  readonly managerStopTimeoutSeconds: number;
-  readonly managerPromptTimeoutSeconds: number;
-  readonly managerSessionStartTimeoutSeconds: number;
 }
 export interface ConfigurationDiagnostic { readonly setting: string; readonly message: string; readonly severity: "warning" | "error"; }
 export interface ConfigurationResult { readonly value: AboardConfiguration; readonly diagnostics: readonly ConfigurationDiagnostic[]; }
@@ -30,9 +24,6 @@ export const ABOARD_SETTINGS = [
   "aboard.launch.maxInlinePromptChars",
   "aboard.launch.effort",
   "aboard.terminals.closeOnSessionEnd",
-  "aboard.manager.disallowedTools",
-  "aboard.manager.roadmapReminderBytes",
-  "aboard.manager.transcriptBackups",
   "aboard.autoRun.review",
   "aboard.autoRun.branchMode",
   "aboard.autoRun.exploreBeforeImplement",
@@ -47,9 +38,6 @@ export const ABOARD_SETTINGS = [
   "aboard.autoRun.worktree.root",
   "aboard.autoRun.worktree.keep",
   "aboard.autoRun.worktree.setupTimeoutSeconds",
-  "aboard.timeouts.managerStop",
-  "aboard.timeouts.managerPrompt",
-  "aboard.timeouts.managerSessionStart",
 ] as const;
 export type AboardSetting = (typeof ABOARD_SETTINGS)[number];
 const KNOWN_SETTINGS: ReadonlySet<string> = new Set(ABOARD_SETTINGS);
@@ -160,33 +148,20 @@ function claudeCommand(reader: ConfigurationReader, diagnostics: ConfigurationDi
 export function readAboardConfiguration(reader: ConfigurationReader): ConfigurationResult {
   const diagnostics: ConfigurationDiagnostic[] = [];
   const effort = launchEffort(reader, diagnostics);
-  const rawTools = reader.get("aboard.manager.disallowedTools");
-  let managerDisallowedTools: readonly string[] = [];
-  if (rawTools !== undefined) {
-    if (Array.isArray(rawTools) && rawTools.every((tool) => typeof tool === "string" && tool.trim().length > 0)) managerDisallowedTools = rawTools.map((tool) => tool.trim());
-    else diagnostics.push({ setting: "aboard.manager.disallowedTools", severity: "warning", message: "aboard.manager.disallowedTools must contain only non-empty strings; using an empty list." });
-  }
   return { value: {
     bridgePort: integer(reader, "aboard.bridge.port", DEFAULT_BRIDGE_PORT, 0, 65_535, diagnostics),
     maxInlinePromptChars: integer(reader, "aboard.launch.maxInlinePromptChars", DEFAULT_MAX_INLINE_PROMPT_CHARS, 0, 32_767, diagnostics),
     claudeCommand: claudeCommand(reader, diagnostics),
     ...(effort === undefined ? {} : { launchEffort: effort }),
-    managerDisallowedTools,
-    managerRoadmapReminderBytes: integer(reader, "aboard.manager.roadmapReminderBytes", 150_000, 0, 100_000_000, diagnostics),
-    managerTranscriptBackups: integer(reader, "aboard.manager.transcriptBackups", DEFAULT_TRANSCRIPT_BACKUPS, 0, 100, diagnostics),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {
       branchMode: choice<AutoRunBranchMode>(reader, "aboard.autoRun.branchMode", AUTO_RUN_BRANCH_MODES, "per-issue", diagnostics),
-      // Automated review stays opt-in so a run cannot silently expand its
-      // authority from implementation into review.
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
       exploreBeforeImplement: flag(reader, "aboard.autoRun.exploreBeforeImplement", false, diagnostics),
       recursiveIssueReferences: flag(reader, "aboard.autoRun.recursiveIssueReferences", false, diagnostics),
       permanentPrompt: text(reader, "aboard.autoRun.prompt", "", diagnostics),
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),
-      // Off by default for the same reason review is: the run's own pull request
-      // lands a batch of automated work on a branch a human is using.
       mergeRunPullRequest: flag(reader, "aboard.autoRun.mergeRunPullRequest", false, diagnostics),
       pollSeconds: integer(reader, "aboard.autoRun.pollSeconds", 30, 1, 3_600, diagnostics),
       discardBehavior: choice<DiscardBehavior>(reader, "aboard.autoRun.discardBehavior", DISCARD_BEHAVIORS, "record-only", diagnostics),
@@ -194,28 +169,10 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
         enabled: flag(reader, "aboard.autoRun.worktree.enabled", false, diagnostics),
         root: text(reader, "aboard.autoRun.worktree.root", "", diagnostics),
         keep: flag(reader, "aboard.autoRun.worktree.keep", false, diagnostics),
-        // Generous: this is where `npm install` or `uv sync` runs, on a tree
-        // with no caches of its own yet.
         setupTimeoutSeconds: integer(reader, "aboard.autoRun.worktree.setupTimeoutSeconds", 600, 1, 86_400, diagnostics),
       },
     },
-    managerStopTimeoutSeconds: integer(reader, "aboard.timeouts.managerStop", 3_600, 1, 86_400, diagnostics),
-    managerPromptTimeoutSeconds: integer(reader, "aboard.timeouts.managerPrompt", 60, 1, 600, diagnostics),
-    managerSessionStartTimeoutSeconds: integer(reader, "aboard.timeouts.managerSessionStart", 120, 1, 3_600, diagnostics),
   }, diagnostics };
 }
 
-export const MANAGER_RESTART_SETTINGS = new Set([
-  "aboard.manager.disallowedTools",
-  "aboard.launch.claudeCommand",
-  // Effort is a launch flag on a process that may already be hours old, so a
-  // change reaches a running Manager only through a restart.
-  "aboard.launch.effort",
-]);
-
-export function managerLaunchChanged(before: AboardConfiguration, after: AboardConfiguration): boolean {
-  const list = (values: readonly string[]) => values.join(" ");
-  return list(before.claudeCommand) !== list(after.claudeCommand)
-    || list(before.managerDisallowedTools) !== list(after.managerDisallowedTools)
-    || before.launchEffort !== after.launchEffort;
-}
+// REMOVED: Manager-specific restart settings (REFACTOR.md section 5)

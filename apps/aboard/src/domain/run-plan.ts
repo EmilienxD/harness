@@ -38,7 +38,7 @@ export interface FrozenRunSettings {
   readonly workspaceRoot?: string;
   /** Configured note added before any per-run guidance. */
   readonly permanentPrompt?: string;
-  /** Appended to every implementer and pr-doctor prompt for this run. */
+  /** Appended to every implementer and reviewer prompt for this run. */
   readonly additionalGuideline?: string;
 }
 
@@ -133,7 +133,7 @@ export interface AutoRunRecord {
   readonly currentIssue: number | undefined;
   readonly checkpoint: RunCheckpoint;
   readonly runPullRequest?: number;
-  /** Issues a pr-doctor has already reviewed; a review that finds nothing leaves no trace. */
+  /** Issues a reviewer has already checked; a review that finds nothing leaves no trace. */
   readonly reviewedIssues: readonly number[];
   readonly pendingAction?: PendingAction;
   readonly outcome?: RunAttemptOutcome;
@@ -143,7 +143,7 @@ export interface AutoRunRecord {
   readonly workerSession?: {
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
-    readonly type: "implementer" | "pr-doctor-afk" | "Explore";
+    readonly type: "implementer" | "reviewer" | "Explore";
     readonly issueNumber: number;
     /** The worker itself failed or returned an unusable completion, rather than a later phase failing. */
     readonly continuable?: true;

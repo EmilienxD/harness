@@ -520,33 +520,32 @@ test("delegated prompts remain free-form and fetch no GitHub context", async () 
     github: new FakeGitHub({ issues: [issue47, parent31] }),
   }));
   const prompt = await adapter.resolve({
-    type: "general-purpose",
+    type: "interactive",
     description: "fix the session loss",
     prompt: "Work with me to fix issue #47.",
   }, { interactive: true });
 
   assert.ok(prompt?.text.includes("Work with me to fix issue #47."));
   assert.deepEqual(prompt?.sources, []);
-  assert.equal(await adapter.resolve({ type: "general-purpose", description: "d" }, { interactive: true }), undefined);
-  const brainstorm = await adapter.resolve({
-    type: "brainstormer", description: "d", prompt: "caching layer",
+  assert.equal(await adapter.resolve({ type: "interactive", description: "d" }, { interactive: true }), undefined);
+  const interactive = await adapter.resolve({
+    type: "interactive", description: "d", prompt: "caching layer",
   }, { interactive: true });
-  assert.ok(brainstorm?.text.includes("caching layer"));
-  // Free-form topics fetch nothing: no GitHub sources are attached.
-  assert.deepEqual(brainstorm?.sources, []);
+  assert.ok(interactive?.text.includes("caching layer"));
+  assert.deepEqual(interactive?.sources, []);
 });
 
 test("interactive launches resolve to no prompt so the terminal opens empty", async () => {
   const { GitHubDelegationPromptResolver } = await import("../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
-  for (const type of ["brainstormer"] as const) {
+  for (const type of ["interactive"] as const) {
     assert.equal(await adapter.resolve({ type, description: "d" }, { interactive: true }), undefined);
     assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }, { interactive: true }), undefined);
     // A Manager delegating with a real topic still gets it; only filler is gone.
     const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { interactive: true });
     assert.equal(withTopic?.text.includes("caching layer"), true);
   }
-  const doctor = await adapter.resolve({ type: "pr-doctor-afk", description: "d" }, { interactive: false });
+  const doctor = await adapter.resolve({ type: "reviewer", reviewMode: "afk", description: "d" }, { interactive: false });
   assert.notEqual(doctor, undefined);
   assert.ok(doctor!.text.length > 0);
 });
@@ -581,20 +580,21 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
   assert.equal(implementerText.indexOf("Refresh the access token before it expires.") < implementerText.indexOf(guideline), true);
   assert.equal(implementerText.indexOf(permanentPrompt) < implementerText.indexOf(guideline), true);
 
-  for (const type of ["pr-doctor-afk", "pr-doctor-hitl"] as const) {
+  for (const reviewMode of ["afk", "hitl"] as const) {
     const doctor = await adapter.resolve({
-      type,
+      type: "reviewer",
+      reviewMode,
       description: "review pull request 42",
       pullRequest: 42,
       permanentPrompt,
       additionalGuideline: guideline,
-    }, { interactive: type === "pr-doctor-hitl" });
+    }, { interactive: reviewMode === "hitl" });
     const doctorText = doctor?.text ?? "";
     assert.doesNotMatch(doctorText, /aboard|auto[ -]?run|automated|automation/i);
-    assert.equal(doctorText.trimEnd().endsWith(guideline), true, type);
+    assert.equal(doctorText.trimEnd().endsWith(guideline), true, reviewMode);
     // The resolved diff comes first.
-    assert.equal(doctorText.indexOf("+ refreshEarly();") < doctorText.indexOf(guideline), true, type);
-    assert.equal(doctorText.indexOf(permanentPrompt) < doctorText.indexOf(guideline), true, type);
+    assert.equal(doctorText.indexOf("+ refreshEarly();") < doctorText.indexOf(guideline), true, reviewMode);
+    assert.equal(doctorText.indexOf(permanentPrompt) < doctorText.indexOf(guideline), true, reviewMode);
   }
 });
 
@@ -603,13 +603,11 @@ test("a builtin type's prompt follows its launch mode, not its type", async () =
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
   // Interactive: the terminal opens empty even though the type can also run
   // unattended; the user types the first message.
-  assert.equal(await adapter.resolve({ type: "general-purpose", description: "d" }, { interactive: true }), undefined);
+  assert.equal(await adapter.resolve({ type: "interactive", description: "d" }, { interactive: true }), undefined);
   assert.equal(await adapter.resolve({ type: "Explore", description: "d" }, { interactive: true }), undefined);
   const topic = await adapter.resolve({ type: "Explore", description: "d", prompt: "auth flow" }, { interactive: true });
   assert.equal(topic?.text.includes("auth flow"), true);
-  // Automated: the prompt is the first user turn, and a missing one still falls
-  // back rather than leave an agent at an empty terminal.
-  const task = await adapter.resolve({ type: "general-purpose", description: "d", prompt: "find the retry bug" }, { interactive: false });
+  const task = await adapter.resolve({ type: "interactive", description: "d", prompt: "find the retry bug" }, { interactive: false });
   assert.equal(task?.text.includes("find the retry bug"), true);
   const fallback = await adapter.resolve({ type: "Explore", description: "d" }, { interactive: false });
   assert.notEqual(fallback, undefined);

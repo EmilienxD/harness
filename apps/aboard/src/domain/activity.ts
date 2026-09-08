@@ -1,6 +1,6 @@
 
 import {
-  isContinuableAgentType,
+
   isNonRestorablePersistedAgentType,
   type AgentId,
   type AgentSession,
@@ -64,8 +64,7 @@ export interface AgentActivityEntry {
   readonly terminalId?: TerminalId;
   /** Present only when this conversation can be handed back to the user. */
   readonly reopen?: ReopenableSession;
-  /** Persisted for automated research that a live caller may continue, but the user cannot reopen directly. */
-  readonly continuation?: ReopenableSession;
+
 }
 
 export interface RunActivityEntry {
@@ -134,7 +133,7 @@ export function agentActivity(
   options: { readonly reason?: string; readonly terminalId?: TerminalId } = {},
 ): AgentActivityEntry {
   const reopenable = canReopenSession(session);
-  const continuationOnly = isContinuableAgentType(session.identity.type) && !reopenable;
+
   const durationMs = elapsedMs(session.lifecycle.startedAt, at);
   const launchFacts: ReopenableSession = {
     sessionId: session.sessionId,
@@ -156,7 +155,6 @@ export function agentActivity(
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
     ...(options.terminalId === undefined ? {} : { terminalId: options.terminalId }),
     ...(reopenable ? { reopen: launchFacts } : {}),
-    ...(continuationOnly ? { continuation: launchFacts } : {}),
   };
 }
 
@@ -222,51 +220,6 @@ export function hasReopenableEntries(store: ActivityDto | undefined): boolean {
   return (store ?? EMPTY_ACTIVITY).entries.some((entry) => entry.kind === "agent" && entry.reopen !== undefined);
 }
 
-export interface LegacySessionRecord {
-  readonly agentId: AgentId;
-  readonly type: AgentType;
-  readonly sessionId: SessionId;
-  readonly description: string;
-  readonly endedAt: IsoTimestamp;
-  readonly issueNumbers?: readonly number[];
-  readonly chromeEnabled?: true;
-  readonly cwd?: string;
-  readonly autoRunRestricted?: true;
-}
-
-export function migrateLegacySessions(
-  store: ActivityDto | undefined,
-  sessions: readonly LegacySessionRecord[],
-  limit: number = ACTIVITY_LIMIT,
-): ActivityDto {
-  let result = store ?? EMPTY_ACTIVITY;
-  const known = new Set(result.entries.flatMap((entry) => (entry.kind === "agent" ? [entry.agentId] : [])));
-  // Oldest first, so the newest legacy record ends up at the top after each
-  // append pushes the previous one down.
-  const ordered = [...sessions].sort((left, right) => left.endedAt.localeCompare(right.endedAt));
-  for (const session of ordered) {
-    if (known.has(session.agentId) || !isReopenableType(session.type)) continue;
-    known.add(session.agentId);
-    result = appendActivity(result, {
-      kind: "agent",
-      id: agentEntryId(session.agentId, "ended"),
-      at: session.endedAt,
-      agentId: session.agentId,
-      type: session.type,
-      description: session.description,
-      outcome: "ended",
-      ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
-      reopen: {
-        sessionId: session.sessionId,
-        ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
-        ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
-        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
-        ...(session.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-      },
-    }, limit);
-  }
-  return result;
-}
 
 export type ReopenOrigin =
   /** Still running with an open terminal: reopening means focusing it. */

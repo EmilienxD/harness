@@ -13,17 +13,9 @@ const required = [
   "assets/runtime/abd_hook.py",
   "assets/runtime/abd-hooks.json",
   "assets/runtime/abd_wrapper.py",
-  // Under `.abd/`, not `.claude/agents/`: a definition in the latter is a
-  // subagent type every session in the workspace can discover and spawn.
-  "assets/scaffold/.abd/agents/manager.md",
-  "assets/scaffold/.abd/agents/Explore.md",
-  // Both ship: the project is cloned on every platform, and the file for the
-  // one aboard is not running on is still the user's to edit.
+  "assets/scaffold/.abd/launch.json",
   "assets/scaffold/.abd/session-setup.ps1",
   "assets/scaffold/.abd/session-setup.sh",
-  "assets/scaffold/.abd/skills/update-todo/SKILL.md",
-  "assets/scaffold/.abd/skills/brainstorm/SKILL.md",
-  "assets/scaffold/.abd/skills/general-purpose/SKILL.md",
   "LICENSE",
 ];
 
@@ -32,11 +24,11 @@ const forbidden = [
   /(^|\/)\.abd\/runtime(\/|$)/,
   /(^|\/)\.env(?:\.|$)/,
   /(^|\/)bridge\.json$/,
-  /(^|\/)manager\.json$/,
+
   /(^|\/)fleet\.json$/,
   /(^|\/)prompts(\/|$)/,
   /(^|\/)abd_cli\.py$/,
-  /assets\/scaffold\/\.abd\/agents\/(?:implementer|pr-doctor-(?:afk|hitl))\.md$/,
+  /assets\/scaffold\/\.abd\/(?:agents|skills)(?:\/|$)/,
   /(^|\/)test(\/|$)/,
   /(^|\/)src(\/|$)/,
 ];

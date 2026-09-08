@@ -10,9 +10,7 @@ import { WorkerHookService, createWorkerHookRoutes } from "../src/bridge/worker-
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
-import { WriteLease } from "../src/domain/lease.js";
 import { combineHandlers } from "../src/bridge/router.js";
-import { ManagerBriefings, ManagerPromptService, ManagerStopService, RoadmapReminderService, createManagerHookRoutes } from "../src/bridge/manager-hooks.js";
 import { createWorkerLifecycleRoutes } from "../src/bridge/lifecycle.js";
 import { SessionLifecycleService, SessionProcessMonitor, createSessionLifecycleRoutes } from "../src/bridge/session-lifecycle.js";
 
@@ -37,16 +35,10 @@ function request(path: string, body: unknown): AuthenticatedBridgeRequest {
   return { method: "POST", url: new URL(`http://127.0.0.1${path}`), headers: {}, body, signal: new AbortController().signal };
 }
 
-test("tracks child lifecycle and merges optional Agent telemetry", async () => {
-  const fleet = fleetWithWorker(); const service = new WorkerHookService(fleet, undefined, () => new Date(timestamp));
-  const route = createWorkerHookRoutes(service);
-  assert.equal((await route(request("/hooks/worker/subagent-start", { parentAgentId: parentId, childAgentId: "explore-1", agentType: "Explore" }))).status, 200);
-  assert.equal(fleet.listChildren(parentId)[0]?.status, "running");
-  assert.equal((await route(request("/hooks/worker/agent-tool", { parentAgentId: parentId, toolResponse: { agentId: "explore-1", content: [{ type: "text", text: "found it" }], totalTokens: 42, usage: { input_tokens: 30, output_tokens: 12 }, resolvedModel: "claude-sonnet" } }))).status, 200);
-  assert.deepEqual(fleet.listChildren(parentId)[0]?.telemetry, { totalTokens: 42, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0, resolvedModel: "claude-sonnet", usage: { inputTokens: 30, outputTokens: 12 } });
-  assert.equal((await route(request("/hooks/worker/subagent-stop", { parentAgentId: parentId, childAgentId: "explore-1", result: "complete" }))).status, 200);
-  assert.equal(fleet.listChildren(parentId)[0]?.status, "completed");
-  assert.equal(fleet.listChildren(parentId)[0]?.result, "complete");
+test("rejects removed in-process Agent telemetry routes", async () => {
+  const route = createWorkerHookRoutes(new WorkerHookService(fleetWithWorker()));
+  assert.equal((await route(request("/hooks/worker/subagent-start", { agentId: parentId }))).status, 404);
+  assert.equal((await route(request("/hooks/worker/agent-tool", { agentId: parentId }))).status, 404);
 });
 
 test("leaves non-worker POST routes for the next bridge adapter", async () => {
@@ -62,7 +54,7 @@ test("records compact telemetry and reinjects the original task on each continua
   assert.deepEqual(fleet.get(parentId)?.compactSummaries, ["first summary", "second summary"]);
   const route = createWorkerHookRoutes(service);
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const result = await route(request("/hooks/worker/reground", { parentAgentId: parentId }));
+    const result = await route(request("/hooks/worker/reground", { agentId: parentId }));
     assert.equal(result.status, 200);
     const context = (result.body as { additionalContext: string }).additionalContext;
     assert.ok(context.includes("issue #15"));
@@ -92,12 +84,11 @@ test("re-grounding names every bound issue and refuses a worker bound to none", 
   await assert.rejects(() => new WorkerHookService(unbound, undefined, () => new Date(timestamp)).reground("worker-17" as AgentId));
 });
 
-test("worker Python hook is silent for non-aboard and wrong-role sessions", () => {
+test("worker Python hook is silent for non-aboard and non-Auto-Run sessions", () => {
   const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   for (const env of [
     {},
-    { ABOARD_AGENT_ID: "manager", ABOARD_AGENT_TYPE: "manager" },
-    { ABOARD_AGENT_ID: "research-1", ABOARD_AGENT_TYPE: "webresearcher" },
+    { ABOARD_AGENT_ID: "interactive-1", ABOARD_AGENT_TYPE: "interactive" },
     { ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" },
   ]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
@@ -105,16 +96,12 @@ test("worker Python hook is silent for non-aboard and wrong-role sessions", () =
   }
 });
 
-test("worker Python hook guards attended sessions and completes unattended sessions", async () => {
+test("worker Python hook reports completion only for Auto Run workers", async () => {
   const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "Changed the boundary; safely." });
-  // An interactive general-purpose session reports nothing: without the delivery flag
-  // the guard exits 0 with no output, exactly like a brainstormer.
-  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose", ABOARD_ATTENDED: "1" } });
+  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "interactive-1", ABOARD_AGENT_TYPE: "interactive" } });
   assert.equal(silent.status, 0); assert.equal(silent.stdout, ""); assert.equal(silent.stderr, "");
 
-  // general-purpose launched to deliver a result reports its stop: the flag opens the worker route.
-  // Explore is automated-only and in WORKER_AGENT_TYPES, so it reports its stop directly.
   const received: { url?: string; body?: string }[] = [];
   const server = createServer((incoming, outgoing) => {
     const chunks: Buffer[] = [];
@@ -151,15 +138,13 @@ test("worker Python hook guards attended sessions and completes unattended sessi
       assert.equal(stderr, "");
     };
 
-    // Absence of the attended flag opens completion for general-purpose.
-    await report({ ABOARD_AGENT_ID: "gp-1", ABOARD_AGENT_TYPE: "general-purpose" });
-    // Explore is automated-only, so its type alone opens the route.
-    await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" });
+    await report({ ABOARD_AGENT_ID: "implementer-1", ABOARD_AGENT_TYPE: "implementer" });
+    await report({ ABOARD_AGENT_ID: "reviewer-1", ABOARD_AGENT_TYPE: "reviewer" });
 
     assert.equal(received.length, 2);
     assert.equal(received[0]!.url, "/hooks/stop");
     assert.deepEqual(JSON.parse(received[0]!.body ?? "{}"), {
-      agentId: "gp-1",
+      agentId: "implementer-1",
       cwd: "C:\\repo",
       lastAssistantMessage: "Changed the boundary; safely.",
     });
@@ -194,9 +179,8 @@ test("session Python hooks post proof-of-life and reason, and stay silent withou
   try {
     const address = server.address();
     assert.ok(address !== null && typeof address !== "string");
-    // A Manager-type env with no delivery flag: the session-lifecycle routes
-    // must fire for every aboard session, not only result-delivering workers.
-    const envFor = { ...process.env, ABOARD_AGENT_ID: "boarded", ABOARD_AGENT_TYPE: "manager", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" };
+    // Session lifecycle applies to every Aboard session, including interactive ones.
+    const envFor = { ...process.env, ABOARD_AGENT_ID: "boarded", ABOARD_AGENT_TYPE: "interactive", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" };
     // Async spawn, like the other live-POST hook tests: a synchronous spawn
     // would block the event loop that must answer the hook's request.
     const run = (route: string, payload: object) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
@@ -226,20 +210,20 @@ test("session Python hooks post proof-of-life and reason, and stay silent withou
   }
 });
 
-test("scaffold registers lifecycle, Agent telemetry, and compact re-grounding", async () => {
-
+test("scaffold registers only lifecycle and Auto Run worker hooks", async () => {
   const hooks = JSON.parse(await readFile(join(process.cwd(), "assets", "runtime", "abd-hooks.json"), "utf8")) as Record<string, unknown>;
-  for (const event of ["SubagentStart", "SubagentStop", "PostToolUse", "PostCompact", "Stop", "StopFailure"]) assert.ok(event in hooks);
-  assert.equal((hooks.PostToolUse as { matcher: string }[])[0]?.matcher, "Agent");
-  // SessionStart carries the proof-of-life registration plus the manager
-  // briefings and the compact re-grounding entry.
-  assert.equal((hooks.SessionStart as unknown[]).length, 3);
-  assert.ok("SessionEnd" in hooks);
-  // InstructionsLoaded has no decision control, so additionalContext returned
-  // from it is discarded. Re-grounding must ride SessionStart(compact) alone.
-  assert.ok(!("InstructionsLoaded" in hooks));
+  assert.deepEqual(Object.keys(hooks).sort(), ["PostCompact", "SessionEnd", "SessionStart", "Stop", "StopFailure"].sort());
+  assert.equal((hooks.SessionStart as unknown[]).length, 2);
   const regrounding = (hooks.SessionStart as { matcher: string; hooks: { args: string[] }[] }[]).find((entry) => entry.matcher === "compact");
   assert.ok(regrounding?.hooks.some((hook) => hook.args.includes("worker-reground")));
+  assert.deepEqual([...scaffoldedRoutes().names].sort(), [
+    "session-start",
+    "worker-reground",
+    "session-end",
+    "worker-post-compact",
+    "worker-stop",
+    "worker-stop-failure",
+  ].sort());
 });
 
 function scaffoldedRoutes(): { readonly names: readonly string[]; readonly table: Readonly<Record<string, string>> } {
@@ -272,24 +256,7 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
   const registered = new Set(names.map((name) => table[name]!));
 
   const fleet = new FleetRegistry();
-  const lease = new WriteLease();
-  const briefings = new ManagerBriefings(
-    {
-      repository: async () => ({ name: "aboard", defaultBranch: "main", checks: [] }),
-      git: async () => ({ branch: "main", head: "abc1234", dirty: false }),
-      github: async () => ({ issues: [], openPullRequests: [], unreviewedMergeCount: 0 }),
-      roadmap: async () => ({ number: 12, tasks: [{ position: 1, subject: "Ship the bridge", completed: false }], carrierCount: 1, nearBound: false, duplicateSubjects: [] }),
-      autoRun: () => undefined,
-    },
-    fleet, lease,
-  );
   const handler = combineHandlers(
-    createManagerHookRoutes(
-      briefings,
-      new ManagerStopService({ fleet }),
-      new ManagerPromptService(fleet, { spawnInteractive: async () => ({ agentId: "a" }) }),
-      new RoadmapReminderService({ roadmap: async () => undefined }),
-    ),
     createWorkerLifecycleRoutes({ stop: async () => true, stopFailure: async () => true, timeout: async () => true, terminalClosed: async () => true } as never),
     createWorkerHookRoutes(new WorkerHookService(fleet)),
     createSessionLifecycleRoutes({

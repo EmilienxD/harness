@@ -1,11 +1,11 @@
 export const LABEL_PREFIX = "[AI]-";
 
-export const LABEL_TODO = `${LABEL_PREFIX}todo`;
+
 export const LABEL_AFK = `${LABEL_PREFIX}afk`;
 export const LABEL_HITL = `${LABEL_PREFIX}hitl`;
 export const LABEL_CHROME = `${LABEL_PREFIX}chrome`;
 
-export const ABOARD_LABELS = [LABEL_TODO, LABEL_AFK, LABEL_HITL, LABEL_CHROME] as const;
+export const ABOARD_LABELS = [LABEL_AFK, LABEL_HITL, LABEL_CHROME] as const;
 export type AboardLabel = (typeof ABOARD_LABELS)[number];
 
 export const ISSUE_DIFFICULTIES = ["routine", "basic", "advanced", "expert"] as const;

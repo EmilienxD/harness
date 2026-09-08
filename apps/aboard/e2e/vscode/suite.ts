@@ -49,11 +49,10 @@ export async function run(): Promise<void> {
   if (phase === "initialize") {
     assert.equal(window.terminals.some((terminal) => terminal.name.startsWith("aboard:")), false);
     assert.equal(await endpoint(api.commandEndpointDirectory, root), undefined);
-    await commands.executeCommand("aboard.newManager");
-    assert.equal(window.terminals.some((terminal) => terminal.name.startsWith("aboard:")), false);
     await commands.executeCommand("aboard.initializeProject");
     const published = await eventually(() => endpoint(api.commandEndpointDirectory, root), "initialization did not publish the command endpoint");
     assert.ok(published.port > 0);
+    await assert.rejects(access(join(root, ".abd", "agents")));
     await assert.rejects(access(join(root, ".claude")));
     await assert.rejects(access(join(root, ".mcp.json")));
     await assert.rejects(access(join(root, ".gitignore")));
@@ -202,36 +201,12 @@ export async function run(): Promise<void> {
     terminalListener.dispose();
     return;
   }
-  if (phase !== "delegation") throw new Error(`Unknown extension E2E phase ${String(phase)}`);
+  if (phase !== "admission") throw new Error(`Unknown extension E2E phase ${String(phase)}`);
   const published = await eventually(() => endpoint(api.commandEndpointDirectory, root), "initialized project did not publish the command endpoint");
-  const before = new Set(window.terminals);
-  await commands.executeCommand("aboard.newManager");
-  const manager = await eventually(() => window.terminals.find((terminal) => !before.has(terminal)), "Manager terminal was not created");
-  await eventually(async () => await manager.processId ? manager : undefined, "Manager terminal process did not start");
-
-  const completed = await eventually(async () => {
-    const value = await diagnostics();
-    return value?.observations.some((item) => item.checkpoint === "manager-complete") ? value : undefined;
-  }, "Manager and Explore journey did not complete", 480);
-  assert.equal(completed.upstreamMode, "forbidden");
-  const successes = completed.observations.filter((item) => item.result === "success");
-  const managerRows = successes.filter((item) => item.scenario === "manager-foreground-explore");
-  const exploreRows = successes.filter((item) => item.scenario === "explore-read-report");
-  assert.deepEqual(managerRows.map((item) => item.checkpoint), ["delegate-explore", "manager-complete"]);
-  assert.deepEqual(exploreRows.map((item) => item.checkpoint), ["explore-read", "explore-complete"]);
-  assert.ok(managerRows[0]?.toolNamesOffered.includes("mcp__aboard__run_agent"));
-  assert.equal(managerRows[0]?.toolNamesOffered.includes("Edit"), false);
-  assert.ok(exploreRows[0]?.toolNamesOffered.includes("Read"));
-  assert.equal(exploreRows[0]?.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__")), false);
-  assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);
-
-  const journeyTerminals = window.terminals.filter((terminal) => !before.has(terminal));
-  assert.ok(journeyTerminals.length >= 2, "Manager and Explore terminals stay visible for inspection");
-  const statusBeforeReset = (await execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" })).stdout;
-  assert.doesNotMatch(statusBeforeReset, /deterministic\.txt/u);
+  assert.equal(window.terminals.some((terminal) => terminal.name.startsWith("aboard:")), false);
+  await assert.rejects(access(join(root, ".abd", "agents")));
 
   await rm(join(root, ".abd"), { recursive: true, force: true });
-  await eventually(() => journeyTerminals.some((terminal) => window.terminals.includes(terminal)) ? undefined : true, "deleting .abd did not close aboard terminals");
   await eventually(async () => await endpoint(api.commandEndpointDirectory, root) === undefined ? true : undefined, "deleting .abd did not remove the command endpoint");
   await assert.rejects(fetch(`http://127.0.0.1:${published.port}/commands`));
   const finalStatus = (await execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" })).stdout;

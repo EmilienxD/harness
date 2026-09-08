@@ -1,56 +1,52 @@
+/**
+ * Aboard session types after the REFACTOR.md redesign:
+ * - interactive: Ordinary user-controlled Claude TUI
+ * - Explore: Claude's built-in read-only agent
+ * - implementer: Auto Run worker that implements one frozen issue
+ * - reviewer: Auto Run worker that reviews (both AFK and HITL use this profile)
+ */
 export const AGENT_TYPES = [
-  "manager",
-  "brainstormer",
-  "prototyper",
-  "webresearcher",
-  "implementer",
-  "pr-doctor-afk",
-  "pr-doctor-hitl",
-  "general-purpose",
+  "interactive",
   "Explore",
+  "implementer",
+  "reviewer",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 
-export const LAUNCHABLE_AGENT_TYPES = AGENT_TYPES.filter((type) => type !== "manager");
+/** All agent types can be launched by the user or Auto Run */
+export const LAUNCHABLE_AGENT_TYPES = AGENT_TYPES;
 
-export const MCP_LAUNCHABLE_AGENT_TYPES: readonly AgentType[] = LAUNCHABLE_AGENT_TYPES.filter(
-  (type) => type !== "implementer" && type !== "pr-doctor-afk" && type !== "pr-doctor-hitl",
-);
-
-export const BRAINSTORMER_LAUNCHABLE_AGENT_TYPES = ["Explore", "webresearcher", "prototyper", "brainstormer"] as const;
-
-export const MCP_DEFAULT_AGENT_TYPE: AgentType = "general-purpose";
-
-export const AUTOMATED_AGENT_TYPES = ["webresearcher", "implementer", "pr-doctor-afk", "Explore"] as const;
-
-export function isAutomatedAgentType(type: AgentType): boolean {
-  return (AUTOMATED_AGENT_TYPES as readonly AgentType[]).includes(type);
-}
-
-export const INTERACTIVE_AGENT_TYPES = ["brainstormer", "prototyper", "pr-doctor-hitl"] as const;
+/** Interactive sessions are user-driven */
+export const INTERACTIVE_AGENT_TYPES = ["interactive"] as const;
 
 export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
+/** Explore is Claude's built-in agent */
 export const NAMED_BUILTIN_AGENT_TYPES = ["Explore"] as const;
 
 export function isNamedBuiltinAgentType(type: AgentType): boolean {
   return (NAMED_BUILTIN_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-export const NON_RESTORABLE_PERSISTED_AGENT_TYPES = ["webresearcher", "Explore"] as const;
+/** Auto Run workers: implementer and reviewer */
+export const AUTO_RUN_WORKER_TYPES = ["implementer", "reviewer"] as const;
+
+export function isAutoRunWorkerType(type: AgentType): boolean {
+  return (AUTO_RUN_WORKER_TYPES as readonly AgentType[]).includes(type);
+}
+
+/** Explore sessions are not restored from activity */
+export const NON_RESTORABLE_PERSISTED_AGENT_TYPES = ["Explore"] as const;
 
 export function isNonRestorablePersistedAgentType(type: AgentType): boolean {
   return (NON_RESTORABLE_PERSISTED_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-/** Conversations a live MCP caller may ask to continue after their report lands. */
-export const CONTINUABLE_AGENT_TYPES = ["webresearcher", "prototyper", "brainstormer"] as const;
-
-export function isContinuableAgentType(type: AgentType): type is (typeof CONTINUABLE_AGENT_TYPES)[number] {
-  return (CONTINUABLE_AGENT_TYPES as readonly AgentType[]).includes(type);
+export function isAutomatedAgentType(type: AgentType): boolean {
+  return type === "Explore" || isAutoRunWorkerType(type);
 }
 
 export type AgentId = string & { readonly __brand: "AgentId" };
@@ -84,16 +80,6 @@ export interface AgentTokenUsage {
   readonly cacheReadInputTokens?: number;
 }
 
-export interface ChildAgentNode {
-  readonly agentId: string;
-  readonly parentAgentId: AgentId;
-  readonly type: string;
-  readonly status: "running" | "completed";
-  readonly startedAt: IsoTimestamp;
-  readonly finishedAt?: IsoTimestamp;
-  readonly result?: string;
-  readonly telemetry: AgentTelemetry;
-}
 
 export const WORKER_FAILURE_TYPES = [
   "crashed",
@@ -139,7 +125,6 @@ export type AgentLifecycle =
 
 export type ResultDelivery =
   | { readonly mode: "tool-result" }
-  | { readonly mode: "mailbox"; readonly recipientAgentId: AgentId }
   | { readonly mode: "none" };
 
 export type WorkerResult =
@@ -177,13 +162,6 @@ export interface AgentSession {
   readonly lastResult?: WorkerResult;
 }
 
-export interface ManagerPersistenceDto {
-  readonly version: 1;
-  readonly agentId: AgentId;
-  readonly sessionId: SessionId;
-  readonly terminalId: TerminalId;
-  readonly updatedAt: IsoTimestamp;
-}
 
 export function assertNever(value: never): never {
   throw new Error(`Unhandled domain variant: ${JSON.stringify(value)}`);

@@ -1,23 +1,20 @@
-import type { AgentId, AgentSession, ChildAgentNode, IsoTimestamp, TerminalId, WorkerFailureType } from "../domain/contracts.js";
+import type { AgentId, AgentSession, IsoTimestamp, TerminalId, WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import type { AutoRunState } from "../auto/engine.js";
 import { formatIssueNumbers } from "../shared/issues.js";
 
 export type FleetTreeNode =
-  | { readonly kind: "new-manager" }
-  | { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean }
-  | { readonly kind: "child"; readonly child: ChildAgentNode };
+  { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean }; 
 
 export interface FleetTreeItem {
   readonly label: string;
   readonly description: string;
   readonly tooltip: string;
   readonly icon: string;
-  readonly contextValue: "aboard.action.newManager" | "aboard.agent.active" | "aboard.child";
+  readonly contextValue: "aboard.agent.active";
   readonly collapsible: boolean;
   readonly command?:
-    | { readonly command: "aboard.newManager"; readonly title: string; readonly arguments: readonly [] }
     | { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
 }
 
@@ -34,7 +31,6 @@ export class FleetTreeModel {
     private readonly lease: WriteLease,
     host: FleetTreeHost,
     private readonly isTerminalOpen: (terminalId: TerminalId) => boolean = () => true,
-    private readonly isManagerLive?: () => boolean,
   ) {
     this.#fleetRegistration = fleet.onDidChange(() => host.refresh());
     this.#leaseRegistration = lease.onDidChange(() => host.refresh());
@@ -43,51 +39,26 @@ export class FleetTreeModel {
   public roots(): readonly FleetTreeNode[] {
     const agents = this.fleet.list()
       .filter((session) => isLiveSession(session) && this.isTerminalOpen(session.terminal.terminalId))
-      .map((session): FleetTreeNode => ({ kind: "agent", session, leaseHolder: this.lease.current()?.agentId === session.identity.agentId }))
-      .sort((left, right) => managerRank(left) - managerRank(right));
-    return this.isManagerLive === undefined || this.isManagerLive()
-      ? agents
-      : [{ kind: "new-manager" }, ...agents];
+      .map((session): FleetTreeNode => ({ kind: "agent", session, leaseHolder: this.lease.current()?.agentId === session.identity.agentId }));
+    return agents;
   }
 
-  /** Only running children: a completed sub-agent is history, not fleet. */
-  public children(node: FleetTreeNode): readonly FleetTreeNode[] {
-    if (node.kind !== "agent") return [];
-    return this.fleet.listChildren(node.session.identity.agentId)
-      .filter((child) => child.status === "running")
-      .map((child) => ({ kind: "child", child }));
-  }
 
   public item(node: FleetTreeNode): FleetTreeItem {
-    if (node.kind === "new-manager") {
-      return {
-        label: "New Manager",
-        description: "",
-        tooltip: "Start a new Manager",
-        icon: "add",
-        contextValue: "aboard.action.newManager",
-        collapsible: false,
-        command: { command: "aboard.newManager" as const, title: "New Manager", arguments: [] as const },
-      };
-    }
-    if (node.kind === "child") {
-      return { label: node.child.type, description: node.child.status, tooltip: childTooltip(node.child), icon: "symbol-method", contextValue: "aboard.child", collapsible: false };
-    }
+
     const { session } = node;
     const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
-    const reportsOwed = this.fleet.reportsOwedTo(session.identity.agentId).map(agentLabel);
     const markers = [
       session.lifecycle.status,
       node.leaseHolder ? "lease holder" : "",
-      reportsOwed.length === 0 ? "" : `waiting on ${reportsOwed.join(", ")}`,
     ].filter(Boolean);
     return {
       label: `${agentLabel(session)}${goal}`,
       description: markers.join(" · "),
-      tooltip: agentTooltip(session, node.leaseHolder, reportsOwed),
+      tooltip: agentTooltip(session, node.leaseHolder),
       icon: agentIcon(session),
       contextValue: "aboard.agent.active",
-      collapsible: this.children(node).length > 0,
+      collapsible: false,
       command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const },
     };
   }
@@ -132,33 +103,25 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
   return { dispose: () => registrations.forEach((entry) => entry.dispose()) };
 }
 
-function agentIcon(session: AgentSession): string {
-  if (session.identity.type === "manager") return "organization";
-  return "sparkle-filled";
-}
+function agentIcon(_session: AgentSession): string { return "sparkle-filled"; }
 
 /** Lifecycle states that describe an agent still doing something. */
 export function isLiveSession(session: AgentSession): boolean {
   return ["starting", "running", "awaiting-user"].includes(session.lifecycle.status);
 }
 
-function managerRank(node: FleetTreeNode): number { return node.kind === "agent" && node.session.identity.type === "manager" ? 0 : 1; }
+
 function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "agent" }> { return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "agent"; }
-function agentLabel(session: AgentSession): string {
-  if (session.identity.type === "manager") return "Manager";
-  return `aboard-${session.identity.type}-${session.identity.agentId}`;
-}
+function agentLabel(session: AgentSession): string { return `aboard-${session.identity.type}-${session.identity.agentId}`; }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
-function agentTooltip(session: AgentSession, leaseHolder: boolean, reportsOwed: readonly string[]): string {
+function agentTooltip(session: AgentSession, leaseHolder: boolean): string {
   return [
     `Session: ${session.sessionId}`,
     `Status: ${session.lifecycle.status}`,
     leaseHolder ? "Holds the write lease" : "",
-    reportsOwed.length === 0 ? "" : `Waiting on: ${reportsOwed.join(", ")}`,
   ].filter(Boolean).join("\n");
 }
-function childTooltip(child: ChildAgentNode): string { return [`Type: ${child.type}`, `Status: ${child.status}`].join("\n"); }
 
 export interface FleetNotificationHost { warning(message: string): void; error(message: string): void; }
 export class FleetNotifications {
@@ -174,9 +137,7 @@ export class FleetNotifications {
 function notify(event: FleetEvent, fleet: FleetRegistry, host: FleetNotificationHost): void {
   if (event.type !== "lifecycle-transitioned" || (event.to !== "completed" && event.to !== "failed")) return;
   const session = fleet.get(event.agentId);
-  // The Manager is the user's own console: its ending is something they did, not
-  // a background result worth a toast.
-  if (session?.identity.type === "manager") return;
+
   if (session?.lifecycle.status === "failed") host.error(`${session.identity.type} failed: ${failureLabel(session.lifecycle.failure.type)}.`);
 }
 function failureLabel(type: WorkerFailureType): string { return type.replaceAll("-", " "); }

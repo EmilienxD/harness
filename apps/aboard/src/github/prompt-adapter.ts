@@ -9,7 +9,7 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
   public constructor(private readonly prompts: PromptResolver) {}
 
   public async resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined> {
-    if (input.type === "pr-doctor-afk" || input.type === "pr-doctor-hitl") {
+    if (input.type === "reviewer") {
       if (input.pullRequest === undefined) {
         return appendAutoRunGuidance(
           await this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Review the supplied change against its contract." }),

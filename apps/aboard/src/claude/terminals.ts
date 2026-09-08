@@ -78,8 +78,6 @@ export interface BridgeTerminalEnvironment {
   readonly token: string;
   readonly workspaceRoot: string;
   readonly runtimeRoot?: string;
-  readonly managerMcpTimeoutMs: number;
-  readonly managerRoadmapReminderBytes: number;
 }
 
 export interface CreateAboardTerminalRequest {
@@ -178,7 +176,7 @@ export interface TerminalControllerOptions {
 }
 
 function isUserFacing(request: CreateAboardTerminalRequest): boolean {
-  return request.focus ?? (request.attended ?? (request.agentType === "manager" || isInteractiveAgentType(request.agentType)));
+  return request.focus ?? (request.attended ?? isInteractiveAgentType(request.agentType));
 }
 
 export class TerminalController {
@@ -229,12 +227,6 @@ export class TerminalController {
       env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");
     }
     if (request.attended === true) env.ABOARD_ATTENDED = "1";
-    if (request.agentType === "manager") {
-      env.MCP_TOOL_TIMEOUT = String(environment.managerMcpTimeoutMs);
-      env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS = "0";
-      env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT = "0";
-      env.ABOARD_ROADMAP_REMINDER_BYTES = String(environment.managerRoadmapReminderBytes);
-    }
 
     const creationOptions: TerminalCreationOptions = {
       cwd,

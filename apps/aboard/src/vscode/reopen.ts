@@ -23,11 +23,7 @@ export function renderReopenItems(
   options: readonly ReopenOption[],
   now: Date = new Date(),
 ): readonly ReopenQuickPickItem[] {
-  // The Manager is the session the user most often wants back, so it leads the
-  // list; everything else keeps the coordinator's recency order.
-  const ordered = [...options].sort((left, right) =>
-    Number(right.candidate.type === "manager") - Number(left.candidate.type === "manager"));
-  return ordered.map((option) => {
+  return options.map((option) => {
     const { candidate } = option;
     const described = candidate.issueNumbers === undefined ? "" : describeIssueNumbers(candidate.issueNumbers);
     const issues = described.length === 0 ? "" : ` · ${described}`;
@@ -74,7 +70,7 @@ export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoo
       return;
     }
     if (items.length === 0) {
-      host.info("aboard has no recorded sessions to reopen yet. Sessions you are handed; brainstormer, general-purpose, pr-doctor-hitl; appear here after they end.");
+      host.info("aboard has no recorded sessions to reopen yet.");
       return;
     }
     const chosen = await host.pick(items, "Reopen an aboard session");

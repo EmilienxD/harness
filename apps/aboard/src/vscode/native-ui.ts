@@ -64,12 +64,11 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     lease,
     { refresh: () => fleetChanges.fire(undefined) },
     (terminalId) => isTerminalOpen(terminalId),
-    () => fleet.list().some((session) => session.identity.type === "manager"),
   );
   disposables.push(
     window.registerTreeDataProvider("aboard.fleet", {
       onDidChangeTreeData: fleetChanges.event,
-      getChildren: (node) => [...(node === undefined ? fleetModel.roots() : fleetModel.children(node))],
+      getChildren: (node) => node === undefined ? [...fleetModel.roots()] : [],
       getTreeItem: (node) => {
         const mapped = fleetModel.item(node);
         const item = new TreeItem(mapped.label, mapped.collapsible ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None);

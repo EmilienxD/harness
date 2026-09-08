@@ -50,16 +50,17 @@ export class ReviewCoordinator {
     }
 
     const launched = await this.delegation.launchInteractive({
-      type: "pr-doctor-hitl",
+      type: "reviewer",
+      reviewMode: "hitl",
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
       ...(request.focus === undefined ? {} : { focus: request.focus }),
-    }, "manager");
+    }, "user");
     return {
       action: "launched",
       prNumber,
       agentId: launched.agentId,
-      notice: `No aboard session is recorded for PR #${prNumber}, so a fresh pr-doctor-hitl was launched against its diff instead of resuming one.`,
+      notice: `No aboard session is recorded for PR #${prNumber}, so a fresh reviewer was launched against its diff instead of resuming one.`,
     };
   }
 }

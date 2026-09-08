@@ -66,7 +66,7 @@ function setup() {
   const controller = new TerminalController({
     host,
     shell: "powershell",
-    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerMcpTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
+    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard" }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
     sleep: async () => undefined,
@@ -86,7 +86,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
   });
 
   assert.equal(created.terminalId, "terminal-1");
-  // Exhaustive on purpose: MCP timeout controls belong only to the Manager.
+  // Exhaustive on purpose: terminals receive only the Aboard bridge/session environment.
   assert.deepEqual(host.created[0]?.options.env, {
     ABOARD_BRIDGE_PORT: "4932",
     ABOARD_BRIDGE_TOKEN: "secret",
@@ -109,19 +109,8 @@ test("creates one real-terminal record with the complete aboard environment", ()
   assert.throws(() => controller.create({
     agentId: agent("agent-6"),
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    agentType: "pr-doctor-afk",
+    agentType: "reviewer",
   }), /already has a live aboard terminal/);
-
-  // Foreground MCP calls keep waiting under the configured wall-clock bound
-  // rather than being auto-backgrounded or cut off as idle.
-  controller.create({
-    agentId: agent("manager-1"),
-    sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"),
-    agentType: "manager",
-  });
-  assert.equal(host.created[1]?.options.env.MCP_TOOL_TIMEOUT, "3600000");
-  assert.equal(host.created[1]?.options.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0");
-  assert.equal(host.created[1]?.options.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT, "0");
 });
 
 test("a launch given its own directory starts there, cds there, and calls it the workspace", () => {
@@ -147,8 +136,8 @@ test("a launch given its own directory starts there, cds there, and calls it the
 
 test("an agent's live terminal is findable without the fleet, so settlement can collect it", () => {
   const { controller, host } = setup();
-  const agentId = agent("manager-1");
-  const created = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  const agentId = agent("interactive-1");
+  const created = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "interactive" });
   assert.equal(controller.liveTerminalForAgent(agentId), created.terminalId);
   assert.equal(controller.liveTerminalForAgent(agent("never-launched")), undefined);
   host.close(host.created[0]!.terminal);
@@ -158,8 +147,8 @@ test("an agent's live terminal is findable without the fleet, so settlement can 
 test("a released terminal survives the session, stops being aboard's, and frees the relaunch", () => {
   // Ctrl+C twice ends the session inside a shell the user kept on purpose.
   const { controller, host, events } = setup();
-  const agentId = agent("manager-1");
-  const first = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  const agentId = agent("interactive-1");
+  const first = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "interactive" });
   controller.release(first.terminalId);
 
   assert.equal(host.created[0]?.terminal.disposed, false, "the terminal is handed back, not killed");
@@ -169,7 +158,7 @@ test("a released terminal survives the session, stops being aboard's, and frees 
   assert.throws(() => controller.show(first.terminalId), /is detached/);
   assert.throws(() => controller.kill(first.terminalId), /is detached/);
 
-  const relaunched = controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "manager" });
+  const relaunched = controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "interactive" });
   assert.equal(relaunched.status, "open");
 
   // Closing the released terminal later must stay silent: the agent has been
@@ -182,7 +171,7 @@ test("a released terminal survives the session, stops being aboard's, and frees 
 
 test("releasing is idempotent and never resurrects a closed terminal", () => {
   const { controller, host } = setup();
-  const created = controller.create({ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  const created = controller.create({ agentId: agent("interactive-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "interactive" });
   host.close(host.created[0]!.terminal);
   controller.release(created.terminalId);
   assert.equal(controller.get(created.terminalId).status, "closed");
@@ -201,7 +190,7 @@ test("several bound issues reach the session as one comma-separated variable, an
 });
 
 test("the terminal leaves title policy to VS Code; the aboard label stays on the record", () => {
-  // A static "aboard: manager" tab outlives the agent and then lies about it.
+  // A static role title outlives the session and then lies about it.
   const { controller, host } = setup();
   const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "implementer", issueNumbers: [6] });
   assert.equal("name" in (host.created[0]?.options ?? {}), false);
@@ -211,22 +200,22 @@ test("the terminal leaves title policy to VS Code; the aboard label stays on the
 
 test("a closed terminal frees the agent for relaunch but keeps session identity fixed", async () => {
   const { controller, host } = setup();
-  const agentId = agent("manager-1");
-  const first = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  const agentId = agent("interactive-1");
+  const first = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "interactive" });
   host.close(host.created[0]!.terminal);
   assert.equal(controller.get(first.terminalId).status, "closed");
 
   // Resuming the recorded conversation and starting a fresh one are both valid
-  // relaunches of the same Manager identity.
-  const resumed = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" });
+  // relaunches of the same interactive identity.
+  const resumed = controller.create({ agentId, sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "interactive" });
   assert.equal(resumed.status, "open");
   host.close(host.created[1]!.terminal);
-  const fresh = controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "manager" });
+  const fresh = controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "interactive" });
   assert.equal(fresh.status, "open");
 
   // A session id never migrates to a different agent, closed or not.
-  assert.throws(() => controller.create({ agentId: agent("manager-2"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "manager" }), /belongs to agent manager-1/);
-  assert.throws(() => controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "manager" }), /already has a live aboard terminal/);
+  assert.throws(() => controller.create({ agentId: agent("interactive-2"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "interactive" }), /belongs to agent interactive-1/);
+  assert.throws(() => controller.create({ agentId, sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "interactive" }), /already has a live aboard terminal/);
 });
 
 test("attended sessions carry ABOARD_ATTENDED independently of reporting", () => {
@@ -256,9 +245,9 @@ test("attended sessions carry ABOARD_ATTENDED independently of reporting", () =>
 test("bulk restoration can suppress focus for user-facing sessions", () => {
   const { controller, host } = setup();
   controller.create({
-    agentId: agent("restored-brainstormer"),
+    agentId: agent("restored-interactive"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "brainstormer",
+    agentType: "interactive",
     focus: false,
   });
   assert.deepEqual(host.created[0]!.terminal.shows, []);
@@ -267,9 +256,9 @@ test("bulk restoration can suppress focus for user-facing sessions", () => {
 test("focuses interactive terminals and exposes only takeover-named input controls", async () => {
   const { controller, host } = setup();
   const created = controller.create({
-    agentId: agent("brainstorm-1"),
+    agentId: agent("interactive-1"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "brainstormer",
+    agentType: "interactive",
   });
   const native = host.created[0]!.terminal;
   assert.deepEqual(native.shows, [false]);
@@ -288,9 +277,9 @@ test("focuses interactive terminals and exposes only takeover-named input contro
 test("captures closure once, releases the native handle, and treats a missing pid as information", async () => {
   const { controller, host, events } = setup();
   const created = controller.create({
-    agentId: agent("general-purpose-1"),
+    agentId: agent("interactive-1"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "general-purpose",
+    agentType: "interactive",
   });
   const native = host.created[0]!.terminal;
   native.processId = new Promise<number | undefined>(() => undefined);
@@ -310,7 +299,7 @@ test("captures closure once, releases the native handle, and treats a missing pi
   assert.deepEqual(events[1], {
     type: "terminal-closed",
     terminalId: "terminal-1",
-    agentId: "general-purpose-1",
+    agentId: "interactive-1",
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
     exitCode: null,
     reason: "killed",
@@ -364,7 +353,7 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
   const duplicate = await handler(request("POST", "/terminals", {
     agentId: "worker",
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    agentType: "pr-doctor-afk",
+    agentType: "reviewer",
   }));
   assert.equal(duplicate.status, 409);
 });
@@ -389,7 +378,7 @@ function setupProofs(verdict: () => Promise<unknown>) {
   const controller = new TerminalController({
     host,
     shell: "powershell",
-    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard", managerMcpTimeoutMs: 3_600_000, managerRoadmapReminderBytes: 150_000 }),
+    environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard" }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
     onLifecycleEvent: (event) => events.push(event),
@@ -402,27 +391,27 @@ function setupProofs(verdict: () => Promise<unknown>) {
 
 test("a launch with no SessionStart inside its window is reported once, then killed as a failed launch", async () => {
   const { controller, host, proofs, notified, flush } = setupProofs(() =>
-    Promise.reject(new SessionStartTimeoutError(agent("manager-1"), 120_000)));
+    Promise.reject(new SessionStartTimeoutError(agent("interactive-1"), 120_000)));
   controller.create({
-    agentId: agent("manager-1"),
+    agentId: agent("interactive-1"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "manager",
+    agentType: "interactive",
     startupTimeoutMs: 120_000,
   });
-  assert.deepEqual(proofs.armed, [{ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
+  assert.deepEqual(proofs.armed, [{ agentId: agent("interactive-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
 
   await flush();
-  assert.deepEqual(notified, [{ agentId: agent("manager-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
+  assert.deepEqual(notified, [{ agentId: agent("interactive-1"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), timeoutMs: 120_000 }]);
   assert.equal(host.created[0]!.terminal.disposed, true);
 });
 
 test("a cancelled or settled proof is not a verdict and never kills the terminal", async () => {
   const { controller, host, notified, flush } = setupProofs(() =>
-    Promise.reject(new SessionStartCancelledError(agent("manager-1"))));
+    Promise.reject(new SessionStartCancelledError(agent("interactive-1"))));
   controller.create({
-    agentId: agent("manager-1"),
+    agentId: agent("interactive-1"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "manager",
+    agentType: "interactive",
     startupTimeoutMs: 120_000,
   });
   await flush();
@@ -432,11 +421,11 @@ test("a cancelled or settled proof is not a verdict and never kills the terminal
 
 test("a launch with no startup timeout armed asks for no proof at all", async () => {
   const { controller, proofs } = setupProofs(() =>
-    Promise.reject(new SessionStartTimeoutError(agent("general-purpose-1"), 60_000)));
+    Promise.reject(new SessionStartTimeoutError(agent("interactive-1"), 60_000)));
   controller.create({
-    agentId: agent("general-purpose-1"),
+    agentId: agent("interactive-1"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "general-purpose",
+    agentType: "interactive",
   });
   assert.equal(proofs.armed.length, 0);
 });

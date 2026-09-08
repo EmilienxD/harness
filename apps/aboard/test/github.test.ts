@@ -101,205 +101,6 @@ test("authentication preflight is fresh, targets the workspace repository, and p
   assert.equal(gh.calls.filter((args) => args[0] === "api").length, 1);
 });
 
-/** Open issues carrying `[AI]-todo`, as `gh issue list --json number,body,createdAt` returns them. */
-function carriers(...issues: readonly { number: number; body: string; createdAt: string }[]): string {
-  return JSON.stringify(issues);
-}
-
-const ROADMAP = "- [ ] Ship the bridge\n- [x] Rotate the tokens";
-
-function roadmapGh(response: (args: readonly string[]) => string): FixtureGh {
-  return new FixtureGh((args) => {
-    if (args[0] === "issue" && args[1] === "edit") return "";
-    if (args[0] === "issue" && args[1] === "pin") return "";
-    if (args[0] === "label") return "";
-    return response(args);
-  });
-}
-
-test("one label query resolves the locator and the document, with no cache and no search index", async () => {
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  const roadmap = await github.readRoadmap();
-  assert.equal(roadmap?.number, 12);
-  assert.deepEqual(roadmap?.tasks.map((task) => [task.subject, task.completed]), [["Ship the bridge", false], ["Rotate the tokens", true]]);
-  assert.equal(roadmap?.carrierCount, 1);
-
-  const lookup = gh.calls.find((args) => args[0] === "issue" && args[1] === "list");
-  assert.equal(lookup?.includes("--search"), false);
-  assert.deepEqual(lookup, ["issue", "list", "--state", "open", "--label", "[AI]-todo", "--limit", "50", "--json", "number,body,createdAt"]);
-
-  // A second read re-resolves: the cache it replaced saved nothing, because
-  // every use of it had to revalidate at exactly the cost of resolving.
-  await github.readRoadmap();
-  assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "list").length, 2);
-});
-
-test("newest carrier wins, ties break on the lowest number, and read and write agree", async () => {
-  const listed = carriers(
-    { number: 50, body: "- [ ] Fifty", createdAt: "2026-07-02T00:00:00Z" },
-    { number: 3, body: "- [ ] Three", createdAt: "2026-07-09T00:00:00Z" },
-    { number: 9, body: "- [ ] Nine", createdAt: "2026-07-09T00:00:00Z" },
-  );
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return listed;
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  // Newest createdAt, then the lower number among the two that tie.
-  assert.equal((await github.readRoadmap())?.number, 3);
-  assert.equal((await github.createRoadmapTasks({ subjects: ["Added"] })).issue, 3);
-  assert.deepEqual(gh.calls.filter((args) => args[1] === "edit").at(-1)?.slice(0, 3), ["issue", "edit", "3"]);
-});
-
-test("extra carriers are reported, never repaired", async () => {
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") {
-      return carriers({ number: 50, body: "- [ ] Fifty", createdAt: "2026-07-09T00:00:00Z" }, { number: 3, body: "- [ ] Three", createdAt: "2026-07-02T00:00:00Z" });
-    }
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  assert.equal((await github.readRoadmap())?.carrierCount, 2);
-  const written = await github.createRoadmapTasks({ subjects: ["Added"] });
-  assert.equal(written.issue, 50);
-  assert.match(written.notices.join(" "), /2 open issues carry `\[AI\]-todo`; #50 is in use/);
-  // aboard never modifies an issue it did not create: no relabelling, and no
-  // third issue minted to escape the ambiguity.
-  assert.equal(gh.calls.some((args) => args.includes("--remove-label")), false);
-  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "create"), false);
-});
-
-test("an empty candidate set mints on create, is the first-run state on read, and fails on update", async () => {
-  const empty = (args: readonly string[]) => {
-    if (args[0] === "issue" && args[1] === "list") return "[]";
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
-    throw new Error(`unexpected ${args.join(" ")}`);
-  };
-  // No carrier is a fact about the repository, not a failure: the briefing
-  // renders it as work to do rather than as an unavailable section.
-  assert.equal(await new GitHubClient(roadmapGh(empty)).readRoadmap(), undefined);
-
-  const createGh = roadmapGh(empty);
-  const created = await new GitHubClient(createGh).createRoadmapTasks({ subjects: ["Write the first task"] });
-  assert.equal(created.issue, 44);
-  assert.deepEqual(created.positions, [1]);
-  assert.match(created.notices.join(" "), /Created issue #44/);
-  // Plain `label create`, so a user-owned `[AI]-todo` keeps its colour.
-  assert.equal(createGh.calls.some((args) => args.includes("--force")), false);
-  assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "create")?.slice(0, 4), ["issue", "create", "--title", "Project roadmap"]);
-  assert.deepEqual(createGh.calls.find((args) => args[0] === "issue" && args[1] === "pin"), ["issue", "pin", "44"]);
-
-  await assert.rejects(
-    () => new GitHubClient(roadmapGh(empty)).updateRoadmapTask({ task: 1, expect: "Anything", status: "completed" }),
-    (error: unknown) => error instanceof GitHubBoundaryError && error.code === "missing-todo",
-  );
-});
-
-test("roadmap issue pinning is best effort after minting", async () => {
-  const gh = new FixtureGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return "[]";
-    if (args[0] === "label") return "";
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
-    if (args[0] === "issue" && args[1] === "pin") throw new GitHubBoundaryError("command-failed", "pin failed");
-    if (args[0] === "issue" && args[1] === "view") {
-      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["[AI]-todo"] });
-    }
-    if (args[0] === "issue" && args[1] === "edit") return "";
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  const created = await github.createRoadmapTasks({ subjects: ["Write the first task"] });
-  assert.equal(created.issue, 44);
-  assert.match(created.notices.join(" "), /could not pin #44/);
-
-  await github.updateRoadmapTask({ task: 1, expect: "Write the first task", status: "completed" });
-  assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
-  assert.deepEqual(gh.calls.find((args) => args[0] === "issue" && args[1] === "edit")?.slice(0, 3), ["issue", "edit", "44"]);
-});
-
-test("a batch create is one issue edit, returns positions in order, and honours --after", async () => {
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: "- [ ] First\n- [ ] Second", createdAt: "2026-07-01T00:00:00Z" });
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  const created = await github.createRoadmapTasks({ subjects: ["Third", "Fourth"], after: "top" });
-  assert.deepEqual(created.positions, [1, 2]);
-  // One write for N subjects: the bootstrap must not cost twenty issue revisions.
-  assert.equal(gh.calls.filter((args) => args[0] === "issue" && args[1] === "edit").length, 1);
-  assert.equal(gh.calls.find((args) => args[1] === "edit")?.at(-1), "- [ ] Third\n- [ ] Fourth\n- [ ] First\n- [ ] Second");
-});
-
-test("an edit that renumbers hands back the pending list; one that does not stays quiet", async () => {
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-
-  // A move renumbers everything between, so the caller's held positions are
-  // stale and it is handed the current list rather than left to discover that.
-  const moved = await github.updateRoadmapTask({ task: 2, expect: "Rotate the tokens", after: "top" });
-  assert.deepEqual(moved.tasks, ["2. [ ] Ship the bridge"]);
-  assert.match(moved.notices.join(" "), /renumbered the tasks after it/);
-
-  // Completing a task in place moves nothing, so nothing is owed.
-  const completed = await github.updateRoadmapTask({ task: 1, expect: "Ship the bridge", status: "completed" });
-  assert.equal(completed.tasks, undefined);
-  assert.equal(completed.task, 1);
-
-  const appended = await github.createRoadmapTasks({ subjects: ["Later"] });
-  assert.equal(appended.tasks, undefined);
-});
-
-test("an out-of-range position writes nothing and returns the current list", async () => {
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  await assert.rejects(
-    () => new GitHubClient(gh).updateRoadmapTask({ task: 9, expect: "Ship the bridge", status: "completed" }),
-    (error: unknown) => {
-      assert.ok(error instanceof GitHubBoundaryError && error.code === "unknown-task");
-      const details = (error as GitHubBoundaryError).details as { tasks: readonly string[] };
-      assert.deepEqual(details.tasks, ["1. [ ] Ship the bridge", "2. [x] Rotate the tokens"]);
-      return true;
-    },
-  );
-  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), false);
-});
-
-test("an expect mismatch writes nothing and returns the current list", async () => {
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: ROADMAP, createdAt: "2026-07-01T00:00:00Z" });
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  await assert.rejects(
-    () => new GitHubClient(gh).updateRoadmapTask({ task: 1, expect: "Rotate the tokens", status: "completed" }),
-    (error: unknown) => {
-      assert.ok(error instanceof GitHubBoundaryError && error.code === "expectation-mismatch");
-      assert.match(error.message, /Position 1 is "Ship the bridge", not "Rotate the tokens"/);
-      const details = (error as GitHubBoundaryError).details as { tasks: readonly string[] };
-      assert.deepEqual(details.tasks, ["1. [ ] Ship the bridge", "2. [x] Rotate the tokens"]);
-      return true;
-    },
-  );
-  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), false);
-});
-
-test("the size bound accepts the write and warns rather than deadlocking the Manager", async () => {
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return carriers({ number: 12, body: `- [ ] ${"x".repeat(60_000)}`, createdAt: "2026-07-01T00:00:00Z" });
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const written = await new GitHubClient(gh).createRoadmapTasks({ subjects: ["One more"] });
-  assert.match(written.notices.join(" "), /past the 60000 bound. The write was accepted/);
-  assert.equal(gh.calls.some((args) => args[0] === "issue" && args[1] === "edit"), true);
-});
 
 /** One page of open issues as the GraphQL query returns it. */
 function openIssues(): string {
@@ -312,15 +113,8 @@ function openIssues(): string {
   return graph({ issues: { nodes, pageInfo: endPage } });
 }
 
-test("derives readiness solely from dependency closedness and flags classification", async () => {
-  const gh = new FixtureGh((args) => args[0] === "repo" ? repo : openIssues());
-  const issues = await new GitHubClient(gh).listRoadmapIssues();
-  assert.deepEqual(issues.map((issue) => [issue.number, issue.ready, issue.disposition]), [
-    [16, true, "hitl"], [17, false, "afk"], [18, true, "unclassified"], [19, true, "unclassified"],
-  ]);
-});
 
-test("the queue and the briefing are projected from one open-issue read", async () => {
+test("the Auto Run queue preserves open issue ordering, classification labels, and dependencies", async () => {
   const gh = new FixtureGh((args) => args[0] === "repo" ? repo : openIssues());
   const github = new GitHubClient(gh);
   const { candidates } = await github.listImplementableIssues();
@@ -334,12 +128,7 @@ test("the queue and the briefing are projected from one open-issue read", async 
   assert.deepEqual(candidates.find((issue) => issue.number === 16)?.dependencyNumbers, [15, 18, 17]);
   assert.deepEqual(candidates.find((issue) => issue.number === 19)?.dependencyNumbers, [16]);
 
-  const briefing = await github.listRoadmapIssues();
-  for (const issue of briefing) {
-    const candidate = candidates.find((entry) => entry.number === issue.number);
-    assert.equal(issue.ready, candidate?.openBlockedByNumbers.length === 0);
-    assert.equal(issue.title, candidate?.title);
-  }
+  assert.deepEqual(candidates.map((issue) => issue.labels), [["[AI]-hitl"], ["[AI]-afk"], [], ["planning"]]);
 
   // Ascending creation order establishes priority before cursor pagination.
   const query = gh.calls.flat().find((arg) => arg.startsWith("query=")) ?? "";
@@ -600,7 +389,7 @@ test("a tree row can open the issue or pull request it names", async () => {
 });
 
 test("malformed gh JSON is a typed boundary failure", async () => {
-  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json")).readRoadmap(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
+  await assert.rejects(() => new GitHubClient(new FixtureGh(() => "not-json")).listImplementableIssues(), (error: unknown) => error instanceof GitHubBoundaryError && error.code === "malformed-output");
 });
 
 test("briefing data surfaces only merges with no durable review", async () => {
@@ -612,78 +401,4 @@ test("briefing data surfaces only merges with no durable review", async () => {
     { number: 41, title: "Unreviewed", mergedAt: "2026-07-30T09:00:00Z" },
   ]);
   assert.equal(gh.calls[0]?.includes("merged:>=2026-07-30T00:00:00Z"), true);
-});
-
-/** `gh issue view <n> --json number,body,createdAt,state,labels`. */
-function viewed(issue: { number: number; body: string; createdAt: string; state: string; labels: readonly string[] }): string {
-  return JSON.stringify({ ...issue, labels: issue.labels.map((name) => ({ name })) });
-}
-
-test("an update straight after a mint resolves the new issue the label index has not indexed yet", async () => {
-  let indexed = false;
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") {
-      return indexed ? carriers({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z" }) : "[]";
-    }
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
-    if (args[0] === "issue" && args[1] === "view") {
-      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", state: "OPEN", labels: ["[AI]-todo"] });
-    }
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  assert.equal((await github.createRoadmapTasks({ subjects: ["Write the first task"] })).issue, 44);
-
-  const updated = await github.updateRoadmapTask({ task: 1, expect: "Write the first task", status: "completed" });
-  assert.equal(updated.issue, 44);
-  assert.deepEqual(gh.calls.find((args) => args[1] === "edit")?.slice(0, 3), ["issue", "edit", "44"]);
-  assert.deepEqual(gh.calls.find((args) => args[1] === "view")?.slice(0, 3), ["issue", "view", "44"]);
-  // The body comes from the lookup, not from what aboard wrote, so an edit the
-  // user made on GitHub in between is not overwritten.
-  assert.equal(gh.calls.find((args) => args[1] === "edit")?.at(-1), "- [x] Write the first task");
-
-  // Once the index catches up the seed costs nothing: no second point lookup.
-  indexed = true;
-  assert.equal((await github.readRoadmap())?.number, 44);
-  assert.equal(gh.calls.filter((args) => args[1] === "view").length, 1);
-});
-
-test("a minted seed never outlives the issue being a carrier", async () => {
-  let carrier = { state: "OPEN", labels: ["[AI]-todo"] };
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return "[]";
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
-    if (args[0] === "issue" && args[1] === "view") {
-      return viewed({ number: 44, body: "- [ ] Write the first task", createdAt: "2026-07-09T00:00:00Z", ...carrier });
-    }
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  await github.createRoadmapTasks({ subjects: ["Write the first task"] });
-
-  // The user closed it: the repository has no roadmap again, and the seed must
-  // not resurrect one.
-  carrier = { state: "CLOSED", labels: ["[AI]-todo"] };
-  assert.equal(await github.readRoadmap(), undefined);
-  // Dropped, not re-checked on every later resolution.
-  assert.equal(await github.readRoadmap(), undefined);
-  assert.equal(gh.calls.filter((args) => args[1] === "view").length, 1);
-});
-
-test("a seeded mint re-enters the candidate set without winning it", async () => {
-  let listed = "[]";
-  const gh = roadmapGh((args) => {
-    if (args[0] === "issue" && args[1] === "list") return listed;
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/EmilienxD/aboard/issues/44\n";
-    throw new Error(`unexpected ${args.join(" ")}`);
-  });
-  const github = new GitHubClient(gh);
-  await github.createRoadmapTasks({ subjects: ["Minted"] });
-
-  listed = carriers(
-    { number: 44, body: "- [ ] Minted", createdAt: "2026-07-09T00:00:00Z" },
-    { number: 60, body: "- [ ] Newer", createdAt: "2026-07-10T00:00:00Z" },
-  );
-  assert.equal((await github.readRoadmap())?.number, 60);
-  assert.equal(gh.calls.some((args) => args[1] === "view"), false);
 });

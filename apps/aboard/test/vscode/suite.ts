@@ -32,24 +32,23 @@ export async function run(): Promise<void> {
   // the registered TreeDataProvider's source; VS Code hosts this assertion so
   // bundling and extension-host execution are covered as well as pure mapping.
   const at = "2026-08-30T10:00:00.000Z" as IsoTimestamp;
-  const recipientId = "manager-ui" as AgentId;
+  const agentId = "interactive-ui" as AgentId;
   const fleet = new FleetRegistry();
-  const base: AgentSession = {
-    identity: { agentId: recipientId, type: "manager" },
-    sessionId: "session-manager-ui" as SessionId,
-    terminal: { terminalId: "terminal-manager-ui" as TerminalId, name: "Manager" },
+  const session: AgentSession = {
+    identity: { agentId, type: "interactive" },
+    sessionId: "session-interactive-ui" as SessionId,
+    terminal: { terminalId: "terminal-interactive-ui" as TerminalId, name: "interactive" },
     lifecycle: { status: "starting", startedAt: at },
     resultDelivery: { mode: "none" },
+    attended: true,
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   };
-  fleet.register(base, at);
-  fleet.register({ ...base, identity: { agentId: "research-ui" as AgentId, type: "webresearcher" }, sessionId: "session-research-ui" as SessionId, terminal: { terminalId: "terminal-research-ui" as TerminalId, name: "research" }, resultDelivery: { mode: "mailbox", recipientAgentId: recipientId } }, at);
-  fleet.register({ ...base, identity: { agentId: "prototype-ui" as AgentId, type: "prototyper" }, sessionId: "session-prototype-ui" as SessionId, terminal: { terminalId: "terminal-prototype-ui" as TerminalId, name: "prototype" }, resultDelivery: { mode: "mailbox", recipientAgentId: recipientId }, attended: true }, at);
-  fleet.transition(recipientId, { status: "running", startedAt: at }, at);
+  fleet.register(session, at);
+  fleet.transition(agentId, { status: "running", startedAt: at }, at);
   const fleetModel = new FleetTreeModel(fleet, new WriteLease(), { refresh: () => {} }, () => true);
-  const recipientRow = fleetModel.roots().find((node) => node.kind === "agent" && node.session.identity.agentId === recipientId);
-  assert.ok(recipientRow, "the recipient has an Agents row");
-  assert.equal(fleetModel.item(recipientRow).description, "running · waiting on aboard-webresearcher-research-ui, aboard-prototyper-prototype-ui");
+  const row = fleetModel.roots().find((node) => node.kind === "agent" && node.session.identity.agentId === agentId);
+  assert.ok(row, "the interactive session has an Agents row");
+  assert.equal(fleetModel.item(row).description, "running");
   fleetModel.dispose();
 
   const available = await commands.getCommands(true);

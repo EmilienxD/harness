@@ -15,7 +15,7 @@ import {
 import type { ActivityDto } from "../domain/activity.js";
 import type { FleetPersistenceDto } from "../domain/fleet.js";
 import type { AgentId, SessionId } from "../domain/contracts.js";
-import { parseActivityDto, parseFleetPersistenceDto, parseLegacySessionLedger, type LegacySessionLedgerDto } from "../domain/validation.js";
+import { parseActivityDto, parseFleetPersistenceDto } from "../domain/validation.js";
 import { ISSUE_DIFFICULTIES, type IssueDifficulty } from "../shared/labels.js";
 import type { RuntimeAdmission } from "./admission.js";
 import type { RuntimeLayout } from "./layout.js";
@@ -69,14 +69,6 @@ export class FileActivityStore extends AtomicJsonFile<ActivityDto> {
   }
 }
 
-export class FileLegacySessionLedger extends AtomicJsonFile<LegacySessionLedgerDto> {
-  public constructor(runtimeRoot: string, admission?: RuntimeAdmission) {
-    super(join(runtimeRoot, "state", "sessions.json"), (value) => {
-      const result = parseLegacySessionLedger(value);
-      return result.ok ? result.value : undefined;
-    }, admission);
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -341,7 +333,7 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
     workerSession === undefined
     || nonEmptyString(workerSession.agentId) === undefined
     || nonEmptyString(workerSession.sessionId) === undefined
-    || (workerSession.type !== "implementer" && workerSession.type !== "pr-doctor-afk" && workerSession.type !== "Explore")
+    || (workerSession.type !== "implementer" && workerSession.type !== "reviewer" && workerSession.type !== "Explore")
     || positiveInteger(workerSession.issueNumber) === undefined
     || (workerSession.continuable !== undefined && (workerSession.continuable !== true || workerSession.type === "Explore"))
   )) return undefined;
@@ -370,7 +362,7 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
     ...(workerSession === undefined ? {} : { workerSession: {
       agentId: workerSession.agentId as AgentId,
       sessionId: workerSession.sessionId as SessionId,
-      type: workerSession.type as "implementer" | "pr-doctor-afk" | "Explore",
+      type: workerSession.type as "implementer" | "reviewer" | "Explore",
       issueNumber: workerSession.issueNumber as number,
       ...(workerSession.continuable === true ? { continuable: true as const } : {}),
     } }),

@@ -1,5 +1,5 @@
 
-import { deriveWriteCapability, type WriteCapability } from "../domain/capability.js";
+import type { WriteCapability } from "../domain/capability.js";
 import {
   isAutomatedAgentType,
   isNamedBuiltinAgentType,
@@ -7,7 +7,7 @@ import {
   type AgentType,
   type SessionId,
 } from "../domain/contracts.js";
-import { ABOARD_MCP_SERVER_NAME, aboardToolNamesForRole } from "../bridge/mcp-tools.js";
+
 import type { IssueDifficulty } from "../shared/labels.js";
 import {
   describeResolvedPrompt,
@@ -32,8 +32,6 @@ export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
   "git-bash": 24_000,
 };
 
-/** The scaffolded definition the Manager session runs from. */
-export const MANAGER_AGENT_NAME = "manager";
 
 export type ClaudeCommandResult =
   | { readonly ok: true; readonly value: readonly string[] }
@@ -139,19 +137,6 @@ function launchPolicy(
 
 export type LaunchConfiguration =
   | {
-      readonly shape: "agent-defined";
-      readonly agentName: string;
-      /** The definition body, written as the rewritten file's markdown body. */
-      readonly systemPrompt: string;
-      readonly declaredTools: readonly string[];
-      /** `description:` from the same definition; a required frontmatter field. */
-      readonly declaredDescription?: string;
-      readonly extraFrontmatter?: readonly string[];
-      readonly declaredModel?: string;
-      readonly declaredEffort?: DeclaredEffort;
-      readonly declaredCommand?: readonly string[];
-    }
-  | {
       readonly shape: "builtin";
       readonly agentName: string;
       readonly declaredModel?: string;
@@ -166,21 +151,24 @@ export type LaunchConfiguration =
       readonly declaredEffort?: DeclaredEffort;
       readonly declaredCommand?: readonly string[];
     }
-  /** Claude Code's unmodified default session, exposed as `general-purpose`. */
+  /** Claude Code's unmodified default interactive session. */
   | { readonly shape: "default" };
+
+export type AutoRunReviewMode = "afk" | "hitl";
+export type AutoRunWorkerType = "implementer" | "reviewer";
 
 export const AUTO_RUN_WORKER_SKILLS = {
   implementer: "implement",
-  "pr-doctor-afk": "review-afk",
-  "pr-doctor-hitl": "review-hitl",
+  reviewer: "review-afk",
 } as const;
 
-export type AutoRunWorkerType = keyof typeof AUTO_RUN_WORKER_SKILLS;
-
-export function autoRunWorkerConfiguration(type: AutoRunWorkerType): LaunchConfiguration {
+export function autoRunWorkerConfiguration(
+  type: AutoRunWorkerType,
+  reviewMode: AutoRunReviewMode = "afk",
+): LaunchConfiguration {
   return {
     shape: "skill",
-    skillName: AUTO_RUN_WORKER_SKILLS[type],
+    skillName: type === "reviewer" ? `review-${reviewMode}` : AUTO_RUN_WORKER_SKILLS[type],
     declaredModel: BY_DIFFICULTY,
     declaredEffort: BY_DIFFICULTY,
   };
@@ -216,7 +204,7 @@ export type LaunchPlanErrorCode =
   | "unsafe-spill-path"
   | "invalid-threshold"
   | "invalid-command"
-  | "invalid-mcp-config"
+
   | "command-line-too-long"
   | "missing-prompt"
   | "shape-not-allowed";
@@ -272,70 +260,20 @@ export function resolveLaunchConfiguration(
             assertFlagValue(token, "invalid-command", "agent command token", { allowLeadingDash: true }),
           );
 
-    // A builtin profile never supplies a prompt or tools. Claude Code resolves
-    // both through `--agent`; aboard passes only the policy fields above.
-    if (input.systemPrompt === undefined) {
-      if (input.declaredTools !== undefined) {
-        throw new LaunchPlanError(
-          "conflicting-launch-shape",
-          `The ${input.agentName} builtin profile must not declare tools`,
-        );
-      }
-      if (
-        input.declaredDescription !== undefined ||
-        input.extraFrontmatter !== undefined
-      ) {
-        throw new LaunchPlanError(
-          "conflicting-launch-shape",
-          `The ${input.agentName} builtin profile is launch policy only; Claude Code owns its definition`,
-        );
-      }
-      return {
-        shape: "builtin",
-        agentName: input.agentName,
-        ...(declaredModel === undefined ? {} : { declaredModel }),
-        ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
-        ...(declaredCommand === undefined ? {} : { declaredCommand }),
-      };
-    }
-
-    if (!AGENT_ID_PATTERN.test(input.agentName)) {
+    if (
+      input.systemPrompt !== undefined ||
+      input.declaredTools !== undefined ||
+      input.declaredDescription !== undefined ||
+      input.extraFrontmatter !== undefined
+    ) {
       throw new LaunchPlanError(
-        "invalid-agent-name",
-        `An aboard agent definition name must be a single path segment: ${input.agentName}`,
+        "shape-not-allowed",
+        "Generated custom agent definitions are no longer supported",
       );
-    }
-    if (input.systemPrompt.trim().length === 0) {
-      throw new LaunchPlanError(
-        "missing-system-prompt",
-        `The ${input.agentName} agent definition has an empty system prompt`,
-      );
-    }
-    if (input.declaredTools === undefined || input.declaredTools.length === 0) {
-      // Without `tools:` there is no allowlist to pass, so no `--tools` flag is
-      // emitted; an empty allowlist must not disable every tool or inherit one.
-      throw new LaunchPlanError(
-        "missing-declared-tools",
-        `The ${input.agentName} agent definition declares no tools`,
-      );
-    }
-    for (const line of input.extraFrontmatter ?? []) {
-      if (line.includes("\n") || line.includes("\r") || /^\s*(?:---|\.\.\.)\s*$/.test(line)) {
-        throw new LaunchPlanError(
-          "invalid-frontmatter",
-          `Agent frontmatter line cannot be carried through: ${JSON.stringify(line)}`,
-        );
-      }
     }
     return {
-      shape: "agent-defined",
+      shape: "builtin",
       agentName: input.agentName,
-      systemPrompt: input.systemPrompt,
-      declaredTools: input.declaredTools,
-      ...(input.declaredDescription === undefined ? {} : { declaredDescription: input.declaredDescription }),
-      ...(input.extraFrontmatter === undefined || input.extraFrontmatter.length === 0
-        ? {}
-        : { extraFrontmatter: input.extraFrontmatter }),
       ...(declaredModel === undefined ? {} : { declaredModel }),
       ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
       ...(declaredCommand === undefined ? {} : { declaredCommand }),
@@ -370,26 +308,15 @@ export function launchWriteCapability(
   configuration: LaunchConfiguration,
 ): WriteCapability {
   if (agentType === "Explore") return "read-only";
-  if (agentType === "general-purpose") return "write-capable";
-  switch (configuration.shape) {
-    case "agent-defined":
-      return deriveWriteCapability(configuration.declaredTools);
-    // A builtin has no readable tool set, which is unknown capability and
-    // therefore the restrictive answer.
-    case "builtin":
-      return deriveWriteCapability(undefined);
-    case "skill":
-      return "write-capable";
-    case "default":
-      return deriveWriteCapability(undefined);
-  }
+  if (configuration.shape === "skill") return "write-capable";
+  return configuration.shape === "default" ? "write-capable" : "read-only";
 }
 
 export function requiresWriteLease(
   agentType: AgentType,
   capability: WriteCapability,
 ): boolean {
-  return agentType !== "manager" && capability === "write-capable";
+  return capability === "write-capable";
 }
 
 /** A file the plan needs on disk before its command line can run. */
@@ -403,7 +330,6 @@ export interface RuntimeFile {
 /** The path is the exact text after `@`, so it carries no whitespace. */
 export type PromptSpillFile = RuntimeFile;
 
-export type AgentDefinitionFile = RuntimeFile;
 
 /** Exact child argv consumed by the wrapper before it starts Claude. */
 export type WrapperRequestFile = RuntimeFile;
@@ -425,7 +351,7 @@ export interface LaunchPlan {
   readonly spill?: PromptSpillFile;
   /** Original worker task, preserved independently of resume messages. */
   readonly task?: PromptSpillFile;
-  readonly agentDefinition?: AgentDefinitionFile;
+
   readonly wrapperRequest?: WrapperRequestFile;
   /** Per-launch directory selected with `--settings` and `--add-dir`. */
   readonly runtimeDirectory: string;
@@ -441,7 +367,7 @@ interface CommonPlanRequest {
   readonly effort?: EffortLevel | undefined;
   readonly difficulty?: IssueDifficulty | undefined;
   readonly command?: readonly string[] | undefined;
-  readonly mcpConfigPath?: string | undefined;
+
   /** Set only for an auto-run implementer whose frozen issue has `[AI]-chrome`. */
   readonly chrome?: true | undefined;
   readonly maxInlinePromptChars?: number | undefined;
@@ -466,10 +392,6 @@ export interface LaunchPlanRequest extends CommonPlanRequest {
   readonly disallowedTools?: readonly string[] | undefined;
 }
 
-export type ManagerResumePlanRequest = Omit<CommonPlanRequest, "agentType"> & {
-  readonly configuration: LaunchConfiguration;
-  readonly disallowedTools?: readonly string[] | undefined;
-};
 
 export interface SessionResumePlanRequest extends CommonPlanRequest {
   readonly configuration: LaunchConfiguration;
@@ -491,31 +413,6 @@ function assertFlagValue(
   return trimmed;
 }
 
-function assertMcpConfigShape(
-  path: string | undefined,
-  configuration: LaunchConfiguration,
-): string | undefined {
-  if (path !== undefined && configuration.shape !== "agent-defined") {
-    throw new LaunchPlanError(
-      "shape-not-allowed",
-      "An MCP registration is carried only by an aboard agent definition launch",
-    );
-  }
-  return path;
-}
-
-function mcpConfigArguments(path: string | undefined): readonly string[] {
-  if (path === undefined) return [];
-  return ["--mcp-config", assertFlagValue(path, "invalid-mcp-config", "MCP config path")];
-}
-
-function aboardMcpAllowRules(agentType: AgentType, configuration: LaunchConfiguration): readonly string[] {
-  if (configuration.shape !== "agent-defined") return [];
-  const declaresAboard = configuration.declaredTools.some(
-    (rule) => rule.trim() === `mcp__${ABOARD_MCP_SERVER_NAME}__*`,
-  );
-  return declaresAboard ? aboardToolNamesForRole(agentType) : [];
-}
 
 function toolListArguments(
   flag: string,
@@ -592,50 +489,6 @@ function agentRuntimeDirectory(runtimeDirectory: string, agentId: AgentId): stri
   return `${directory}/agents/${agentId}`;
 }
 
-export function runtimeAgentName(agentName: string, agentId: AgentId): string {
-  return `abd-${agentName}-${agentId}`;
-}
-
-/** One `key: value` line, or nothing when the value is absent. */
-function frontmatterLine(key: string, value: string | undefined): readonly string[] {
-  return value === undefined ? [] : [`${key}: ${value}`];
-}
-
-function renderAgentDefinition(
-  configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
-  name: string,
-  policy: ResolvedLaunchPolicy,
-  additionalTools: readonly string[] = [],
-): string {
-  const frontmatter = [
-    `name: ${name}`,
-    `description: ${configuration.declaredDescription ?? `aboard ${configuration.agentName} agent`}`,
-    `tools: ${[...configuration.declaredTools, ...additionalTools].join(", ")}`,
-    ...frontmatterLine("model", policy.declaredModel),
-    ...frontmatterLine("effort", policy.declaredEffort),
-    ...(configuration.extraFrontmatter ?? []),
-  ];
-  return `---\n${frontmatter.join("\n")}\n---\n\n${configuration.systemPrompt.trim()}\n`;
-}
-
-function agentRuntimeArguments(
-  configuration: Extract<LaunchConfiguration, { shape: "agent-defined" }>,
-  agentId: AgentId,
-  runtimeDirectory: string,
-  policy: ResolvedLaunchPolicy,
-  additionalTools: readonly string[] = [],
-): { readonly args: readonly string[]; readonly file: AgentDefinitionFile } {
-  const directory = agentRuntimeDirectory(runtimeDirectory, agentId);
-  const name = runtimeAgentName(configuration.agentName, agentId);
-  return {
-    args: ["--agent", name],
-    file: {
-      agentId,
-      relativePath: `${directory}/.claude/agents/${name}.md`,
-      contents: renderAgentDefinition(configuration, name, policy, additionalTools),
-    },
-  };
-}
 
 function denyRules(requested: readonly string[] | undefined): readonly string[] {
   return [...new Set(requested ?? [])];
@@ -793,40 +646,26 @@ function wrapCommand(
 }
 
 function assertLaunchShape(agentType: AgentType, configuration: LaunchConfiguration): void {
-  if (agentType === "manager") {
-    if (configuration.shape !== "agent-defined" || configuration.agentName !== MANAGER_AGENT_NAME) {
-      throw new LaunchPlanError("shape-not-allowed", "The Manager launches from .abd/agents/manager.md");
-    }
-    return;
-  }
-  if (agentType === "general-purpose") {
+  if (agentType === "interactive") {
     if (configuration.shape !== "default") {
-      throw new LaunchPlanError(
-        "shape-not-allowed",
-        "general-purpose launches as Claude Code's default session without --agent or a system prompt",
-      );
+      throw new LaunchPlanError("shape-not-allowed", "interactive launches as Claude Code's default session");
     }
     return;
   }
-  const expectedSkill = AUTO_RUN_WORKER_SKILLS[agentType as AutoRunWorkerType];
-  if (expectedSkill !== undefined) {
-    if (configuration.shape !== "skill" || configuration.skillName !== expectedSkill) {
-      throw new LaunchPlanError("shape-not-allowed", `${agentType} must launch through /${expectedSkill}`);
+  if (agentType === "implementer") {
+    if (configuration.shape !== "skill" || configuration.skillName !== "implement") {
+      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /implement");
     }
     return;
   }
-  if (isNamedBuiltinAgentType(agentType)) {
-    if (configuration.shape !== "builtin" || configuration.agentName !== agentType) {
-      throw new LaunchPlanError(
-        "shape-not-allowed",
-        `The ${agentType} session must launch through Claude Code's builtin ${agentType} agent`,
-      );
+  if (agentType === "reviewer") {
+    if (configuration.shape !== "skill" || !["review-afk", "review-hitl"].includes(configuration.skillName)) {
+      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /review-afk or /review-hitl");
     }
     return;
   }
-  if (configuration.shape !== "agent-defined" || configuration.agentName !== agentType) {
-    throw new LaunchPlanError("shape-not-allowed", `${agentType} must launch from its matching agent definition`);
-  }
+  if (isNamedBuiltinAgentType(agentType) && configuration.shape === "builtin" && configuration.agentName === agentType) return;
+  throw new LaunchPlanError("shape-not-allowed", `${agentType} has no supported launch configuration`);
 }
 
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
@@ -847,30 +686,16 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
-  const task = prompt !== undefined && (agentType === "implementer" || agentType === "pr-doctor-afk" || agentType === "pr-doctor-hitl")
+  const task = prompt !== undefined && (agentType === "implementer" || agentType === "reviewer")
     ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId), contents: `${prompt.text.trim()}\n` }
     : undefined;
   const shapeArguments: string[] = [
-    ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration)),
     "--add-dir", launchRuntimeDirectory,
     "--settings", `${launchRuntimeDirectory}/settings.json`,
   ];
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
 
-  let agentDefinition: AgentDefinitionFile | undefined;
   switch (configuration.shape) {
-    case "agent-defined": {
-      const definition = agentRuntimeArguments(
-        configuration,
-        request.agentId,
-        runtimeDirectory,
-        policy,
-        request.chrome === true ? ["mcp__claude-in-chrome__*"] : [],
-      );
-      shapeArguments.push(...definition.args);
-      agentDefinition = definition.file;
-      break;
-    }
     case "builtin":
       shapeArguments.push("--agent", configuration.agentName);
       break;
@@ -884,7 +709,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--session-id",
     request.sessionId,
     ...shapeArguments,
-    ...toolListArguments("--allowedTools", aboardMcpAllowRules(agentType, configuration)),
+
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
@@ -937,85 +762,29 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     runtimeDirectory: launchRuntimeDirectory,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
     ...(task === undefined ? {} : { task }),
-    ...(agentDefinition === undefined ? {} : { agentDefinition }),
+
     ...(built.request === undefined ? {} : { wrapperRequest: built.request }),
   };
 }
 
-export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan {
-  const { command, wrapper, runtimeDirectory, launchCode } = commonPreconditions({ ...request, agentType: "manager" }, request.configuration);
-  if (
-    request.configuration.shape !== "agent-defined" ||
-    request.configuration.agentName !== MANAGER_AGENT_NAME
-  ) {
-    throw new LaunchPlanError(
-      "shape-not-allowed",
-      "The Manager resumes from .abd/agents/manager.md",
-    );
-  }
-  const policy = launchPolicy(request.configuration, request);
-  const definition = agentRuntimeArguments(request.configuration, request.agentId, runtimeDirectory, policy);
-  const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
-  const args = [
-    "--resume",
-    request.sessionId,
-    ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, request.configuration)),
-    "--add-dir", launchRuntimeDirectory,
-    "--settings", `${launchRuntimeDirectory}/settings.json`,
-    ...definition.args,
-    // Re-passed like every other launch flag: a resumed Manager that lost the
-    // pre-approvals would stall behind the same prompts the launch avoided.
-    ...toolListArguments("--allowedTools", aboardMcpAllowRules("manager", request.configuration)),
-    ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
-    ...modelArguments(policy.model),
-    ...effortArguments(policy.effort),
-  ];
-  const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
-  return {
-    kind: "resume",
-    agentId: request.agentId,
-    sessionId: request.sessionId,
-    agentType: "manager",
-    shell: request.shell,
-    command,
-    args,
-    commandLine: buildCommandLine(request.shell, wrapped.command, wrapped.args),
-    writeCapability: "read-only",
-    requiresWriteLease: false,
-    promptDelivery: "none",
-    runtimeDirectory: launchRuntimeDirectory,
-    agentDefinition: definition.file,
-    ...(wrapped.request === undefined ? {} : { wrapperRequest: wrapped.request }),
-  };
-}
 
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
   const { command, wrapper, runtimeDirectory, launchCode, threshold } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   assertLaunchShape(request.agentType, configuration);
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
-  const definition = configuration.shape === "agent-defined"
-    ? agentRuntimeArguments(
-        configuration,
-        request.agentId,
-        runtimeDirectory,
-        policy,
-        request.chrome === true ? ["mcp__claude-in-chrome__*"] : [],
-      )
-    : undefined;
+
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   // Claude Code restores a builtin's `--agent` selection with the conversation.
   const shapeArguments = [
-    ...mcpConfigArguments(assertMcpConfigShape(request.mcpConfigPath, configuration)),
     "--add-dir", launchRuntimeDirectory,
     "--settings", `${launchRuntimeDirectory}/settings.json`,
-    ...(definition?.args ?? []),
   ];
   const fixedArguments = [
     "--resume",
     request.sessionId,
     ...shapeArguments,
-    ...toolListArguments("--allowedTools", aboardMcpAllowRules(request.agentType, configuration)),
+
     ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
@@ -1063,7 +832,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     promptDelivery: built.promptPlan.delivery,
     runtimeDirectory: launchRuntimeDirectory,
     ...(built.promptPlan.spill === undefined ? {} : { spill: built.promptPlan.spill }),
-    ...(definition === undefined ? {} : { agentDefinition: definition.file }),
+
     ...(built.request === undefined ? {} : { wrapperRequest: built.request }),
   };
 }

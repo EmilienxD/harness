@@ -18,8 +18,6 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 /** Shells that can write anything unless the rule narrows them to a command. */
 const SHELL_TOOLS: ReadonlySet<string> = new Set(["Bash", "PowerShell"]);
 
-/** Rules for the aboard MCP, whose tools orchestrate rather than edit files. */
-const ABOARD_MCP_PREFIX = "mcp__aboard__";
 
 export interface ToolRule {
   readonly name: string;
@@ -143,7 +141,7 @@ export function deriveWriteCapability(
       continue;
     }
     if (READ_ONLY_TOOLS.has(parsed.name)) continue;
-    if (parsed.name.startsWith(ABOARD_MCP_PREFIX)) continue;
+
     return "write-capable";
   }
   return "read-only";

@@ -7,22 +7,8 @@ import type {
   IssueSnapshot,
   PullRequestSnapshot,
 } from "../claude/prompts.js";
-import {
-  ROADMAP_BODY_LIMIT,
-  createTasks,
-  describeSubjectRejection,
-  nearBodyLimit,
-  numberedTasks,
-  parseRoadmap,
-  updateTask,
-  type RoadmapCreateInput,
-  type RoadmapEdit,
-  type RoadmapTask,
-  type RoadmapUpdateInput,
-} from "../domain/roadmap.js";
 import type { CandidateIssue } from "../domain/auto-run.js";
 import { referencedIssueNumbers } from "../shared/issues.js";
-import { LABEL_HITL, LABEL_TODO, hasLabel, issueDisposition } from "../shared/labels.js";
 
 export { ABOARD_LABELS } from "../shared/labels.js";
 export type { AboardLabel } from "../shared/labels.js";
@@ -33,10 +19,6 @@ export type GitHubErrorCode =
   | "command-failed"
   | "issue-not-found"
   | "malformed-output"
-  | "missing-todo"
-  | "unknown-task"
-  | "expectation-mismatch"
-  | "invalid-subject"
   | "invalid-finding";
 
 export class GitHubBoundaryError extends Error {
@@ -102,32 +84,6 @@ function isMissingIssueResponse(stdout: unknown): boolean {
   }
 }
 
-export interface RoadmapSnapshot {
-  readonly number: number;
-  readonly body: string;
-  readonly tasks: readonly RoadmapTask[];
-  readonly duplicateSubjects: readonly string[];
-  readonly carrierCount: number;
-  readonly nearBound: boolean;
-}
-
-export interface RoadmapWriteResult {
-  readonly issue: number;
-  /** Positions of the tasks the call created, in the order their subjects were given. */
-  readonly positions?: readonly number[];
-  /** The edited task's position after the edit, absent when it was deleted. */
-  readonly task?: number | undefined;
-  readonly tasks?: readonly string[];
-  readonly notices: readonly string[];
-}
-
-export interface RoadmapIssue {
-  readonly number: number;
-  readonly title: string;
-  readonly disposition: "afk" | "hitl" | "unclassified";
-  readonly ready: boolean;
-  readonly dependencyNumbers: readonly number[];
-}
 
 export interface ReviewFinding {
   readonly body: string;
@@ -437,16 +393,6 @@ function parseOpenIssue(
   };
 }
 
-interface TodoCarrier {
-  readonly number: number;
-  readonly body: string;
-  readonly createdAt: string;
-}
-
-/** Newest first, ties on the lowest number: the one rule read and write share. */
-function sortedCarriers(carriers: readonly TodoCarrier[]): readonly TodoCarrier[] {
-  return [...carriers].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.number - right.number);
-}
 
 function repositoryFromGraphql(value: unknown): Record<string, unknown> {
   return record(record(record(value, "GraphQL response").data, "data").repository, "data.repository");
@@ -463,8 +409,6 @@ const PR_QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(ow
 export class GitHubClient implements GitHubPromptSource {
   #identity: Promise<{ readonly owner: string; readonly repo: string }> | undefined;
 
-  #minted: number | undefined;
-
   public constructor(private readonly gh: GhExecutor) {}
 
   public async checkAuthentication(): Promise<void> {
@@ -472,117 +416,6 @@ export class GitHubClient implements GitHubPromptSource {
     this.#identity = Promise.resolve(identity);
   }
 
-  public async readRoadmap(): Promise<RoadmapSnapshot | undefined> {
-    const carriers = await this.#scanTodoCarriers();
-    const chosen = carriers[0];
-    if (chosen === undefined) return undefined;
-    const parsed = parseRoadmap(chosen.body);
-    return {
-      number: chosen.number,
-      body: chosen.body,
-      tasks: parsed.tasks,
-      duplicateSubjects: parsed.duplicateSubjects,
-      carrierCount: carriers.length,
-      nearBound: nearBodyLimit(chosen.body),
-    };
-  }
-
-  public async createRoadmapTasks(input: RoadmapCreateInput): Promise<RoadmapWriteResult> {
-    const carriers = await this.#scanTodoCarriers();
-    const chosen = carriers[0];
-    if (chosen === undefined) {
-      const edit = this.#applied(createTasks("", input), []);
-      const minted = await this.#mintRoadmap(edit.body);
-      return { issue: minted.number, positions: edit.value.positions, notices: [`Created issue #${minted.number} and labelled it \`${LABEL_TODO}\`; this repository had no roadmap yet.`, ...minted.notices, ...this.#boundNotices(edit.body)] };
-    }
-    const edit = this.#applied(createTasks(chosen.body, input), parseRoadmap(chosen.body).tasks);
-    await this.gh.run(["issue", "edit", String(chosen.number), "--body", edit.body]);
-    const shift = this.#shift(edit.body, edit.value.shifted);
-    return {
-      issue: chosen.number,
-      positions: edit.value.positions,
-      ...shift.result,
-      notices: [...this.#carrierNotices(carriers, chosen.number), ...shift.notices, ...this.#boundNotices(edit.body)],
-    };
-  }
-
-  public async updateRoadmapTask(input: RoadmapUpdateInput): Promise<RoadmapWriteResult> {
-    const carriers = await this.#scanTodoCarriers();
-    const chosen = carriers[0];
-    if (chosen === undefined) {
-      throw new GitHubBoundaryError("missing-todo", `No open issue carries \`${LABEL_TODO}\`, so there is no task to update. Create the roadmap first with \`todo create\`.`);
-    }
-    const edit = this.#applied(updateTask(chosen.body, input), parseRoadmap(chosen.body).tasks);
-    await this.gh.run(["issue", "edit", String(chosen.number), "--body", edit.body]);
-    const shift = this.#shift(edit.body, edit.value.shifted);
-    return {
-      issue: chosen.number,
-      task: edit.value.position,
-      ...shift.result,
-      notices: [...this.#carrierNotices(carriers, chosen.number), ...shift.notices, ...this.#boundNotices(edit.body)],
-    };
-  }
-
-  #shift(body: string, shifted: boolean): { readonly result: { readonly tasks?: readonly string[] }; readonly notices: readonly string[] } {
-    if (!shifted) return { result: {}, notices: [] };
-    const pending = parseRoadmap(body).tasks.filter((task) => !task.completed);
-    return {
-      result: { tasks: numberedTasks(pending) },
-      notices: ["This edit renumbered the tasks after it; `tasks` is the pending list as it now stands, and earlier positions you were holding are stale."],
-    };
-  }
-
-  #applied<T>(edit: RoadmapEdit<T>, tasks: readonly RoadmapTask[]): { readonly body: string; readonly value: T } {
-    if (edit.ok) return { body: edit.body, value: edit.value };
-    if (edit.failure.reason === "invalid-subject") {
-      throw new GitHubBoundaryError("invalid-subject", describeSubjectRejection(edit.failure.rejection), { subject: edit.failure.subject });
-    }
-    if (edit.failure.reason === "expectation-mismatch") {
-      throw new GitHubBoundaryError(
-        "expectation-mismatch",
-        `Position ${edit.failure.position} is "${edit.failure.actual}", not "${edit.failure.expected}". Nothing was written. The roadmap changed since you last saw it, so re-read the list below and retry against the position the task holds now.`,
-        { tasks: numberedTasks(tasks) },
-      );
-    }
-    const field = edit.failure.field === "task" ? "No roadmap task is at position" : "No roadmap task is at the `after` position";
-    throw new GitHubBoundaryError(
-      "unknown-task",
-      `${field} ${edit.failure.position}; the roadmap has ${tasks.length} task(s). Nothing was written. Use a position from the list below.`,
-      { tasks: numberedTasks(tasks) },
-    );
-  }
-
-  #boundNotices(body: string): readonly string[] {
-    if (body.length > ROADMAP_BODY_LIMIT) return [`The roadmap is now ${body.length} characters, past the ${ROADMAP_BODY_LIMIT} bound. The write was accepted; ask the user whether to prune completed items.`];
-    return nearBodyLimit(body) ? [`The roadmap is ${body.length} characters, near its ${ROADMAP_BODY_LIMIT} bound; consider asking the user about pruning.`] : [];
-  }
-
-  /** Reported, never repaired: aboard does not relabel an issue it does not own. */
-  #carrierNotices(carriers: readonly { readonly number: number }[], chosen: number): readonly string[] {
-    return carriers.length <= 1 ? [] : [`${carriers.length} open issues carry \`${LABEL_TODO}\`; #${chosen} is in use and the others were left untouched.`];
-  }
-
-  async #mintRoadmap(body: string): Promise<{ readonly number: number; readonly notices: readonly string[] }> {
-    // Plain create, not `--force`: a user-owned `[AI]-todo` label keeps its colour
-    // and description, and "already exists" is a success for our purposes.
-    try { await this.gh.run(["label", "create", LABEL_TODO, "--description", "Project roadmap", "--color", "1D76DB"]); }
-    catch { /* the label already exists, which is what we wanted anyway */ }
-    const output = (await this.gh.run(["issue", "create", "--title", "Project roadmap", "--body", body, "--label", LABEL_TODO])).trim();
-    const match = /\/issues\/(\d+)\/?$/.exec(output);
-    if (match === null) throw new GitHubBoundaryError("malformed-output", "gh issue create did not return an issue URL");
-    const number = integer(Number(match[1]), "created roadmap number");
-    this.#minted = number;
-    return { number, notices: await this.#pinRoadmap(number) };
-  }
-
-  async #pinRoadmap(number: number): Promise<readonly string[]> {
-    try {
-      await this.gh.run(["issue", "pin", String(number)]);
-      return [];
-    } catch {
-      return [`Created the roadmap issue, but could not pin #${number}. The issue remains the \`${LABEL_TODO}\` carrier; pin it manually if you want it at the top of the repository issues page.`];
-    }
-  }
 
   public async getIssue(number: number): Promise<IssueSnapshot | undefined> {
     const repository = await this.#ownerRepo();
@@ -612,19 +445,6 @@ export class GitHubClient implements GitHubPromptSource {
     };
   }
 
-  public async listRoadmapIssues(): Promise<readonly RoadmapIssue[]> {
-    const page = await this.#scanOpenIssues();
-    return page.rows.flatMap((row) => {
-      if (hasLabel(row.labels, LABEL_TODO)) return [];
-      return [{
-        number: row.number,
-        title: row.title,
-        disposition: issueDisposition(row.labels),
-        ready: row.openBlockedByNumbers.length === 0,
-        dependencyNumbers: row.dependencyNumbers,
-      }];
-    });
-  }
 
   public async listImplementableIssues(): Promise<ImplementableIssues> {
     const page = await this.#scanOpenIssues();
@@ -817,50 +637,6 @@ export class GitHubClient implements GitHubPromptSource {
     await this.gh.run(["api", `repos/{owner}/{repo}/pulls/${pr}/comments`, "--method", "POST", "-f", `body=${finding.body.trim()}`, "-f", `commit_id=${string(item.headRefOid, "pullRequest.headRefOid")}`, "-f", `path=${finding.path.trim()}`, "-F", `line=${finding.line}`, "-f", `side=${finding.side ?? "RIGHT"}`]);
   }
 
-  async #scanTodoCarriers(): Promise<readonly TodoCarrier[]> {
-    const output = await this.gh.run(["issue", "list", "--state", "open", "--label", LABEL_TODO, "--limit", "50", "--json", "number,body,createdAt"]);
-    const items = array(json(output, "roadmap lookup"), "roadmap lookup");
-    const listed = items.map((value, index) => {
-      const item = record(value, `roadmap issue[${index}]`);
-      return {
-        number: integer(item.number, `roadmap issue[${index}].number`),
-        body: string(item.body ?? "", `roadmap issue[${index}].body`),
-        createdAt: string(item.createdAt, `roadmap issue[${index}].createdAt`),
-      };
-    });
-    return sortedCarriers(await this.#withMinted(listed));
-  }
-
-  async #withMinted(listed: readonly TodoCarrier[]): Promise<readonly TodoCarrier[]> {
-    const minted = this.#minted;
-    if (minted === undefined || listed.some((carrier) => carrier.number === minted)) return listed;
-    const carrier = await this.#viewTodoCarrier(minted);
-    if (carrier === undefined) {
-      this.#minted = undefined;
-      return listed;
-    }
-    return [...listed, carrier];
-  }
-
-  /** The minted issue as itself, or `undefined` once it stops being a carrier. */
-  async #viewTodoCarrier(number: number): Promise<TodoCarrier | undefined> {
-    let output: string;
-    try {
-      output = await this.gh.run(["issue", "view", String(number), "--json", "number,body,createdAt,state,labels"]);
-    } catch {
-      // The issue was deleted, or `gh` failed transiently. Either way the label
-      // query stands on its own; a retry costs one more lookup.
-      return undefined;
-    }
-    const item = record(json(output, "roadmap issue lookup"), "roadmap issue lookup");
-    if (state(item.state, "roadmap issue lookup.state") !== "open") return undefined;
-    if (!hasLabel(labels(item.labels, "roadmap issue lookup.labels"), LABEL_TODO)) return undefined;
-    return {
-      number: integer(item.number, "roadmap issue lookup.number"),
-      body: string(item.body ?? "", "roadmap issue lookup.body"),
-      createdAt: string(item.createdAt, "roadmap issue lookup.createdAt"),
-    };
-  }
 
   async #scanOpenIssues(): Promise<{ readonly rows: readonly OpenIssueRow[] }> {
     const rows = new Map<number, OpenIssueRow>();
