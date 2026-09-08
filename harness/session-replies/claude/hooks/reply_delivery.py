@@ -16,17 +16,62 @@ def database_path() -> Path:
     return root / "sessions.sqlite3"
 
 
-def ready(connection: sqlite3.Connection, parent: str, include_claimed: bool = False):
+VALID_MODES = {"post-tool", "stop", "prompt"}
+
+
+def claim_ready(connection: sqlite3.Connection, parent: str, mode: str):
+    """Atomically claim one instant's replies, or redeliver claims on fallback."""
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        if mode != "prompt":
+            # A near-simultaneous competing hook must not acknowledge the winner
+            # before Claude has consumed its output. A later boundary does.
+            connection.execute(
+                "UPDATE requests SET acknowledged_at = CURRENT_TIMESTAMP "
+                "WHERE parent_session_id = ? AND claimed_at IS NOT NULL "
+                "AND acknowledged_at IS NULL "
+                "AND claimed_at < datetime('now', '-2 seconds')",
+                (parent,),
+            )
+        claimed_filter = "" if mode == "prompt" else "AND claimed_at IS NULL"
+        rows = connection.execute(
+            f"""
+            SELECT id, delivery_id, reply FROM requests
+            WHERE parent_session_id = ? AND state = 'replied'
+              AND acknowledged_at IS NULL {claimed_filter}
+            ORDER BY created_at, id
+            """,
+            (parent,),
+        ).fetchall()
+        if mode == "prompt":
+            for request_id, _delivery_id, _message in rows:
+                connection.execute(
+                    "UPDATE requests SET claimed_at = COALESCE(claimed_at, CURRENT_TIMESTAMP) WHERE id = ?",
+                    (request_id,),
+                )
+        else:
+            won = []
+            for row in rows:
+                changed = connection.execute(
+                    "UPDATE requests SET claimed_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND claimed_at IS NULL AND acknowledged_at IS NULL",
+                    (row[0],),
+                )
+                if changed.rowcount:
+                    won.append(row)
+            rows = won
+        connection.commit()
+        return rows
+    except BaseException:
+        connection.rollback()
+        raise
+
+
+def has_pending(connection: sqlite3.Connection, parent: str) -> bool:
     return connection.execute(
-        f"""
-        SELECT id, delivery_id, reply FROM requests
-        WHERE parent_session_id = ? AND state = 'replied'
-          AND acknowledged_at IS NULL
-          {'' if include_claimed else 'AND claimed_at IS NULL'}
-        ORDER BY created_at
-        """,
+        "SELECT 1 FROM requests WHERE parent_session_id = ? AND state = 'pending' LIMIT 1",
         (parent,),
-    ).fetchall()
+    ).fetchone() is not None
 
 
 def main() -> int:
@@ -39,54 +84,20 @@ def main() -> int:
     if not isinstance(parent, str) or not database_path().is_file():
         return 0
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode not in VALID_MODES:
+        return 0
     connection = sqlite3.connect(database_path(), timeout=30, isolation_level=None)
     try:
-        connection.execute("BEGIN IMMEDIATE")
-        # A later non-prompt boundary acknowledges an earlier injection. Prompt
-        # hooks are the restart fallback: they deliberately redeliver an
-        # unacknowledged claim with the same stable delivery ID.
-        if mode != "prompt":
-            connection.execute(
-                "UPDATE requests SET acknowledged_at = CURRENT_TIMESTAMP "
-                "WHERE parent_session_id = ? AND claimed_at IS NOT NULL "
-                "AND acknowledged_at IS NULL "
-                "AND claimed_at < datetime('now', '-2 seconds')",
-                (parent,),
-            )
-        connection.commit()
-
-        rows = ready(connection, parent, include_claimed=mode == "prompt")
-        if mode == "stop" and not rows:
-            pending = connection.execute(
-                "SELECT 1 FROM requests WHERE parent_session_id = ? AND state = 'pending' LIMIT 1",
-                (parent,),
-            ).fetchone()
-            while pending and not rows:
+        rows = claim_ready(connection, parent, mode)
+        if mode == "stop":
+            while not rows and has_pending(connection, parent):
                 time.sleep(0.25)
-                rows = ready(connection, parent)
-                pending = connection.execute(
-                    "SELECT 1 FROM requests WHERE parent_session_id = ? AND state = 'pending' LIMIT 1",
-                    (parent,),
-                ).fetchone()
+                rows = claim_ready(connection, parent, mode)
         if not rows:
-            return 0
-
-        connection.execute("BEGIN IMMEDIATE")
-        claimed = []
-        for request_id, delivery_id, message in rows:
-            changed = connection.execute(
-                "UPDATE requests SET claimed_at = CURRENT_TIMESTAMP "
-                "WHERE id = ? AND acknowledged_at IS NULL",
-                (request_id,),
-            )
-            if changed.rowcount:
-                claimed.append((delivery_id, message))
-        connection.commit()
-        if not claimed:
             return 0
         context = "\n\n".join(
             f"<harness-reply delivery-id=\"{delivery_id}\">\n{message}\n</harness-reply>"
-            for delivery_id, message in claimed
+            for _request_id, delivery_id, message in rows
         )
         print(json.dumps({
             "hookSpecificOutput": {

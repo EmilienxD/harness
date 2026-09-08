@@ -7,7 +7,7 @@ their parent/child reply state.
 Run the pinned, ephemeral installer:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.2.1 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.2 harness
 ```
 
 That opens the one installation menu. The menu reconciles its selection: newly selected packages

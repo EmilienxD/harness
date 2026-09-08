@@ -1,5 +1,5 @@
 name = "session-replies"
-version = "1.0.0"
+version = "1.0.1"
 description = "Delivers replies from visible Harness child sessions"
 requires = []
 
@@ -17,4 +17,3 @@ dest = "reply_delivery.py"
 root = "hooks"
 platforms = ["claude"]
 executable = true
-
