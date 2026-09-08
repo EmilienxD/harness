@@ -128,6 +128,12 @@ test("the ChatGPT adapter normalizes Codex lifecycle payloads with the runtime s
     session_id: actual,
     reason: "other",
   }), { type: "end", agentId, sessionId: actual, reason: "other" });
+  assert.deepEqual(platform.normalizeLifecycle("compaction", {
+    agentId,
+    session_id: actual,
+    trigger: "auto",
+  }), { type: "compaction", agentId, sessionId: actual });
+  assert.equal(platform.capabilities.lifecycle.includes("compaction"), true);
 });
 
 test("the ChatGPT adapter preflights the complete configured command", async () => {
@@ -141,4 +147,53 @@ test("the ChatGPT adapter preflights the complete configured command", async () 
   });
   await platform.preflight(["wrapper", "run", "codex"]);
   assert.deepEqual(calls, [["wrapper", "run", "codex", "--version"]]);
+});
+
+test("the ChatGPT adapter resumes the exact Codex conversation with current launch policy", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const plan = platform.planSessionResume({
+    agentId,
+    sessionId: actual,
+    agentType: "interactive",
+    shell: "powershell",
+    configuration: {
+      shape: "default",
+      declaredCommand: ["wrapper", "codex"],
+      declaredModel: "gpt-test",
+      declaredEffort: "high",
+    },
+    prompt: "Continue from the saved state.",
+    runtimeDirectory: "C:/aboard/runtime",
+  });
+
+  assert.equal(plan.kind, "resume");
+  assert.deepEqual(plan.command, ["wrapper", "codex"]);
+  assert.deepEqual(plan.args.slice(0, 2), ["resume", actual]);
+  assert.equal(plan.args.includes("--model"), true);
+  assert.equal(plan.args.includes("model_reasoning_effort=\"high\""), true);
+  assert.deepEqual(plan.args.slice(-1), ["Continue from the saved state."]);
+  assert.match(plan.args.join("\n"), /hooks\.SessionStart/u);
+  assert.match(plan.args.join("\n"), /matcher="startup\|resume"/u);
+  assert.equal(plan.args.filter((argument) => argument.startsWith("hooks.SessionStart=")).length, 1);
+  assert.match(plan.args.join("\n"), /worker-reground/u);
+});
+
+test("the ChatGPT adapter checks resumability through Codex instead of transcript files", async () => {
+  const inspected: unknown[] = [];
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionProbe: {
+      inspect: async (sessionId, cwd, command) => {
+        inspected.push({ sessionId, cwd, command });
+        return { state: "resumable" };
+      },
+    },
+  });
+
+  assert.equal(await platform.isResumable(actual, "C:/work", ["wrapper", "codex"]), true);
+  assert.deepEqual(inspected, [{ sessionId: actual, cwd: "C:/work", command: ["wrapper", "codex"] }]);
 });

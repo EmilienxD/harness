@@ -194,10 +194,14 @@ export class FleetRegistry {
   }
 
 
-  public recordCompaction(agentId: AgentId, summary: string, occurredAt: IsoTimestamp): void {
+  public recordCompaction(agentId: AgentId, summary: string | undefined, occurredAt: IsoTimestamp): void {
     const session = this.requireSession(agentId);
     const telemetry = { ...session.telemetry, compactionCount: session.telemetry.compactionCount + 1 };
-    this.sessionsByAgent.set(agentId, { ...session, telemetry, compactSummaries: [...(session.compactSummaries ?? []), summary] });
+    this.sessionsByAgent.set(agentId, {
+      ...session,
+      telemetry,
+      ...(summary === undefined ? {} : { compactSummaries: [...(session.compactSummaries ?? []), summary] }),
+    });
     this.record({ type: "telemetry-updated", agentId }, occurredAt);
   }
 

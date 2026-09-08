@@ -52,7 +52,8 @@ test("records compact telemetry and reinjects the original task on each continua
   const task = { path: "C:/Temp/prompts/worker-15/task.md", contents: "Implement the token refresh contract.\n\nRun the browser checks." };
   const fleet = fleetWithWorker(); const service = new WorkerHookService(fleet, { task: async (id) => { assert.equal(id, parentId); return task; } }, () => new Date(timestamp));
   service.compact(parentId, "first summary"); service.compact(parentId, "second summary");
-  assert.equal(fleet.get(parentId)?.telemetry.compactionCount, 2);
+  service.compact(parentId);
+  assert.equal(fleet.get(parentId)?.telemetry.compactionCount, 3);
   assert.deepEqual(fleet.get(parentId)?.compactSummaries, ["first summary", "second summary"]);
   const route = createWorkerHookRoutes(service);
   for (let attempt = 0; attempt < 2; attempt += 1) {

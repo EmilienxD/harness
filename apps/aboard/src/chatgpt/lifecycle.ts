@@ -21,6 +21,7 @@ export function normalizeChatGptLifecycle(kind: PlatformLifecycleKind, input: un
         lastAssistantMessage: requiredString(value.lastAssistantMessage ?? value.last_assistant_message, "lastAssistantMessage"),
       };
     case "compaction":
+      return { type: "compaction", agentId, sessionId };
     case "failure":
       throw new Error(`ChatGPT does not support ${kind} lifecycle observations in this release`);
   }

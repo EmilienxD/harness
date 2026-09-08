@@ -10,13 +10,14 @@ import {
 
 /** Why a recorded session cannot be reopened, as the user is told it. */
 export type UnresumableReason =
-  "no-transcript";
+  "no-transcript" | "inspection-failed";
 
 /** A candidate plus the answer to "would `--resume` actually find it?". */
 export interface ReopenOption {
   readonly candidate: ReopenCandidate;
   readonly resumable: boolean;
   readonly reason?: UnresumableReason;
+  readonly diagnostic?: string;
 }
 
 
@@ -24,7 +25,7 @@ export type ReopenOutcome =
   | { readonly action: "none"; readonly reason: "no-recorded-sessions" | "no-match"; readonly selector?: string }
   | { readonly action: "focused"; readonly candidate: ReopenCandidate }
   | { readonly action: "reopened"; readonly candidate: ReopenCandidate; readonly handles: InteractiveLaunchHandles }
-  | { readonly action: "unresumable"; readonly candidate: ReopenCandidate; readonly reason: UnresumableReason };
+  | { readonly action: "unresumable"; readonly candidate: ReopenCandidate; readonly reason: UnresumableReason; readonly diagnostic?: string };
 
 export interface ReopenActivitySource {
   entries(): ActivityDto;
@@ -46,7 +47,7 @@ export interface ReopenCoordinatorOptions {
   readonly fleet: FleetRegistry;
   readonly terminals: ReopenTerminals;
   readonly launcher: ReopenSessionLauncher;
-  readonly isResumable: (platform: AgentPlatformId, sessionId: SessionId, cwd?: string) => Promise<boolean>;
+  readonly isResumable: (platform: AgentPlatformId, sessionId: SessionId, cwd?: string, type?: AgentType) => Promise<boolean>;
 }
 
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
@@ -69,8 +70,17 @@ export class ReopenCoordinator {
       // A live session needs no transcript test: its conversation is in front of
       // the user, and reopening it means focusing the terminal it is already in.
       if (candidate.origin === "live") return { candidate, resumable: true };
-      const resumable = await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd).catch(() => false);
-      return resumable ? { candidate, resumable } : { candidate, resumable, reason: "no-transcript" };
+      try {
+        const resumable = await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd, candidate.type);
+        return resumable ? { candidate, resumable } : { candidate, resumable, reason: "no-transcript" };
+      } catch (error) {
+        return {
+          candidate,
+          resumable: false,
+          reason: "inspection-failed",
+          diagnostic: error instanceof Error ? error.message : "The selected agent platform could not inspect the conversation",
+        };
+      }
     }));
   }
 
@@ -82,9 +92,20 @@ export class ReopenCoordinator {
       return { action: "focused", candidate };
     }
 
-    if (!await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd).catch(() => false)) {
-      return { action: "unresumable", candidate, reason: "no-transcript" };
+    let resumable: boolean;
+    try {
+      resumable = await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd, candidate.type);
+    } catch (error) {
+      // A platform that cannot inspect the conversation has not told us the
+      // conversation is gone; say which of the two happened.
+      return {
+        action: "unresumable",
+        candidate,
+        reason: "inspection-failed",
+        diagnostic: error instanceof Error ? error.message : "The selected agent platform could not inspect the conversation",
+      };
     }
+    if (!resumable) return { action: "unresumable", candidate, reason: "no-transcript" };
     const handles = await this.options.launcher.reopen({
       platform: candidate.platform,
       agentId: candidate.agentId,
@@ -115,7 +136,12 @@ export class ReopenCoordinator {
     const chosen = matching.find((option) => option.resumable) ?? matching[0]!;
     return chosen.resumable
       ? this.reopen(chosen.candidate)
-      : { action: "unresumable", candidate: chosen.candidate, reason: chosen.reason ?? "no-transcript" };
+      : {
+          action: "unresumable",
+          candidate: chosen.candidate,
+          reason: chosen.reason ?? "no-transcript",
+          ...(chosen.diagnostic === undefined ? {} : { diagnostic: chosen.diagnostic }),
+        };
   }
 
   /** Looks one candidate up by agent id, for a tree item or a command argument. */
@@ -136,6 +162,8 @@ export function describeReopenOutcome(outcome: ReopenOutcome): string {
     case "reopened":
       return `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
     case "unresumable":
-      return `The selected agent platform no longer has the conversation for agent ${outcome.candidate.agentId}, so it cannot be reopened.`;
+      return outcome.reason === "inspection-failed"
+        ? `The conversation for agent ${outcome.candidate.agentId} could not be inspected: ${outcome.diagnostic ?? "unknown platform error"}`
+        : `The selected agent platform no longer has the conversation for agent ${outcome.candidate.agentId}, so it cannot be reopened.`;
   }
 }

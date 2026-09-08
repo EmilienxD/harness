@@ -50,7 +50,7 @@ export interface AgentPlatform {
   planLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan;
   planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan;
   preflight(command: readonly string[]): Promise<void>;
-  isResumable(sessionId: SessionId, cwd: string): Promise<boolean>;
+  isResumable(sessionId: SessionId, cwd: string, command?: readonly string[]): Promise<boolean>;
 }
 
 export interface PromptSpillStore {

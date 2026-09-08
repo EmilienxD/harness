@@ -40,7 +40,9 @@ function detailFor(option: ReopenOption, now: Date): string {
   const { candidate } = option;
   const chrome = candidate.chromeEnabled === true ? " · Chrome" : "";
   if (!option.resumable) {
-    return `Cannot be reopened; the selected agent platform no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
+    return option.reason === "inspection-failed"
+      ? `Cannot inspect this conversation; ${option.diagnostic ?? "unknown platform error"}${chrome}`
+      : `Cannot be reopened; the selected agent platform no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
   }
   switch (candidate.origin) {
     case "live": return `Running now; opens its terminal${chrome}`;
@@ -76,7 +78,9 @@ export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoo
     const chosen = await host.pick(items, "Reopen an aboard session");
     if (chosen === undefined) return;
     if (!chosen.option.resumable) {
-      host.warning(`The selected agent platform no longer has the conversation for ${chosen.label}, so it cannot be reopened.`);
+      host.warning(chosen.option.reason === "inspection-failed"
+        ? `The conversation for ${chosen.label} could not be inspected: ${chosen.option.diagnostic ?? "unknown platform error"}`
+        : `The selected agent platform no longer has the conversation for ${chosen.label}, so it cannot be reopened.`);
       return;
     }
     try {

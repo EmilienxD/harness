@@ -152,3 +152,67 @@ test("shared delegation does not report a runtime-assigned session until its act
   assert.equal((await launched).sessionId, actual);
   assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "running");
 });
+
+test("a ChatGPT reopen preserves identity and ownership while waiting for resume startup proof", async () => {
+  const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
+  const agentId = "agent-1" as AgentId;
+  let resolveProof: ((value: unknown) => void) | undefined;
+  const proofs: StartupProofTracker = {
+    awaitStarted: () => new Promise((resolve) => { resolveProof = resolve; }),
+    cancel: () => undefined,
+  };
+  const platform: AgentPlatform = {
+    id: "chatgpt",
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    capabilities: { sessionIdentity: "runtime-assigned", promptDelivery: ["none"], lifecycle: ["start"], models: [], reasoningEfforts: [] },
+    createSession: () => ({ sessionId, binding: "provisional" }),
+    bindSession: (current, observed) => current.sessionId === observed ? observed : undefined,
+    normalizeLifecycle: () => { throw new Error("not used"); },
+    planLaunch: () => { throw new Error("not used"); },
+    planSessionResume: (request) => ({
+      platform: "chatgpt", kind: "resume", agentId: request.agentId, sessionId: request.sessionId, agentType: request.agentType,
+      shell: request.shell, command: ["codex"], args: ["resume", sessionId], commandLine: `codex resume ${sessionId}`,
+      writeCapability: "write-capable", requiresWriteLease: false, promptDelivery: "none", runtimeDirectory: "C:/runtime/agents/agent-1",
+    }),
+    preflight: async () => undefined,
+    isResumable: async () => true,
+  };
+  const at = "2026-09-08T10:00:00.000Z" as IsoTimestamp;
+  const fleet = new FleetRegistry();
+  fleet.register({
+    platform: "chatgpt", identity: { agentId, type: "interactive" }, sessionId, sessionBinding: "bound",
+    terminal: { terminalId: "old-terminal" as TerminalId, name: "aboard: ChatGPT" }, lifecycle: { status: "starting", startedAt: at },
+    resultDelivery: { mode: "none" }, attended: true,
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, at);
+  fleet.transition(agentId, { status: "running", startedAt: at }, at);
+  const lease = new WriteLease();
+  lease.acquire("write-capable", { agentId, sessionId }, at, "existing owner");
+  const host = new FakeTerminalHost();
+  const terminals = new TerminalController({
+    host, shell: "powershell", environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:/work" }),
+    terminalIdFactory: () => "new-terminal" as TerminalId, startupProofs: proofs,
+  });
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:/work", fleet, lease, terminals,
+    configurations: { get: async () => ({ platform: "chatgpt", settings: { shape: "default" } }) },
+    platforms: new Map([["chatgpt", platform]]), prompts: { resolve: async () => undefined },
+    spills: { prepare: async () => undefined, write: async () => "unused" }, shell: "powershell",
+    agentIdFactory: () => "unused" as AgentId, startupTimeoutMs: 60_000,
+  });
+
+  let settled = false;
+  const reopened = coordinator.reopen({
+    platform: "chatgpt", agentId, type: "interactive", sessionId, terminalName: "aboard: ChatGPT", cwd: "C:/work",
+  }).then((value) => { settled = true; return value; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(fleet.get(agentId)?.lifecycle.status, "starting");
+  assert.equal(fleet.get(agentId)?.sessionId, sessionId);
+  assert.equal(lease.current()?.sessionId, sessionId);
+  resolveProof?.({ agentId, sessionId });
+
+  assert.equal((await reopened).terminalId, "new-terminal");
+  assert.equal(fleet.get(agentId)?.lifecycle.status, "running");
+  assert.equal(lease.current()?.sessionId, sessionId);
+});

@@ -16,7 +16,7 @@ export class WorkerHookService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  public compact(agentId: AgentId, summary: string): void {
+  public compact(agentId: AgentId, summary?: string): void {
     this.fleet.recordCompaction(agentId, summary, this.timestamp());
   }
 

@@ -251,10 +251,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   ]);
   // Conversation discovery belongs to the session's runtime, not today's launch
   // selection. In particular, editing launch.json must not make an existing
-  // process disappear from Recent Activity when it ends.
-  const sessionIsResumable = async (platformId: AgentSession["platform"], sessionId: SessionId, cwd: string): Promise<boolean> => {
+  // process disappear from Recent Activity when it ends. launch.json is read
+  // only for the runtime a platform needs to answer the question at all - a
+  // renamed or wrapped executable - and only while it still selects that
+  // platform; an unreadable file leaves the platform on its own default.
+  const sessionIsResumable = async (platformId: AgentSession["platform"], sessionId: SessionId, cwd: string, type?: AgentSession["identity"]["type"]): Promise<boolean> => {
     const platform = platforms.get(platformId);
-    return platform === undefined ? false : platform.isResumable(sessionId, cwd);
+    if (platform === undefined) return false;
+    const configured = type === undefined ? undefined : await launchFile.get(type).catch(() => undefined);
+    const settings = configured?.platform === platformId ? configured.settings : undefined;
+    const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
+      ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand
+      : undefined;
+    return platform.isResumable(sessionId, cwd, command);
   };
   if (initialized) await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
   const rememberEndedSession = async (
@@ -269,10 +278,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const terminalId = terminals.liveTerminalForAgent(session.identity.agentId);
     const conversationStarted = !isInteractiveLaunch(session)
       // A runtime-assigned id is proof that Codex created the conversation.
-      // Supported ChatGPT resume discovery lands in #13; process settlement
-      // must still retain today's real, bound conversation in activity.
       || (session.platform === "chatgpt" && session.sessionBinding === "bound")
-      || await sessionIsResumable(session.platform, session.sessionId, session.cwd ?? workspaceRoot);
+      || await sessionIsResumable(session.platform, session.sessionId, session.cwd ?? workspaceRoot, session.identity.type);
     if (!shouldRecordEndedSession(session, conversationStarted)) {
       output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no agent conversation started.`);
       return;
@@ -496,7 +503,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       show: (terminalId) => terminals.show(terminalId),
     },
     launcher: coordinator,
-    isResumable: (platform, sessionId, cwd) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot),
+    isResumable: (platform, sessionId, cwd, type) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot, type),
   });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);

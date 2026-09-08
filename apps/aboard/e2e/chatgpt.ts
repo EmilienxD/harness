@@ -25,13 +25,14 @@ export async function runChatGptSmoke(config: HarnessConfig): Promise<void> {
   await mkdir(root, { recursive: true });
   try {
     await runScenario(root, "[E2E:chatgpt-success] complete the deterministic attended turn.", 0);
+    await runScenario(root, "", 0, true);
     await runScenario(root, `${"large deterministic prompt ".repeat(300)}[E2E:chatgpt-process-failure]`, 23);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
-async function runScenario(root: string, prompt: string, expectedExit: number): Promise<void> {
+async function runScenario(root: string, prompt: string, expectedExit: number, resume = false): Promise<void> {
   const agentId = `chatgpt-${expectedExit}` as AgentId;
   const runtimeRoot = join(root, agentId);
   const wrapper = sessionWrapperLayout(runtimeRoot, resolve(process.cwd(), "assets", "runtime", "abd_wrapper.py"));
@@ -45,8 +46,9 @@ async function runScenario(root: string, prompt: string, expectedExit: number): 
   });
   const fleet = new FleetRegistry();
   const now = new Date().toISOString() as IsoTimestamp;
+  const expectedSessionId = resume ? ACTUAL : PROVISIONAL;
   const session: AgentSession = {
-    platform: "chatgpt", identity: { agentId, type: "interactive" }, sessionId: PROVISIONAL, sessionBinding: "provisional",
+    platform: "chatgpt", identity: { agentId, type: "interactive" }, sessionId: expectedSessionId, sessionBinding: resume ? "bound" : "provisional",
     terminal: { terminalId: `terminal-${expectedExit}` as TerminalId, name: "ChatGPT E2E" },
     lifecycle: { status: "starting", startedAt: now }, resultDelivery: { mode: "none" }, attended: true,
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
@@ -63,33 +65,42 @@ async function runScenario(root: string, prompt: string, expectedExit: number): 
       workers: { stop: async () => false, failure: async () => false },
       compactions: { compact: () => undefined }, proofs,
       sessionBindings: [{
-        canBindSession: (candidate, expected) => candidate === agentId && expected === PROVISIONAL,
+        canBindSession: (candidate, expected) => candidate === agentId && expected === expectedSessionId,
         bindSession: () => undefined,
       }],
     }),
   });
   try {
     const fakeCodex = resolve(process.cwd(), "e2e", "fake-codex.mjs");
-    const plan = platform.planLaunch({
+    const request = {
       agentId, sessionId: PROVISIONAL, agentType: "interactive", shell: process.platform === "win32" ? "powershell" : "git-bash",
       configuration: { shape: "default", declaredCommand: [process.execPath, fakeCodex] }, prompt,
       runtimeDirectory: runtimeRoot, maxInlinePromptChars: expectedExit === 0 ? 4000 : 20, wrapper,
-    });
+    } as const;
+    const plan = resume
+      ? platform.planSessionResume({ ...request, sessionId: ACTUAL })
+      : platform.planLaunch(request);
     await platform.preflight(plan.command);
+    if (resume) {
+      if (!await platform.isResumable(ACTUAL, root, plan.command)) throw new Error("ChatGPT E2E could not discover its saved session");
+      if (await platform.isResumable("c15badb6-d6c8-45a6-a59f-e931cd364332" as SessionId, root, plan.command)) {
+        throw new Error("ChatGPT E2E treated a missing session as resumable");
+      }
+    }
     const files = new FileSystemPromptSpillStore(root, runtimeRoot, new Map([["chatgpt", platform.lifecycleAssets]]));
     await files.prepare(plan);
     if (plan.spill !== undefined) await files.write(plan.spill);
-    monitor.trackLaunch({ agentId, sessionId: PROVISIONAL, lockFile: wrapper.lockPathFor(agentId) });
-    const proof = proofs.awaitStarted(agentId, PROVISIONAL, 10_000);
+    monitor.trackLaunch({ agentId, sessionId: expectedSessionId, lockFile: wrapper.lockPathFor(agentId) });
+    const proof = proofs.awaitStarted(agentId, expectedSessionId, 10_000);
     if (plan.wrapperRequest === undefined) throw new Error("ChatGPT E2E expected wrapper request delivery");
     const execution = spawnCaptured("uv", ["run", "--no-project", "--no-managed-python", wrapper.script, wrapper.lockPathFor(agentId), "--request", plan.wrapperRequest.relativePath], root, {
       ...process.env,
       ABOARD_BRIDGE_PORT: String(bridge.port), ABOARD_BRIDGE_TOKEN: bridge.token,
-      ABOARD_AGENT_ID: agentId, ABOARD_SESSION_ID: PROVISIONAL, ABOARD_AGENT_TYPE: "interactive",
+      ABOARD_AGENT_ID: agentId, ABOARD_SESSION_ID: expectedSessionId, ABOARD_AGENT_TYPE: "interactive",
       ABOARD_RUNTIME_ROOT: runtimeRoot, ABOARD_WORKSPACE_ROOT: root, ABOARD_ATTENDED: "1",
     });
     const started = await proof;
-    if (started.sessionId !== ACTUAL || fleet.get(agentId)?.sessionId !== ACTUAL) throw new Error("ChatGPT E2E did not bind the runtime session id");
+    if (started.sessionId !== ACTUAL || fleet.get(agentId)?.sessionId !== ACTUAL) throw new Error("ChatGPT E2E did not preserve the runtime session id");
     fleet.transition(agentId, { status: "running", startedAt: now }, now);
     const result = await execution;
     if (result !== expectedExit) throw new Error(`ChatGPT E2E child exited ${result}; expected ${expectedExit}`);

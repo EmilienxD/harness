@@ -221,10 +221,6 @@ export class DelegationCoordinator {
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
-    const resumable = await platform.isResumable(target.sessionId, cwd);
-    if (!resumable) {
-      throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no agent conversation to resume`);
-    }
     const attended = target.attended ?? true;
 
     const plan = platform.planSessionResume({
@@ -248,6 +244,10 @@ export class DelegationCoordinator {
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
     await platform.preflight(plan.command);
+    const resumable = await platform.isResumable(target.sessionId, cwd, plan.command);
+    if (!resumable) {
+      throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no agent conversation to resume`);
+    }
     const occurredAt = this.#timestamp();
     const origin = target.origin;
     if (origin !== undefined && leaseRequired(origin, attended)) {
@@ -319,6 +319,11 @@ export class DelegationCoordinator {
           resultDelivery,
           attended,
         );
+      }
+      if (platform.capabilities.sessionIdentity === "runtime-assigned" && this.options.startupTimeoutMs !== undefined) {
+        const startup = this.options.terminals.waitForStartup(target.agentId);
+        if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${target.agentId}`);
+        await startup;
       }
       this.options.fleet.transition(target.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
       return { agentId: target.agentId, sessionId: target.sessionId, terminalId: terminal.terminalId };
