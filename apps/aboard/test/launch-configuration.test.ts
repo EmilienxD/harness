@@ -66,6 +66,24 @@ test("launch.json resolves the four launch profiles", () => {
   assert.equal(reviewerSettings.skillName, "review-hitl");
 });
 
+test("launch.json selects an attended ChatGPT session with its Codex command", () => {
+  const parsed = parseLaunchFile(`{
+    "version": 1,
+    "platform": "chatgpt",
+    "command": ["wrapper", "codex"],
+    "interactive": { "model": "inherit", "effort": "inherit" }
+  }`);
+
+  assert.deepEqual(parsed.diagnostics, []);
+  assert.deepEqual(parsed.value.configuration("interactive"), {
+    platform: "chatgpt",
+    settings: {
+      shape: "default",
+      declaredCommand: ["wrapper", "codex"],
+    },
+  });
+});
+
 test("missing profile fields use defaults and unsupported fields produce one warning", () => {
   const parsed = parseLaunchFile(`{
     "version": 1,
@@ -102,17 +120,22 @@ test("invalid known launch fields block configuration", () => {
     '{"version":1,"platform":"claude","implementer":{"effort":"inherit"}}',
     '{"version":1,"platform":"claude","reviewer":{"deniedTools":"Agent"}}',
     '{"version":1,"platform":"claude","implementer":{"model":"gpt-5.6"}}',
+    '{"version":1,"platform":"chatgpt","interactive":{"model":"sonnet"}}',
   ]) {
     assert.throws(() => parseLaunchFile(text), LaunchFileError, text);
   }
 });
 
 test("platform diagnostics identify missing, unknown, and cross-platform settings", () => {
-  assert.throws(() => parseLaunchFile('{"version":1}'), /platform is required.*claude/u);
-  assert.throws(() => parseLaunchFile('{"version":1,"platform":"codex"}'), /platform must be.*claude.*codex/u);
+  assert.throws(() => parseLaunchFile('{"version":1}'), /platform is required.*claude.*chatgpt/u);
+  assert.throws(() => parseLaunchFile('{"version":1,"platform":"codex"}'), /platform must be.*claude.*chatgpt.*codex/u);
   assert.throws(
     () => parseLaunchFile('{"version":1,"platform":"claude","implementer":{"model":"gpt-5.6"}}'),
     /implementer\.model is not valid for platform claude/u,
+  );
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","interactive":{"model":"sonnet"}}'),
+    /interactive\.model is not valid for platform chatgpt.*Claude model/u,
   );
 });
 

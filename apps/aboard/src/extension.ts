@@ -16,6 +16,8 @@ import type { TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { spawnCommandRunner } from "./claude/preflight.js";
 import { ClaudeAgentPlatform } from "./claude/platform.js";
+import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
+import type { AgentPlatform, AgentPlatformId } from "./platform/agent-platform.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldCatalogRevision, scaffoldProject } from "./scaffold/project.js";
 import { join } from "node:path";
@@ -36,7 +38,7 @@ import {
 } from "./configuration.js";
 import { FileActivityStore, FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
-import { isInteractiveLaunch, shouldRecordEndedSession } from "./domain/activity.js";
+import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from "./domain/activity.js";
 import { completedCount, isUnsupportedRecord } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
@@ -53,7 +55,7 @@ import {
   SessionStartupProofs,
   type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
-import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
@@ -236,7 +238,17 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
     },
   });
-  const platforms = new Map([[claudePlatform.id, claudePlatform]]);
+  const chatGptPlatform = new ChatGptAgentPlatform({
+    commandRunner: spawnCommandRunner(workspaceRoot),
+    lifecycleAssets: {
+      settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
+      script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
+    },
+  });
+  const platforms: ReadonlyMap<AgentPlatformId, AgentPlatform> = new Map<AgentPlatformId, AgentPlatform>([
+    [claudePlatform.id, claudePlatform],
+    [chatGptPlatform.id, chatGptPlatform],
+  ]);
   // Conversation discovery belongs to the session's runtime, not today's launch
   // selection. In particular, editing launch.json must not make an existing
   // process disappear from Recent Activity when it ends.
@@ -248,7 +260,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const rememberEndedSession = async (
     session: AgentSession,
     endedAt: IsoTimestamp,
-    outcome: "ended" | "killed" | "interrupted" = "ended",
+    outcome: Extract<AgentOutcome, "ended" | "failed" | "killed" | "interrupted"> = "ended",
     reason?: string,
   ): Promise<void> => {
     if (!initialized) return;
@@ -256,6 +268,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // release the still-open terminal while the check is in flight.
     const terminalId = terminals.liveTerminalForAgent(session.identity.agentId);
     const conversationStarted = !isInteractiveLaunch(session)
+      // A runtime-assigned id is proof that Codex created the conversation.
+      // Supported ChatGPT resume discovery lands in #13; process settlement
+      // must still retain today's real, bound conversation in activity.
+      || (session.platform === "chatgpt" && session.sessionBinding === "bound")
       || await sessionIsResumable(session.platform, session.sessionId, session.cwd ?? workspaceRoot);
     if (!shouldRecordEndedSession(session, conversationStarted)) {
       output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no agent conversation started.`);
@@ -369,7 +385,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const at = new Date().toISOString() as IsoTimestamp;
       if (!reportsResult(session)) {
         lease.releaseForTerminalOutcome(observation.agentId, at, "agent session process ended");
-        void rememberEndedSession(session, at);
+        const failure = sessionExitFailure(exit);
+        void rememberEndedSession(session, at, failure === undefined ? "ended" : "failed", failure);
         fleet.remove(observation.agentId, at);
         releaseAbandonedTerminal(observation.agentId, session.autoRunRestricted === true);
         output.appendLine(`Session process for agent ${observation.agentId} ended`);

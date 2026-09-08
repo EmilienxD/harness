@@ -79,7 +79,17 @@ async function dispatch(options: PlatformLifecycleRoutesOptions, platform: Agent
       return acceptedStart;
     }
     case "end": return options.sessions.sessionEnded(observation);
-    case "stop": return options.workers.stop(observation);
+    case "stop": {
+      const session = options.fleet.get(observation.agentId);
+      if (session === undefined || session.sessionId !== observation.sessionId) return false;
+      // Stop means "the current turn produced a final answer" for an attended
+      // TUI, not that its conversation or process ended. Preserve the answer
+      // for Fleet/activity settlement and leave the session live.
+      if (session.attended === true || session.resultDelivery.mode === "none") {
+        return options.fleet.observeAssistantMessage(observation.agentId, observation.lastAssistantMessage, timestamp(options));
+      }
+      return options.workers.stop(observation);
+    }
     case "failure": return options.workers.failure(observation);
     case "compaction": {
       if (options.fleet.get(observation.agentId)?.sessionId !== observation.sessionId) return false;

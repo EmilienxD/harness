@@ -429,3 +429,41 @@ test("a launch with no startup timeout armed asks for no proof at all", async ()
   });
   assert.equal(proofs.armed.length, 0);
 });
+
+test("shared orchestration can await the one proof already armed by terminal creation", async () => {
+  let resolveProof: ((value: unknown) => void) | undefined;
+  const { controller, proofs } = setupProofs(() => new Promise((resolve) => { resolveProof = resolve; }));
+  controller.create({
+    agentId: agent("chatgpt-1"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "interactive",
+    startupTimeoutMs: 120_000,
+  });
+
+  const pending = controller.waitForStartup(agent("chatgpt-1"));
+  assert.equal(proofs.armed.length, 1);
+  assert.ok(pending !== undefined);
+  resolveProof?.({ sessionId: "actual" });
+  assert.deepEqual(await pending, { sessionId: "actual" });
+  assert.equal(proofs.armed.length, 1);
+  assert.equal(controller.waitForStartup(agent("chatgpt-1")), undefined);
+});
+
+test("startup ownership is published after proof is armed and before the command is sent", () => {
+  const { controller, host, proofs } = setupProofs(() => new Promise(() => undefined));
+  let published = false;
+  controller.create({
+    agentId: agent("chatgpt-1"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "interactive",
+    initialCommand: "codex",
+    startupTimeoutMs: 120_000,
+  }, () => {
+    assert.equal(proofs.armed.length, 1);
+    assert.deepEqual(host.created[0]?.terminal.sent, []);
+    published = true;
+  });
+
+  assert.equal(published, true);
+  assert.equal(host.created[0]?.terminal.sent.at(-1)?.text, "codex");
+});

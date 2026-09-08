@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../src/runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
 
@@ -144,6 +144,17 @@ test("wrapper returns the child's exit code", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("only nonzero proven-session exits are classified as process failures", () => {
+  assert.equal(sessionExitFailure(undefined), undefined);
+  assert.equal(sessionExitFailure({ exitCode: null }), undefined);
+  assert.equal(sessionExitFailure({ exitCode: 0 }), undefined);
+  assert.equal(sessionExitFailure({ exitCode: 23 }), "the agent process exited with code 23");
+  assert.equal(
+    sessionExitFailure({ exitCode: 127, error: "runtime missing" }),
+    "the configured agent command could not be started (runtime missing)",
+  );
 });
 
 test("wrapper consumes a request file and runs its exact argv", () => {

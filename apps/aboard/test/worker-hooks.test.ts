@@ -100,12 +100,9 @@ test("worker Python hook is silent for non-aboard and non-Auto-Run sessions", ()
   }
 });
 
-test("worker Python hook reports completion only for Auto Run workers", async () => {
+test("Python Stop hook reports final output for every Aboard session", async () => {
   const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   const stopPayload = JSON.stringify({ hook_event_name: "Stop", cwd: "C:\\repo", last_assistant_message: "Changed the boundary; safely." });
-  const silent = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], { input: stopPayload, encoding: "utf8", env: { ...process.env, ABOARD_AGENT_ID: "interactive-1", ABOARD_AGENT_TYPE: "interactive" } });
-  assert.equal(silent.status, 0); assert.equal(silent.stdout, ""); assert.equal(silent.stderr, "");
-
   const received: { url?: string; body?: string }[] = [];
   const server = createServer((incoming, outgoing) => {
     const chunks: Buffer[] = [];
@@ -142,14 +139,15 @@ test("worker Python hook reports completion only for Auto Run workers", async ()
       assert.equal(stderr, "");
     };
 
+    await report({ ABOARD_AGENT_ID: "interactive-1", ABOARD_AGENT_TYPE: "interactive" });
     await report({ ABOARD_AGENT_ID: "implementer-1", ABOARD_AGENT_TYPE: "implementer" });
     await report({ ABOARD_AGENT_ID: "reviewer-1", ABOARD_AGENT_TYPE: "reviewer" });
     await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" });
 
-    assert.equal(received.length, 3);
+    assert.equal(received.length, 4);
     assert.equal(received[0]!.url, "/hooks/stop");
     assert.deepEqual(JSON.parse(received[0]!.body ?? "{}"), {
-      agentId: "implementer-1",
+      agentId: "interactive-1",
       cwd: "C:\\repo",
       lastAssistantMessage: "Changed the boundary; safely.",
     });
@@ -157,6 +155,7 @@ test("worker Python hook reports completion only for Auto Run workers", async ()
     assert.equal((JSON.parse(received[1]!.body ?? "{}") as { lastAssistantMessage?: unknown }).lastAssistantMessage, "Changed the boundary; safely.");
     assert.equal(received[2]!.url, "/hooks/stop");
     assert.equal((JSON.parse(received[2]!.body ?? "{}") as { lastAssistantMessage?: unknown }).lastAssistantMessage, "Changed the boundary; safely.");
+    assert.equal(received[3]!.url, "/hooks/stop");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
   }
@@ -187,7 +186,7 @@ test("session Python hooks post proof-of-life and reason, and stay silent withou
     const address = server.address();
     assert.ok(address !== null && typeof address !== "string");
     // Session lifecycle applies to every Aboard session, including interactive ones.
-    const envFor = { ...process.env, ABOARD_AGENT_ID: "boarded", ABOARD_AGENT_TYPE: "interactive", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" };
+    const envFor = { ...process.env, ABOARD_AGENT_ID: "boarded", ABOARD_SESSION_ID: "provisional", ABOARD_AGENT_TYPE: "interactive", ABOARD_BRIDGE_PORT: String(address.port), ABOARD_BRIDGE_TOKEN: "secret" };
     // Async spawn, like the other live-POST hook tests: a synchronous spawn
     // would block the event loop that must answer the hook's request.
     const run = (route: string, payload: object) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {

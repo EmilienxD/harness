@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import type { DelegationConfigurationSource } from "../bridge/delegation.js";
 import { parseClaudeLaunchFile } from "../claude/launch-configuration.js";
+import { parseChatGptLaunchFile } from "../chatgpt/launch-configuration.js";
 import type { AgentType } from "../domain/contracts.js";
 import type { AgentPlatformId, AutoRunReviewMode, ConfiguredLaunch } from "./agent-platform.js";
 
@@ -24,8 +25,8 @@ function object(value: unknown, path: string): Record<string, unknown> {
 }
 
 function platform(value: unknown): AgentPlatformId {
-  if (value === undefined) throw new LaunchFileError('launch.json platform is required; set it to "claude"');
-  if (value !== "claude") throw new LaunchFileError(`launch.json platform must be "claude"; received ${JSON.stringify(value)}`);
+  if (value === undefined) throw new LaunchFileError('launch.json platform is required; set it to "claude" or "chatgpt"');
+  if (value !== "claude" && value !== "chatgpt") throw new LaunchFileError(`launch.json platform must be "claude" or "chatgpt"; received ${JSON.stringify(value)}`);
   return value;
 }
 
@@ -39,6 +40,7 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   const parsedPlatform = (() => {
     switch (selectedPlatform) {
       case "claude": return parseClaudeLaunchFile(root);
+      case "chatgpt": return parseChatGptLaunchFile(root);
     }
   })();
   const diagnostics = parsedPlatform.unknownFields.length === 0

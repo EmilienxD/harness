@@ -4,7 +4,9 @@ export const SHELL_KINDS = ["powershell", "git-bash", "cmd"] as const;
 export type ShellKind = (typeof SHELL_KINDS)[number];
 
 const ARGUMENT_HAZARDS: Readonly<Record<ShellKind, RegExp>> = {
-  powershell: /[\r\n"]/,
+  // PowerShell's outer single-quoted argument safely carries double quotes;
+  // Codex hook overrides need those quotes inside their TOML value.
+  powershell: /[\r\n]/,
   "git-bash": /[\r\n]/,
   cmd: /[\r\n"%!^&|<>]/,
 };

@@ -4,10 +4,10 @@ Usage:
     python abd_wrapper.py <lock-file> -- <command> [args...]
     python abd_wrapper.py <lock-file> --request <launch.json>
 
-The extension launches every Claude session through this wrapper. A request
+The extension launches every supported agent session through this wrapper. A request
 path is a one-time launch capability: it is claimed before it is read, so a
 terminal-history replay cannot start or resume Claude again. The wrapper
-creates the marker file before spawning the child Claude process, forwards the
+creates the marker file before spawning the child agent process, forwards the
 terminal, waits, and removes the marker when the child exits for any reason —
 `exit`, double Ctrl+C, an unhandled crash. The bridge polls the marker's
 existence instead of a process id: no PID reuse risk and no process-table
@@ -116,7 +116,7 @@ def main() -> int:
             child = subprocess.Popen(command)
         except OSError as error:
             # The command itself could not be run: the shell found the wrapper
-            # but not Claude. Nothing else will ever report this.
+            # but not the configured agent runtime. Nothing else will report this.
             spawn_error = str(error)
             exit_code = 127
             return exit_code

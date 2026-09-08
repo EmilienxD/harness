@@ -1,8 +1,8 @@
 {
   "name": "aboard",
-  "displayName": "aboard; visible agents for Claude Code",
+  "displayName": "aboard; visible coding agents",
   "publisher": "aboard",
-  "description": "VS Code integration for Claude Code with visible terminals, fleet tracking, and Auto Run orchestration.",
+  "description": "VS Code integration for visible Claude Code and ChatGPT sessions, fleet tracking, and Auto Run orchestration.",
   "version": "0.0.0",
   "private": true,
   "repository": {
@@ -22,6 +22,8 @@
   "keywords": [
     "claude",
     "claude code",
+    "chatgpt",
+    "codex",
     "agents",
     "orchestration",
     "ai"
@@ -209,7 +211,7 @@
     "viewsWelcome": [
       {
         "view": "aboard.welcome",
-        "contents": "aboard provides visible terminals for Claude Code sessions, fleet tracking, and Auto Run orchestration.\n\nOne click sets this workspace up: launch configuration, Auto Run setup, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
+        "contents": "aboard provides visible terminals for coding-agent sessions, fleet tracking, and Auto Run orchestration.\n\nOne click sets this workspace up: launch configuration, Auto Run setup, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
         "when": "!aboard.scaffoldUpdateRequired"
       },
       {
@@ -570,6 +572,7 @@
     "e2e:reset": "npm run e2e:build && node dist/e2e/cli.js reset",
     "e2e:serve": "npm run e2e:build && node dist/e2e/cli.js serve",
     "e2e:smoke": "npm run e2e:build && node dist/e2e/cli.js smoke",
+    "e2e:chatgpt": "npm run e2e:build && node dist/e2e/cli.js chatgpt",
     "e2e:extension:build": "esbuild e2e/vscode/run.ts e2e/vscode/auto-run.ts e2e/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/e2e/vscode --sourcemap",
     "e2e:extension": "npm run build && npm run e2e:extension:build && node dist/e2e/vscode/run.js",
     "e2e:auto-run": "npm run build && npm run e2e:build && npm run e2e:extension:build && node dist/e2e/vscode/auto-run.js",

@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { bootstrap, reset } from "./repository.js";
 import { startFakeAnthropicServer } from "./server.js";
 import { runSmoke } from "./smoke.js";
+import { runChatGptSmoke } from "./chatgpt.js";
 
 async function main(): Promise<void> {
   const command = process.argv[2];
@@ -22,6 +23,11 @@ async function main(): Promise<void> {
     process.stdout.write(`Smoke passed; edited fixture retained at ${config.cloneRoot}\\deterministic.txt\n`);
     return;
   }
+  if (command === "chatgpt") {
+    await runChatGptSmoke(config);
+    process.stdout.write("Deterministic ChatGPT launch, completion, and process-failure scenarios passed\n");
+    return;
+  }
   if (command === "serve") {
     await mkdir(config.runtimeRoot, { recursive: true });
     const server = await startFakeAnthropicServer({ repoRoot: config.cloneRoot, diagnosticsPath: config.diagnosticsPath, readinessPath: config.readinessPath });
@@ -30,7 +36,7 @@ async function main(): Promise<void> {
     await server.close();
     return;
   }
-  throw new Error("Usage: e2e/cli.ts <bootstrap|reset|serve|smoke>");
+  throw new Error("Usage: e2e/cli.ts <bootstrap|reset|serve|smoke|chatgpt>");
 }
 
 async function waitForSignal(): Promise<void> {

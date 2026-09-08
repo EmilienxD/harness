@@ -1,0 +1,144 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { ChatGptAgentPlatform } from "../src/chatgpt/platform.js";
+import type { AgentId, SessionId } from "../src/domain/contracts.js";
+
+const agentId = "interactive-1" as AgentId;
+const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
+const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
+
+test("the ChatGPT adapter launches a visible Codex session without imposing its provisional id", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => provisional,
+  });
+
+  assert.deepEqual(platform.createSession(), { sessionId: provisional, binding: "provisional" });
+  assert.equal(platform.bindSession({ sessionId: provisional, binding: "provisional" }, actual), actual);
+  assert.equal(platform.bindSession({ sessionId: actual, binding: "bound" }, provisional), undefined);
+
+  const plan = platform.planLaunch({
+    agentId,
+    sessionId: provisional,
+    agentType: "interactive",
+    shell: "powershell",
+    configuration: { shape: "default", declaredCommand: ["wrapper", "codex"] },
+    prompt: "Inspect the launch boundary.",
+    runtimeDirectory: "C:/aboard/runtime",
+  });
+
+  assert.equal(plan.platform, "chatgpt");
+  assert.deepEqual(plan.command, ["wrapper", "codex"]);
+  assert.equal(plan.args.includes("--session-id"), false);
+  assert.equal(plan.args.includes("--dangerously-bypass-hook-trust"), true);
+  assert.deepEqual(plan.args.slice(-2), ["--", "Inspect the launch boundary."]);
+  assert.equal(plan.args.at(-1), "Inspect the launch boundary.");
+  assert.equal(plan.promptDelivery, "inline");
+  assert.match(plan.args.join("\n"), /hooks\.SessionStart/u);
+  assert.match(plan.args.join("\n"), /hooks\.SessionEnd/u);
+});
+
+test("the ChatGPT adapter protects option-shaped prompts from Codex argument parsing", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const plan = platform.planLaunch({
+    agentId,
+    sessionId: provisional,
+    agentType: "interactive",
+    shell: "powershell",
+    configuration: { shape: "default", declaredCommand: ["codex"] },
+    prompt: "--help is part of the task, not a CLI option.",
+    runtimeDirectory: "C:/aboard/runtime",
+  });
+
+  assert.deepEqual(plan.args.slice(-2), ["--", "--help is part of the task, not a CLI option."]);
+});
+
+test("the ChatGPT adapter spills a large initial prompt without losing its contents", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => provisional,
+  });
+  const prompt = "large prompt ".repeat(100);
+  const plan = platform.planLaunch({
+    agentId,
+    sessionId: provisional,
+    agentType: "interactive",
+    shell: "powershell",
+    configuration: { shape: "default", declaredCommand: ["codex"] },
+    prompt,
+    runtimeDirectory: "C:/aboard/runtime",
+    maxInlinePromptChars: 20,
+  });
+
+  assert.equal(plan.promptDelivery, "spilled");
+  assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
+  assert.ok(plan.spill !== undefined);
+  assert.match(plan.args.at(-1) ?? "", new RegExp(`@${plan.spill.relativePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
+});
+
+test("the ChatGPT adapter spills an inline-eligible prompt when the shell command would overflow", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const prompt = "shell-sized prompt ".repeat(1_600);
+  const plan = platform.planLaunch({
+    agentId,
+    sessionId: provisional,
+    agentType: "interactive",
+    shell: "powershell",
+    configuration: { shape: "default", declaredCommand: ["codex"] },
+    prompt,
+    runtimeDirectory: "C:/aboard/runtime",
+    maxInlinePromptChars: 50_000,
+  });
+
+  assert.equal(plan.promptDelivery, "spilled");
+  assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
+});
+
+test("the ChatGPT adapter normalizes Codex lifecycle payloads with the runtime session id", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+
+  assert.deepEqual(platform.normalizeLifecycle("start", {
+    agentId,
+    session_id: actual,
+    source: "startup",
+  }), { type: "start", agentId, sessionId: actual, source: "startup" });
+  assert.deepEqual(platform.normalizeLifecycle("stop", {
+    agentId,
+    session_id: actual,
+    cwd: "C:/work",
+    last_assistant_message: "Finished inspecting the boundary.",
+  }), {
+    type: "stop", agentId, sessionId: actual, cwd: "C:/work",
+    lastAssistantMessage: "Finished inspecting the boundary.",
+  });
+  assert.deepEqual(platform.normalizeLifecycle("end", {
+    agentId,
+    session_id: actual,
+    reason: "other",
+  }), { type: "end", agentId, sessionId: actual, reason: "other" });
+});
+
+test("the ChatGPT adapter preflights the complete configured command", async () => {
+  const calls: string[][] = [];
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async (program, args) => {
+      calls.push([program, ...args]);
+      return { code: 0, stdout: "codex-cli 0.153.4\n", stderr: "" };
+    },
+  });
+  await platform.preflight(["wrapper", "run", "codex"]);
+  assert.deepEqual(calls, [["wrapper", "run", "codex", "--version"]]);
+});

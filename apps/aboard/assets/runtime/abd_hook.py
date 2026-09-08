@@ -21,8 +21,8 @@ RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"Explore", "implementer", "r
 
 
 def main() -> int:
-    # Claude Code's hook wire format is UTF-8 regardless of the ambient Windows
-    # code page.
+    # Agent hook wire formats are UTF-8 regardless of the ambient Windows code
+    # page.
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -42,7 +42,9 @@ def main() -> int:
         return 0
     payload: dict[str, Any] = payload_raw if isinstance(payload_raw, dict) else {}
     event = payload.get("hook_event_name")
-    session_id = os.environ.get("ABOARD_SESSION_ID") or payload.get("session_id")
+    # Runtime-assigned platforms report the canonical conversation id here;
+    # client-assigned platforms report the same id Aboard placed in the env.
+    session_id = payload.get("session_id") or os.environ.get("ABOARD_SESSION_ID")
 
     body: dict[str, Any]
     if endpoint == "/hooks/session-start":
@@ -54,7 +56,7 @@ def main() -> int:
             return 0
         body = {"agentId": agent_id, "sessionId": session_id, "reason": payload.get("reason") or "other"}
     else:
-        if os.environ.get("ABOARD_AGENT_TYPE") not in RESULT_REPORTING_TYPES:
+        if endpoint != "/hooks/stop" and os.environ.get("ABOARD_AGENT_TYPE") not in RESULT_REPORTING_TYPES:
             return 0
         if endpoint == "/hooks/worker/post-compact":
             if event != "PostCompact":

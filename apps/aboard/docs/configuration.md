@@ -33,9 +33,25 @@ Initialization creates:
 }
 ```
 
-`platform` is required and selects the agent runtime explicitly. It is not inferred from `command`, because that command may begin with a wrapper, package runner, Windows path, or remote executor. This release supports `claude`; a missing or unknown platform blocks launches with a diagnostic that names the field to fix.
+`platform` is required and selects the agent runtime explicitly. It is not inferred from `command`, because that command may begin with a wrapper, package runner, Windows path, or remote executor. This release supports `claude` for all session kinds and `chatgpt` for attended Interactive sessions. A missing or unknown platform blocks launches with a diagnostic that names the field to fix.
 
 The remaining fields are validated by the selected platform. For `claude`, `command` is a non-empty array containing the executable followed by wrapper arguments, and Aboard appends Claude Code's launch flags. `model` accepts `haiku`, `sonnet`, or `opus`; Interactive and Explore also accept `inherit`, while implementer and reviewer accept `by-difficulty`. `effort` accepts `low`, `medium`, `high`, `xhigh`, or `max`, with the same profile-specific `inherit` and `by-difficulty` values. Models or effort values belonging to another platform are rejected before a terminal is created.
+
+For an attended ChatGPT session, select the Codex CLI explicitly:
+
+```json
+{
+  "version": 1,
+  "platform": "chatgpt",
+  "command": ["codex"],
+  "interactive": {
+    "model": "inherit",
+    "effort": "inherit"
+  }
+}
+```
+
+ChatGPT `command` has the same wrapper-friendly array shape and defaults to `["codex"]`. Its Interactive `model` accepts `inherit` or a non-empty Codex model slug; `effort` accepts `inherit`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Aboard launches the ordinary visible Codex TUI, waits for its lifecycle handshake, and replaces its provisional launch ownership with the actual Codex session id. Aboard passes only the hook-trust bypass needed by its generated lifecycle hooks; it never passes Codex's approvals-and-sandbox bypass. Explore, implementer, reviewer, and ChatGPT resume remain unavailable in this release and fail before terminal creation.
 
 Interactive, implementer, and reviewer deny `Agent`, `WebSearch`, and `WebFetch` by default. Users may replace or clear those profile denials. Explore uses Claude Code's built-in policy and does not accept Aboard denials.
 

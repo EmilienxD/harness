@@ -182,6 +182,7 @@ function isUserFacing(request: CreateAboardTerminalRequest): boolean {
 
 export class TerminalController {
   readonly #records = new Map<TerminalId, TerminalRecord>();
+  readonly #startupByAgent = new Map<AgentId, Promise<unknown>>();
   readonly #terminalIdsByHandle = new WeakMap<TerminalHandle, TerminalId>();
   readonly #closeRegistration: { dispose(): void };
   readonly #now: () => Date;
@@ -193,11 +194,17 @@ export class TerminalController {
     this.#closeRegistration = options.host.onDidCloseTerminal((terminal) => this.#onClosed(terminal));
   }
 
-  public create(request: CreateAboardTerminalRequest): TerminalSnapshot {
-    return this.#create(request);
+  public create(
+    request: CreateAboardTerminalRequest,
+    beforeCommand?: (terminal: TerminalSnapshot) => void,
+  ): TerminalSnapshot {
+    return this.#create(request, beforeCommand);
   }
 
-  #create(request: CreateAboardTerminalRequest): TerminalSnapshot {
+  #create(
+    request: CreateAboardTerminalRequest,
+    beforeCommand?: (terminal: TerminalSnapshot) => void,
+  ): TerminalSnapshot {
     const latestForAgent = this.#latest((record) => record.agentId === request.agentId);
     if (latestForAgent?.status === "open") {
       throw new TerminalControlError("duplicate-agent", `Agent ${request.agentId} already has a live aboard terminal`);
@@ -255,6 +262,27 @@ export class TerminalController {
     this.#records.set(terminalId, record);
     this.#terminalIdsByHandle.set(handle, terminalId);
 
+    // Arm proof before the command can emit SessionStart. Runtime-assigned
+    // platforms also use beforeCommand to publish provisional ownership before
+    // Codex can race its real session id back through the bridge.
+    const startupTimeoutMs = request.startupTimeoutMs;
+    if (startupTimeoutMs !== undefined && this.options.startupProofs !== undefined) {
+      const startup = this.options.startupProofs.awaitStarted(request.agentId, request.sessionId, startupTimeoutMs);
+      this.#startupByAgent.set(request.agentId, startup);
+      void startup
+        .then(undefined, (error: unknown) => {
+          if (!isStartupTimeout(error)) return;
+          const current = this.#records.get(terminalId);
+          if (current === undefined || current.status !== "open") return;
+          this.options.onStartupTimeout?.(request.agentId, request.sessionId, startupTimeoutMs);
+          this.kill(terminalId);
+        });
+      void startup.then(
+        () => this.#forgetStartup(request.agentId, startup),
+        () => this.#forgetStartup(request.agentId, startup),
+      );
+    }
+
     this.options.onLifecycleEvent?.({
       type: "terminal-created",
       terminalId,
@@ -263,23 +291,14 @@ export class TerminalController {
       occurredAt: createdAt,
     });
 
+    beforeCommand?.(this.#snapshot(record));
+
     if (isUserFacing(request)) handle.show(false);
     // VS Code receives cwd too; this visible belt-and-braces cd prevents a
     // shell that starts elsewhere from launching Claude against another tree.
     handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
 
-    const startupTimeoutMs = request.startupTimeoutMs;
-    if (startupTimeoutMs !== undefined && this.options.startupProofs !== undefined) {
-      void this.options.startupProofs.awaitStarted(request.agentId, request.sessionId, startupTimeoutMs)
-        .then(undefined, (error: unknown) => {
-          if (!isStartupTimeout(error)) return;
-          const current = this.#records.get(terminalId);
-          if (current === undefined || current.status !== "open") return;
-          this.options.onStartupTimeout?.(request.agentId, request.sessionId, startupTimeoutMs);
-          this.kill(terminalId);
-        });
-    }
     return this.#snapshot(record);
   }
 
@@ -290,6 +309,11 @@ export class TerminalController {
   public liveTerminalForAgent(agentId: AgentId): TerminalId | undefined {
     const record = this.#latest((candidate) => candidate.agentId === agentId);
     return record?.status === "open" ? record.terminalId : undefined;
+  }
+
+  /** The proof armed by create(), shared with orchestration without rearming it. */
+  public waitForStartup(agentId: AgentId): Promise<unknown> | undefined {
+    return this.#startupByAgent.get(agentId);
   }
 
   public canBindSession(agentId: AgentId, expected: SessionId, actual: SessionId): boolean {
@@ -392,6 +416,10 @@ export class TerminalController {
 
   #latest(predicate: (record: TerminalRecord) => boolean): TerminalRecord | undefined {
     return [...this.#records.values()].reverse().find(predicate);
+  }
+
+  #forgetStartup(agentId: AgentId, startup: Promise<unknown>): void {
+    if (this.#startupByAgent.get(agentId) === startup) this.#startupByAgent.delete(agentId);
   }
 
   #requireRecord(terminalId: TerminalId): TerminalRecord {

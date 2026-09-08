@@ -464,31 +464,38 @@ export class DelegationCoordinator {
         initialCommand: plan.commandLine,
         attended,
         // A failed launch prints to the terminal and exits before any hook; the
-        // The platform's start observation is the only trustworthy proof the session is up.
+        // platform's start observation is the only trustworthy proof the session is up.
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+      }, (createdTerminal) => {
+        this.options.fleet.register({
+          platform: platform.id,
+          identity: { agentId, type: agentType },
+          sessionId,
+          sessionBinding: createdSession.binding,
+          terminal: { terminalId: createdTerminal.terminalId, name: createdTerminal.name },
+          lifecycle: { status: "starting", startedAt: occurredAt },
+          resultDelivery,
+          ...(attended ? { attended: true as const } : {}),
+          telemetry: EMPTY_TELEMETRY,
+          ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
+          ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
+          ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
+          // This policy is not derivable from the stable reviewer identity: a
+          // manual review is user-driven and deliberately unrestricted.
+          ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
+          ...(cwd === undefined ? {} : { cwd }),
+        }, occurredAt);
       });
       terminalStarted = true;
-      this.options.fleet.register({
-        platform: platform.id,
-        identity: { agentId, type: agentType },
-        sessionId,
-        sessionBinding: createdSession.binding,
-        terminal: { terminalId: terminal.terminalId, name: terminal.name },
-        lifecycle: { status: "starting", startedAt: occurredAt },
-        resultDelivery,
-        ...(attended ? { attended: true as const } : {}),
-        telemetry: EMPTY_TELEMETRY,
-        ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
-        ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
-        ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
-        // This policy is not derivable from the stable reviewer identity: a
-        // manual review is user-driven and deliberately unrestricted.
-        ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
-        ...(cwd === undefined ? {} : { cwd }),
-      }, occurredAt);
+      if (platform.capabilities.sessionIdentity === "runtime-assigned" && this.options.startupTimeoutMs !== undefined) {
+        const startup = this.options.terminals.waitForStartup(agentId);
+        if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${agentId}`);
+        await startup;
+      }
+      const canonicalSessionId = this.options.fleet.get(agentId)?.sessionId ?? sessionId;
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
 
-      return { agentId, sessionId, terminalId: terminal.terminalId };
+      return { agentId, sessionId: canonicalSessionId, terminalId: terminal.terminalId };
     } catch (error) {
       this.options.lease.release(agentId, occurredAt, "launch failed");
       if (!terminalStarted) await this.options.spills.remove?.(agentId).catch(() => undefined);

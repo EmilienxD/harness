@@ -75,7 +75,15 @@ test("platform lifecycle ingress binds a discovered id before shared services ob
 
 test("platform lifecycle ingress dispatches only normalized stop, end, compaction, and failure observations", async () => {
   const fleet = new FleetRegistry();
-  fleet.register({ ...registered(), sessionId: actual, sessionBinding: "bound", lifecycle: { status: "starting", startedAt: at } }, at);
+  const { attended: _attended, ...unattended } = registered();
+  fleet.register({
+    ...unattended,
+    identity: { agentId, type: "implementer" },
+    sessionId: actual,
+    sessionBinding: "bound",
+    lifecycle: { status: "starting", startedAt: at },
+    resultDelivery: { mode: "tool-result" },
+  }, at);
   fleet.transition(agentId, { status: "running", startedAt: at }, at);
   const observed: unknown[] = [];
   const platform = new ClaudeAgentPlatform({
@@ -112,4 +120,32 @@ test("platform lifecycle ingress dispatches only normalized stop, end, compactio
     { type: "failure", agentId, sessionId: actual, failureType: "context-exhausted", message: "limit", exitCode: null },
   ]);
   assert.deepEqual(staleCompaction, { status: 200, body: { ok: true, accepted: false } });
+});
+
+test("an attended session Stop records final output without settling the live conversation", async () => {
+  const fleet = new FleetRegistry();
+  fleet.register({ ...registered(), sessionId: actual, sessionBinding: "bound", lifecycle: { status: "starting", startedAt: at } }, at);
+  fleet.transition(agentId, { status: "running", startedAt: at }, at);
+  let workerStops = 0;
+  const platform = new ClaudeAgentPlatform({
+    commandRunner: async () => ({ code: 0, stdout: "2.1.199", stderr: "" }),
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+  });
+  const route = createPlatformLifecycleRoutes({
+    fleet,
+    platforms: new Map([["claude", platform]]),
+    sessions: { sessionStarted: () => false, sessionEnded: () => false },
+    workers: { stop: async () => { workerStops += 1; return true; }, failure: async () => false },
+    compactions: { compact: () => undefined },
+    now: () => new Date(at),
+  });
+  const response = await route({
+    method: "POST", url: new URL("http://127.0.0.1/hooks/stop"), headers: {}, signal: AbortSignal.abort(),
+    body: { agentId, sessionId: actual, cwd: "C:/work", lastAssistantMessage: "A final attended answer." },
+  });
+
+  assert.deepEqual(response, { status: 200, body: { ok: true, accepted: true } });
+  assert.equal(workerStops, 0);
+  assert.equal(fleet.get(agentId)?.lastObservedAssistantMessage, "A final attended answer.");
+  assert.equal(fleet.get(agentId)?.lifecycle.status, "running");
 });

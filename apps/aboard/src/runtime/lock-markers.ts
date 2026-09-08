@@ -27,6 +27,13 @@ export interface SessionExitRecord {
   readonly error?: string;
 }
 
+/** Human-readable evidence that a proven agent process ended abnormally. */
+export function sessionExitFailure(exit: SessionExitRecord | undefined): string | undefined {
+  if (exit?.error !== undefined) return `the configured agent command could not be started (${exit.error})`;
+  if (exit?.exitCode !== undefined && exit.exitCode !== null && exit.exitCode !== 0) return `the agent process exited with code ${exit.exitCode}`;
+  return undefined;
+}
+
 export function takeSessionExitRecord(lockFile: string): SessionExitRecord | undefined {
   const path = `${lockFile.replace(/\.lock$/, "")}.exit`;
   let raw: string;
