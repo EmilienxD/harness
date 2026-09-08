@@ -13,3 +13,4 @@ commit-ai.key
 temp/
 .claude/
 .agents/
+.codex/
