@@ -63,7 +63,7 @@ function portable(path: string): string { return path.split(sep).join("/"); }
 
 function isOwnedAssetPath(path: string): boolean {
   const segments = path.split("/");
-  return segments.length > 2 && segments[0] === ".abd"
+  return segments.length >= 2 && segments[0] === ".abd"
     && segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\\"));
 }
 

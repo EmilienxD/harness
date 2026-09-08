@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { runTests } from "@vscode/test-electron";
@@ -53,7 +53,6 @@ export async function runAutoRunJourney(): Promise<void> {
         launchArgs: [config.cloneRoot, "--disable-extensions"],
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
-        "aboard.launch.claudeCommand": ["claude", "--permission-mode", "acceptEdits"],
         "aboard.autoRun.review": true,
         "aboard.autoRun.exploreBeforeImplement": true,
         "aboard.autoRun.recursiveIssueReferences": true,
@@ -76,6 +75,10 @@ export async function runAutoRunJourney(): Promise<void> {
 }
 
 async function commitInitializedScaffold(root: string, settings: Readonly<Record<string, unknown>>): Promise<void> {
+  const launchPath = join(root, ".abd", "launch.json");
+  const launch = JSON.parse(await readFile(launchPath, "utf8")) as Record<string, unknown>;
+  launch.command = ["claude", "--permission-mode", "acceptEdits"];
+  await writeFile(launchPath, `${JSON.stringify(launch, null, 2)}\n`, "utf8");
   const settingsPath = join(root, ".vscode", "settings.json");
   await mkdir(join(root, ".vscode"), { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
@@ -205,7 +208,6 @@ async function runSingleBranchJourney(): Promise<void> {
         launchArgs: [config.cloneRoot, "--disable-extensions"],
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
-        "aboard.launch.claudeCommand": ["claude", "--permission-mode", "acceptEdits"],
         "aboard.autoRun.branchMode": "single-branch",
         "aboard.autoRun.review": false,
         "aboard.autoRun.exploreBeforeImplement": false,

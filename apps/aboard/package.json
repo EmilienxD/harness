@@ -438,47 +438,11 @@
           "maximum": 65535,
           "description": "Preferred loopback port. If occupied, aboard selects an ephemeral port."
         },
-        "aboard.launch.claudeCommand": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          ],
-          "default": "claude",
-          "markdownDescription": "Command that starts Claude Code. Defaults to `claude`; use it to point aboard at another binary or a wrapper, for example `openclaude` or `wrapper run MyProfile --`. aboard appends its own flags to this command unchanged.\n\nWritten as a string it is split on spaces, with `\"...\"` or `'...'` around a token that contains spaces (`\"C:\\tools\\my claude.exe\" run --`); an array of strings is used verbatim. It is a program and its arguments, not a shell expression: every token is quoted, so `&&` or `|` would be passed as literal text."
-        },
         "aboard.launch.maxInlinePromptChars": {
           "type": "integer",
           "default": 4000,
           "minimum": 0,
           "description": "Longest prompt passed inline as a command-line argument. Longer prompts spill to one-use files in the OS temporary directory and are referenced with @path."
-        },
-        "aboard.launch.effort": {
-          "type": "string",
-          "enum": [
-            "inherit",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max"
-          ],
-          "enumDescriptions": [
-            "Pass no --effort flag; Claude Code's own effort level applies.",
-            "Launch with --effort low.",
-            "Launch with --effort medium.",
-            "Launch with --effort high.",
-            "Launch with --effort xhigh.",
-            "Launch with --effort max."
-          ],
-          "default": "inherit",
-          "markdownDescription": "Reasoning effort for every session aboard starts or resumes, passed as `--effort`. Available levels depend on the model.\n\nApplies to the next launch; a running agent keeps its level."
         },
         "aboard.terminals.closeOnSessionEnd": {
           "type": "boolean",
@@ -488,7 +452,7 @@
         "aboard.autoRun.review": {
           "type": "boolean",
           "default": false,
-          "description": "Launch a pr-doctor after each issue is addressed during an auto-run. Automated review stays opt-in; the explicit review action is always available."
+          "description": "Launch an Auto Run reviewer after each issue is addressed."
         },
         "aboard.autoRun.branchMode": {
           "type": "string",
@@ -509,7 +473,7 @@
         "aboard.autoRun.prompt": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Persistent note added near the end of every auto-run implementer and pr-doctor prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
+          "markdownDescription": "Persistent note added near the end of every Auto Run implementer and reviewer prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
         },
         "aboard.autoRun.pauseAfterHitl": {
           "type": "boolean",

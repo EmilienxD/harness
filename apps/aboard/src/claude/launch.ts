@@ -2,6 +2,7 @@
 import type { WriteCapability } from "../domain/capability.js";
 import {
   isAutomatedAgentType,
+  isAutoRunWorkerType,
   isNamedBuiltinAgentType,
   type AgentId,
   type AgentType,
@@ -32,53 +33,6 @@ export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
   "git-bash": 24_000,
 };
 
-
-export type ClaudeCommandResult =
-  | { readonly ok: true; readonly value: readonly string[] }
-  | { readonly ok: false; readonly reason: string };
-
-export function parseClaudeCommand(value: unknown): ClaudeCommandResult {
-  if (Array.isArray(value)) {
-    if (!value.every((token): token is string => typeof token === "string")) {
-      return { ok: false, reason: "Launch command array must contain only strings" };
-    }
-    const tokens = value.map((token) => token.trim()).filter((token) => token.length > 0);
-    return tokens.length === 0
-      ? { ok: false, reason: "Launch command is empty" }
-      : { ok: true, value: tokens };
-  }
-  if (typeof value !== "string") return { ok: false, reason: "Launch command must be a string or an array of strings" };
-
-  const tokens: string[] = [];
-  let current = "";
-  let started = false;
-  let quote: '"' | "'" | undefined;
-  for (const character of value) {
-    if (quote !== undefined) {
-      if (character === quote) quote = undefined;
-      else current += character;
-      continue;
-    }
-    if (character === '"' || character === "'") {
-      quote = character;
-      started = true;
-      continue;
-    }
-    if (/\s/.test(character)) {
-      if (started) tokens.push(current);
-      current = "";
-      started = false;
-      continue;
-    }
-    current += character;
-    started = true;
-  }
-  if (quote !== undefined) return { ok: false, reason: "Launch command has an unterminated quote" };
-  if (started) tokens.push(current);
-  return tokens.length === 0
-    ? { ok: false, reason: "Launch command is empty" }
-    : { ok: true, value: tokens };
-}
 
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -135,66 +89,29 @@ function launchPolicy(
   };
 }
 
+interface LaunchConfigurationBase {
+  readonly declaredModel?: string;
+  readonly declaredEffort?: DeclaredEffort;
+  readonly declaredCommand?: readonly string[];
+  readonly deniedTools?: readonly string[];
+}
+
 export type LaunchConfiguration =
-  | {
+  | (LaunchConfigurationBase & {
       readonly shape: "builtin";
       readonly agentName: string;
-      readonly declaredModel?: string;
-      readonly declaredEffort?: DeclaredEffort;
-      readonly declaredCommand?: readonly string[];
-    }
-  | {
+    })
+  | (LaunchConfigurationBase & {
       /** A normal top-level Claude session whose first prompt invokes a Harness skill. */
       readonly shape: "skill";
       readonly skillName: string;
-      readonly declaredModel?: string;
-      readonly declaredEffort?: DeclaredEffort;
-      readonly declaredCommand?: readonly string[];
-    }
+    })
   /** Claude Code's unmodified default interactive session. */
-  | { readonly shape: "default" };
+  | (LaunchConfigurationBase & { readonly shape: "default" });
 
 export type AutoRunReviewMode = "afk" | "hitl";
-export type AutoRunWorkerType = "implementer" | "reviewer";
-
-export const AUTO_RUN_WORKER_SKILLS = {
-  implementer: "implement",
-  reviewer: "review-afk",
-} as const;
-
-export function autoRunWorkerConfiguration(
-  type: AutoRunWorkerType,
-  reviewMode: AutoRunReviewMode = "afk",
-): LaunchConfiguration {
-  return {
-    shape: "skill",
-    skillName: type === "reviewer" ? `review-${reviewMode}` : AUTO_RUN_WORKER_SKILLS[type],
-    declaredModel: BY_DIFFICULTY,
-    declaredEffort: BY_DIFFICULTY,
-  };
-}
-
-/** The flat shape a caller supplies, so the exclusive pair can be rejected. */
-export interface LaunchConfigurationInput {
-  readonly agentName?: string | undefined;
-  /** Present only for a complete aboard-owned agent definition. */
-  readonly systemPrompt?: string | undefined;
-  readonly declaredTools?: readonly string[] | undefined;
-  readonly declaredDescription?: string | undefined;
-  readonly extraFrontmatter?: readonly string[] | undefined;
-  readonly declaredModel?: string | undefined;
-  readonly declaredEffort?: DeclaredEffort | undefined;
-  readonly declaredCommand?: readonly string[] | undefined;
-  /** Rejected for builtins; retained here so the invalid combination is typed. */
-  readonly tools?: readonly string[] | undefined;
-}
 
 export type LaunchPlanErrorCode =
-  | "conflicting-launch-shape"
-  | "declared-tools-without-agent"
-  | "missing-declared-tools"
-  | "missing-system-prompt"
-  | "invalid-agent-name"
   | "invalid-tool-rule"
   | "invalid-model"
   | "invalid-effort"
@@ -218,90 +135,9 @@ export class LaunchPlanError extends Error {
   }
 }
 
-const AGENT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function resolveLaunchConfiguration(
-  input: LaunchConfigurationInput,
-): LaunchConfiguration {
-  if (input.agentName !== undefined) {
-    if (input.tools !== undefined) {
-      throw new LaunchPlanError(
-        "conflicting-launch-shape",
-        "--agent cannot be combined with --tools",
-      );
-    }
-    if (!AGENT_NAME_PATTERN.test(input.agentName)) {
-      throw new LaunchPlanError(
-        "invalid-agent-name",
-        `Invalid agent definition name: ${input.agentName}`,
-      );
-    }
-    const declaredModel =
-      input.declaredModel === undefined || input.declaredModel === "inherit"
-        ? undefined
-        : assertFlagValue(input.declaredModel, "invalid-model", "agent model");
-    if (
-      input.declaredEffort !== undefined &&
-      input.declaredEffort !== BY_DIFFICULTY &&
-      !isEffortLevel(input.declaredEffort)
-    ) {
-      throw new LaunchPlanError(
-        "invalid-effort",
-        `Agent effort must be ${BY_DIFFICULTY} or one of ${EFFORT_LEVELS.join(", ")}: ${JSON.stringify(input.declaredEffort)}`,
-      );
-    }
-    const declaredCommand =
-      input.declaredCommand === undefined || input.declaredCommand.length === 0
-        ? undefined
-        : input.declaredCommand.map((token) =>
-            assertFlagValue(token, "invalid-command", "agent command token", { allowLeadingDash: true }),
-          );
-
-    if (
-      input.systemPrompt !== undefined ||
-      input.declaredTools !== undefined ||
-      input.declaredDescription !== undefined ||
-      input.extraFrontmatter !== undefined
-    ) {
-      throw new LaunchPlanError(
-        "shape-not-allowed",
-        "Generated custom agent definitions are no longer supported",
-      );
-    }
-    return {
-      shape: "builtin",
-      agentName: input.agentName,
-      ...(declaredModel === undefined ? {} : { declaredModel }),
-      ...(input.declaredEffort === undefined ? {} : { declaredEffort: input.declaredEffort }),
-      ...(declaredCommand === undefined ? {} : { declaredCommand }),
-    };
-  }
-
-  if (
-    input.systemPrompt !== undefined ||
-    input.declaredTools !== undefined ||
-    input.declaredDescription !== undefined ||
-    input.extraFrontmatter !== undefined ||
-    input.declaredModel !== undefined ||
-    input.declaredEffort !== undefined ||
-    input.declaredCommand !== undefined
-  ) {
-    throw new LaunchPlanError(
-      "declared-tools-without-agent",
-      "declared fields describe an agent definition and require agentName",
-    );
-  }
-  if (input.tools !== undefined) {
-    throw new LaunchPlanError(
-      "conflicting-launch-shape",
-      "The default Claude Code session cannot be combined with --tools",
-    );
-  }
-  return { shape: "default" };
-}
 
 export function launchWriteCapability(
   agentType: AgentType,
@@ -316,7 +152,7 @@ export function requiresWriteLease(
   agentType: AgentType,
   capability: WriteCapability,
 ): boolean {
-  return capability === "write-capable";
+  return isAutoRunWorkerType(agentType) && capability === "write-capable";
 }
 
 /** A file the plan needs on disk before its command line can run. */
@@ -539,7 +375,7 @@ function effectiveCommand(
   configuration: LaunchConfiguration,
   configured: readonly string[] | undefined,
 ): readonly string[] {
-  if (configuration.shape !== "default" && configuration.declaredCommand !== undefined) {
+  if (configuration.declaredCommand !== undefined) {
     return configuration.declaredCommand;
   }
   return configured === undefined || configured.length === 0 ? [...DEFAULT_CLAUDE_COMMAND] : configured;
@@ -710,7 +546,10 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     request.sessionId,
     ...shapeArguments,
 
-    ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
+    ...toolListArguments("--disallowedTools", denyRules([
+      ...(configuration.deniedTools ?? []),
+      ...(request.disallowedTools ?? []),
+    ])),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
     ...chromeArguments(agentType, request.chrome),
@@ -785,7 +624,10 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     request.sessionId,
     ...shapeArguments,
 
-    ...toolListArguments("--disallowedTools", denyRules(request.disallowedTools)),
+    ...toolListArguments("--disallowedTools", denyRules([
+      ...(configuration.deniedTools ?? []),
+      ...(request.disallowedTools ?? []),
+    ])),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
     ...chromeArguments(request.agentType, request.chrome),

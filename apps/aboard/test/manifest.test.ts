@@ -13,8 +13,17 @@ interface Manifest {
     };
     views: Record<string, readonly { id: string; name?: string; when?: string }[]>;
     viewsWelcome?: readonly { view: string; when?: string; contents: string }[];
+    configuration: { properties: Record<string, unknown> };
   };
 }
+
+test("launch command, model, effort, and denials live only in .abd/launch.json", async () => {
+  const { contributes } = await manifest();
+  const settings = Object.keys(contributes.configuration.properties);
+  assert.equal(settings.includes("aboard.launch.claudeCommand"), false);
+  assert.equal(settings.includes("aboard.launch.effort"), false);
+  assert.equal(settings.includes("aboard.launch.maxInlinePromptChars"), true);
+});
 
 const manifest = async (): Promise<Manifest> =>
   JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as Manifest;
@@ -57,24 +66,15 @@ test("a stale scaffold gets a dedicated update action instead of Initialize", as
   assert.match(palette.get("aboard.updateProject") ?? "", /aboard\.scaffoldUpdateRequired/u);
 });
 
-test("Agent Fleet keeps New Manager first, and the Manager reopens through the shared reopen action", async () => {
+test("Agent Fleet exposes Run Agent and one shared reopen action", async () => {
   const { contributes } = await manifest();
   const fleetWelcome = (contributes.viewsWelcome ?? []).filter((entry) => entry.view === "aboard.fleet");
   assert.deepEqual(fleetWelcome, [], "the fleet has no empty-state copy or duplicate launch actions");
 
-  const fleetTitle = (contributes.menus["view/title"] ?? []).filter((entry) => entry.when?.includes("view == aboard.fleet"));
-  assert.equal(fleetTitle.some((entry) => entry.command === "aboard.newManager"), false, "aboard.newManager must not render in the fleet header");
-
-  // There is one word for getting a session back. No separate Manager-resume
-  // command, palette entry, or activity-row button survives; a Manager row uses
-  // the same reopen action as every other session.
-  const all = [
-    ...(contributes.menus["view/title"] ?? []),
-    ...(contributes.menus["view/item/context"] ?? []),
-    ...(contributes.menus.commandPalette ?? []),
-  ];
-  assert.equal(all.some((entry) => entry.command === "aboard.resumeManager"), false, "aboard.resumeManager must not survive anywhere");
-  assert.equal((contributes.commands ?? []).some((entry) => entry.command === "aboard.resumeManager"), false, "aboard.resumeManager must not be a contributed command");
+  assert.deepEqual(
+    contributes.commands.filter((entry) => ["aboard.runAgent", "aboard.reopenSession"].includes(entry.command)).map((entry) => entry.title),
+    ["Run Agent", "Reopen a Session"],
+  );
 });
 
 test("every action rendered inline in a panel has an icon", async () => {

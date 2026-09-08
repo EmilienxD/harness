@@ -24,7 +24,7 @@ test("project settings accept retained nested settings and ignore unknown fields
   const result = parseProjectSettings(JSON.stringify({
     launch: { maxInlinePromptChars: 6000 },
     autoRun: { mergeStrategy: "rebase" },
-    obsolete: { manager: true },
+    obsolete: { removed: true },
   }));
   assert.deepEqual(Object.fromEntries(result.values), {
     "aboard.launch.maxInlinePromptChars": 6000,
@@ -44,11 +44,4 @@ test("project settings accept retained nested settings and ignore unknown fields
 test("every contributed setting is listed in ABOARD_SETTINGS", async () => {
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as { contributes: { configuration: { properties: Record<string, unknown> } } };
   assert.deepEqual([...ABOARD_SETTINGS].sort(), Object.keys(manifest.contributes.configuration.properties).sort());
-});
-
-test("the Claude command and effort settings are validated", () => {
-  const read = (key: string, value: unknown) => readAboardConfiguration({ get: (candidate) => candidate === key ? value : undefined });
-  assert.deepEqual(read("aboard.launch.claudeCommand", "wrapper run --").value.claudeCommand, ["wrapper", "run", "--"]);
-  assert.equal(read("aboard.launch.effort", "high").value.launchEffort, "high");
-  assert.deepEqual(read("aboard.launch.claudeCommand", '"unterminated').value.claudeCommand, ["claude"]);
 });

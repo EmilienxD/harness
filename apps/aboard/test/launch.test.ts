@@ -2,18 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AUTO_RUN_WORKER_SKILLS,
   BY_DIFFICULTY,
   LaunchPlanError,
-  autoRunWorkerConfiguration,
   difficultyLaunchPolicy,
   launchWriteCapability,
-  parseClaudeCommand,
   planLaunch,
   planSessionResume,
   promptSpillRoot,
-  resolveLaunchConfiguration,
   taskPromptPath,
+  type LaunchConfiguration,
   type LaunchPlanRequest,
   type SessionWrapperLayout,
 } from "../src/claude/launch.js";
@@ -23,13 +20,22 @@ const agentId = "agent-1" as AgentId;
 const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const runtimeRoot = "C:\\storage\\aboard";
 
+function workerConfiguration(type: "implementer" | "reviewer", mode: "afk" | "hitl" = "afk"): LaunchConfiguration {
+  return {
+    shape: "skill",
+    skillName: type === "implementer" ? "implement" : `review-${mode}`,
+    declaredModel: BY_DIFFICULTY,
+    declaredEffort: BY_DIFFICULTY,
+  };
+}
+
 function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest {
   return {
     agentId,
     sessionId,
     agentType: "implementer",
     shell: "powershell",
-    configuration: autoRunWorkerConfiguration("implementer"),
+    configuration: workerConfiguration("implementer"),
     prompt: "Address issue #47.",
     runtimeDirectory: runtimeRoot,
     ...overrides,
@@ -41,37 +47,29 @@ function hasPair(args: readonly string[], flag: string, value: string): boolean 
   return index >= 0 && args[index + 1] === value;
 }
 
-test("parses configured Claude commands without invoking a shell parser", () => {
-  assert.deepEqual(parseClaudeCommand("uvx --from 'claude code' claude"), {
-    ok: true,
-    value: ["uvx", "--from", "claude code", "claude"],
-  });
-  assert.equal(parseClaudeCommand("claude '").ok, false);
-  assert.equal(parseClaudeCommand([]).ok, false);
-});
-
 test("plans an unmodified interactive session without an initial prompt", () => {
   const plan = planLaunch(request({
     agentType: "interactive",
-    configuration: resolveLaunchConfiguration({}),
+    configuration: { shape: "default" },
     prompt: undefined,
     attended: true,
   }));
 
   assert.equal(plan.promptDelivery, "none");
   assert.equal(plan.writeCapability, "write-capable");
-  assert.equal(plan.requiresWriteLease, true);
+  assert.equal(plan.requiresWriteLease, false);
   assert.equal(plan.args.includes("--agent"), false);
   assert.equal(plan.args.includes("--mcp-config"), false);
   assert.equal("agentDefinition" in plan, false);
 });
 
 test("plans Explore through Claude Code's builtin agent", () => {
-  const configuration = resolveLaunchConfiguration({
+  const configuration: LaunchConfiguration = {
+    shape: "builtin",
     agentName: "Explore",
     declaredModel: "haiku",
     declaredEffort: "low",
-  });
+  };
   const plan = planLaunch(request({
     agentType: "Explore",
     configuration,
@@ -86,30 +84,6 @@ test("plans Explore through Claude Code's builtin agent", () => {
   assert.equal(plan.requiresWriteLease, false);
 });
 
-test("rejects generated custom agent definitions", () => {
-  assert.throws(
-    () => resolveLaunchConfiguration({ agentName: "custom", systemPrompt: "Do work", declaredTools: ["Read"] }),
-    (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",
-  );
-});
-
-test("maps stable Auto Run worker types to Harness skills", () => {
-  assert.deepEqual(AUTO_RUN_WORKER_SKILLS, { implementer: "implement", reviewer: "review-afk" });
-  assert.equal(autoRunWorkerConfiguration("implementer").shape, "skill");
-  assert.deepEqual(autoRunWorkerConfiguration("reviewer", "afk"), {
-    shape: "skill",
-    skillName: "review-afk",
-    declaredModel: BY_DIFFICULTY,
-    declaredEffort: BY_DIFFICULTY,
-  });
-  assert.deepEqual(autoRunWorkerConfiguration("reviewer", "hitl"), {
-    shape: "skill",
-    skillName: "review-hitl",
-    declaredModel: BY_DIFFICULTY,
-    declaredEffort: BY_DIFFICULTY,
-  });
-});
-
 for (const [type, mode, invocation] of [
   ["implementer", undefined, "/implement"],
   ["reviewer", "afk", "/review-afk"],
@@ -117,8 +91,8 @@ for (const [type, mode, invocation] of [
 ] as const) {
   test(`plans ${type}${mode === undefined ? "" : ` ${mode}`} as a literal skill invocation`, () => {
     const configuration = type === "implementer"
-      ? autoRunWorkerConfiguration("implementer")
-      : autoRunWorkerConfiguration("reviewer", mode);
+      ? workerConfiguration("implementer")
+      : workerConfiguration("reviewer", mode);
     const plan = planLaunch(request({ agentType: type, configuration, difficulty: "basic" }));
 
     assert.match(plan.args.at(-1) ?? "", new RegExp(`^${invocation.replace("/", "\\/")} `));
@@ -140,10 +114,11 @@ test("requires a first prompt for skill launches", () => {
 
 test("preserves immutable and isolation deny rules without MCP allowlisting", () => {
   const plan = planLaunch(request({
+    configuration: { ...workerConfiguration("implementer"), deniedTools: ["Agent", "WebSearch", "WebFetch"] },
     disallowedTools: ["Bash(git push*)", "Bash(git push*)", "WebFetch"],
   }));
 
-  assert.equal(hasPair(plan.args, "--disallowedTools", "Bash(git push*),WebFetch"), true);
+  assert.equal(hasPair(plan.args, "--disallowedTools", "Agent,WebSearch,WebFetch,Bash(git push*)"), true);
   assert.equal(plan.args.includes("--allowedTools"), false);
   assert.equal(plan.args.includes("--mcp-config"), false);
 });
@@ -185,7 +160,7 @@ test("resume restores policy and restrictions without re-expanding a skill", () 
     sessionId,
     agentType: "reviewer",
     shell: "powershell",
-    configuration: autoRunWorkerConfiguration("reviewer", "afk"),
+    configuration: workerConfiguration("reviewer", "afk"),
     runtimeDirectory: runtimeRoot,
     prompt: "Continue",
     disallowedTools: ["Bash(git push*)"],
@@ -204,7 +179,7 @@ test("Chrome is available only to implementers and is replayed on resume", () =>
   assert.throws(
     () => planLaunch(request({
       agentType: "reviewer",
-      configuration: autoRunWorkerConfiguration("reviewer", "hitl"),
+      configuration: workerConfiguration("reviewer", "hitl"),
       chrome: true,
     })),
     (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",
@@ -212,11 +187,11 @@ test("Chrome is available only to implementers and is replayed on resume", () =>
 });
 
 test("launch capability follows the stable public role", () => {
-  const cases: readonly [AgentType, ReturnType<typeof resolveLaunchConfiguration> | ReturnType<typeof autoRunWorkerConfiguration>, string][] = [
-    ["interactive", resolveLaunchConfiguration({}), "write-capable"],
-    ["Explore", resolveLaunchConfiguration({ agentName: "Explore" }), "read-only"],
-    ["implementer", autoRunWorkerConfiguration("implementer"), "write-capable"],
-    ["reviewer", autoRunWorkerConfiguration("reviewer"), "write-capable"],
+  const cases: readonly [AgentType, LaunchConfiguration, string][] = [
+    ["interactive", { shape: "default" }, "write-capable"],
+    ["Explore", { shape: "builtin", agentName: "Explore" }, "read-only"],
+    ["implementer", workerConfiguration("implementer"), "write-capable"],
+    ["reviewer", workerConfiguration("reviewer"), "write-capable"],
   ];
   for (const [type, configuration, expected] of cases) {
     assert.equal(launchWriteCapability(type, configuration), expected);

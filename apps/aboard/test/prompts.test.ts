@@ -313,25 +313,6 @@ test("a document crossing the budget is complete and later primary issues are om
   assert.deepEqual(prompt?.sources.map((source) => source.number), [47]);
 });
 
-test("brainstorm context preserves complete issue bodies", async () => {
-  const body = `Context\n${"x".repeat(25_000)}\nFinal requirement.`;
-  const comment = "Later discussion narrows the context.";
-  const prompt = await new PromptResolver({
-    github: new FakeGitHub({ issues: [{
-      ...issue47,
-      body,
-      comments: [{ authorLogin: "maintainer", body: comment }],
-    }, parent31] }),
-    limits: { maxPromptChars: 100 },
-  }).resolve({ kind: "brainstorm", relatedIssueNumbers: [47, 31] });
-
-  assert.ok(prompt);
-  assert.ok(prompt.text.includes(body));
-  assert.ok(prompt.text.includes(comment));
-  assert.deepEqual(prompt.sources.map((source) => source.number), [47]);
-  assert.equal(prompt.text.includes(parent31.body), false);
-});
-
 test("resolves a review prompt with the contract and the diff", async () => {
   const resolver = new PromptResolver({
     github: new FakeGitHub({
@@ -361,22 +342,6 @@ test("resolves a review prompt with the contract and the diff", async () => {
     prompt?.sources.map((source) => source.kind),
     ["issue", "pull-request", "pull-request-diff"],
   );
-});
-
-test("leaves a bare brainstorm launch with no prompt at all", async () => {
-  const resolver = new PromptResolver({ github: new FakeGitHub({ issues: [parent31] }) });
-
-  assert.equal(await resolver.resolve({ kind: "brainstorm" }), undefined);
-
-  const prompt = await resolver.resolve({
-    kind: "brainstorm",
-    topic: "Rework auth",
-    relatedIssueNumbers: [31, 999],
-  });
-  assert.ok(prompt?.text.includes("Rework auth"));
-  // Resolvable related issues contribute their content; missing ones are dropped.
-  assert.ok(prompt?.text.includes("The auth subsystem is replaced end to end."));
-  assert.equal(prompt?.text.includes("999"), false);
 });
 
 test("rejects an empty instruction and a missing issue or pull request", async () => {
@@ -541,7 +506,6 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
   for (const type of ["interactive"] as const) {
     assert.equal(await adapter.resolve({ type, description: "d" }, { interactive: true }), undefined);
     assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }, { interactive: true }), undefined);
-    // A Manager delegating with a real topic still gets it; only filler is gone.
     const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { interactive: true });
     assert.equal(withTopic?.text.includes("caching layer"), true);
   }

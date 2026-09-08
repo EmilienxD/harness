@@ -29,10 +29,10 @@ test("binds to IPv4 loopback and authenticates every route", async (context) => 
 
   assert.equal(bridge.host, "127.0.0.1");
   assert.equal((await request(bridge.port, "/hook")).status, 401);
-  assert.equal((await request(bridge.port, "/mcp", "wrong-token")).status, 401);
-  assert.deepEqual(await request(bridge.port, "/mcp", bridge.token), {
+  assert.equal((await request(bridge.port, "/unknown", "wrong-token")).status, 401);
+  assert.deepEqual(await request(bridge.port, "/unknown", bridge.token), {
     status: 200,
-    body: { path: "/mcp" },
+    body: { path: "/unknown" },
   });
 });
 
@@ -67,8 +67,7 @@ test("the command token opens the command endpoint and nothing else", async (con
     assert.deepEqual(await request(bridge.port, path, bridge.commandToken), { status: 200, body: { path } });
   }
   // A discoverable credential must not reach the agent surface: no launches, no
-  // fleet or session state, no Manager MCP, and no hook routes.
-  for (const path of ["/terminals", "/mcp", "/hook", "/sessions", "/commandsandmore"]) {
+  for (const path of ["/terminals", "/unknown", "/hook", "/sessions", "/commandsandmore"]) {
     const refused = await request(bridge.port, path, bridge.commandToken);
     assert.equal(refused.status, 403, path);
     assert.deepEqual(refused.body, { ok: false, error: { code: "forbidden", message: "This credential only authorizes the command endpoint" } });
@@ -171,7 +170,7 @@ test("logs and typed errors never disclose the bearer token", async (context) =>
   });
   context.after(() => bridge.stop());
 
-  const response = await request(bridge.port, "/mcp", bridge.token);
+  const response = await request(bridge.port, "/unknown", bridge.token);
   assert.equal(response.status, 500);
   assert.equal(messages.join("\n").includes(bridge.token), false);
   assert.equal(JSON.stringify(response.body).includes(bridge.token), false);

@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { claudeConfigDirectory } from "./sessions.js";
 
+export const REQUIRED_HARNESS_WORKER_SKILLS = ["implement", "review-afk", "review-hitl"] as const;
+
 export async function harnessSkillIsResolvable(
   workspaceRoot: string,
   skillName: string,
@@ -25,4 +27,13 @@ export async function requireHarnessSkill(
   throw new Error(
     `Required Harness skill /${skillName} is not installed. Rerun the Harness installer with Aboard selected.`,
   );
+}
+
+export async function requireHarnessWorkerSkills(
+  workspaceRoot: string,
+  configDirectory: string = claudeConfigDirectory(),
+): Promise<void> {
+  for (const skill of REQUIRED_HARNESS_WORKER_SKILLS) {
+    await requireHarnessSkill(workspaceRoot, skill, configDirectory);
+  }
 }

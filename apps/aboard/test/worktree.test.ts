@@ -297,7 +297,6 @@ test("the project overlay copies ignored Claude and aboard files and preserves c
   await mkdir(join(project, ".claude", "hooks"), { recursive: true });
   await mkdir(join(project, ".claude", "skills", "local"), { recursive: true });
   await mkdir(join(project, ".claude", "worktrees", "other"), { recursive: true });
-  await mkdir(join(project, ".abd", "agents"), { recursive: true });
   await mkdir(join(project, ".abd", "prototypes", "7-parser"), { recursive: true });
   await mkdir(join(checkout, ".claude"), { recursive: true });
   await mkdir(join(checkout, ".abd"), { recursive: true });
@@ -307,7 +306,6 @@ test("the project overlay copies ignored Claude and aboard files and preserves c
   await writeFile(join(project, ".claude", "skills", "local", "SKILL.md"), "skill\n");
   await writeFile(join(project, ".claude", "worktrees", "other", "secret"), "transient\n");
   await writeFile(join(project, ".abd", "scaffold.json"), "scaffold\n");
-  await writeFile(join(project, ".abd", "agents", "manager.md"), "manager\n");
   await writeFile(join(project, ".abd", "session-setup.ps1"), "from project\n");
   await writeFile(join(project, ".abd", "settings.json"), "local aboard settings\n");
   await writeFile(join(project, ".abd", "prototypes", "7-parser", "experiment.ts"), "scratch\n");
@@ -324,7 +322,6 @@ test("the project overlay copies ignored Claude and aboard files and preserves c
   assert.equal(await readFile(join(checkout, ".claude", "hooks", "abd_hook.py"), "utf8"), "hook\n");
   assert.equal(await readFile(join(checkout, ".claude", "skills", "local", "SKILL.md"), "utf8"), "skill\n");
   assert.equal(await readFile(join(checkout, ".abd", "scaffold.json"), "utf8"), "scaffold\n");
-  assert.equal(await readFile(join(checkout, ".abd", "agents", "manager.md"), "utf8"), "manager\n");
   assert.equal(await readFile(join(checkout, ".abd", "settings.json"), "utf8"), "local aboard settings\n");
   assert.equal(await readFile(join(checkout, ".abd", "session-setup.ps1"), "utf8"), "from git\n");
   assert.ok(requested.includes(".claude/settings.local.json"), "settings.local.json is deliberately copied");

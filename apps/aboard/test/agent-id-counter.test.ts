@@ -58,9 +58,7 @@ test("the fleet ceiling wins over a stale counter lower than live numeric ids", 
   assert.equal(reseeded.next(), "6");
 });
 
-test("a separately persisted Manager identity contributes to the ceiling", () => {
-  // The Manager store can survive while its fleet row does not. On upgrade the
-  // counter file may not exist yet, so the Manager id must still be reserved.
+test("the supplied persisted identity contributes to the ceiling", () => {
   const counter = WorkspaceAgentIdCounter.load(tempRoot(), () => ["2"]);
   assert.equal(counter.next(), "3");
 });

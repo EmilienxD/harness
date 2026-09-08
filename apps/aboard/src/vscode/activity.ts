@@ -55,7 +55,7 @@ export class ActivityTreeModel {
 
 export function canOpenActivityIssue(entry: ActivityEntry): entry is ActivityEntry & { readonly issueNumbers: readonly [number] } {
   return entry.kind === "agent"
-    && ["implementer", "pr-doctor-afk", "pr-doctor-hitl"].includes(entry.type)
+    && ["implementer", "reviewer"].includes(entry.type)
     && entry.issueNumbers?.length === 1;
 }
 

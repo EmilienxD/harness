@@ -132,7 +132,7 @@ export interface RepositoryFacts {
   readonly hasCommit: boolean;
   readonly commitPushed: boolean;
   readonly pullRequest: PullRequestFacts | undefined;
-  /** Whether a pr-doctor has already run against the open pull request. */
+  /** Whether a reviewer has already run against the open pull request. */
   readonly reviewed: boolean;
   readonly issueClosed: boolean;
 }

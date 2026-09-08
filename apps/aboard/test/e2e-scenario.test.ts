@@ -41,7 +41,6 @@ function mismatch(messages: readonly Message[], pattern: RegExp, tools?: readonl
 
 test("scenario selection requires exactly one active marker", () => {
   mismatch(initial("no marker"), /exactly one scenario marker; found 0/u);
-  mismatch(initial("[E2E:manager-foreground-explore] obsolete delegation"), /found 0/u);
   mismatch(initial(`${SCENARIO_MARKER} ${SCENARIO_MARKER}`), /found 2/u);
 });
 

@@ -137,14 +137,12 @@ Processes aboard launched itself do not need any of this: they inherit
 The bridge mints two per-activation credentials:
 
 - The **full token** reaches every route. It stays in memory and in the
-  environment of processes aboard started; only ephemeral MCP configurations
-  for catalog-owning roles contain resolved copies while initialized. It is not published.
+  environment of processes aboard started. It is not published.
 - The **command token** reaches `/commands` and nothing else; a request to any
   other path is `403 forbidden`. This is the one that gets published, because a
   credential a script can find is a credential anything running as that user can
   find. Scoping it means what finds it can run a command in a visible terminal;
-  it cannot create agents, drive the Manager, or read fleet, session, or hook
-  state.
+  it cannot create Aboard sessions or read fleet, session, or hook state.
 
 That capability is still "run a shell command as the user", which is what the
 endpoint is for and what anything already running as that user could do anyway.

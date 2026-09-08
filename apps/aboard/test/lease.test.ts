@@ -1,51 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveAgentDefinitionWriteCapability } from "../src/domain/capability.js";
 import type { AgentId, IsoTimestamp, SessionId } from "../src/domain/contracts.js";
 import { dirtyTreeFailure, isStaleLease, leaseRequired, WriteLease } from "../src/domain/lease.js";
 
 const at = (value: string) => value as IsoTimestamp;
 const agent = (value: string) => value as AgentId;
 const session = (value: string) => value as SessionId;
-const definition = (tools: string) => `---\nname: fixture\ndescription: fixture\ntools: ${tools}\n---\nPrompt`;
-
-test("derives capability for catalogue fixtures and conservative boundaries", () => {
-  const fixtures = {
-    implementer: definition("Read, Grep, Glob, Edit, Write, Bash, LSP, Agent, Skill"),
-    webresearcher: definition("WebSearch, WebFetch"),
-    brainstormer: definition("Read, Grep, Glob, Bash, Write, Edit, Agent, Skill"),
-    missing: undefined,
-    malformed: "---\ntools: [Read, Edit\n---",
-  } as const;
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.implementer), "write-capable");
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.webresearcher), "read-only");
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.brainstormer), "write-capable");
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.missing), "write-capable");
-  assert.equal(deriveAgentDefinitionWriteCapability(fixtures.malformed), "write-capable");
-  assert.equal(
-    deriveAgentDefinitionWriteCapability(definition("Read, Agent(worker, researcher)")),
-    "read-only",
-  );
-});
-
-test("treats direct writers and unrestricted shells as write-capable", () => {
-  for (const tool of ["Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Bash(*)", "PowerShell(*)"]) {
-    assert.equal(deriveAgentDefinitionWriteCapability(definition(tool)), "write-capable");
-  }
-  assert.equal(deriveAgentDefinitionWriteCapability(definition("Bash(gh *), PowerShell(git diff*)")), "read-only");
-});
-
-test("only launches aboard drives are leased: automated Manager work and every auto-run launch", () => {
+test("only Auto Run launches are leased", () => {
   const interactive = true;
-  // The agent works alone and reports back to aboard.
-  assert.equal(leaseRequired("manager", !interactive), true);
-  assert.equal(leaseRequired("manager", interactive), false);
-  // The run commits, pushes, and merges behind its terminals, so even the
-  // interactive pr-doctor-hitl is leased.
   assert.equal(leaseRequired("auto-run", !interactive), true);
   assert.equal(leaseRequired("auto-run", interactive), true);
-  // The user restoring or resuming a session of their own.
   assert.equal(leaseRequired("user", !interactive), false);
   assert.equal(leaseRequired("user", interactive), false);
 });

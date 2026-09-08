@@ -1,4 +1,4 @@
-import { DEFAULT_CLAUDE_COMMAND, DEFAULT_MAX_INLINE_PROMPT_CHARS, EFFORT_LEVELS, parseClaudeCommand, type EffortLevel } from "./claude/launch.js";
+import { DEFAULT_MAX_INLINE_PROMPT_CHARS } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 
 import { AUTO_RUN_BRANCH_MODES, DISCARD_BEHAVIORS, MERGE_STRATEGIES, type AutoRunSettings, type AutoRunBranchMode, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";
@@ -7,10 +7,6 @@ export interface ConfigurationReader { get(section: string): unknown; }
 export interface AboardConfiguration {
   readonly bridgePort: number;
   readonly maxInlinePromptChars: number;
-  /** `aboard.launch.claudeCommand` as tokens: the program, then its own fixed arguments. */
-  readonly claudeCommand: readonly string[];
-  /** `aboard.launch.effort`; absent means aboard passes no `--effort` and Claude Code's own setting stands. */
-  readonly launchEffort?: EffortLevel;
   readonly closeTerminalOnSessionEnd: boolean;
   readonly autoRun: AutoRunSettings;
 }
@@ -20,9 +16,7 @@ export interface ConfigurationResult { readonly value: AboardConfiguration; read
 /** Every setting aboard reads, in the order it appears in the contributed schema. */
 export const ABOARD_SETTINGS = [
   "aboard.bridge.port",
-  "aboard.launch.claudeCommand",
   "aboard.launch.maxInlinePromptChars",
-  "aboard.launch.effort",
   "aboard.terminals.closeOnSessionEnd",
   "aboard.autoRun.review",
   "aboard.autoRun.branchMode",
@@ -126,33 +120,11 @@ function choice<T extends string>(reader: ConfigurationReader, setting: string, 
   return fallback;
 }
 
-function launchEffort(reader: ConfigurationReader, diagnostics: ConfigurationDiagnostic[]): EffortLevel | undefined {
-  const setting = "aboard.launch.effort";
-  const value = reader.get(setting);
-  if (value === undefined || value === "inherit") return undefined;
-  if (typeof value === "string" && (EFFORT_LEVELS as readonly string[]).includes(value)) return value as EffortLevel;
-  diagnostics.push({ setting, severity: "warning", message: `${setting} must be one of inherit, ${EFFORT_LEVELS.join(", ")}; inheriting the session effort level.` });
-  return undefined;
-}
-
-function claudeCommand(reader: ConfigurationReader, diagnostics: ConfigurationDiagnostic[]): readonly string[] {
-  const setting = "aboard.launch.claudeCommand";
-  const value = reader.get(setting);
-  if (value === undefined) return [...DEFAULT_CLAUDE_COMMAND];
-  const parsed = parseClaudeCommand(value);
-  if (parsed.ok) return parsed.value;
-  diagnostics.push({ setting, severity: "warning", message: `${setting}: ${parsed.reason}; using ${DEFAULT_CLAUDE_COMMAND.join(" ")}.` });
-  return [...DEFAULT_CLAUDE_COMMAND];
-}
-
 export function readAboardConfiguration(reader: ConfigurationReader): ConfigurationResult {
   const diagnostics: ConfigurationDiagnostic[] = [];
-  const effort = launchEffort(reader, diagnostics);
   return { value: {
     bridgePort: integer(reader, "aboard.bridge.port", DEFAULT_BRIDGE_PORT, 0, 65_535, diagnostics),
     maxInlinePromptChars: integer(reader, "aboard.launch.maxInlinePromptChars", DEFAULT_MAX_INLINE_PROMPT_CHARS, 0, 32_767, diagnostics),
-    claudeCommand: claudeCommand(reader, diagnostics),
-    ...(effort === undefined ? {} : { launchEffort: effort }),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
     autoRun: {
       branchMode: choice<AutoRunBranchMode>(reader, "aboard.autoRun.branchMode", AUTO_RUN_BRANCH_MODES, "per-issue", diagnostics),
@@ -174,5 +146,3 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     },
   }, diagnostics };
 }
-
-// REMOVED: Manager-specific restart settings (REFACTOR.md section 5)

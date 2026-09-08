@@ -1,5 +1,5 @@
 import type { AutoRunReviewMode, EffortLevel, LaunchConfiguration } from "../claude/launch.js";
-import { autoRunWorkerConfiguration, planLaunch, planSessionResume } from "../claude/launch.js";
+import { planLaunch, planSessionResume } from "../claude/launch.js";
 import type { ResolvedPrompt } from "../claude/prompts.js";
 import { dirname } from "node:path";
 import type { PromptSpillStore } from "../claude/spill.js";
@@ -100,7 +100,7 @@ export interface InteractiveLaunchHandles {
 }
 
 export interface DelegationConfigurationSource {
-  get(type: AgentType): Promise<LaunchConfiguration>;
+  get(type: AgentType, reviewMode?: AutoRunReviewMode): Promise<LaunchConfiguration>;
 }
 
 export interface DelegationPromptResolver {
@@ -414,9 +414,10 @@ export class DelegationCoordinator {
     const sessionId = this.options.sessionIdFactory();
     const agentType = input.type;
     const [configuration, prompt] = await Promise.all([
-      agentType === "reviewer"
-        ? Promise.resolve(autoRunWorkerConfiguration("reviewer", input.reviewMode ?? (attended ? "hitl" : "afk")))
-        : this.options.configurations.get(agentType),
+      this.options.configurations.get(
+        agentType,
+        input.reviewMode ?? (agentType === "reviewer" ? (attended ? "hitl" : "afk") : undefined),
+      ),
       this.options.prompts.resolve(input, { interactive: attended }),
     ]);
     const plan = planLaunch({

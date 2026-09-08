@@ -17,7 +17,7 @@ ROUTES: dict[str, str] = {
     "session-end": "/hooks/session-end",
 }
 
-AUTO_RUN_WORKER_TYPES: frozenset[str] = frozenset({"implementer", "reviewer"})
+RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"Explore", "implementer", "reviewer"})
 
 
 def main() -> int:
@@ -54,7 +54,7 @@ def main() -> int:
             return 0
         body = {"agentId": agent_id, "sessionId": session_id, "reason": payload.get("reason") or "other"}
     else:
-        if os.environ.get("ABOARD_AGENT_TYPE") not in AUTO_RUN_WORKER_TYPES:
+        if os.environ.get("ABOARD_AGENT_TYPE") not in RESULT_REPORTING_TYPES:
             return 0
         if endpoint == "/hooks/worker/post-compact":
             if event != "PostCompact":

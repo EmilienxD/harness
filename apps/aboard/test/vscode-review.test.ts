@@ -27,7 +27,7 @@ test("the panel action asks for nothing, targets the pull request in flight, and
 });
 
 test("a positional pull request number narrows the action, and junk is ignored", async () => {
-  const { invoke, requests } = setup({ action: "resumed", prNumber: 17, agentId: "a", type: "pr-doctor-afk" });
+  const { invoke, requests } = setup({ action: "resumed", prNumber: 17, agentId: "a", type: "reviewer" });
   await invoke(17);
   await invoke("not a number");
   await invoke(0);
@@ -41,7 +41,7 @@ test("no open pull request reports that nothing was reopened", async () => {
 });
 
 test("focus text that could not be applied remains visible", async () => {
-  const { invoke, messages } = setup({ action: "resumed", prNumber: 17, agentId: "a", type: "pr-doctor-afk", unusedFocus: "check retries" });
+  const { invoke, messages } = setup({ action: "resumed", prNumber: 17, agentId: "a", type: "reviewer", unusedFocus: "check retries" });
   await invoke(17);
   assert.match(messages[0]!, /focus text was not applied/i);
 });

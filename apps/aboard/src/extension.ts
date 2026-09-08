@@ -79,13 +79,10 @@ import { FileAutoRunStore } from "./runtime/persistence.js";
 import { RuntimeAdmission, RuntimeStartup } from "./runtime/admission.js";
 import { RuntimeLayout } from "./runtime/layout.js";
 import {
-  AUTO_RUN_WORKER_SKILLS,
-  autoRunWorkerConfiguration,
-  type AutoRunWorkerType,
-  type LaunchConfiguration,
+  type AutoRunReviewMode,
 } from "./claude/launch.js";
-import { deriveWriteCapability } from "./domain/capability.js";
-import { requireHarnessSkill } from "./claude/skills.js";
+import { requireHarnessWorkerSkills } from "./claude/skills.js";
+import { FileLaunchConfigurationSource } from "./claude/launch-configuration.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
@@ -110,13 +107,12 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 }
 
 
-function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
-  return { get: async (type) => {
-    if (type === "interactive") return { shape: "default" };
-    if (type === "Explore") return { shape: "builtin", agentName: "Explore" };
-    const workerType = type as AutoRunWorkerType;
-    await requireHarnessSkill(workspaceRoot, AUTO_RUN_WORKER_SKILLS[workerType]);
-    return autoRunWorkerConfiguration(workerType);
+function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigurationSource): DelegationConfigurationSource {
+  return { get: async (type, reviewMode?: AutoRunReviewMode) => {
+    if (type === "implementer" || type === "reviewer") {
+      await requireHarnessWorkerSkills(workspaceRoot);
+    }
+    return source.get(type, reviewMode);
   } };
 }
 
@@ -258,7 +254,26 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
   let agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => fleet.list().map((session) => session.identity.agentId as string), runtimeAdmission.isOpen);
   const lease = new WriteLease();
-  const launchConfigurations = workerConfigurations(workspaceRoot);
+  const launchFile = new FileLaunchConfigurationSource(join(workspaceRoot, ".abd", "launch.json"));
+  const launchConfigurations = workerConfigurations(workspaceRoot, launchFile);
+  let launchFileNotice: string | undefined;
+  const validateLaunchFile = async (): Promise<void> => {
+    if (!initialized) return;
+    try {
+      const parsed = await launchFile.load();
+      const notice = parsed.diagnostics.map((diagnostic) => diagnostic.message).join(" ");
+      if (notice.length > 0) output.appendLine(`Launch configuration: ${notice}`);
+      if (notice.length > 0 && notice !== launchFileNotice) void window.showWarningMessage(notice);
+      if (launchFileNotice !== undefined && notice.length === 0) void window.showInformationMessage("Launch configuration is valid. New and reopened sessions use it.");
+      launchFileNotice = notice.length === 0 ? undefined : notice;
+    } catch (error) {
+      const notice = error instanceof Error ? error.message : "Invalid .abd/launch.json";
+      output.appendLine(`Launch configuration: ${notice}`);
+      if (notice !== launchFileNotice) void window.showErrorMessage(`${notice}. New and reopened sessions are blocked until it is fixed.`);
+      launchFileNotice = notice;
+    }
+  };
+  await validateLaunchFile();
   const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot, runtime.root, {
     settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
     script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
@@ -272,7 +287,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const claudeProbe = new ClaudeCommandProbe({ run: spawnCommandRunner(workspaceRoot) });
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", command: () => currentConfiguration.claudeCommand, effort: () => currentConfiguration.launchEffort, maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, preflight: (command) => claudeProbe.require(command) });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -615,7 +630,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   await publishScaffoldState();
   const scaffoldWatcher = workspace.createFileSystemWatcher(new RelativePattern(workspaceRoot, ".abd/**"));
   for (const event of [scaffoldWatcher.onDidCreate, scaffoldWatcher.onDidChange, scaffoldWatcher.onDidDelete]) {
-    context.subscriptions.push(event(() => void publishScaffoldState()));
+    context.subscriptions.push(event(() => void publishScaffoldState().then(validateLaunchFile)));
   }
   context.subscriptions.push(
     scaffoldWatcher,
@@ -638,7 +653,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         void window.showWarningMessage(`${report.preserved.length} locally changed aboard asset${report.preserved.length === 1 ? " was" : "s were"} preserved. See the aboard Output channel for the file list.`);
       }
     } catch (error) { void window.showErrorMessage(error instanceof Error ? error.message : "Unable to scaffold aboard project assets"); }
-    finally { await publishScaffoldState(); }
+    finally { await publishScaffoldState(); await validateLaunchFile(); }
   };
   context.subscriptions.push(
     commands.registerCommand("aboard.initializeProject", scaffold),

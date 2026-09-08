@@ -16,10 +16,10 @@ export type LeaseAcquisition =
   | { readonly acquired: false; readonly required: true; readonly holder: WriteLeaseHolder; readonly ageMs: number };
 
 /** Who started an agent, which is what decides whether the launch is leased. */
-export type LaunchOrigin = "manager" | "auto-run" | "user";
+export type LaunchOrigin = "auto-run" | "user";
 
-export function leaseRequired(origin: LaunchOrigin, interactive: boolean): boolean {
-  return origin === "auto-run" || (origin === "manager" && !interactive);
+export function leaseRequired(origin: LaunchOrigin, _interactive: boolean): boolean {
+  return origin === "auto-run";
 }
 
 export type TerminalObservation = "open" | "closed" | "missing";

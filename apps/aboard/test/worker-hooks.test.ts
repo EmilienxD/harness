@@ -140,8 +140,9 @@ test("worker Python hook reports completion only for Auto Run workers", async ()
 
     await report({ ABOARD_AGENT_ID: "implementer-1", ABOARD_AGENT_TYPE: "implementer" });
     await report({ ABOARD_AGENT_ID: "reviewer-1", ABOARD_AGENT_TYPE: "reviewer" });
+    await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" });
 
-    assert.equal(received.length, 2);
+    assert.equal(received.length, 3);
     assert.equal(received[0]!.url, "/hooks/stop");
     assert.deepEqual(JSON.parse(received[0]!.body ?? "{}"), {
       agentId: "implementer-1",
@@ -150,6 +151,8 @@ test("worker Python hook reports completion only for Auto Run workers", async ()
     });
     assert.equal(received[1]!.url, "/hooks/stop");
     assert.equal((JSON.parse(received[1]!.body ?? "{}") as { lastAssistantMessage?: unknown }).lastAssistantMessage, "Changed the boundary; safely.");
+    assert.equal(received[2]!.url, "/hooks/stop");
+    assert.equal((JSON.parse(received[2]!.body ?? "{}") as { lastAssistantMessage?: unknown }).lastAssistantMessage, "Changed the boundary; safely.");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
   }

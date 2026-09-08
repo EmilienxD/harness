@@ -109,7 +109,7 @@ export interface UnreviewedMerge {
   readonly mergedAt: string;
 }
 
-/** An open pull request as the Manager's briefing needs it: enough to name it. */
+/** An open pull request summary. */
 export interface OpenPullRequest {
   readonly number: number;
   readonly title: string;

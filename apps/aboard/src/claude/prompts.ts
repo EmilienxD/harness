@@ -79,11 +79,6 @@ export type PromptResolutionRequest =
       readonly pullRequestNumber: number;
       readonly focus?: string | undefined;
     }
-  | {
-      readonly kind: "brainstorm";
-      readonly topic?: string | undefined;
-      readonly relatedIssueNumbers?: readonly number[] | undefined;
-    }
   | { readonly kind: "free-form"; readonly instruction: string };
 
 export interface PromptResolutionLimits {
@@ -218,8 +213,6 @@ export class PromptResolver {
         return this.#resolveExploration(request);
       case "review":
         return this.#resolveReview(request);
-      case "brainstorm":
-        return this.#resolveBrainstorm(request);
       case "free-form": {
         const instruction = requireInstruction(request.instruction);
         return resolvedPromptFromText(instruction);
@@ -389,36 +382,6 @@ export class PromptResolver {
     return builder.build();
   }
 
-  async #resolveBrainstorm(
-    request: Extract<PromptResolutionRequest, { kind: "brainstorm" }>,
-  ): Promise<ResolvedPrompt | undefined> {
-    const topic = request.topic?.trim() ?? "";
-    const relatedNumbers = request.relatedIssueNumbers ?? [];
-    // A bare `/brainstorm` opens an empty prompt for the user.
-    if (topic.length === 0 && relatedNumbers.length === 0) return undefined;
-
-    const builder = new PromptBuilder(
-      topic.length === 0
-        ? "Brainstorm the related issues below."
-        : `Brainstorm: ${resolvedPromptFromText(topic).headline}`,
-      this.#limits.maxPromptChars,
-    );
-    if (topic.length > 0) builder.section(undefined, topic);
-
-    for (const number of relatedNumbers) {
-      if (!builder.canIncludeDocument) break;
-      const issue = await this.#github.getIssue(number);
-      if (issue === undefined) continue;
-      builder.document(
-        "related-issue",
-        issue.number,
-        `Related issue #${issue.number}; ${issue.title} (${issue.state})`,
-        this.#issueDocument(issue),
-      );
-    }
-
-    return builder.build();
-  }
 }
 
 /** A redacted, loggable summary. Never includes prompt content. */
