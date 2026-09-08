@@ -1,13 +1,16 @@
 import hashlib
 import io
+from contextlib import nullcontext
 
 import pytest
 
 from harness_cli.catalogue import CatalogueError, resolve_dependencies
+from harness_cli import cli
 from harness_cli.cli import build_parser
 from harness_cli.installer import CatalogueInstaller, InstallError, Target
 from harness_cli.host_actions import HostActionError, prepare
 from harness_cli.manifest import HostAction, discover, load_tool
+from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore
 
 
@@ -19,6 +22,63 @@ def test_cli_has_only_session_commands():
     parser = build_parser()
     choices = next(action for action in parser._actions if action.dest == "command").choices
     assert set(choices) == {"run", "ask", "reply", "resume"}
+
+
+def test_catalogue_asks_for_tools_before_scope_and_defaults_to_both_platforms(monkeypatch):
+    aboard = discover()["aboard"]
+    questions = []
+    planned = {}
+
+    class InteractiveInput:
+        @staticmethod
+        def isatty():
+            return True
+
+    class FakeUI:
+        def __init__(self, read_key):
+            pass
+
+        def checklist(self, title, options, selected):
+            questions.append(title)
+            return {0}
+
+        def choose(self, title, options, default=0, note=""):
+            questions.append(title)
+            return 0
+
+        def message(self, title, lines):
+            questions.append(title)
+
+    class FakeInstaller:
+        def __init__(self, available, target, store):
+            self.target = target
+
+        def plan(self, requested):
+            planned[self.target.platform] = requested
+            return [], []
+
+        def reconcile(self, requested):
+            raise AssertionError("nothing should be reconciled when there are no changes")
+
+    monkeypatch.setattr(cli.sys, "stdin", InteractiveInput())
+    monkeypatch.setattr(cli, "discover", lambda: {aboard.name: aboard})
+    monkeypatch.setattr(cli, "terminal_keys", lambda: nullcontext(lambda: ""))
+    monkeypatch.setattr(cli, "TerminalUI", FakeUI)
+    monkeypatch.setattr(cli, "CatalogueInstaller", FakeInstaller)
+    monkeypatch.setattr(cli.ReceiptStore, "load", lambda: object())
+
+    assert cli.catalogue_menu() == 0
+    assert questions[:4] == [
+        "Choose tools",
+        "Where should Harness install them?",
+        "Which agent platforms?",
+        "Review installation",
+    ]
+    assert planned == {Platform.CLAUDE: {"aboard"}, Platform.CHATGPT: set()}
+
+
+def test_aboard_is_labelled_claude_only():
+    assert cli._compatibility(discover()["aboard"]) == "Claude only"
 
 
 def test_dependencies_install_transitively_and_receipts_track_ownership(tmp_path):

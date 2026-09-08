@@ -7,13 +7,23 @@ their parent/child reply state.
 Run the pinned, ephemeral installer:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.1 harness
 ```
 
 That opens the one installation menu. The menu reconciles its selection: newly selected packages
 are installed, deselected packages are removed, and mandatory dependencies remain transitive
 selections. There are no separate install, uninstall, list, info, or upgrade commands. Rerun the
 same pinned entry point to change or upgrade the installation.
+
+The wizard asks for tools first, followed by scope and platform. Use the arrow keys to move, Enter
+to toggle or select, and Escape to return to the previous question. Claude Code and ChatGPT are
+selected together by default. If a tool supports only one selected platform, Harness installs it
+only there and discloses the skipped target in the review before making changes.
+
+Use the arrow keys to move, Enter to toggle or select, and Escape to return to the previous
+question. Tool selection comes first, followed by scope and platform. The default platform choice
+installs for both Claude Code and ChatGPT. A tool that supports only one of them is installed only
+there, and the review explains every skipped target before applying changes.
 
 The catalogue can independently select the persistent Harness CLI, Aboard, skills, and hooks.
 Aboard is a verified release artifact, not part of the Python wheel. Its manifest pins the URL,
