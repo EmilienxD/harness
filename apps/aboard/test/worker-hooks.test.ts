@@ -11,8 +11,8 @@ import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { combineHandlers } from "../src/bridge/router.js";
-import { createWorkerLifecycleRoutes } from "../src/bridge/lifecycle.js";
-import { SessionLifecycleService, SessionProcessMonitor, createSessionLifecycleRoutes } from "../src/bridge/session-lifecycle.js";
+import { createPlatformLifecycleRoutes } from "../src/bridge/platform-lifecycle.js";
+import { ClaudeAgentPlatform } from "../src/claude/platform.js";
 
 const at = (value: string) => value as IsoTimestamp;
 const timestamp = at("2026-07-30T12:00:00.000Z");
@@ -21,8 +21,10 @@ const parentId = "worker-15" as AgentId;
 function fleetWithWorker(): FleetRegistry {
   const fleet = new FleetRegistry();
   const worker: AgentSession = {
+    platform: "claude",
     identity: { agentId: parentId, type: "implementer" },
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId,
+    sessionBinding: "bound",
     terminal: { terminalId: "worker-terminal" as TerminalId, name: "worker" },
     lifecycle: { status: "starting", startedAt: timestamp }, resultDelivery: { mode: "tool-result" },
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 }, issueNumbers: [15],
@@ -67,8 +69,10 @@ test("records compact telemetry and reinjects the original task on each continua
 
 test("re-grounding names every bound issue and refuses a worker bound to none", async () => {
   const bound = (agentId: string, issueNumbers: readonly number[]): AgentSession => ({
+    platform: "claude",
     identity: { agentId: agentId as AgentId, type: "implementer" },
     sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId,
+    sessionBinding: "bound",
     terminal: { terminalId: `${agentId}-terminal` as TerminalId, name: agentId },
     lifecycle: { status: "starting", startedAt: timestamp }, resultDelivery: { mode: "tool-result" },
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
@@ -259,17 +263,23 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
   const registered = new Set(names.map((name) => table[name]!));
 
   const fleet = new FleetRegistry();
+  const workerHooks = new WorkerHookService(fleet);
+  const platform = new ClaudeAgentPlatform({
+    commandRunner: async () => ({ code: 0, stdout: "2.1.199 (Claude Code)", stderr: "" }),
+    lifecycleAssets: {
+      settings: join(process.cwd(), "assets", "runtime", "abd-hooks.json"),
+      script: join(process.cwd(), "assets", "runtime", "abd_hook.py"),
+    },
+  });
   const handler = combineHandlers(
-    createWorkerLifecycleRoutes({ stop: async () => true, stopFailure: async () => true, timeout: async () => true, terminalClosed: async () => true } as never),
-    createWorkerHookRoutes(new WorkerHookService(fleet)),
-    createSessionLifecycleRoutes({
-      service: new SessionLifecycleService({
-        fleet,
-        monitor: new SessionProcessMonitor({ probe: () => true }),
-        settlement: { settleConversationEnded: () => undefined },
-        lockPathFor: () => "x.lock",
-      }),
+    createPlatformLifecycleRoutes({
+      fleet,
+      platforms: new Map([["claude", platform]]),
+      sessions: { sessionStarted: () => false, sessionEnded: () => false },
+      workers: { stop: async () => false, failure: async () => false },
+      compactions: workerHooks,
     }),
+    createWorkerHookRoutes(workerHooks),
   );
 
   for (const endpoint of registered) {

@@ -46,7 +46,7 @@ export interface NativeUiOptions {
   readonly lease: WriteLease;
   readonly terminals: TerminalController;
   readonly isInitialized: () => boolean;
-  readonly isResumable: (sessionId: AgentSession["sessionId"], cwd: string) => Promise<boolean>;
+  readonly isResumable: (platform: AgentSession["platform"], sessionId: AgentSession["sessionId"], cwd: string) => Promise<boolean>;
   readonly autoRun: AutoRunUiHost;
   readonly activity: ActivityUiHost;
 }
@@ -268,7 +268,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       const candidate = persisted?.version === 2 ? continuationSessionFor(persisted, fleet.list()) : undefined;
       const cwd = candidate?.cwd ?? workspace.workspaceFolders?.[0]?.uri.fsPath;
       const canContinue = candidate !== undefined && cwd !== undefined
-        ? await options.isResumable(candidate.sessionId, cwd)
+        ? await options.isResumable(candidate.platform, candidate.sessionId, cwd)
         : false;
       let continueSession: AgentSession | undefined;
       if (candidate !== undefined && canContinue) {

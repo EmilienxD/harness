@@ -53,6 +53,8 @@ export type AgentId = string & { readonly __brand: "AgentId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
 export type TerminalId = string & { readonly __brand: "TerminalId" };
 export type IsoTimestamp = string & { readonly __brand: "IsoTimestamp" };
+export const AGENT_PLATFORM_IDS = ["claude"] as const;
+export type AgentPlatformId = (typeof AGENT_PLATFORM_IDS)[number];
 
 export interface AgentIdentity {
   readonly agentId: AgentId;
@@ -141,8 +143,10 @@ export type WorkerResult =
     };
 
 export interface AgentSession {
+  readonly platform: AgentPlatformId;
   readonly identity: AgentIdentity;
   readonly sessionId: SessionId;
+  readonly sessionBinding: "provisional" | "bound";
   readonly terminal: TerminalReference;
   readonly lifecycle: AgentLifecycle;
   readonly resultDelivery: ResultDelivery;

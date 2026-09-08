@@ -6,7 +6,6 @@ import {
   SessionProcessMonitor,
   SessionStartTimeoutError,
   SessionStartupProofs,
-  createSessionLifecycleRoutes,
   type SessionEndReason,
   type SessionStartObservation,
 } from "../src/bridge/session-lifecycle.js";
@@ -24,8 +23,10 @@ const LOCK = "C:\\repo\\.abd\\runtime\\locks\\a1.lock";
 
 function registerAgent(fleet: FleetRegistry, agentId: AgentId, sessionId: SessionId, type: AgentSession["identity"]["type"] = "implementer"): void {
   fleet.register({
+    platform: "claude",
     identity: { agentId, type },
     sessionId,
+    sessionBinding: "bound",
     terminal: { terminalId: terminal(`t-${agentId}`), name: "test" },
     lifecycle: { status: "starting", startedAt },
     resultDelivery: { mode: "none" },
@@ -58,26 +59,19 @@ function setup(probe: (lockFile: string) => boolean) {
 
 const start: SessionStartObservation = { agentId: agent("a1"), sessionId: session("s1"), source: "startup" };
 
-test("session-start tracks the wrapper's lock marker and emits proof-of-life", () => {
+test("normalized session start tracks the wrapper's lock marker and emits proof-of-life", () => {
   const proofs = new SessionStartupProofs();
   const { fleet, monitor, service } = setup(() => true);
   const done: string[] = [];
   const waiting = proofs.awaitStarted(agent("a1"), session("s1"), 5_000).then(() => { done.push("resolved"); });
   monitor.start(60_000);
   registerAgent(fleet, agent("a1"), session("s1"));
-  const routes = createSessionLifecycleRoutes({ service, proofs });
-  const response = routes({
-    method: "POST",
-    url: new URL("http://127.0.0.1/hooks/session-start"),
-    headers: {},
-    body: { agentId: "a1", sessionId: "s1", source: "startup" },
-    signal: new AbortController().signal,
-  });
-  return Promise.all([waiting, response]).then(([, body]) => {
+  assert.equal(service.sessionStarted(start), true);
+  assert.equal(proofs.discharge(start), true);
+  return waiting.then(() => {
     assert.equal(monitor.isTracked(agent("a1")), true);
     assert.equal(monitor.registration(agent("a1"))?.lockFile, LOCK);
     assert.deepEqual(done, ["resolved"]);
-    assert.equal(body.status, 200);
     monitor.stop();
   });
 });
@@ -270,24 +264,6 @@ test("session events for unknown or stale sessions are ignored", () => {
   const { service } = setup(() => true);
   assert.equal(service.sessionStarted(start), false);
   assert.equal(service.sessionEnded({ agentId: agent("ghost"), sessionId: session("ghost"), reason: "clear" }), false);
-});
-
-test("routes validate reason and identity", async () => {
-  const { fleet, service } = setup(() => true);
-  registerAgent(fleet, agent("a1"), session("s1"));
-  const routes = createSessionLifecycleRoutes({ service });
-  const signal = new AbortController().signal;
-  const post = (pathname: string, body: unknown) => routes({ method: "POST", url: new URL(`http://127.0.0.1${pathname}`), headers: {}, body, signal });
-
-  const okStart = await post("/hooks/session-start", { agentId: "a1", sessionId: "s1", source: "startup" });
-  assert.equal(okStart.status, 200);
-  const badReason = await post("/hooks/session-end", { agentId: "a1", sessionId: "s1", reason: "mystery" });
-  assert.equal(badReason.status, 400);
-  const okClear = await post("/hooks/session-end", { agentId: "a1", sessionId: "s1", reason: "clear" });
-  assert.equal(okClear.status, 200);
-  assert.equal((okClear.body as { accepted: boolean }).accepted, true);
-  const unknown = await post("/hooks/elsewhere", {});
-  assert.equal(unknown.status, 404);
 });
 
 test("monitor uses injected timers and stops polling after stop()", () => {

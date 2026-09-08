@@ -53,6 +53,16 @@ export class WriteLease {
     return [...this.#audit];
   }
 
+  public canBindSession(agentId: AgentId, expected: SessionId, _actual: SessionId): boolean {
+    return this.#holder === undefined || this.#holder.agentId !== agentId || this.#holder.sessionId === expected;
+  }
+
+  /** Keeps an active lease attached to the runtime's canonical conversation id. */
+  public bindSession(agentId: AgentId, expected: SessionId, actual: SessionId): void {
+    if (!this.canBindSession(agentId, expected, actual)) throw new Error("Write lease session identity does not match");
+    if (this.#holder?.agentId === agentId) this.#holder = { ...this.#holder, sessionId: actual };
+  }
+
   public acquire(
     capability: WriteCapability,
     identity: { readonly agentId: AgentId; readonly sessionId: SessionId },

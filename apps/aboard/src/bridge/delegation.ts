@@ -64,6 +64,7 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly platform: AgentPlatformId;
   readonly agentId: AgentId;
   readonly type: AgentType;
   readonly sessionId: SessionId;
@@ -106,8 +107,6 @@ export interface DelegationCoordinatorOptions {
   readonly workspaceRoot: string;
   /** Absolute mutable-state root supplied by the extension host. */
   readonly runtimeDirectory?: string;
-  /** Tests transcript availability before deciding between resume and a fresh session. */
-  readonly isResumable?: (sessionId: SessionId, cwd: string) => Promise<boolean>;
   readonly fleet: FleetRegistry;
   readonly lease: WriteLease;
   readonly terminals: TerminalController;
@@ -125,7 +124,6 @@ export interface DelegationCoordinatorOptions {
   readonly command?: () => readonly string[] | undefined;
   readonly effort?: () => EffortLevel | undefined;
   readonly agentIdFactory: () => AgentId;
-  readonly sessionIdFactory: () => SessionId;
   readonly now?: () => Date;
   readonly maxInlinePromptChars?: number;
   readonly startupTimeoutMs?: number;
@@ -198,6 +196,7 @@ export class DelegationCoordinator {
       );
     }
     return this.reopen({
+      platform: session.platform,
       agentId: session.identity.agentId,
       type: session.identity.type,
       sessionId: session.sessionId,
@@ -215,14 +214,14 @@ export class DelegationCoordinator {
 
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
     const configured = await this.options.configurations.get(target.type);
-    const platform = this.#platform(configured.platform);
+    if (configured.platform !== target.platform) {
+      throw new DelegationError("unresumable-session", `Session ${target.sessionId} belongs to ${target.platform}, but launch.json selects ${configured.platform}`);
+    }
+    const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
-    const resumable = await (
-      this.options.isResumable
-      ?? ((sessionId, directory) => platform.isResumable(sessionId, directory))
-    )(target.sessionId, cwd);
+    const resumable = await platform.isResumable(target.sessionId, cwd);
     if (!resumable) {
       throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no agent conversation to resume`);
     }
@@ -288,8 +287,10 @@ export class DelegationCoordinator {
       const fleetTerminal = { terminalId: terminal.terminalId, name: terminal.name };
       if (existing === undefined) {
         this.options.fleet.register({
+          platform: target.platform,
           identity: { agentId: target.agentId, type: target.type },
           sessionId: target.sessionId,
+          sessionBinding: "bound",
           terminal: fleetTerminal,
           lifecycle: { status: "starting", startedAt: occurredAt },
           resultDelivery,
@@ -345,6 +346,7 @@ export class DelegationCoordinator {
     // discard its retained blocking copy before waiting for the continuation.
     this.options.fleet.takeBlockingResult(session.identity.agentId, this.#timestamp());
     const launched = await this.reopen({
+      platform: session.platform,
       agentId: session.identity.agentId,
       type: session.identity.type,
       sessionId: session.sessionId,
@@ -408,7 +410,6 @@ export class DelegationCoordinator {
     readonly terminalId: AgentSession["terminal"]["terminalId"];
   }> {
     const agentId = this.options.agentIdFactory();
-    const sessionId = this.options.sessionIdFactory();
     const agentType = input.type;
     const [configured, prompt] = await Promise.all([
       this.options.configurations.get(
@@ -418,6 +419,8 @@ export class DelegationCoordinator {
       this.options.prompts.resolve(input, { interactive: attended }),
     ]);
     const platform = this.#platform(configured.platform);
+    const createdSession = platform.createSession();
+    const { sessionId } = createdSession;
     const plan = platform.planLaunch({
       agentId,
       sessionId,
@@ -461,13 +464,15 @@ export class DelegationCoordinator {
         initialCommand: plan.commandLine,
         attended,
         // A failed launch prints to the terminal and exits before any hook; the
-        // SessionStart pid report is the only trustworthy proof the TUI is up.
+        // The platform's start observation is the only trustworthy proof the session is up.
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
       });
       terminalStarted = true;
       this.options.fleet.register({
+        platform: platform.id,
         identity: { agentId, type: agentType },
         sessionId,
+        sessionBinding: createdSession.binding,
         terminal: { terminalId: terminal.terminalId, name: terminal.name },
         lifecycle: { status: "starting", startedAt: occurredAt },
         resultDelivery,

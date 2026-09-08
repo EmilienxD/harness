@@ -59,11 +59,11 @@ def main() -> int:
         if endpoint == "/hooks/worker/post-compact":
             if event != "PostCompact":
                 return 0
-            body = {"parentAgentId": agent_id, "compactSummary": payload.get("compact_summary")}
+            body = {"agentId": agent_id, "sessionId": session_id, "compactSummary": payload.get("compact_summary")}
         elif endpoint == "/hooks/worker/reground":
             if event != "SessionStart" or payload.get("source") != "compact":
                 return 0
-            body = {"parentAgentId": agent_id}
+            body = {"agentId": agent_id}
         elif endpoint == "/hooks/stop":
             last_assistant_message = payload.get("last_assistant_message")
             if event != "Stop" or not isinstance(last_assistant_message, str) or not last_assistant_message.strip():

@@ -11,19 +11,29 @@ test("the Claude adapter owns launch planning, capabilities, preflight, and resu
   const probes: readonly string[][] = [];
   const mutableProbes = probes as string[][];
   const platform = new ClaudeAgentPlatform({
+    lifecycleAssets: { settings: "claude-hooks.json", script: "claude-hook.py" },
     commandRunner: async (program, args) => {
       mutableProbes.push([program, ...args]);
       return { code: 0, stdout: "2.1.199 (Claude Code)\n", stderr: "" };
     },
+    sessionIdFactory: () => sessionId,
     resumable: async (candidate, cwd) => candidate === sessionId && cwd === "C:\\work",
   });
 
   assert.deepEqual(platform.capabilities, {
     sessionIdentity: "client-assigned",
     promptDelivery: ["none", "inline", "spilled"],
-    lifecycle: ["start", "stop", "end"],
+    lifecycle: ["start", "stop", "end", "compaction", "failure"],
     models: ["haiku", "sonnet", "opus"],
     reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+  });
+  assert.deepEqual(platform.lifecycleAssets, { settings: "claude-hooks.json", script: "claude-hook.py" });
+
+  assert.deepEqual(platform.createSession(), { sessionId, binding: "bound" });
+  assert.equal(platform.bindSession({ sessionId, binding: "bound" }, sessionId), sessionId);
+  assert.equal(platform.bindSession({ sessionId, binding: "bound" }, "different" as SessionId), undefined);
+  assert.deepEqual(platform.normalizeLifecycle("compaction", { agentId: "agent-1", session_id: "session-1", compact_summary: "summary" }), {
+    type: "compaction", agentId: "agent-1", sessionId: "session-1", summary: "summary",
   });
 
   const plan = platform.planLaunch({

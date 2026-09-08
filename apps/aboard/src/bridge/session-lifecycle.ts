@@ -1,6 +1,9 @@
 import type { AgentId, SessionId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
-import { protocolError, type BridgeRequestHandler } from "./protocol.js";
+import type { LifecycleObservation, SessionEndReason } from "../platform/lifecycle.js";
+
+export { SESSION_END_REASONS } from "../platform/lifecycle.js";
+export type { SessionEndReason } from "../platform/lifecycle.js";
 
 export type LockMarkerProbe = (lockFile: string) => boolean;
 
@@ -11,28 +14,8 @@ export interface SessionRegistration {
   readonly lockFile: string;
 }
 
-export interface SessionStartObservation {
-  readonly agentId: AgentId;
-  readonly sessionId: SessionId;
-  readonly source?: string;
-}
-
-export const SESSION_END_REASONS = [
-  "clear",
-  "resume",
-  "logout",
-  "prompt_input_exit",
-  "bypass_permissions_disabled",
-  "other",
-] as const;
-
-export type SessionEndReason = (typeof SESSION_END_REASONS)[number];
-
-export interface SessionEndObservation {
-  readonly agentId: AgentId;
-  readonly sessionId: SessionId;
-  readonly reason: SessionEndReason;
-}
+export type SessionStartObservation = Omit<Extract<LifecycleObservation, { readonly type: "start" }>, "type">;
+export type SessionEndObservation = Omit<Extract<LifecycleObservation, { readonly type: "end" }>, "type">;
 
 export type SessionEndPhase = "launching" | "live";
 
@@ -58,7 +41,7 @@ const EXIT_CONFIRMATION_DELAYS_MS = [50, 150, 400, 1_000, 2_500] as const;
 
 interface WatchedSession {
   readonly registration: SessionRegistration;
-  /** A SessionStart hook has proved a TUI exists. */
+  /** A normalized start observation has proved a session exists. */
   proven: boolean;
   /** The wrapper's marker has been observed at least once. */
   appeared: boolean;
@@ -176,7 +159,7 @@ export class SessionLifecycleService {
 
   public constructor(private readonly options: SessionLifecycleServiceOptions) {}
 
-  /** SessionStart = proof-of-life: registers the wrapper's marker for polling. */
+  /** A normalized start is proof-of-life and registers the process marker for polling. */
   public sessionStarted(observation: SessionStartObservation): boolean {
     const pending = this.#pendingResume.get(observation.agentId);
     if (pending !== undefined) {
@@ -250,11 +233,11 @@ export class SessionLifecycleService {
 }
 
 export interface SessionStartupProof {
-  /** Resolves when SessionStart reports the session live; rejects on timeout. */
+  /** Resolves when the selected platform reports the session live; rejects on timeout. */
   awaitStarted(agentId: AgentId, sessionId: SessionId, timeoutMs: number): Promise<SessionStartObservation>;
   cancel(agentId: AgentId): void;
-  /** Called by the session-start route; returns false for stale/unknown ids. */
-  discharge(observation: SessionStartObservation): boolean;
+  /** Called after normalized lifecycle ingress; returns false for stale/unknown ids. */
+  discharge(observation: SessionStartObservation, expectedSessionId?: SessionId): boolean;
 }
 
 interface PendingProof {
@@ -301,10 +284,10 @@ export class SessionStartupProofs implements SessionStartupProof {
     });
   }
 
-  /** Called by the session-start route; returns false for stale/unknown ids. */
-  public discharge(observation: SessionStartObservation): boolean {
+  /** Called after normalized lifecycle ingress; returns false for stale/unknown ids. */
+  public discharge(observation: SessionStartObservation, expectedSessionId: SessionId = observation.sessionId): boolean {
     const pending = this.#pending.get(observation.agentId);
-    if (pending === undefined || pending.sessionId !== observation.sessionId) return false;
+    if (pending === undefined || pending.sessionId !== expectedSessionId) return false;
     pending.resolve(observation);
     return true;
   }
@@ -327,7 +310,7 @@ export class SessionStartTimeoutError extends Error {
     public readonly agentId: AgentId,
     public readonly timeoutMs: number,
   ) {
-    super(`Agent session did not start within ${Math.round(timeoutMs / 1000)}s; no SessionStart hook fired. Check the terminal for a CLI error.`);
+    super(`Agent session did not start within ${Math.round(timeoutMs / 1000)}s; no lifecycle start observation arrived. Check the terminal for a CLI error.`);
     this.name = "SessionStartTimeoutError";
   }
 }
@@ -338,66 +321,3 @@ export class SessionStartCancelledError extends Error {
     this.name = "SessionStartCancelledError";
   }
 }
-
-export interface SessionLifecycleRoutesOptions {
-  readonly service: SessionLifecycleService;
-  readonly proofs?: SessionStartupProof;
-}
-
-export function createSessionLifecycleRoutes(options: SessionLifecycleRoutesOptions): BridgeRequestHandler {
-  return async (request) => {
-    if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
-    try {
-      if (request.url.pathname === "/hooks/session-start") {
-        const observation = parseSessionStart(request.body);
-        const accepted = options.service.sessionStarted(observation);
-        options.proofs?.discharge(observation);
-        return { status: 200, body: { ok: true, accepted } };
-      }
-      if (request.url.pathname === "/hooks/session-end") {
-        const observation = parseSessionEnd(request.body);
-        return { status: 200, body: { ok: true, accepted: options.service.sessionEnded(observation) } };
-      }
-      return protocolError(404, "not-found", "Route not found");
-    } catch (error) {
-      return protocolError(400, "invalid-request", error instanceof Error ? error.message : "Invalid session lifecycle event");
-    }
-  };
-}
-
-function parseSessionStart(input: unknown): SessionStartObservation {
-  const value = record(input);
-  const source = optionalString(value.source);
-  return {
-    agentId: agentId(value.agentId),
-    sessionId: sessionId(value.sessionId),
-    ...(source === undefined ? {} : { source }),
-  };
-}
-
-function parseSessionEnd(input: unknown): SessionEndObservation {
-  const value = record(input);
-  const reason = requiredString(value.reason, "reason") as SessionEndReason;
-  if (!(SESSION_END_REASONS as readonly string[]).includes(reason)) {
-    throw new Error(`reason must be one of ${SESSION_END_REASONS.join(", ")}`);
-  }
-  return {
-    agentId: agentId(value.agentId),
-    sessionId: sessionId(value.sessionId),
-    reason,
-  };
-}
-
-function record(input: unknown): Record<string, unknown> {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) throw new Error("Request body must be an object");
-  return input as Record<string, unknown>;
-}
-function requiredString(input: unknown, name: string): string {
-  if (typeof input !== "string" || input.trim().length === 0) throw new Error(`${name} must be a non-empty string`);
-  return input;
-}
-function optionalString(input: unknown): string | undefined {
-  return typeof input === "string" && input.length > 0 ? input : undefined;
-}
-function agentId(input: unknown): AgentId { return requiredString(input, "agentId") as AgentId; }
-function sessionId(input: unknown): SessionId { return requiredString(input, "sessionId") as SessionId; }

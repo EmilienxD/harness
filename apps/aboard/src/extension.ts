@@ -44,13 +44,13 @@ import { registerReopenCommand } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
+import { createPlatformLifecycleRoutes } from "./bridge/platform-lifecycle.js";
 
-import { GitWorkingTreeInspector, WorkerLifecycleReconciler, createWorkerLifecycleRoutes, reportsResult } from "./bridge/lifecycle.js";
+import { GitWorkingTreeInspector, WorkerLifecycleReconciler, reportsResult } from "./bridge/lifecycle.js";
 import {
   SessionLifecycleService,
   SessionProcessMonitor,
   SessionStartupProofs,
-  createSessionLifecycleRoutes,
   type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
 import { lockMarkerDirectory, lockMarkerPresent, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
@@ -173,7 +173,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     startupProofs: sessionProofs,
     onStartupTimeout: (agentId, sessionId, timeoutMs) => {
       const label = fleet.get(agentId)?.terminal.name ?? `agent ${agentId}`;
-      output.appendLine(`${label} (agent ${agentId}, session ${sessionId}) did not produce a SessionStart hook within ${Math.round(timeoutMs / 1000)}s; closing the terminal as a failed launch.`);
+      output.appendLine(`${label} (agent ${agentId}, session ${sessionId}) did not produce a lifecycle start observation within ${Math.round(timeoutMs / 1000)}s; closing the terminal as a failed launch.`);
       // Settle the timeout before TerminalController closes the terminal. Its
       // close event then observes an already-failed session instead of emitting
       // a second, misleading "killed" failure notification.
@@ -229,16 +229,20 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     onDidChange: () => { for (const listener of activityListeners) listener(); },
   });
   const launchFile = new FileLaunchConfigurationSource(join(workspaceRoot, ".abd", "launch.json"));
-  const claudePlatform = new ClaudeAgentPlatform({ commandRunner: spawnCommandRunner(workspaceRoot) });
+  const claudePlatform = new ClaudeAgentPlatform({
+    commandRunner: spawnCommandRunner(workspaceRoot),
+    lifecycleAssets: {
+      settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
+      script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
+    },
+  });
   const platforms = new Map([[claudePlatform.id, claudePlatform]]);
   // Conversation discovery belongs to the session's runtime, not today's launch
   // selection. In particular, editing launch.json must not make an existing
   // process disappear from Recent Activity when it ends.
-  const sessionIsResumable = async (sessionId: SessionId, cwd: string): Promise<boolean> => {
-    for (const platform of platforms.values()) {
-      if (await platform.isResumable(sessionId, cwd)) return true;
-    }
-    return false;
+  const sessionIsResumable = async (platformId: AgentSession["platform"], sessionId: SessionId, cwd: string): Promise<boolean> => {
+    const platform = platforms.get(platformId);
+    return platform === undefined ? false : platform.isResumable(sessionId, cwd);
   };
   if (initialized) await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
   const rememberEndedSession = async (
@@ -252,7 +256,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // release the still-open terminal while the check is in flight.
     const terminalId = terminals.liveTerminalForAgent(session.identity.agentId);
     const conversationStarted = !isInteractiveLaunch(session)
-      || await sessionIsResumable(session.sessionId, session.cwd ?? workspaceRoot);
+      || await sessionIsResumable(session.platform, session.sessionId, session.cwd ?? workspaceRoot);
     if (!shouldRecordEndedSession(session, conversationStarted)) {
       output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no agent conversation started.`);
       return;
@@ -285,10 +289,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }
   };
   await validateLaunchFile();
-  const runtimeFiles = new FileSystemPromptSpillStore(workspaceRoot, runtime.root, {
-    settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
-    script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
-  }, runtimeAdmission);
+  const runtimeFiles = new FileSystemPromptSpillStore(
+    workspaceRoot,
+    runtime.root,
+    new Map([...platforms.values()].map((platform) => [platform.id, platform.lifecycleAssets])),
+    runtimeAdmission,
+  );
   const liveTaskAgents = new Set(fleet.list().map((session) => session.identity.agentId as string));
   await runtimeFiles.prune(liveTaskAgents, new Set([
     ...liveTaskAgents,
@@ -297,7 +303,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "abd_wrapper.py"));
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), sessionIdFactory: () => randomUUID() as SessionId, startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -473,7 +479,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       show: (terminalId) => terminals.show(terminalId),
     },
     launcher: coordinator,
-    isResumable: (sessionId, cwd) => sessionIsResumable(sessionId, cwd ?? workspaceRoot),
+    isResumable: (platform, sessionId, cwd) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot),
   });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);
@@ -484,9 +490,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!initialized || bridge !== undefined) return Promise.resolve();
     return bridgeStartup.run(async () => {
     if (!initialized || bridge !== undefined) return;
+    const workerHooks = new WorkerHookService(fleet, runtimeFiles);
     bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
-    handler: combineHandlers(createWorkerLifecycleRoutes(lifecycle), createWorkerHookRoutes(new WorkerHookService(fleet, runtimeFiles)), createSessionLifecycleRoutes({ service: sessionLifecycle, proofs: sessionProofs }), createTerminalRoutes(terminals), createCommandRoutes(commandTerminals)),
+    handler: combineHandlers(
+      createPlatformLifecycleRoutes({ fleet, platforms, sessions: sessionLifecycle, workers: lifecycle, compactions: workerHooks, sessionBindings: [lease, terminals], proofs: sessionProofs }),
+      createWorkerHookRoutes(workerHooks),
+      createTerminalRoutes(terminals),
+      createCommandRoutes(commandTerminals),
+    ),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
     bridgeEnvironment = { port: bridge.port, token: bridge.token };

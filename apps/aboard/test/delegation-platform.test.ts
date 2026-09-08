@@ -32,8 +32,10 @@ test("shared delegation asks the selected platform for an executable launch plan
   const planned: PlatformLaunchRequest[] = [];
   const preflighted: readonly string[][] = [];
   const mutablePreflighted = preflighted as string[][];
+  let createdSessions = 0;
   const platform: AgentPlatform = {
     id: "claude",
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     capabilities: {
       sessionIdentity: "client-assigned",
       promptDelivery: ["none", "inline", "spilled"],
@@ -41,6 +43,12 @@ test("shared delegation asks the selected platform for an executable launch plan
       models: ["test-model"],
       reasoningEfforts: ["test-effort"],
     },
+    createSession: () => {
+      createdSessions += 1;
+      return { sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId, binding: "bound" };
+    },
+    bindSession: (current, observed) => current.sessionId === observed ? observed : undefined,
+    normalizeLifecycle: () => { throw new Error("not used"); },
     planLaunch: (request) => {
       planned.push(request);
       return {
@@ -64,6 +72,7 @@ test("shared delegation asks the selected platform for an executable launch plan
     isResumable: async () => false,
   };
   const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
   const terminals = new TerminalController({
     host,
     shell: "powershell",
@@ -72,7 +81,7 @@ test("shared delegation asks the selected platform for an executable launch plan
   });
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\work",
-    fleet: new FleetRegistry(),
+    fleet,
     lease: new WriteLease(),
     terminals,
     configurations: { get: async () => ({ platform: "claude", settings: opaqueSettings }) },
@@ -81,14 +90,16 @@ test("shared delegation asks the selected platform for an executable launch plan
     spills: { prepare: async () => undefined, write: async () => "unused" },
     shell: "powershell",
     agentIdFactory: () => "agent-1" as AgentId,
-    sessionIdFactory: () => "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
   });
 
   const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell" }, "user");
 
   assert.equal(planned.length, 1);
+  assert.equal(createdSessions, 1);
   assert.equal(planned[0]?.configuration, opaqueSettings);
   assert.deepEqual(preflighted, [["runtime-wrapper", "profile"]]);
   assert.equal(host.terminals[0]?.sent.at(-1), "runtime-wrapper profile --start");
   assert.equal(launched.terminalId, "terminal-1");
+  assert.equal(fleet.get("agent-1" as AgentId)?.platform, "claude");
+  assert.equal(fleet.get("agent-1" as AgentId)?.sessionBinding, "bound");
 });

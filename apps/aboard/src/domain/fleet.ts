@@ -38,6 +38,14 @@ export type FleetEvent =
   | {
       readonly sequence: number;
       readonly occurredAt: IsoTimestamp;
+      readonly type: "session-bound";
+      readonly agentId: AgentId;
+      readonly from: SessionId;
+      readonly to: SessionId;
+    }
+  | {
+      readonly sequence: number;
+      readonly occurredAt: IsoTimestamp;
       readonly type: "agent-removed";
       readonly agentId: AgentId;
       readonly sessionId: SessionId;
@@ -165,6 +173,24 @@ export class FleetRegistry {
 
   public list(): readonly AgentSession[] {
     return [...this.sessionsByAgent.values()];
+  }
+
+  /** Atomically replaces a provisional provider identity with its discovered id. */
+  public canBindSession(agentId: AgentId, expected: SessionId, actual: SessionId): boolean {
+    const session = this.sessionsByAgent.get(agentId);
+    if (session === undefined || session.sessionId !== expected || session.sessionBinding !== "provisional") return false;
+    const owner = this.agentBySession.get(actual);
+    return owner === undefined || owner === agentId;
+  }
+
+  public bindSession(agentId: AgentId, expected: SessionId, actual: SessionId, occurredAt: IsoTimestamp): boolean {
+    if (!this.canBindSession(agentId, expected, actual)) return false;
+    const session = this.sessionsByAgent.get(agentId)!;
+    this.agentBySession.delete(expected);
+    this.agentBySession.set(actual, agentId);
+    this.sessionsByAgent.set(agentId, { ...session, sessionId: actual, sessionBinding: "bound" });
+    this.record({ type: "session-bound", agentId, from: expected, to: actual }, occurredAt);
+    return true;
   }
 
 
@@ -349,4 +375,3 @@ export class FleetRegistry {
     for (const listener of this.listeners) listener(recorded);
   }
 }
-

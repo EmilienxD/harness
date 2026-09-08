@@ -1,9 +1,11 @@
 import {
   AGENT_TYPES,
+  AGENT_PLATFORM_IDS,
   INTERACTIVE_AGENT_TYPES,
   WORKER_FAILURE_TYPES,
   isAutomatedAgentType,
   type AgentId,
+  type AgentPlatformId,
   type AgentIdentity,
   type AgentLifecycle,
   type AgentSession,
@@ -133,6 +135,12 @@ function parseAgentType(
     return value as AgentType;
   }
   issues.push(`${path} must be one of: ${AGENT_TYPES.join(", ")}`);
+  return undefined;
+}
+
+function parseAgentPlatform(value: unknown, path: string, issues: string[]): AgentPlatformId | undefined {
+  if (typeof value === "string" && (AGENT_PLATFORM_IDS as readonly string[]).includes(value)) return value as AgentPlatformId;
+  issues.push(`${path} must be one of: ${AGENT_PLATFORM_IDS.join(", ")}`);
   return undefined;
 }
 
@@ -384,7 +392,11 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
   if (record === undefined) return { ok: false, issues };
 
   const identity = parseIdentity(record.identity, "session.identity", issues);
+  const platform = parseAgentPlatform(record.platform, "session.platform", issues);
   const sessionId = parseSessionId(record.sessionId, "session.sessionId", issues);
+  const sessionBinding = record.sessionBinding === "provisional" || record.sessionBinding === "bound"
+    ? record.sessionBinding
+    : (issues.push("session.sessionBinding must be provisional or bound"), undefined);
   const terminal = parseTerminal(record.terminal, "session.terminal", issues);
   const lifecycle = parseLifecycle(record.lifecycle, "session.lifecycle", issues);
   const resultDelivery = parseResultDelivery(
@@ -460,7 +472,9 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
   if (
     issues.length > 0 ||
     identity === undefined ||
+    platform === undefined ||
     sessionId === undefined ||
+    sessionBinding === undefined ||
     terminal === undefined ||
     lifecycle === undefined ||
     resultDelivery === undefined ||
@@ -474,8 +488,10 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
   }
 
   const base: AgentSession = {
+    platform,
     identity,
     sessionId,
+    sessionBinding,
     terminal,
     lifecycle,
     resultDelivery,
@@ -545,20 +561,34 @@ export function parseFleetPersistenceDto(
   );
 
 
-  const events = parseArray(record.events, "fleet.events", (item, path, innerIssues) => {
+  const events = parseArray<FleetEvent>(record.events, "fleet.events", (item, path, innerIssues) => {
     const event = readRecord(item, path, innerIssues);
     if (event === undefined) return undefined;
     const sequence = readNonNegativeInteger(event.sequence, `${path}.sequence`, innerIssues);
     const occurredAt = readTimestamp(event.occurredAt, `${path}.occurredAt`, innerIssues);
     if (sequence === undefined || occurredAt === undefined) return undefined;
     switch (event.type) {
-      case "agent-registered":
+      case "agent-registered": {
+        const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
+        const sessionId = parseSessionId(event.sessionId, `${path}.sessionId`, innerIssues);
+        return agentId === undefined || sessionId === undefined
+          ? undefined
+          : { sequence, occurredAt, type: "agent-registered", agentId: agentId as AgentId, sessionId };
+      }
       case "agent-removed": {
         const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
         const sessionId = parseSessionId(event.sessionId, `${path}.sessionId`, innerIssues);
         return agentId === undefined || sessionId === undefined
           ? undefined
-          : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId, sessionId };
+          : { sequence, occurredAt, type: "agent-removed", agentId: agentId as AgentId, sessionId };
+      }
+      case "session-bound": {
+        const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
+        const from = parseSessionId(event.from, `${path}.from`, innerIssues);
+        const to = parseSessionId(event.to, `${path}.to`, innerIssues);
+        return agentId === undefined || from === undefined || to === undefined
+          ? undefined
+          : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId, from, to };
       }
       case "lifecycle-transitioned": {
         const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
@@ -722,9 +752,11 @@ function parseReopenable(value: unknown): ReopenableSession | undefined {
   if (!isRecord(value)) return undefined;
   const dropped: string[] = [];
   const sessionId = parseSessionId(value.sessionId, "reopen.sessionId", dropped);
-  if (sessionId === undefined) return undefined;
+  const platform = parseAgentPlatform(value.platform, "reopen.platform", dropped);
+  if (sessionId === undefined || platform === undefined) return undefined;
   const issueNumbers = readIssueNumbers(value.issueNumbers, dropped);
   return {
+    platform,
     sessionId,
     ...(issueNumbers === undefined ? {} : { issueNumbers }),
     ...(value.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
@@ -732,5 +764,3 @@ function parseReopenable(value: unknown): ReopenableSession | undefined {
     ...(value.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
   };
 }
-
-

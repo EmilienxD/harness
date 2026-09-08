@@ -1497,8 +1497,10 @@ test("a failed run can continue its exact ended worker with one Continue message
   const reference = context.record()?.workerSession;
   assert.ok(reference);
   const session: AgentSession = {
+    platform: "claude",
     identity: { agentId: reference.agentId, type: reference.type },
     sessionId: reference.sessionId,
+    sessionBinding: "bound",
     terminal: { terminalId: "terminal-1" as TerminalId, name: "aboard: address issue 34" },
     lifecycle: {
       status: "completed",

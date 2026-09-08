@@ -44,9 +44,6 @@ export function createWorkerHookRoutes(service: WorkerHookService): BridgeReques
       const body = object(request.body);
       const agentId = requiredString(body.agentId, "agentId") as AgentId;
       switch (request.url.pathname) {
-        case "/hooks/worker/post-compact":
-          service.compact(agentId, requiredString(body.compactSummary, "compactSummary"));
-          return { status: 200, body: { ok: true } };
         case "/hooks/worker/reground":
           return { status: 200, body: { ok: true, additionalContext: await service.reground(agentId) } };
         default:

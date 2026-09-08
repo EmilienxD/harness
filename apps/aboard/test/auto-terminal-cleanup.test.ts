@@ -14,8 +14,10 @@ const startedAt = at("2026-08-23T10:00:00.000Z");
 
 function session(): AgentSession {
   return {
+    platform: "claude",
     identity: { agentId, type: "implementer" },
     sessionId,
+    sessionBinding: "bound",
     terminal: { terminalId, name: "aboard: address issue 206" },
     lifecycle: { status: "starting", startedAt },
     resultDelivery: { mode: "tool-result" },

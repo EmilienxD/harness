@@ -3,6 +3,7 @@ import {
 
   isNonRestorablePersistedAgentType,
   type AgentId,
+  type AgentPlatformId,
   type AgentSession,
   type AgentType,
   type IsoTimestamp,
@@ -35,6 +36,7 @@ export type RunOutcome =
 
 /** The launch facts a reopen replays. No prompt text, no conversation content. */
 export interface ReopenableSession {
+  readonly platform: AgentPlatformId;
   readonly sessionId: SessionId;
   readonly issueNumbers?: readonly number[];
   readonly chromeEnabled?: true;
@@ -136,6 +138,7 @@ export function agentActivity(
 
   const durationMs = elapsedMs(session.lifecycle.startedAt, at);
   const launchFacts: ReopenableSession = {
+    platform: session.platform,
     sessionId: session.sessionId,
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
     ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
@@ -228,6 +231,7 @@ export type ReopenOrigin =
   | "ended";
 
 export interface ReopenCandidate {
+  readonly platform: AgentPlatformId;
   readonly agentId: AgentId;
   readonly type: AgentType;
   readonly sessionId: SessionId;
@@ -255,6 +259,7 @@ export function reopenCandidates(
     if (!canReopenSession(session) || !isReopenableType(type)) continue;
     if (!isTerminalOpen(session.terminal.terminalId)) continue;
     candidates.set(session.identity.agentId, {
+      platform: session.platform,
       agentId: session.identity.agentId,
       type,
       sessionId: session.sessionId,
@@ -274,6 +279,7 @@ export function reopenCandidates(
     // this version will not reopen may still be in it.
     if (!isReopenableType(entry.type) || candidates.has(entry.agentId)) continue;
     candidates.set(entry.agentId, {
+      platform: entry.reopen.platform,
       agentId: entry.agentId,
       type: entry.type,
       sessionId: entry.reopen.sessionId,

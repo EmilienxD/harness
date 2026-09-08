@@ -1,16 +1,10 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import { promptSpillRoot, taskPromptPath, type LaunchPlan, type RuntimeFile } from "./launch.js";
+import { promptSpillRoot, taskPromptPath, type RuntimeFile } from "./launch.js";
 import type { AgentId } from "../domain/contracts.js";
 import { RuntimeAdmission } from "../runtime/admission.js";
-
-export interface PromptSpillStore {
-  write(file: RuntimeFile, root?: string): Promise<string>;
-  prepare(plan: LaunchPlan, root?: string): Promise<void>;
-  remove?(agentId: string): Promise<void>;
-  prune?(retainedAgentIds: ReadonlySet<string>): Promise<void>;
-}
+import type { PlatformLaunchPlan, PlatformLifecycleAssets, PromptSpillStore } from "../platform/agent-platform.js";
 
 export class PromptSpillPathError extends Error {}
 
@@ -18,7 +12,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
   public constructor(
     _projectRoot: string,
     private readonly runtimeRoot: string,
-    private readonly hookAssets: { readonly settings: string; readonly script: string },
+    private readonly lifecycleAssets: ReadonlyMap<string, PlatformLifecycleAssets>,
     private readonly admission: RuntimeAdmission = new RuntimeAdmission(true),
   ) {}
 
@@ -34,19 +28,21 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     return path;
   }
 
-  public async prepare(plan: LaunchPlan, root?: string): Promise<void> {
+  public async prepare(plan: PlatformLaunchPlan, root?: string): Promise<void> {
     return this.admission.run(() => this.#prepare(plan, root));
   }
 
-  async #prepare(plan: LaunchPlan, _root?: string): Promise<void> {
+  async #prepare(plan: PlatformLaunchPlan, _root?: string): Promise<void> {
     const directory = this.#resolvePath(plan.runtimeDirectory);
     await mkdir(directory, { recursive: true });
     const hookDirectory = join(directory, "scripts");
     const hookScript = join(hookDirectory, "abd_hook.py");
     await mkdir(hookDirectory, { recursive: true });
-    await cp(this.hookAssets.script, hookScript, { force: true });
+    const assets = this.lifecycleAssets.get(plan.platform);
+    if (assets === undefined) throw new Error(`No lifecycle assets are registered for ${plan.platform}`);
+    await cp(assets.script, hookScript, { force: true });
     const hooks = replaceHookScript(
-      JSON.parse(await readFile(this.hookAssets.settings, "utf8")) as unknown,
+      JSON.parse(await readFile(assets.settings, "utf8")) as unknown,
       hookScript,
     );
     await writeFile(join(directory, "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });

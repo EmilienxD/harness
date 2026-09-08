@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { WorkerLifecycleReconciler, classifyStopFailure, createWorkerLifecycleRoutes, reportsResult } from "../src/bridge/lifecycle.js";
-import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
+import { WorkerLifecycleReconciler, reportsResult } from "../src/bridge/lifecycle.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId, WorkerResult } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { WriteLease } from "../src/domain/lease.js";
@@ -15,8 +14,10 @@ const startedAt = at("2026-07-30T10:00:00.000Z");
 
 function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }, expectsUncommittedTree = false): AgentSession {
   return {
+    platform: "claude",
     identity: { agentId: agent("worker-10"), type: "implementer" },
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    sessionBinding: "bound",
     terminal: { terminalId: terminal("terminal-10"), name: "worker" },
     lifecycle: { status: "starting", startedAt },
     resultDelivery: delivery,
@@ -56,6 +57,17 @@ function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: 
 
 const identity = { agentId: agent("worker-10"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee") };
 
+test("a provisional session identity binds once and rejects stale or duplicate discoveries", () => {
+  const fleet = new FleetRegistry();
+  const provisional = worker();
+  fleet.register({ ...provisional, sessionBinding: "provisional" }, startedAt);
+  const actual = session("af817a6c-cd41-41e2-a4db-44d3f43cd560");
+  assert.equal(fleet.bindSession(identity.agentId, identity.sessionId, actual, startedAt), true);
+  assert.equal(fleet.get(identity.agentId)?.sessionId, actual);
+  assert.equal(fleet.get(identity.agentId)?.sessionBinding, "bound");
+  assert.equal(fleet.bindSession(identity.agentId, identity.sessionId, session("c15badb6-d6c8-45a6-a59f-e931cd364332"), startedAt), false);
+});
+
 test("clean Stop succeeds, uses the supplied last message, and releases the lease", async () => {
   const { reconciler, lease, delivered, finished } = setup();
   assert.equal(await reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "committed" }), true);
@@ -91,14 +103,13 @@ test("non-zero, kill, timeout, and StopFailure paths are typed and release", asy
     ["crashed", (r: WorkerLifecycleReconciler) => r.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "partial", exitCode: 1 })],
     ["killed", (r: WorkerLifecycleReconciler) => r.terminalClosed({ type: "terminal-closed", terminalId: terminal("terminal-10"), ...identity, exitCode: null, reason: "killed", occurredAt: startedAt })],
     ["timeout", (r: WorkerLifecycleReconciler) => r.timeout(identity.agentId, identity.sessionId, "partial")],
-    ["context-exhausted", (r: WorkerLifecycleReconciler) => r.stopFailure({ ...identity, error: "max_output_tokens", lastAssistantMessage: "token limit" })],
+    ["context-exhausted", (r: WorkerLifecycleReconciler) => r.failure({ type: "failure", ...identity, failureType: "context-exhausted", message: "token limit", exitCode: null })],
   ] as const) {
     const { reconciler, delivered, lease } = setup();
     await act(reconciler);
     assert.equal(delivered[0]?.outcome === "failed" && delivered[0].failure.type, expected);
     assert.equal(lease.current(), undefined);
   }
-  assert.equal(classifyStopFailure("authentication_failed", "API error"), "permission-denied");
 });
 
 test("duplicate events and Stop/close races settle exactly once", async () => {
@@ -122,20 +133,22 @@ test("duplicate events and Stop/close races settle exactly once", async () => {
   assert.deepEqual(await Promise.all([stop, close]), [true, false]);
   assert.equal(await reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "again" }), false);
   assert.equal(delivered.length, 1);
+  assert.equal(lease.events().filter((event) => event.type === "released").length, 1);
 });
 
-test("hook routes validate identities and accept Claude snake-case result fields", async () => {
-  const { reconciler } = setup();
-  const handler = createWorkerLifecycleRoutes(reconciler);
-  const request = (path: string, body: unknown): AuthenticatedBridgeRequest => ({
-    method: "POST", url: new URL(path, "http://127.0.0.1"), headers: {}, body,
-    signal: new AbortController().signal,
+test("a stale stop cannot occupy the current session's settlement slot", async () => {
+  const { reconciler, delivered } = setup();
+  const stale = reconciler.stop({
+    agentId: identity.agentId,
+    sessionId: session("stale-session"),
+    cwd: "C:\\repo",
+    lastAssistantMessage: "old result",
   });
-  const result = await handler(request("/hooks/stop", {
-    agentId: "worker-10", session_id: identity.sessionId, cwd: "C:\\repo", last_assistant_message: "done",
-  }));
-  assert.equal(result.status, 200);
-  assert.equal((await handler(request("/hooks/stop", { agentId: "worker-10" }))).status, 400);
+  const current = reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "current result" });
+
+  assert.deepEqual(await Promise.all([stale, current]), [false, true]);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0]?.outcome === "succeeded" && delivered[0].lastAssistantMessage, "current result");
 });
 
 test("only Auto Run workers with result delivery are reconciled on terminal close", () => {

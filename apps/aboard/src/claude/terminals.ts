@@ -129,7 +129,8 @@ export interface TerminalSnapshot {
   readonly exitCode: number | null;
 }
 
-interface TerminalRecord extends Omit<TerminalSnapshot, "status" | "closedAt" | "exitCode"> {
+interface TerminalRecord extends Omit<TerminalSnapshot, "sessionId" | "status" | "closedAt" | "exitCode"> {
+  sessionId: SessionId;
   status: TerminalSnapshot["status"];
   closedAt: string | null;
   exitCode: number | null;
@@ -170,7 +171,7 @@ export interface TerminalControllerOptions {
   readonly onLifecycleEvent?: (event: TerminalLifecycleEvent) => void;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly processIdTimeoutMs?: number;
-  /** When set with `startupTimeoutMs` on a launch, arms the proof-of-life watch. */
+  /** When set with `startupTimeoutMs` on a launch, arms the platform proof-of-life watch. */
   readonly startupProofs?: StartupProofTracker;
   readonly onStartupTimeout?: (agentId: AgentId, sessionId: SessionId, timeoutMs: number) => void;
 }
@@ -289,6 +290,19 @@ export class TerminalController {
   public liveTerminalForAgent(agentId: AgentId): TerminalId | undefined {
     const record = this.#latest((candidate) => candidate.agentId === agentId);
     return record?.status === "open" ? record.terminalId : undefined;
+  }
+
+  public canBindSession(agentId: AgentId, expected: SessionId, actual: SessionId): boolean {
+    const record = this.#latest((candidate) => candidate.agentId === agentId);
+    if (record === undefined || record.status !== "open" || record.sessionId !== expected) return false;
+    const owner = this.#latest((candidate) => candidate.sessionId === actual);
+    return owner === undefined || owner.agentId === agentId;
+  }
+
+  /** Updates terminal-close ownership after a runtime-assigned session handshake. */
+  public bindSession(agentId: AgentId, expected: SessionId, actual: SessionId): void {
+    if (!this.canBindSession(agentId, expected, actual)) throw new Error("Terminal session identity does not match");
+    this.#latest((candidate) => candidate.agentId === agentId)!.sessionId = actual;
   }
 
   public release(terminalId: TerminalId): void {

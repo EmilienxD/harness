@@ -1,6 +1,6 @@
 
 import type { InteractiveLaunchHandles, ReopenTarget } from "../bridge/delegation.js";
-import type { AgentId, AgentType, SessionId, TerminalId } from "../domain/contracts.js";
+import type { AgentId, AgentPlatformId, AgentType, SessionId, TerminalId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import {
   reopenCandidates,
@@ -46,7 +46,7 @@ export interface ReopenCoordinatorOptions {
   readonly fleet: FleetRegistry;
   readonly terminals: ReopenTerminals;
   readonly launcher: ReopenSessionLauncher;
-  readonly isResumable: (sessionId: SessionId, cwd?: string) => Promise<boolean>;
+  readonly isResumable: (platform: AgentPlatformId, sessionId: SessionId, cwd?: string) => Promise<boolean>;
 }
 
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
@@ -69,7 +69,7 @@ export class ReopenCoordinator {
       // A live session needs no transcript test: its conversation is in front of
       // the user, and reopening it means focusing the terminal it is already in.
       if (candidate.origin === "live") return { candidate, resumable: true };
-      const resumable = await this.options.isResumable(candidate.sessionId, candidate.cwd).catch(() => false);
+      const resumable = await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd).catch(() => false);
       return resumable ? { candidate, resumable } : { candidate, resumable, reason: "no-transcript" };
     }));
   }
@@ -82,10 +82,11 @@ export class ReopenCoordinator {
       return { action: "focused", candidate };
     }
 
-    if (!await this.options.isResumable(candidate.sessionId, candidate.cwd).catch(() => false)) {
+    if (!await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd).catch(() => false)) {
       return { action: "unresumable", candidate, reason: "no-transcript" };
     }
     const handles = await this.options.launcher.reopen({
+      platform: candidate.platform,
       agentId: candidate.agentId,
       type: candidate.type,
       sessionId: candidate.sessionId,

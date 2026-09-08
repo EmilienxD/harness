@@ -35,8 +35,10 @@ export async function run(): Promise<void> {
   const agentId = "interactive-ui" as AgentId;
   const fleet = new FleetRegistry();
   const session: AgentSession = {
+    platform: "claude",
     identity: { agentId, type: "interactive" },
     sessionId: "session-interactive-ui" as SessionId,
+    sessionBinding: "bound",
     terminal: { terminalId: "terminal-interactive-ui" as TerminalId, name: "interactive" },
     lifecycle: { status: "starting", startedAt: at },
     resultDelivery: { mode: "none" },
