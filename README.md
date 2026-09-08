@@ -7,13 +7,14 @@ their parent/child reply state.
 Run the pinned, ephemeral installer:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.2.2 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.2.3 harness
 ```
 
 That opens the one installation menu. The menu reconciles its selection: newly selected packages
 are installed, deselected packages are removed, and mandatory dependencies remain transitive
 selections. There are no separate install, uninstall, list, info, or upgrade commands. Rerun the
-same pinned entry point to change or upgrade the installation.
+same pinned entry point to change or upgrade the installation. If a reconciliation step fails,
+Harness restores the prior files, configuration, receipts, and completed host actions.
 
 The wizard asks for tools first, followed by scope and platform. Use the arrow keys to move, Enter
 to toggle or select, and Escape to return to the previous question. Claude Code and ChatGPT are

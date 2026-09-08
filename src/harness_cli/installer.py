@@ -9,6 +9,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -131,11 +132,75 @@ def _make_executable(path: Path) -> None:
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _prepare_actions(actions: list[HostAction]) -> list[PreparedAction]:
+    prepared: list[PreparedAction] = []
+    try:
+        for action in actions:
+            prepared.append(prepare_host_action(action))
+        return prepared
+    except Exception:
+        for action in prepared:
+            action.cleanup()
+        raise
+
+
 @dataclass(frozen=True)
 class Change:
     action: str
     package: str
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class _FileSnapshot:
+    path: Path
+    content: bytes | None
+    mode: int | None
+
+
+class _LocalTransaction:
+    """Restore installer-owned local state if reconciliation does not commit."""
+
+    def __init__(self, paths: set[Path], store: ReceiptStore):
+        self._store = store
+        self._store_data = deepcopy(store.data)
+        paths = {path.resolve() for path in paths | {store.path}}
+        self._files = [
+            _FileSnapshot(
+                path,
+                path.read_bytes() if path.is_file() else None,
+                stat.S_IMODE(path.stat().st_mode) if path.is_file() else None,
+            )
+            for path in sorted(paths, key=lambda item: str(item))
+        ]
+        self._missing_directories = {
+            parent
+            for path in paths
+            for parent in path.parents
+            if not parent.exists()
+        }
+
+    def rollback(self) -> None:
+        errors: list[str] = []
+        for snapshot in self._files:
+            try:
+                if snapshot.content is None:
+                    snapshot.path.unlink(missing_ok=True)
+                    continue
+                snapshot.path.parent.mkdir(parents=True, exist_ok=True)
+                snapshot.path.write_bytes(snapshot.content)
+                if snapshot.mode is not None:
+                    snapshot.path.chmod(snapshot.mode)
+            except OSError as exc:
+                errors.append(str(exc))
+        for directory in sorted(self._missing_directories, key=lambda item: len(item.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        self._store.data = deepcopy(self._store_data)
+        if errors:
+            raise OSError("; ".join(errors))
 
 
 class CatalogueInstaller:
@@ -253,6 +318,23 @@ class CatalogueInstaller:
                     raise InstallError(f"refusing to overwrite unowned file {destination}")
 
         prepared: dict[str, list[PreparedAction]] = {}
+        rollback_prepared: dict[str, list[PreparedAction]] = {}
+        host_undo: list[tuple[str, HostAction | PreparedAction]] = []
+        local_paths = {self.target.settings_path, self.target.gitignore_path}
+        local_paths.update(
+            Path(record["path"])
+            for receipt in packages.values()
+            for record in receipt.get("files", [])
+        )
+        local_paths.update(
+            self.target.destination_path(payload.root, payload.dest)
+            for item in resolved
+            for payload in item.tool.expand(self.target.platform)
+        )
+        try:
+            transaction = _LocalTransaction(local_paths, self.store)
+        except OSError as exc:
+            raise InstallError(str(exc)) from exc
         try:
             missing_requirements = sorted(
                 {
@@ -276,16 +358,31 @@ class CatalogueInstaller:
                                 f"({', '.join(present)})"
                             )
                     prepared[item.tool.name] = (
-                        [] if shared_host_owner else [prepare_host_action(action) for action in item.tool.actions]
+                        [] if shared_host_owner else _prepare_actions(list(item.tool.actions))
+                    )
+                    if current is not None and current.get("version") != item.tool.version:
+                        rollback_prepared[item.tool.name] = _prepare_actions(
+                            [self._receipt_action(raw) for raw in current.get("actions", [])]
+                        )
+            for name in self._removal_order(packages, set(desired)):
+                if not self._owned_in_another_installation(name):
+                    rollback_prepared[name] = _prepare_actions(
+                        [self._receipt_action(raw) for raw in packages[name].get("actions", [])]
                     )
             for name in self._removal_order(packages, set(desired)):
-                self._remove(name)
+                self._remove(name, host_undo=host_undo, rollback_actions=rollback_prepared.get(name, []))
             for item in resolved:
                 current = packages.get(item.tool.name)
                 if current is None or current.get("version") != item.tool.version:
+                    replacing = current is not None
                     if current is not None:
                         self._remove(item.tool.name, remove_actions=False)
-                    self._install(item, prepared.get(item.tool.name, []))
+                    self._install(
+                        item,
+                        prepared.get(item.tool.name, []),
+                        host_undo,
+                        rollback_prepared.get(item.tool.name, []) if replacing else [],
+                    )
                 else:
                     current["explicit"] = item.explicit
                     current["dependencies"] = [dependency.name for dependency in item.tool.dependencies]
@@ -294,14 +391,52 @@ class CatalogueInstaller:
             else:
                 self.store.prune()
             return changes
-        except (OSError, ValueError, HostActionError) as exc:
-            raise InstallError(str(exc)) from exc
+        except Exception as exc:
+            rollback_errors = self._rollback(host_undo, transaction)
+            detail = str(exc)
+            if rollback_errors:
+                detail += "; rollback also failed: " + "; ".join(rollback_errors)
+            if isinstance(exc, InstallError) and not rollback_errors:
+                raise
+            raise InstallError(detail) from exc
         finally:
-            for actions in prepared.values():
+            for actions in [*prepared.values(), *rollback_prepared.values()]:
                 for action in actions:
                     action.cleanup()
 
-    def _install(self, item: ResolvedPackage, prepared: list[PreparedAction]) -> None:
+    @staticmethod
+    def _receipt_action(raw: dict[str, Any]) -> HostAction:
+        return HostAction(raw["type"], {key: value for key, value in raw.items() if key != "type"})
+
+    @staticmethod
+    def _rollback(
+        host_undo: list[tuple[str, HostAction | PreparedAction]],
+        transaction: _LocalTransaction,
+    ) -> list[str]:
+        errors: list[str] = []
+        for operation, action in reversed(host_undo):
+            try:
+                if operation == "uninstall":
+                    assert isinstance(action, HostAction)
+                    uninstall_host_action(action)
+                else:
+                    assert isinstance(action, PreparedAction)
+                    apply_host_action(action)
+            except (OSError, HostActionError) as exc:
+                errors.append(str(exc))
+        try:
+            transaction.rollback()
+        except OSError as exc:
+            errors.append(str(exc))
+        return errors
+
+    def _install(
+        self,
+        item: ResolvedPackage,
+        prepared: list[PreparedAction],
+        host_undo: list[tuple[str, HostAction | PreparedAction]],
+        previous_actions: list[PreparedAction],
+    ) -> None:
         tool = item.tool
         files: list[dict[str, Any]] = []
         for payload in tool.expand(self.target.platform):
@@ -338,8 +473,13 @@ class CatalogueInstaller:
             before = self.target.gitignore_path.read_text(encoding="utf-8") if self.target.gitignore_path.is_file() else ""
             self.target.gitignore_path.parent.mkdir(parents=True, exist_ok=True)
             self.target.gitignore_path.write_text(gitignore.apply(before, block, patterns), encoding="utf-8")
+        restore_previous = bool(previous_actions)
         for action in prepared:
             apply_host_action(action)
+            if restore_previous:
+                host_undo.extend(("apply", previous) for previous in reversed(previous_actions))
+                restore_previous = False
+            host_undo.append(("uninstall", action.action))
         self.installation["packages"][tool.name] = {
             "version": tool.version,
             "explicit": item.explicit,
@@ -350,13 +490,22 @@ class CatalogueInstaller:
             "actions": [{"type": action.type, **action.data} for action in tool.actions],
         }
 
-    def _remove(self, name: str, remove_actions: bool = True) -> None:
+    def _remove(
+        self,
+        name: str,
+        remove_actions: bool = True,
+        host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
+        rollback_actions: list[PreparedAction] | None = None,
+    ) -> None:
         receipt = self.installation["packages"].get(name)
         if receipt is None:
             return
         if remove_actions and not self._owned_in_another_installation(name):
-            for raw in reversed(receipt.get("actions", [])):
-                uninstall_host_action(HostAction(raw["type"], {key: value for key, value in raw.items() if key != "type"}))
+            old_actions = rollback_actions or []
+            for index, raw in reversed(list(enumerate(receipt.get("actions", [])))):
+                uninstall_host_action(self._receipt_action(raw))
+                if host_undo is not None:
+                    host_undo.append(("apply", old_actions[index]))
         for record in receipt.get("files", []):
             path = Path(record["path"])
             if (

@@ -1,5 +1,5 @@
 name = "harness-cli"
-version = "0.2.2"
+version = "0.2.3"
 description = "Persistent Harness run, ask, reply, and resume commands"
 dependencies = ["session-replies>=1.0.0,<2.0.0"]
 
@@ -13,4 +13,4 @@ reason = "The persistent session CLI currently launches Claude Code."
 [[actions]]
 type = "uv-tool"
 package = "harness"
-source = "git+https://github.com/EmilienxD/harness@v0.2.2"
+source = "git+https://github.com/EmilienxD/harness@v0.2.3"

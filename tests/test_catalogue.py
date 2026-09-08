@@ -8,7 +8,7 @@ from harness_cli.catalogue import CatalogueError, resolve_dependencies
 from harness_cli import cli
 from harness_cli.cli import build_parser
 from harness_cli.installer import CatalogueInstaller, InstallError, Target
-from harness_cli.host_actions import HostActionError, prepare
+from harness_cli.host_actions import HostActionError, PreparedAction, prepare
 from harness_cli.manifest import HostAction, discover, load_tool
 from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore
@@ -138,6 +138,156 @@ def test_receipt_driven_uninstall_keeps_modified_files(tmp_path):
     selected.reconcile(set())
     assert skill.read_text() == "mine"
     assert selected.installation["packages"] == {}
+
+
+def transactional_package(tmp_path, name, *, action=False):
+    root = tmp_path / name
+    root.mkdir()
+    (root / "payload").write_text(name)
+    (root / "fragment.json").write_text('{"env": {"PACKAGE": "installed"}}')
+    manifest = (
+        f'name="{name}"\nversion="1.0.0"\ndescription="x"\n'
+        'gitignore=["generated"]\n'
+        '[platforms.claude]\nstatus="supported"\nfragment="fragment.json"\n'
+        f'[[files]]\nsrc="payload"\ndest="{name}.txt"\n'
+    )
+    if action:
+        manifest += (
+            '[[actions]]\ntype="uv-tool"\n'
+            'source="git+https://example.test/harness@0123456789abcdef"\n'
+            f'package="{name}-test"\n'
+        )
+    (root / "harness.toml").write_text(manifest)
+    return load_tool(root)
+
+
+def test_failed_host_action_rolls_back_local_installation(monkeypatch, tmp_path):
+    tool = transactional_package(tmp_path, "failing", action=True)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".gitignore").write_text("existing\n")
+    target = Target.for_project(project)
+    selected = manager({tool.name: tool}, target, tmp_path)
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: False)
+    monkeypatch.setattr(
+        "harness_cli.installer.apply_host_action",
+        lambda action: (_ for _ in ()).throw(HostActionError("host failed")),
+    )
+
+    with pytest.raises(InstallError, match="host failed"):
+        selected.reconcile({tool.name})
+
+    assert (project / ".gitignore").read_text() == "existing\n"
+    assert not target.settings_path.exists()
+    assert not (target.install_root / "failing.txt").exists()
+    assert selected.installation["packages"] == {}
+    assert not selected.store.path.exists()
+
+
+def test_receipt_failure_undoes_completed_host_action(monkeypatch, tmp_path):
+    tool = transactional_package(tmp_path, "failing", action=True)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({tool.name: tool}, target, tmp_path)
+    applied = []
+    removed = []
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: False)
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", lambda prepared: applied.append(prepared.action))
+    monkeypatch.setattr("harness_cli.installer.uninstall_host_action", removed.append)
+    monkeypatch.setattr(
+        selected.store,
+        "save",
+        lambda: (_ for _ in ()).throw(OSError("receipt failed")),
+    )
+
+    with pytest.raises(InstallError, match="receipt failed"):
+        selected.reconcile({tool.name})
+
+    assert removed == applied
+    assert not (target.install_root / "failing.txt").exists()
+    assert selected.installation["packages"] == {}
+
+
+def test_failed_upgrade_restores_previous_files_receipt_and_host_action(monkeypatch, tmp_path):
+    old = transactional_package(tmp_path, "upgrade", action=True)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({old.name: old}, target, tmp_path)
+    applied = []
+    removed = []
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: False)
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", lambda prepared: applied.append(prepared.action))
+    monkeypatch.setattr("harness_cli.installer.uninstall_host_action", removed.append)
+    selected.reconcile({old.name})
+    applied.clear()
+
+    old.root.joinpath("payload").write_text("new")
+    manifest = old.root / "harness.toml"
+    manifest.write_text(manifest.read_text().replace('version="1.0.0"', 'version="2.0.0"'))
+    upgraded = load_tool(old.root)
+    selected.available = {upgraded.name: upgraded}
+    monkeypatch.setattr(
+        selected.store,
+        "save",
+        lambda: (_ for _ in ()).throw(OSError("receipt failed")),
+    )
+
+    with pytest.raises(InstallError, match="receipt failed"):
+        selected.reconcile({upgraded.name})
+
+    assert (target.install_root / "upgrade.txt").read_text() == "upgrade"
+    assert selected.installation["packages"][old.name]["version"] == "1.0.0"
+    assert len(applied) == 2
+    assert removed == [upgraded.actions[0]]
+
+
+def test_later_failure_restores_package_removed_earlier_in_reconciliation(monkeypatch, tmp_path):
+    old = transactional_package(tmp_path, "old", action=True)
+    failing = transactional_package(tmp_path, "failing", action=True)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({old.name: old, failing.name: failing}, target, tmp_path)
+    applied = []
+    removed = []
+    fail_host_action = {"enabled": False}
+
+    def apply(prepared):
+        if fail_host_action["enabled"] and prepared.action == failing.actions[0]:
+            raise HostActionError("host failed")
+        applied.append(prepared.action)
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: False)
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", apply)
+    monkeypatch.setattr("harness_cli.installer.uninstall_host_action", removed.append)
+    selected.reconcile({old.name})
+    applied.clear()
+    payload = target.install_root / "old.txt"
+    before = payload.read_bytes()
+    fail_host_action["enabled"] = True
+
+    with pytest.raises(InstallError, match="host failed"):
+        selected.reconcile({failing.name})
+
+    assert payload.read_bytes() == before
+    assert set(selected.installation["packages"]) == {old.name}
+    assert removed == [old.actions[0]]
+    assert applied == [old.actions[0]]
 
 
 def test_every_catalogue_manifest_loads():
