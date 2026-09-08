@@ -21,7 +21,7 @@ byte size, and SHA-256 digest; Harness verifies all three before asking VS Code 
 
 The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
 It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
-continue to use `v<version>` tags. Changes limited to Aboard run only its path-filtered workflow.
+continue to use `v<version>` tags.
 
 ## Visible sessions
 
