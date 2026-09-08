@@ -91,8 +91,16 @@ import { AUTO_RUN_DISALLOWED_TOOLS } from "./auto/permissions.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
 import { RuntimeAdmission, RuntimeStartup } from "./runtime/admission.js";
 import { RuntimeLayout } from "./runtime/layout.js";
-import { planSessionResume, resolveLaunchConfiguration, type LaunchConfiguration } from "./claude/launch.js";
+import {
+  AUTO_RUN_WORKER_SKILLS,
+  autoRunWorkerConfiguration,
+  planSessionResume,
+  resolveLaunchConfiguration,
+  type AutoRunWorkerType,
+  type LaunchConfiguration,
+} from "./claude/launch.js";
 import { deriveWriteCapability } from "./domain/capability.js";
+import { requireHarnessSkill } from "./claude/skills.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
@@ -205,6 +213,11 @@ function briefingSources(
 function workerConfigurations(workspaceRoot: string): DelegationConfigurationSource {
   return { get: async (type) => {
     if (type === "general-purpose") return { shape: "default" };
+    if (type in AUTO_RUN_WORKER_SKILLS) {
+      const workerType = type as AutoRunWorkerType;
+      await requireHarnessSkill(workspaceRoot, AUTO_RUN_WORKER_SKILLS[workerType]);
+      return autoRunWorkerConfiguration(workerType);
+    }
     if (isNamedBuiltinAgentType(type)) {
       let source: string;
       try {

@@ -4,7 +4,12 @@ import test from "node:test";
 import { DelegationCoordinator, DelegationError } from "../src/bridge/delegation.js";
 import { ManagerPromptService } from "../src/bridge/manager-hooks.js";
 import { ReopenCoordinator, describeReopenOutcome } from "../src/claude/reopen.js";
-import { resolveLaunchConfiguration } from "../src/claude/launch.js";
+import {
+  AUTO_RUN_WORKER_SKILLS,
+  autoRunWorkerConfiguration,
+  resolveLaunchConfiguration,
+  type AutoRunWorkerType,
+} from "../src/claude/launch.js";
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
 import { TerminalController, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../src/claude/terminals.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
@@ -92,6 +97,8 @@ function setup(options: {
     configurations: {
       get: async (type) => type === "general-purpose"
         ? resolveLaunchConfiguration({})
+        : type in AUTO_RUN_WORKER_SKILLS
+          ? autoRunWorkerConfiguration(type as AutoRunWorkerType)
         : resolveLaunchConfiguration({ agentName: type, systemPrompt: `You are the ${type}.`, declaredTools: ["Read", "Grep"] }),
     },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
@@ -315,7 +322,7 @@ test("an [AI]-chrome implementer is reopened with its recorded launch fact", asy
   const line = host.created[0]!.terminal.sent.at(-1) ?? "";
   assert.match(line, /--resume af817a6c/);
   assert.match(line, /--chrome/);
-  assert.match(line, /--agent abd-implementer-9/);
+  assert.doesNotMatch(line, /--agent/);
 });
 
 test("a live session is focused rather than relaunched", async () => {

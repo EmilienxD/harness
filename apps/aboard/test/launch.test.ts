@@ -6,12 +6,14 @@ import test from "node:test";
 
 import {
   BY_DIFFICULTY,
+  AUTO_RUN_WORKER_SKILLS,
   DEFAULT_RUNTIME_DIRECTORY,
   DEFAULT_MAX_INLINE_PROMPT_CHARS,
   DIFFICULTY_LAUNCH_POLICIES,
   EFFORT_LEVELS,
   MAX_COMMAND_LINE_CHARS,
   LaunchPlanError,
+  autoRunWorkerConfiguration,
   describeLaunchPlan,
   isEffortLevel,
   launchWriteCapability,
@@ -22,6 +24,7 @@ import {
   promptSpillRoot,
   resolveLaunchConfiguration,
   type EffortLevel,
+  type LaunchConfiguration,
   type LaunchPlanRequest,
 } from "../src/claude/launch.js";
 import { resolvedPromptFromText } from "../src/claude/prompts.js";
@@ -84,9 +87,22 @@ function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest 
     sessionId,
     agentType: "implementer",
     shell: "powershell",
-    configuration: definition("implementer", IMPLEMENTER_TOOLS),
+    configuration: autoRunWorkerConfiguration("implementer"),
     runtimeDirectory: RUNTIME_ROOT,
     prompt: "Address issue #47.",
+    ...overrides,
+  };
+}
+
+function skillConfiguration(
+  type: keyof typeof AUTO_RUN_WORKER_SKILLS,
+  overrides: Partial<Extract<LaunchConfiguration, { shape: "skill" }>> = {},
+): Extract<LaunchConfiguration, { shape: "skill" }> {
+  return {
+    shape: "skill",
+    skillName: AUTO_RUN_WORKER_SKILLS[type],
+    declaredModel: BY_DIFFICULTY,
+    declaredEffort: BY_DIFFICULTY,
     ...overrides,
   };
 }
@@ -243,7 +259,7 @@ test("wrapper layout keeps child argv out of the visible launch and resume lines
 
   const resumed = planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
-    configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
+    configuration: autoRunWorkerConfiguration("implementer"), wrapper,
   });
   assert.match(resumed.commandLine, new RegExp(`abd_wrapper\\.py' .* --request ${RUNTIME_ROOT.replaceAll("/", "\\/")}\\/agents\\/a1b2c3\\/launch-start-code\\.json`));
   assert.deepEqual(JSON.parse(resumed.wrapperRequest!.contents), { command: ["claude", ...resumed.args] });
@@ -257,11 +273,11 @@ test("wrapper tokens are validated like the launch command", () => {
   };
   assert.throws(() => planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
-    configuration: definition("implementer", IMPLEMENTER_TOOLS), wrapper,
+    configuration: autoRunWorkerConfiguration("implementer"), wrapper,
   }), /Wrapper token/);
 });
 
-test("plans an agent-defined implementer and spills a multi-line prompt", () => {
+test("plans an implementer as a literal Harness skill invocation and spills its context", () => {
   const prompt = resolvedPromptFromText(
     "Address issue #47; Add token refresh.\n\n## Issue #47\n\nRotate the token.",
   );
@@ -270,17 +286,21 @@ test("plans an agent-defined implementer and spills a multi-line prompt", () => 
   // The stub's wording is free to change; what the launch must deliver is the
   // headline and a pointer at the spilled file.
   const stub = plan.args.at(-1)!;
+  assert.ok(stub.startsWith("/implement "));
   assert.ok(stub.includes("#47"));
   assert.ok(stub.includes(`@${plan.spill!.relativePath}`));
   assert.deepEqual(plan.args.slice(0, -1), [
     "--session-id",
     sessionId,
-    ...definitionArgs("implementer"),
+    ...runtimeArgs,
+    "--model", "opus",
+    "--effort", "high",
   ]);
   assert.ok(plan.commandLine.includes(`'${stub}'`));
   assert.equal(plan.promptDelivery, "spilled");
   assert.equal(dirname(plan.spill!.relativePath).replaceAll("\\", "/"), `${promptSpillRoot(RUNTIME_ROOT).replaceAll("\\", "/")}/${agentId}`);
   assert.equal(plan.spill?.contents, `${prompt.text}\n`);
+  assert.equal(plan.agentDefinition, undefined);
   assert.equal(plan.requiresWriteLease, true);
 });
 
@@ -335,14 +355,15 @@ test("Chrome is available only to implementers and is replayed on resume", () =>
   const implementer = planLaunch(request({ chrome: true }));
   assert.equal(implementer.args.includes("--chrome"), true);
   assert.equal(implementer.args.at(-2), "--chrome");
-  assert.match(implementer.agentDefinition?.contents ?? "", /tools: .*mcp__claude-in-chrome__\*/);
+  assert.equal(implementer.args.at(-1), "/implement Address issue #47.");
+  assert.equal(implementer.agentDefinition, undefined);
   const withoutChrome = planLaunch(request());
   assert.equal(withoutChrome.args.includes("--no-chrome"), false);
-  assert.doesNotMatch(withoutChrome.agentDefinition?.contents ?? "", /mcp__claude-in-chrome__/);
+  assert.equal(withoutChrome.agentDefinition, undefined);
   const { prompt: _prompt, ...resumeRequest } = request({ chrome: true });
   const resumed = planSessionResume(resumeRequest);
   assert.equal(resumed.args.includes("--chrome"), true);
-  assert.match(resumed.agentDefinition?.contents ?? "", /tools: .*mcp__claude-in-chrome__\*/);
+  assert.equal(resumed.agentDefinition, undefined);
 
   assert.throws(
     () => planLaunch({ ...generalPurpose, chrome: true }),
@@ -385,12 +406,13 @@ test("the builtin types carry Claude Code's own capabilities and Explore accepts
 });
 
 test("passes the session effort level on every launch shape and refuses an unknown one", () => {
-  const plan = planLaunch(request({ effort: "xhigh" }));
+  const configuration = definition("prototyper", IMPLEMENTER_TOOLS);
+  const plan = planLaunch(request({ agentType: "prototyper", configuration, effort: "xhigh" }));
   // --effort sits with the other session flags, before the positional prompt.
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
-    ...definitionArgs("implementer"),
+    ...definitionArgs("prototyper"),
     "--effort",
     "xhigh",
     "Address issue #47.",
@@ -409,18 +431,18 @@ test("passes the session effort level on every launch shape and refuses an unkno
     planSessionResume({
       agentId,
       sessionId,
-      agentType: "implementer",
+      agentType: "prototyper",
       shell: "powershell",
-      configuration: definition("implementer", IMPLEMENTER_TOOLS),
+      configuration,
       effort: "max",
     }).args,
-    ["--resume", sessionId, ...definitionArgs("implementer"), "--effort", "max"],
+    ["--resume", sessionId, ...definitionArgs("prototyper"), "--effort", "max"],
   );
 
   // Unset is the documented "inherit": no flag at all, so Claude Code's own
   // effortLevel setting keeps deciding.
 
-  assert.equal(planLaunch(request()).args.includes("--effort"), false);
+  assert.equal(planLaunch(request({ agentType: "prototyper", configuration })).args.includes("--effort"), false);
   assert.equal(
     planManagerResume({
       agentId, sessionId, shell: "powershell",
@@ -431,12 +453,12 @@ test("passes the session effort level on every launch shape and refuses an unkno
 
   for (const level of EFFORT_LEVELS) {
     assert.equal(isEffortLevel(level), true);
-    assert.deepEqual(planLaunch(request({ effort: level })).args.slice(8, 10), ["--effort", level]);
+    assert.deepEqual(planLaunch(request({ agentType: "prototyper", configuration, effort: level })).args.slice(8, 10), ["--effort", level]);
   }
   for (const invalid of ["ultracode", "highest", "", "--max"]) {
     assert.equal(isEffortLevel(invalid), false);
     assert.throws(
-      () => planLaunch(request({ effort: invalid as EffortLevel })),
+      () => planLaunch(request({ agentType: "prototyper", configuration, effort: invalid as EffortLevel })),
       (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-effort",
       `${invalid} must be refused as an effort level`,
     );
@@ -444,17 +466,17 @@ test("passes the session effort level on every launch shape and refuses an unkno
 });
 
 test("puts the definition's model and effort on the command line, overriding the session settings", () => {
-  const configuration = definition("implementer", IMPLEMENTER_TOOLS, {
+  const configuration = definition("prototyper", IMPLEMENTER_TOOLS, {
     declaredModel: "opus",
     declaredEffort: "high",
   });
   const plan = planLaunch(
-    request({ configuration, model: "haiku", effort: "low" }),
+    request({ agentType: "prototyper", configuration, model: "haiku", effort: "low" }),
   );
   assert.deepEqual(plan.args, [
     "--session-id",
     sessionId,
-    ...definitionArgs("implementer"),
+    ...definitionArgs("prototyper"),
     "--model",
     "opus",
     "--effort",
@@ -475,10 +497,10 @@ test("puts the definition's model and effort on the command line, overriding the
 
   // `model: inherit` is the definition declining to choose, which is no flag —
   // not a model literally named "inherit", which would fail the launch.
-  const inherited = definition("implementer", IMPLEMENTER_TOOLS, { declaredModel: "inherit" });
+  const inherited = definition("prototyper", IMPLEMENTER_TOOLS, { declaredModel: "inherit" });
   assert.equal("declaredModel" in inherited, false);
   assert.equal(
-    planLaunch(request({ configuration: inherited })).args.includes("--model"),
+    planLaunch(request({ agentType: "prototyper", configuration: inherited })).args.includes("--model"),
     false,
   );
 
@@ -488,13 +510,13 @@ test("puts the definition's model and effort on the command line, overriding the
     planSessionResume({
       agentId,
       sessionId,
-      agentType: "implementer",
+      agentType: "prototyper",
       shell: "powershell",
       configuration,
       model: "haiku",
       effort: "low",
     }).args,
-    ["--resume", sessionId, ...definitionArgs("implementer"), "--model", "opus", "--effort", "high"],
+    ["--resume", sessionId, ...definitionArgs("prototyper"), "--model", "opus", "--effort", "high"],
   );
   assert.deepEqual(
     planManagerResume({
@@ -526,60 +548,58 @@ test("puts the definition's model and effort on the command line, overriding the
 });
 
 test("by-difficulty hands model and effort to the issue's tier, and a declared value takes them back", () => {
-  const routed = definition("implementer", IMPLEMENTER_TOOLS, {
-    declaredModel: BY_DIFFICULTY,
-    declaredEffort: BY_DIFFICULTY,
-  });
+  const routed = skillConfiguration("implementer");
   // The tiers are data. What is asserted here is that each one reaches the
   // command line whole, not what any particular tier happens to be worth.
   for (const [difficulty, policy] of Object.entries(DIFFICULTY_LAUNCH_POLICIES)) {
     assert.deepEqual(
-      planLaunch(request({ configuration: routed, difficulty: difficulty as IssueDifficulty })).args.slice(8),
-      ["--model", policy.model, "--effort", policy.effort, "Address issue #47."],
+      planLaunch(request({ configuration: routed, difficulty: difficulty as IssueDifficulty })).args.slice(6),
+      ["--model", policy.model, "--effort", policy.effort, "/implement Address issue #47."],
       `the ${difficulty} tier must reach the command line`,
     );
   }
 
   assert.deepEqual(
-    planLaunch(request({ configuration: routed })).args.slice(8),
-    ["--model", "opus", "--effort", "high", "Address issue #47."],
+    planLaunch(request({ configuration: routed })).args.slice(6),
+    ["--model", "opus", "--effort", "high", "/implement Address issue #47."],
   );
   // ...and the session-wide setting does not get to fill the gap either, since
   // the definition did choose; it chose to ask the label.
   assert.deepEqual(
-    planLaunch(request({ configuration: routed, model: "haiku", effort: "low" })).args.slice(8, 12),
+    planLaunch(request({ configuration: routed, model: "haiku", effort: "low" })).args.slice(6, 10),
     ["--model", "opus", "--effort", "high"],
   );
 
   // A definition that names either field keeps it. The two resolve
   // independently, so one agent may route its model and pin its effort.
-  const pinned = definition("implementer", IMPLEMENTER_TOOLS, {
+  const pinned = skillConfiguration("implementer", {
     declaredModel: "opus",
     declaredEffort: BY_DIFFICULTY,
   });
   assert.deepEqual(
-    planLaunch(request({ configuration: pinned, difficulty: "routine" })).args.slice(8, 12),
+    planLaunch(request({ configuration: pinned, difficulty: "routine" })).args.slice(6, 10),
     ["--model", "opus", "--effort", "medium"],
   );
   assert.deepEqual(
     planLaunch(request({
-      configuration: definition("implementer", IMPLEMENTER_TOOLS, { declaredModel: BY_DIFFICULTY, declaredEffort: "max" }),
+      configuration: skillConfiguration("implementer", { declaredModel: BY_DIFFICULTY, declaredEffort: "max" }),
       difficulty: "routine",
-    })).args.slice(8, 12),
+    })).args.slice(6, 10),
     ["--model", "haiku", "--effort", "max"],
   );
 
   // A difficulty carried by a launch whose definition never asked for one
   // changes nothing at all.
   assert.deepEqual(
-    planLaunch(request({ difficulty: "routine" })).args.includes("--model"),
+    planLaunch(request({
+      agentType: "prototyper",
+      configuration: definition("prototyper", IMPLEMENTER_TOOLS),
+      difficulty: "routine",
+    })).args.includes("--model"),
     false,
   );
 
-  const file = planLaunch(request({ configuration: routed, difficulty: "basic" })).agentDefinition;
-  assert.match(file?.contents ?? "", /^model: sonnet$/mu);
-  assert.match(file?.contents ?? "", /^effort: high$/mu);
-  assert.doesNotMatch(file?.contents ?? "", new RegExp(BY_DIFFICULTY, "u"));
+  assert.equal(planLaunch(request({ configuration: routed, difficulty: "basic" })).agentDefinition, undefined);
 
   // Resume is the same launch policy or it is a different agent: a reopened
   // session must not come back cheaper than it started.
@@ -592,7 +612,7 @@ test("by-difficulty hands model and effort to the issue's tier, and a declared v
       configuration: routed,
       difficulty: "routine",
     }).args,
-    ["--resume", sessionId, ...definitionArgs("implementer"), "--model", "haiku", "--effort", "medium"],
+    ["--resume", sessionId, ...runtimeArgs, "--model", "haiku", "--effort", "medium"],
   );
 
   // The sentinel is a launch-policy value like any other, so a builtin profile
@@ -669,16 +689,16 @@ test("refuses a definition that cannot produce a complete command line", () => {
 });
 
 test("an agent-defined launch registers its definition where only that launch can find it", () => {
-  const configuration = definition("implementer", ["Read", "Agent(Explore)"], {
+  const configuration = definition("prototyper", ["Read", "Agent(Explore)"], {
     declaredDescription: "Implement one issue.",
     declaredModel: "opus",
     declaredEffort: "high",
     extraFrontmatter: ["color: green", "maxTurns: 40", "hooks:", "  PreToolUse: []"],
   });
-  const plan = planLaunch(request({ configuration, prompt: "Go." }));
+  const plan = planLaunch(request({ agentType: "prototyper", configuration, prompt: "Go." }));
 
   assert.deepEqual(plan.args, [
-    "--session-id", sessionId, ...definitionArgs("implementer"),
+    "--session-id", sessionId, ...definitionArgs("prototyper"),
     "--model", "opus", "--effort", "high", "Go.",
   ]);
   assert.equal(plan.args.includes("--tools"), false);
@@ -688,12 +708,12 @@ test("an agent-defined launch registers its definition where only that launch ca
   assert.equal(plan.args.at(-1), "Go.");
   assert.equal(plan.args[plan.args.indexOf("--add-dir") + 2], "--settings");
 
-  assert.equal(plan.agentDefinition?.relativePath, runtimePath("implementer"));
+  assert.equal(plan.agentDefinition?.relativePath, runtimePath("prototyper"));
   assert.equal(
     plan.agentDefinition?.contents,
     [
       "---",
-      `name: ${runtimeName("implementer")}`,
+      `name: ${runtimeName("prototyper")}`,
       "description: Implement one issue.",
       "tools: Read, Agent(Explore)",
       "model: opus",
@@ -706,17 +726,17 @@ test("an agent-defined launch registers its definition where only that launch ca
       "  PreToolUse: []",
       "---",
       "",
-      "You are the implementer.",
+      "You are the prototyper.",
       "",
     ].join("\n"),
   );
 
   const resumed = planSessionResume({
-    agentId, sessionId, agentType: "implementer", shell: "powershell",
+    agentId, sessionId, agentType: "prototyper", shell: "powershell",
     configuration,
   });
   assert.deepEqual(resumed.args, [
-    "--resume", sessionId, ...definitionArgs("implementer"),
+    "--resume", sessionId, ...definitionArgs("prototyper"),
     "--model", "opus", "--effort", "high",
   ]);
   assert.equal(resumed.agentDefinition?.relativePath, plan.agentDefinition?.relativePath);
@@ -724,21 +744,21 @@ test("an agent-defined launch registers its definition where only that launch ca
 
   // The directory and the name both carry the agent id, so one launch's
   // definition is never inside another's `--add-dir`.
-  const other = planLaunch(request({ agentId: "z9" as AgentId, configuration, prompt: "Go." }));
-  assert.equal(other.agentDefinition?.relativePath, `${RUNTIME_ROOT}/agents/z9/.claude/agents/abd-implementer-z9.md`);
+  const other = planLaunch(request({ agentId: "z9" as AgentId, agentType: "prototyper", configuration, prompt: "Go." }));
+  assert.equal(other.agentDefinition?.relativePath, `${RUNTIME_ROOT}/agents/z9/.claude/agents/abd-prototyper-z9.md`);
 });
 
 test("model and effort ride the command line as well as the rewritten file, on start and resume", () => {
-  const configuration = definition("implementer", ["Read"], {
+  const configuration = definition("prototyper", ["Read"], {
     declaredDescription: "d", declaredModel: "opus", declaredEffort: "high",
   });
   const flags = ["--model", "opus", "--effort", "high"];
-  const plan = planLaunch(request({ configuration, prompt: "Go." }));
+  const plan = planLaunch(request({ agentType: "prototyper", configuration, prompt: "Go." }));
   assert.deepEqual(plan.args.slice(-5, -1), flags);
   assert.equal(plan.agentDefinition?.contents.includes("model: opus\neffort: high\n"), true);
 
   const resumed = planSessionResume({
-    agentId, sessionId, agentType: "implementer", shell: "powershell",
+    agentId, sessionId, agentType: "prototyper", shell: "powershell",
     configuration,
   });
   assert.deepEqual(resumed.args.slice(-4), flags);
@@ -770,15 +790,15 @@ test("model and effort ride the command line as well as the rewritten file, on s
 
 test("passes carried-through frontmatter through and refuses a line that would close the fence", () => {
   for (const color of ["color: chartreuse", "color: #00ff00"]) {
-    const configuration = definition("implementer", ["Read"], { extraFrontmatter: [color] });
-    const plan = planLaunch(request({ configuration, prompt: "Go." }));
+    const configuration = definition("prototyper", ["Read"], { extraFrontmatter: [color] });
+    const plan = planLaunch(request({ agentType: "prototyper", configuration, prompt: "Go." }));
     assert.equal(plan.agentDefinition?.contents.includes(`${color}\n`), true, color);
   }
   // A carried-through line that closes the `---` fence would move the rest of
   // the frontmatter into the system prompt without any error.
   for (const line of ["---", "  ...  ", "maxTurns: 40\nname: hijacked"]) {
     assert.throws(
-      () => definition("implementer", ["Read"], { extraFrontmatter: [line] }),
+      () => definition("prototyper", ["Read"], { extraFrontmatter: [line] }),
       (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-frontmatter",
       JSON.stringify(line),
     );
@@ -884,14 +904,16 @@ test("a resume re-passes every flag that shaped the launch", () => {
   );
 });
 
-test("automated workers require a prompt and interactive workers do not", () => {
-  for (const agentType of ["webresearcher", "implementer", "pr-doctor-afk"] as const) {
+test("automated and Harness skill workers require a prompt while other interactive workers do not", () => {
+  for (const agentType of ["webresearcher", "implementer", "pr-doctor-afk", "pr-doctor-hitl"] as const) {
     assert.throws(
       () =>
         planLaunch(
           request({
             agentType,
-            configuration: definition(agentType, IMPLEMENTER_TOOLS),
+            configuration: agentType === "webresearcher"
+              ? definition(agentType, IMPLEMENTER_TOOLS)
+              : autoRunWorkerConfiguration(agentType),
             prompt: "   ",
           }),
         ),
@@ -913,8 +935,8 @@ test("automated workers require a prompt and interactive workers do not", () => 
 });
 
 test("honours the inline prompt threshold at its boundary", () => {
-  const inline = "x".repeat(DEFAULT_MAX_INLINE_PROMPT_CHARS);
-  const spilled = "x".repeat(DEFAULT_MAX_INLINE_PROMPT_CHARS + 1);
+  const inline = "x".repeat(DEFAULT_MAX_INLINE_PROMPT_CHARS - "/implement ".length);
+  const spilled = `${inline}x`;
 
   assert.equal(planLaunch(request({ prompt: inline })).promptDelivery, "inline");
   assert.equal(planLaunch(request({ prompt: spilled })).promptDelivery, "spilled");
@@ -988,7 +1010,7 @@ test("uses a launch executable path with spaces without breaking the plan", () =
   );
   assert.equal(
     plan.commandLine,
-    `& 'C:\\Program Files\\claude\\claude.exe' --session-id ${sessionId} ${definitionFlags("implementer")} Go.`,
+    `& 'C:\\Program Files\\claude\\claude.exe' --session-id ${sessionId} --add-dir ${runtimeDir} --settings ${runtimeDir}/settings.json --model opus --effort high '/implement Go.'`,
   );
 });
 
@@ -997,7 +1019,7 @@ test("a wrapper command keeps its own arguments ahead of every aboard flag", () 
   assert.deepEqual(plan.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.equal(
     plan.commandLine,
-    `& wrapper run MyProfile -- --session-id ${sessionId} ${definitionFlags("implementer")} Go.`,
+    `& wrapper run MyProfile -- --session-id ${sessionId} --add-dir ${runtimeDir} --settings ${runtimeDir}/settings.json --model opus --effort high '/implement Go.'`,
   );
 });
 
@@ -1014,16 +1036,16 @@ test("refuses a launch command that is empty or unrepresentable, and defaults to
 });
 
 test("a definition's command replaces the configured launch command for that agent alone", () => {
-  const configuration = definition("implementer", IMPLEMENTER_TOOLS, {
+  const configuration = definition("prototyper", IMPLEMENTER_TOOLS, {
     declaredCommand: ["wrapper", "run", "MyProfile", "--"],
   });
   const plan = planLaunch(
-    request({ configuration, command: ["claude"], prompt: "Go." }),
+    request({ agentType: "prototyper", configuration, command: ["claude"], prompt: "Go." }),
   );
   assert.deepEqual(plan.command, ["wrapper", "run", "MyProfile", "--"]);
   assert.equal(
     plan.commandLine,
-    `& wrapper run MyProfile -- --session-id ${sessionId} ${definitionFlags("implementer")} Go.`,
+    `& wrapper run MyProfile -- --session-id ${sessionId} ${definitionFlags("prototyper")} Go.`,
   );
   // The flags aboard passes are untouched by the override: only the program
   // in front of them changes.
@@ -1039,7 +1061,7 @@ test("a definition's command replaces the configured launch command for that age
   // planner or a resumed agent would come back on the wrong CLI.
   assert.deepEqual(
     planSessionResume({
-      agentId, sessionId, agentType: "implementer", shell: "powershell",
+      agentId, sessionId, agentType: "prototyper", shell: "powershell",
       configuration, command: ["claude"],
     }).command,
     ["wrapper", "run", "MyProfile", "--"],
@@ -1052,7 +1074,7 @@ test("a definition's command replaces the configured launch command for that age
 
   // The wrapper still owns the outermost program; the override is what it runs.
   const wrapped = planLaunch(request({
-    configuration, prompt: "Go.",
+    agentType: "prototyper", configuration, prompt: "Go.",
     wrapper: { script: "C:\\extension\\assets\\runtime\\abd_wrapper.py", lockPathFor: () => "C:\\storage\\runtime\\locks\\a1b2c3.lock", mintLaunchCode: () => "start-code" },
   }));
   assert.ok(wrapped.commandLine.includes(`'C:\\storage\\runtime\\locks\\a1b2c3.lock' --request ${RUNTIME_ROOT}/agents/a1b2c3/launch-start-code.json`));
@@ -1065,7 +1087,8 @@ test("a declared command is validated like the setting, and requires a definitio
   for (const command of [[" "], ['say "hi"'], ["line\nbreak"]]) {
     assert.throws(
       () => planLaunch(request({
-        configuration: definition("implementer", IMPLEMENTER_TOOLS, { declaredCommand: command }),
+        agentType: "prototyper",
+        configuration: definition("prototyper", IMPLEMENTER_TOOLS, { declaredCommand: command }),
         prompt: "Go.",
       })),
       (error: unknown) => error instanceof LaunchPlanError && error.code === "invalid-command",
@@ -1074,9 +1097,9 @@ test("a declared command is validated like the setting, and requires a definitio
   }
   // An empty list is the frontmatter spelling of "no override", like
   // `model: inherit`, rather than a launch with no program.
-  const empty = definition("implementer", IMPLEMENTER_TOOLS, { declaredCommand: [] });
+  const empty = definition("prototyper", IMPLEMENTER_TOOLS, { declaredCommand: [] });
   assert.equal("declaredCommand" in empty, false);
-  assert.deepEqual(planLaunch(request({ configuration: empty, command: ["openclaude"], prompt: "Go." })).command, ["openclaude"]);
+  assert.deepEqual(planLaunch(request({ agentType: "prototyper", configuration: empty, command: ["openclaude"], prompt: "Go." })).command, ["openclaude"]);
 
   assert.deepEqual(resolveLaunchConfiguration({ agentName: "Explore", declaredCommand: ["wrapper"] }), {
     shape: "builtin", agentName: "Explore", declaredCommand: ["wrapper"],
@@ -1206,7 +1229,9 @@ test("worker tasks survive continuation and bundle cleanup until their conversat
   });
   for (const type of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"] as const) {
     const original = `Resolve issue #15 as ${type}.${type === "implementer" ? "\n\n" : " "}Run the migration and browser checks.`;
-    const plan = planLaunch(request({ agentType: type, configuration: definition(type, IMPLEMENTER_TOOLS), prompt: original, runtimeDirectory: runtimeRoot }));
+    const plan = planLaunch(request({ agentType: type, configuration: autoRunWorkerConfiguration(type), prompt: original, runtimeDirectory: runtimeRoot }));
+    assert.ok(plan.args.at(-1)?.startsWith(`/${AUTO_RUN_WORKER_SKILLS[type]} `));
+    assert.ok(!plan.args.includes("--agent"));
     assert.equal(plan.promptDelivery, type === "implementer" ? "spilled" : "inline");
     if (plan.spill !== undefined) assert.equal(plan.task?.contents, plan.spill.contents);
     await store.prepare(plan);
@@ -1215,7 +1240,7 @@ test("worker tasks survive continuation and bundle cleanup until their conversat
     assert.equal(task.contents.trim(), original);
     assert.equal(await readFile(task.path, "utf8"), task.contents);
 
-    const resumed = planSessionResume(request({ agentType: type, configuration: definition(type, IMPLEMENTER_TOOLS), prompt: "Continue", runtimeDirectory: runtimeRoot }));
+    const resumed = planSessionResume(request({ agentType: type, configuration: autoRunWorkerConfiguration(type), prompt: "Continue", runtimeDirectory: runtimeRoot }));
     await store.prepare(resumed);
     assert.deepEqual(await store.task(agentId), task);
     await store.remove(agentId);
@@ -1336,7 +1361,7 @@ test("a command line too long even with the prompt spilled is a typed refusal", 
 
   // The same 900-rule list as an *allowlist* now costs the command line
   // nothing, because it never reaches it.
-  const wide = planLaunch(request({ agentType: "implementer", shell: "cmd", configuration: definition("implementer", denied) }));
+  const wide = planLaunch(request({ agentType: "prototyper", shell: "cmd", configuration: definition("prototyper", denied) }));
   assert.ok(wide.commandLine.length < 8_000);
   assert.equal(wide.agentDefinition?.contents.includes("Bash(tool899-x *)"), true);
 });
@@ -1360,7 +1385,7 @@ test("no launch carries a permission flag", () => {
   );
   const resumed = planSessionResume({
     agentId, sessionId, agentType: "implementer", shell: "powershell",
-    configuration: definition("implementer", IMPLEMENTER_TOOLS),
+    configuration: autoRunWorkerConfiguration("implementer"),
   });
   const managerResumed = planManagerResume({
     agentId, sessionId, shell: "powershell",
@@ -1378,8 +1403,8 @@ test("slash commands remain enabled for every start and resume shape", () => {
     planLaunch(request({ attended: true })),
     planLaunch(request({ agentType: "manager", configuration: definition("manager", MANAGER_TOOLS), prompt: undefined })),
     planLaunch(request({ agentType: "brainstormer", configuration: definition("brainstormer", BRAINSTORMER_TOOLS), prompt: undefined })),
-    planSessionResume({ agentId, sessionId, agentType: "implementer", shell: "powershell", configuration: definition("implementer", IMPLEMENTER_TOOLS) }),
-    planSessionResume({ agentId, sessionId, agentType: "implementer", shell: "powershell", configuration: definition("implementer", IMPLEMENTER_TOOLS), attended: true }),
+    planSessionResume({ agentId, sessionId, agentType: "implementer", shell: "powershell", configuration: autoRunWorkerConfiguration("implementer") }),
+    planSessionResume({ agentId, sessionId, agentType: "implementer", shell: "powershell", configuration: autoRunWorkerConfiguration("implementer"), attended: true }),
     planManagerResume({ agentId, sessionId, shell: "powershell", configuration: definition("manager", MANAGER_TOOLS) }),
   ];
   for (const plan of plans) assert.ok(!plan.args.includes("--disable-slash-commands"));
@@ -1387,7 +1412,7 @@ test("slash commands remain enabled for every start and resume shape", () => {
 
 test("normalizes slash-prefixed words in extension-supplied start and continuation prompts", () => {
   const inline = planLaunch(request({ prompt: "/review the /change but keep mid/path" }));
-  assert.equal(inline.args.at(-1), "review the change but keep mid/path");
+  assert.equal(inline.args.at(-1), "/implement review the change but keep mid/path");
 
   const spilled = planLaunch(request({
     prompt: "/review the /change",
@@ -1400,7 +1425,7 @@ test("normalizes slash-prefixed words in extension-supplied start and continuati
     sessionId,
     agentType: "implementer",
     shell: "powershell",
-    configuration: definition("implementer", IMPLEMENTER_TOOLS),
+    configuration: autoRunWorkerConfiguration("implementer"),
     prompt: "/continue /now",
   });
   assert.equal(resumed.args.at(-1), "continue now");

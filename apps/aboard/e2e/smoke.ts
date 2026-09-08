@@ -11,6 +11,7 @@ import { startFakeAnthropicServer } from "./server.js";
 const execFileAsync = promisify(execFile);
 const MINIMUM_VERSION = [2, 1, 261] as const;
 const REQUIRED_HELP = ["-p, --print", "--output-format <format>", "--verbose", "--tools <tools...>", "--allowedTools", "--permission-mode <mode>", "--permission-prompts <target>", "--session-id <uuid>"] as const;
+const INITIAL_SKILL_NAME = "aboard-e2e-initial-skill";
 const CLEARED_ENVIRONMENT = [
   "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS",
   "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE",
@@ -26,10 +27,20 @@ export async function runSmoke(config: HarnessConfig): Promise<void> {
   const fixturePath = join(config.cloneRoot, "deterministic.txt");
   const baseline = await readFile(fixturePath, "utf8");
   if (baseline !== BEFORE_CONTENT) throw new Error("Runtime clone does not contain the exact canonical fixture baseline");
-  await mkdir(config.claudeConfigRoot, { recursive: true });
+  const skillDirectory = join(config.claudeConfigRoot, "skills", INITIAL_SKILL_NAME);
+  await mkdir(skillDirectory, { recursive: true });
   await writeFile(join(config.claudeConfigRoot, "settings.json"), "{}\n", { encoding: "utf8", flag: "wx" }).catch((error: unknown) => {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
   });
+  await writeFile(join(skillDirectory, "SKILL.md"), [
+    "---",
+    `name: ${INITIAL_SKILL_NAME}`,
+    "description: Proves that Claude expands a user-only skill passed as its initial CLI prompt.",
+    "disable-model-invocation: true",
+    "---",
+    `${SCENARIO_MARKER} Perform the deterministic fixture update using the available tools, then report completion.`,
+    "",
+  ].join("\n"), "utf8");
 
   const server = await startFakeAnthropicServer({ repoRoot: config.cloneRoot, diagnosticsPath: config.diagnosticsPath, readinessPath: config.readinessPath });
   try {
@@ -37,7 +48,7 @@ export async function runSmoke(config: HarnessConfig): Promise<void> {
     const args = [
       "-p", "--output-format", "stream-json", "--verbose", "--tools", "Read,Edit", "--allowedTools", "Read,Edit",
       "--permission-mode", "acceptEdits", "--permission-prompts", "none", "--session-id", sessionId,
-      `${SCENARIO_MARKER} Perform the deterministic fixture update using the available tools, then report completion.`,
+      `/${INITIAL_SKILL_NAME} Perform the deterministic fixture update.`,
     ];
     const env = childEnvironment(process.env, {
       ANTHROPIC_BASE_URL: server.baseUrl,

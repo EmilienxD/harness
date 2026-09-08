@@ -19,7 +19,7 @@ import {
 } from "../src/scaffold/agent-definition.js";
 
 const agentsRoot = join(process.cwd(), "assets", "scaffold", ".abd", "agents");
-const taskTools = ["TaskCreate", "TaskGet", "TaskList", "TaskStop", "TaskUpdate", "TodoWrite"] as const;
+const archiveRoot = join(process.cwd(), "docs", "archive", "agent-prompts");
 
 const expected = {
   brainstormer: {
@@ -40,26 +40,6 @@ const expected = {
     effort: "medium",
     tools: ["WebSearch", "WebFetch"],
   },
-  // The three roles that are only ever sent at one issue defer both fields to
-  // that issue's difficulty label; every other role answers for itself.
-  implementer: {
-    capability: "write-capable",
-    model: "by-difficulty",
-    effort: "by-difficulty",
-    tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
-  },
-  "pr-doctor-afk": {
-    capability: "write-capable",
-    model: "by-difficulty",
-    effort: "by-difficulty",
-    tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
-  },
-  "pr-doctor-hitl": {
-    capability: "write-capable",
-    model: "by-difficulty",
-    effort: "by-difficulty",
-    tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "LSP", "Agent", "Skill", ...taskTools],
-  },
 } as const;
 
 async function definition(name: WorkerAgentName) {
@@ -68,7 +48,7 @@ async function definition(name: WorkerAgentName) {
   return parsed.value;
 }
 
-test("ships the Manager, six worker definitions, and the Explore builtin profile", async () => {
+test("ships the Manager, three interactive definitions, and the Explore builtin profile", async () => {
   const files = (await readdir(agentsRoot)).sort();
   assert.deepEqual(files, SCAFFOLDED_AGENT_NAMES.map((name) => `${name}.md`).sort());
   assert.equal(files.includes("manager.md"), true);
@@ -78,11 +58,12 @@ test("ships the Manager, six worker definitions, and the Explore builtin profile
   assert.equal(files.includes("explorer.md"), false);
 });
 
-test("auto-run definitions describe the task without exposing orchestration", async () => {
+test("auto-run prompts are archived but absent from the runtime scaffold", async () => {
   for (const name of ["implementer", "pr-doctor-afk", "pr-doctor-hitl"] as const) {
-    const source = await readFile(join(agentsRoot, `${name}.md`), "utf8");
-    assert.doesNotMatch(source, /aboard|auto[ -]?run|automated|automation|the extension|the system (?:has|commits)|becomes the pull request body/i, name);
+    await assert.rejects(readFile(join(agentsRoot, `${name}.md`), "utf8"), { code: "ENOENT" });
+    assert.match(await readFile(join(archiveRoot, `${name}.md`), "utf8"), new RegExp(`^---\\nname: ${name}$`, "mu"));
   }
+  assert.match(await readFile(join(archiveRoot, "README.md"), "utf8"), /never loads them at runtime/u);
 });
 
 test("the Explore profile configures launch policy without copying Claude's prompt or tools", async () => {
@@ -148,7 +129,7 @@ test("the Manager definition declares its orchestration tool list", async () => 
 
 test("an agent definition may declare an effort level, and an unknown one is refused", () => {
   const worker = (frontmatter: string) =>
-    parseAgentDefinition(`---\nname: implementer\ndescription: d\ntools: Read\nmodel: opus\n${frontmatter}---\nImplement.`);
+    parseAgentDefinition(`---\nname: prototyper\ndescription: d\ntools: Read\nmodel: opus\n${frontmatter}---\nImplement.`);
 
   const inherited = worker("");
   assert.equal(inherited.ok, true, inherited.ok ? undefined : inherited.reason);
@@ -197,7 +178,7 @@ test("the rewrite narrows a bare Agent allowance to Claude Code's native types",
 test("the rewrite copies unresolved frontmatter verbatim, including the color", async () => {
   const source = [
     "---",
-    "name: implementer",
+    "name: prototyper",
     "description: Implement one issue.",
     "tools: Read, Agent",
     "model: opus",
@@ -263,13 +244,13 @@ test("the authored definitions declare the fleet colors, carried through rather 
 
 test("a color a user writes travels verbatim, and a blank one stays one line", () => {
   const parsed = parseAgentDefinition(
-    "---\nname: implementer\ndescription: d\ntools: Read\nmodel: opus\ncolor: chartreuse\n---\nImplement.",
+    "---\nname: prototyper\ndescription: d\ntools: Read\nmodel: opus\ncolor: chartreuse\n---\nImplement.",
   );
   assert.equal(parsed.ok, true, parsed.ok ? undefined : parsed.reason);
   assert.deepEqual(parsed.ok && parsed.value.extraFrontmatter, ["color: chartreuse"]);
 
   const blank = parseAgentDefinition(
-    "---\nname: implementer\ndescription: d\ntools: Read\nmodel: opus\ncolor:\n---\nImplement.",
+    "---\nname: prototyper\ndescription: d\ntools: Read\nmodel: opus\ncolor:\n---\nImplement.",
   );
   assert.equal(blank.ok, true, blank.ok ? undefined : blank.reason);
   assert.deepEqual(blank.ok && blank.value.extraFrontmatter, ["color:"]);

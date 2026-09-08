@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { CORE_MCP_TOOLS, createMcpHandler } from "../src/bridge/mcp.js";
 import { DelegationCoordinator } from "../src/bridge/delegation.js";
-import { resolveLaunchConfiguration } from "../src/claude/launch.js";
+import {
+  AUTO_RUN_WORKER_SKILLS,
+  autoRunWorkerConfiguration,
+  resolveLaunchConfiguration,
+  type AutoRunWorkerType,
+} from "../src/claude/launch.js";
 
 /** An aboard definition: body plus tool list, rewritten per launch under `--add-dir`. */
 const definitionFor = (agentName: string, declaredTools: readonly string[]) =>
@@ -125,6 +130,8 @@ function setup() {
     configurations: {
       get: async (type) => type === "general-purpose"
         ? resolveLaunchConfiguration({})
+        : type in AUTO_RUN_WORKER_SKILLS
+          ? autoRunWorkerConfiguration(type as AutoRunWorkerType)
         : isNamedBuiltinAgentType(type)
           ? resolveLaunchConfiguration({ agentName: type })
           : definitionFor(type, type === "brainstormer" ? ["mcp__aboard__*", "Read", "Grep"] : type === "webresearcher" ? ["Read", "Grep"] : ["Read", "Edit"]),
@@ -962,7 +969,7 @@ test("an unobservable session is not a gone one: no liveness source never reclai
     managerAgentId: () => MANAGER, shell: "powershell",
     agentIdFactory: () => agent("worker-unobserved"),
     sessionIdFactory: () => session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    configurations: { get: async () => definitionFor("pr-doctor-afk", ["Read", "Edit"]) },
+    configurations: { get: async () => autoRunWorkerConfiguration("pr-doctor-afk") },
     prompts: { resolve: async (input) => input.prompt === undefined ? undefined : resolvedPromptFromText(input.prompt) },
     spills: { write: async (spill) => spill.relativePath, prepare: async () => undefined },
   });
@@ -1017,7 +1024,7 @@ test("the configured launch command leads every worker command line", async () =
   const { coordinator, host } = setup();
   await coordinator.spawn({ type: "implementer", prompt: "Implement the change", description: "implement the current change" });
   // The wrapper's own arguments come first; aboard's flags are appended unchanged.
-  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json --agent abd-implementer-worker-1 /);
+  assert.match(host.created[0]!.terminal.sent.at(-1)!, /^& wrapper run MyProfile -- --session-id .* --add-dir C:\/storage\/runtime\/agents\/worker-1 --settings C:\/storage\/runtime\/agents\/worker-1\/settings\.json .*'\/implement Implement the change'$/);
   // Role alone does not impose auto-run's fence: this launch is Manager-driven.
   assert.doesNotMatch(host.created[0]!.terminal.sent.at(-1)!, /Bash\(git commit\*\)/);
 });
@@ -1079,7 +1086,7 @@ test("an isolated launch runs in its own directory, writes its runtime files the
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(host.created[0]?.options.cwd, CHECKOUT);
-  assert.deepEqual(spills, [{ path: `${RUNTIME_ROOT}/agents/worker-1/.claude/agents/abd-implementer-worker-1.md`, root: CHECKOUT }]);
+  assert.deepEqual(spills, []);
   // The isolation rules join the infrastructure and auto-run denials rather than replacing them.
   const line = host.created[0]!.terminal.sent.at(-1)!;
   assert.match(line, /--disallowedTools 'mcp__aboard__\*,Bash\(git -\*\),/);

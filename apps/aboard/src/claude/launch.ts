@@ -158,8 +158,33 @@ export type LaunchConfiguration =
       readonly declaredEffort?: DeclaredEffort;
       readonly declaredCommand?: readonly string[];
     }
+  | {
+      /** A normal top-level Claude session whose first prompt invokes a Harness skill. */
+      readonly shape: "skill";
+      readonly skillName: string;
+      readonly declaredModel?: string;
+      readonly declaredEffort?: DeclaredEffort;
+      readonly declaredCommand?: readonly string[];
+    }
   /** Claude Code's unmodified default session, exposed as `general-purpose`. */
   | { readonly shape: "default" };
+
+export const AUTO_RUN_WORKER_SKILLS = {
+  implementer: "implement",
+  "pr-doctor-afk": "review-afk",
+  "pr-doctor-hitl": "review-hitl",
+} as const;
+
+export type AutoRunWorkerType = keyof typeof AUTO_RUN_WORKER_SKILLS;
+
+export function autoRunWorkerConfiguration(type: AutoRunWorkerType): LaunchConfiguration {
+  return {
+    shape: "skill",
+    skillName: AUTO_RUN_WORKER_SKILLS[type],
+    declaredModel: BY_DIFFICULTY,
+    declaredEffort: BY_DIFFICULTY,
+  };
+}
 
 /** The flat shape a caller supplies, so the exclusive pair can be rejected. */
 export interface LaunchConfigurationInput {
@@ -353,6 +378,8 @@ export function launchWriteCapability(
     // therefore the restrictive answer.
     case "builtin":
       return deriveWriteCapability(undefined);
+    case "skill":
+      return "write-capable";
     case "default":
       return deriveWriteCapability(undefined);
   }
@@ -628,22 +655,25 @@ function planPrompt(
     readonly threshold: number;
     readonly runtimeDirectory: string;
     readonly stem: string;
+    readonly invocation?: string;
   },
 ): PromptPlan {
   if (prompt === undefined) return { delivery: "none", args: [] };
 
   const text = prompt.text.trim();
-  if (text.length <= options.threshold && canQuoteArgument(options.shell, text)) {
-    return { delivery: "inline", args: [text] };
+  const inline = options.invocation === undefined ? text : `${options.invocation} ${text}`;
+  if (inline.length <= options.threshold && canQuoteArgument(options.shell, inline)) {
+    return { delivery: "inline", args: [inline] };
   }
 
   const relativePath = spillRelativePath(options.runtimeDirectory, options.agentId, options.stem);
   const reference = `Your full task is in @${relativePath}; follow it.`;
-  const withHeadline = `${prompt.headline} ${reference}`;
+  const prefix = options.invocation === undefined ? "" : `${options.invocation} `;
+  const withHeadline = `${prefix}${prompt.headline} ${reference}`;
   const stub =
     withHeadline.length <= options.threshold && canQuoteArgument(options.shell, withHeadline)
       ? withHeadline
-      : reference;
+      : `${prefix}${reference}`;
 
   return {
     delivery: "spilled",
@@ -762,49 +792,57 @@ function wrapCommand(
   };
 }
 
+function assertLaunchShape(agentType: AgentType, configuration: LaunchConfiguration): void {
+  if (agentType === "manager") {
+    if (configuration.shape !== "agent-defined" || configuration.agentName !== MANAGER_AGENT_NAME) {
+      throw new LaunchPlanError("shape-not-allowed", "The Manager launches from .abd/agents/manager.md");
+    }
+    return;
+  }
+  if (agentType === "general-purpose") {
+    if (configuration.shape !== "default") {
+      throw new LaunchPlanError(
+        "shape-not-allowed",
+        "general-purpose launches as Claude Code's default session without --agent or a system prompt",
+      );
+    }
+    return;
+  }
+  const expectedSkill = AUTO_RUN_WORKER_SKILLS[agentType as AutoRunWorkerType];
+  if (expectedSkill !== undefined) {
+    if (configuration.shape !== "skill" || configuration.skillName !== expectedSkill) {
+      throw new LaunchPlanError("shape-not-allowed", `${agentType} must launch through /${expectedSkill}`);
+    }
+    return;
+  }
+  if (isNamedBuiltinAgentType(agentType)) {
+    if (configuration.shape !== "builtin" || configuration.agentName !== agentType) {
+      throw new LaunchPlanError(
+        "shape-not-allowed",
+        `The ${agentType} session must launch through Claude Code's builtin ${agentType} agent`,
+      );
+    }
+    return;
+  }
+  if (configuration.shape !== "agent-defined" || configuration.agentName !== agentType) {
+    throw new LaunchPlanError("shape-not-allowed", `${agentType} must launch from its matching agent definition`);
+  }
+}
+
 export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   const { command, threshold, runtimeDirectory, wrapper, launchCode } = commonPreconditions(request, request.configuration);
   const { agentType, configuration } = request;
 
-  if (agentType === "manager") {
-    // The Manager's persona and tool list both live in
-    // .abd/agents/manager.md; it never launches from a bare tool list.
-    if (
-      configuration.shape !== "agent-defined" ||
-      configuration.agentName !== MANAGER_AGENT_NAME
-    ) {
-      throw new LaunchPlanError(
-        "shape-not-allowed",
-        "The Manager launches from .abd/agents/manager.md",
-      );
-    }
-  }
-  if (agentType === "general-purpose" && configuration.shape !== "default") {
-    throw new LaunchPlanError(
-      "shape-not-allowed",
-      "general-purpose launches as Claude Code's default session without --agent or a system prompt",
-    );
-  }
-  if (agentType !== "general-purpose" && configuration.shape === "default") {
-    throw new LaunchPlanError(
-      "shape-not-allowed",
-      `Only general-purpose launches as Claude Code's default session: ${agentType}`,
-    );
-  }
-  if (isNamedBuiltinAgentType(agentType) !== (configuration.shape === "builtin")) {
-    throw new LaunchPlanError(
-      "shape-not-allowed",
-      `Only Claude Code's builtin agent types launch with --agent: ${agentType}`,
-    );
-  }
+  assertLaunchShape(agentType, configuration);
 
   const prompt = normalizePrompt(request.prompt);
-  if (prompt === undefined && isAutomatedAgentType(agentType)) {
-    // An automated worker with no first message sits at an empty TUI forever,
-    // and 5.1.3 forbids the only mechanism that could rescue it.
+  if (prompt === undefined && (isAutomatedAgentType(agentType) || configuration.shape === "skill")) {
+    // An automated worker with no first message sits at an empty TUI forever.
+    // Harness-backed workers also need a first message to invoke their skill;
+    // attended workers may be interactive after that initial expansion.
     throw new LaunchPlanError(
       "missing-prompt",
-      `An automated ${agentType} cannot launch without a prompt`,
+      `${agentType} cannot launch without its initial prompt`,
     );
   }
 
@@ -836,6 +874,8 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     case "builtin":
       shapeArguments.push("--agent", configuration.agentName);
       break;
+    case "skill":
+      break;
     case "default":
       break;
   }
@@ -858,6 +898,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       threshold: promptThreshold,
       runtimeDirectory,
       stem: "prompt",
+      ...(configuration.shape === "skill" ? { invocation: `/${configuration.skillName}` } : {}),
     });
     const args = [...fixedArguments, ...plan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
@@ -951,6 +992,7 @@ export function planManagerResume(request: ManagerResumePlanRequest): LaunchPlan
 export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan {
   const { command, wrapper, runtimeDirectory, launchCode, threshold } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
+  assertLaunchShape(request.agentType, configuration);
   const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
   const definition = configuration.shape === "agent-defined"
     ? agentRuntimeArguments(

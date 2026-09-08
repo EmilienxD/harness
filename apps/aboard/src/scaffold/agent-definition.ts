@@ -47,9 +47,6 @@ export const WORKER_AGENT_NAMES = [
   "brainstormer",
   "prototyper",
   "webresearcher",
-  "implementer",
-  "pr-doctor-afk",
-  "pr-doctor-hitl",
 ] as const;
 
 /** Claude Code builtins with an aboard-owned launch profile but no copied prompt or tools. */

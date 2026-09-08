@@ -34,7 +34,9 @@ test("fresh scaffold installs every aboard-owned asset under .abd only", async (
   assert.match(explore, /name: Explore/);
   assert.doesNotMatch(explore, /^tools\s*:/mu);
   await assert.rejects(readFile(join(root, ".claude", "agents", "manager.md")));
-  for (const name of ["general-purpose", "explorer"]) await assert.rejects(readFile(join(root, ".abd", "agents", `${name}.md`)));
+  for (const name of ["general-purpose", "explorer", "implementer", "pr-doctor-afk", "pr-doctor-hitl"]) {
+    await assert.rejects(readFile(join(root, ".abd", "agents", `${name}.md`)));
+  }
   assert.equal("todo" in report, false);
   // An existing installation upgrades the same way, with nothing to reconcile.
   assert.equal("todo" in await scaffoldProject({ projectRoot: root, assetRoot: assets }), false);
@@ -99,11 +101,11 @@ test("rerun is idempotent and never changes user Claude or MCP configuration", a
 test("owned assets upgrade only when unchanged and quietly preserve local edits", async () => {
   const root = await project();
   await scaffoldProject({ projectRoot: root, assetRoot: assets });
-  const target = join(root, ".abd", "agents", "implementer.md");
+  const target = join(root, ".abd", "agents", "prototyper.md");
   await writeFile(target, "local edit\n");
   const report = await scaffoldProject({ projectRoot: root, assetRoot: assets, autoCompactEnabled: false });
   assert.equal(await readFile(target, "utf8"), "local edit\n");
-  assert.ok(report.preserved.includes(".abd/agents/implementer.md"));
+  assert.ok(report.preserved.includes(".abd/agents/prototyper.md"));
   // Preserving a local edit is non-destructive and needs no user action, so it
   // is not a warning; the autoCompact check remains the only warning here.
   assert.deepEqual(report.warnings.filter((warning) => warning.toLowerCase().includes("preserved")), []);
