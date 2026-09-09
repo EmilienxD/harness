@@ -7,6 +7,7 @@ import { childEnvironment } from "../e2e/smoke.js";
 import { harnessWorktreePaths } from "../e2e/repository.js";
 import { FINAL_RESPONSE, SCENARIO_MARKER, ScenarioMismatch, parseMessagesRequest, transition, type Message } from "../e2e/scenario.js";
 import { startFakeAnthropicServer } from "../e2e/server.js";
+import { startFakeOpenAiServer } from "../e2e/codex-server.js";
 
 function request(messages: readonly Message[], stream = false) {
   return parseMessagesRequest({ model: "claude-e2e", max_tokens: 1000, messages, stream, tools: [{ name: "Read" }, { name: "Edit" }], unknown_future_field: true }, true);
@@ -80,6 +81,100 @@ test("fake server supports aggregate and streaming responses with redacted diagn
   assert.match(diagnostics, /"upstreamMode": "forbidden"/);
   await rm(root, { recursive: true, force: true });
 });
+
+test("OpenAI emulator drives a real Codex function turn and redacts diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-codex-server-"));
+  const diagnosticsPath = join(root, "diagnostics.json");
+  const server = await startFakeOpenAiServer({ diagnosticsPath });
+  const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
+  const base = {
+    model: "codex-e2e", stream: true, store: false,
+    input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "[E2E:chatgpt-success] private-prompt" }] }],
+    tools: [{ type: "function", name: "exec_command", parameters: { type: "object" } }],
+  };
+  try {
+    const first = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify(base) });
+    assert.equal(first.status, 200);
+    const firstCompleted = completedResponse(await first.text());
+    const call = (firstCompleted.output as Record<string, unknown>[])[0]!;
+    assert.equal(call.type, "function_call");
+
+    const additionalToolsBody = {
+      ...base,
+      tools: undefined,
+      input: [{ type: "additional_tools", tools: [{ type: "custom", name: "exec" }] }, ...base.input],
+    };
+    const additionalTools = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(additionalToolsBody),
+    });
+    assert.equal(additionalTools.status, 200);
+    const localCall = (completedResponse(await additionalTools.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(localCall.type, "custom_tool_call");
+    assert.equal(localCall.name, "exec");
+
+    const localResult = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...additionalToolsBody,
+        input: [...additionalToolsBody.input, localCall, { type: "custom_tool_call_output", call_id: localCall.call_id, output: "Script completed\nOutput: {}" }],
+      }),
+    });
+    assert.equal(localResult.status, 200);
+    const localCompleted = completedResponse(await localResult.text());
+    assert.equal(((localCompleted.output as Record<string, unknown>[])[0]!.content as Record<string, unknown>[])[0]!.text, "Deterministic ChatGPT session completed.");
+
+    const secondBody = {
+      ...base,
+      input: [...base.input, call, { type: "function_call_output", call_id: call.call_id, output: "Chunk ID: e2e\nProcess exited with code 0" }],
+    };
+    const second = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify(secondBody) });
+    assert.equal(second.status, 200);
+    const secondCompleted = completedResponse(await second.text());
+    assert.equal(((secondCompleted.output as Record<string, unknown>[])[0]!.content as Record<string, unknown>[])[0]!.text, "Deterministic ChatGPT session completed.");
+
+    const title = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...base,
+        tools: undefined,
+        client_metadata: { "x-codex-turn-metadata": JSON.stringify({ request_kind: "turn" }) },
+        text: { format: { type: "json_schema", name: "generated_thread_title", schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false } } },
+      }),
+    });
+    assert.equal(title.status, 200);
+    const titleCompleted = completedResponse(await title.text());
+    assert.equal(((titleCompleted.output as Record<string, unknown>[])[0]!.content as Record<string, unknown>[])[0]!.text, '{"title":"Deterministic E2E task"}');
+
+    const toolLessAgentTurn = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...base, tools: undefined, client_metadata: { "x-codex-turn-metadata": JSON.stringify({ request_kind: "turn" }) } }),
+    });
+    assert.equal(toolLessAgentTurn.status, 400);
+
+    const rejected = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ ...base, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "private-unknown" }] }] }) });
+    assert.equal(rejected.status, 400);
+    assert.equal(server.assertions().unexpectedRequests, 2);
+    assert.deepEqual(server.assertions().checkpoints, ["attended:tool", "attended:complete", "auxiliary:thread-title"]);
+  } finally {
+    await server.close();
+  }
+  const diagnostics = await readFile(diagnosticsPath, "utf8");
+  assert.doesNotMatch(diagnostics, /private-prompt|private-unknown|aboard-e2e-/);
+  assert.match(diagnostics, /"protocol": "openai-responses"/);
+  await rm(root, { recursive: true, force: true });
+});
+
+function completedResponse(stream: string): Record<string, unknown> {
+  const data = stream.split(/\r?\n/u).filter((line) => line.startsWith("data: ") && line !== "data: [DONE]").map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>);
+  const completed = data.find((event) => event.type === "response.completed");
+  assert.ok(completed !== undefined);
+  return completed.response as Record<string, unknown>;
+}
 
 test("smoke child environment clears paid and alternate provider selectors", () => {
   const env = childEnvironment({ ANTHROPIC_API_KEY: "paid", CLAUDE_CODE_USE_BEDROCK: "1", AWS_ACCESS_KEY_ID: "secret", KEEP_ME: "yes" }, { ANTHROPIC_AUTH_TOKEN: "dummy" });

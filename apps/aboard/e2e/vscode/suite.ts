@@ -45,6 +45,7 @@ export async function run(): Promise<void> {
   assert.ok(extension, "aboard extension is discoverable");
   const api = await extension.activate() as AboardApi;
   const phase = process.env.ABOARD_E2E_PHASE;
+  const platform = process.env.ABOARD_E2E_PLATFORM ?? "claude";
 
   if (phase === "initialize") {
     assert.equal(window.terminals.some((terminal) => terminal.name.startsWith("aboard:")), false);
@@ -90,10 +91,11 @@ export async function run(): Promise<void> {
     assert.deepEqual(rows.map((item) => item.checkpoint), [
       "auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-complete",
     ]);
-    assert.ok(rows.find((item) => item.checkpoint === "auto-afk-read")?.toolNamesOffered.includes("Read"));
-    assert.ok(rows.find((item) => item.checkpoint === "auto-afk-edit")?.toolNamesOffered.includes("Edit"));
+    const expectedTool = platform === "chatgpt" ? "exec" : "Read";
+    assert.ok(rows.find((item) => item.checkpoint === "auto-afk-read")?.toolNamesOffered.includes(expectedTool));
+    assert.ok(rows.find((item) => item.checkpoint === "auto-afk-edit")?.toolNamesOffered.includes(platform === "chatgpt" ? "exec" : "Edit"));
     assert.equal(rows.some((item) => item.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__"))), false);
-    assert.equal(rows.every((item) => item.model?.includes("haiku") === true), true, "routine implementer, Explore, and reviewer use their configured Haiku routing");
+    assert.equal(rows.every((item) => platform === "chatgpt" ? item.model === "codex-e2e" || item.model?.includes("luna") === true : item.model?.includes("haiku") === true), true, `routine workers use their configured ${platform} routing`);
 
     await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(issueNumber), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
@@ -174,13 +176,14 @@ export async function run(): Promise<void> {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === "auto-followup-complete") ? value : undefined;
     }, "single-branch follow-up implementer did not complete", 480);
-    const successes = completed.observations.filter((item) => item.result === "success");
+    const successes = completed.observations.filter((item) => item.scenario !== null && item.result === "success");
     assert.deepEqual(successes.map((item) => item.checkpoint), [
-      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-complete", "auto-followup-read", "auto-followup-edit", "auto-followup-complete",
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ]);
     assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);
     assert.equal(successes.some((item) => item.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__"))), false);
-    assert.equal(successes.every((item) => item.model?.includes("opus") === true), true, "advanced and expert workers use their configured Opus routing");
+    assert.equal(successes.every((item) => item.model?.includes(platform === "chatgpt" ? "sol" : "opus") === true), true, `advanced and expert workers use their configured ${platform} routing`);
     await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(followup), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
       return issue.state === "CLOSED" ? issue : undefined;

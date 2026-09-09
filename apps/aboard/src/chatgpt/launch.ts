@@ -28,8 +28,8 @@ export interface ChatGptDifficultyLaunchPolicy {
 export const CHATGPT_DIFFICULTY_LAUNCH_POLICIES: { readonly [K in IssueDifficulty]: ChatGptDifficultyLaunchPolicy } = {
   routine: { model: "gpt-5.6-luna", effort: "medium" },
   basic: { model: "gpt-5.6-terra", effort: "high" },
-  advanced: { model: "gpt-5.6", effort: "medium" },
-  expert: { model: "gpt-5.6", effort: "high" },
+  advanced: { model: "gpt-5.6-sol", effort: "medium" },
+  expert: { model: "gpt-5.6-sol", effort: "high" },
 };
 
 export function chatGptDifficultyLaunchPolicy(difficulty: IssueDifficulty | undefined): ChatGptDifficultyLaunchPolicy {
@@ -52,7 +52,7 @@ export const CHATGPT_EXPLORE_ROLE =
 export const CHATGPT_CHROME_INSTRUCTION =
   "This issue requires the Chrome browser backend. Use the chrome backend of your configured browser tool server to visualize, test, and debug your changes; do not fall back to the in-app browser or another backend.";
 
-const READ_ONLY_POLICY = ["-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"'] as const;
+const READ_ONLY_POLICY = ["--sandbox", "read-only", "-c", 'approval_policy="never"'] as const;
 
 const CLAUDE_MODELS: ReadonlySet<string> = new Set(["haiku", "sonnet", "opus"]);
 

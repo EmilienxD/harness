@@ -181,7 +181,7 @@ test("a ChatGPT Explore session is a visible top-level Codex session Codex canno
   assert.equal(plan.agentType, "Explore");
   assert.equal(plan.writeCapability, "read-only");
   assert.equal(plan.requiresWriteLease, false);
-  assert.equal(plan.args.includes('sandbox_mode="read-only"'), true);
+  assert.deepEqual(plan.args.slice(plan.args.indexOf("--sandbox"), plan.args.indexOf("--sandbox") + 2), ["--sandbox", "read-only"]);
   assert.equal(plan.args.includes('approval_policy="never"'), true);
   assert.equal(plan.args.includes("--agent"), false);
   assert.equal(plan.args.at(-2), "--");
@@ -416,7 +416,7 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
   assert.equal(afk.args.includes('web_search="disabled"'), true);
   assert.equal(afk.args.includes("features.multi_agent=false"), true);
   assert.deepEqual(JSON.parse(afk.guard?.contents ?? "{}"), { denySubagents: true, denyCommands: ["git commit*", "gh pr review*"] });
-  assert.deepEqual(afk.args.slice(afk.args.indexOf("--model"), afk.args.indexOf("--model") + 2), ["--model", "gpt-5.6"]);
+  assert.deepEqual(afk.args.slice(afk.args.indexOf("--model"), afk.args.indexOf("--model") + 2), ["--model", "gpt-5.6-sol"]);
   assert.equal(afk.args.includes('model_reasoning_effort="medium"'), true);
   assert.equal(afk.task?.contents, "Review pull request #42.\n");
 

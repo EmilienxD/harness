@@ -49,7 +49,7 @@ export class ChatGptSessionProbe {
       });
     } catch (error) {
       const detail = rpcDetail(error);
-      if (/\b(?:thread|conversation|session)\b.*\bnot found\b|\bnot found\b.*\b(?:thread|conversation|session)\b/iu.test(detail)) {
+      if (/\b(?:thread|conversation|session)\b.*\b(?:not found|not loaded)\b|\b(?:not found|not loaded)\b.*\b(?:thread|conversation|session)\b/iu.test(detail)) {
         return { state: "missing", reason: "Codex no longer has that saved conversation" };
       }
       if (/decode|deserialize|corrupt|rollout|invalid (?:thread|session)/iu.test(detail)) {

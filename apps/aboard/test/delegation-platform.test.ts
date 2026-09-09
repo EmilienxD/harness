@@ -183,7 +183,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
   const run = coordinator.runAutomated({ type: "Explore", description: "explore issue 14", issues: [14] });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.match(command, /sandbox_mode="read-only"/u);
+  assert.match(command, /--sandbox read-only/u);
   assert.match(command, /approval_policy="never"/u);
   assert.match(delivered.at(-1) ?? "", /^You are a read-only exploration agent\./u);
   assert.match(delivered.at(-1) ?? "", /Report the implementation context for issue #14\./u);

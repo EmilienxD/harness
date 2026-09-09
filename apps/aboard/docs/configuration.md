@@ -85,9 +85,9 @@ Difficulty routing is:
 | :-- | :-- | :-- | :-- | :-- |
 | `[AI]-routine-difficulty` | `haiku` | `medium` | `gpt-5.6-luna` | `medium` |
 | `[AI]-basic-difficulty` | `sonnet` | `high` | `gpt-5.6-terra` | `high` |
-| `[AI]-advanced-difficulty` | `opus` | `medium` | `gpt-5.6` | `medium` |
-| `[AI]-expert-difficulty` | `opus` | `high` | `gpt-5.6` | `high` |
-| No difficulty label | `opus` | `high` | `gpt-5.6` | `high` |
+| `[AI]-advanced-difficulty` | `opus` | `medium` | `gpt-5.6-sol` | `medium` |
+| `[AI]-expert-difficulty` | `opus` | `high` | `gpt-5.6-sol` | `high` |
+| No difficulty label | `opus` | `high` | `gpt-5.6-sol` | `high` |
 
 Each platform routes difficulty through its own policy, so a Claude model name never reaches Codex and a Codex slug never reaches Claude Code.
 

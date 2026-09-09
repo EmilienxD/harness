@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { writeFile, mkdtemp, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import test from "node:test";
 
 import {
@@ -37,6 +34,11 @@ test("ChatGPT resumability distinguishes missing and non-persisted conversations
     state: "missing",
     reason: "Codex no longer has that saved conversation",
   });
+  const notLoaded = new ChatGptSessionProbe({ exchange: async () => { throw { code: -32600, message: "thread not loaded" }; } });
+  assert.deepEqual(await notLoaded.inspect(sessionId, "C:/work", ["codex"]), {
+    state: "missing",
+    reason: "Codex no longer has that saved conversation",
+  });
 
   const ephemeral = new ChatGptSessionProbe({
     exchange: async () => ({ thread: { id: sessionId, ephemeral: true, status: { type: "notLoaded" } } }),
@@ -56,18 +58,4 @@ test("ChatGPT resumability reports corrupt or unreadable conversation state sepa
       && /could not read/u.test(error.message)
       && /failed to decode rollout/u.test(error.message),
   );
-});
-
-test("ChatGPT resumability speaks the supported App Server protocol over stdio", async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), "aboard-chatgpt-sessions-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  await writeFile(join(cwd, ".fake-codex-session.json"), `${JSON.stringify({ sessionId })}\n`, "utf8");
-  const probe = new ChatGptSessionProbe({ timeoutMs: 5_000 });
-  const command = [process.execPath, resolve(process.cwd(), "e2e", "fake-codex.mjs")];
-
-  assert.deepEqual(await probe.inspect(sessionId, cwd, command), { state: "resumable" });
-  assert.deepEqual(await probe.inspect("c15badb6-d6c8-45a6-a59f-e931cd364332" as SessionId, cwd, command), {
-    state: "missing",
-    reason: "Codex no longer has that saved conversation",
-  });
 });

@@ -161,14 +161,14 @@ test("a ChatGPT implementer profile is configurable independently of Claude rout
   const parsed = parseLaunchFile(`{
     "version": 1,
     "platform": "chatgpt",
-    "implementer": { "model": "gpt-5.6", "effort": "xhigh", "webSearch": "live", "subagents": "allowed" }
+    "implementer": { "model": "gpt-5.6-sol", "effort": "xhigh", "webSearch": "live", "subagents": "allowed" }
   }`);
 
   assert.deepEqual(settings(parsed.value.configuration("implementer")), {
     shape: "skill",
     skillName: "address-issue",
     declaredCommand: ["codex"],
-    declaredModel: "gpt-5.6",
+    declaredModel: "gpt-5.6-sol",
     declaredEffort: "xhigh",
     webSearch: "live",
     subagents: "allowed",
@@ -230,7 +230,7 @@ test("invalid known launch fields block configuration", () => {
     '{"version":1,"platform":"claude","explore":{"deniedTools":["Agent"]}}',
     '{"version":1,"platform":"claude","implementer":{"effort":"inherit"}}',
     '{"version":1,"platform":"claude","reviewer":{"deniedTools":"Agent"}}',
-    '{"version":1,"platform":"claude","implementer":{"model":"gpt-5.6"}}',
+    '{"version":1,"platform":"claude","implementer":{"model":"gpt-5.6-sol"}}',
     '{"version":1,"platform":"chatgpt","interactive":{"model":"sonnet"}}',
   ]) {
     assert.throws(() => parseLaunchFile(text), LaunchFileError, text);
@@ -241,7 +241,7 @@ test("platform diagnostics identify missing, unknown, and cross-platform setting
   assert.throws(() => parseLaunchFile('{"version":1}'), /platform is required.*claude.*chatgpt/u);
   assert.throws(() => parseLaunchFile('{"version":1,"platform":"codex"}'), /platform must be.*claude.*chatgpt.*codex/u);
   assert.throws(
-    () => parseLaunchFile('{"version":1,"platform":"claude","implementer":{"model":"gpt-5.6"}}'),
+    () => parseLaunchFile('{"version":1,"platform":"claude","implementer":{"model":"gpt-5.6-sol"}}'),
     /implementer\.model is not valid for platform claude/u,
   );
   assert.throws(

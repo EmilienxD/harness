@@ -1,7 +1,8 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { createPlatformLifecycleRoutes } from "../src/bridge/platform-lifecycle.js";
 import { startBridge } from "../src/bridge/server.js";
@@ -11,43 +12,66 @@ import { spawnCommandRunner } from "../src/claude/preflight.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../src/auto/permissions.js";
 import { ChatGptBrowserProbe } from "../src/chatgpt/browser.js";
 import { ChatGptAgentPlatform } from "../src/chatgpt/platform.js";
+import { ChatGptSessionProbe } from "../src/chatgpt/sessions.js";
 import type { AgentId, AgentSession, AgentType, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { lockMarkerPresent, sessionWrapperLayout } from "../src/runtime/lock-markers.js";
 import type { HarnessConfig } from "./config.js";
 import { contains } from "./config.js";
+import { startFakeOpenAiServer } from "./codex-server.js";
 
 const PROVISIONAL = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
-const ACTUAL = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
+const CODEX_COMMAND = ["codex", "exec", "--json"] as const;
+const CODEX_MODEL = "codex-e2e";
+const OPENAI_KEY_ENV = "ABOARD_E2E_OPENAI_KEY";
+const execFileAsync = promisify(execFile);
 
 export async function runChatGptSmoke(config: HarnessConfig): Promise<void> {
   const root = resolve(config.runtimeRoot, "chatgpt-smoke");
   if (!contains(config.runtimeRoot, root) || root === resolve(config.runtimeRoot)) throw new Error("ChatGPT smoke root escaped its dedicated runtime directory");
+  await validateCodexCli();
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
+  await writeFile(join(root, "sandbox-target.txt"), "sandbox baseline\n", "utf8");
+  await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: root, windowsHide: true });
+  const diagnosticsPath = join(root, "responses-diagnostics.json");
+  const server = await startFakeOpenAiServer({ diagnosticsPath });
+  const home = await prepareCodexHome(root, server.baseUrl);
+  const previousHome = process.env.CODEX_HOME;
+  const previousKey = process.env[OPENAI_KEY_ENV];
+  process.env.CODEX_HOME = home;
+  process.env[OPENAI_KEY_ENV] = server.authToken;
   try {
-    await runScenario(root, { prompt: "[E2E:chatgpt-success] complete the deterministic attended turn.", expectedExit: 0 });
-    await runScenario(root, { prompt: "", expectedExit: 0, resume: true });
-    await runScenario(root, { prompt: `${"large deterministic prompt ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 23 });
+    const attended = await runScenario(root, { prompt: "[E2E:chatgpt-success] complete the deterministic attended turn.", expectedExit: 0 });
+    await runScenario(root, { prompt: "Continue", expectedExit: 0, resume: attended });
+    await runScenario(root, { prompt: `${"large deterministic prompt ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 1 });
     await runScenario(root, { prompt: "[E2E:chatgpt-explore] report the implementation context for this checkout.", expectedExit: 0, explore: true });
-    await runScenario(root, { prompt: "[E2E:chatgpt-implement] address the deterministic issue.", expectedExit: 0, implement: true });
-    await runScenario(root, { prompt: "Continue", expectedExit: 0, implement: true, resume: true });
+    const implementer = await runScenario(root, { prompt: "[E2E:chatgpt-implement] address the deterministic issue.", expectedExit: 0, implement: true });
+    await runScenario(root, { prompt: "Continue", expectedExit: 0, implement: true, resume: implementer });
     await runScenario(root, { prompt: "[E2E:chatgpt-implement] address the deterministic issue with Chrome.", expectedExit: 0, implement: true, chrome: "declared" });
     await runChromeRefusal(root);
     await runScenario(root, { prompt: "[E2E:chatgpt-review-approve] review the deterministic pull request.", expectedExit: 0, review: "afk" });
     await runScenario(root, { prompt: "[E2E:chatgpt-review-changes] review the deterministic pull request.", expectedExit: 0, review: "afk" });
-    await runScenario(root, { prompt: "Continue", expectedExit: 0, review: "afk", resume: true });
-    await runScenario(root, { prompt: `${"large deterministic review ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 23, review: "afk" });
+    await runScenario(root, { prompt: `${"large deterministic review ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 1, review: "afk" });
     await runScenario(root, { prompt: "[E2E:chatgpt-review-approve] review the deterministic pull request with a human.", expectedExit: 0, review: "hitl" });
+    const assertions = server.assertions();
+    for (const checkpoint of ["prompt:spilled", "attended:tool", "attended:complete", "explore:tool", "explore:complete", "implement:guard", "implement:tool", "implement:complete", "review-approve:complete", "review-changes:complete", "process-failure:failed"]) {
+      if (!assertions.checkpoints.includes(checkpoint)) throw new Error(`Codex Responses scenario did not reach ${checkpoint}`);
+    }
+    if (assertions.unexpectedRequests !== 0) throw new Error(`Codex made ${assertions.unexpectedRequests} structurally invalid Responses requests`);
+    const diagnostics = await readFile(diagnosticsPath, "utf8");
+    if (/chatgpt-success|chatgpt-implement|chatgpt-review|chatgpt-explore|aboard-e2e-/u.test(diagnostics)) throw new Error("Codex Responses diagnostics persisted prompt or credential material");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousHome;
+    if (previousKey === undefined) delete process.env[OPENAI_KEY_ENV]; else process.env[OPENAI_KEY_ENV] = previousKey;
+    await server.close();
   }
 }
 
 interface Scenario {
   readonly prompt: string;
   readonly expectedExit: number;
-  readonly resume?: boolean;
+  readonly resume?: SessionId;
   readonly explore?: boolean;
   readonly implement?: boolean;
   readonly review?: "afk" | "hitl";
@@ -77,6 +101,43 @@ function scenarioName(scenario: Scenario): string {
   if (scenario.implement === true) return `implement-${scenario.chrome ?? "plain"}`;
   if (scenario.review !== undefined) return `review-${scenario.review}-${scenario.expectedExit}`;
   return `${scenario.expectedExit}`;
+}
+
+export async function prepareCodexHome(root: string, baseUrl: string, trustedProjects: readonly string[] = []): Promise<string> {
+  const home = join(root, "codex-home");
+  await mkdir(home, { recursive: true });
+  await writeFile(join(home, "config.toml"), [
+    `model = ${JSON.stringify(CODEX_MODEL)}`,
+    'model_provider = "aboard-e2e"',
+    'sandbox_mode = "danger-full-access"',
+    'approval_policy = "never"',
+    'windows.sandbox = "unelevated"',
+    '[model_providers.aboard-e2e]',
+    'name = "Aboard deterministic E2E"',
+    `base_url = ${JSON.stringify(baseUrl)}`,
+    `env_key = ${JSON.stringify(OPENAI_KEY_ENV)}`,
+    'wire_api = "responses"',
+    "request_max_retries = 0",
+    "stream_max_retries = 0",
+    "stream_idle_timeout_ms = 30000",
+    "[notice]",
+    "hide_full_access_warning = true",
+    "hide_world_writable_warning = true",
+    ...trustedProjects.flatMap((project) => [
+      `[projects.${JSON.stringify(resolve(project).toLowerCase())}]`,
+      'trust_level = "trusted"',
+    ]),
+    "",
+  ].join("\n"), "utf8");
+  await writeSkill(home, "address-issue", "[E2E:address-issue-skill-loaded] Follow the supplied issue and finish with the exact model-provided result.");
+  await writeSkill(home, "issue-review", "[E2E:issue-review-skill-loaded] Review the supplied change and finish with the exact model-provided disposition.");
+  return home;
+}
+
+async function writeSkill(home: string, name: string, instruction: string): Promise<void> {
+  const directory = join(home, "skills", name);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Deterministic Aboard E2E fixture.\n---\n\n${instruction}\n`, "utf8");
 }
 
 /** The deterministic final message each scenario's session reports on Stop. */
@@ -118,7 +179,7 @@ async function runChromeRefusal(root: string): Promise<void> {
   });
   const plan = platform.planLaunch({
     agentId, sessionId: PROVISIONAL, agentType: "implementer", shell: process.platform === "win32" ? "powershell" : "git-bash",
-    configuration: scenarioConfiguration(scenario, [process.execPath, resolve(process.cwd(), "e2e", "fake-codex.mjs")]),
+    configuration: scenarioConfiguration(scenario, CODEX_COMMAND),
     prompt: scenario.prompt, runtimeDirectory: runtimeRoot, chrome: true,
   });
   if (plan.chromeRequired !== true) throw new Error("ChatGPT E2E lost the Chrome requirement on the launch plan");
@@ -129,24 +190,26 @@ async function runChromeRefusal(root: string): Promise<void> {
   if (existsSync(join(runtimeRoot, "agents", agentId, "guard.json"))) throw new Error("ChatGPT E2E prepared runtime files for a refused launch");
 }
 
-async function runScenario(root: string, scenario: Scenario): Promise<void> {
-  const { prompt, expectedExit, resume = false, explore = false, implement = false } = scenario;
+async function runScenario(root: string, scenario: Scenario): Promise<SessionId> {
+  const { prompt, expectedExit, resume, explore = false, implement = false } = scenario;
   const agentType = scenarioAgentType(scenario);
   const worker = implement || scenario.review !== undefined;
   const agentId = `chatgpt-${scenarioName(scenario)}` as AgentId;
   const runtimeRoot = join(root, agentId);
   const wrapper = sessionWrapperLayout(runtimeRoot, resolve(process.cwd(), "assets", "runtime", "abd_wrapper.py"));
+  const realSessionProbe = new ChatGptSessionProbe();
   const platform = new ChatGptAgentPlatform({
     commandRunner: spawnCommandRunner(root),
     lifecycleAssets: LIFECYCLE_ASSETS,
     sessionIdFactory: () => PROVISIONAL,
+    sessionProbe: { inspect: (sessionId, cwd) => realSessionProbe.inspect(sessionId, cwd, ["codex"]) },
     ...(await browserProbeFor(root, scenario)),
   });
   const fleet = new FleetRegistry();
   const now = new Date().toISOString() as IsoTimestamp;
-  const expectedSessionId = resume ? ACTUAL : PROVISIONAL;
+  const expectedSessionId = resume ?? PROVISIONAL;
   const session: AgentSession = {
-    platform: "chatgpt", identity: { agentId, type: agentType }, sessionId: expectedSessionId, sessionBinding: resume ? "bound" : "provisional",
+    platform: "chatgpt", identity: { agentId, type: agentType }, sessionId: expectedSessionId, sessionBinding: resume === undefined ? "provisional" : "bound",
     terminal: { terminalId: `terminal-${agentId}` as TerminalId, name: "ChatGPT E2E" },
     lifecycle: { status: "starting", startedAt: now }, resultDelivery: { mode: "none" }, attended: true,
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
@@ -169,20 +232,19 @@ async function runScenario(root: string, scenario: Scenario): Promise<void> {
     }),
   });
   try {
-    const fakeCodex = resolve(process.cwd(), "e2e", "fake-codex.mjs");
     const request = {
       agentId, sessionId: PROVISIONAL, agentType, shell: process.platform === "win32" ? "powershell" : "git-bash",
-      configuration: scenarioConfiguration(scenario, [process.execPath, fakeCodex]), prompt,
+      configuration: scenarioConfiguration(scenario, CODEX_COMMAND), prompt,
       runtimeDirectory: runtimeRoot, maxInlinePromptChars: expectedExit === 0 ? 4000 : 20, wrapper,
       ...(worker ? { disallowedTools: AUTO_RUN_DISALLOWED_TOOLS } : {}),
       ...(scenario.chrome === "declared" ? { chrome: true as const } : {}),
     } as const;
-    const plan = resume
-      ? platform.planSessionResume({ ...request, sessionId: ACTUAL })
-      : platform.planLaunch(request);
+    const plan = resume === undefined
+      ? platform.planLaunch(request)
+      : platform.planSessionResume({ ...request, sessionId: resume })
     await platform.preflight(plan);
-    if (resume) {
-      if (!await platform.isResumable(ACTUAL, root, plan.command)) throw new Error("ChatGPT E2E could not discover its saved session");
+    if (resume !== undefined) {
+      if (!await platform.isResumable(resume, root, plan.command)) throw new Error("ChatGPT E2E could not discover its saved session through the real Codex App Server");
       if (await platform.isResumable("c15badb6-d6c8-45a6-a59f-e931cd364332" as SessionId, root, plan.command)) {
         throw new Error("ChatGPT E2E treated a missing session as resumable");
       }
@@ -192,7 +254,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<void> {
     if (plan.spill !== undefined) await files.write(plan.spill);
     if (worker) {
       if (!existsSync(join(runtimeRoot, "agents", agentId, "guard.json"))) throw new Error(`ChatGPT E2E launched a ${agentType} without its restriction list`);
-      if ((plan.task === undefined) !== resume) throw new Error("ChatGPT E2E did not archive the frozen task exactly once, at launch");
+      if ((plan.task === undefined) !== (resume !== undefined)) throw new Error("ChatGPT E2E did not archive the frozen task exactly once, at launch");
       if (!plan.args.includes('web_search="disabled"')) throw new Error(`ChatGPT E2E left web search enabled for a ${agentType}`);
       if (!plan.requiresWriteLease) throw new Error(`ChatGPT E2E left a ${agentType} outside the run's write lease`);
     }
@@ -209,18 +271,22 @@ async function runScenario(root: string, scenario: Scenario): Promise<void> {
       ABOARD_RUNTIME_ROOT: runtimeRoot, ABOARD_WORKSPACE_ROOT: root, ABOARD_ATTENDED: "1",
     });
     const started = await proof;
-    if (started.sessionId !== ACTUAL || fleet.get(agentId)?.sessionId !== ACTUAL) throw new Error("ChatGPT E2E did not preserve the runtime session id");
+    const actualSessionId = started.sessionId;
+    if (resume === undefined && actualSessionId === PROVISIONAL) throw new Error("ChatGPT E2E did not bind the runtime-assigned Codex session id");
+    if (resume !== undefined && actualSessionId !== resume) throw new Error("ChatGPT E2E resumed a different Codex session");
+    if (fleet.get(agentId)?.sessionId !== actualSessionId) throw new Error("ChatGPT E2E did not preserve the runtime session id");
     fleet.transition(agentId, { status: "running", startedAt: now }, now);
     const result = await execution;
-    if (result !== expectedExit) throw new Error(`ChatGPT E2E child exited ${result}; expected ${expectedExit}`);
+    if (result.code !== expectedExit) throw new Error(`ChatGPT E2E child exited ${result.code}; expected ${expectedExit}; stderr: ${redactProcessError(result.stderr)}; output: ${redactProcessError(result.stdout)}`);
     monitor.poll();
-    if (ended.length !== 1 || ended[0]?.phase !== "live" || ended[0]?.sessionId !== ACTUAL) throw new Error("ChatGPT E2E did not observe the bound process ending");
+    if (ended.length !== 1 || ended[0]?.phase !== "live" || ended[0]?.sessionId !== actualSessionId) throw new Error("ChatGPT E2E did not observe the bound process ending");
     const final = fleet.get(agentId)?.lastObservedAssistantMessage;
     if (expectedExit === 0 && final !== expectedFinalMessage(scenario)) throw new Error(`ChatGPT E2E lost final assistant output: ${String(final)}`);
     if (expectedExit !== 0 && final !== undefined) throw new Error("ChatGPT E2E manufactured output for a failed process");
-    const attempted = existsSync(join(root, `write-attempt-${agentId}.txt`));
-    if (explore && attempted) throw new Error("ChatGPT E2E Explore session modified the checkout");
-    if (!explore && !resume && expectedExit === 0 && !attempted) throw new Error("ChatGPT E2E never proved an unsandboxed session can write");
+    const attempted = existsSync(join(root, `write-attempt-${scenarioArtifact(scenario)}.txt`));
+    if (explore && await readFile(join(root, "sandbox-target.txt"), "utf8") !== "sandbox baseline\n") throw new Error("ChatGPT E2E Explore session modified the checkout");
+    if (!explore && resume === undefined && expectedExit === 0 && !attempted) throw new Error("ChatGPT E2E never proved a write-capable session can execute a real Codex tool");
+    return actualSessionId;
   } finally {
     sessions.dispose();
     monitor.stop();
@@ -228,11 +294,35 @@ async function runScenario(root: string, scenario: Scenario): Promise<void> {
   }
 }
 
-function spawnCaptured(file: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Promise<number | null> {
+function scenarioArtifact(scenario: Scenario): string {
+  if (scenario.implement === true) return "implement";
+  if (scenario.review === "afk" && scenario.prompt.includes("review-changes")) return "review-changes";
+  if (scenario.review !== undefined) return "review-approve";
+  return "attended";
+}
+
+function spawnCaptured(file: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Promise<{ readonly code: number | null; readonly stdout: string; readonly stderr: string }> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(file, [...args], { cwd, env, shell: false, windowsHide: true, stdio: "ignore" });
-    const timeout = setTimeout(() => child.kill(), 15_000);
+    const child = spawn(file, [...args], { cwd, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const timeout = setTimeout(() => child.kill(), 120_000);
     child.once("error", (error) => { clearTimeout(timeout); reject(error); });
-    child.once("close", (code) => { clearTimeout(timeout); resolvePromise(code); });
+    child.once("close", (code) => { clearTimeout(timeout); resolvePromise({ code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") }); });
   });
+}
+
+export async function validateCodexCli(): Promise<void> {
+  const version = (await execFileAsync("codex", ["--version"], { windowsHide: true })).stdout.trim();
+  if (!/^codex-cli 0\.(?:15[3-9]|1[6-9]\d|[2-9]\d\d)\./u.test(version)) throw new Error(`Codex CLI >= 0.153 is required; found ${JSON.stringify(version)}`);
+  const help = (await execFileAsync("codex", ["exec", "--help"], { windowsHide: true })).stdout;
+  const required = ["--json", "--output-last-message", "--dangerously-bypass-hook-trust", "--sandbox <SANDBOX_MODE>"];
+  const missing = required.filter((item) => !help.includes(item));
+  if (missing.length > 0) throw new Error(`Codex CLI protocol mismatch; missing required help structures: ${missing.join(", ")}`);
+}
+
+function redactProcessError(stderr: string): string {
+  return stderr.replace(/Bearer\s+\S+/giu, "Bearer [redacted]").replace(/aboard-e2e-[a-f0-9]+/giu, "[redacted]").slice(0, 1000).trim() || "no stderr";
 }
