@@ -187,6 +187,10 @@ export interface LaunchPlan {
   readonly spill?: PromptSpillFile;
   /** Original worker task, preserved independently of resume messages. */
   readonly task?: PromptSpillFile;
+  /** The launch needs the platform's Chrome browser capability before it may start. */
+  readonly chromeRequired?: true;
+  /** Worker restrictions a platform enforces through its own lifecycle hook. */
+  readonly guard?: RuntimeFile;
 
   readonly wrapperRequest?: WrapperRequestFile;
   /** Per-launch directory selected with `--settings` and `--add-dir`. */

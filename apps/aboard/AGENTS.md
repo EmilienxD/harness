@@ -2,16 +2,16 @@
 
 ## Project shape
 
-Aboard is a VS Code extension for Claude Code. It provides visible Aboard-launched terminals, fleet and activity views, project scaffold management, lifecycle tracking, and Auto Run orchestration. Harness owns user-facing skills, hooks, session commands, and their persistent state.
+Aboard is a VS Code extension for Claude Code and ChatGPT (Codex CLI). It provides visible Aboard-launched terminals, fleet and activity views, project scaffold management, lifecycle tracking, and Auto Run orchestration on either platform. Harness owns user-facing skills, hooks, session commands, and their persistent state.
 
 The clean-slate redesign deliberately has no compatibility layer. Do not restore Manager, roadmap/TODO, MCP, custom agent definitions, report mailboxes, in-process child telemetry, `/queue`, or standalone PR review entry points.
 
 ## Retained session kinds
 
-- `interactive`: an ordinary empty, user-controlled Claude TUI.
+- `interactive`: an ordinary empty, user-controlled Claude Code or Codex TUI.
 - `Explore`: a read-only exploration session; Claude Code's built-in agent, or a top-level Codex session held read-only by sandbox and approval policy.
-- `implementer`: an Auto Run worker launched with `/implement`.
-- `reviewer`: an Auto Run worker launched with `/review-afk` or `/review-hitl`.
+- `implementer`: an Auto Run worker launched with `/implement`, or a top-level Codex session that invokes `$implement`.
+- `reviewer`: an Auto Run worker launched with `/review-afk` or `/review-hitl`, or a top-level Codex session that invokes `$review-afk` or `$review-hitl`.
 
 Aboard applies internal lifecycle and Auto Run completion hooks only. It never copies Harness assets into its scaffold or private runtime bundle.
 

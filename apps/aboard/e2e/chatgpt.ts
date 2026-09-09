@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { createPlatformLifecycleRoutes } from "../src/bridge/platform-lifecycle.js";
@@ -8,8 +8,10 @@ import { startBridge } from "../src/bridge/server.js";
 import { SessionLifecycleService, SessionProcessMonitor, SessionStartupProofs, type ProcessEndedObservation } from "../src/bridge/session-lifecycle.js";
 import { FileSystemPromptSpillStore } from "../src/claude/spill.js";
 import { spawnCommandRunner } from "../src/claude/preflight.js";
+import { AUTO_RUN_DISALLOWED_TOOLS } from "../src/auto/permissions.js";
+import { ChatGptBrowserProbe } from "../src/chatgpt/browser.js";
 import { ChatGptAgentPlatform } from "../src/chatgpt/platform.js";
-import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
+import type { AgentId, AgentSession, AgentType, IsoTimestamp, SessionId, TerminalId } from "../src/domain/contracts.js";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { lockMarkerPresent, sessionWrapperLayout } from "../src/runtime/lock-markers.js";
 import type { HarnessConfig } from "./config.js";
@@ -28,6 +30,15 @@ export async function runChatGptSmoke(config: HarnessConfig): Promise<void> {
     await runScenario(root, { prompt: "", expectedExit: 0, resume: true });
     await runScenario(root, { prompt: `${"large deterministic prompt ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 23 });
     await runScenario(root, { prompt: "[E2E:chatgpt-explore] report the implementation context for this checkout.", expectedExit: 0, explore: true });
+    await runScenario(root, { prompt: "[E2E:chatgpt-implement] address the deterministic issue.", expectedExit: 0, implement: true });
+    await runScenario(root, { prompt: "Continue", expectedExit: 0, implement: true, resume: true });
+    await runScenario(root, { prompt: "[E2E:chatgpt-implement] address the deterministic issue with Chrome.", expectedExit: 0, implement: true, chrome: "declared" });
+    await runChromeRefusal(root);
+    await runScenario(root, { prompt: "[E2E:chatgpt-review-approve] review the deterministic pull request.", expectedExit: 0, review: "afk" });
+    await runScenario(root, { prompt: "[E2E:chatgpt-review-changes] review the deterministic pull request.", expectedExit: 0, review: "afk" });
+    await runScenario(root, { prompt: "Continue", expectedExit: 0, review: "afk", resume: true });
+    await runScenario(root, { prompt: `${"large deterministic review ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 23, review: "afk" });
+    await runScenario(root, { prompt: "[E2E:chatgpt-review-approve] review the deterministic pull request with a human.", expectedExit: 0, review: "hitl" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -38,21 +49,98 @@ interface Scenario {
   readonly expectedExit: number;
   readonly resume?: boolean;
   readonly explore?: boolean;
+  readonly implement?: boolean;
+  readonly review?: "afk" | "hitl";
+  readonly chrome?: "declared" | "absent";
+}
+
+const LIFECYCLE_ASSETS = {
+  settings: resolve(process.cwd(), "assets", "runtime", "abd-hooks.json"),
+  script: resolve(process.cwd(), "assets", "runtime", "abd_hook.py"),
+} as const;
+
+function scenarioAgentType(scenario: Scenario): AgentType {
+  if (scenario.explore === true) return "Explore";
+  if (scenario.implement === true) return "implementer";
+  return scenario.review === undefined ? "interactive" : "reviewer";
+}
+
+function scenarioConfiguration(scenario: Scenario, command: readonly string[]): Record<string, unknown> {
+  if (scenario.implement === true) return { shape: "skill", skillName: "implement", declaredCommand: command };
+  if (scenario.review !== undefined) return { shape: "skill", skillName: `review-${scenario.review}`, declaredCommand: command };
+  return { shape: scenario.explore === true ? "explore" : "default", declaredCommand: command };
+}
+
+/** One runtime directory per session kind; a resume deliberately reuses its launch's. */
+function scenarioName(scenario: Scenario): string {
+  if (scenario.explore === true) return "explore";
+  if (scenario.implement === true) return `implement-${scenario.chrome ?? "plain"}`;
+  if (scenario.review !== undefined) return `review-${scenario.review}-${scenario.expectedExit}`;
+  return `${scenario.expectedExit}`;
+}
+
+/** The deterministic final message each scenario's session reports on Stop. */
+function expectedFinalMessage(scenario: Scenario): string {
+  if (scenario.explore === true) return "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
+  if (scenario.implement === true) return "Implemented the deterministic issue; the work is uncommitted.";
+  if (scenario.review !== undefined) {
+    return scenario.prompt.includes("[E2E:chatgpt-review-changes]")
+      ? "Review complete: requested changes before this can merge."
+      : "Review complete: the implementation matches the frozen issue contract.";
+  }
+  return "Deterministic ChatGPT session completed.";
+}
+
+/** A Codex configuration whose only relevant declaration is the browser backend list. */
+async function codexHome(root: string, name: string, backends: string): Promise<string> {
+  const home = join(root, `codex-${name}`);
+  await mkdir(home, { recursive: true });
+  await writeFile(join(home, "config.toml"), `[mcp_servers.deterministic-browser.env]\nBROWSER_USE_AVAILABLE_BACKENDS = "${backends}"\n`, "utf8");
+  return home;
+}
+
+async function browserProbeFor(root: string, scenario: Scenario): Promise<{ readonly browserProbe: ChatGptBrowserProbe } | Record<string, never>> {
+  if (scenario.chrome === undefined) return {};
+  const home = await codexHome(root, scenario.chrome, scenario.chrome === "declared" ? " CDP , Chrome " : "builtin");
+  return { browserProbe: new ChatGptBrowserProbe({ codexHome: home }) };
+}
+
+/** A Chrome-required launch must fail before any terminal or Codex process exists. */
+async function runChromeRefusal(root: string): Promise<void> {
+  const agentId = "chatgpt-chrome-absent" as AgentId;
+  const runtimeRoot = join(root, agentId);
+  const scenario: Scenario = { prompt: "[E2E:chatgpt-implement] address it.", expectedExit: 0, implement: true, chrome: "absent" };
+  const platform = new ChatGptAgentPlatform({
+    commandRunner: spawnCommandRunner(root),
+    lifecycleAssets: LIFECYCLE_ASSETS,
+    sessionIdFactory: () => PROVISIONAL,
+    ...(await browserProbeFor(root, scenario)),
+  });
+  const plan = platform.planLaunch({
+    agentId, sessionId: PROVISIONAL, agentType: "implementer", shell: process.platform === "win32" ? "powershell" : "git-bash",
+    configuration: scenarioConfiguration(scenario, [process.execPath, resolve(process.cwd(), "e2e", "fake-codex.mjs")]),
+    prompt: scenario.prompt, runtimeDirectory: runtimeRoot, chrome: true,
+  });
+  if (plan.chromeRequired !== true) throw new Error("ChatGPT E2E lost the Chrome requirement on the launch plan");
+  let refused: string | undefined;
+  try { await platform.preflight(plan); } catch (error) { refused = error instanceof Error ? error.message : String(error); }
+  if (refused === undefined) throw new Error("ChatGPT E2E started Chrome-required work without a declared Chrome backend");
+  if (!/BROWSER_USE_AVAILABLE_BACKENDS/u.test(refused)) throw new Error(`ChatGPT E2E gave an unusable Chrome refusal: ${refused}`);
+  if (existsSync(join(runtimeRoot, "agents", agentId, "guard.json"))) throw new Error("ChatGPT E2E prepared runtime files for a refused launch");
 }
 
 async function runScenario(root: string, scenario: Scenario): Promise<void> {
-  const { prompt, expectedExit, resume = false, explore = false } = scenario;
-  const agentType = explore ? "Explore" : "interactive";
-  const agentId = `chatgpt-${explore ? "explore" : expectedExit}` as AgentId;
+  const { prompt, expectedExit, resume = false, explore = false, implement = false } = scenario;
+  const agentType = scenarioAgentType(scenario);
+  const worker = implement || scenario.review !== undefined;
+  const agentId = `chatgpt-${scenarioName(scenario)}` as AgentId;
   const runtimeRoot = join(root, agentId);
   const wrapper = sessionWrapperLayout(runtimeRoot, resolve(process.cwd(), "assets", "runtime", "abd_wrapper.py"));
   const platform = new ChatGptAgentPlatform({
     commandRunner: spawnCommandRunner(root),
-    lifecycleAssets: {
-      settings: resolve(process.cwd(), "assets", "runtime", "abd-hooks.json"),
-      script: resolve(process.cwd(), "assets", "runtime", "abd_hook.py"),
-    },
+    lifecycleAssets: LIFECYCLE_ASSETS,
     sessionIdFactory: () => PROVISIONAL,
+    ...(await browserProbeFor(root, scenario)),
   });
   const fleet = new FleetRegistry();
   const now = new Date().toISOString() as IsoTimestamp;
@@ -84,8 +172,10 @@ async function runScenario(root: string, scenario: Scenario): Promise<void> {
     const fakeCodex = resolve(process.cwd(), "e2e", "fake-codex.mjs");
     const request = {
       agentId, sessionId: PROVISIONAL, agentType, shell: process.platform === "win32" ? "powershell" : "git-bash",
-      configuration: { shape: explore ? "explore" : "default", declaredCommand: [process.execPath, fakeCodex] }, prompt,
+      configuration: scenarioConfiguration(scenario, [process.execPath, fakeCodex]), prompt,
       runtimeDirectory: runtimeRoot, maxInlinePromptChars: expectedExit === 0 ? 4000 : 20, wrapper,
+      ...(worker ? { disallowedTools: AUTO_RUN_DISALLOWED_TOOLS } : {}),
+      ...(scenario.chrome === "declared" ? { chrome: true as const } : {}),
     } as const;
     const plan = resume
       ? platform.planSessionResume({ ...request, sessionId: ACTUAL })
@@ -100,6 +190,15 @@ async function runScenario(root: string, scenario: Scenario): Promise<void> {
     const files = new FileSystemPromptSpillStore(root, runtimeRoot, new Map([["chatgpt", platform.lifecycleAssets]]));
     await files.prepare(plan);
     if (plan.spill !== undefined) await files.write(plan.spill);
+    if (worker) {
+      if (!existsSync(join(runtimeRoot, "agents", agentId, "guard.json"))) throw new Error(`ChatGPT E2E launched a ${agentType} without its restriction list`);
+      if ((plan.task === undefined) !== resume) throw new Error("ChatGPT E2E did not archive the frozen task exactly once, at launch");
+      if (!plan.args.includes('web_search="disabled"')) throw new Error(`ChatGPT E2E left web search enabled for a ${agentType}`);
+      if (!plan.requiresWriteLease) throw new Error(`ChatGPT E2E left a ${agentType} outside the run's write lease`);
+    }
+    if (scenario.chrome === "declared" && !(plan.spill?.contents ?? "").includes("Chrome browser backend")) {
+      throw new Error("ChatGPT E2E lost the Chrome backend instruction");
+    }
     monitor.trackLaunch({ agentId, sessionId: expectedSessionId, lockFile: wrapper.lockPathFor(agentId) });
     const proof = proofs.awaitStarted(agentId, expectedSessionId, 10_000);
     if (plan.wrapperRequest === undefined) throw new Error("ChatGPT E2E expected wrapper request delivery");
@@ -117,8 +216,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<void> {
     monitor.poll();
     if (ended.length !== 1 || ended[0]?.phase !== "live" || ended[0]?.sessionId !== ACTUAL) throw new Error("ChatGPT E2E did not observe the bound process ending");
     const final = fleet.get(agentId)?.lastObservedAssistantMessage;
-    const expectedFinal = explore ? "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts." : "Deterministic ChatGPT session completed.";
-    if (expectedExit === 0 && final !== expectedFinal) throw new Error("ChatGPT E2E lost final assistant output");
+    if (expectedExit === 0 && final !== expectedFinalMessage(scenario)) throw new Error(`ChatGPT E2E lost final assistant output: ${String(final)}`);
     if (expectedExit !== 0 && final !== undefined) throw new Error("ChatGPT E2E manufactured output for a failed process");
     const attempted = existsSync(join(root, `write-attempt-${agentId}.txt`));
     if (explore && attempted) throw new Error("ChatGPT E2E Explore session modified the checkout");

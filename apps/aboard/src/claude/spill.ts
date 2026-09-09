@@ -47,6 +47,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     );
     await writeFile(join(directory, "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
+    if (plan.guard !== undefined) await this.#write(plan.guard);
     if (plan.wrapperRequest !== undefined) await this.#write(plan.wrapperRequest);
     if (plan.task !== undefined) {
       await this.#write({ ...plan.task, relativePath: this.#taskArchivePath(plan.agentId) });

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Any
 import urllib.error
 import urllib.request
+
+# Enforced locally: a worker restriction must not depend on a bridge round trip.
+GUARD_ROUTE = "worker-guard"
+SUBAGENT_TOOLS: frozenset[str] = frozenset({"Agent", "spawn_agent"})
+UNREADABLE = "aboard cannot read the restriction list for this worker, so the call is blocked."
 
 # Opaque, path-free names avoid MSYS rewriting hook arguments on Windows.
 ROUTES: dict[str, str] = {
@@ -20,6 +26,60 @@ ROUTES: dict[str, str] = {
 RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"Explore", "implementer", "reviewer"})
 
 
+def deny(reason: str) -> int:
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }))
+    return 0
+
+
+def command_text(tool_input: Any) -> str:
+    if not isinstance(tool_input, dict):
+        return ""
+    command = tool_input.get("command")
+    if isinstance(command, list):
+        return " ".join(str(part) for part in command)
+    return command if isinstance(command, str) else ""
+
+
+def matches(pattern: str, segment: str) -> bool:
+    expression = "".join(".*" if part == "*" else re.escape(part) for part in re.split(r"(\*)", pattern))
+    return re.fullmatch(expression, " ".join(segment.split())) is not None
+
+
+def guard(payload: dict[str, Any]) -> int:
+    if payload.get("hook_event_name") != "PreToolUse":
+        return 0
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guard.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            rules: Any = json.load(handle)
+    except (OSError, ValueError):
+        return deny(UNREADABLE)
+    if not isinstance(rules, dict):
+        return deny(UNREADABLE)
+    if rules.get("denySubagents") and payload.get("tool_name") in SUBAGENT_TOOLS:
+        return deny("aboard's auto-run workers cannot spawn subagents. Do the work in this session.")
+    command = command_text(payload.get("tool_input"))
+    if not command.strip():
+        return 0
+    patterns = [pattern for pattern in rules.get("denyCommands", []) if isinstance(pattern, str)]
+    for segment in re.split(r"&&|\|\||[;\n|]", command):
+        if not segment.strip():
+            continue
+        for pattern in patterns:
+            if matches(pattern, segment):
+                return deny(
+                    f"aboard owns this run's git and GitHub state; {' '.join(segment.split())} is blocked. "
+                    "Leave your work uncommitted in the working tree and use git and gh only for read-only inspection."
+                )
+    return 0
+
+
 def main() -> int:
     # Agent hook wire formats are UTF-8 regardless of the ambient Windows code
     # page.
@@ -30,17 +90,25 @@ def main() -> int:
         json.dump(ROUTES, sys.stdout)
         return 0
 
-    agent_id = os.environ.get("ABOARD_AGENT_ID")
     route: str | None = sys.argv[1] if len(sys.argv) >= 2 else None
+    try:
+        payload_raw: Any = json.load(sys.stdin)
+    except (ValueError, OSError):
+        payload_raw = None
+    payload: dict[str, Any] = payload_raw if isinstance(payload_raw, dict) else {}
+
+    if route == GUARD_ROUTE:
+        # Reporting routes may drop an event they cannot read; a restriction
+        # that cannot read its own event has to block instead.
+        return guard(payload) if isinstance(payload_raw, dict) else deny(UNREADABLE)
+    if not isinstance(payload_raw, dict):
+        return 0
+
+    agent_id = os.environ.get("ABOARD_AGENT_ID")
     endpoint = ROUTES.get(route) if route else None
     if not agent_id or endpoint is None:
         return 0
 
-    try:
-        payload_raw: Any = json.load(sys.stdin)
-    except (ValueError, OSError):
-        return 0
-    payload: dict[str, Any] = payload_raw if isinstance(payload_raw, dict) else {}
     event = payload.get("hook_event_name")
     # Runtime-assigned platforms report the canonical conversation id here;
     # client-assigned platforms report the same id Aboard placed in the env.

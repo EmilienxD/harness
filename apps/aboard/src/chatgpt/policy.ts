@@ -88,7 +88,7 @@ export function parseManagedPolicy(text: string, source: string): ChatGptManaged
   let allowManagedHooksOnly: boolean | undefined;
   let hooks: boolean | undefined;
   for (let index = 0; index < lines.length; index += 1) {
-    const line = strip(lines[index] ?? "");
+    const line = stripTomlComment(lines[index] ?? "");
     if (line.length === 0) continue;
     if (line.startsWith("[")) { table = line.replace(/^\[+/u, "").replace(/\]+$/u, "").trim(); continue; }
     const assignment = /^([A-Za-z0-9_.-]+)\s*=\s*(.*)$/u.exec(line);
@@ -96,7 +96,7 @@ export function parseManagedPolicy(text: string, source: string): ChatGptManaged
     let value = assignment[2] ?? "";
     while (value.startsWith("[") && !value.includes("]") && index + 1 < lines.length) {
       index += 1;
-      value += ` ${strip(lines[index] ?? "")}`;
+      value += ` ${stripTomlComment(lines[index] ?? "")}`;
     }
     const key = table === "" ? assignment[1] : `${table}.${assignment[1] ?? ""}`;
     if (key === "allowed_sandbox_modes") allowedSandboxModes = strings(value);
@@ -113,7 +113,7 @@ export function parseManagedPolicy(text: string, source: string): ChatGptManaged
   };
 }
 
-function strip(line: string): string {
+export function stripTomlComment(line: string): string {
   let quote: string | undefined;
   for (let index = 0; index < line.length; index += 1) {
     const character = line[index];

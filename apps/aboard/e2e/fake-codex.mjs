@@ -58,15 +58,42 @@ function hook(route, payload) {
     windowsHide: true,
   });
   if (result.status !== 0) process.exit(92);
+  return result.stdout;
+}
+
+const implementer = process.env.ABOARD_AGENT_TYPE === "implementer";
+const reviewer = process.env.ABOARD_AGENT_TYPE === "reviewer";
+if (implementer || reviewer) {
+  const invocation = implementer ? "$implement " : "$review-";
+  if (resumedSessionId === undefined && !prompt.startsWith(invocation)) process.exit(94);
+  if (!process.argv.includes('web_search="disabled"') || !process.argv.includes("features.multi_agent=false")) process.exit(95);
+  const decide = (payload) => {
+    const output = hook("worker-guard", payload);
+    return output.trim().length === 0 ? undefined : JSON.parse(output).hookSpecificOutput.permissionDecision;
+  };
+  const bash = (command) => ({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } });
+  if (decide(bash("git commit -m 'deterministic'")) !== "deny") process.exit(96);
+  if (decide(bash("gh pr create --fill")) !== "deny") process.exit(96);
+  if (decide({ hook_event_name: "PreToolUse", tool_name: "spawn_agent", tool_input: {} }) !== "deny") process.exit(96);
+  if (decide(bash("git status --short")) !== undefined) process.exit(97);
+  if (delivered.includes("with Chrome") && !delivered.includes("Chrome browser backend")) process.exit(98);
 }
 
 hook("session-start", { hook_event_name: "SessionStart", source: resumedSessionId === undefined ? "startup" : "resume" });
 if (delivered.includes("[E2E:chatgpt-process-failure]")) process.exit(23);
+
+function finalMessage() {
+  if (readOnly) return "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
+  if (implementer) return "Implemented the deterministic issue; the work is uncommitted.";
+  if (!reviewer) return "Deterministic ChatGPT session completed.";
+  return delivered.includes("[E2E:chatgpt-review-changes]")
+    ? "Review complete: requested changes before this can merge."
+    : "Review complete: the implementation matches the frozen issue contract.";
+}
+
 hook("worker-stop", {
   hook_event_name: "Stop",
   cwd: process.cwd(),
-  last_assistant_message: readOnly
-    ? "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts."
-    : "Deterministic ChatGPT session completed.",
+  last_assistant_message: finalMessage(),
 });
 hook("session-end", { hook_event_name: "SessionEnd", reason: "other" });

@@ -21,19 +21,25 @@ export interface ProjectConfigurationOverlayRequest {
   readonly git: GitClient;
 }
 
+/** Each platform's project configuration, minus the entries that hold live session state. */
+export const PROJECT_CONFIGURATION_ROOTS = [
+  { name: ".claude", excludedEntries: ["worktrees"], required: false },
+  { name: ".agents", excludedEntries: [], required: false },
+  { name: ".codex", excludedEntries: ["sessions", "history.jsonl", "log", "logs", "cache", "tmp"], required: false },
+  { name: ".abd", excludedEntries: [], required: true },
+] as const;
+
 export async function overlayProjectConfiguration(request: ProjectConfigurationOverlayRequest): Promise<void> {
   const files: ProjectOverlayFile[] = [];
-  for (const root of [
-    { name: ".claude", excludedDirectories: ["worktrees"] },
-    { name: ".abd", excludedDirectories: [] },
-  ] as const) {
+  for (const root of PROJECT_CONFIGURATION_ROOTS) {
     const sourceRoot = join(request.workspaceRoot, root.name);
     const targetRoot = join(request.worktreeRoot, root.name);
     const source = await pathStat(sourceRoot);
     if (source === undefined || !source.isDirectory()) {
+      if (!root.required) continue;
       throw new RunWorkspaceError(`The project configuration directory at ${sourceRoot} is missing or is not a directory.`);
     }
-    await planProjectOverlay(sourceRoot, targetRoot, [root.name], root.excludedDirectories, files);
+    await planProjectOverlay(sourceRoot, targetRoot, [root.name], root.excludedEntries, files);
   }
 
   const paths = files.map((file) => file.repositoryPath);
@@ -41,7 +47,7 @@ export async function overlayProjectConfiguration(request: ProjectConfigurationO
   const exposed = paths.filter((path) => !ignored.has(path));
   if (exposed.length > 0) {
     throw new RunWorkspaceError(
-      `The run cannot copy ${exposed.length} local project configuration path(s) because git does not ignore them (${exposed.slice(0, 20).join(", ")}). Ignore the local .claude or .abd content, or commit it before using worktree mode; otherwise git add -A could publish it.`,
+      `The run cannot copy ${exposed.length} local project configuration path(s) because git does not ignore them (${exposed.slice(0, 20).join(", ")}). Ignore the local ${PROJECT_CONFIGURATION_ROOTS.map((root) => root.name).join(", ")} content, or commit it before using worktree mode; otherwise git add -A could publish it.`,
     );
   }
 
@@ -59,12 +65,13 @@ async function planProjectOverlay(
   sourceDirectory: string,
   targetDirectory: string,
   segments: readonly string[],
-  excludedDirectories: readonly string[],
+  excludedEntries: readonly string[],
   files: ProjectOverlayFile[],
 ): Promise<void> {
   for (const entry of await readdir(sourceDirectory, { withFileTypes: true })) {
-    // Claude's own worktrees are live state rather than project configuration.
-    if (segments.length === 1 && excludedDirectories.some((directory) => entry.name.toLowerCase() === directory.toLowerCase())) continue;
+    // A platform's own worktrees, sessions, and logs are live state rather than
+    // project configuration.
+    if (segments.length === 1 && excludedEntries.some((excluded) => entry.name.toLowerCase() === excluded.toLowerCase())) continue;
     const nextSegments = [...segments, entry.name];
     const source = join(sourceDirectory, entry.name);
     const target = join(targetDirectory, entry.name);
@@ -77,7 +84,7 @@ async function planProjectOverlay(
     }
     if (entry.isDirectory()) {
       if (targetEntry !== undefined && !targetEntry.isDirectory()) continue;
-      await planProjectOverlay(source, target, nextSegments, excludedDirectories, files);
+      await planProjectOverlay(source, target, nextSegments, excludedEntries, files);
       continue;
     }
     if (!entry.isFile()) {

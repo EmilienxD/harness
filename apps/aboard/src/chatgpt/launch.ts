@@ -3,27 +3,63 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import type { WriteCapability } from "../domain/capability.js";
-import type { AgentId, SessionId } from "../domain/contracts.js";
+import { isAutoRunWorkerType, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "../claude/shell.js";
-import { MAX_COMMAND_LINE_CHARS, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../claude/launch.js";
+import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../claude/launch.js";
 import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest } from "../platform/agent-platform.js";
+import type { IssueDifficulty } from "../shared/labels.js";
 
 export const DEFAULT_CHATGPT_COMMAND = ["codex"] as const;
 
+export const CHATGPT_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+export type ChatGptEffort = (typeof CHATGPT_EFFORTS)[number];
+
+export const CHATGPT_WEB_SEARCH_MODES = ["disabled", "cached", "indexed", "live"] as const;
+export type ChatGptWebSearch = (typeof CHATGPT_WEB_SEARCH_MODES)[number];
+
+export const CHATGPT_WORKER_SKILLS = ["implement", "review-afk", "review-hitl"] as const;
+const CHATGPT_REVIEW_SKILLS: readonly string[] = ["review-afk", "review-hitl"];
+
+export interface ChatGptDifficultyLaunchPolicy {
+  readonly model: string;
+  readonly effort: ChatGptEffort;
+}
+
+/** ChatGPT routing, configurable on its own so Claude model names never reach Codex. */
+export const CHATGPT_DIFFICULTY_LAUNCH_POLICIES: { readonly [K in IssueDifficulty]: ChatGptDifficultyLaunchPolicy } = {
+  routine: { model: "gpt-5.6-luna", effort: "medium" },
+  basic: { model: "gpt-5.6-terra", effort: "high" },
+  advanced: { model: "gpt-5.6", effort: "medium" },
+  expert: { model: "gpt-5.6", effort: "high" },
+};
+
+export function chatGptDifficultyLaunchPolicy(difficulty: IssueDifficulty | undefined): ChatGptDifficultyLaunchPolicy {
+  return CHATGPT_DIFFICULTY_LAUNCH_POLICIES[difficulty ?? "expert"];
+}
+
 export interface ChatGptLaunchConfiguration {
-  readonly shape: "default" | "explore";
+  readonly shape: "default" | "explore" | "skill";
+  readonly skillName?: string;
   readonly declaredCommand?: readonly string[];
   readonly declaredModel?: string;
-  readonly declaredEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  readonly declaredEffort?: ChatGptEffort | typeof BY_DIFFICULTY;
+  readonly webSearch?: ChatGptWebSearch;
+  readonly subagents?: "allowed" | "denied";
 }
 
 export const CHATGPT_EXPLORE_ROLE =
   "You are a read-only exploration agent. Codex runs this session in a read-only sandbox: do not create, modify, or delete files, and do not run commands that change this repository, its worktree, its git state, or GitHub. Inspect the checkout and end your turn with the requested report as your final message.";
 
+export const CHATGPT_CHROME_INSTRUCTION =
+  "This issue requires the Chrome browser backend. Use the chrome backend of your configured browser tool server to visualize, test, and debug your changes; do not fall back to the in-app browser or another backend.";
+
 const READ_ONLY_POLICY = ["-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"'] as const;
+
+const CLAUDE_MODELS: ReadonlySet<string> = new Set(["haiku", "sonnet", "opus"]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const BASH_RULE = /^Bash\((.+)\)$/u;
 
 export function planChatGptLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan {
   return planChatGptSession(request, "start");
@@ -34,20 +70,20 @@ export function planChatGptSessionResume(request: PlatformResumeRequest): Platfo
 }
 
 function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeRequest, kind: "start" | "resume"): PlatformLaunchPlan {
+  const configuration = request.configuration as ChatGptLaunchConfiguration;
   const explore = request.agentType === "Explore";
-  if (!explore && request.agentType !== "interactive") throw new LaunchPlanError("shape-not-allowed", `ChatGPT does not support ${request.agentType} sessions yet`);
+  const worker = isAutoRunWorkerType(request.agentType);
+  assertShape(request.agentType, configuration);
   if (!SAFE_ID.test(request.agentId)) throw new LaunchPlanError("unsafe-agent-id", `Agent id is not safe as a file name: ${request.agentId}`);
   if (!UUID.test(request.sessionId)) throw new LaunchPlanError("invalid-session-id", kind === "start" ? "Provisional session id must be a UUID minted before launch" : "Saved session id must be a UUID");
-  const configuration = request.configuration as ChatGptLaunchConfiguration;
-  if (configuration.shape !== (explore ? "explore" : "default")) {
-    throw new LaunchPlanError("shape-not-allowed", explore ? "Explore launches as a read-only Codex session" : "interactive launches as Codex's default session");
-  }
   const command = configuration.declaredCommand ?? request.command ?? DEFAULT_CHATGPT_COMMAND;
   if (command.length === 0 || command.some((token) => token.trim().length === 0 || !canQuoteArgument(request.shell, token))) {
     throw new LaunchPlanError("invalid-command", `Launch command cannot be passed on a ${request.shell} command line`);
   }
   const threshold = request.maxInlinePromptChars ?? 4000;
   if (!Number.isInteger(threshold) || threshold < 0) throw new LaunchPlanError("invalid-threshold", "maxInlinePromptChars must be a non-negative integer");
+  const chrome = request.chrome === true;
+  if (chrome && !worker) throw new LaunchPlanError("shape-not-allowed", `The Chrome browser backend is available only to [AI]-chrome auto-run workers: ${request.agentType}`);
   const runtimeRoot = request.runtimeDirectory ?? join(tmpdir(), "abd-runtime");
   const runtimeDirectory = `${runtimeRoot.replaceAll("\\", "/").replace(/\/+$/u, "")}/agents/${request.agentId}`;
   const hookScript = `${runtimeDirectory}/scripts/abd_hook.py`;
@@ -58,35 +94,55 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     "-c",
     `hooks.${event}=[${entries.join(",")}]`,
   ];
+  const subagentsDenied = worker && configuration.subagents !== "allowed";
+  const denyCommands = worker ? commandDenyPatterns(request.disallowedTools) : [];
+  const guard: RuntimeFile | undefined = worker
+    ? {
+        agentId: request.agentId,
+        relativePath: `${runtimeDirectory}/guard.json`,
+        contents: `${JSON.stringify({ denySubagents: subagentsDenied, denyCommands }, null, 2)}\n`,
+      }
+    : undefined;
+  const policy = launchPolicy(configuration, request.difficulty);
   const fixed = [
     "--dangerously-bypass-hook-trust",
     "-c", "features.hooks=true",
     ...(explore ? READ_ONLY_POLICY : []),
+    ...(worker ? ["-c", `web_search=${JSON.stringify(configuration.webSearch ?? "disabled")}`] : []),
+    ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
     ...config("SessionStart", [hookEntry("session-start", "startup|resume"), hookEntry("worker-reground", "compact")]),
     ...config("SessionEnd", [hookEntry("session-end")]),
     ...config("Stop", [hookEntry("worker-stop")]),
     ...config("PostCompact", [hookEntry("worker-post-compact", "manual|auto")]),
-    ...(configuration.declaredModel === undefined ? [] : ["--model", configuration.declaredModel]),
-    ...(configuration.declaredEffort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(configuration.declaredEffort)}`]),
+    ...(guard === undefined ? [] : config("PreToolUse", [hookEntry("worker-guard", "Bash|Agent")])),
+    ...(policy.model === undefined ? [] : ["--model", policy.model]),
+    ...(policy.effort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(policy.effort)}`]),
   ];
   const task = typeof request.prompt === "string" ? request.prompt.trim() : request.prompt?.text.trim();
   if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "Explore cannot launch without its exploration task");
-  const text = explore && task !== undefined ? `${CHATGPT_EXPLORE_ROLE}\n\n${task}` : task;
+  if (worker && kind === "start" && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", `${request.agentType} cannot launch without its initial prompt`);
+  const text = task === undefined || task.length === 0
+    ? undefined
+    : [...(explore ? [CHATGPT_EXPLORE_ROLE] : []), ...(chrome ? [CHATGPT_CHROME_INSTRUCTION] : []), task].join("\n\n");
+  // A resume continues the conversation the skill already governs.
+  const invocation = kind === "start" && configuration.shape === "skill" ? `$${configuration.skillName ?? ""}` : undefined;
   const planFor = (promptThreshold: number): { readonly promptDelivery: PromptDelivery; readonly spill?: RuntimeFile; readonly args: readonly string[]; readonly commandLine: string; readonly wrapperRequest?: RuntimeFile } => {
     let promptDelivery: PromptDelivery = "none";
     let spill: RuntimeFile | undefined;
     let promptArgs: string[] = [];
     if (text !== undefined && text.length > 0) {
-      if (text.length <= promptThreshold && canQuoteArgument(request.shell, text)) {
+      const inline = invocation === undefined ? text : `${invocation} ${text}`;
+      if (inline.length <= promptThreshold && canQuoteArgument(request.shell, inline)) {
         promptDelivery = "inline";
-        promptArgs = ["--", text];
+        promptArgs = ["--", inline];
       } else {
         promptDelivery = "spilled";
         const identity = createHash("sha256").update(resolve(runtimeRoot)).digest("hex");
         const relativePath = `${join(tmpdir(), "abd-prompts", identity, request.agentId, "prompt.md").replaceAll("\\", "/")}`;
         if (/\s/u.test(relativePath)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${relativePath}`);
         spill = { agentId: request.agentId, relativePath, contents: `${text}\n` };
-        promptArgs = ["--", `Your full task is in @${relativePath}; follow it.`];
+        const reference = `Your full task is in @${relativePath}; follow it.`;
+        promptArgs = ["--", invocation === undefined ? reference : `${invocation} ${reference}`];
       }
     }
     const args = [...(kind === "resume" ? ["resume", request.sessionId] : []), ...fixed, ...promptArgs];
@@ -104,6 +160,11 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   if (built.commandLine.length > limit && built.promptDelivery === "inline") built = planFor(0);
   if (built.commandLine.length > limit) throw new LaunchPlanError("command-line-too-long", `ChatGPT launch command line is ${built.commandLine.length} characters, over the ${limit} the ${request.shell} shell accepts, even with the prompt spilled to a file`);
   const writeCapability: WriteCapability = explore ? "read-only" : "write-capable";
+  // Only a launch owns the frozen task; a resume message must not replace the
+  // archive that regrounds the worker after compaction.
+  const archived: RuntimeFile | undefined = worker && kind === "start" && text !== undefined
+    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeRoot, request.agentId), contents: `${text}\n` }
+    : undefined;
   return {
     platform: "chatgpt",
     kind,
@@ -115,12 +176,61 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     args: built.args,
     commandLine: built.commandLine,
     writeCapability,
-    requiresWriteLease: false,
+    requiresWriteLease: requiresWriteLease(request.agentType, writeCapability),
     promptDelivery: built.promptDelivery,
     runtimeDirectory,
+    ...(chrome ? { chromeRequired: true as const } : {}),
+    ...(guard === undefined ? {} : { guard }),
+    ...(archived === undefined ? {} : { task: archived }),
     ...(built.spill === undefined ? {} : { spill: built.spill }),
     ...(built.wrapperRequest === undefined ? {} : { wrapperRequest: built.wrapperRequest }),
   };
+}
+
+function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfiguration): void {
+  switch (agentType) {
+    case "interactive":
+      if (configuration.shape !== "default") throw new LaunchPlanError("shape-not-allowed", "interactive launches as Codex's default session");
+      return;
+    case "Explore":
+      if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "Explore launches as a read-only Codex session");
+      return;
+    case "implementer":
+      if (configuration.shape !== "skill" || configuration.skillName !== "implement") {
+        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $implement");
+      }
+      return;
+    case "reviewer":
+      if (configuration.shape !== "skill" || !CHATGPT_REVIEW_SKILLS.includes(configuration.skillName ?? "")) {
+        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $review-afk or $review-hitl");
+      }
+      return;
+  }
+}
+
+function launchPolicy(
+  configuration: ChatGptLaunchConfiguration,
+  difficulty: IssueDifficulty | undefined,
+): { readonly model: string | undefined; readonly effort: ChatGptEffort | undefined } {
+  const tier = chatGptDifficultyLaunchPolicy(difficulty);
+  const model = configuration.declaredModel === BY_DIFFICULTY ? tier.model : configuration.declaredModel;
+  const effort = configuration.declaredEffort === BY_DIFFICULTY ? tier.effort : configuration.declaredEffort;
+  if (model !== undefined && (model.trim().length === 0 || CLAUDE_MODELS.has(model))) {
+    throw new LaunchPlanError("invalid-model", `Model is not valid for platform chatgpt: ${JSON.stringify(model)}`);
+  }
+  if (effort !== undefined && !CHATGPT_EFFORTS.includes(effort)) {
+    throw new LaunchPlanError("invalid-effort", `Reasoning effort must be one of ${CHATGPT_EFFORTS.join(", ")}: ${JSON.stringify(effort)}`);
+  }
+  return { model, effort };
+}
+
+/** Codex has no tool-rule syntax, so Aboard's Bash denials become guard-hook command patterns. */
+export function commandDenyPatterns(rules: readonly string[] | undefined): readonly string[] {
+  const patterns = (rules ?? []).flatMap((rule) => {
+    const match = BASH_RULE.exec(rule.trim());
+    return match === null ? [] : [match[1]!.trim()];
+  });
+  return [...new Set(patterns.filter((pattern) => pattern.length > 0))];
 }
 
 function wrap(command: readonly string[], args: readonly string[], wrapper: SessionWrapperLayout | undefined, agentId: AgentId, _sessionId: SessionId, runtimeRoot: string): { readonly command: readonly string[]; readonly args: readonly string[]; readonly request?: RuntimeFile } {

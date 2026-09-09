@@ -8,7 +8,7 @@ fragment = "claude/settings.fragment.json"
 
 [platforms.chatgpt]
 status = "unsupported"
-reason = "Aboard currently integrates with Claude Code."
+reason = "The /auto entry point is a Claude Code hook and skill."
 
 [[files]]
 src = "claude/hooks/auto.py"

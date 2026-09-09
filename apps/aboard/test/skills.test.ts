@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
+import { chatGptSkillIsResolvable, requireChatGptWorkerSkills } from "../src/chatgpt/skills.js";
 import { harnessSkillIsResolvable, requireHarnessSkill, requireHarnessWorkerSkills } from "../src/claude/skills.js";
 
 test("required worker skills resolve from project or personal Claude skills", async (t) => {
@@ -53,5 +54,36 @@ test("Aboard requires all three empty worker skill placeholders", async (t) => {
   await assert.rejects(
     requireHarnessWorkerSkills(join(root, "project"), personal),
     /Required Harness skill \/review-hitl is not installed/u,
+  );
+});
+
+test("the ChatGPT worker skills resolve from the repository or the user's agent skills", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-chatgpt-skills-"));
+  const project = join(root, "project");
+  const home = join(root, "home");
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.equal(await chatGptSkillIsResolvable(project, "implement", home), false);
+  await assert.rejects(
+    requireChatGptWorkerSkills(project, home),
+    /Required Harness skill \$implement is not installed for ChatGPT.*Harness installer/u,
+  );
+
+  const projectSkill = join(project, ".agents", "skills", "implement", "SKILL.md");
+  await mkdir(dirname(projectSkill), { recursive: true });
+  await writeFile(projectSkill, "");
+  assert.equal(await chatGptSkillIsResolvable(project, "implement", home), true);
+  await rm(join(project, ".agents"), { recursive: true });
+
+  for (const skill of ["implement", "review-afk", "review-hitl"]) {
+    const userSkill = join(home, ".agents", "skills", skill, "SKILL.md");
+    await mkdir(dirname(userSkill), { recursive: true });
+    await writeFile(userSkill, "");
+  }
+  await requireChatGptWorkerSkills(project, home);
+  await rm(join(home, ".agents", "skills", "review-hitl", "SKILL.md"));
+  await assert.rejects(
+    requireChatGptWorkerSkills(project, home),
+    /Required Harness skill \$review-hitl is not installed for ChatGPT/u,
   );
 });

@@ -102,7 +102,6 @@ test("launch.json selects a read-only ChatGPT Explore session and still refuses 
       declaredEffort: "low",
     },
   });
-  assert.throws(() => parsed.value.configuration("implementer"), /chatgpt does not support implementer sessions yet/u);
   assert.throws(
     () => parseLaunchFile('{"version":1,"platform":"chatgpt","explore":{"model":"opus"}}'),
     /explore\.model is not valid for platform chatgpt.*Claude model/u,
@@ -110,6 +109,92 @@ test("launch.json selects a read-only ChatGPT Explore session and still refuses 
   assert.throws(
     () => parseLaunchFile('{"version":1,"platform":"chatgpt","explore":{"effort":"max"}}'),
     /explore\.effort is not valid for platform chatgpt/u,
+  );
+});
+
+test("launch.json routes a ChatGPT implementer through the implement skill with its own worker policy", () => {
+  const parsed = parseLaunchFile(`{
+    "version": 1,
+    "platform": "chatgpt",
+    "command": ["codex"]
+  }`);
+
+  assert.deepEqual(parsed.diagnostics, []);
+  assert.deepEqual(parsed.value.configuration("implementer"), {
+    platform: "chatgpt",
+    settings: {
+      shape: "skill",
+      skillName: "implement",
+      declaredCommand: ["codex"],
+      declaredModel: "by-difficulty",
+      declaredEffort: "by-difficulty",
+      webSearch: "disabled",
+      subagents: "denied",
+    },
+  });
+});
+
+test("launch.json routes ChatGPT reviewers through the review skill their disposition selects", () => {
+  const parsed = parseLaunchFile(`{
+    "version": 1,
+    "platform": "chatgpt",
+    "command": ["codex"],
+    "reviewer": { "effort": "high" }
+  }`);
+
+  assert.deepEqual(parsed.diagnostics, []);
+  assert.deepEqual(settings(parsed.value.configuration("reviewer", "afk")), {
+    shape: "skill",
+    skillName: "review-afk",
+    declaredCommand: ["codex"],
+    declaredModel: "by-difficulty",
+    declaredEffort: "high",
+    webSearch: "disabled",
+    subagents: "denied",
+  });
+  const hitl = settings(parsed.value.configuration("reviewer", "hitl"));
+  if (hitl.shape !== "skill") assert.fail("a ChatGPT reviewer must resolve to a skill launch");
+  assert.equal(hitl.skillName, "review-hitl");
+  // An unspecified review mode keeps the unattended default.
+  const fallback = settings(parsed.value.configuration("reviewer"));
+  assert.equal(fallback.shape === "skill" ? fallback.skillName : undefined, "review-afk");
+});
+
+test("a ChatGPT implementer profile is configurable independently of Claude routing", () => {
+  const parsed = parseLaunchFile(`{
+    "version": 1,
+    "platform": "chatgpt",
+    "implementer": { "model": "gpt-5.6", "effort": "xhigh", "webSearch": "live", "subagents": "allowed" }
+  }`);
+
+  assert.deepEqual(settings(parsed.value.configuration("implementer")), {
+    shape: "skill",
+    skillName: "implement",
+    declaredCommand: ["codex"],
+    declaredModel: "gpt-5.6",
+    declaredEffort: "xhigh",
+    webSearch: "live",
+    subagents: "allowed",
+  });
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","implementer":{"model":"opus"}}'),
+    /implementer\.model is not valid for platform chatgpt.*Claude model/u,
+  );
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","implementer":{"effort":"max"}}'),
+    /implementer\.effort is not valid for platform chatgpt/u,
+  );
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","implementer":{"webSearch":"everything"}}'),
+    /implementer\.webSearch is not valid for platform chatgpt/u,
+  );
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","interactive":{"webSearch":"live"}}'),
+    /interactive\.webSearch is only supported for the implementer and reviewer profiles/u,
+  );
+  assert.throws(
+    () => parseLaunchFile('{"version":1,"platform":"chatgpt","interactive":{"model":"by-difficulty"}}'),
+    /interactive\.model must be inherit or a Codex model slug/u,
   );
 });
 

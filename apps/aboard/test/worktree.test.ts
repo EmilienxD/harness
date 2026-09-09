@@ -347,6 +347,55 @@ test("the project overlay refuses unignored local configuration before copying a
   await assert.rejects(readFile(join(checkout, ".claude", "settings.local.json")), { code: "ENOENT" });
 });
 
+test("the project overlay carries ChatGPT project instructions and configuration but not live session data", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-overlay-chatgpt-"));
+  context.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const project = join(root, "project");
+  const checkout = join(root, "checkout");
+  await mkdir(join(project, ".agents", "skills", "implement"), { recursive: true });
+  await mkdir(join(project, ".codex", "hooks"), { recursive: true });
+  await mkdir(join(project, ".codex", "sessions", "2026"), { recursive: true });
+  await mkdir(join(project, ".abd"), { recursive: true });
+  await mkdir(join(checkout, ".abd"), { recursive: true });
+  await writeFile(join(project, ".agents", "skills", "implement", "SKILL.md"), "implement\n");
+  await writeFile(join(project, ".codex", "config.toml"), "project config\n");
+  await writeFile(join(project, ".codex", "hooks", "local.py"), "hook\n");
+  await writeFile(join(project, ".codex", "history.jsonl"), "{\"live\":true}\n");
+  await writeFile(join(project, ".codex", "sessions", "2026", "rollout.jsonl"), "transcript\n");
+  await writeFile(join(project, ".abd", "scaffold.json"), "scaffold\n");
+  const requested: string[] = [];
+  const git = {
+    ignoredPaths: async (paths: readonly string[]) => { requested.push(...paths); return paths; },
+  } as Pick<GitClient, "ignoredPaths"> as GitClient;
+
+  await overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git });
+  assert.equal(await readFile(join(checkout, ".agents", "skills", "implement", "SKILL.md"), "utf8"), "implement\n");
+  assert.equal(await readFile(join(checkout, ".codex", "config.toml"), "utf8"), "project config\n");
+  assert.equal(await readFile(join(checkout, ".codex", "hooks", "local.py"), "utf8"), "hook\n");
+  await assert.rejects(readFile(join(checkout, ".codex", "history.jsonl")), { code: "ENOENT" });
+  await assert.rejects(readFile(join(checkout, ".codex", "sessions", "2026", "rollout.jsonl")), { code: "ENOENT" });
+  assert.ok(requested.includes(".codex/config.toml"), "ChatGPT configuration keeps the ignored-file safety check");
+  assert.equal(requested.some((path) => path.startsWith(".codex/sessions")), false);
+});
+
+test("the project overlay refuses unignored ChatGPT configuration", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-overlay-chatgpt-ignore-"));
+  context.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const project = join(root, "project");
+  const checkout = join(root, "checkout");
+  await mkdir(join(project, ".codex"), { recursive: true });
+  await mkdir(join(project, ".abd"), { recursive: true });
+  await mkdir(join(checkout, ".abd"), { recursive: true });
+  await writeFile(join(project, ".codex", "config.toml"), "local config\n");
+  const git = { ignoredPaths: async () => [] } as Pick<GitClient, "ignoredPaths"> as GitClient;
+
+  await assert.rejects(
+    overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git }),
+    /git does not ignore.*\.codex\/config\.toml/u,
+  );
+  await assert.rejects(readFile(join(checkout, ".codex", "config.toml")), { code: "ENOENT" });
+});
+
 test("the project overlay never follows a missing symbolic link", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "aboard-overlay-link-"));
   context.after(async () => { await rm(root, { recursive: true, force: true }); });

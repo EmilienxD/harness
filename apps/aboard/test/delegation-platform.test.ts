@@ -200,6 +200,157 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
   assert.equal(fleet.get(agentId)?.lifecycle.status, "completed");
 });
 
+test("an auto-run ChatGPT implementer invokes the implement skill under the run's write lease and restrictions", async () => {
+  const agentId = "agent-1" as AgentId;
+  const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
+  const delivered: string[] = [];
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => sessionId,
+    policyProbe: { require: async () => undefined },
+    browserProbe: { require: async () => undefined },
+  });
+  const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
+  const terminals = new TerminalController({
+    host, shell: "powershell", environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:/work" }),
+    terminalIdFactory: () => "terminal-1" as TerminalId,
+  });
+  const lease = new WriteLease();
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:/work", fleet, lease, terminals,
+    configurations: { get: async () => ({
+      platform: "chatgpt",
+      settings: { shape: "skill", skillName: "implement", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+    }) },
+    platforms: new Map([["chatgpt", platform]]),
+    prompts: { resolve: async () => resolvedPromptFromText("The checked-out branch is for issue #15.") },
+    spills: { prepare: async () => undefined, write: async (file) => { delivered.push(file.contents); return file.relativePath; } },
+    shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
+  });
+
+  const run = coordinator.runAutomated({ type: "implementer", description: "address issue 15", issues: [15], difficulty: "expert", chrome: true });
+  while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
+  const command = host.terminals[0]?.sent.at(-1) ?? "";
+  assert.match(command, /\$implement/u);
+  assert.match(command, /web_search="disabled"/u);
+  assert.match(command, /features\.multi_agent=false/u);
+  assert.match(command, /--model gpt-5\.6/u);
+  assert.match(command, /model_reasoning_effort="high"/u);
+  assert.match(delivered.at(-1) ?? "", /Chrome browser backend/u);
+  assert.equal(lease.current()?.agentId, agentId);
+  assert.equal(fleet.get(agentId)?.chromeEnabled, true);
+  assert.equal(fleet.get(agentId)?.autoRunRestricted, true);
+
+  coordinator.complete(agentId, {
+    outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Implemented issue #15.",
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  });
+
+  assert.equal((await run).result.outcome, "succeeded");
+  assert.equal(lease.current(), undefined);
+});
+
+test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and settles through the shared contract", async () => {
+  const agentId = "agent-1" as AgentId;
+  const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
+  const requested: (string | undefined)[] = [];
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => sessionId,
+    policyProbe: { require: async () => undefined },
+  });
+  const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
+  const terminals = new TerminalController({
+    host, shell: "powershell", environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:/work" }),
+    terminalIdFactory: () => "terminal-1" as TerminalId,
+  });
+  const lease = new WriteLease();
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:/work", fleet, lease, terminals,
+    configurations: { get: async (_type, reviewMode) => {
+      requested.push(reviewMode);
+      return {
+        platform: "chatgpt",
+        settings: { shape: "skill", skillName: `review-${reviewMode ?? "afk"}`, declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+      };
+    } },
+    platforms: new Map([["chatgpt", platform]]),
+    prompts: { resolve: async () => resolvedPromptFromText("Review pull request #42 for issue #15.") },
+    spills: { prepare: async () => undefined, write: async () => "unused" },
+    shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
+  });
+
+  const run = coordinator.runAutomated({ type: "reviewer", reviewMode: "afk", description: "review pull request 42", issues: [15], pullRequest: 42, difficulty: "advanced" });
+  while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
+  const command = host.terminals[0]?.sent.at(-1) ?? "";
+  assert.deepEqual(requested, ["afk"]);
+  assert.match(command, /\$review-afk/u);
+  assert.match(command, /web_search="disabled"/u);
+  assert.equal(lease.current()?.agentId, agentId);
+  assert.equal(fleet.get(agentId)?.autoRunRestricted, true);
+
+  coordinator.complete(agentId, {
+    outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Requested changes: tighten the guard test.",
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  });
+  const outcome = await run;
+
+  assert.equal(outcome.result.outcome, "succeeded");
+  assert.equal(outcome.result.outcome === "succeeded" ? outcome.result.lastAssistantMessage : undefined, "Requested changes: tighten the guard test.");
+  assert.equal(fleet.get(agentId)?.lifecycle.status, "completed");
+  assert.equal(lease.current(), undefined);
+});
+
+test("a HITL ChatGPT reviewer opens an attended session that waits for the human decision", async () => {
+  const agentId = "agent-1" as AgentId;
+  const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
+  const requested: (string | undefined)[] = [];
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => sessionId,
+    policyProbe: { require: async () => undefined },
+  });
+  const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
+  const terminals = new TerminalController({
+    host, shell: "powershell", environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:/work" }),
+    terminalIdFactory: () => "terminal-1" as TerminalId,
+  });
+  const lease = new WriteLease();
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:/work", fleet, lease, terminals,
+    configurations: { get: async (_type, reviewMode) => {
+      requested.push(reviewMode);
+      return {
+        platform: "chatgpt",
+        settings: { shape: "skill", skillName: `review-${reviewMode ?? "afk"}`, declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+      };
+    } },
+    platforms: new Map([["chatgpt", platform]]),
+    prompts: { resolve: async () => resolvedPromptFromText("Review pull request #42 for issue #15.") },
+    spills: { prepare: async () => undefined, write: async () => "unused" },
+    shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
+  });
+
+  const handles = await coordinator.launchInteractive({ type: "reviewer", reviewMode: "hitl", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
+
+  assert.deepEqual(requested, ["hitl"]);
+  assert.match(host.terminals[0]?.sent.at(-1) ?? "", /\$review-hitl/u);
+  assert.equal(handles.sessionId, sessionId);
+  const session = fleet.get(agentId);
+  assert.equal(session?.attended, true);
+  assert.deepEqual(session?.resultDelivery, { mode: "none" });
+  assert.equal(session?.lifecycle.status, "running");
+  // The human decision arrives on the pull request; Aboard keeps the lease and
+  // the terminal until then.
+  assert.equal(lease.current()?.agentId, agentId);
+});
+
 test("a ChatGPT reopen preserves identity and ownership while waiting for resume startup proof", async () => {
   const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
   const agentId = "agent-1" as AgentId;
