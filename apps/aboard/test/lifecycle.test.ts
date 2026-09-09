@@ -12,7 +12,7 @@ const session = (value: string) => value as SessionId;
 const terminal = (value: string) => value as TerminalId;
 const startedAt = at("2026-07-30T10:00:00.000Z");
 
-function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }, expectsUncommittedTree = false): AgentSession {
+function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }): AgentSession {
   return {
     platform: "claude",
     identity: { agentId: agent("worker-10"), type: "implementer" },
@@ -22,14 +22,13 @@ function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result"
     lifecycle: { status: "starting", startedAt },
     resultDelivery: delivery,
     telemetry: { totalTokens: 12, totalDurationMs: 34, totalToolUseCount: 2, compactionCount: 1 },
-    ...(expectsUncommittedTree ? { expectsUncommittedTree: true } : {}),
   };
 }
 
-function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }, expectsUncommittedTree = false) {
+function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }) {
   const fleet = new FleetRegistry();
 
-  fleet.register(worker(delivery, expectsUncommittedTree), startedAt);
+  fleet.register(worker(delivery), startedAt);
   fleet.transition(agent("worker-10"), { status: "running", startedAt }, startedAt);
   const lease = new WriteLease();
   lease.acquire("write-capable", { agentId: agent("worker-10"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee") }, startedAt, "test launch");
@@ -86,16 +85,17 @@ test("dirty write-capable Stop becomes no-commit", async () => {
   assert.equal(lease.current(), undefined);
 });
 
-test("no-commit is not raised when the launch expected an uncommitted tree", async () => {
-  const expected = setup(false, { mode: "tool-result" }, true);
-  await expected.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "left the change in the tree" });
-  assert.equal(expected.delivered[0]?.outcome, "succeeded");
-  assert.equal(expected.lease.current(), undefined);
+test("every write-capable agent owes a commit, auto-run worker or not", async () => {
+  // Workers signal completion by committing, so no launch shape may leave the
+  // tree dirty and still be called a success.
+  const dirty = setup(false);
+  await dirty.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "left the change in the tree" });
+  assert.equal(dirty.delivered[0]?.outcome === "failed" && dirty.delivered[0].failure.type, "no-commit");
+  assert.equal(dirty.lease.current(), undefined);
 
-  // A manually delegated write-capable agent still owes a commit.
-  const manual = setup(false);
-  await manual.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "done" });
-  assert.equal(manual.delivered[0]?.outcome === "failed" && manual.delivered[0].failure.type, "no-commit");
+  const committed = setup();
+  await committed.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "done" });
+  assert.equal(committed.delivered[0]?.outcome, "succeeded");
 });
 
 test("non-zero, kill, timeout, and StopFailure paths are typed and release", async () => {

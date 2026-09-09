@@ -80,9 +80,6 @@ import { WorktreeRunWorkspaces } from "./auto/worktree.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
 import { RuntimeAdmission, RuntimeStartup } from "./runtime/admission.js";
 import { RuntimeLayout } from "./runtime/layout.js";
-import {
-  type AutoRunReviewMode,
-} from "./claude/launch.js";
 import { requireHarnessWorkerSkills } from "./claude/skills.js";
 import { requireChatGptWorkerSkills } from "./chatgpt/skills.js";
 import { FileLaunchConfigurationSource } from "./platform/launch-configuration.js";
@@ -111,8 +108,8 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 
 
 function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigurationSource): DelegationConfigurationSource {
-  return { get: async (type, reviewMode?: AutoRunReviewMode) => {
-    const configured = await source.get(type, reviewMode);
+  return { get: async (type) => {
+    const configured = await source.get(type);
     if (type === "implementer" || type === "reviewer") {
       if (configured.platform === "claude") await requireHarnessWorkerSkills(workspaceRoot);
       else await requireChatGptWorkerSkills(workspaceRoot);

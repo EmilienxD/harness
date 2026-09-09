@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { claudeConfigDirectory } from "./sessions.js";
 
-export const REQUIRED_HARNESS_WORKER_SKILLS = ["implement", "review-afk", "review-hitl"] as const;
+export const REQUIRED_HARNESS_WORKER_SKILLS = ["address-issue", "issue-review"] as const;
 
 export async function harnessSkillIsResolvable(
   workspaceRoot: string,

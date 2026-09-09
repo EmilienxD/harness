@@ -120,13 +120,12 @@ test("createBranch, add, and commit leave the branch carrying the issue's commit
   assert.match(sha, /^[0-9a-f]{7,}$/);
   assert.equal(isWorkingTreeClean(await client.status()), true);
 
-  // Only commits this branch adds over its base count, and the issue number is
-  // matched as a whole reference.
-  assert.equal(await client.hasCommitFor(34, "main"), true);
-  assert.equal(await client.hasCommitFor(3, "main"), false);
-  assert.equal(await client.hasCommitFor(340, "main"), false);
+  // Ancestry, not the commit message, is what tells aboard the branch carries
+  // work its base does not.
+  assert.deepEqual(await client.aheadBehind("issue/34-add-retry-backoff", "main"), { ahead: 1, behind: 0 });
+  assert.equal(await client.isAncestor("main", "issue/34-add-retry-backoff"), true);
   await client.checkout("main");
-  assert.equal(await client.hasCommitFor(34, "main"), false);
+  assert.deepEqual(await client.aheadBehind("main", "main"), { ahead: 0, behind: 0 });
 });
 
 test("deleteBranch removes only a fully merged local branch", async () => {

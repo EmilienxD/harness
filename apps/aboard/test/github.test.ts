@@ -41,7 +41,7 @@ test("a CLI lookup failure for a missing context issue does not block implementa
   }));
   const resolver = new PromptResolver({ github });
   const prompt = await resolver.resolve({
-    kind: "implementation", instruction: "Implement the issue", issueNumbers: [337], recursiveIssueReferences: false,
+    kind: "implementation", instruction: "Implement the issue", issueNumbers: [337], issueContextDepth: 2,
   });
   assert.deepEqual(fetched, [337, 332, 336]);
   assert.deepEqual(prompt?.sources.map((source) => source.number), [337, 332]);

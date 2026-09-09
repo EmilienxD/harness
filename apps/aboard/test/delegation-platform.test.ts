@@ -222,7 +222,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
     workspaceRoot: "C:/work", fleet, lease, terminals,
     configurations: { get: async () => ({
       platform: "chatgpt",
-      settings: { shape: "skill", skillName: "implement", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+      settings: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
     }) },
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => resolvedPromptFromText("The checked-out branch is for issue #15.") },
@@ -233,7 +233,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   const run = coordinator.runAutomated({ type: "implementer", description: "address issue 15", issues: [15], difficulty: "expert", chrome: true });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.match(command, /\$implement/u);
+  assert.match(command, /\$address-issue/u);
   assert.match(command, /web_search="disabled"/u);
   assert.match(command, /features\.multi_agent=false/u);
   assert.match(command, /--model gpt-5\.6/u);
@@ -271,11 +271,11 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
   const lease = new WriteLease();
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:/work", fleet, lease, terminals,
-    configurations: { get: async (_type, reviewMode) => {
-      requested.push(reviewMode);
+    configurations: { get: async (type) => {
+      requested.push(type);
       return {
         platform: "chatgpt",
-        settings: { shape: "skill", skillName: `review-${reviewMode ?? "afk"}`, declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+        settings: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
@@ -284,11 +284,11 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "reviewer", reviewMode: "afk", description: "review pull request 42", issues: [15], pullRequest: 42, difficulty: "advanced" });
+  const run = coordinator.runAutomated({ type: "reviewer", description: "review pull request 42", issues: [15], pullRequest: 42, difficulty: "advanced" });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.deepEqual(requested, ["afk"]);
-  assert.match(command, /\$review-afk/u);
+  assert.deepEqual(requested, ["reviewer"]);
+  assert.match(command, /\$issue-review/u);
   assert.match(command, /web_search="disabled"/u);
   assert.equal(lease.current()?.agentId, agentId);
   assert.equal(fleet.get(agentId)?.autoRunRestricted, true);
@@ -324,11 +324,11 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
   const lease = new WriteLease();
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:/work", fleet, lease, terminals,
-    configurations: { get: async (_type, reviewMode) => {
-      requested.push(reviewMode);
+    configurations: { get: async (type) => {
+      requested.push(type);
       return {
         platform: "chatgpt",
-        settings: { shape: "skill", skillName: `review-${reviewMode ?? "afk"}`, declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+        settings: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
@@ -337,10 +337,10 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const handles = await coordinator.launchInteractive({ type: "reviewer", reviewMode: "hitl", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
+  const handles = await coordinator.launchInteractive({ type: "reviewer", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
 
-  assert.deepEqual(requested, ["hitl"]);
-  assert.match(host.terminals[0]?.sent.at(-1) ?? "", /\$review-hitl/u);
+  assert.deepEqual(requested, ["reviewer"]);
+  assert.match(host.terminals[0]?.sent.at(-1) ?? "", /\$issue-review/u);
   assert.equal(handles.sessionId, sessionId);
   const session = fleet.get(agentId);
   assert.equal(session?.attended, true);

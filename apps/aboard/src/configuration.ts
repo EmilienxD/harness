@@ -1,7 +1,7 @@
 import { DEFAULT_MAX_INLINE_PROMPT_CHARS } from "./claude/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 
-import { AUTO_RUN_BRANCH_MODES, DISCARD_BEHAVIORS, MERGE_STRATEGIES, type AutoRunSettings, type AutoRunBranchMode, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";
+import { AUTO_RUN_BRANCH_MODES, DEFAULT_ISSUE_CONTEXT_DEPTH, DISCARD_BEHAVIORS, MAX_ISSUE_CONTEXT_DEPTH, MERGE_STRATEGIES, type AutoRunSettings, type AutoRunBranchMode, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";
 
 export interface ConfigurationReader { get(section: string): unknown; }
 export interface AboardConfiguration {
@@ -21,7 +21,7 @@ export const ABOARD_SETTINGS = [
   "aboard.autoRun.review",
   "aboard.autoRun.branchMode",
   "aboard.autoRun.exploreBeforeImplement",
-  "aboard.autoRun.recursiveIssueReferences",
+  "aboard.autoRun.issueContextDepth",
   "aboard.autoRun.prompt",
   "aboard.autoRun.pauseAfterHitl",
   "aboard.autoRun.mergeStrategy",
@@ -130,7 +130,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       branchMode: choice<AutoRunBranchMode>(reader, "aboard.autoRun.branchMode", AUTO_RUN_BRANCH_MODES, "per-issue", diagnostics),
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
       exploreBeforeImplement: flag(reader, "aboard.autoRun.exploreBeforeImplement", false, diagnostics),
-      recursiveIssueReferences: flag(reader, "aboard.autoRun.recursiveIssueReferences", false, diagnostics),
+      issueContextDepth: integer(reader, "aboard.autoRun.issueContextDepth", DEFAULT_ISSUE_CONTEXT_DEPTH, 0, MAX_ISSUE_CONTEXT_DEPTH, diagnostics),
       permanentPrompt: text(reader, "aboard.autoRun.prompt", "", diagnostics),
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),

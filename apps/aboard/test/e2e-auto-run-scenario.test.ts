@@ -17,7 +17,7 @@ import {
 
 const root = "C:\\fixture";
 
-function request(messages: readonly Message[], tools: readonly string[] = ["Read", "Edit"]) {
+function request(messages: readonly Message[], tools: readonly string[] = ["Read", "Edit", "Bash"]) {
   return parseMessagesRequest({
     model: "claude-e2e",
     max_tokens: 1000,
@@ -52,13 +52,24 @@ test("auto-run AFK implementer reads, edits, and reports a valid completion", ()
     },
   }]);
 
-  const complete = transition(request([
+  const afterEdit: Message[] = [
     ...afterRead,
     { role: "assistant", content: edit.content },
     { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_e2e_auto_afk_edit", content: "updated", is_error: false }] },
+  ];
+  // The commit is the completion signal, so the worker makes one itself.
+  const commit = transition(request(afterEdit), root);
+  assert.equal(commit.checkpoint, "auto-afk-commit");
+  assert.equal(commit.content[0]?.name, "Bash");
+  assert.match(String((commit.content[0]?.input as { command?: string }).command), /^git add -A && git commit /u);
+
+  const complete = transition(request([
+    ...afterEdit,
+    { role: "assistant", content: commit.content },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_e2e_auto_afk_commit", content: "1 file changed", is_error: false }] },
   ]), root);
   assert.equal(complete.checkpoint, "auto-afk-complete");
-  assert.match(String(complete.content[0]?.text), /<commit>Update deterministic fixture<\/commit>/u);
+  assert.doesNotMatch(String(complete.content[0]?.text), /<commit>/u);
 });
 
 test("auto-run Explore reads the checkout before returning bounded context", () => {
@@ -94,7 +105,10 @@ test("single-branch HITL and follow-up workers apply sequential edits", () => {
     const edit = transition(request(afterRead), root);
     assert.equal(edit.checkpoint, `${item.checkpoint}-edit`);
     assert.equal((edit.content[0]?.input as { new_string?: string }).new_string, item.after);
-    const complete = transition(request([...afterRead, { role: "assistant", content: edit.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: item.editId, content: "updated", is_error: false }] }]), root);
+    const afterEdit: Message[] = [...afterRead, { role: "assistant", content: edit.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: item.editId, content: "updated", is_error: false }] }];
+    const commit = transition(request(afterEdit), root);
+    assert.equal(commit.checkpoint, `${item.checkpoint}-commit`);
+    const complete = transition(request([...afterEdit, { role: "assistant", content: commit.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: `${item.editId}_commit`, content: "1 file changed", is_error: false }] }]), root);
     assert.equal(complete.checkpoint, `${item.checkpoint}-complete`);
   }
 });

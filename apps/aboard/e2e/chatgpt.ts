@@ -66,8 +66,8 @@ function scenarioAgentType(scenario: Scenario): AgentType {
 }
 
 function scenarioConfiguration(scenario: Scenario, command: readonly string[]): Record<string, unknown> {
-  if (scenario.implement === true) return { shape: "skill", skillName: "implement", declaredCommand: command };
-  if (scenario.review !== undefined) return { shape: "skill", skillName: `review-${scenario.review}`, declaredCommand: command };
+  if (scenario.implement === true) return { shape: "skill", skillName: "address-issue", declaredCommand: command };
+  if (scenario.review !== undefined) return { shape: "skill", skillName: "issue-review", declaredCommand: command };
   return { shape: scenario.explore === true ? "explore" : "default", declaredCommand: command };
 }
 

@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const REQUIRED_CHATGPT_WORKER_SKILLS = ["implement", "review-afk", "review-hitl"] as const;
+export const REQUIRED_CHATGPT_WORKER_SKILLS = ["address-issue", "issue-review"] as const;
 
 export function chatGptSkillDirectories(workspaceRoot: string, homeDirectory: string = homedir()): readonly string[] {
   return [

@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DIRTY_RECOVERY_SENTENCE,
-  hasTrustedDirtyWork,
   validateRun,
   type BranchObservation,
   type IssueObservation,
@@ -25,7 +23,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     settings: {
       review: false,
       exploreBeforeImplement: false,
-      recursiveIssueReferences: false,
+      issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
@@ -317,17 +315,17 @@ test("the run's own pull request may not be merged or closed by anybody else", (
 
 // --- working tree and workspace ---------------------------------------------
 
-test("uncommitted work is trusted only on the branch the run's current issue belongs to", () => {
+test("uncommitted work leaves a run resumable only on the branch its current issue belongs to", () => {
   const current = working({ state: "current", phase: "implement" });
   const observed = withIssueBranch();
 
   const onIssueBranch = { ...observed, workingTree: { branch: "issue/34-add-retry-backoff", dirtyPaths: ["src/a.ts"] } };
+  // Resumable, so the user can inspect it; the run itself refuses to hand a
+  // dirty checkout to another worker.
   assert.equal(reason(current, onIssueBranch), undefined);
-  assert.equal(hasTrustedDirtyWork(current, onIssueBranch), true);
 
   const elsewhere = { ...observed, workingTree: { branch: "feature/wip", dirtyPaths: ["src/a.ts"] } };
   assert.match(reason(current, elsewhere) ?? "", /uncommitted changes on feature\/wip, which is not the branch this run is working/);
-  assert.equal(hasTrustedDirtyWork(current, elsewhere), false);
 
   // With no current issue there is no branch that could own the work.
   assert.match(reason(record(), { ...observations(), workingTree: { branch: SESSION, dirtyPaths: ["src/a.ts"] } }) ?? "", /not the branch this run is working/);
@@ -343,8 +341,3 @@ test("the run's own checkout is required only after its creation was checkpointe
   assert.equal(reason(after, observations({ workspacePresent: true })), undefined);
 });
 
-test("the recovery sentence is exactly one sentence about the edits, not about the crash", () => {
-  assert.equal(DIRTY_RECOVERY_SENTENCE.split(/(?<=\.)\s/u).length, 1);
-  assert.match(DIRTY_RECOVERY_SENTENCE, /review them critically/);
-  assert.doesNotMatch(DIRTY_RECOVERY_SENTENCE, /crash|interrupt|resume/i);
-});

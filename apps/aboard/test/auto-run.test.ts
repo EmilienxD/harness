@@ -10,8 +10,8 @@ import {
   isAutoRunExplorationComment,
   issueClosedComment,
   issueCommentBody,
+  classifyWorkerResult,
   nextStep,
-  parseImplementerCompletion,
   pullRequestBody,
   runPullRequestBody,
   runPullRequestTitle,
@@ -128,7 +128,6 @@ test("an issue-closing comment says where the work is without product branding",
 
 test("an issue comment is the agent's own text, bounded, and absent when there is none", () => {
   assert.equal(issueCommentBody("  Rewrote the backoff.  "), "Rewrote the backoff.");
-  assert.equal(issueCommentBody("Rewrote the backoff.", "Fix *retry* handling"), "**Fix \\*retry\\* handling**\n\nRewrote the backoff.");
   assert.equal(issueCommentBody("   "), undefined);
   assert.ok((issueCommentBody("z".repeat(70_000)) ?? "").length <= 65_536);
 });
@@ -141,38 +140,80 @@ test("exploration context is recognizable without hidden or product-specific mar
   assert.equal(isAutoRunExplorationComment("## Codebase context\n\nA user-authored note."), false);
 });
 
-test("implementer completion accepts one commit block anywhere and removes it from the report", () => {
-  assert.deepEqual(
-    parseImplementerCompletion("Changed retry behavior.\n\n<commit>Fix retry handling</commit>\n\nTests pass."),
-    {
-      accepted: true,
-      completion: {
-        commitMessage: "Fix retry handling",
-        report: "Changed retry behavior.\n\nTests pass.",
-      },
-    },
-  );
+test("a worker's single commit on top of its starting tip is the success signal", () => {
+  const committed = classifyWorkerResult("address-issue", {
+    startingSha: "a".repeat(40),
+    headSha: "b".repeat(40),
+    dirtyPaths: [],
+    descendsFromStart: true,
+    newCommitCount: 1,
+  });
+  assert.deepEqual(committed, { kind: "committed", sha: "b".repeat(40) });
 });
 
-test("implementer completion fails closed without one valid commit subject", () => {
-  for (const message of [
-    "Partial work only.",
-    "<commit> </commit>",
-    "<commit>One</commit><commit>Two</commit>",
-    "<commit>One</commit><commit>",
-    "</commit><commit>One</commit>",
-    "<commit>Subject\nBody</commit>",
-    `<commit>${"x".repeat(73)}</commit>`,
-  ]) {
-    assert.equal(parseImplementerCompletion(message).accepted, false, message);
+test("issue-review may finish untouched, but address-issue may not", () => {
+  const untouched = { startingSha: "a".repeat(40), headSha: "a".repeat(40), dirtyPaths: [], descendsFromStart: true, newCommitCount: 0 } as const;
+  assert.deepEqual(classifyWorkerResult("issue-review", untouched), { kind: "unchanged" });
+  const rejected = classifyWorkerResult("address-issue", untouched);
+  assert.equal(rejected.kind, "rejected");
+  assert.match(rejected.kind === "rejected" ? rejected.reason : "", /without committing/);
+});
+
+test("residual changes reject a worker even when it also committed", () => {
+  for (const role of ["address-issue", "issue-review"] as const) {
+    const outcome = classifyWorkerResult(role, {
+      startingSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+      dirtyPaths: ["src/a.ts", "src/b.ts"],
+      descendsFromStart: true,
+      newCommitCount: 1,
+    });
+    assert.equal(outcome.kind, "rejected", role);
+    assert.match(outcome.kind === "rejected" ? outcome.reason : "", /2 uncommitted path/);
   }
+});
+
+test("rewritten history and extra commits are rejected", () => {
+  const moved = classifyWorkerResult("address-issue", {
+    startingSha: "a".repeat(40),
+    headSha: "b".repeat(40),
+    dirtyPaths: [],
+    descendsFromStart: false,
+    newCommitCount: 0,
+  });
+  assert.equal(moved.kind, "rejected");
+  assert.match(moved.kind === "rejected" ? moved.reason : "", /moved HEAD off/);
+
+  const extra = classifyWorkerResult("issue-review", {
+    startingSha: "a".repeat(40),
+    headSha: "b".repeat(40),
+    dirtyPaths: [],
+    descendsFromStart: true,
+    newCommitCount: 3,
+  });
+  assert.equal(extra.kind, "rejected");
+  assert.match(extra.kind === "rejected" ? extra.reason : "", /created 3 commits/);
 });
 
 test("the reducer walks the phases in order from a clean start", () => {
   // The base is the run's session branch, never the repository's default one.
   assert.deepEqual(step("branch", { branchExists: false, currentBranch: "main" }), { action: "branch", branch: issue.branch, base: SESSION_BRANCH });
   assert.deepEqual(step("implement"), { action: "implement", issue });
-  assert.deepEqual(step("commit", { workingTreeDirty: true, dirtyPaths: ["src/a.ts"] }), { action: "commit", issue });
+  // The worker committed; the commit phase only publishes what it produced.
+  assert.deepEqual(step("commit", { hasCommit: true }), { action: "commit", issue });
+});
+
+test("uncommitted changes stop the run instead of feeding a worker or a commit", () => {
+  const dirty = { workingTreeDirty: true, dirtyPaths: ["src/a.ts"] } as const;
+  const beforeImplementation = step("implement", dirty);
+  assert.equal(beforeImplementation.action, "stop");
+  assert.match(beforeImplementation.action === "stop" ? beforeImplementation.reason : "", /src\/a\.ts/);
+
+  const afterImplementation = step("commit", { ...dirty, hasCommit: true });
+  assert.equal(afterImplementation.action, "stop");
+
+  const nothingCommitted = step("commit", { pullRequest: { number: 56, state: "open", approvedByOther: false } });
+  assert.deepEqual(nothingCommitted, { action: "stop", reason: `address-issue produced no commit for issue #${issue.number}` });
 });
 
 test("every already-satisfied postcondition short circuits", () => {
@@ -209,7 +250,7 @@ test("a branch with a pull request but nothing to commit is a failure, not a com
     pullRequest: { number: 56, state: "open", approvedByOther: false },
   });
   assert.equal(outcome.action, "stop");
-  assert.match((outcome as { reason: string }).reason, /produced no changes/);
+  assert.match((outcome as { reason: string }).reason, /produced no commit/);
 });
 
 test("uncommitted work on the wrong branch stops the run instead of being checked out over", () => {

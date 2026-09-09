@@ -1,7 +1,7 @@
 import type { AgentType } from "../domain/contracts.js";
 import type { ConfiguredLaunch } from "../platform/agent-platform.js";
 import { LaunchFileError, type PlatformLaunchFile } from "../platform/launch-configuration.js";
-import { BY_DIFFICULTY, EFFORT_LEVELS, type AutoRunReviewMode, type DeclaredEffort, type EffortLevel, type LaunchConfiguration } from "./launch.js";
+import { BY_DIFFICULTY, EFFORT_LEVELS, type DeclaredEffort, type EffortLevel, type LaunchConfiguration } from "./launch.js";
 
 const PROFILE_NAMES = ["interactive", "explore", "implementer", "reviewer"] as const;
 const ROOT_FIELDS = new Set(["version", "platform", "command", ...PROFILE_NAMES]);
@@ -57,7 +57,7 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
   public readonly platform = "claude" as const;
   public constructor(private readonly command: readonly string[], private readonly profiles: Readonly<Record<ProfileName, Profile>>) {}
 
-  public configuration(type: AgentType, reviewMode: AutoRunReviewMode = "afk"): ConfiguredLaunch {
+  public configuration(type: AgentType): ConfiguredLaunch {
     const profileName = type === "Explore" ? "explore" : type;
     const profile = this.profiles[profileName];
     const common = {
@@ -69,8 +69,9 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
     let settings: LaunchConfiguration;
     if (type === "interactive") settings = { shape: "default", ...common };
     else if (type === "Explore") settings = { shape: "builtin", agentName: "Explore", ...common };
-    else if (type === "implementer") settings = { shape: "skill", skillName: "implement", ...common };
-    else settings = { shape: "skill", skillName: `review-${reviewMode}`, ...common };
+    else if (type === "implementer") settings = { shape: "skill", skillName: "address-issue", ...common };
+    // AFK and HITL are auto-run orchestration modes, not separate review skills.
+    else settings = { shape: "skill", skillName: "issue-review", ...common };
     return { platform: this.platform, settings };
   }
 }

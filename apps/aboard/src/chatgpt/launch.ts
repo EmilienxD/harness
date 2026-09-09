@@ -17,8 +17,7 @@ export type ChatGptEffort = (typeof CHATGPT_EFFORTS)[number];
 export const CHATGPT_WEB_SEARCH_MODES = ["disabled", "cached", "indexed", "live"] as const;
 export type ChatGptWebSearch = (typeof CHATGPT_WEB_SEARCH_MODES)[number];
 
-export const CHATGPT_WORKER_SKILLS = ["implement", "review-afk", "review-hitl"] as const;
-const CHATGPT_REVIEW_SKILLS: readonly string[] = ["review-afk", "review-hitl"];
+export const CHATGPT_WORKER_SKILLS = ["address-issue", "issue-review"] as const;
 
 export interface ChatGptDifficultyLaunchPolicy {
   readonly model: string;
@@ -199,13 +198,14 @@ function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfigura
       if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "Explore launches as a read-only Codex session");
       return;
     case "implementer":
-      if (configuration.shape !== "skill" || configuration.skillName !== "implement") {
-        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $implement");
+      if (configuration.shape !== "skill" || configuration.skillName !== "address-issue") {
+        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $address-issue");
       }
       return;
     case "reviewer":
-      if (configuration.shape !== "skill" || !CHATGPT_REVIEW_SKILLS.includes(configuration.skillName ?? "")) {
-        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $review-afk or $review-hitl");
+      // One skill for both dispositions: AFK and HITL differ in orchestration.
+      if (configuration.shape !== "skill" || configuration.skillName !== "issue-review") {
+        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $issue-review");
       }
       return;
   }

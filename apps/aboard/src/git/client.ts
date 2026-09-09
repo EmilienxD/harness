@@ -125,8 +125,6 @@ export interface GitClient {
   add(): Promise<void>;
   commit(subject: string, body: string): Promise<string>;
   push(branch: string, setUpstream: boolean): Promise<void>;
-  /** Whether HEAD carries a commit whose message references this issue. */
-  hasCommitFor(issueNumber: number, base: string): Promise<boolean>;
   isPushed(branch: string): Promise<boolean>;
   /** Which repository-relative paths are excluded by the checkout's ignore rules. */
   ignoredPaths(paths: readonly string[]): Promise<readonly string[]>;
@@ -312,12 +310,6 @@ export class ProcessGitClient implements GitClient {
 
   public async push(branch: string, setUpstream: boolean): Promise<void> {
     await this.run(setUpstream ? ["push", "-u", "origin", branch] : ["push", "origin", branch]);
-  }
-
-  public async hasCommitFor(issueNumber: number, base: string): Promise<boolean> {
-    const log = await this.tryRun(["log", `${base}..HEAD`, "--format=%B"]);
-    if (log === undefined || log.length === 0) return false;
-    return new RegExp(`(?:^|\\s)#${issueNumber}(?![0-9])`, "u").test(log);
   }
 
   public async isPushed(branch: string): Promise<boolean> {
@@ -522,7 +514,6 @@ export class CachingGitClient implements GitClient {
   public add(): ReturnType<GitClient["add"]> { return this.inner.add(); }
   public commit(subject: string, body: string): ReturnType<GitClient["commit"]> { return this.inner.commit(subject, body); }
   public push(branch: string, setUpstream: boolean): ReturnType<GitClient["push"]> { return this.inner.push(branch, setUpstream); }
-  public hasCommitFor(issueNumber: number, base: string): ReturnType<GitClient["hasCommitFor"]> { return this.inner.hasCommitFor(issueNumber, base); }
   public isPushed(branch: string): ReturnType<GitClient["isPushed"]> { return this.inner.isPushed(branch); }
   public ignoredPaths(paths: readonly string[]): ReturnType<GitClient["ignoredPaths"]> { return this.inner.ignoredPaths(paths); }
   public trackedPathsUnder(ref: string, directory: string): ReturnType<GitClient["trackedPathsUnder"]> { return this.inner.trackedPathsUnder(ref, directory); }

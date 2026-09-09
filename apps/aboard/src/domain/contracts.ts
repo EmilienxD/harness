@@ -158,7 +158,6 @@ export interface AgentSession {
   /** Every issue this agent's launch prompt resolved, in the order it was given them. */
   readonly issueNumbers?: readonly number[];
   readonly cwd?: string;
-  readonly expectsUncommittedTree?: boolean;
   readonly autoRunRestricted?: true;
   readonly compactSummaries?: readonly string[];
   /** Most recent complete assistant message observed by aboard's Stop hook. */

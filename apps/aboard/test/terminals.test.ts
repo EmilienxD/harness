@@ -82,7 +82,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     agentType: "implementer",
     issueNumbers: [6],
-    initialCommand: "claude --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"/implement Address issue 6\"",
+    initialCommand: "claude --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"/address-issue Address issue 6\"",
   });
 
   assert.equal(created.terminalId, "terminal-1");
@@ -101,7 +101,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
     text: "cd -LiteralPath 'C:\\work\\aboard'",
     addNewLine: true,
   }, {
-    text: "claude --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"/implement Address issue 6\"",
+    text: "claude --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"/address-issue Address issue 6\"",
     addNewLine: true,
   }]);
   assert.deepEqual(host.created[0]?.terminal.shows, []);

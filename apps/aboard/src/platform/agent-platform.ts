@@ -61,7 +61,6 @@ export interface PromptSpillStore {
 }
 
 export type {
-  AutoRunReviewMode,
   EffortLevel,
   LaunchConfiguration,
   LaunchPlan,

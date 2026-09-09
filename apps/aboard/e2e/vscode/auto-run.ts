@@ -55,17 +55,17 @@ export async function runAutoRunJourney(): Promise<void> {
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
         "aboard.autoRun.review": true,
         "aboard.autoRun.exploreBeforeImplement": true,
-        "aboard.autoRun.recursiveIssueReferences": true,
+        "aboard.autoRun.issueContextDepth": 2,
         "aboard.autoRun.prompt": AUTO_RUN_PERMANENT_NOTE,
         "aboard.autoRun.mergeStrategy": "merge",
         "aboard.autoRun.mergeRunPullRequest": true,
       });
     }
     const assertions = server.assertions();
-    for (const checkpoint of ["auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-complete", "auto-review-complete"]) {
+    for (const checkpoint of ["auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-complete"]) {
       if (!assertions.checkpoints.includes(checkpoint)) throw new Error(`Auto-run journey did not reach ${checkpoint}`);
     }
-    if (assertions.inferenceRequests !== 6 || assertions.unexpectedRequests !== 0) {
+    if (assertions.inferenceRequests !== 7 || assertions.unexpectedRequests !== 0) {
       throw new Error(`Unexpected auto-run inference activity: ${assertions.inferenceRequests} inference requests, ${assertions.unexpectedRequests} rejected requests`);
     }
   } finally {
@@ -105,7 +105,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
 
 async function installHarnessWorkerSkills(configRoot: string): Promise<void> {
   const harnessRoot = resolve(__dirname, "..", "..", "..", "..", "..");
-  for (const name of ["implement", "review-afk", "review-hitl"]) {
+  for (const name of ["address-issue", "issue-review"]) {
     const destination = join(configRoot, "skills", name, "SKILL.md");
     await mkdir(join(configRoot, "skills", name), { recursive: true });
     await copyFile(join(harnessRoot, "harness", name, "shared", "skills", name, "SKILL.md"), destination);
@@ -211,7 +211,7 @@ async function runSingleBranchJourney(): Promise<void> {
         "aboard.autoRun.branchMode": "single-branch",
         "aboard.autoRun.review": false,
         "aboard.autoRun.exploreBeforeImplement": false,
-        "aboard.autoRun.recursiveIssueReferences": false,
+        "aboard.autoRun.issueContextDepth": 1,
         "aboard.autoRun.pauseAfterHitl": true,
         "aboard.autoRun.mergeStrategy": "rebase",
         "aboard.autoRun.mergeRunPullRequest": false,
@@ -225,10 +225,13 @@ async function runSingleBranchJourney(): Promise<void> {
       if (phase === "initialize") await mkdir(join(config.cloneRoot, ".claude"), { recursive: true });
     }
     const assertions = server.assertions();
-    for (const checkpoint of ["auto-hitl-read", "auto-hitl-edit", "auto-hitl-complete", "auto-followup-read", "auto-followup-edit", "auto-followup-complete"]) {
+    for (const checkpoint of [
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
+    ]) {
       if (!assertions.checkpoints.includes(checkpoint)) throw new Error(`Single-branch auto-run did not reach ${checkpoint}`);
     }
-    if (assertions.inferenceRequests !== 6 || assertions.unexpectedRequests !== 0) throw new Error("Unexpected single-branch inference activity");
+    if (assertions.inferenceRequests !== 8 || assertions.unexpectedRequests !== 0) throw new Error("Unexpected single-branch inference activity");
   } finally {
     await server.close();
     await resetHarness();

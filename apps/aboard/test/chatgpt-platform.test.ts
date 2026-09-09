@@ -212,7 +212,7 @@ test("a ChatGPT Explore session refuses to launch without an exploration task or
   );
   assert.throws(
     () => platform.planLaunch({ ...request, agentType: "reviewer", configuration: { shape: "explore", declaredCommand: ["codex"] }, prompt: "Review the change." }),
-    /reviewer must launch through \$review-afk or \$review-hitl/u,
+    /reviewer must launch through \$issue-review/u,
   );
 });
 
@@ -274,7 +274,7 @@ const implementer = {
   sessionId: provisional,
   agentType: "implementer",
   shell: "powershell",
-  configuration: { shape: "skill", skillName: "implement", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+  configuration: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
   runtimeDirectory: "C:/aboard/runtime",
 } as const;
 
@@ -298,7 +298,7 @@ test("a ChatGPT implementer invokes the installed implement skill with the froze
   assert.equal(plan.agentType, "implementer");
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, true);
-  assert.deepEqual(plan.args.slice(-2), ["--", "$implement The checked-out branch is for issue #15."]);
+  assert.deepEqual(plan.args.slice(-2), ["--", "$address-issue The checked-out branch is for issue #15."]);
   assert.equal(plan.task?.contents, "The checked-out branch is for issue #15.\n");
   assert.equal(plan.chromeRequired, undefined);
   assert.deepEqual(plan.args.slice(plan.args.indexOf("--model"), plan.args.indexOf("--model") + 2), ["--model", "gpt-5.6-terra"]);
@@ -313,7 +313,7 @@ test("a ChatGPT implementer keeps its skill invocation when the frozen contract 
   });
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.match(plan.args.at(-1) ?? "", /^\$implement Your full task is in @/u);
+  assert.match(plan.args.at(-1) ?? "", /^\$address-issue Your full task is in @/u);
   assert.match(plan.spill?.contents ?? "", /^frozen issue contract/u);
   assert.match(plan.task?.contents ?? "", /^frozen issue contract/u);
 });
@@ -362,7 +362,7 @@ test("a Chrome-required ChatGPT launch tells the worker to use the Chrome backen
   const plan = platform.planLaunch({ ...implementer, prompt: "Address the issue.", chrome: true });
 
   assert.equal(plan.chromeRequired, true);
-  assert.match(plan.args.at(-1) ?? "", /^\$implement Your full task is in @/u);
+  assert.match(plan.args.at(-1) ?? "", /^\$address-issue Your full task is in @/u);
   assert.match(plan.spill?.contents ?? "", /^This issue requires the Chrome browser backend\./u);
   assert.match(plan.spill?.contents ?? "", /Address the issue\.\n$/u);
   await platform.preflight(plan);
@@ -374,12 +374,12 @@ test("a Chrome-required ChatGPT launch tells the worker to use the Chrome backen
   // The resume message must not replace the frozen task the reground hook restores.
   assert.equal(resumed.task, undefined);
   assert.equal(resumed.args.includes('web_search="disabled"'), true);
-  assert.equal(resumed.args.filter((argument) => argument.startsWith("$implement")).length, 0);
+  assert.equal(resumed.args.filter((argument) => argument.startsWith("$address-issue")).length, 0);
 
   const reopened = platform.planSessionResume({ ...implementer, sessionId: actual, chrome: true });
   assert.equal(reopened.promptDelivery, "inline");
   assert.match(reopened.args.at(-1) ?? "", /Chrome browser backend/u);
-  assert.equal(reopened.args.filter((argument) => argument.startsWith("$implement")).length, 0);
+  assert.equal(reopened.args.filter((argument) => argument.startsWith("$address-issue")).length, 0);
 });
 
 test("a Chrome-required ChatGPT launch fails before the terminal when no backend declares Chrome", async () => {
@@ -407,10 +407,10 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
 
   const afk = chatGpt().planLaunch({
     ...reviewer,
-    configuration: { shape: "skill", skillName: "review-afk", ...settings },
+    configuration: { shape: "skill", skillName: "issue-review", ...settings },
     prompt: "Review pull request #42.",
   });
-  assert.deepEqual(afk.args.slice(-2), ["--", "$review-afk Review pull request #42."]);
+  assert.deepEqual(afk.args.slice(-2), ["--", "$issue-review Review pull request #42."]);
   assert.equal(afk.writeCapability, "write-capable");
   assert.equal(afk.requiresWriteLease, true);
   assert.equal(afk.args.includes('web_search="disabled"'), true);
@@ -422,11 +422,11 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
 
   const hitl = chatGpt().planLaunch({
     ...reviewer,
-    configuration: { shape: "skill", skillName: "review-hitl", ...settings },
+    configuration: { shape: "skill", skillName: "issue-review", ...settings },
     prompt: "Review pull request #42.",
     attended: true,
   });
-  assert.deepEqual(hitl.args.slice(-2), ["--", "$review-hitl Review pull request #42."]);
+  assert.deepEqual(hitl.args.slice(-2), ["--", "$issue-review Review pull request #42."]);
   assert.equal(hitl.requiresWriteLease, true);
 });
 
@@ -436,7 +436,7 @@ test("a resumed ChatGPT reviewer keeps its restrictions and does not re-invoke i
     sessionId: actual,
     agentType: "reviewer",
     shell: "powershell",
-    configuration: { shape: "skill", skillName: "review-afk", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+    configuration: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
     runtimeDirectory: "C:/aboard/runtime",
     prompt: "Continue",
     difficulty: "expert",
@@ -463,16 +463,16 @@ test("a ChatGPT reviewer refuses a skill that is not its review mode", () => {
   } as const;
 
   assert.throws(
-    () => chatGpt().planLaunch({ ...request, configuration: { shape: "skill", skillName: "implement", declaredCommand: ["codex"] } }),
-    /reviewer must launch through \$review-afk or \$review-hitl/u,
+    () => chatGpt().planLaunch({ ...request, configuration: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"] } }),
+    /reviewer must launch through \$issue-review/u,
   );
   assert.throws(
     () => chatGpt().planLaunch({ ...request, configuration: { shape: "default", declaredCommand: ["codex"] } }),
-    /reviewer must launch through \$review-afk or \$review-hitl/u,
+    /reviewer must launch through \$issue-review/u,
   );
   assert.throws(
-    () => chatGpt().planLaunch({ ...request, agentType: "implementer", configuration: { shape: "skill", skillName: "review-afk", declaredCommand: ["codex"] } }),
-    /implementer must launch through \$implement/u,
+    () => chatGpt().planLaunch({ ...request, agentType: "implementer", configuration: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"] } }),
+    /implementer must launch through \$address-issue/u,
   );
 });
 

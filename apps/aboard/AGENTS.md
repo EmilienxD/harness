@@ -10,8 +10,8 @@ The clean-slate redesign deliberately has no compatibility layer. Do not restore
 
 - `interactive`: an ordinary empty, user-controlled Claude Code or Codex TUI.
 - `Explore`: a read-only exploration session; Claude Code's built-in agent, or a top-level Codex session held read-only by sandbox and approval policy.
-- `implementer`: an Auto Run worker launched with `/implement`, or a top-level Codex session that invokes `$implement`.
-- `reviewer`: an Auto Run worker launched with `/review-afk` or `/review-hitl`, or a top-level Codex session that invokes `$review-afk` or `$review-hitl`.
+- `implementer`: an Auto Run worker launched with `/address-issue`, or a top-level Codex session that invokes `$address-issue`.
+- `reviewer`: an Auto Run worker launched with `/issue-review`, or a top-level Codex session that invokes `$issue-review`. AFK and HITL are Auto Run orchestration modes, not separate skills.
 
 Aboard applies internal lifecycle and Auto Run completion hooks only. It never copies Harness assets into its scaffold or private runtime bundle.
 
@@ -25,7 +25,8 @@ Aboard applies internal lifecycle and Auto Run completion hooks only. It never c
 ## Key constraints
 
 - Preserve Auto Run behavior except for custom-agent-to-skill worker launches.
-- Aboard owns all Auto Run Git and GitHub mutations; workers leave changes uncommitted.
+- Workers signal completion with exactly one commit; Aboard grants them only `git add` and `git commit` and owns every other Auto Run Git and GitHub mutation.
+- Worker success comes from process outcome, commit ancestry and count, and worktree cleanliness alone. Never parse a final response for completion markup, and never generate or read worker commit messages.
 - `.abd/scaffold.json` is the initialized-project marker. With it absent, runtime surfaces are closed.
 - Mutable runtime state belongs in VS Code storage, not the workspace.
 - `.abd/launch.json` is the launch authority. Re-read it for new launches and resumes.

@@ -385,6 +385,7 @@ test("recursive issue context terminates across parent and reference cycles", as
     kind: "implementation",
     instruction: "Go.",
     issueNumbers: [47],
+    issueContextDepth: 5,
   });
 
   assert.deepEqual(github.issueRequests, [47, 31, 52]);
@@ -414,7 +415,7 @@ test("implementation context can stop after the primary issue's direct reference
     kind: "implementation",
     instruction: "Go.",
     issueNumbers: [47],
-    recursiveIssueReferences: false,
+    issueContextDepth: 1,
   });
 
   assert.deepEqual(github.issueRequests, [47, 31]);
@@ -440,6 +441,7 @@ test("recursive issue context has a hard node bound even without a cycle", async
     kind: "implementation",
     instruction: "Go.",
     issueNumbers: [1],
+    issueContextDepth: 9,
   });
 
   assert.deepEqual(github.issueRequests, [1, 2, 3, 4]);
@@ -509,7 +511,7 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
     const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { interactive: true });
     assert.equal(withTopic?.text.includes("caching layer"), true);
   }
-  const doctor = await adapter.resolve({ type: "reviewer", reviewMode: "afk", description: "d" }, { interactive: false });
+  const doctor = await adapter.resolve({ type: "reviewer", description: "d" }, { interactive: false });
   assert.notEqual(doctor, undefined);
   assert.ok(doctor!.text.length > 0);
 });
@@ -547,7 +549,6 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
   for (const reviewMode of ["afk", "hitl"] as const) {
     const doctor = await adapter.resolve({
       type: "reviewer",
-      reviewMode,
       description: "review pull request 42",
       pullRequest: 42,
       permanentPrompt,

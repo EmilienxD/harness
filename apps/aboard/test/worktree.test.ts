@@ -124,7 +124,6 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     add: async () => { calls.push("add"); },
     commit: async () => "abc1234",
     push: async () => { calls.push("push"); },
-    hasCommitFor: async () => false,
     isPushed: async () => true,
     ignoredPaths: async (paths: readonly string[]) => {
       const ignored = new Set(options.ignored ?? paths);

@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { AUTO_RUN_BRANCH_MODES, AUTO_RUN_PHASES, MERGE_STRATEGIES, type AutoRunBranchMode, type AutoRunPhase, type IssueDisposition, type MergeStrategy } from "../domain/auto-run.js";
+import { AUTO_RUN_BRANCH_MODES, AUTO_RUN_PHASES, DEFAULT_ISSUE_CONTEXT_DEPTH, MAX_ISSUE_CONTEXT_DEPTH, MERGE_STRATEGIES, type AutoRunBranchMode, type AutoRunPhase, type IssueDisposition, type MergeStrategy } from "../domain/auto-run.js";
 import {
   RUN_CHECKPOINTS,
   type AutoRunRecord,
@@ -109,6 +109,10 @@ function strings(value: unknown): readonly string[] | undefined {
   return value.every((entry) => typeof entry === "string") ? value as string[] : undefined;
 }
 
+function isDepth(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_ISSUE_CONTEXT_DEPTH;
+}
+
 function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   if (!isRecord(value)) return undefined;
   const worktree = isRecord(value.worktree) ? value.worktree : undefined;
@@ -120,7 +124,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   if (
     typeof value.review !== "boolean"
     || (value.exploreBeforeImplement !== undefined && typeof value.exploreBeforeImplement !== "boolean")
-    || (value.recursiveIssueReferences !== undefined && typeof value.recursiveIssueReferences !== "boolean")
+    || (value.issueContextDepth !== undefined && !isDepth(value.issueContextDepth))
     || typeof value.mergeRunPullRequest !== "boolean" || typeof value.pauseAfterHitl !== "boolean"
     || mergeStrategy === undefined || pollSeconds === undefined
     || typeof worktree.enabled !== "boolean" || typeof worktree.root !== "string"
@@ -138,7 +142,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     ...(branchMode === undefined ? {} : { branchMode }),
     review: value.review,
     exploreBeforeImplement: value.exploreBeforeImplement ?? false,
-    recursiveIssueReferences: value.recursiveIssueReferences ?? false,
+    issueContextDepth: value.issueContextDepth ?? DEFAULT_ISSUE_CONTEXT_DEPTH,
     mergeStrategy,
     mergeRunPullRequest: value.mergeRunPullRequest,
     pauseAfterHitl: value.pauseAfterHitl,
@@ -236,6 +240,11 @@ function parsePendingAction(value: unknown): PendingAction | undefined {
       const fingerprint = strings(value.fingerprint);
       if (branch === undefined || parentSha === undefined || message === undefined || treeSha === undefined || fingerprint === undefined) return undefined;
       return { kind: "commit", branch, parentSha, message, treeSha, fingerprint };
+    }
+    case "worker-commit": {
+      const parentSha = fullSha(value.parentSha);
+      if (branch === undefined || parentSha === undefined) return undefined;
+      return { kind: "worker-commit", branch, parentSha };
     }
     case "push": {
       const sha = fullSha(value.sha);

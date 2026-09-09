@@ -1,6 +1,10 @@
+/**
+ * Auto Run workers signal completion with a commit, so `git add` and `git
+ * commit` are deliberately absent here. Everything that could move history,
+ * reach a remote, or mutate GitHub stays denied; aboard owns those.
+ */
 export const AUTO_RUN_DISALLOWED_TOOLS: readonly string[] = [
   "Bash(git -*)",
-  "Bash(git add*)",
   "Bash(git am*)",
   "Bash(git apply*)",
   "Bash(git archimport*)",
@@ -12,7 +16,6 @@ export const AUTO_RUN_DISALLOWED_TOOLS: readonly string[] = [
   "Bash(git cherry-pick*)",
   "Bash(git clean*)",
   "Bash(git clone*)",
-  "Bash(git commit*)",
   "Bash(git commit-graph*)",
   "Bash(git config*)",
   "Bash(git credential*)",

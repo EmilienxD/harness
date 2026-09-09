@@ -467,10 +467,12 @@
           "default": false,
           "description": "Launch a visible read-only Explore agent immediately before each fresh auto-run implementer. Its bounded codebase report is passed directly to the implementer and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
         },
-        "aboard.autoRun.recursiveIssueReferences": {
-          "type": "boolean",
-          "default": false,
-          "description": "Include issue bodies referenced by the primary issue's directly related issues in an auto-run implementer's initial context. Direct references are always included. Off by default, so traversal stops after that first level. This changes loaded issue bodies only, not the implementer's instructions."
+        "aboard.autoRun.issueContextDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 1,
+          "description": "How many relation levels of issue context an auto-run worker is given. 0 loads the run's own issue alone; 1 adds its direct parents, sub-issues, and same-repository references; each further level continues the traversal by one more hop. Bounded by at most 50 related issues, the newest 20 comments per issue, and roughly 60,000 characters. This changes loaded issue bodies only, not the worker's instructions."
         },
         "aboard.autoRun.prompt": {
           "type": "string",

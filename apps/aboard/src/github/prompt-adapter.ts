@@ -34,7 +34,7 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         kind: "exploration",
         instruction: input.prompt ?? "Explore the issue's implementation context.",
         issueNumbers: input.issues,
-        ...(input.recursiveIssueReferences === undefined ? {} : { recursiveIssueReferences: input.recursiveIssueReferences }),
+        ...(input.issueContextDepth === undefined ? {} : { issueContextDepth: input.issueContextDepth }),
       });
     }
     if (input.type === "implementer" && input.issues !== undefined) {
@@ -44,7 +44,7 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
           instruction: input.prompt ?? "Address the issue.",
           issueNumbers: input.issues,
           ...(input.codebaseContext === undefined ? {} : { codebaseContext: input.codebaseContext }),
-          ...(input.recursiveIssueReferences === undefined ? {} : { recursiveIssueReferences: input.recursiveIssueReferences }),
+          ...(input.issueContextDepth === undefined ? {} : { issueContextDepth: input.issueContextDepth }),
         }),
         input.permanentPrompt,
         input.additionalGuideline,

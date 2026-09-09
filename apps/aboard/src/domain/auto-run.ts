@@ -35,6 +35,14 @@ export function unpublishedTargetWarning(base: string, count: number): string {
 export const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 export type MergeStrategy = (typeof MERGE_STRATEGIES)[number];
 
+/**
+ * Relation levels preloaded around each requested issue. `0` is the requested
+ * issues alone; `1` adds their direct parents, sub-issues, and references; each
+ * further level continues the traversal by one more hop.
+ */
+export const DEFAULT_ISSUE_CONTEXT_DEPTH = 1;
+export const MAX_ISSUE_CONTEXT_DEPTH = 10;
+
 export const AUTO_RUN_BRANCH_MODES = ["per-issue", "single-branch"] as const;
 export type AutoRunBranchMode = (typeof AUTO_RUN_BRANCH_MODES)[number];
 
@@ -54,8 +62,8 @@ export interface AutoRunSettings {
   readonly review: boolean;
   /** Whether a read-only Explore worker prepares fresh context for each fresh implementer. */
   readonly exploreBeforeImplement: boolean;
-  /** Whether issue context follows references beyond the primary issue's direct references. */
-  readonly recursiveIssueReferences: boolean;
+  /** How many relation levels of issue context are preloaded around each issue. */
+  readonly issueContextDepth: number;
   /** Persistent user-authored note added to every auto-run agent prompt. */
   readonly permanentPrompt: string;
   readonly discardBehavior: DiscardBehavior;
@@ -178,17 +186,18 @@ export function nextStep(input: ReducerInput): AutoRunStep {
         }
         return { action: "branch", branch: issue.branch, base: input.baseBranch };
       case "implement":
-        // A commit or a pull request already carries the implementation; a dirty
-        // tree on the right branch is an implementation waiting to be committed.
-        if (facts.hasCommit || facts.pullRequest !== undefined || facts.workingTreeDirty) continue;
+        // A commit or a pull request already carries the implementation.
+        if (facts.hasCommit || facts.pullRequest !== undefined) continue;
+        // address-issue commits its own verified work, so nothing may be
+        // waiting in the tree; leftover edits are the user's to review.
+        if (facts.workingTreeDirty) return { action: "stop", reason: dirtyReason(issue, facts) };
         return { action: "implement", issue };
       case "commit":
-        if (facts.hasCommit && facts.commitPushed && !facts.workingTreeDirty) continue;
-        // Reachable on resume: a pull request exists, so the `implement` phase
-        // was satisfied, yet the branch carries nothing to commit.
-        if (!facts.workingTreeDirty && !facts.hasCommit) {
-          return { action: "stop", reason: `the implementer produced no changes for issue #${issue.number}` };
+        if (facts.workingTreeDirty) return { action: "stop", reason: dirtyReason(issue, facts) };
+        if (!facts.hasCommit) {
+          return { action: "stop", reason: `address-issue produced no commit for issue #${issue.number}` };
         }
+        if (facts.commitPushed) continue;
         return { action: "commit", issue };
       case "pr": {
         if (facts.pullRequest !== undefined) continue;
@@ -225,6 +234,11 @@ export function nextStep(input: ReducerInput): AutoRunStep {
     }
   }
   return { action: "advance" };
+}
+
+function dirtyReason(issue: PlannedIssue, facts: RepositoryFacts): string {
+  const paths = facts.dirtyPaths.slice(0, 10).join(", ");
+  return `issue #${issue.number} has uncommitted changes on ${facts.currentBranch ?? "a detached HEAD"}${paths.length === 0 ? "" : ` (${paths})`}; the workers commit their own work, so the run stops for you to inspect the checkout`;
 }
 
 type PullRequestOr = { readonly action: "stop"; readonly reason: string } | { readonly action: "found"; readonly number: number };
@@ -269,45 +283,54 @@ export function commitSubject(title: string): string {
   return trimmed.length <= COMMIT_SUBJECT_MAX_CHARS ? trimmed : `${trimmed.slice(0, COMMIT_SUBJECT_MAX_CHARS - 1).trimEnd()}…`;
 }
 
-export interface ImplementerCompletion {
-  readonly commitMessage: string;
-  readonly report: string;
+/** The two commit-signaling Harness worker skills, named as the user invokes them. */
+export type WorkerRole = "address-issue" | "issue-review";
+
+/**
+ * What the run's checkout looked like immediately after a worker exited. It is
+ * repository state only: no part of the worker's final response is inspected,
+ * so a worker needs no machine-readable completion markup.
+ */
+export interface WorkerRepositoryState {
+  /** The tip aboard recorded before launching the worker. */
+  readonly startingSha: string;
+  readonly headSha: string;
+  /** Paths still dirty: staged, unstaged, or untracked alike. */
+  readonly dirtyPaths: readonly string[];
+  /** Whether the starting commit is still reachable from `headSha`. */
+  readonly descendsFromStart: boolean;
+  /** Commits reachable from `headSha` but not from `startingSha`. */
+  readonly newCommitCount: number;
 }
 
-export type ImplementerCompletionParseResult =
-  | { readonly accepted: true; readonly completion: ImplementerCompletion }
-  | { readonly accepted: false; readonly reason: string };
+export type WorkerOutcome =
+  | { readonly kind: "committed"; readonly sha: string }
+  /** Only `issue-review` may finish this way: it found nothing worth fixing. */
+  | { readonly kind: "unchanged" }
+  | { readonly kind: "rejected"; readonly reason: string };
 
-const COMMIT_BLOCK = /<commit>([\s\S]*?)<\/commit>/gu;
-
-/** Positive evidence that an implementer considers the whole issue ready to commit. */
-export function parseImplementerCompletion(message: string): ImplementerCompletionParseResult {
-  const matches = [...message.matchAll(COMMIT_BLOCK)];
-  const openingTags = message.match(/<commit>/gu)?.length ?? 0;
-  const closingTags = message.match(/<\/commit>/gu)?.length ?? 0;
-  if (matches.length !== 1 || openingTags !== 1 || closingTags !== 1) {
+/** Decides a worker's success from process-independent repository state alone. */
+export function classifyWorkerResult(role: WorkerRole, state: WorkerRepositoryState): WorkerOutcome {
+  // A commit followed by more uncommitted edits is unsuccessful, so the dirty
+  // check comes first and applies whether or not a commit was also created.
+  if (state.dirtyPaths.length > 0) {
     return {
-      accepted: false,
-      reason: openingTags === 0 && closingTags === 0
-        ? "the implementer did not confirm that the issue is complete"
-        : "the implementer returned a malformed or repeated commit block",
+      kind: "rejected",
+      reason: `${role} left ${state.dirtyPaths.length} uncommitted path(s) in the checkout: ${state.dirtyPaths.slice(0, 10).join(", ")}`,
     };
   }
-
-  const commitMessage = matches[0]?.[1]?.trim() ?? "";
-  if (commitMessage.length === 0) return { accepted: false, reason: "the implementer returned an empty commit block" };
-  if (/\r|\n/u.test(commitMessage)) return { accepted: false, reason: "the implementer's commit message must be one line" };
-  if (/\p{Cc}/u.test(commitMessage)) return { accepted: false, reason: "the implementer's commit message contains a control character" };
-  if (commitMessage.length > COMMIT_SUBJECT_MAX_CHARS) {
-    return { accepted: false, reason: `the implementer's commit message exceeds ${COMMIT_SUBJECT_MAX_CHARS} characters` };
+  if (state.headSha === state.startingSha) {
+    return role === "issue-review"
+      ? { kind: "unchanged" }
+      : { kind: "rejected", reason: `${role} finished without committing anything on top of ${state.startingSha.slice(0, 8)}` };
   }
-
-  const match = matches[0];
-  const start = match?.index ?? 0;
-  const before = message.slice(0, start).trimEnd();
-  const after = message.slice(start + (match?.[0].length ?? 0)).trimStart();
-  const report = [before, after].filter((part) => part.length > 0).join("\n\n");
-  return { accepted: true, completion: { commitMessage, report } };
+  if (!state.descendsFromStart) {
+    return { kind: "rejected", reason: `${role} moved HEAD off ${state.startingSha.slice(0, 8)} instead of committing on top of it` };
+  }
+  if (state.newCommitCount !== 1) {
+    return { kind: "rejected", reason: `${role} created ${state.newCommitCount} commits; exactly one is allowed` };
+  }
+  return { kind: "committed", sha: state.headSha };
 }
 
 export const PR_BODY_MAX_CHARS = 4_000;
@@ -363,10 +386,8 @@ export function issueClosedComment(prNumber: number, sessionBranch: string, base
 
 export const ISSUE_COMMENT_MAX_CHARS = 65_536;
 
-export function issueCommentBody(summary: string, commitMessage?: string): string | undefined {
-  const report = summary.trim();
-  const heading = commitMessage === undefined ? "" : `**${escapeMarkdownInline(commitMessage)}**`;
-  const trimmed = [heading, report].filter((part) => part.length > 0).join("\n\n");
+export function issueCommentBody(summary: string): string | undefined {
+  const trimmed = summary.trim();
   if (trimmed.length === 0) return undefined;
   return trimmed.length <= ISSUE_COMMENT_MAX_CHARS ? trimmed : `${trimmed.slice(0, ISSUE_COMMENT_MAX_CHARS - 1).trimEnd()}…`;
 }
@@ -388,10 +409,6 @@ export function explorationCommentBody(input: {
   return issueCommentBody(body) ?? body;
 }
 
-function escapeMarkdownInline(value: string): string {
-  return value.replace(/([\\*_`[\]])/gu, "\\$1");
-}
-
 /** A candidate issue as GitHub reports it, before selection filters it. */
 export interface CandidateIssue {
   readonly number: number;
@@ -410,11 +427,9 @@ export const autoRunMessage = {
   started: (afk: number, hitl: number, review: boolean): string =>
     `auto-run: started; ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}.`,
   implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} addressed on ${branch}.`,
-  unchanged: (issue: number): string =>
-    `auto-run: issue #${issue} finished with no changes; deleted its empty branch and continuing.`,
   committed: (issue: number, sha: string, pr: number): string => `auto-run: issue #${issue} committed (${sha}) and opened PR #${pr}.`,
-  reviewed: (issue: number, paths: readonly string[]): string =>
-    `auto-run: issue #${issue} reviewed; committing ${paths.length === 0 ? "no further changes" : `${paths.length} changed path(s): ${paths.slice(0, 10).join(", ")}`}.`,
+  reviewed: (issue: number, sha: string | undefined): string =>
+    `auto-run: issue #${issue} reviewed; ${sha === undefined ? "no fixes were needed" : `fixes committed (${sha.slice(0, 8)})`}.`,
   captured: (issue: number, pr: number, paths: readonly string[]): string =>
     `auto-run: committed ${paths.length} changed path(s) from issue #${issue}'s open terminals to PR #${pr}: ${paths.slice(0, 10).join(", ")}.`,
   workspace: (path: string): string =>

@@ -1,4 +1,4 @@
-import { isAutoRunExplorationComment } from "../domain/auto-run.js";
+import { DEFAULT_ISSUE_CONTEXT_DEPTH, isAutoRunExplorationComment } from "../domain/auto-run.js";
 
 export interface IssueCommentSnapshot {
   readonly authorLogin?: string | undefined;
@@ -64,14 +64,14 @@ export type PromptResolutionRequest =
       readonly instruction: string;
       readonly issueNumbers: readonly number[];
       readonly codebaseContext?: string;
-      /** Defaults to recursive resolution for callers outside auto-run. */
-      readonly recursiveIssueReferences?: boolean;
+      /** Relation levels to traverse; defaults to `DEFAULT_ISSUE_CONTEXT_DEPTH`. */
+      readonly issueContextDepth?: number;
     }
   | {
       readonly kind: "exploration";
       readonly instruction: string;
       readonly issueNumbers: readonly number[];
-      readonly recursiveIssueReferences?: boolean;
+      readonly issueContextDepth?: number;
     }
   | {
       readonly kind: "review";
@@ -267,24 +267,25 @@ export class PromptResolver {
   async #issueSections(
     builder: PromptBuilder,
     issues: readonly IssueSnapshot[],
-    recursiveIssueReferences = true,
+    issueContextDepth = DEFAULT_ISSUE_CONTEXT_DEPTH,
   ): Promise<void> {
     for (const issue of issues) {
       builder.document("issue", issue.number, `Issue #${issue.number}; ${issue.title}`, this.#issueDocument(issue));
     }
 
+    const depth = Math.max(0, issueContextDepth);
     const visited = new Set(issues.map((issue) => issue.number));
-    const pending: { readonly number: number; readonly kind: "parent-issue" | "related-issue" }[] = [];
-    const enqueue = (number: number | undefined, kind: "parent-issue" | "related-issue"): void => {
-      if (number === undefined || visited.has(number)) return;
+    const pending: { readonly number: number; readonly kind: "parent-issue" | "related-issue"; readonly level: number }[] = [];
+    const enqueue = (number: number | undefined, kind: "parent-issue" | "related-issue", level: number): void => {
+      if (number === undefined || visited.has(number) || level > depth) return;
       // Mark on enqueue, not after the read: siblings can point at each other
       // (or themselves through a parent) and must still cost one fetch.
       visited.add(number);
-      pending.push({ number, kind });
+      pending.push({ number, kind, level });
     };
-    for (const issue of issues) enqueue(issue.parentIssueNumber, "parent-issue");
+    for (const issue of issues) enqueue(issue.parentIssueNumber, "parent-issue", 1);
     for (const issue of issues) {
-      for (const number of issue.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
+      for (const number of issue.dependencyIssueNumbers ?? []) enqueue(number, "related-issue", 1);
     }
 
     let attempted = 0;
@@ -301,10 +302,8 @@ export class PromptResolver {
         `${next.kind === "parent-issue" ? "Parent issue" : "Related issue"} #${related.number}; ${related.title}`,
         this.#issueDocument(related),
       );
-      if (recursiveIssueReferences) {
-        enqueue(related.parentIssueNumber, "parent-issue");
-        for (const number of related.dependencyIssueNumbers ?? []) enqueue(number, "related-issue");
-      }
+      enqueue(related.parentIssueNumber, "parent-issue", next.level + 1);
+      for (const number of related.dependencyIssueNumbers ?? []) enqueue(number, "related-issue", next.level + 1);
     }
   }
 
@@ -318,7 +317,7 @@ export class PromptResolver {
 
     builder.section(undefined, instruction);
 
-    await this.#issueSections(builder, issues, request.recursiveIssueReferences);
+    await this.#issueSections(builder, issues, request.issueContextDepth);
     if (request.codebaseContext !== undefined) {
       builder.section(
         "Fresh codebase context",
@@ -337,7 +336,7 @@ export class PromptResolver {
     const builder = new PromptBuilder(`Explore implementation context for issue #${primary.number}; ${primary.title}.`, this.#limits.maxPromptChars);
 
     builder.section(undefined, instruction);
-    await this.#issueSections(builder, issues, request.recursiveIssueReferences);
+    await this.#issueSections(builder, issues, request.issueContextDepth);
     return builder.build();
   }
 

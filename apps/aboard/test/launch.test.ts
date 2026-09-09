@@ -20,10 +20,10 @@ const agentId = "agent-1" as AgentId;
 const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const runtimeRoot = "C:\\storage\\aboard";
 
-function workerConfiguration(type: "implementer" | "reviewer", mode: "afk" | "hitl" = "afk"): LaunchConfiguration {
+function workerConfiguration(type: "implementer" | "reviewer"): LaunchConfiguration {
   return {
     shape: "skill",
-    skillName: type === "implementer" ? "implement" : `review-${mode}`,
+    skillName: type === "implementer" ? "address-issue" : "issue-review",
     declaredModel: BY_DIFFICULTY,
     declaredEffort: BY_DIFFICULTY,
   };
@@ -84,15 +84,12 @@ test("plans Explore through Claude Code's builtin agent", () => {
   assert.equal(plan.requiresWriteLease, false);
 });
 
-for (const [type, mode, invocation] of [
-  ["implementer", undefined, "/implement"],
-  ["reviewer", "afk", "/review-afk"],
-  ["reviewer", "hitl", "/review-hitl"],
+for (const [type, invocation] of [
+  ["implementer", "/address-issue"],
+  ["reviewer", "/issue-review"],
 ] as const) {
-  test(`plans ${type}${mode === undefined ? "" : ` ${mode}`} as a literal skill invocation`, () => {
-    const configuration = type === "implementer"
-      ? workerConfiguration("implementer")
-      : workerConfiguration("reviewer", mode);
+  test(`plans ${type} as a literal skill invocation`, () => {
+    const configuration = workerConfiguration(type);
     const plan = planLaunch(request({ agentType: type, configuration, difficulty: "basic" }));
 
     assert.match(plan.args.at(-1) ?? "", new RegExp(`^${invocation.replace("/", "\\/")} `));
@@ -128,7 +125,7 @@ test("spills long skill prompts and keeps the original task separately", () => {
   const plan = planLaunch(request({ prompt, maxInlinePromptChars: 40 }));
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.match(plan.args.at(-1) ?? "", /^\/implement .*@.*\.md/u);
+  assert.match(plan.args.at(-1) ?? "", /^\/address-issue .*@.*\.md/u);
   assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
   assert.equal(plan.task?.contents, `${prompt.trim()}\n`);
   assert.equal(
@@ -151,7 +148,7 @@ test("uses a wrapper request to keep child argv out of terminal input", () => {
   const child = JSON.parse(plan.wrapperRequest?.contents ?? "{}") as { command?: string[] };
   assert.equal(child.command?.[0], "claude");
   assert.equal(child.command?.includes("--session-id"), true);
-  assert.equal(child.command?.at(-1), "/implement Address issue #47.");
+  assert.equal(child.command?.at(-1), "/address-issue Address issue #47.");
 });
 
 test("resume restores policy and restrictions without re-expanding a skill", () => {
@@ -160,7 +157,7 @@ test("resume restores policy and restrictions without re-expanding a skill", () 
     sessionId,
     agentType: "reviewer",
     shell: "powershell",
-    configuration: workerConfiguration("reviewer", "afk"),
+    configuration: workerConfiguration("reviewer"),
     runtimeDirectory: runtimeRoot,
     prompt: "Continue",
     disallowedTools: ["Bash(git push*)"],
@@ -168,7 +165,7 @@ test("resume restores policy and restrictions without re-expanding a skill", () 
   });
 
   assert.equal(hasPair(plan.args, "--resume", sessionId), true);
-  assert.equal(plan.args.some((argument) => argument.includes("/review-afk")), false);
+  assert.equal(plan.args.some((argument) => argument.includes("/issue-review")), false);
   assert.equal(hasPair(plan.args, "--disallowedTools", "Bash(git push*)"), true);
   assert.equal(plan.args.includes("--mcp-config"), false);
   assert.equal("agentDefinition" in plan, false);
@@ -179,7 +176,7 @@ test("Chrome is available only to implementers and is replayed on resume", () =>
   assert.throws(
     () => planLaunch(request({
       agentType: "reviewer",
-      configuration: workerConfiguration("reviewer", "hitl"),
+      configuration: workerConfiguration("reviewer"),
       chrome: true,
     })),
     (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",

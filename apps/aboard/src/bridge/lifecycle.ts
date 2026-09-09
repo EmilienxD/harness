@@ -70,8 +70,9 @@ export class WorkerLifecycleReconciler {
       if (exitCode !== 0) {
         return this.#finish(observation.agentId, failure("crashed", exitCode, observation.lastAssistantMessage));
       }
-      const expectsUncommittedTree = this.options.fleet.get(observation.agentId)?.expectsUncommittedTree === true;
-      if (!expectsUncommittedTree && this.options.lease.current()?.agentId === observation.agentId) {
+      // A worker signals completion with a commit, so a dirty tree at Stop is
+      // unfinished work rather than a result.
+      if (this.options.lease.current()?.agentId === observation.agentId) {
         let clean = false;
         try {
           clean = await this.options.workingTree.isClean(observation.cwd);

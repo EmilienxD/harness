@@ -51,7 +51,6 @@ export class ReviewCoordinator {
 
     const launched = await this.delegation.launchInteractive({
       type: "reviewer",
-      reviewMode: "hitl",
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
       ...(request.focus === undefined ? {} : { focus: request.focus }),

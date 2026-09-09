@@ -4,14 +4,14 @@ import type { DelegationConfigurationSource } from "../bridge/delegation.js";
 import { parseClaudeLaunchFile } from "../claude/launch-configuration.js";
 import { parseChatGptLaunchFile } from "../chatgpt/launch-configuration.js";
 import type { AgentType } from "../domain/contracts.js";
-import type { AgentPlatformId, AutoRunReviewMode, ConfiguredLaunch } from "./agent-platform.js";
+import type { AgentPlatformId, ConfiguredLaunch } from "./agent-platform.js";
 
 export interface LaunchFileDiagnostic { readonly severity: "warning"; readonly message: string; }
 export class LaunchFileError extends Error {}
 
 export interface PlatformLaunchFile {
   readonly platform: AgentPlatformId;
-  configuration(type: AgentType, reviewMode?: AutoRunReviewMode): ConfiguredLaunch;
+  configuration(type: AgentType): ConfiguredLaunch;
 }
 
 export interface ParsedLaunchFile {
@@ -60,5 +60,5 @@ export async function readLaunchFile(path: string): Promise<ParsedLaunchFile> {
 export class FileLaunchConfigurationSource implements DelegationConfigurationSource {
   public constructor(private readonly path: string) {}
   public async load(): Promise<ParsedLaunchFile> { return readLaunchFile(this.path); }
-  public async get(type: AgentType, reviewMode?: AutoRunReviewMode): Promise<ConfiguredLaunch> { return (await this.load()).value.configuration(type, reviewMode); }
+  public async get(type: AgentType): Promise<ConfiguredLaunch> { return (await this.load()).value.configuration(type); }
 }

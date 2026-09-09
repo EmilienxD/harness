@@ -29,7 +29,7 @@ export interface FrozenRunSettings {
   readonly branchMode?: AutoRunBranchMode;
   readonly review: boolean;
   readonly exploreBeforeImplement: boolean;
-  readonly recursiveIssueReferences: boolean;
+  readonly issueContextDepth: number;
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
   readonly pauseAfterHitl: boolean;
@@ -104,6 +104,12 @@ export type PendingAction =
       /** Sorted paths that were dirty when the commit was decided. */
       readonly fingerprint: readonly string[];
     }
+  /**
+   * A commit-signaling worker is running on `branch`. Its own commit is the
+   * only movement expected there, so recovery and validation both tolerate one
+   * descendant commit while this is journalled.
+   */
+  | { readonly kind: "worker-commit"; readonly branch: string; readonly parentSha: string }
   | { readonly kind: "push"; readonly branch: string; readonly sha: string }
   | { readonly kind: "create-issue-pr"; readonly issue: number; readonly head: string; readonly base: string }
   | { readonly kind: "merge-issue-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string }

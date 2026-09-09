@@ -422,11 +422,6 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     if (typeof record.cwd === "string" && record.cwd.trim().length > 0) cwd = record.cwd;
     else issues.push("session.cwd must be a non-empty string when present");
   }
-  let expectsUncommittedTree: boolean | undefined;
-  if (record.expectsUncommittedTree !== undefined) {
-    if (typeof record.expectsUncommittedTree === "boolean") expectsUncommittedTree = record.expectsUncommittedTree;
-    else issues.push("session.expectsUncommittedTree must be a boolean");
-  }
   let autoRunRestricted: true | undefined;
   if (record.autoRunRestricted !== undefined) {
     if (record.autoRunRestricted === true) autoRunRestricted = true;
@@ -503,7 +498,6 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     // rather than as a session bound to nothing.
     ...(issueNumbers === undefined || issueNumbers.length === 0 ? {} : { issueNumbers: issueNumbers as number[] }),
     ...(cwd === undefined ? {} : { cwd }),
-    ...(expectsUncommittedTree === undefined ? {} : { expectsUncommittedTree }),
     ...(autoRunRestricted === undefined ? {} : { autoRunRestricted }),
     ...(compactSummaries === undefined ? {} : { compactSummaries: compactSummaries as string[] }),
     ...(lastObservedAssistantMessage === undefined ? {} : { lastObservedAssistantMessage }),

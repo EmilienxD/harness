@@ -1,4 +1,4 @@
-import { BY_DIFFICULTY, type AutoRunReviewMode } from "../claude/launch.js";
+import { BY_DIFFICULTY } from "../claude/launch.js";
 import { isAutoRunWorkerType, type AgentType } from "../domain/contracts.js";
 import type { ConfiguredLaunch } from "../platform/agent-platform.js";
 import { LaunchFileError, type PlatformLaunchFile } from "../platform/launch-configuration.js";
@@ -59,7 +59,7 @@ export function parseChatGptLaunchFile(root: Record<string, unknown>): { readonl
 class ChatGptLaunchFile implements PlatformLaunchFile {
   public readonly platform = "chatgpt" as const;
   public constructor(private readonly command: readonly string[], private readonly profiles: Readonly<Record<ProfileName, Profile>>) {}
-  public configuration(type: AgentType, reviewMode: AutoRunReviewMode = "afk"): ConfiguredLaunch {
+  public configuration(type: AgentType): ConfiguredLaunch {
     const profile = this.profiles[type === "Explore" ? "explore" : type];
     const common = {
       declaredCommand: this.command,
@@ -69,7 +69,7 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
     const settings: ChatGptLaunchConfiguration = isAutoRunWorkerType(type)
       ? {
           shape: "skill",
-          skillName: type === "implementer" ? "implement" : `review-${reviewMode}`,
+          skillName: type === "implementer" ? "address-issue" : "issue-review",
           ...common,
           ...(profile.webSearch === undefined ? {} : { webSearch: profile.webSearch }),
           ...(profile.subagents === undefined ? {} : { subagents: profile.subagents }),

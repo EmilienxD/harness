@@ -14,7 +14,7 @@ import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
-const SETTINGS: AutoRunSettings = { review: false, exploreBeforeImplement: false, recursiveIssueReferences: false, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
+const SETTINGS: AutoRunSettings = { review: false, exploreBeforeImplement: false, issueContextDepth: 1, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "run/test";
@@ -91,13 +91,19 @@ interface HarnessOptions {
   readonly settings?: Partial<AutoRunSettings>;
   /** The open issue queue the repository reports, in any order. */
   readonly issues?: readonly QueueIssue[];
-  /** Working-tree entries reported after an implementer runs. */
+  /** Whether a worker commits before it exits. Defaults to true. */
   readonly producesChanges?: boolean;
   readonly implementerFails?: boolean;
   readonly exploreFails?: boolean;
   readonly explorationReport?: string;
   /** Final message returned by the implementer. */
   readonly implementerMessage?: string;
+  /** Makes a worker leave residual uncommitted edits behind its commit. */
+  readonly workerLeavesDirtyTree?: boolean;
+  /** Makes a worker commit more than the one commit the protocol allows. */
+  readonly workerCommitCount?: number;
+  /** Whether the reviewer finds anything to fix. Defaults to `producesChanges`. */
+  readonly reviewerProducesChanges?: boolean;
   /** Called once a hitl pull request has been observed as open; returns its next state. */
   readonly resolveHitl?: "merged" | "closed";
   readonly startDirty?: boolean;
@@ -163,7 +169,7 @@ test("single-branch HITL waits for explicit Aboard acceptance and scopes review 
   for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(context.engine.state()?.waiting, true);
   assert.equal(context.closures.length, 0);
-  const review = context.launches.find((launch) => launch.type === "reviewer" && launch.reviewMode === "hitl");
+  const review = context.launches.find((launch) => launch.type === "reviewer");
   assert.match(review?.additionalGuideline ?? "", /Review only issue #35's changes in exact range .{40}\.\..{40}/);
   context.engine.continueNow();
   await context.engine.settle();
@@ -196,8 +202,9 @@ function harness(options: HarnessOptions = {}): Harness {
   // What origin has. A branch the user never pushed exists locally and not here,
   // which is the difference a pull request base cares about.
   const remoteBranches = new Set<string>(options.baseNotOnRemote === true ? ["main"] : ["main", "feature/wip"]);
-  const commits = new Set<number>();
   const pushed = new Set<string>();
+  /** A minimal commit graph, so ancestry answers come from history, not messages. */
+  const parents = new Map<string, string>();
   const worktrees: { path: string; branch: string | undefined }[] = [];
   let currentBranch = options.startBranch ?? "main";
   let dirty = options.startDirty === true;
@@ -215,6 +222,28 @@ function harness(options: HarnessOptions = {}): Harness {
   function advance(branch: string): void {
     inheritedShas.delete(branch);
     shas.set(branch, (shas.get(branch) ?? 0) + 1);
+  }
+  function commitOn(branch: string): string {
+    const before = shaFor(branch);
+    advance(branch);
+    const after = shaFor(branch);
+    parents.set(after, before);
+    pushed.delete(branch);
+    return after;
+  }
+  function chain(sha: string): string[] {
+    const walked: string[] = [];
+    for (let current = parents.get(sha); current !== undefined; current = parents.get(current)) walked.push(current);
+    return walked;
+  }
+  function aheadCount(from: string, to: string): number {
+    const reachable = new Set([to, ...chain(to)]);
+    let count = 0;
+    for (let current: string | undefined = from; current !== undefined && !reachable.has(current); current = parents.get(current)) count += 1;
+    return count;
+  }
+  function resolve(ref: string): string {
+    return branches.has(ref) ? shaFor(ref) : ref;
   }
   function advanceRemote(branch: string): string {
     const revision = (shas.get(`${branch}:remote`) ?? 0) + 1;
@@ -246,9 +275,19 @@ function harness(options: HarnessOptions = {}): Harness {
         ? options.remoteBaseSha
         : remoteShas.get(branch) ?? shaFor(branch)
       : undefined,
-    aheadBehind: async () => ({ ahead: options.unpublishedTargetCommits ?? 0, behind: 0 }),
-    isAncestor: async () => options.targetPublishedBeforeConclusion ?? (options.unpublishedTargetCommits === undefined),
-    commitDetails: async (ref) => ({ sha: shaFor(ref), parents: ["parent0000000000000000000000000000000000"], subject: "subject", message: "subject", treeSha: "tree000000000000000000000000000000000000" }),
+    aheadBehind: async (left, right) => {
+      // Only the target-publication check asks about a remote-tracking ref.
+      if (right.startsWith("origin/")) return { ahead: options.unpublishedTargetCommits ?? 0, behind: 0 };
+      const [from, to] = [resolve(left), resolve(right)];
+      return { ahead: aheadCount(from, to), behind: aheadCount(to, from) };
+    },
+    isAncestor: async (ancestor, descendant) => {
+      // Only a commit this fake created has real ancestry; every other question
+      // is about target publication, which the options describe.
+      if (parents.has(descendant)) return ancestor === descendant || chain(descendant).includes(ancestor);
+      return options.targetPublishedBeforeConclusion ?? (options.unpublishedTargetCommits === undefined);
+    },
+    commitDetails: async (ref) => ({ sha: shaFor(ref), parents: [parents.get(shaFor(ref)) ?? "parent0000000000000000000000000000000000"], subject: "subject", message: "subject", treeSha: "tree000000000000000000000000000000000000" }),
     stagedTreeSha: async () => "tree000000000000000000000000000000000000",
     deleteBranchAt: async (branch, expected) => {
       gitCalls.push(`deleteBranchAt ${branch} ${expected}`);
@@ -287,7 +326,7 @@ function harness(options: HarnessOptions = {}): Harness {
       return true;
     },
     add: async () => { gitCalls.push("add"); },
-    commit: async (subject, body) => { gitCalls.push("commit"); commitCalls.push({ subject, body }); dirty = false; commits.add(issueForBranch(currentBranch)); pushed.delete(currentBranch); advance(currentBranch); return shaFor(currentBranch); },
+    commit: async (subject, body) => { gitCalls.push("commit"); commitCalls.push({ subject, body }); dirty = false; return commitOn(currentBranch); },
     push: async (branch, setUpstream) => {
       gitCalls.push(`push ${branch}${setUpstream ? " -u" : ""}`);
       // The session branch's own push is infrastructure, not the issue's commit;
@@ -297,7 +336,6 @@ function harness(options: HarnessOptions = {}): Harness {
       pushed.add(branch);
       remoteBranches.add(branch);
     },
-    hasCommitFor: async (issueNumber) => commits.has(issueNumber),
     isPushed: async (branch) => pushed.has(branch),
     ignoredPaths: async (paths) => [...paths],
     trackedPathsUnder: async () => [],
@@ -444,10 +482,11 @@ function harness(options: HarnessOptions = {}): Harness {
   const launcher: AutoRunLauncher = {
     runAutomated: async (input, signal) => {
       launches.push(input);
-      // Implementation and review agents leave their work in the working tree;
+      // address-issue and issue-review signal completion by committing;
       // Explore is read-only.
-      if (input.type !== "Explore" && options.producesChanges !== false) dirty = true;
       if (input.type === options.pendingWorkerType) {
+        // Killed mid-edit: what it had written is still uncommitted.
+        if (input.type !== "Explore" && options.producesChanges !== false) dirty = true;
         await new Promise<void>((resolve) => {
           if (signal?.aborted) resolve();
           else signal?.addEventListener("abort", () => resolve(), { once: true });
@@ -458,6 +497,13 @@ function harness(options: HarnessOptions = {}): Harness {
           terminalId: `terminal-${launches.length}` as TerminalId,
           result: { outcome: "failed", failure: { type: "killed", exitCode: null, lastAssistantMessage: null }, telemetry: telemetry() },
         };
+      }
+      const commits = input.type === "reviewer" && options.reviewerProducesChanges !== undefined
+        ? options.reviewerProducesChanges
+        : options.producesChanges !== false;
+      if (input.type !== "Explore" && commits) {
+        for (let made = 0; made < (options.workerCommitCount ?? 1); made += 1) commitOn(currentBranch);
+        if (options.workerLeavesDirtyTree === true) dirty = true;
       }
       if (input.type === "implementer" && options.relabelAfterImplementer === true) {
         queue.find((entry) => entry.number === input.issues?.[0])?.labels.splice(0, Infinity, "[AI]-hitl");
@@ -484,8 +530,9 @@ function harness(options: HarnessOptions = {}): Harness {
       };
     },
     resumeAutomated: async (session, prompt) => {
+      // A continued worker finishes the job the original one did not.
       continuations.push({ session, prompt });
-      dirty = true;
+      commitOn(currentBranch);
       return {
         agentId: session.identity.agentId,
         sessionId: session.sessionId,
@@ -647,7 +694,7 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     settings: {
       review: false,
       exploreBeforeImplement: false,
-      recursiveIssueReferences: false,
+      issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
@@ -750,8 +797,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(result.started, true);
   await context.engine.settle();
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
-  assert.equal(context.launches[0]?.expectsUncommittedTree, true);
-  assert.equal(context.launches[0]?.recursiveIssueReferences, false);
+  assert.equal(context.launches[0]?.issueContextDepth, 1);
   assert.equal(context.launches[0]?.description, "address issue 34");
   // The issue number and branch reach the prompt; the wording around them is free.
   assert.equal(context.launches[0]?.prompt?.includes("#34"), true);
@@ -762,7 +808,8 @@ test("the afk path runs branch to merge and performs every side effect itself", 
     // published yet, and is published before any issue starts.
     `createBranch ${SESSION} main`, `push ${SESSION} -u`,
     `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch issue/34-add-retry-backoff ${SESSION}`,
-    "add", "commit", "push issue/34-add-retry-backoff -u",
+    // address-issue made the commit itself; aboard only publishes it.
+    "push issue/34-add-retry-backoff -u",
     // After the merge, so the record carries the session branch tip the merge
     // produced rather than the one it had before.
     `checkout ${SESSION}`, `fastForward ${SESSION}`,
@@ -781,7 +828,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
 test("optional exploration runs just before a fresh implementer and publishes bounded context", async () => {
   const report = `Relevant code lives in src/retry.ts; preserve RetryPolicy and run retry tests.\n${"x".repeat(7_000)}`;
   const context = harness({
-    settings: { exploreBeforeImplement: true, recursiveIssueReferences: true },
+    settings: { exploreBeforeImplement: true, issueContextDepth: 2 },
     explorationReport: report,
   });
 
@@ -792,7 +839,7 @@ test("optional exploration runs just before a fresh implementer and publishes bo
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer"]);
   assert.equal(context.launches[0]?.issues?.[0], 34);
-  assert.equal(context.launches[0]?.recursiveIssueReferences, true);
+  assert.equal(context.launches[0]?.issueContextDepth, 2);
   assert.match(context.launches[0]?.prompt ?? "", /under 800 words/);
   assert.equal(context.launches[1]?.codebaseContext?.length, 6_000);
   assert.match(context.launches[1]?.codebaseContext ?? "", /\[Explore report truncated\]$/);
@@ -848,7 +895,9 @@ test("exploration comment failure does not withhold direct context", async () =>
 test("resume creates a missing session branch from the unpublished local target", async () => {
   const context = harness({
     remoteBaseSha: "f".repeat(40),
-    implementerMessage: "The dependency is unavailable.",
+    // The implementer commits nothing, so the run stops right after the session
+    // branch is created and its recorded tip stays the one under test.
+    producesChanges: false,
   });
   context.seed(plannedRecord({ checkpoint: "workspace-ready" }));
 
@@ -860,15 +909,15 @@ test("resume creates a missing session branch from the unpublished local target"
   assert.notEqual(context.record()?.branchShas[SESSION], "f".repeat(40));
 });
 
-test("auto-run freezes recursive issue context and passes it only as launch data", async () => {
-  const context = harness({ settings: { recursiveIssueReferences: true } });
+test("auto-run freezes the issue-context depth and passes it only as launch data", async () => {
+  const context = harness({ settings: { issueContextDepth: 3 } });
   const result = await context.engine.start();
   assert.equal(result.started, true);
   await context.engine.settle();
 
-  assert.equal(context.saved.some((record) => record.settings.recursiveIssueReferences), true);
-  assert.equal(context.launches[0]?.recursiveIssueReferences, true);
-  assert.equal(context.launches[0]?.prompt?.includes("recursive"), false);
+  assert.equal(context.saved.some((record) => record.settings.issueContextDepth === 3), true);
+  assert.equal(context.launches[0]?.issueContextDepth, 3);
+  assert.equal(context.launches[0]?.prompt?.includes("depth"), false);
 });
 
 test("the default branch is never a pull request base and never merged into", async () => {
@@ -1110,7 +1159,6 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
   assert.match(context.launches[0]?.prompt ?? "", /Chrome browser capability.*test.*debug/);
   assert.doesNotMatch(context.launches[0]?.prompt ?? "", /aboard|auto[ -]?run|automated|automation/i);
   assert.equal(context.launches[1]?.type, "reviewer");
-  assert.equal(context.launches[1]?.reviewMode, "afk");
   assert.equal(context.launches[1]?.chrome, undefined);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
 });
@@ -1121,7 +1169,6 @@ test("configured and per-run guidance are persisted and reach every auto agent s
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.deepEqual(context.launches.map((launch) => launch.reviewMode), [undefined, "afk"]);
   assert.deepEqual(context.launches.map((launch) => launch.permanentPrompt), ["run browser tests", "run browser tests"]);
   assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["no unit tests needed", "no unit tests needed"]);
   assert.equal(context.saved.every((record) => record.settings.permanentPrompt === "run browser tests"), true);
@@ -1233,20 +1280,18 @@ test("cancelling a running automated reviewer uses the same owned-terminal path"
 
 test("the implementer's account of its change is posted on the issue it addressed", async () => {
   const context = harness({
-    implementerMessage: "Rewrote the backoff.\n\n<commit>Fix retry backoff</commit>\n\nCovered retry exhaustion.",
+    implementerMessage: "Rewrote the backoff. Covered retry exhaustion.",
   });
   await context.engine.start();
   await context.engine.settle();
 
+  // The account is posted verbatim: no completion markup is expected or stripped.
   assert.deepEqual(context.comments, [{
     issue: 34,
-    body: "**Fix retry backoff**\n\nRewrote the backoff.\n\nCovered retry exhaustion.",
+    body: "Rewrote the backoff. Covered retry exhaustion.",
   }]);
-  assert.deepEqual(context.commitCalls[0], {
-    subject: "Fix retry backoff",
-    body: "Addresses #34.",
-  });
-  assert.doesNotMatch(context.createdPullRequests[0]?.body ?? "", /<commit>/u);
+  assert.deepEqual(context.commitCalls, [], "aboard writes no commit message of its own");
+  assert.match(context.createdPullRequests[0]?.body ?? "", /Rewrote the backoff\./u);
 });
 
 test("a comment that cannot be posted does not fail an issue that was addressed", async () => {
@@ -1313,16 +1358,37 @@ test("a merge refused for a reason other than a conflict still stops the whole r
   assert.equal(context.state.cleared, false);
 });
 
+test("a review that finds nothing succeeds without inventing an empty commit", async () => {
+  const context = harness({ settings: { review: true }, reviewerProducesChanges: false });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.match(context.notifications.join("\n"), /issue #34 reviewed; no fixes were needed/);
+  // One push for the implementation; the review added nothing to publish.
+  assert.equal(context.gitCalls.filter((call) => call.startsWith("push issue/34")).length, 1);
+  assert.equal(context.pullRequests.get(56)?.state, "merged");
+});
+
+test("a worker that makes more than one commit stops the run", async () => {
+  const context = harness({ workerCommitCount: 2 });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*created 2 commits; exactly one is allowed/);
+  assert.equal(context.pullRequests.size, 0);
+  assert.equal(context.record()?.currentIssue, 34, "the commits and the branch are left for inspection");
+});
+
 test("review mode launches an AFK reviewer and commits its fixes as a second commit", async () => {
   const context = harness({ settings: { review: true } });
   await context.engine.start();
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.equal(context.launches[1]?.reviewMode, "afk");
-  // Two commits: the implementation, then the reviewer's fixes.
-  assert.equal(context.gitCalls.filter((call) => call === "commit").length, 2);
-  assert.match(context.notifications.join("\n"), /issue #34 reviewed; committing 1 changed path\(s\)/);
+  // Both workers commit for themselves; aboard creates no commit of its own.
+  assert.equal(context.gitCalls.filter((call) => call === "commit").length, 0);
+  assert.match(context.notifications.join("\n"), /issue #34 reviewed; fixes committed \([0-9a-z]{8}\)/);
   assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
 });
 
@@ -1410,7 +1476,11 @@ test("a hitl reviewer stays open while the run awaits the user and closes after 
 
   assert.equal(context.engine.state()?.waiting, true);
   assert.equal(context.engine.owner(56)?.type, "reviewer");
-  assert.deepEqual(context.closedTerminals, ["terminal-1"], "only the completed implementer closes while review is active");
+  // HITL is an orchestration mode: the same unattended issue-review worker runs
+  // and settles, and only then does the run wait for the user.
+  assert.deepEqual(context.interactiveOrigins, []);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
 
   context.advance(SESSION);
   context.pullRequests.set(56, { state: "merged", mergeable: "mergeable", mergeCommitSha: context.sha(SESSION) });
@@ -1449,7 +1519,7 @@ test("a failing implementer stops the run with no commit and no pull request", a
   assert.match(context.notifications.join("\n"), /stopped at issue #34 \(implementer failed: context-exhausted\)/);
 });
 
-test("an implementer completion marker without changes stops for user judgment", async () => {
+test("an implementer that commits nothing stops for user judgment", async () => {
   const context = harness({
     producesChanges: false,
     issues: [
@@ -1465,31 +1535,33 @@ test("an implementer completion marker without changes stops for user judgment",
   assert.equal(context.launches.length, 1);
   assert.equal(context.gitCalls.includes("deleteBranch issue/34-add-retry-backoff"), false);
   assert.equal(context.comments.length, 0);
-  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*confirmed issue #34 complete but produced no changes/);
+  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*address-issue finished without committing/);
   assert.equal(context.state.cleared, false);
 });
 
-test("partial work without a commit marker stops and a resume sends it to a fresh implementer", async () => {
-  const context = harness({ implementerMessage: "Implemented half, but dependency installation is blocked." });
+test("residual uncommitted changes stop the run even though the worker also committed", async () => {
+  const context = harness({ workerLeavesDirtyTree: true });
   await context.engine.start();
   await context.engine.settle();
 
-  assert.equal(context.gitCalls.includes("commit"), false);
   assert.equal(context.pullRequests.size, 0);
   assert.deepEqual(context.comments, []);
-  assert.match(context.notifications.join("\n"), /did not confirm that the issue is complete/);
+  assert.match(context.notifications.join("\n"), /left 1 uncommitted path/);
   assert.equal(context.record()?.currentIssue, 34);
 
+  // The checkout is the user's to inspect; a resume never hands a dirty tree to
+  // another worker, so it stops on the same condition rather than relaunching.
   assert.equal((await context.engine.resume()).started, true);
   await context.engine.settle();
-  assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 2);
-  assert.equal(context.gitCalls.includes("commit"), false);
+  assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1);
+  assert.match(context.notifications.join("\n"), /uncommitted changes on issue\/34-add-retry-backoff/);
 });
 
 test("a failed run can continue its exact ended worker with one Continue message", async () => {
   const context = harness({
     settings: { exploreBeforeImplement: true },
-    implementerMessage: "Implemented half, but dependency installation is blocked.",
+    implementerFails: true,
+    producesChanges: false,
   });
   await context.engine.start();
   await context.engine.settle();
@@ -1507,7 +1579,7 @@ test("a failed run can continue its exact ended worker with one Continue message
       startedAt: "2026-01-01T00:00:00.000Z" as IsoTimestamp,
       finishedAt: "2026-01-01T00:01:00.000Z" as IsoTimestamp,
       exitCode: 0,
-      lastAssistantMessage: "Implemented half, but dependency installation is blocked.",
+      lastAssistantMessage: null,
     },
     resultDelivery: { mode: "tool-result" },
     telemetry: telemetry(),
@@ -1524,7 +1596,8 @@ test("a failed run can continue its exact ended worker with one Continue message
   assert.equal(context.continuations.length, 1);
   assert.equal(context.continuations[0]?.session, session);
   assert.equal(context.continuations[0]?.prompt, "Continue");
-  assert.equal(context.gitCalls.includes("commit"), true);
+  // The continued worker's own commit is what the run then published.
+  assert.equal(context.gitCalls.some((call) => call.startsWith("push issue/34-add-retry-backoff")), true);
 });
 
 test("a run with its own checkout works there, launches there, and never moves the user's HEAD", async () => {
@@ -1532,9 +1605,9 @@ test("a run with its own checkout works there, launches there, and never moves t
   assert.equal((await context.engine.start()).started, true);
   await context.engine.settle();
 
-  // Every effect of the run; the branch, the commit, the push; belongs to the
-  // checkout it was given.
-  for (const effect of ["checkout", "createBranch", "add", "commit", "push"]) {
+  // Every effect of the run; the branch, the worker's commit, the push; belongs
+  // to the checkout it was given.
+  for (const effect of ["checkout", "createBranch", "push", "headSha", "isAncestor"]) {
     assert.ok(context.workspaceGitCalls.includes(effect), `${effect} must happen in the run's own checkout`);
   }
   // The user's checkout is only ever asked questions: what branch they are on,
@@ -2005,13 +2078,12 @@ test("a HITL reviewer's approved fixes are committed to the pull request before 
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.equal(context.launches[1]?.reviewMode, "hitl");
   assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["keep migration reversible", "keep migration reversible"]);
-  // Handed to the user but still leased: the run is committing behind it, which
-  // is exactly the collision the lease exists to prevent.
-  assert.deepEqual(context.interactiveOrigins, ["auto-run"]);
-  // The implementation commit, then the fixes captured while the PR was open.
-  assert.equal(context.gitCalls.filter((call) => call === "commit").length, 2);
+  // Both dispositions run the same unattended worker; only the pause differs.
+  assert.deepEqual(context.interactiveOrigins, []);
+  // The workers commit for themselves; aboard's only commit is the capture of
+  // what the user changed while the pull request was open.
+  assert.equal(context.gitCalls.filter((call) => call === "commit").length, 1);
   assert.match(context.notifications.join("\n"), /committed 1 changed path\(s\) from issue #35's open terminals to PR #56/);
   // The capture must land before the merge is observed, or it missed the boat.
   const log = context.notifications.join("\n");
@@ -2056,7 +2128,6 @@ test("a resumed run uses the settings it froze, not the ones configured now", as
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.equal(context.launches[1]?.reviewMode, "afk");
 });
 
 test("a review already recorded is not repeated after a restart", async () => {

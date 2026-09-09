@@ -1,4 +1,4 @@
-import type { AgentPlatform, AgentPlatformId, AutoRunReviewMode, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
+import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
 import { dirname } from "node:path";
 import type { WriteCapability } from "../domain/capability.js";
 import {
@@ -32,8 +32,6 @@ export interface LaunchIsolation {
 
 export interface DelegationLaunchInput {
   readonly type: AgentType;
-  /** Internal Auto Run review behavior; persisted identity remains `reviewer`. */
-  readonly reviewMode?: AutoRunReviewMode;
   readonly prompt?: string;
   /** Persistent configured note, ordered before the per-run guideline. */
   readonly permanentPrompt?: string;
@@ -41,15 +39,14 @@ export interface DelegationLaunchInput {
   readonly description: string;
   /** Every issue whose resolved contract belongs in the opening prompt, in the caller's order. */
   readonly issues?: readonly number[];
-  /** Whether resolved issue context follows references found in directly related issues. */
-  readonly recursiveIssueReferences?: boolean;
+  /** How many relation levels of issue context the resolved prompt preloads. */
+  readonly issueContextDepth?: number;
   /** Fresh bounded codebase evidence supplied only to an implementer. */
   readonly codebaseContext?: string;
   readonly pullRequest?: number;
   readonly focus?: string;
   /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */
   readonly chrome?: true;
-  readonly expectsUncommittedTree?: boolean;
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
   readonly isolation?: LaunchIsolation;
   readonly difficulty?: IssueDifficulty;
@@ -94,7 +91,7 @@ export interface InteractiveLaunchHandles {
 }
 
 export interface DelegationConfigurationSource {
-  get(type: AgentType, reviewMode?: AutoRunReviewMode): Promise<ConfiguredLaunch>;
+  get(type: AgentType): Promise<ConfiguredLaunch>;
 }
 
 export interface DelegationPromptResolver {
@@ -417,10 +414,7 @@ export class DelegationCoordinator {
     const agentId = this.options.agentIdFactory();
     const agentType = input.type;
     const [configured, prompt] = await Promise.all([
-      this.options.configurations.get(
-        agentType,
-        input.reviewMode ?? (agentType === "reviewer" ? (attended ? "hitl" : "afk") : undefined),
-      ),
+      this.options.configurations.get(agentType),
       this.options.prompts.resolve(input, { interactive: attended }),
     ]);
     const platform = this.#platform(configured.platform);
@@ -484,7 +478,6 @@ export class DelegationCoordinator {
           telemetry: EMPTY_TELEMETRY,
           ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
           ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
-          ...(input.expectsUncommittedTree === true ? { expectsUncommittedTree: true } : {}),
           // This policy is not derivable from the stable reviewer identity: a
           // manual review is user-driven and deliberately unrestricted.
           ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),

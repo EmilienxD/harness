@@ -52,18 +52,18 @@ test("launch.json resolves the four launch profiles", () => {
     platform: "claude",
     settings: {
       shape: "skill",
-      skillName: "implement",
+      skillName: "address-issue",
       declaredCommand: ["claude"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
       deniedTools: ["Agent", "WebSearch", "WebFetch"],
     },
   });
-  const reviewer = parsed.value.configuration("reviewer", "hitl");
+  const reviewer = parsed.value.configuration("reviewer");
   const reviewerSettings = settings(reviewer);
   assert.equal(reviewerSettings.shape, "skill");
   if (reviewerSettings.shape !== "skill") assert.fail("reviewer must resolve to a skill launch");
-  assert.equal(reviewerSettings.skillName, "review-hitl");
+  assert.equal(reviewerSettings.skillName, "issue-review");
 });
 
 test("launch.json selects an attended ChatGPT session with its Codex command", () => {
@@ -124,7 +124,7 @@ test("launch.json routes a ChatGPT implementer through the implement skill with 
     platform: "chatgpt",
     settings: {
       shape: "skill",
-      skillName: "implement",
+      skillName: "address-issue",
       declaredCommand: ["codex"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
@@ -143,21 +143,18 @@ test("launch.json routes ChatGPT reviewers through the review skill their dispos
   }`);
 
   assert.deepEqual(parsed.diagnostics, []);
-  assert.deepEqual(settings(parsed.value.configuration("reviewer", "afk")), {
+  assert.deepEqual(settings(parsed.value.configuration("reviewer")), {
     shape: "skill",
-    skillName: "review-afk",
+    skillName: "issue-review",
     declaredCommand: ["codex"],
     declaredModel: "by-difficulty",
     declaredEffort: "high",
     webSearch: "disabled",
     subagents: "denied",
   });
-  const hitl = settings(parsed.value.configuration("reviewer", "hitl"));
-  if (hitl.shape !== "skill") assert.fail("a ChatGPT reviewer must resolve to a skill launch");
-  assert.equal(hitl.skillName, "review-hitl");
-  // An unspecified review mode keeps the unattended default.
-  const fallback = settings(parsed.value.configuration("reviewer"));
-  assert.equal(fallback.shape === "skill" ? fallback.skillName : undefined, "review-afk");
+  // AFK and HITL are orchestration modes, so both resolve to the one skill.
+  const implementer = settings(parsed.value.configuration("implementer"));
+  assert.equal(implementer.shape === "skill" ? implementer.skillName : undefined, "address-issue");
 });
 
 test("a ChatGPT implementer profile is configurable independently of Claude routing", () => {
@@ -169,7 +166,7 @@ test("a ChatGPT implementer profile is configurable independently of Claude rout
 
   assert.deepEqual(settings(parsed.value.configuration("implementer")), {
     shape: "skill",
-    skillName: "implement",
+    skillName: "address-issue",
     declaredCommand: ["codex"],
     declaredModel: "gpt-5.6",
     declaredEffort: "xhigh",

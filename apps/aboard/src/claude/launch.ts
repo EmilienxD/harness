@@ -109,8 +109,6 @@ export type LaunchConfiguration =
   /** Claude Code's unmodified default interactive session. */
   | (LaunchConfigurationBase & { readonly shape: "default" });
 
-export type AutoRunReviewMode = "afk" | "hitl";
-
 export type LaunchPlanErrorCode =
   | "invalid-tool-rule"
   | "invalid-model"
@@ -493,14 +491,15 @@ function assertLaunchShape(agentType: AgentType, configuration: LaunchConfigurat
     return;
   }
   if (agentType === "implementer") {
-    if (configuration.shape !== "skill" || configuration.skillName !== "implement") {
-      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /implement");
+    if (configuration.shape !== "skill" || configuration.skillName !== "address-issue") {
+      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /address-issue");
     }
     return;
   }
   if (agentType === "reviewer") {
-    if (configuration.shape !== "skill" || !["review-afk", "review-hitl"].includes(configuration.skillName)) {
-      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /review-afk or /review-hitl");
+    // One skill for both dispositions: AFK and HITL differ in orchestration.
+    if (configuration.shape !== "skill" || configuration.skillName !== "issue-review") {
+      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /issue-review");
     }
     return;
   }

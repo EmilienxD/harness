@@ -124,7 +124,7 @@ function fixedPlanRecord(): AutoRunRecord {
     settings: {
       review: true,
       exploreBeforeImplement: true,
-      recursiveIssueReferences: true,
+      issueContextDepth: 2,
       mergeStrategy: "merge",
       mergeRunPullRequest: true,
       pauseAfterHitl: false,
@@ -253,7 +253,7 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, attempt: 0 },
     { ...valid, settings: { ...valid.settings, mergeStrategy: "fast-forward" } },
     { ...valid, settings: { ...valid.settings, exploreBeforeImplement: "yes" } },
-    { ...valid, settings: { ...valid.settings, recursiveIssueReferences: "yes" } },
+    { ...valid, settings: { ...valid.settings, issueContextDepth: "deep" } },
     { ...valid, workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35, continuable: true } },
     { ...valid, settings: undefined },
     { ...valid, plan: [{ number: 34 }] },
@@ -267,9 +267,9 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
   }
   const priorRecord = parseAutoRunRecord({
     ...valid,
-    settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "recursiveIssueReferences")),
+    settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "issueContextDepth")),
   });
-  assert.equal(priorRecord?.version === 2 ? priorRecord.settings.recursiveIssueReferences : undefined, false);
+  assert.equal(priorRecord?.version === 2 ? priorRecord.settings.issueContextDepth : undefined, 1);
   const priorExplorationRecord = parseAutoRunRecord({
     ...valid,
     settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "exploreBeforeImplement")),

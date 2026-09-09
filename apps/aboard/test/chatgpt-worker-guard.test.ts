@@ -27,7 +27,7 @@ async function prepared(context: { after(callback: () => Promise<void>): void })
     sessionId: provisional,
     agentType: "implementer",
     shell: "powershell",
-    configuration: { shape: "skill", skillName: "implement", declaredCommand: ["codex"] },
+    configuration: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"] },
     prompt: "Address issue #15.",
     runtimeDirectory: root.replaceAll("\\", "/"),
     disallowedTools: ["Bash(git commit*)", "Bash(git -*)", "Bash(gh pr merge*)", "Agent"],

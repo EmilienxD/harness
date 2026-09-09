@@ -114,6 +114,9 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
     const expected = record.branchShas[name];
     const merge = mergePostcondition(record.pendingAction, name, observations)
       ?? hitlMergePostcondition(record, name, observations);
+    // A journalled worker owns exactly one commit on its branch. Its ancestry
+    // and count are checked where the worker settles, not from a bare SHA here.
+    const workerRunning = record.pendingAction?.kind === "worker-commit" && record.pendingAction.branch === name;
     if (observed?.localSha === undefined && observed?.remoteSha === undefined) {
       const mergedHeadWasDeleted = record.pendingAction?.kind === "merge-issue-pr"
         && record.pendingAction.head === name
@@ -121,7 +124,7 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
       if (mergedHeadWasDeleted) continue;
       return broken(`the run's branch ${name} no longer exists`);
     }
-    if (expected === undefined) continue;
+    if (expected === undefined || workerRunning) continue;
     if (observed.localSha !== undefined && observed.localSha !== expected && merge?.mergeCommitSha !== observed.localSha) {
       return broken(`${name} has moved since the run last pushed it`);
     }
@@ -325,15 +328,6 @@ export function currentIssue(record: AutoRunRecord): FrozenIssue | undefined {
   return record.plan.find((issue) => issue.number === record.currentIssue);
 }
 
-export function hasTrustedDirtyWork(record: AutoRunRecord, observations: RunObservations): boolean {
-  const current = currentIssue(record);
-  if (current === undefined || observations.workingTree.dirtyPaths.length === 0) return false;
-  return observations.workingTree.branch === (record.settings.branchMode === "single-branch" ? record.sessionBranch : current.branch);
-}
-
 function remainingIssuesForValidation(record: AutoRunRecord): boolean {
   return record.plan.some((issue) => issueProgress(record, issue.number).state !== "done");
 }
-
-export const DIRTY_RECOVERY_SENTENCE =
-  "Existing uncommitted changes may be incomplete or incorrect; review them critically before finishing the issue.";

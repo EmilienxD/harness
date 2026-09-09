@@ -14,7 +14,7 @@ Aboard has four session kinds: Interactive, Explore, Auto Run implementer, and A
 
 ## Auto Run
 
-`/auto` starts Auto Run immediately and `/auto --dry` produces a forecast. The panel offers a separate review-and-start path. Aboard owns all Auto Run Git and GitHub mutations. Workers receive complete issue or pull-request context through the Harness-installed `/implement`, `/review-afk`, and `/review-hitl` skills and leave changes uncommitted.
+`/auto` starts Auto Run immediately and `/auto --dry` produces a forecast. The panel offers a separate review-and-start path. Aboard owns all Auto Run Git and GitHub mutations. Workers receive complete issue or pull-request context through the Harness-installed `/address-issue` and `/issue-review` skills, and signal completion by committing on the branch Aboard put them on. Aboard grants them `git add` and `git commit` and keeps every other Git and GitHub operation to itself.
 
 Auto Run continues to support issue dispositions, difficulty routing, optional Explore sessions, per-issue and single-branch modes, worktrees, review, recovery, cancellation, and run activity.
 

@@ -88,7 +88,7 @@ export async function run(): Promise<void> {
     assert.equal(completed.upstreamMode, "forbidden");
     const rows = completed.observations.filter((item) => item.scenario === "auto-run-afk" && item.result === "success");
     assert.deepEqual(rows.map((item) => item.checkpoint), [
-      "auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-complete", "auto-review-complete",
+      "auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-complete",
     ]);
     assert.ok(rows.find((item) => item.checkpoint === "auto-afk-read")?.toolNamesOffered.includes("Read"));
     assert.ok(rows.find((item) => item.checkpoint === "auto-afk-edit")?.toolNamesOffered.includes("Edit"));

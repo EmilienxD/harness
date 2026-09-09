@@ -64,7 +64,7 @@ function hook(route, payload) {
 const implementer = process.env.ABOARD_AGENT_TYPE === "implementer";
 const reviewer = process.env.ABOARD_AGENT_TYPE === "reviewer";
 if (implementer || reviewer) {
-  const invocation = implementer ? "$implement " : "$review-";
+  const invocation = implementer ? "$address-issue " : "$issue-review";
   if (resumedSessionId === undefined && !prompt.startsWith(invocation)) process.exit(94);
   if (!process.argv.includes('web_search="disabled"') || !process.argv.includes("features.multi_agent=false")) process.exit(95);
   const decide = (payload) => {
@@ -72,10 +72,13 @@ if (implementer || reviewer) {
     return output.trim().length === 0 ? undefined : JSON.parse(output).hookSpecificOutput.permissionDecision;
   };
   const bash = (command) => ({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } });
-  if (decide(bash("git commit -m 'deterministic'")) !== "deny") process.exit(96);
+  if (decide(bash("git push origin main")) !== "deny") process.exit(96);
   if (decide(bash("gh pr create --fill")) !== "deny") process.exit(96);
   if (decide({ hook_event_name: "PreToolUse", tool_name: "spawn_agent", tool_input: {} }) !== "deny") process.exit(96);
   if (decide(bash("git status --short")) !== undefined) process.exit(97);
+  // Staging and committing are the worker's completion signal, not a denial.
+  if (decide(bash("git add -A")) !== undefined) process.exit(97);
+  if (decide(bash("git commit -m 'deterministic'")) !== undefined) process.exit(97);
   if (delivered.includes("with Chrome") && !delivered.includes("Chrome browser backend")) process.exit(98);
 }
 

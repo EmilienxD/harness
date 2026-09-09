@@ -78,7 +78,6 @@ test("an unknown owner falls back to a fresh reviewer and says so", async () => 
   assert.match((outcome as { notice: string }).notice, /No aboard session is recorded for PR #7/);
   assert.deepEqual(launched[0], {
     type: "reviewer",
-    reviewMode: "hitl",
     pullRequest: 7,
     description: "review pull request 7",
     focus: "boundaries",

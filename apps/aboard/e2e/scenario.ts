@@ -11,7 +11,9 @@ export const AUTO_RUN_HITL_MARKER = "[E2E:auto-run-hitl]";
 export const AUTO_RUN_FOLLOWUP_MARKER = "[E2E:auto-run-followup]";
 export const BEFORE_CONTENT = "aboard e2e fixture: before\n";
 export const AFTER_CONTENT = "aboard e2e fixture: after\n";
-export const FINAL_RESPONSE = "Fixture updated and verified.\n\n<commit>Update deterministic fixture</commit>";
+/** No completion markup: a worker signals completion by committing. */
+export const FINAL_RESPONSE = "Fixture updated and verified.";
+export const WORKER_COMMIT_COMMAND = 'git add -A && git commit -m "Update deterministic fixture"';
 
 export type ScenarioId = "single-file-success" | "auto-run-afk" | "auto-run-hitl" | "auto-run-followup";
 
@@ -131,7 +133,12 @@ function autoRunSequentialTransition(request: MessagesRequest, repoRoot: string,
   readonly before: string;
   readonly after: string;
 }): ScenarioResponse {
-  const results = scenarioSequenceResults(request.messages, [{ id: input.readId, name: "Read" }, { id: input.editId, name: "Edit" }], input.scenario);
+  const commitId = `${input.editId}_commit`;
+  const results = scenarioSequenceResults(request.messages, [
+    { id: input.readId, name: "Read" },
+    { id: input.editId, name: "Edit" },
+    { id: commitId, name: "Bash" },
+  ], input.scenario);
   const read = results.get(input.readId);
   if (!read) {
     requireScenarioTool(request, "Read", input.scenario);
@@ -156,6 +163,18 @@ function autoRunSequentialTransition(request: MessagesRequest, repoRoot: string,
     };
   }
   if (edit.is_error === true) throw new ScenarioMismatch("$.messages", "Edit tool_result reported an error", input.scenario);
+  const commit = results.get(commitId);
+  if (!commit) {
+    requireScenarioTool(request, "Bash", input.scenario);
+    return {
+      scenario: input.scenario,
+      checkpoint: `${input.checkpoint}-commit`,
+      messageId: scenarioStableId(input.scenario, `${input.checkpoint}-commit`),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: commitId, name: "Bash", input: { command: WORKER_COMMIT_COMMAND } }],
+    };
+  }
+  if (commit.is_error === true) throw new ScenarioMismatch("$.messages", "the worker's commit reported an error", input.scenario);
   return {
     scenario: input.scenario,
     checkpoint: `${input.checkpoint}-complete`,
@@ -185,9 +204,11 @@ function autoRunAfkTransition(request: MessagesRequest, repoRoot: string): Scena
   }
   const readId = "toolu_e2e_auto_afk_read";
   const editId = "toolu_e2e_auto_afk_edit";
+  const commitId = "toolu_e2e_auto_afk_commit";
   const results = scenarioSequenceResults(request.messages, [
     { id: readId, name: "Read" },
     { id: editId, name: "Edit" },
+    { id: commitId, name: "Bash" },
   ], scenario);
   const readResult = results.get(readId);
   const editResult = results.get(editId);
@@ -225,6 +246,18 @@ function autoRunAfkTransition(request: MessagesRequest, repoRoot: string): Scena
     };
   }
   if (editResult.is_error === true) throw new ScenarioMismatch("$.messages", "Edit tool_result reported an error", scenario);
+  const commitResult = results.get(commitId);
+  if (!commitResult) {
+    requireScenarioTool(request, "Bash", scenario);
+    return {
+      scenario,
+      checkpoint: "auto-afk-commit",
+      messageId: scenarioStableId(scenario, "auto-afk-commit"),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: commitId, name: "Bash", input: { command: WORKER_COMMIT_COMMAND } }],
+    };
+  }
+  if (commitResult.is_error === true) throw new ScenarioMismatch("$.messages", "the worker's commit reported an error", scenario);
   return {
     scenario,
     checkpoint: "auto-afk-complete",
