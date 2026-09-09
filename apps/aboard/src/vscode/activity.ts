@@ -102,7 +102,7 @@ function icon(entry: ActivityEntry): string {
   // Pass or error only: the user should be able to scan the list and know at a
   // glance whether the row is a success log or a failure log.
   if (entry.kind === "run") {
-    return entry.outcome === "succeeded" ? "pass" : "error";
+    return entry.outcome === "succeeded" || entry.outcome === "started" ? "pass" : "error";
   }
   switch (entry.outcome) {
     case "succeeded":
