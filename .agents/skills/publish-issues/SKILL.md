@@ -1,0 +1,13 @@
+---
+name: publish-issues
+description: Publish all drafted issues from .issues-gateway/ to GitHub. Usage is $publish-issues [--dry]. --dry shows what would be published without creating issues. Creates issues via gh CLI and deletes successful drafts to avoid duplicates on rerun.
+---
+
+Use the invocation's surrounding user text as this skill's input.
+
+**ERROR: Do not publish anything. `$publish-issues` is broken — report that to the user and stop.**
+
+`$publish-issues` is handled entirely by a ChatGPT `UserPromptSubmit` hook that should have intercepted the prompt — it is either unregistered or not working there. Do not run `gh issue create`, or otherwise emulate what the hook would have done. The hook
+deletes successfully published drafts and updates failed drafts before reruns, and a hand-rolled run would duplicate issues. Don't try fixing it yourself except if the user explicitly asks it in future messages. For now, notify the user and ask them to rerun `uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness`, reselect `issues`, or publish a GitHub issue at `https://github.com/EmilienxD/harness/issues`.
+
+
