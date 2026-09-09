@@ -74,11 +74,11 @@ def test_catalogue_asks_for_tools_before_scope_and_defaults_to_both_platforms(mo
         "Which agent platforms?",
         "Review installation",
     ]
-    assert planned == {Platform.CLAUDE: {"aboard"}, Platform.CHATGPT: set()}
+    assert planned == {Platform.CLAUDE: {"aboard"}, Platform.CHATGPT: {"aboard"}}
 
 
-def test_aboard_is_labelled_claude_only():
-    assert cli._compatibility(discover()["aboard"]) == "Claude only"
+def test_aboard_is_labelled_cross_platform():
+    assert cli._compatibility(discover()["aboard"]) == "Claude + ChatGPT"
 
 
 def test_dependencies_install_transitively_and_receipts_track_ownership(tmp_path):

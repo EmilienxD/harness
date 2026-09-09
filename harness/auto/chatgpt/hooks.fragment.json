@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/auto.py\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

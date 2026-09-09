@@ -7,8 +7,7 @@ dependencies = ["auto>=1.0.0,<2.0.0", "implement>=1.0.0,<2.0.0", "review-afk>=1.
 status = "supported"
 
 [platforms.chatgpt]
-status = "unsupported"
-reason = "Aboard launches ChatGPT sessions, but its mandatory /auto entry point is Claude Code only."
+status = "supported"
 
 [[actions]]
 type = "vscode-extension"

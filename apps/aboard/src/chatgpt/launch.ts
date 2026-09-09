@@ -121,9 +121,12 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   const task = typeof request.prompt === "string" ? request.prompt.trim() : request.prompt?.text.trim();
   if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "Explore cannot launch without its exploration task");
   if (worker && kind === "start" && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", `${request.agentType} cannot launch without its initial prompt`);
-  const text = task === undefined || task.length === 0
-    ? undefined
-    : [...(explore ? [CHATGPT_EXPLORE_ROLE] : []), ...(chrome ? [CHATGPT_CHROME_INSTRUCTION] : []), task].join("\n\n");
+  const promptParts = [
+    ...(explore ? [CHATGPT_EXPLORE_ROLE] : []),
+    ...(chrome ? [CHATGPT_CHROME_INSTRUCTION] : []),
+    ...(task === undefined || task.length === 0 ? [] : [task]),
+  ];
+  const text = promptParts.length === 0 ? undefined : promptParts.join("\n\n");
   // A resume continues the conversation the skill already governs.
   const invocation = kind === "start" && configuration.shape === "skill" ? `$${configuration.skillName ?? ""}` : undefined;
   const planFor = (promptThreshold: number): { readonly promptDelivery: PromptDelivery; readonly spill?: RuntimeFile; readonly args: readonly string[]; readonly commandLine: string; readonly wrapperRequest?: RuntimeFile } => {

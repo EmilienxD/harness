@@ -375,6 +375,11 @@ test("a Chrome-required ChatGPT launch tells the worker to use the Chrome backen
   assert.equal(resumed.task, undefined);
   assert.equal(resumed.args.includes('web_search="disabled"'), true);
   assert.equal(resumed.args.filter((argument) => argument.startsWith("$implement")).length, 0);
+
+  const reopened = platform.planSessionResume({ ...implementer, sessionId: actual, chrome: true });
+  assert.equal(reopened.promptDelivery, "inline");
+  assert.match(reopened.args.at(-1) ?? "", /Chrome browser backend/u);
+  assert.equal(reopened.args.filter((argument) => argument.startsWith("$implement")).length, 0);
 });
 
 test("a Chrome-required ChatGPT launch fails before the terminal when no backend declares Chrome", async () => {

@@ -29,8 +29,11 @@ def main() -> int:
     try:
         port = int(os.environ["ABOARD_BRIDGE_PORT"])
         token = os.environ["ABOARD_BRIDGE_TOKEN"]
-        session_id = os.environ["ABOARD_SESSION_ID"]
     except (KeyError, ValueError):
+        return deny("/auto requires an active Aboard session. Start this agent from the Aboard panel.")
+    runtime_session_id = payload.get("session_id")
+    session_id = runtime_session_id if isinstance(runtime_session_id, str) and runtime_session_id else os.environ.get("ABOARD_SESSION_ID")
+    if not session_id:
         return deny("/auto requires an active Aboard session. Start this agent from the Aboard panel.")
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/hooks/auto",
@@ -48,4 +51,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

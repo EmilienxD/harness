@@ -1,5 +1,5 @@
 name = "auto"
-version = "1.0.0"
+version = "1.1.0"
 description = "Routes /auto and /auto --dry to an active Aboard session"
 
 [platforms.claude]
@@ -7,19 +7,22 @@ status = "supported"
 fragment = "claude/settings.fragment.json"
 
 [platforms.chatgpt]
-status = "unsupported"
-reason = "The /auto entry point is a Claude Code hook and skill."
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "claude/hooks/auto.py"
+src = "shared/hooks/auto.py"
 dest = "auto.py"
 root = "hooks"
-platforms = ["claude"]
 executable = true
 
 [[files]]
-src = "claude/skills/auto/SKILL.md"
+src = "shared/skills/auto/SKILL.md"
 dest = "auto/SKILL.md"
 root = "skills"
-platforms = ["claude"]
 
+[[files]]
+src = "chatgpt/skills/auto/agents/openai.yaml"
+dest = "auto/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
