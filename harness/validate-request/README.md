@@ -26,12 +26,12 @@ Use `$validate-request` in ChatGPT, with the request in the surrounding user tex
 An explicit request takes precedence over any fallback issue.
 
 With no request, the skill uses the oldest **open issue by creation time** with the exact label
-`[AI]-help-wanted`. A `UserPromptSubmit` hook fetches it for a standalone invocation, saves its
-number, URL, title, creation time, and full body in a unique UTF-8 file in the system temporary
-directory, and supplies only a plain path in context, without an `@` mention or inline body.
-It orders matches on GitHub and pages past pull requests, so it does not select the oldest
-among a limited set of recent issues. Files remain available for later reads in the session
-and can be removed through normal temporary-file cleanup.
+`[AI]-help-wanted`. A `UserPromptSubmit` hook fetches it for a standalone invocation and supplies
+its number, URL, title, creation time, and full body directly in `additionalContext` as concise
+plain text. It orders matches on GitHub and pages past pull requests, so it does not select the
+oldest among a limited set of recent issues. If that context exceeds the host's model-visible
+limit, Claude Code or ChatGPT saves the full text to its own temporary file and gives the agent
+a preview and file path.
 
 The hook ignores invocations with a request and unrelated prompts. It recognizes bare
 `/validate-request`, `$validate-request`, and ChatGPT's standalone Markdown skill reference.
