@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/prefer_fewer_comments_PostToolUse_hook.py"]
+          }
+        ]
+      }
+    ]
+  }
+}
