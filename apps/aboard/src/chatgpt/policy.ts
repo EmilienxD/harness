@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import type { AgentType } from "../domain/contracts.js";
 
-export type ChatGptPolicyCapability = "lifecycle-hooks" | "read-only-sandbox" | "never-approval";
+export type ChatGptPolicyCapability = "lifecycle-hooks" | "read-only-sandbox" | "never-approval" | "permission-profile";
 
 export class ChatGptPolicyError extends Error {
   public constructor(public readonly capability: ChatGptPolicyCapability, message: string) {
@@ -17,6 +17,8 @@ export interface ChatGptManagedPolicy {
   readonly source: string;
   readonly allowedSandboxModes?: readonly string[];
   readonly allowedApprovalPolicies?: readonly string[];
+  readonly allowedPermissionProfiles?: Readonly<Record<string, boolean>>;
+  readonly defaultPermissions?: string;
   readonly allowManagedHooksOnly?: boolean;
   readonly hooks?: boolean;
 }
@@ -47,7 +49,7 @@ export class ChatGptPolicyProbe {
       .map((entry) => parseManagedPolicy(entry.text, entry.path));
   }
 
-  public async require(agentType: AgentType): Promise<void> {
+  public async require(agentType: AgentType, permissionProfile?: string): Promise<void> {
     for (const policy of await this.policies()) {
       if (policy.hooks === false) {
         throw new ChatGptPolicyError(
@@ -61,19 +63,35 @@ export class ChatGptPolicyProbe {
           `Managed Codex policy in ${policy.source} sets allow_managed_hooks_only = true, so Codex skips the hooks Aboard generates for a ${agentType} session and its result would never arrive. Ask your administrator to allow session hooks.`,
         );
       }
-      if (agentType !== "Explore") continue;
+      if (permissionProfile !== undefined) {
+        if (policy.allowedPermissionProfiles !== undefined && policy.allowedPermissionProfiles[permissionProfile] !== true) {
+          throw new ChatGptPolicyError(
+            "permission-profile",
+            `Managed Codex policy in ${policy.source} does not allow the ${permissionProfile} permission profile required to isolate the user's original checkout. Ask your administrator to allow that profile.`,
+          );
+        }
+        if (policy.defaultPermissions !== undefined && policy.defaultPermissions !== permissionProfile) {
+          throw new ChatGptPolicyError(
+            "permission-profile",
+            `Managed Codex policy in ${policy.source} requires the ${policy.defaultPermissions} permission profile, so Aboard cannot select ${permissionProfile} to isolate the user's original checkout.`,
+          );
+        }
+      }
       const modes = policy.allowedSandboxModes;
-      if (modes !== undefined && !modes.includes("read-only")) {
+      if (agentType === "Explore" && permissionProfile === undefined && modes !== undefined && !modes.includes("read-only")) {
         throw new ChatGptPolicyError(
           "read-only-sandbox",
           `Managed Codex policy in ${policy.source} limits allowed_sandbox_modes to ${modes.join(", ")}, which excludes read-only. A ChatGPT Explore session must run read-only. Ask your administrator to allow the read-only sandbox mode.`,
         );
       }
       const approvals = policy.allowedApprovalPolicies;
-      if (approvals !== undefined && !approvals.includes("never")) {
+      if ((agentType === "Explore" || permissionProfile !== undefined) && approvals !== undefined && !approvals.includes("never")) {
+        const subject = permissionProfile === undefined
+          ? "A ChatGPT Explore session"
+          : `The ${permissionProfile} permission profile`;
         throw new ChatGptPolicyError(
           "never-approval",
-          `Managed Codex policy in ${policy.source} limits allowed_approval_policies to ${approvals.join(", ")}, which excludes never. A ChatGPT Explore session runs approval_policy="never" so it cannot escalate out of its read-only sandbox. Ask your administrator to allow the never approval policy.`,
+          `Managed Codex policy in ${policy.source} limits allowed_approval_policies to ${approvals.join(", ")}, which excludes never. ${subject} runs approval_policy="never" so it cannot escalate outside its filesystem boundary. Ask your administrator to allow the never approval policy.`,
         );
       }
     }
@@ -85,6 +103,8 @@ export function parseManagedPolicy(text: string, source: string): ChatGptManaged
   let table = "";
   let allowedSandboxModes: readonly string[] | undefined;
   let allowedApprovalPolicies: readonly string[] | undefined;
+  const allowedPermissionProfiles: Record<string, boolean> = {};
+  let defaultPermissions: string | undefined;
   let allowManagedHooksOnly: boolean | undefined;
   let hooks: boolean | undefined;
   for (let index = 0; index < lines.length; index += 1) {
@@ -101,6 +121,11 @@ export function parseManagedPolicy(text: string, source: string): ChatGptManaged
     const key = table === "" ? assignment[1] : `${table}.${assignment[1] ?? ""}`;
     if (key === "allowed_sandbox_modes") allowedSandboxModes = strings(value);
     else if (key === "allowed_approval_policies") allowedApprovalPolicies = strings(value);
+    else if (key === "default_permissions") defaultPermissions = string(value);
+    else if (table === "allowed_permission_profiles" && assignment[1] !== undefined) {
+      const allowed = boolean(value);
+      if (allowed !== undefined) allowedPermissionProfiles[assignment[1]] = allowed;
+    }
     else if (key === "allow_managed_hooks_only") allowManagedHooksOnly = boolean(value);
     else if (key === "features.hooks") hooks = boolean(value);
   }
@@ -108,6 +133,8 @@ export function parseManagedPolicy(text: string, source: string): ChatGptManaged
     source,
     ...(allowedSandboxModes === undefined ? {} : { allowedSandboxModes }),
     ...(allowedApprovalPolicies === undefined ? {} : { allowedApprovalPolicies }),
+    ...(Object.keys(allowedPermissionProfiles).length === 0 ? {} : { allowedPermissionProfiles }),
+    ...(defaultPermissions === undefined ? {} : { defaultPermissions }),
     ...(allowManagedHooksOnly === undefined ? {} : { allowManagedHooksOnly }),
     ...(hooks === undefined ? {} : { hooks }),
   };
@@ -131,4 +158,9 @@ function strings(value: string): readonly string[] | undefined {
 
 function boolean(value: string): boolean | undefined {
   return value === "true" ? true : value === "false" ? false : undefined;
+}
+
+function string(value: string): string | undefined {
+  const match = /^(?:"([^"]*)"|'([^']*)')$/u.exec(value.trim());
+  return match === null ? undefined : match[1] ?? match[2];
 }

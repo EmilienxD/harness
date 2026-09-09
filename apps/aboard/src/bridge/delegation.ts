@@ -22,6 +22,7 @@ import {
   type WriteLeaseHolder,
 } from "../domain/lease.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
+import { isolationDenyRules } from "../auto/worktree.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
 export interface LaunchIsolation {
@@ -234,6 +235,9 @@ export class DelegationCoordinator {
       disallowedTools: [
         ...(this.options.disallowedTools ?? []),
         ...(target.autoRunRestricted === true ? AUTO_RUN_DISALLOWED_TOOLS : []),
+        ...(target.autoRunRestricted === true && target.cwd !== undefined
+          ? isolationDenyRules(this.options.workspaceRoot)
+          : []),
       ],
       ...this.#effort(),
       ...this.#command(),

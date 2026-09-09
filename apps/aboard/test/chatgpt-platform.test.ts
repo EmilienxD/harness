@@ -336,6 +336,20 @@ test("a ChatGPT implementer cannot spawn subagents, search the web, or mutate Ab
   });
 });
 
+test("an isolated ChatGPT worker requires a Codex version with permission profiles", async () => {
+  const platform = chatGpt({
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.137.0", stderr: "" }),
+    policyProbe: { require: async () => undefined },
+  });
+  const plan = platform.planLaunch({
+    ...implementer,
+    prompt: "Address the issue.",
+    disallowedTools: ["Read(//C:/project/**)", "Edit(//C:/project/**)"],
+  });
+
+  await assert.rejects(platform.preflight(plan), /Codex 0\.138\.0 or later.*permission profile/u);
+});
+
 test("a ChatGPT implementer profile can restore web search and subagents", () => {
   const plan = chatGpt().planLaunch({
     ...implementer,

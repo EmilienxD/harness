@@ -26,9 +26,10 @@ export class ChatGptCommandProbe {
     return pending;
   }
 
-  public async require(command?: readonly string[]): Promise<void> {
+  public async require(command?: readonly string[]): Promise<Extract<PreflightResult, { readonly ok: true }>> {
     const result = await this.verify(command);
     if (!result.ok) throw new ChatGptPreflightError(result.reason);
+    return result;
   }
 
   async #probe(tokens: readonly string[]): Promise<PreflightResult> {
@@ -42,5 +43,19 @@ export class ChatGptCommandProbe {
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : "the command could not be started" };
     }
+  }
+}
+
+export function requirePermissionProfileVersion(version: string): void {
+  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(version);
+  const current = match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+  const supported = current !== undefined && (
+    current[0] > 0
+    || (current[0] === 0 && current[1] >= 138)
+  );
+  if (!supported) {
+    throw new ChatGptPreflightError(
+      `Codex 0.138.0 or later is required for Aboard's worktree permission profile; found ${version.trim() || "an unknown version"}`,
+    );
   }
 }

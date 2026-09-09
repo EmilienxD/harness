@@ -8,7 +8,7 @@ import { ChatGptBrowserProbe } from "./browser.js";
 import { normalizeChatGptLifecycle } from "./lifecycle.js";
 import { planChatGptLaunch, planChatGptSessionResume } from "./launch.js";
 import { ChatGptPolicyProbe } from "./policy.js";
-import { ChatGptCommandProbe } from "./preflight.js";
+import { ChatGptCommandProbe, requirePermissionProfileVersion } from "./preflight.js";
 import { ChatGptSessionProbe } from "./sessions.js";
 
 export class ChatGptAgentPlatform implements AgentPlatform {
@@ -39,8 +39,9 @@ export class ChatGptAgentPlatform implements AgentPlatform {
   public planLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan { return planChatGptLaunch(request); }
   public planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan { return planChatGptSessionResume(request); }
   public async preflight(plan: PlatformLaunchPlan): Promise<void> {
-    await this.#commandProbe.require(plan.command);
-    await this.#policyProbe.require(plan.agentType);
+    const command = await this.#commandProbe.require(plan.command);
+    if (plan.permissionProfile !== undefined) requirePermissionProfileVersion(command.version);
+    await this.#policyProbe.require(plan.agentType, plan.permissionProfile);
     if (plan.chromeRequired === true) await this.#browserProbe.require(plan.agentType);
   }
   public async isResumable(sessionId: SessionId, cwd: string, command?: readonly string[]): Promise<boolean> {

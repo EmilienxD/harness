@@ -230,7 +230,17 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "implementer", description: "address issue 15", issues: [15], difficulty: "expert", chrome: true });
+  const run = coordinator.runAutomated({
+    type: "implementer",
+    description: "address issue 15",
+    issues: [15],
+    difficulty: "expert",
+    chrome: true,
+    isolation: {
+      cwd: "C:\\checkouts\\run-1\\work",
+      denyTools: ["Read(//C:/work/**)", "Edit(//C:/work/**)"],
+    },
+  });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /\$address-issue/u);
@@ -238,6 +248,11 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   assert.match(command, /features\.multi_agent=false/u);
   assert.match(command, /--model gpt-5\.6/u);
   assert.match(command, /model_reasoning_effort="high"/u);
+  assert.match(command, /default_permissions="aboard-worktree"/u);
+  assert.match(command, /permissions\.aboard-worktree=/u);
+  assert.match(command, /extends=":workspace"/u);
+  assert.match(command, /approval_policy="never"/u);
+  assert.match(command, /C:\\\\work\\\\\*\*/u);
   assert.match(delivered.at(-1) ?? "", /Chrome browser backend/u);
   assert.equal(lease.current()?.agentId, agentId);
   assert.equal(fleet.get(agentId)?.chromeEnabled, true);
@@ -413,4 +428,74 @@ test("a ChatGPT reopen preserves identity and ownership while waiting for resume
   assert.equal((await reopened).terminalId, "new-terminal");
   assert.equal(fleet.get(agentId)?.lifecycle.status, "running");
   assert.equal(lease.current()?.sessionId, sessionId);
+});
+
+test("an isolated auto-run ChatGPT continuation reapplies the original checkout boundary", async () => {
+  const agentId = "agent-1" as AgentId;
+  const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
+  const at = "2026-09-08T10:00:00.000Z" as IsoTimestamp;
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionProbe: { inspect: async () => ({ state: "resumable" }) },
+    policyProbe: { require: async () => undefined },
+  });
+  const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
+  fleet.register({
+    platform: "chatgpt",
+    identity: { agentId, type: "implementer" },
+    sessionId,
+    sessionBinding: "bound",
+    terminal: { terminalId: "old-terminal" as TerminalId, name: "aboard: address issue 15" },
+    lifecycle: { status: "starting", startedAt: at },
+    resultDelivery: { mode: "tool-result" },
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+    issueNumbers: [15],
+    cwd: "C:\\checkouts\\run-1\\work",
+    autoRunRestricted: true,
+  }, at);
+  fleet.transition(agentId, { status: "running", startedAt: at }, at);
+  fleet.transition(agentId, {
+    status: "completed",
+    startedAt: at,
+    finishedAt: at,
+    exitCode: 0,
+    lastAssistantMessage: "The first attempt needs another turn.",
+  }, at);
+  const terminals = new TerminalController({
+    host,
+    shell: "powershell",
+    environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:\\work" }),
+    terminalIdFactory: () => "new-terminal" as TerminalId,
+  });
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:\\work",
+    fleet,
+    lease: new WriteLease(),
+    terminals,
+    configurations: { get: async () => ({
+      platform: "chatgpt",
+      settings: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"], webSearch: "disabled", subagents: "denied" },
+    }) },
+    platforms: new Map([["chatgpt", platform]]),
+    prompts: { resolve: async () => undefined },
+    spills: { prepare: async () => undefined, write: async () => "unused" },
+    shell: "powershell",
+    agentIdFactory: () => "unused" as AgentId,
+  });
+
+  const resumed = coordinator.resumeAutomated(fleet.get(agentId)!, "Continue addressing issue #15.");
+  while (host.terminals.length === 0) await new Promise((resolve) => setImmediate(resolve));
+  const command = host.terminals[0]?.sent.at(-1) ?? "";
+  assert.match(command, /default_permissions="aboard-worktree"/u);
+  assert.match(command, /C:\\\\work\\\\\*\*/u);
+
+  coordinator.complete(agentId, {
+    outcome: "succeeded",
+    exitCode: 0,
+    lastAssistantMessage: "Implemented issue #15.",
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  });
+  assert.equal((await resumed).result.outcome, "succeeded");
 });

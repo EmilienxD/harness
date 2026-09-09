@@ -189,6 +189,8 @@ export interface LaunchPlan {
   readonly chromeRequired?: true;
   /** Worker restrictions a platform enforces through its own lifecycle hook. */
   readonly guard?: RuntimeFile;
+  /** Native permission profile required before this launch may create a terminal. */
+  readonly permissionProfile?: string;
 
   readonly wrapperRequest?: WrapperRequestFile;
   /** Per-launch directory selected with `--settings` and `--add-dir`. */

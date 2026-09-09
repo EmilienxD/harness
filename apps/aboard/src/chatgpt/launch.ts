@@ -55,10 +55,12 @@ export const CHATGPT_CHROME_INSTRUCTION =
 const READ_ONLY_POLICY = ["--sandbox", "read-only", "-c", 'approval_policy="never"'] as const;
 
 const CLAUDE_MODELS: ReadonlySet<string> = new Set(["haiku", "sonnet", "opus"]);
+const WORKTREE_PERMISSION_PROFILE = "aboard-worktree";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const BASH_RULE = /^Bash\((.+)\)$/u;
+const FILE_RULE = /^(?:Read|Edit)\((.+)\)$/u;
 
 export function planChatGptLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan {
   return planChatGptSession(request, "start");
@@ -95,6 +97,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   ];
   const subagentsDenied = worker && configuration.subagents !== "allowed";
   const denyCommands = worker ? commandDenyPatterns(request.disallowedTools) : [];
+  const denyFiles = fileDenyPatterns(request.disallowedTools);
   const guard: RuntimeFile | undefined = worker
     ? {
         agentId: request.agentId,
@@ -103,10 +106,12 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       }
     : undefined;
   const policy = launchPolicy(configuration, request.difficulty);
+  const permissionProfile = denyFiles.length === 0 ? [] : permissionProfileArguments(denyFiles, explore);
   const fixed = [
     "--dangerously-bypass-hook-trust",
     "-c", "features.hooks=true",
-    ...(explore ? READ_ONLY_POLICY : []),
+    ...(explore && denyFiles.length === 0 ? READ_ONLY_POLICY : []),
+    ...permissionProfile,
     ...(worker ? ["-c", `web_search=${JSON.stringify(configuration.webSearch ?? "disabled")}`] : []),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
     ...config("SessionStart", [hookEntry("session-start", "startup|resume"), hookEntry("worker-reground", "compact")]),
@@ -183,6 +188,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     runtimeDirectory,
     ...(chrome ? { chromeRequired: true as const } : {}),
     ...(guard === undefined ? {} : { guard }),
+    ...(denyFiles.length === 0 ? {} : { permissionProfile: WORKTREE_PERMISSION_PROFILE }),
     ...(archived === undefined ? {} : { task: archived }),
     ...(built.spill === undefined ? {} : { spill: built.spill }),
     ...(built.wrapperRequest === undefined ? {} : { wrapperRequest: built.wrapperRequest }),
@@ -234,6 +240,28 @@ export function commandDenyPatterns(rules: readonly string[] | undefined): reado
     return match === null ? [] : [match[1]!.trim()];
   });
   return [...new Set(patterns.filter((pattern) => pattern.length > 0))];
+}
+
+/** Convert Claude-style filesystem rules into Codex's native permission profile. */
+export function fileDenyPatterns(rules: readonly string[] | undefined): readonly string[] {
+  const patterns = (rules ?? []).flatMap((rule) => {
+    const match = FILE_RULE.exec(rule.trim());
+    if (match === null) return [];
+    const raw = (match[1] ?? "").trim().replace(/^\/\//u, "");
+    if (raw.length === 0) return [];
+    return [/^[A-Za-z]:\//u.test(raw) ? raw.replaceAll("/", "\\") : raw];
+  });
+  return [...new Set(patterns)];
+}
+
+function permissionProfileArguments(patterns: readonly string[], readOnly: boolean): readonly string[] {
+  const filesystem = patterns.map((pattern) => `${JSON.stringify(pattern)}="deny"`).join(",");
+  const profile = `{extends=${JSON.stringify(readOnly ? ":read-only" : ":workspace")},filesystem={${filesystem}}}`;
+  return [
+    "-c", `permissions.${WORKTREE_PERMISSION_PROFILE}=${profile}`,
+    "-c", `default_permissions=${JSON.stringify(WORKTREE_PERMISSION_PROFILE)}`,
+    "-c", 'approval_policy="never"',
+  ];
 }
 
 function wrap(command: readonly string[], args: readonly string[], wrapper: SessionWrapperLayout | undefined, agentId: AgentId, _sessionId: SessionId, runtimeRoot: string): { readonly command: readonly string[]; readonly args: readonly string[]; readonly request?: RuntimeFile } {

@@ -11,7 +11,12 @@ test("managed Codex requirements are read for the keys Aboard depends on", () =>
   const policy = parseManagedPolicy([
     "# managed",
     'allowed_sandbox_modes = ["workspace-write", "READ-ONLY"] # both',
+    'default_permissions = "aboard-worktree"',
     "allow_managed_hooks_only = false",
+    "",
+    "[allowed_permission_profiles]",
+    "aboard-worktree = true",
+    "other-profile = false",
     "",
     "[features]",
     "hooks = true",
@@ -23,6 +28,8 @@ test("managed Codex requirements are read for the keys Aboard depends on", () =>
   assert.deepEqual(policy, {
     source: "requirements.toml",
     allowedSandboxModes: ["workspace-write", "read-only"],
+    allowedPermissionProfiles: { "aboard-worktree": true, "other-profile": false },
+    defaultPermissions: "aboard-worktree",
     allowManagedHooksOnly: false,
     hooks: true,
   });
@@ -81,4 +88,37 @@ test("a multi-line sandbox allowlist containing read-only is accepted", async ()
     "/etc/codex/requirements.toml": 'allowed_sandbox_modes = [\n  "read-only",\n  "workspace-write",\n]\n[features]\nhooks = true\n',
   });
   await policy.require("Explore");
+});
+
+test("managed permission requirements reject an isolated ChatGPT worker before launch", async () => {
+  const policy = probe({
+    "C:/codex/requirements.toml": [
+      'allowed_approval_policies = ["on-request"]',
+      "[allowed_permission_profiles]",
+      'aboard-worktree = false',
+    ].join("\n"),
+  });
+
+  await assert.rejects(policy.require("implementer", "aboard-worktree"), (error: unknown) => {
+    assert.ok(error instanceof ChatGptPolicyError);
+    assert.equal(error.capability, "permission-profile");
+    assert.match(error.message, /aboard-worktree/u);
+    return true;
+  });
+});
+
+test("an allowed isolated ChatGPT profile still requires never approval", async () => {
+  const policy = probe({
+    "C:/codex/requirements.toml": [
+      'allowed_approval_policies = ["on-request"]',
+      "[allowed_permission_profiles]",
+      'aboard-worktree = true',
+    ].join("\n"),
+  });
+
+  await assert.rejects(policy.require("reviewer", "aboard-worktree"), (error: unknown) => {
+    assert.ok(error instanceof ChatGptPolicyError);
+    assert.equal(error.capability, "never-approval");
+    return true;
+  });
 });
