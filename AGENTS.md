@@ -94,6 +94,10 @@ surrounding user text instead of `$ARGUMENTS`.
 - `harness/prefer-edit-tool/` — PostToolUse/PostToolUseFailure hook reminding the agent to use
   Write/Edit instead of heredocs, `>` redirects, `sed -i`, inline python `open(...)` and PowerShell
   `Set-Content`. Write-side counterpart to `prefer-read-tool`. See `README.md`.
+- `harness/prefer-fewer-comments/` — PostToolUse hook that scans the text a write added — Write/Edit/
+  MultiEdit, `apply_patch`, or a shell heredoc — and asks for less commentary when a comment,
+  docstring, file header, or the change's comment density runs over budget. Budgets and exempt paths
+  live in `prefer-fewer-comments.rules`. See `README.md`.
 - `harness/prefer-read-tool/` — PostToolUse hook reminding the agent to use Read instead of cat/sed.
   See `README.md`.
 - `harness/redirect-subagents/` — PreToolUse/PostToolUse/Stop hooks redirecting Agent subagents

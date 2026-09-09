@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/prefer_fewer_comments_PostToolUse_hook.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
