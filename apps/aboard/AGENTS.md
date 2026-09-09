@@ -43,4 +43,4 @@ npm run test:vscode
 npm run package
 ```
 
-Use the `tdd` skill before adding tests. Use `aboard-e2e` only for work under `e2e/`.
+Use the `tdd` skill before adding tests. Use `harness-e2e` for work under the repository's `e2e/` core or Aboard's `e2e/` adapter.
