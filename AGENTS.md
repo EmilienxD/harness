@@ -1,128 +1,91 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Project Shape
 
-## What this repo is
+Harness is the canonical catalogue and installer for independently selectable agent skills, hooks,
+command-line tools, and optional apps for Claude Code and ChatGPT. It also owns persistent visible-session
+commands and ask/reply state.
 
-"harness" is the canonical catalogue and installer for agent skills, hooks, command-line tools, and
-optional apps. It also owns persistent visible-session commands and ask/reply state.
+`uvx --from <pinned source> harness` opens the only installer interface: one interactive catalogue menu.
+Do not add named install, uninstall, upgrade, list, or info commands. The only named commands are `run`,
+`ask`, `reply`, and `resume`.
 
-Each tool lives under `harness/<tool-name>/`. Its root `README.md`, when present, is the product-neutral
-source of truth for what it does; otherwise consult the relevant platform's `SKILL.md`. This file only
-indexes them.
+## Repository Layout
 
-`uvx --from <pinned source> harness` opens the only installer interface: one interactive catalogue
-menu. Do not add named install, uninstall, upgrade, list, or info commands. The only named commands
-are `run`, `ask`, `reply`, and `resume`. The CLI is in `src/harness_cli/`; see the root `README.md`.
+- `src/harness_cli/`: Python installer, catalogue, platform adapters, receipts, settings merging, TUI, and
+  persistent session commands.
+- `harness/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
+  no README exists.
+- `apps/aboard/`: independent npm monorepo boundary for the Aboard VS Code extension. Its local
+  `AGENTS.md` is the navigation map for extension work.
+- `tests/`: installer, catalogue, platform, settings, receipt, and session tests.
+- `e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
+- `docs/CLAUDE-REFERENCES/`: mirrored official Claude Code documentation.
+- `docs/CHATGPT-REFERENCES/`: mirrored official ChatGPT documentation.
+- `docs/CHATGPT-COMPATIBILITY.md`: native ChatGPT target feasibility and implementation map.
+- `scripts/update_references.py`: refreshes the mirrored upstream documentation.
+- `harness/itsclaudehistory/`: nested Git repository; leave its internals alone unless explicitly asked.
 
-## Adding or changing a tool
+## Catalogue Package Shape
 
-Every installable tool uses sibling `shared/`, `claude/`, and `chatgpt/` payload layers. `shared/`
-contains only files installed unchanged for both products; native adapters, fragments, skill variants,
-and metadata belong to their product directory. Omit empty layers. Never make one product the implicit
-source tree for another or reintroduce a `targets/` override directory. Keep `harness.toml` and
-product-neutral documentation at the tool root, and mirror logical roots such as `hooks/` and `skills/`
-inside each payload layer.
+Each installable tool has a `harness.toml` with `name`, `version`, `description`, and at least one
+`[[files]]` or `[[actions]]` entry. Bump `version` whenever its payload, fragment, dependency, or action
+changes; a tool without a manifest is invisible to the installer.
 
-Every catalogue package needs a `harness.toml` declaring `name`, `version`, `description`, and one or
-more `[[files]]` or `[[actions]]` entries. Package dependencies belong in `dependencies` with explicit
-version constraints; `requires` is reserved for executables on PATH. Claude Code settings default to a sibling `settings.fragment.json`;
-platform-specific native JSON fragments are named by `[platforms.<name>].fragment`. They are merged
-as-is, with `${PYTHON}` and platform placeholders resolved at install time. `${PYTHON}` becomes
-`uv run --no-project --no-managed-python`
-when `uv` is installed (which it is if you used `uvx`), otherwise falls back to the first working
-interpreter among `python3`, `python`, `py` (the Windows Store alias passes `which` without being a
-real interpreter, so actual execution is tested). A file the user is meant to edit after install —
-config templates, like the `.rules` files — declares `starter = true` on its `[[files]]` entry: it is
-copied when absent and never overwritten afterwards. A tool without a manifest is invisible to the
-installer, so add one in the same change that adds the tool, and bump `version` whenever its files or
-fragment, dependency, or action changes. Run `uv run pytest` — the suite exercises catalogue
-reconciliation and receipt-driven removal.
+Payloads use sibling layers:
 
-A fragment is merged as written: the receipt stores the exact resolved fragment, and deselection
-removes only those entries. It does not rewrite hook entries belonging to anyone else. Keys that
-Claude Code's settings schema doesn't define don't belong in a fragment — project settings are
-validated strictly, and a file that fails validation is rejected whole.
+```text
+harness/<tool>/
+├── harness.toml
+├── README.md
+├── shared/          # installed unchanged for both products
+├── claude/          # Claude-native variants and metadata
+└── chatgpt/         # ChatGPT-native variants and metadata
+```
 
-The installer has explicit `claude` and `chatgpt` platform adapters. The menu asks for its target and
-first-party manifests declare `[platforms.claude]` explicitly.
-Target support belongs in `[platforms.<name>]` with a `supported`,
-`replacement`, or `unsupported` status and, for native config, a target-specific `fragment`. File
-entries can use `root = "platform"`, `"skills"`, or `"hooks"`; omit `platforms` for a shared payload or
-set `platforms = ["chatgpt"]` (or `"claude"`) for a variant. The adapter maps those roots to `.claude`,
-`.agents`, and `.codex`; do not put platform-path conditionals in installer call sites. There is no
-legacy manifest, installation, scaffold, or receipt compatibility layer.
+Omit empty layers. Keep manifests and product-neutral documentation at the tool root. Mirror logical
+roots such as `hooks/` and `skills/` inside payload layers; never use one product as another's implicit
+source tree or restore a `targets/` override directory.
 
-ChatGPT skill payloads place a variant `SKILL.md` (plus reference doc variants) under
-`chatgpt/skills/<skill>/` only when the content genuinely diverges, such as for Claude command
-injection (`` !`command` ``), `argument-hint`, Claude tool names, or `$ARGUMENTS` references. Do not split
-a skill merely because it contains `disable-model-invocation`: ChatGPT silently ignores that unknown
-frontmatter key, so such a skill belongs in `shared/`. Claude's `disable-model-invocation: true` maps
-to `chatgpt/skills/<skill>/agents/openai.yaml` with `policy: allow_implicit_invocation: false`;
-ChatGPT has no documented argument substitution, so argument-taking skills read the invocation's
-surrounding user text instead of `$ARGUMENTS`.
+## Important Constraints
 
-## Tools
+- The installer has explicit `claude` and `chatgpt` adapters. Declare target support under
+  `[platforms.<name>]`; keep platform path mapping in the adapters, not installer call sites.
+- `dependencies` contains package dependencies with explicit version constraints. `requires` is only for
+  executables expected on `PATH`.
+- Native settings fragments are merged as written and removed receipt-first without rewriting unrelated
+  entries. Only use keys accepted by the target product's settings schema.
+- Mark user-editable templates with `starter = true`; install them only when absent and never overwrite
+  them later.
+- `${PYTHON}` resolves to `uv run --no-project --no-managed-python` when `uv` is available, otherwise to
+  the first interpreter that passes an execution check.
+- Create a ChatGPT skill variant only for genuine product differences such as tool names, command
+  injection, `$ARGUMENTS`, or reference variants. `disable-model-invocation` alone does not require a
+  split; represent its ChatGPT policy in `agents/openai.yaml`.
+- There is no legacy manifest, scaffold, installation, or receipt compatibility layer.
+- `address-issue` and `issue-review` contain mandatory empty user-owned prompt placeholders; do not author
+  their bodies. The prototype, websearch, ask-agent, and communicate-to-agent workflow prompts are also
+  user-owned.
+- Keep Aboard's npm build and release history independent. Do not flatten it into the Python package,
+  bundle its VSIX in the wheel, or squash its repository history when merging it.
 
-- `harness/aboard/` — verified Aboard VSIX host action with mandatory Auto Run dependencies.
-- `harness/harness-cli/` — persistent `run`, `ask`, `reply`, and `resume` CLI selection.
-- `harness/session-replies/` — parent reply delivery hooks used transitively by the CLI.
-- `harness/auto/` — user-facing, fail-closed `/auto` hook owned by Harness.
-- `harness/address-issue/` — Auto Run implementer skill with its clean-worktree and issue-preloading `UserPromptSubmit` hook. See `README.md`.
-- `harness/issue-review/` — single AFK/HITL reviewer skill with its clean-worktree and commit-metadata `UserPromptSubmit` hook. See `README.md`.
-  Both skill bodies are mandatory empty, user-owned prompt placeholders; do not author them.
-- `harness/prototype/`, `harness/websearch/`, `harness/ask-agent-to-*/`, `harness/communicate-to-agent/` — empty workflow placeholders whose prompts remain user-owned.
-- `harness/audit/` — audits a codebase and reports evidence-backed findings. See the platform `SKILL.md`.
-- `harness/caveman/` — ultra-compressed communication mode skill. See the platform `SKILL.md`.
-- `harness/commit/` — zero-model-call `/commit` hook. See `README.md`.
-- `harness/create-skill/` — guide for authoring new Claude Skills. See its Claude `SKILL.md`.
-- `harness/grill-me/` — interviews the user to stress-test a plan/design. See the platform `SKILL.md`.
-- `harness/handoff/` — compacts a conversation into a handoff doc for another agent. See the platform `SKILL.md`.
-- `harness/improve-codebase-architecture/` — finds architectural friction and proposes refactors. See
-  the platform `SKILL.md`.
-- `harness/issues/` — one bundle for the whole issue workflow: `/draft-issue`, `/publish-issue`,
-  `/draft-issues`, `/publish-issues`, `/save-as-issue` (Claude Code), `/to-spec`, `/to-spec-draft-issue`, plus the
-  publishing hook. See `README.md`.
-- `harness/on-edit-block/` — PreToolUse hook denying Write/Edit/MultiEdit on paths matching
-  gitignore-style patterns until user-picked files have been read that session. Same rules-file UX as
-  `on-read-reminder`. See `README.md`.
-- `harness/on-edit-reminder/` — PostToolUse hook that lets the edit land, then makes the agent read
-  the user-picked files and fix what already violates them. Same rules-file UX as `on-edit-block`,
-  weaker and cheaper. See `README.md`.
-- `harness/on-read-reminder/` — PostToolUse hook reminding the agent to read user-picked files when it
-  reads paths matching gitignore-style patterns. See `README.md`.
-- `harness/prefer-edit-tool/` — PostToolUse/PostToolUseFailure hook reminding the agent to use
-  Write/Edit instead of heredocs, `>` redirects, `sed -i`, inline python `open(...)` and PowerShell
-  `Set-Content`. Write-side counterpart to `prefer-read-tool`. See `README.md`.
-- `harness/prefer-fewer-comments/` — PostToolUse hook that scans the text a write added — Write/Edit/
-  MultiEdit, `apply_patch`, or a shell heredoc — and asks for less commentary when a comment,
-  docstring, file header, or the change's comment density runs over budget. Budgets and exempt paths
-  live in `prefer-fewer-comments.rules`. See `README.md`.
-- `harness/prefer-read-tool/` — PostToolUse hook reminding the agent to use Read instead of cat/sed.
-  See `README.md`.
-- `harness/redirect-subagents/` — PreToolUse/PostToolUse/Stop hooks redirecting Agent subagents
-  to alternate providers (clauder, `claude -p`, custom CLIs) instead of consuming the Claude
-  subscription. Config in `.claude/harness-redirect-subagents/subagents.json`. See `README.md`.
-- `harness/senior-advisor/` — read-only senior-developer advisory mode. See the platform `SKILL.md`.
-- `harness/tdd/` — test-driven development through behavior-focused red-green vertical slices. See the shared `SKILL.md`.
-- `harness/usage-limit-wait/` — `UserPromptSubmit` + `PostToolBatch` hook that warns as a Claude
-  subscription usage window fills and blocks the session until it resets. See `README.md`.
-- `harness/zoom-out/` — gives a higher-level map of a codebase area. See the platform `SKILL.md`.
-- `harness/validate-request/` — clarifies a request into a chat report, with an oldest-labelled-issue fallback. See `README.md`.
-- `harness/itsclaudehistory/` — nested git repo; leave its internals alone unless asked.
+## Commands
 
-## Other directories
+From the repository root:
 
-- `apps/aboard/` — target monorepo boundary for the Aboard extension. Merge its repository history
-  here without squashing; do not flatten its npm build into the Python package or bundle its VSIX in
-  the wheel.
+```powershell
+uv sync
+uv run harness
+uv run pytest
+uv run python scripts/update_references.py
+```
 
-- `docs/CLAUDE-REFERENCES/` — mirrored upstream Claude Code docs, refreshed by
-  `scripts/update_references.py` via the `update-references.yml` workflow. Consult these
-  for how Claude Code itself works (hooks, skills, settings, tools) rather than relying on prior
-  knowledge.
-- `docs/CHATGPT-REFERENCES/` — mirrored official ChatGPT developer docs, refreshed by the same
-  script and workflow. Upstream still uses `codex` and `.codex` for some CLI implementation
-  identifiers; use ChatGPT as the product name in harness-authored material.
-- `docs/CHATGPT-COMPATIBILITY.md` — current feasibility map and implementation plan for a native
-  ChatGPT target.
+For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
+
+## Tests and References
+
+- Run `uv run pytest` after catalogue or installer changes; the suite covers reconciliation and
+  receipt-driven removal.
+- Use the `harness-e2e` skill for work under `e2e/` or `apps/aboard/e2e/`.
+- Use the `tdd` skill before adding unit or E2E tests.
+- Consult the mirrored official references for product behavior instead of relying on memory.

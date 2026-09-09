@@ -34,4 +34,4 @@ npm run test:vscode
 npm run package
 ```
 
-See `docs/configuration.md` for settings and `temp/REFACTOR.md` for the current architectural boundary.
+See `AGENTS.md` for the project map, settings, and architectural boundaries.
