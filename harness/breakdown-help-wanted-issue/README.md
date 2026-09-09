@@ -1,4 +1,4 @@
-# Validate Request
+# Breakdown Help Wanted Issue
 
 Explore an idea against the codebase, resolve the questions that matter, and produce a chat
 report the user can approve, revise, or reject. The agent investigates before interviewing,
@@ -18,11 +18,11 @@ installation and review/trust its project hooks when prompted. The GitHub fallba
 ## Use
 
 ```text
-/validate-request Let users retry failed imports without uploading the file again
-/validate-request
+/breakdown-help-wanted-issue Let users retry failed imports without uploading the file again
+/breakdown-help-wanted-issue
 ```
 
-Use `$validate-request` in ChatGPT, with the request in the surrounding user text.
+Use `$breakdown-help-wanted-issue` in ChatGPT, with the request in the surrounding user text.
 An explicit request takes precedence over any fallback issue.
 
 With no request, the skill uses the oldest **open issue by creation time** with the exact label
@@ -34,13 +34,14 @@ limit, Claude Code or ChatGPT saves the full text to its own temporary file and 
 a preview and file path.
 
 The hook ignores invocations with a request and unrelated prompts. It recognizes bare
-`/validate-request`, `$validate-request`, and ChatGPT's standalone Markdown skill reference.
+`/breakdown-help-wanted-issue`, `$breakdown-help-wanted-issue`, and ChatGPT's standalone Markdown skill reference.
 For other invocation forms, the skill performs the lookup if no source was supplied.
 An empty queue prompts the agent to ask for a request; a failed lookup is reported separately.
 Neither outcome blocks prompt submission. The hook never changes the issue or its labels.
 
 The report covers purpose, current behavior with evidence, scope and acceptance criteria,
-blockers and unresolved decisions, and a recommendation. After validating it, invoke the
+blockers and unresolved decisions, and a recommendation. Once the user approves it, the agent
+asks whether to proceed with the work or create a new GitHub issue. The issue option uses the
 existing [`draft-issue`](../issues/README.md) skill to turn the report into a reviewed draft
-with the appropriate labels. Install `issues` separately for that next step; its drafting
-and publishing workflow is unchanged.
+with the appropriate labels. Install `issues` separately for that next step; its drafting and
+publishing workflow is unchanged.

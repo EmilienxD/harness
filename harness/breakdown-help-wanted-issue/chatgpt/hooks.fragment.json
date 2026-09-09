@@ -5,8 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/validate_request_UserPromptSubmit_hook.py"],
+            "command": "${PYTHON} \"${HOOKS_DIR}/breakdown_help_wanted_issue_UserPromptSubmit_hook.py\"",
             "timeout": 30
           }
         ]
