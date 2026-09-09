@@ -7,6 +7,7 @@ dist/
 build/
 *.egg-info/
 .pytest_cache/
+node_modules/
 commit-ai.key
 .aboard/runtime/
 .claude/settings.local.json

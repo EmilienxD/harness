@@ -86,6 +86,7 @@ The Harness-owned `/auto` hook fails closed outside an authenticated Aboard term
 harness/                 catalogue package payloads and manifests
 src/harness_cli/         installer, receipts, host actions, and session CLI
 tests/                   behavioural and install round-trip coverage
+e2e/                     reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension
 ```
 
@@ -100,3 +101,5 @@ without coupling the two build systems.
 uv run pytest
 uv run harness --help
 ```
+
+Reusable end-to-end infrastructure and tool journeys are documented in [`e2e/README.md`](e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/e2e/`.

@@ -1,6 +1,17 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { contains } from "./config.js";
+import {
+  E2eProtocolError,
+  isRecord,
+  parseAnthropicMessagesRequest,
+  type AnthropicContentBlock,
+  type AnthropicMessage,
+  type AnthropicMessagesRequest,
+  type AnthropicScenarioResponse,
+} from "../../../e2e/core/anthropic-protocol.js";
+
+export { isRecord } from "../../../e2e/core/anthropic-protocol.js";
 
 export const SCENARIO_MARKER = "[E2E:single-file-success]";
 export const AUTO_RUN_AFK_MARKER = "[E2E:auto-run-afk]";
@@ -29,43 +40,14 @@ export const SCENARIO_MANIFEST = {
   ],
 } as const;
 
-export interface ContentBlock {
-  readonly type?: unknown;
-  readonly id?: unknown;
-  readonly name?: unknown;
-  readonly input?: unknown;
-  readonly tool_use_id?: unknown;
-  readonly content?: unknown;
-  readonly is_error?: unknown;
-  readonly [key: string]: unknown;
-}
+export type ContentBlock = AnthropicContentBlock;
+export type Message = AnthropicMessage;
+export type MessagesRequest = AnthropicMessagesRequest;
+export type ScenarioResponse = AnthropicScenarioResponse & { readonly scenario: ScenarioId };
 
-export interface Message {
-  readonly role?: unknown;
-  readonly content?: unknown;
-  readonly [key: string]: unknown;
-}
-
-export interface MessagesRequest {
-  readonly model: string;
-  readonly max_tokens: number;
-  readonly messages: readonly Message[];
-  readonly stream: boolean;
-  readonly tools: readonly Record<string, unknown>[];
-  readonly [key: string]: unknown;
-}
-
-export interface ScenarioResponse {
-  readonly scenario: ScenarioId;
-  readonly checkpoint: string;
-  readonly messageId: string;
-  readonly stopReason: "tool_use" | "end_turn";
-  readonly content: readonly Record<string, unknown>[];
-}
-
-export class ScenarioMismatch extends Error {
+export class ScenarioMismatch extends E2eProtocolError {
   constructor(readonly field: string, detail: string, scenario: ScenarioId = "single-file-success") {
-    super(`scenario ${scenario} at ${field}: ${detail}`);
+    super(field, detail, scenario);
     this.name = "ScenarioMismatch";
   }
 }
@@ -74,41 +56,7 @@ const READ_ID = "toolu_e2e_read_target";
 const EDIT_ID = "toolu_e2e_edit_target";
 
 export function parseMessagesRequest(value: unknown, inference: boolean): MessagesRequest {
-  if (!isRecord(value)) throw new ScenarioMismatch("$", "request body must be an object");
-  if (typeof value.model !== "string" || value.model.length === 0) throw new ScenarioMismatch("$.model", "must be a nonempty string");
-  if (!Array.isArray(value.messages)) throw new ScenarioMismatch("$.messages", "must be an array");
-  if (inference && (!Number.isInteger(value.max_tokens) || (value.max_tokens as number) <= 0)) {
-    throw new ScenarioMismatch("$.max_tokens", "must be a positive integer");
-  }
-  if (value.stream !== undefined && typeof value.stream !== "boolean") throw new ScenarioMismatch("$.stream", "must be boolean when present");
-  if (inference && !Array.isArray(value.tools)) throw new ScenarioMismatch("$.tools", "must be an array");
-  validateMessageShape(value.messages);
-  return {
-    ...value,
-    model: value.model,
-    max_tokens: typeof value.max_tokens === "number" ? value.max_tokens : 1,
-    messages: value.messages as Message[],
-    stream: value.stream === true,
-    tools: Array.isArray(value.tools) ? value.tools.filter(isRecord) : [],
-  };
-}
-
-function validateMessageShape(messages: readonly unknown[]): void {
-  if (messages.length === 0) throw new ScenarioMismatch("$.messages", "must contain at least one message");
-  messages.forEach((message, messageIndex) => {
-    if (!isRecord(message)) throw new ScenarioMismatch(`$.messages[${messageIndex}]`, "must be an object");
-    if (typeof message.role !== "string" || message.role.length === 0) throw new ScenarioMismatch(`$.messages[${messageIndex}].role`, "must be a nonempty string");
-    if (typeof message.content !== "string" && !Array.isArray(message.content)) throw new ScenarioMismatch(`$.messages[${messageIndex}].content`, "must be a string or block array");
-    if (!Array.isArray(message.content)) return;
-    let sawText = false;
-    message.content.forEach((block, blockIndex) => {
-      if (!isRecord(block) || typeof block.type !== "string") throw new ScenarioMismatch(`$.messages[${messageIndex}].content[${blockIndex}]`, "must be a typed block object");
-      if (message.role === "user" && block.type === "text") sawText = true;
-      if (message.role === "user" && block.type === "tool_result" && sawText) {
-        throw new ScenarioMismatch(`$.messages[${messageIndex}].content[${blockIndex}]`, "tool_result blocks must precede text blocks");
-      }
-    });
-  });
+  return parseAnthropicMessagesRequest(value, inference);
 }
 
 export function transition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
@@ -546,8 +494,4 @@ function contentContains(content: unknown, marker: string): boolean {
 
 function hashValue(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 12);
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

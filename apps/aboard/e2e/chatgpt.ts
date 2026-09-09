@@ -4,6 +4,11 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import {
+  prepareCodexHome as prepareCoreCodexHome,
+  validateCodexCli,
+} from "../../../e2e/core/codex.js";
+
 import { createPlatformLifecycleRoutes } from "../src/bridge/platform-lifecycle.js";
 import { startBridge } from "../src/bridge/server.js";
 import { SessionLifecycleService, SessionProcessMonitor, SessionStartupProofs, type ProcessEndedObservation } from "../src/bridge/session-lifecycle.js";
@@ -104,31 +109,7 @@ function scenarioName(scenario: Scenario): string {
 }
 
 export async function prepareCodexHome(root: string, baseUrl: string, trustedProjects: readonly string[] = []): Promise<string> {
-  const home = join(root, "codex-home");
-  await mkdir(home, { recursive: true });
-  await writeFile(join(home, "config.toml"), [
-    `model = ${JSON.stringify(CODEX_MODEL)}`,
-    'model_provider = "aboard-e2e"',
-    'sandbox_mode = "danger-full-access"',
-    'approval_policy = "never"',
-    'windows.sandbox = "unelevated"',
-    '[model_providers.aboard-e2e]',
-    'name = "Aboard deterministic E2E"',
-    `base_url = ${JSON.stringify(baseUrl)}`,
-    `env_key = ${JSON.stringify(OPENAI_KEY_ENV)}`,
-    'wire_api = "responses"',
-    "request_max_retries = 0",
-    "stream_max_retries = 0",
-    "stream_idle_timeout_ms = 30000",
-    "[notice]",
-    "hide_full_access_warning = true",
-    "hide_world_writable_warning = true",
-    ...trustedProjects.flatMap((project) => [
-      `[projects.${JSON.stringify(resolve(project).toLowerCase())}]`,
-      'trust_level = "trusted"',
-    ]),
-    "",
-  ].join("\n"), "utf8");
+  const home = await prepareCoreCodexHome({ root, baseUrl, model: CODEX_MODEL, providerName: "aboard-e2e", envKey: OPENAI_KEY_ENV, trustedProjects });
   await writeSkill(home, "address-issue", "[E2E:address-issue-skill-loaded] Follow the supplied issue and finish with the exact model-provided result.");
   await writeSkill(home, "issue-review", "[E2E:issue-review-skill-loaded] Review the supplied change and finish with the exact model-provided disposition.");
   return home;
@@ -314,14 +295,7 @@ function spawnCaptured(file: string, args: readonly string[], cwd: string, env: 
   });
 }
 
-export async function validateCodexCli(): Promise<void> {
-  const version = (await execFileAsync("codex", ["--version"], { windowsHide: true })).stdout.trim();
-  if (!/^codex-cli 0\.(?:15[3-9]|1[6-9]\d|[2-9]\d\d)\./u.test(version)) throw new Error(`Codex CLI >= 0.153 is required; found ${JSON.stringify(version)}`);
-  const help = (await execFileAsync("codex", ["exec", "--help"], { windowsHide: true })).stdout;
-  const required = ["--json", "--output-last-message", "--dangerously-bypass-hook-trust", "--sandbox <SANDBOX_MODE>"];
-  const missing = required.filter((item) => !help.includes(item));
-  if (missing.length > 0) throw new Error(`Codex CLI protocol mismatch; missing required help structures: ${missing.join(", ")}`);
-}
+export { validateCodexCli } from "../../../e2e/core/codex.js";
 
 function redactProcessError(stderr: string): string {
   return stderr.replace(/Bearer\s+\S+/giu, "Bearer [redacted]").replace(/aboard-e2e-[a-f0-9]+/giu, "[redacted]").slice(0, 1000).trim() || "no stderr";
