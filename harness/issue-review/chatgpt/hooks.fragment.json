@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/issue_review_UserPromptSubmit_hook.py\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
