@@ -88,7 +88,7 @@ def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeyp
 
 def test_worker_skill_bodies_are_empty_placeholders():
     tools = discover()
-    for name in ("implement", "review-afk", "review-hitl"):
+    for name in ("address-issue", "issue-review"):
         text = tools[name].expand("claude")[0].source.read_text(encoding="utf-8")
         assert text.rstrip().endswith("---")
 

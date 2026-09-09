@@ -88,7 +88,7 @@ def test_dependencies_install_transitively_and_receipts_track_ownership(tmp_path
     resolved, _ = selected.plan({"aboard"})
     receipts = {item.tool.name: item.explicit for item in resolved}
     assert receipts["aboard"] is True
-    for dependency in ("auto", "implement", "review-afk", "review-hitl"):
+    for dependency in ("auto", "address-issue", "issue-review"):
         assert receipts[dependency] is False
 
 
@@ -292,7 +292,7 @@ def test_later_failure_restores_package_removed_earlier_in_reconciliation(monkey
 
 def test_every_catalogue_manifest_loads():
     tools = discover()
-    assert {"aboard", "harness-cli", "implement", "review-afk", "review-hitl"} <= tools.keys()
+    assert {"aboard", "harness-cli", "address-issue", "issue-review"} <= tools.keys()
 
 
 def test_vsix_is_verified_before_host_install(monkeypatch):

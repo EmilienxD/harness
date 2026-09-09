@@ -1,0 +1,30 @@
+name = "address-issue"
+version = "1.0.0"
+description = "Implement a GitHub issue on a clean checkout and commit the verified result"
+requires = ["git", "gh"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/address-issue/README.md"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "shared/skills/address-issue/SKILL.md"
+dest = "address-issue/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "shared/hooks/address_issue_UserPromptSubmit_hook.py"
+dest = "address_issue_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "chatgpt/skills/address-issue/agents/openai.yaml"
+dest = "address-issue/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

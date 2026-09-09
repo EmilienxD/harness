@@ -68,7 +68,9 @@ surrounding user text instead of `$ARGUMENTS`.
 - `harness/harness-cli/` — persistent `run`, `ask`, `reply`, and `resume` CLI selection.
 - `harness/session-replies/` — parent reply delivery hooks used transitively by the CLI.
 - `harness/auto/` — user-facing, fail-closed `/auto` hook owned by Harness.
-- `harness/implement/`, `harness/review-afk/`, `harness/review-hitl/` — mandatory empty Auto Run skill placeholders, installed for both products; do not author their bodies during the structural refactor.
+- `harness/address-issue/` — Auto Run implementer skill with its clean-worktree and issue-preloading `UserPromptSubmit` hook. See `README.md`.
+- `harness/issue-review/` — single AFK/HITL reviewer skill with its clean-worktree and commit-metadata `UserPromptSubmit` hook. See `README.md`.
+  Both skill bodies are mandatory empty, user-owned prompt placeholders; do not author them.
 - `harness/prototype/`, `harness/websearch/`, `harness/ask-agent-to-*/`, `harness/communicate-to-agent/` — empty workflow placeholders whose prompts remain user-owned.
 - `harness/audit/` — audits a codebase and reports evidence-backed findings. See the platform `SKILL.md`.
 - `harness/caveman/` — ultra-compressed communication mode skill. See the platform `SKILL.md`.

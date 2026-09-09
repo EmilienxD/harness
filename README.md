@@ -76,8 +76,8 @@ collisions fail the operation. Receipts record versions, explicit/transitive own
 file digests, settings fragments, and host actions. Removal is dependent-aware and never deletes a
 file changed since installation.
 
-The Aboard package depends unconditionally on `auto`, `implement`, `review-afk`, and `review-hitl`.
-The three worker skill bodies are intentionally empty placeholders until their prompts are designed.
+The Aboard package depends unconditionally on `auto`, `address-issue`, and `issue-review`.
+Both worker skill bodies are intentionally empty placeholders until their prompts are designed.
 The Harness-owned `/auto` hook fails closed outside an authenticated Aboard terminal.
 
 ## Repository layout
