@@ -1,5 +1,5 @@
 name = "issues"
-version = "1.19.0"
+version = "1.20.0"
 description = "Draft, publish, address, and review GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issues/README.md"
