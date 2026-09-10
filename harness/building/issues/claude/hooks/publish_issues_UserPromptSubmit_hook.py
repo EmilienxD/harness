@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import issues_core as core
-import save_as_issue
+import copy_message_as_issue
 
 
 def main() -> None:
@@ -16,14 +16,14 @@ def main() -> None:
     prompt = payload.get("prompt", "").strip()
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
 
-    if save_as_issue.PROMPT_PATTERN.match(prompt):
+    if copy_message_as_issue.PROMPT_PATTERN.match(prompt):
         try:
             if payload.get("cwd"):
                 os.chdir(payload["cwd"])
         except OSError as exc:
             sys.stderr.write(f"Save failed: {exc}\n")
             raise SystemExit(2)
-        save_as_issue.handle_save(payload)
+        copy_message_as_issue.handle_save(payload)
 
     if core.PROMPT_PATTERN.match(prompt):
         dry = "--dry" in prompt.split()
@@ -33,7 +33,7 @@ def main() -> None:
         raise SystemExit(2)
 
     try:
-        save_as_issue.invalidate(payload)
+        copy_message_as_issue.invalidate(payload)
     except (OSError, ValueError):
         pass
 

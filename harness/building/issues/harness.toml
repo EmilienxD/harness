@@ -1,5 +1,5 @@
 name = "issues"
-version = "1.19.0"
+version = "1.20.0"
 description = "Draft, publish, address, and review GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issues/README.md"
@@ -13,15 +13,15 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "claude/hooks/save_as_issue.py"
-dest = "save_as_issue.py"
+src = "claude/hooks/copy_message_as_issue.py"
+dest = "copy_message_as_issue.py"
 root = "hooks"
 executable = true
 platforms = ["claude"]
 
 [[files]]
-src = "shared/skills/save-as-issue"
-dest = "save-as-issue"
+src = "shared/skills/copy-message-as-issue"
+dest = "copy-message-as-issue"
 root = "skills"
 platforms = ["claude"]
 
