@@ -13,25 +13,23 @@ wheels = [
 
 [[package]]
 name = "harness"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
-dependencies = [
-    { name = "pyyaml" },
-]
 
 [package.dev-dependencies]
 dev = [
     { name = "portalocker" },
     { name = "pytest" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyyaml", specifier = ">=6.0,<7.0" }]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "portalocker", specifier = ">=4.2.0" },
     { name = "pytest", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6.0,<7.0" },
 ]
 
 [[package]]

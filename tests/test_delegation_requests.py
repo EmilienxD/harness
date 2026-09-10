@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli.delegation import (
+from subagents_runtime.delegation import (
     GRANT_POLICIES,
     PROVIDERS,
     GrantPolicy,
@@ -15,7 +15,7 @@ from harness_cli.delegation import (
     process_grant,
     parse_request_file,
 )
-from harness_cli import sessions
+from subagents_runtime import sessions
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "delegation_requests"

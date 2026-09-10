@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli import sessions
-from harness_cli.cli import build_parser
+from subagents_runtime import sessions
+from subagents_runtime.cli import build_parser
 
 
 def configured(tmp_path, monkeypatch, launches):

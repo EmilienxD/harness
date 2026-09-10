@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli import sessions
-from harness_cli.delegation import (
+from subagents_runtime import sessions
+from subagents_runtime.delegation import (
     arm_reply,
     clear_reply_authorization,
     claim_parent_delivery,

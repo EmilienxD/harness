@@ -28,7 +28,8 @@ def test_first_party_tools_use_explicit_layered_payloads():
             fragment = declaration.get("fragment")
             if fragment:
                 normalized = str(fragment).replace("\\", "/")
-                assert normalized.startswith(f"{platform}/"), (
+                allowed_roots = (f"{platform}/", f"hooks/{platform}/")
+                assert normalized.startswith(allowed_roots), (
                     f"{tool.name}: {platform} fragment is outside its payload layer"
                 )
 

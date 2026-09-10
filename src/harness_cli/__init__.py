@@ -1,3 +1,3 @@
-"""Catalogue installer and visible-session CLI."""
+"""Ephemeral Harness catalogue installer."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

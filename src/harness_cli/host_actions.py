@@ -76,7 +76,7 @@ def apply(prepared: PreparedAction) -> None:
     if action.type == "uv-tool":
         uv = shutil.which("uv")
         if not uv:
-            raise HostActionError("installing the persistent Harness CLI requires uv on PATH")
+            raise HostActionError("installing a Python host tool requires uv on PATH")
         command = [
             uv,
             "tool",
@@ -133,7 +133,7 @@ def uninstall(action: HostAction) -> None:
     if action.type == "uv-tool":
         uv = shutil.which("uv")
         if not uv:
-            raise HostActionError("removing the persistent Harness CLI requires uv on PATH")
+            raise HostActionError("removing a Python host tool requires uv on PATH")
         command = [uv, "tool", "uninstall", _required_string(action, "package")]
     elif action.type == "vscode-extension":
         executable = next(

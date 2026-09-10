@@ -12,8 +12,10 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
 
 ## Repository Layout
 
-- `src/harness_cli/`: Python installer, catalogue, platform adapters, receipts, settings merging, TUI, and
-  persistent session commands.
+- `src/harness_cli/`: Ephemeral Python installer, catalogue, platform adapters, receipts, settings
+  merging, and TUI.
+- `harness/subagents/`: Complete ask/reply bundle with internal provider hooks and an independently
+  packaged persistent Python runtime.
 - `harness/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
   no README exists.
 - `apps/aboard/`: independent npm monorepo boundary for the Aboard VS Code extension. Its local

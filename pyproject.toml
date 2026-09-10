@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness"
-version = "0.3.0"
-description = "Catalogue installer and visible-session CLI for agent skills, hooks, and apps"
+version = "0.4.0"
+description = "Ephemeral catalogue installer for agent skills, hooks, tools, and apps"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "EmilienxD" }]
 keywords = ["claude", "claude-code", "chatgpt", "skills", "hooks", "agent"]
-dependencies = ["PyYAML>=6.0,<7.0"]
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/EmilienxD/harness"
@@ -24,6 +24,7 @@ harness = "harness_cli.cli:main"
 dev = [
     "portalocker>=4.2.0",
     "pytest>=8.0",
+    "PyYAML>=6.0,<7.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -39,3 +40,4 @@ include = ["src/harness_cli", "harness", "tests", "README.md", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["harness/subagents/runtime/src"]

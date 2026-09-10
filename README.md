@@ -1,13 +1,13 @@
 # Harness
 
-Harness is the canonical catalogue and installer for independently selectable agent skills,
-hooks, command-line tools, and optional apps. It also owns visible Claude Code and ChatGPT sessions
-and their durable delegation state.
+Harness is the canonical catalogue and ephemeral installer for independently selectable agent
+skills and optional apps. The `subagents` catalogue package owns visible Claude Code and ChatGPT
+sessions and their durable delegation state.
 
 Run the pinned, ephemeral installer:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.3.0 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.4.0 harness
 ```
 
 That opens the one installation menu. The menu reconciles its selection: newly selected packages
@@ -21,9 +21,10 @@ question. Tool selection comes first, followed by scope and platform. The defaul
 installs for both Claude Code and ChatGPT. A tool that supports only one of them is installed only
 there, and the review explains every skipped target before applying changes.
 
-The catalogue can independently select the persistent Harness CLI, Aboard, skills, and hooks.
-Aboard is a verified release artifact, not part of the Python wheel. Its manifest pins the URL,
-byte size, and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
+The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
+Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard
+is a verified release artifact, not part of the Python wheel. Its manifest pins the URL, byte size,
+and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
 
 The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
 It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
@@ -31,7 +32,7 @@ continue to use `v<version>` tags.
 
 ## Visible sessions
 
-When the persistent CLI is selected:
+When `subagents` is selected, its persistent runtime is installed automatically:
 
 ```bash
 harness run [--provider claude|chatgpt] [initial prompt]
@@ -108,7 +109,8 @@ The Harness-owned `/auto` hook fails closed outside an authenticated Aboard term
 
 ```text
 harness/                 catalogue package payloads and manifests
-src/harness_cli/         installer, receipts, host actions, and session CLI
+src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
+harness/subagents/       complete ask/reply skills, hooks, and persistent runtime
 tests/                   behavioural and install round-trip coverage
 e2e/                     reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension

@@ -1,0 +1,84 @@
+name = "subagents"
+version = "1.0.0"
+description = "Visible subagent delegation with task-specific workflows"
+dependencies = ["prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0"]
+workspace_gitignore = [".harness/runtime/"]
+
+[platforms.claude]
+status = "supported"
+fragment = "hooks/claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "hooks/chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "shared/skills/ask-agent"
+dest = "ask-agent"
+root = "skills"
+
+[[files]]
+src = "shared/skills/ask-agent-to-explore"
+dest = "ask-agent-to-explore"
+root = "skills"
+
+[[files]]
+src = "shared/skills/ask-agent-to-prototype"
+dest = "ask-agent-to-prototype"
+root = "skills"
+
+[[files]]
+src = "shared/skills/ask-agent-to-websearch"
+dest = "ask-agent-to-websearch"
+root = "skills"
+
+[[files]]
+src = "shared/skills/ask-agent-to-brainstorm"
+dest = "ask-agent-to-brainstorm"
+root = "skills"
+
+[[files]]
+src = "shared/skills/reply-to-agent"
+dest = "reply-to-agent"
+root = "skills"
+
+[[files]]
+src = "chatgpt/skills/ask-agent"
+dest = "ask-agent"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/ask-agent-to-explore"
+dest = "ask-agent-to-explore"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/ask-agent-to-prototype"
+dest = "ask-agent-to-prototype"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/ask-agent-to-websearch"
+dest = "ask-agent-to-websearch"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/ask-agent-to-brainstorm"
+dest = "ask-agent-to-brainstorm"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/reply-to-agent"
+dest = "reply-to-agent"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[actions]]
+type = "uv-tool"
+package = "harness-subagents-runtime"
+source = "git+https://github.com/EmilienxD/harness@v0.4.0#subdirectory=harness/subagents/runtime"

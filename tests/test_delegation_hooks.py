@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli import hooks, sessions
+from subagents_runtime import hooks, sessions
 
 
 def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:

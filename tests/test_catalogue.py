@@ -18,10 +18,9 @@ def manager(tools, target, tmp_path):
     return CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
 
 
-def test_cli_has_only_session_commands():
+def test_installer_cli_does_not_expose_runtime_commands():
     parser = build_parser()
-    choices = next(action for action in parser._actions if action.dest == "command").choices
-    assert set(choices) == {"run", "ask", "reply", "resume"}
+    assert all(action.dest != "command" for action in parser._actions)
 
 
 def test_catalogue_asks_for_tools_before_scope_and_defaults_to_both_platforms(monkeypatch):
@@ -292,7 +291,8 @@ def test_later_failure_restores_package_removed_earlier_in_reconciliation(monkey
 
 def test_every_catalogue_manifest_loads():
     tools = discover()
-    assert {"aboard", "harness-cli", "address-issue", "issue-review"} <= tools.keys()
+    assert {"aboard", "subagents", "address-issue", "issue-review"} <= tools.keys()
+    assert {"harness-cli", "communication-hooks"}.isdisjoint(tools)
 
 
 def test_vsix_is_verified_before_host_install(monkeypatch):
