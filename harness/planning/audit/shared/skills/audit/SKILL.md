@@ -1,21 +1,20 @@
 ---
 name: audit
-description: Audit a codebase or a scoped part of it and report evidence-backed findings with severity, confidence, remediation difficulty, and recommendations. Use when the user wants a security, architecture, quality, performance, reliability, testing, dependency, privacy, or general codebase audit.
-argument-hint: "[general|security|architecture|quality|performance|reliability|testing|dependencies|privacy] [path] [agents=N|none] [focus]"
+description: Audit a codebase or a scoped part of it and report evidence-backed findings with severity, confidence, remediation difficulty, and recommendations. Use when the user wants a security, architecture, quality, performance, reliability, testing, dependency, privacy, or general codebase audit. Explicit invocation only.
 disable-model-invocation: true
 ---
 
-Audit the codebase according to the invocation arguments: `$ARGUMENTS`.
+Audit the codebase according to whatever the user said alongside their invocation of this skill.
 
 This is a read-only assessment. Do not edit the codebase unless the user separately asks for fixes.
 
-## Interpret the arguments
+## Interpret the invocation details
 
-Arguments are optional and may appear in any order:
+Everything the user wrote alongside the invocation is optional and may appear in any order:
 
 - An existing file or directory sets the audit scope. Default to the current codebase. Never audit outside an explicit scope.
 - One of the audit-type keywords below selects its focus. Default to `general`.
-- `agents=N` requests exactly N explorer subagents; `agents=none` or an equivalent natural-language instruction requires the main agent to work alone.
+- `agents=N` requests exactly N explorer subagents; `agents=none` or an equivalent natural-language instruction requires you to work alone.
 - Treat everything else as additional focus, constraints, or context.
 
 Explicit user instructions override the defaults and delegation heuristic. If the user names a different audit type, use their description rather than forcing it into a preset.
@@ -36,7 +35,7 @@ Use these keywords as shorthand:
 
 ## 1. Survey horizontally
 
-Very quickly map the explicit scope before reading implementation deeply. Use `Glob`, `Grep`, or lightweight listing commands such as `rg --files`, `git ls-files`, or `ls` to:
+Very quickly map the explicit scope before reading implementation deeply. Use lightweight listing and search commands such as `rg --files`, `rg <pattern>`, `git ls-files`, or `ls` to:
 
 - estimate the number of auditable files;
 - identify languages, entry points, major directories, tests, configuration, and generated or vendored areas;
@@ -49,17 +48,15 @@ Count relevant source, test, configuration, infrastructure, and documentation fi
 Honor an explicit agent count or no-agent request first. Otherwise:
 
 - 10 files or less: audit alone.
-- More than 10 files: Invoke N `Explore` agents based on codebase size and the number of genuinely distinct areas. Limit to 5 agents.
+- More than 10 files: delegate to N explorer subagents based on codebase size and the number of genuinely distinct areas.
 
 Adjust for repository shape and available capacity. Do not manufacture overlapping assignments just to reach a number.
 
-If the user already provides these instructions in argument (e.g. "Run 2 subagents to audit Stripe and Supabase integration"), skip this phase and stick to what they asked.
-
 ## 3. Delegate without overlap
 
-Launch all explorers together when the platform allows it. Assign each one an exclusive directory, package, service, layer, or explicit file set. Cover the entire requested scope once; keep shared root configuration and integration surfaces in their own assignment rather than giving them to every explorer.
+Delegate all explorers at once so they run in parallel. Assign each one an exclusive directory, package, service, layer, or explicit file set. Cover the entire requested scope once; keep shared root configuration and integration surfaces in their own assignment rather than giving them to every explorer.
 
-Each explorer prompt must include:
+Each explorer brief must include:
 
 - its exact allowed scope and exclusions;
 - the selected audit-type sentence and any user focus;
@@ -71,7 +68,7 @@ An explorer may mention a dependency across its boundary, but it must not resear
 
 ### Mandatory wait
 
-After launching explorers, do nothing else until every explorer has reported. Do not continue auditing, inspect more files, analyze partial reports, poll, or make unrelated tool calls. Simply end you turn; the session will resume when a subagent report arrives. If reports arrive separately, continue ending your turn until all expected reports are present.
+After delegating, do nothing else until every explorer has reported. Do not continue auditing, inspect more files, analyze partial reports, poll, or make unrelated tool calls. Simply end your turn; the session will resume when a subagent report arrives. If reports arrive separately, continue ending your turn until all expected reports are present.
 
 ## 4. Synthesize and verify
 

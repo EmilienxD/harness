@@ -331,7 +331,7 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 <summary>Installing by hand</summary>
 
 1. Copy the scripts under `shared/hooks/` and `claude/hooks/` into your repository's `.claude/hooks/`,
-   then copy the skill directories under `shared/skills/` and `claude/skills/` into `.claude/skills/`.
+   then copy the skill directories under `shared/skills/` into `.claude/skills/`.
    If you already have a
    `.claude/settings.json`, merge each hook event array below into your existing file
    instead of overwriting it — Claude Code merges hook arrays, not whole files, so an overwrite would

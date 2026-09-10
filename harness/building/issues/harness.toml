@@ -1,5 +1,5 @@
 name = "issues"
-version = "1.18.0"
+version = "1.19.0"
 description = "Draft, publish, address, and review GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issues/README.md"
@@ -20,7 +20,7 @@ executable = true
 platforms = ["claude"]
 
 [[files]]
-src = "claude/skills/save-as-issue"
+src = "shared/skills/save-as-issue"
 dest = "save-as-issue"
 root = "skills"
 platforms = ["claude"]
@@ -39,28 +39,24 @@ executable = true
 platforms = ["claude"]
 
 [[files]]
-src = "claude/skills/draft-issue"
+src = "shared/skills/draft-issue"
 dest = "draft-issue"
 root = "skills"
-platforms = ["claude"]
 
 [[files]]
-src = "claude/skills/draft-issues"
+src = "shared/skills/draft-issues"
 dest = "draft-issues"
 root = "skills"
-platforms = ["claude"]
 
 [[files]]
-src = "claude/skills/draft-audit-issues"
+src = "shared/skills/draft-audit-issues"
 dest = "draft-audit-issues"
 root = "skills"
-platforms = ["claude"]
 
 [[files]]
-src = "claude/skills/publish-issues"
+src = "shared/skills/publish-issues"
 dest = "publish-issues"
 root = "skills"
-platforms = ["claude"]
 
 [[files]]
 src = "shared/skills/to-spec"
@@ -92,46 +88,15 @@ root = "hooks"
 executable = true
 
 [[files]]
-src = "claude/skills/to-spec-draft-issue"
+src = "shared/skills/to-spec-draft-issue"
 dest = "to-spec-draft-issue"
 root = "skills"
-platforms = ["claude"]
 
 [[files]]
 src = "chatgpt/hooks/issues_ChatGPT_hook.py"
 dest = "issues_ChatGPT_hook.py"
 root = "hooks"
 executable = true
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/skills/draft-issue/SKILL.md"
-dest = "draft-issue/SKILL.md"
-root = "skills"
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/skills/draft-issues/SKILL.md"
-dest = "draft-issues/SKILL.md"
-root = "skills"
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/skills/draft-audit-issues/SKILL.md"
-dest = "draft-audit-issues/SKILL.md"
-root = "skills"
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/skills/publish-issues/SKILL.md"
-dest = "publish-issues/SKILL.md"
-root = "skills"
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/skills/to-spec-draft-issue/SKILL.md"
-dest = "to-spec-draft-issue/SKILL.md"
-root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]

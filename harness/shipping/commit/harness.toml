@@ -1,5 +1,5 @@
 name = "commit"
-version = "1.4.4"
+version = "1.5.0"
 description = "Zero-model-call /commit — stages and commits via native prompt hooks"
 requires = ["git"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/shipping/commit/README.md"
@@ -30,10 +30,9 @@ executable = true
 platforms = ["claude"]
 
 [[files]]
-src = "claude/skills/commit"
+src = "shared/skills/commit"
 dest = "commit"
 root = "skills"
-platforms = ["claude"]
 
 [[files]]
 src = "chatgpt/hooks/commit_ChatGPT_hook.py"
@@ -43,7 +42,7 @@ executable = true
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/commit"
-dest = "commit"
+src = "chatgpt/skills/commit/agents/openai.yaml"
+dest = "commit/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
