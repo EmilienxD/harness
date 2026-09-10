@@ -156,5 +156,5 @@ one goes with the tool.
 ## Development
 
 ```bash
-uv run pytest tests/test_redirect_subagents_hook.py tests/test_catalogue.py
+uv run pytest tests/unit/test_redirect_subagents_hook.py tests/unit/test_catalogue.py
 ```

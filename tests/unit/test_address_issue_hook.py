@@ -15,7 +15,7 @@ from harness_cli.receipts import ReceiptStore
 
 
 HOOK = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "harness/building/issues/shared/hooks/address_issue_UserPromptSubmit_hook.py"
 )
 spec = importlib.util.spec_from_file_location("address_issue_hook", HOOK)

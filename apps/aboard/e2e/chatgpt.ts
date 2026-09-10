@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import {
   prepareCodexHome as prepareCoreCodexHome,
   validateCodexCli,
-} from "../../../e2e/core/codex.js";
+} from "../../../tests/e2e/core/codex.js";
 
 import { createPlatformLifecycleRoutes } from "../src/bridge/platform-lifecycle.js";
 import { startBridge } from "../src/bridge/server.js";
@@ -306,7 +306,7 @@ function spawnCaptured(file: string, args: readonly string[], cwd: string, env: 
   });
 }
 
-export { validateCodexCli } from "../../../e2e/core/codex.js";
+export { validateCodexCli } from "../../../tests/e2e/core/codex.js";
 
 export function redactProcessError(captured: string): string {
   if (captured.length === 0) return "no output";

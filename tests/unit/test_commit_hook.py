@@ -22,11 +22,11 @@ from pathlib import Path
 import pytest
 
 HOOK = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "harness" / "shipping" / "commit" / "shared" / "hooks" / "commit_core.py"
 )
 CLAUDE_ADAPTER = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "harness" / "shipping" / "commit" / "claude" / "hooks" / "commit_UserPromptSubmit_hook.py"
 )
 

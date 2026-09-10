@@ -1,5 +1,5 @@
 import { isAbsolute, join, resolve } from "node:path";
-import { containsPath } from "../../../e2e/core/path.js";
+import { containsPath } from "../../../tests/e2e/core/path.js";
 
 export const DEFAULT_REPOSITORY = "EmilienxD/harness-e2e";
 export const DEFAULT_RUNTIME_ROOT = "C:\\Users\\emb\\dev\\harness-e2e-runtime";

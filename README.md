@@ -121,8 +121,8 @@ harness/extension/       extension catalogue entries and their internal dependen
 harness/archive/         archived packages excluded from catalogue discovery
 src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
 harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
-tests/                   behavioural and install round-trip coverage
-e2e/                     reusable real-CLI and loopback-endpoint E2E core
+tests/unit/              behavioural and install round-trip coverage
+tests/e2e/               reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension
 ```
 
@@ -138,4 +138,4 @@ uv run pytest
 uv run harness --help
 ```
 
-Reusable end-to-end infrastructure and tool journeys are documented in [`e2e/README.md`](e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/e2e/`.
+Reusable end-to-end infrastructure and tool journeys are documented in [`tests/e2e/README.md`](tests/e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/e2e/`.

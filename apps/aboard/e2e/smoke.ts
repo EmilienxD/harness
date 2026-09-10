@@ -9,7 +9,7 @@ import {
   redactProcessError,
   runClaude,
   validateClaudeCli,
-} from "../../../e2e/core/claude.js";
+} from "../../../tests/e2e/core/claude.js";
 import type { HarnessConfig } from "./config.js";
 import { resetLocal } from "./repository.js";
 import { AFTER_CONTENT, BEFORE_CONTENT, FINAL_RESPONSE, SCENARIO_MARKER } from "./scenario.js";
@@ -25,7 +25,7 @@ export {
   parseStreamJson,
   redactProcessError,
   validateClaudeCli,
-} from "../../../e2e/core/claude.js";
+} from "../../../tests/e2e/core/claude.js";
 
 export async function runSmoke(config: HarnessConfig): Promise<void> {
   await validateClaudeCli();

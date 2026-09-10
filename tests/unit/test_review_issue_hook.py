@@ -15,7 +15,7 @@ from harness_cli.receipts import ReceiptStore
 
 
 HOOK = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "harness/building/issues/shared/hooks/review_issue_UserPromptSubmit_hook.py"
 )
 spec = importlib.util.spec_from_file_location("review_issue_hook", HOOK)
@@ -147,6 +147,8 @@ def test_ignored_files_do_not_count_as_dirty(tmp_path, monkeypatch, capsys):
 def test_missing_repository_blocks(tmp_path, monkeypatch, capsys):
     plain = tmp_path / "plain"
     plain.mkdir()
+    # Prevent Git from searching upward into a repository that contains tmp_path.
+    (plain / ".git").write_text("not a gitdir", encoding="utf-8")
     error = blocked("/review-issue", plain, monkeypatch, capsys)
     assert "requires a Git repository" in error
 

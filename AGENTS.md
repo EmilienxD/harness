@@ -20,8 +20,8 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
   no README exists.
 - `apps/aboard/`: independent npm monorepo boundary for the Aboard VS Code extension. Its local
   `AGENTS.md` is the navigation map for extension work.
-- `tests/`: installer, catalogue, platform, settings, receipt, and session tests.
-- `e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
+- `tests/unit/`: installer, catalogue, platform, settings, receipt, and session tests.
+- `tests/e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
 - `docs/CLAUDE-REFERENCES/`: mirrored official Claude Code documentation.
 - `docs/CHATGPT-REFERENCES/`: mirrored official ChatGPT documentation.
 - `docs/CHATGPT-COMPATIBILITY.md`: native ChatGPT target feasibility and implementation map.
@@ -90,7 +90,7 @@ For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 
 - Run `uv run pytest` after catalogue or installer changes; the suite covers reconciliation and
   receipt-driven removal.
-- Use the `harness-e2e` skill for work under `e2e/` or `apps/aboard/e2e/`.
+- Use the `harness-e2e` skill for work under `tests/e2e/` or `apps/aboard/e2e/`.
 - Use the `tdd` skill before adding unit or E2E tests.
 - Consult the mirrored official references for product behavior instead of relying on memory.
 

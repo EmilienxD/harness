@@ -13,7 +13,7 @@ from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 HOOK = ROOT / "harness/guards/command-guard/shared/hooks/command_guard_PreToolUse_hook.py"
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 HOOK = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "harness" / "guards" / "usage-limit-wait" / "claude" / "hooks" / "usage_limit_wait_hook.py"
 )
 

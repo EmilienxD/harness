@@ -9,9 +9,9 @@ import {
   type AnthropicMessage,
   type AnthropicMessagesRequest,
   type AnthropicScenarioResponse,
-} from "../../../e2e/core/anthropic-protocol.js";
+} from "../../../tests/e2e/core/anthropic-protocol.js";
 
-export { isRecord } from "../../../e2e/core/anthropic-protocol.js";
+export { isRecord } from "../../../tests/e2e/core/anthropic-protocol.js";
 
 export const SCENARIO_MARKER = "[E2E:single-file-success]";
 export const AUTO_RUN_AFK_MARKER = "[E2E:auto-run-afk]";

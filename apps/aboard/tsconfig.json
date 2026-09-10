@@ -22,6 +22,6 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "e2e/**/*.ts",
-    "../../e2e/core/**/*.ts"
+    "../../tests/e2e/core/**/*.ts"
   ]
 }

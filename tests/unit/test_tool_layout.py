@@ -10,7 +10,7 @@ from harness_cli.manifest import discover
 
 
 LAYERS = {"shared", "claude", "chatgpt"}
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_first_party_tools_use_explicit_layered_payloads():

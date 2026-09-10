@@ -22,11 +22,11 @@ import portalocker
 import pytest
 
 HOOK = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "harness" / "building" / "issues" / "shared" / "hooks" / "issues_core.py"
 )
 CLAUDE_ADAPTER = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "harness" / "building" / "issues" / "claude" / "hooks" / "publish_issues_UserPromptSubmit_hook.py"
 )
 

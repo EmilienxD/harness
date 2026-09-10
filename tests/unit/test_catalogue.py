@@ -296,7 +296,6 @@ def test_every_catalogue_manifest_loads():
     assert {"aboard", "subagents", "issues"} <= tools.keys()
     assert {
         "address-issue", "review-issue", "harness-cli", "communication-hooks",
-        "improve-codebase-architecture", "senior-advisor",
     }.isdisjoint(tools)
     expected_categories = {
         "planning": {"audit", "breakdown-help-wanted-issue", "grill-me", "prototype", "websearch"},
@@ -309,6 +308,7 @@ def test_every_catalogue_manifest_loads():
             "redirect-subagents", "usage-limit-wait",
         },
         "extension": {"aboard", "auto"},
+        "deprecated": {"improve-codebase-architecture", "senior-advisor"},
     }
     actual_categories = {}
     catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")

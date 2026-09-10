@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 HOOK_DIR = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "harness" / "guards" / "prefer-read-tool" / "claude" / "hooks"
 )
 

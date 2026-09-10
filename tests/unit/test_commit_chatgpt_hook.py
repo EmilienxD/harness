@@ -12,7 +12,7 @@ from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 CORE = ROOT / "harness/shipping/commit/shared/hooks/commit_core.py"
 ADAPTER = ROOT / "harness/shipping/commit/chatgpt/hooks/commit_ChatGPT_hook.py"
 

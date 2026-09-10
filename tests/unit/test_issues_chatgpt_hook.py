@@ -12,7 +12,7 @@ from harness_cli.installer import CatalogueInstaller, Target
 from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 CORE = ROOT / "harness/building/issues/shared/hooks/issues_core.py"
 ADAPTER = ROOT / "harness/building/issues/chatgpt/hooks/issues_ChatGPT_hook.py"
 
