@@ -38,7 +38,7 @@ test("a command that cannot be started is refused with its reason", async () => 
   // The launch paths need this as a throw, carrying the setting to fix.
   const error = await instance.require(["claude"]).catch((caught: unknown) => caught);
   assert.ok(error instanceof ClaudePreflightError);
-  assert.match(error.message, /\.abd\/launch\.json/);
+  assert.match(error.message, /\.harness\/launch\.json/);
 });
 
 test("a non-zero exit reports the code and the first line of the CLI's complaint", async () => {

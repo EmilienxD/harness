@@ -13,7 +13,7 @@ const required = [
   "assets/runtime/abd_hook.py",
   "assets/runtime/abd-hooks.json",
   "assets/runtime/abd_wrapper.py",
-  "assets/scaffold/.abd/launch.json",
+  "assets/scaffold/.harness/launch.json",
   "assets/scaffold/.abd/session-setup.ps1",
   "assets/scaffold/.abd/session-setup.sh",
   "LICENSE",

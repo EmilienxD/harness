@@ -1,16 +1,15 @@
 name = "harness-cli"
-version = "0.2.3"
+version = "0.3.0"
 description = "Persistent Harness run, ask, reply, and resume commands"
-dependencies = ["session-replies>=1.0.0,<2.0.0"]
+dependencies = []
 
 [platforms.claude]
 status = "supported"
 
 [platforms.chatgpt]
-status = "unsupported"
-reason = "The persistent session CLI currently launches Claude Code."
+status = "supported"
 
 [[actions]]
 type = "uv-tool"
 package = "harness"
-source = "git+https://github.com/EmilienxD/harness@v0.2.3"
+source = "git+https://github.com/EmilienxD/harness@v0.3.0"

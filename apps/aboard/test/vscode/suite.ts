@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { access, readFile, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { commands, extensions, window, workspace } from "vscode";
 
@@ -12,6 +13,13 @@ import { createVsCodeTerminalHost } from "../../src/vscode/terminals.js";
 
 interface CommandEndpoint { readonly port: number; readonly workspaceRoot: string; readonly commandToken: string; readonly pid: number }
 interface AboardApi { readonly commandEndpointDirectory: string }
+
+function onPath(command: string): boolean {
+  const suffixes = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE").split(";") : [""];
+  return (process.env.PATH ?? "").split(delimiter).some(
+    (directory) => directory.length > 0 && suffixes.some((suffix) => existsSync(join(directory, `${command}${suffix}`))),
+  );
+}
 
 async function eventually(check: () => boolean, message: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -76,7 +84,9 @@ export async function run(): Promise<void> {
   const titleProbe = createVsCodeTerminalHost().createTerminal({
     cwd: root,
     env: {},
-    shellPath: process.platform === "win32" ? "pwsh" : "/bin/sh",
+    // pwsh is an optional install; Windows PowerShell ships with the OS and
+    // writes the same OSC title sequence, so either one proves the API works.
+    shellPath: process.platform === "win32" ? (onPath("pwsh") ? "pwsh" : "powershell.exe") : "/bin/sh",
     shellArgs: process.platform === "win32"
       ? ["-NoLogo", "-NoProfile", "-Command", `[Console]::Write([char]27 + ']0;${title}' + [char]7); Start-Sleep -Seconds 30`]
       : ["-c", `printf '\\033]0;${title}\\007'; sleep 30`],

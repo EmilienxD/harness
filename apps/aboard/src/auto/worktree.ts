@@ -27,6 +27,7 @@ export const PROJECT_CONFIGURATION_ROOTS = [
   { name: ".agents", excludedEntries: [], required: false },
   { name: ".codex", excludedEntries: ["sessions", "history.jsonl", "log", "logs", "cache", "tmp"], required: false },
   { name: ".abd", excludedEntries: [], required: true },
+  { name: ".harness", excludedEntries: ["runtime"], required: false },
 ] as const;
 
 export async function overlayProjectConfiguration(request: ProjectConfigurationOverlayRequest): Promise<void> {
@@ -123,6 +124,8 @@ export interface RunWorkspace {
   /** git bound to `root`. Every phase's side effects go through it. */
   readonly git: GitClient;
   readonly denyTools: readonly string[];
+  /** Git metadata roots a sandboxed worker needs for its allowed add/commit. */
+  readonly writableRoots: readonly string[];
   /** Whether `root` is a checkout this run created and may remove. */
   readonly isolated: boolean;
 }
@@ -193,6 +196,25 @@ export function isolationDenyRules(projectRoot: string): readonly string[] {
   const path = resolve(projectRoot).replaceAll("\\", "/").replace(/\/+$/u, "");
   if (path.length === 0 || path.includes(",")) return [];
   return [`Read(//${path}/**)`, `Edit(//${path}/**)`];
+}
+
+export async function worktreeGitMetadataRoots(worktreeRoot: string, projectRoot: string): Promise<readonly string[]> {
+  const pointer = await readFile(join(worktreeRoot, ".git"), "utf8");
+  const match = /^gitdir:\s*(.+?)\s*$/iu.exec(pointer.trim());
+  if (match?.[1] === undefined) throw new RunWorkspaceError(`The run checkout at ${worktreeRoot} has no valid linked-worktree .git pointer.`);
+  const gitDirectory = resolve(worktreeRoot, match[1]);
+  const commonDirectory = resolve(gitDirectory, (await readFile(join(gitDirectory, "commondir"), "utf8")).trim());
+  if (!samePath(commonDirectory, join(projectRoot, ".git"))) {
+    throw new RunWorkspaceError(`The run checkout at ${worktreeRoot} points outside the project's Git metadata.`);
+  }
+  return [
+    gitDirectory,
+    join(commonDirectory, "objects"),
+    join(commonDirectory, "refs", "heads"),
+    join(commonDirectory, "logs", "refs", "heads"),
+    join(commonDirectory, "packed-refs"),
+    join(commonDirectory, "packed-refs.lock"),
+  ];
 }
 
 /** The scaffolded setup command for this platform, relative to the project root. */
@@ -275,6 +297,7 @@ export interface WorktreeRunWorkspaceOptions {
   readonly setup?: SetupCommandRunner;
   readonly readSetupFile?: (path: string) => Promise<string | undefined>;
   readonly overlayProjectConfiguration?: (request: ProjectConfigurationOverlayRequest) => Promise<void>;
+  readonly resolveGitMetadataRoots?: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
   readonly directories?: RunWorkspaceDirectories;
 }
 
@@ -297,6 +320,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   readonly #setup: SetupCommandRunner;
   readonly #readSetupFile: (path: string) => Promise<string | undefined>;
   readonly #overlayProjectConfiguration: (request: ProjectConfigurationOverlayRequest) => Promise<void>;
+  readonly #resolveGitMetadataRoots: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
 
   public constructor(private readonly options: WorktreeRunWorkspaceOptions) {
     this.#directories = options.directories ?? nodeDirectories;
@@ -305,6 +329,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     this.#readSetupFile = options.readSetupFile
       ?? (async (path) => { try { return await readFile(path, "utf8"); } catch { return undefined; } });
     this.#overlayProjectConfiguration = options.overlayProjectConfiguration ?? overlayProjectConfiguration;
+    this.#resolveGitMetadataRoots = options.resolveGitMetadataRoots ?? worktreeGitMetadataRoots;
   }
 
   public isolates(): boolean {
@@ -314,7 +339,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   public async prepare(request: RunWorkspaceRequest): Promise<RunWorkspace> {
     const settings = request.worktree ?? this.options.settings();
     if (!settings.enabled) {
-      return { root: this.options.workspaceRoot, git: this.options.git, denyTools: [], isolated: false };
+      return { root: this.options.workspaceRoot, git: this.options.git, denyTools: [], writableRoots: [], isolated: false };
     }
     const path = runWorkspacePath({
       workspaceRoot: this.options.workspaceRoot,
@@ -336,6 +361,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
       root: path,
       git: this.options.gitFor(path),
       denyTools: isolationDenyRules(this.options.workspaceRoot),
+      writableRoots: await this.#resolveGitMetadataRoots(path, this.options.workspaceRoot),
       isolated: true,
     };
   }

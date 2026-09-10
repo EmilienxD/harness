@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness"
-version = "0.2.3"
+version = "0.3.0"
 description = "Catalogue installer and visible-session CLI for agent skills, hooks, and apps"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "EmilienxD" }]
 keywords = ["claude", "claude-code", "chatgpt", "skills", "hooks", "agent"]
-dependencies = []
+dependencies = ["PyYAML>=6.0,<7.0"]
 
 [project.urls]
 Homepage = "https://github.com/EmilienxD/harness"

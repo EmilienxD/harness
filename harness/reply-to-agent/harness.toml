@@ -1,0 +1,21 @@
+name = "reply-to-agent"
+version = "1.0.0"
+description = "Arm the next successful child Stop as a one-shot parent reply"
+dependencies = ["harness-cli>=0.3.0,<0.4.0", "communication-hooks>=1.0.0,<2.0.0"]
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "shared/skills/reply-to-agent/SKILL.md"
+dest = "reply-to-agent/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/skills/reply-to-agent/agents/openai.yaml"
+dest = "reply-to-agent/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

@@ -294,7 +294,7 @@ export class AutoRunEngine {
   #isolation(): { readonly isolation?: LaunchIsolation } {
     const workspace = this.#workspace;
     if (workspace === undefined || !workspace.isolated) return {};
-    return { isolation: { cwd: workspace.root, denyTools: workspace.denyTools } };
+    return { isolation: { cwd: workspace.root, denyTools: workspace.denyTools, writableRoots: workspace.writableRoots } };
   }
 
   #ownerCwd(): { readonly cwd?: string } {

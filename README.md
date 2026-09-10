@@ -1,13 +1,13 @@
 # Harness
 
 Harness is the canonical catalogue and installer for independently selectable agent skills,
-hooks, command-line tools, and optional apps. It also owns visible standalone Claude sessions and
-their parent/child reply state.
+hooks, command-line tools, and optional apps. It also owns visible Claude Code and ChatGPT sessions
+and their durable delegation state.
 
 Run the pinned, ephemeral installer:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.2.3 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.3.0 harness
 ```
 
 That opens the one installation menu. The menu reconciles its selection: newly selected packages
@@ -15,11 +15,6 @@ are installed, deselected packages are removed, and mandatory dependencies remai
 selections. There are no separate install, uninstall, list, info, or upgrade commands. Rerun the
 same pinned entry point to change or upgrade the installation. If a reconciliation step fails,
 Harness restores the prior files, configuration, receipts, and completed host actions.
-
-The wizard asks for tools first, followed by scope and platform. Use the arrow keys to move, Enter
-to toggle or select, and Escape to return to the previous question. Claude Code and ChatGPT are
-selected together by default. If a tool supports only one selected platform, Harness installs it
-only there and discloses the skipped target in the review before making changes.
 
 Use the arrow keys to move, Enter to toggle or select, and Escape to return to the previous
 question. Tool selection comes first, followed by scope and platform. The default platform choice
@@ -39,30 +34,59 @@ continue to use `v<version>` tags.
 When the persistent CLI is selected:
 
 ```bash
-harness run [initial prompt]
-harness ask <fresh-context prompt>
-harness reply <answer>
+harness run [--provider claude|chatgpt] [initial prompt]
+harness ask <grant-id>
+harness reply
 harness resume <session-id>
 ```
 
-`run` and `ask` open independent visible terminals and return immediately. `ask` binds the child
-to the current Harness parent without accepting a caller-supplied parent ID. Each request can be
-answered once, while the child remains open. SQLite stores session and request state under
-`~/.harness/`; Claude hooks deliver replies with stable delivery IDs.
+`run` opens an independent visible terminal. Delegation is available only after the user directly
+invokes `ask-agent`, `ask-agent-to-explore`, `ask-agent-to-prototype`,
+`ask-agent-to-websearch`, or `ask-agent-to-brainstorm`. The invocation opens an unpredictable inbox
+under `<original-cwd>/.harness/runtime/`; the parent writes one Markdown request per child and a
+structured file-write hook launches each valid request. Direct `harness ask` calls without that live
+grant are rejected.
 
-Configure a terminal explicitly in `~/.harness/config.json` when desired:
+Auto children report their next successful Stop automatically. Interactive children report only
+after the user invokes `reply-to-agent`, which arms one successful Stop; an API failure clears the
+authorization and leaves the request pending. SQLite under `~/.harness/` stores grants, requests,
+stable agent numbers, and at-least-once delivery claims.
+
+Each request is a direct, non-symlink `*.md` child of the granted inbox:
+
+```markdown
+---
+task: prototype
+provider: chatgpt
+mode: interactive
+---
+
+A complete, fresh-context description of the work.
+```
+
+`task` and `mode` are required; `provider` defaults to the parent provider. Explore supports only
+`auto`; prototype and websearch support `interactive` or `auto`; brainstorm supports only
+`interactive`; and general delegation supports either mode. Explore is technically read-only.
+
+Provider launch settings resolve from `<project>/.harness/launch.json`, then
+`~/.harness/launch.json`, then built-in defaults. A minimal file is:
 
 ```json
 {
-  "claudeCommand": ["claude"],
-  "terminalCommand": ["wt.exe", "new-tab", "--"]
+  "version": 2,
+  "platform": "claude",
+  "command": ["claude"],
+  "stopWaitHours": 24
 }
 ```
 
-Without `terminalCommand`, Harness detects Windows Terminal or a native console on Windows,
+Configure the native terminal launcher separately in `~/.harness/config.json`, for example
+`{"terminalCommand":["wt.exe","new-tab","--"]}`.
+
+Without `terminalCommand`, Harness uses a matching initialized Aboard window when available, then
+detects Windows Terminal or a native console on Windows,
 Terminal.app on macOS, and common terminal emulators on Linux. If none is available, it reports the
-complete list it tried. Aboard integration for these commands is intentionally disabled; standalone
-terminal launching is the only current path.
+complete list it tried.
 
 ## Catalogue model
 

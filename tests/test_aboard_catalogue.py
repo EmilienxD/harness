@@ -4,10 +4,8 @@ import json
 import os
 import subprocess
 import sys
-
 import pytest
 
-from harness_cli import sessions
 from harness_cli.installer import CatalogueInstaller, Target
 from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
@@ -91,29 +89,3 @@ def test_worker_skill_bodies_are_empty_placeholders():
     for name in ("address-issue", "issue-review"):
         text = tools[name].expand("claude")[0].source.read_text(encoding="utf-8")
         assert text.rstrip().endswith("---")
-
-
-def test_reply_hook_uses_stable_delivery_id_for_fallback(tmp_path, monkeypatch):
-    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setattr(sessions, "_visible_terminal", lambda argv, environment, cwd: None)
-    monkeypatch.setattr(sessions, "_command_from_config", lambda config: ["claude"])
-    parent = sessions.launch()
-    monkeypatch.setenv("HARNESS_SESSION_ID", parent)
-    request, child = sessions.ask("question")
-    monkeypatch.setenv("HARNESS_SESSION_ID", child)
-    monkeypatch.setenv("HARNESS_REQUEST_ID", request)
-    delivery = sessions.reply("answer")
-
-    target = install("session-replies", tmp_path)
-    script = target.install_root / "hooks/reply_delivery.py"
-    environment = os.environ.copy()
-    payload = json.dumps({"session_id": parent, "hook_event_name": "UserPromptSubmit"})
-    first = subprocess.run(
-        [sys.executable, str(script), "prompt"], input=payload, capture_output=True, text=True, env=environment, check=True
-    )
-    second = subprocess.run(
-        [sys.executable, str(script), "prompt"], input=payload, capture_output=True, text=True, env=environment, check=True
-    )
-    assert delivery in first.stdout
-    assert delivery in second.stdout
-    assert "answer" in first.stdout

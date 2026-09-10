@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 export interface ScaffoldOptions {
   readonly projectRoot: string;
@@ -63,8 +63,9 @@ function portable(path: string): string { return path.split(sep).join("/"); }
 
 function isOwnedAssetPath(path: string): boolean {
   const segments = path.split("/");
-  return segments.length >= 2 && segments[0] === ".abd"
-    && segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\\"));
+  const safe = segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\\"));
+  return safe && ((segments.length >= 2 && segments[0] === ".abd")
+    || (segments.length === 2 && segments[0] === ".harness" && segments[1] === "launch.json"));
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
@@ -108,7 +109,7 @@ async function isDeletionInsideOwnedDirectory(projectRoot: string, destination: 
   try {
     const [canonicalProject, canonicalParent] = await Promise.all([realpath(projectRoot), realpath(dirname(destination))]);
     const parentFromProject = relative(canonicalProject, canonicalParent);
-    return parentFromProject === ".abd" || parentFromProject.startsWith(`.abd${sep}`);
+    return isOwnedAssetPath(portable(join(parentFromProject, basename(destination))));
   } catch {
     return false;
   }

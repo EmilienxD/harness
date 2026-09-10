@@ -19,6 +19,8 @@ export interface BridgeProtocolError {
 }
 
 export interface AuthenticatedBridgeRequest {
+  /** Credential class established by the loopback server. Omitted only by direct in-process callers. */
+  readonly authorizationScope?: "full" | "command" | "delegation";
   readonly method: string;
   readonly url: URL;
   readonly headers: IncomingHttpHeaders;

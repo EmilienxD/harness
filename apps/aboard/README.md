@@ -5,12 +5,12 @@ Aboard is a VS Code extension for visible coding-agent sessions. It supports att
 ## What Aboard does
 
 - Initializes and validates the extension-owned `.abd` scaffold.
-- Launches an empty **Run Agent** interactive TUI with the platform selected in `.abd/launch.json`.
+- Launches an empty **Run Agent** interactive TUI with the platform selected in `.harness/launch.json`.
 - Launches a read-only Explore session when Auto Run needs pre-implementation exploration: Claude Code's built-in `Explore` agent, or a top-level Codex session held read-only by its sandbox and approval policy.
 - Tracks Aboard-created sessions and supports resume/reopen with current launch configuration, including attended Codex conversations discovered through supported App Server operations.
 - Runs the complete Auto Run forecast, execution, recovery, validation, Git, and GitHub workflow.
 
-Aboard has four session kinds: Interactive, Explore, Auto Run implementer, and Auto Run reviewer. Claude Code and ChatGPT both support all four. Claude Interactive, implementer, and reviewer sessions deny `Agent`, `WebSearch`, and `WebFetch` by default through `.abd/launch.json`; users can change these profile denials. ChatGPT workers get the same boundary through Codex's own settings: web search disabled, multi-agent tools off, and a `PreToolUse` guard that denies Aboard-owned Git and GitHub commands. In worktree mode, a native Codex permission profile also denies access to the user's original checkout; this requires Codex 0.138.0 or later and fails closed when managed policy disallows the profile.
+Aboard tracks Interactive, Explore, Prototype, Web Search, Brainstorm, General, Auto Run implementer, and Auto Run reviewer identities. Execution mode is recorded separately, so an unattended manual child is not treated as an Auto Run worker. Claude Interactive, implementer, and reviewer sessions deny `Agent`, `WebSearch`, and `WebFetch` by default through `.harness/launch.json`; users can change these profile denials. ChatGPT workers get the same boundary through Codex's own settings: web search disabled, multi-agent tools off, and a `PreToolUse` guard that denies Aboard-owned Git and GitHub commands. In worktree mode, a native Codex permission profile also makes the user's original checkout read-only; this requires Codex 0.138.0 or later and fails closed when managed policy disallows the profile.
 
 ## Auto Run
 
@@ -34,4 +34,5 @@ npm run test:vscode
 npm run package
 ```
 
-See `AGENTS.md` for the project map, settings, and architectural boundaries.
+See `AGENTS.md` for the project map and architectural boundaries, and
+[`docs/configuration.md`](docs/configuration.md) for the version-2 launch file.

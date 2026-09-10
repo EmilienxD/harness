@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 
@@ -168,6 +168,59 @@ test("wrapper consumes a request file and runs its exact argv", () => {
     assert.equal(existsSync(request), false, "launch argv is removed once consumed");
     assert.equal(existsSync(lock), false);
     assert.equal(uv([WRAPPER, lock, "--request", request]).status, 2, "the visible command cannot be replayed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows wrapper preserves exact argv through an npm command shim", { skip: process.platform !== "win32" }, () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-npm-"));
+  const lock = join(root, "a.lock");
+  const request = join(root, "launch.json");
+  const output = join(root, "argv.json");
+  const entry = join(root, "node_modules", "example-cli", "bin", "cli.js");
+  const args = [
+    "-c",
+    'hooks.SessionStart=[{matcher="startup|resume",hooks=[{command="echo (ready) ^ now"}]}]',
+    "prompt with spaces & punctuation",
+  ];
+  try {
+    mkdirSync(join(root, "node_modules", "example-cli", "bin"), { recursive: true });
+    writeFileSync(entry, `require("node:fs").writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)))`);
+    writeFileSync(join(root, "example-cli.cmd"), `@ECHO off\nSETLOCAL\nSET "_prog=node"\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\example-cli\\bin\\cli.js" %*\n`);
+    writeFileSync(request, JSON.stringify({ command: ["example-cli", ...args] }));
+    const env = { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` };
+
+    const result = uv([WRAPPER, lock, "--request", request], { env });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), args);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows wrapper falls through an unknown shim to a native executable", { skip: process.platform !== "win32" }, () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-native-"));
+  const shimDirectory = join(root, "shim");
+  const nativeDirectory = join(root, "native");
+  const lock = join(root, "a.lock");
+  const request = join(root, "launch.json");
+  const output = join(root, "native.txt");
+  try {
+    mkdirSync(shimDirectory);
+    mkdirSync(nativeDirectory);
+    writeFileSync(join(shimDirectory, "example-cli.cmd"), "@ECHO off\r\nexit /b 99\r\n");
+    copyFileSync(process.execPath, join(nativeDirectory, "example-cli.exe"));
+    writeFileSync(request, JSON.stringify({
+      command: ["example-cli", "-e", `require("node:fs").writeFileSync(${JSON.stringify(output)}, "native")`],
+    }));
+    const env = { ...process.env, PATH: `${shimDirectory}${delimiter}${nativeDirectory}${delimiter}${process.env.PATH ?? ""}` };
+
+    const result = uv([WRAPPER, lock, "--request", request], { env });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(output, "utf8"), "native");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

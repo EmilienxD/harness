@@ -28,6 +28,7 @@ export interface StartBridgeOptions {
   readonly logger?: BridgeLogger;
   readonly tokenFactory?: () => string;
   readonly commandTokenFactory?: () => string;
+  readonly delegationTokenFactory?: () => string;
 }
 
 export interface BridgeRuntime {
@@ -36,6 +37,8 @@ export interface BridgeRuntime {
   readonly token: string;
   /** Reaches `/commands` only; see `BridgeTokens`. */
   readonly commandToken: string;
+  /** Reaches exactly `POST /delegations`; see `BridgeTokens`. */
+  readonly delegationToken: string;
   stop(): Promise<void>;
 }
 
@@ -103,7 +106,11 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
   const preferredPort = options.preferredPort ?? DEFAULT_BRIDGE_PORT;
   validatePort(preferredPort);
   const token = (options.tokenFactory ?? randomUUID)();
-  const tokens: BridgeTokens = { full: token, command: (options.commandTokenFactory ?? randomUUID)() };
+  const tokens: BridgeTokens = {
+    full: token,
+    command: (options.commandTokenFactory ?? randomUUID)(),
+    delegation: (options.delegationTokenFactory ?? randomUUID)(),
+  };
   const activeRequests = new Set<AbortController>();
   const activeResponses = new Set<ServerResponse>();
   let stopping = false;
@@ -119,7 +126,7 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
       return;
     }
     if (outcome === "out-of-scope") {
-      writeResponse(response, protocolError(403, "forbidden", "This credential only authorizes the command endpoint"));
+      writeResponse(response, protocolError(403, "forbidden", "This credential does not authorize this endpoint"));
       return;
     }
 
@@ -132,6 +139,7 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
     try {
       const body = await readBody(request);
       const result = await options.handler({
+        authorizationScope: outcome,
         method: request.method ?? "GET",
         url,
         headers: request.headers,
@@ -143,7 +151,7 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
       if (error instanceof MalformedRequestError) {
         writeResponse(response, protocolError(400, "malformed-request", error.message));
       } else if (!stopping) {
-        options.logger?.error(redactSecret(redactSecret("Bridge request failed", token), tokens.command));
+        options.logger?.error(redactSecret(redactSecret(redactSecret("Bridge request failed", token), tokens.command), tokens.delegation));
         writeResponse(response, protocolError(500, "internal-error", "The bridge could not process the request"));
       }
     } finally {
@@ -168,6 +176,7 @@ export async function startBridge(options: StartBridgeOptions): Promise<BridgeRu
     port,
     token,
     commandToken: tokens.command,
+    delegationToken: tokens.delegation,
     stop(): Promise<void> {
       stopPromise ??= (async () => {
         stopping = true;

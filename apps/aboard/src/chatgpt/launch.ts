@@ -60,7 +60,7 @@ const WORKTREE_PERMISSION_PROFILE = "aboard-worktree";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const BASH_RULE = /^Bash\((.+)\)$/u;
-const FILE_RULE = /^(?:Read|Edit)\((.+)\)$/u;
+const FILE_RULE = /^(Read|Edit)\((.+)\)$/u;
 
 export function planChatGptLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan {
   return planChatGptSession(request, "start");
@@ -97,7 +97,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   ];
   const subagentsDenied = worker && configuration.subagents !== "allowed";
   const denyCommands = worker ? commandDenyPatterns(request.disallowedTools) : [];
-  const denyFiles = fileDenyPatterns(request.disallowedTools);
+  const readOnlyFiles = fileWriteRestrictionPatterns(request.disallowedTools);
   const guard: RuntimeFile | undefined = worker
     ? {
         agentId: request.agentId,
@@ -106,11 +106,13 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       }
     : undefined;
   const policy = launchPolicy(configuration, request.difficulty);
-  const permissionProfile = denyFiles.length === 0 ? [] : permissionProfileArguments(denyFiles, explore);
+  const permissionProfile = readOnlyFiles.length === 0
+    ? []
+    : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);
   const fixed = [
     "--dangerously-bypass-hook-trust",
     "-c", "features.hooks=true",
-    ...(explore && denyFiles.length === 0 ? READ_ONLY_POLICY : []),
+    ...(explore && readOnlyFiles.length === 0 ? READ_ONLY_POLICY : []),
     ...permissionProfile,
     ...(worker ? ["-c", `web_search=${JSON.stringify(configuration.webSearch ?? "disabled")}`] : []),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
@@ -188,7 +190,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     runtimeDirectory,
     ...(chrome ? { chromeRequired: true as const } : {}),
     ...(guard === undefined ? {} : { guard }),
-    ...(denyFiles.length === 0 ? {} : { permissionProfile: WORKTREE_PERMISSION_PROFILE }),
+    ...(readOnlyFiles.length === 0 ? {} : { permissionProfile: WORKTREE_PERMISSION_PROFILE }),
     ...(archived === undefined ? {} : { task: archived }),
     ...(built.spill === undefined ? {} : { spill: built.spill }),
     ...(built.wrapperRequest === undefined ? {} : { wrapperRequest: built.wrapperRequest }),
@@ -198,6 +200,10 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
 function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfiguration): void {
   switch (agentType) {
     case "interactive":
+    case "Prototype":
+    case "Web Search":
+    case "Brainstorm":
+    case "General":
       if (configuration.shape !== "default") throw new LaunchPlanError("shape-not-allowed", "interactive launches as Codex's default session");
       return;
     case "Explore":
@@ -242,21 +248,28 @@ export function commandDenyPatterns(rules: readonly string[] | undefined): reado
   return [...new Set(patterns.filter((pattern) => pattern.length > 0))];
 }
 
-/** Convert Claude-style filesystem rules into Codex's native permission profile. */
-export function fileDenyPatterns(rules: readonly string[] | undefined): readonly string[] {
+/** Convert Claude-style Edit denials into Codex read-only path rules. */
+export function fileWriteRestrictionPatterns(rules: readonly string[] | undefined): readonly string[] {
   const patterns = (rules ?? []).flatMap((rule) => {
     const match = FILE_RULE.exec(rule.trim());
-    if (match === null) return [];
-    const raw = (match[1] ?? "").trim().replace(/^\/\//u, "");
+    if (match === null || match[1] !== "Edit") return [];
+    const raw = (match[2] ?? "").trim().replace(/^\/\//u, "");
     if (raw.length === 0) return [];
-    return [/^[A-Za-z]:\//u.test(raw) ? raw.replaceAll("/", "\\") : raw];
+    if (!/^[A-Za-z]:\//u.test(raw)) return [raw];
+    // Codex accepts native Windows separators for the absolute path, but its
+    // portable read-subtree form specifically requires a trailing `/**`.
+    return [raw.endsWith("/**")
+      ? `${raw.slice(0, -3).replaceAll("/", "\\")}/**`
+      : raw.replaceAll("/", "\\")];
   });
   return [...new Set(patterns)];
 }
 
-function permissionProfileArguments(patterns: readonly string[], readOnly: boolean): readonly string[] {
-  const filesystem = patterns.map((pattern) => `${JSON.stringify(pattern)}="deny"`).join(",");
-  const profile = `{extends=${JSON.stringify(readOnly ? ":read-only" : ":workspace")},filesystem={${filesystem}}}`;
+function permissionProfileArguments(patterns: readonly string[], readOnly: boolean, writableRoots: readonly string[]): readonly string[] {
+  const readRules = patterns.map((pattern) => `${JSON.stringify(pattern)}="read"`).join(",");
+  const profile = writableRoots.length === 0
+    ? `{extends=${JSON.stringify(readOnly ? ":read-only" : ":workspace")},filesystem={${readRules}}}`
+    : `{workspace_roots={${writableRoots.map((root) => `${JSON.stringify(root)}=true`).join(",")}},filesystem={":root"="read",":workspace_roots"={"."="write"},":tmpdir"="write",":slash_tmp"="write",${readRules}}}`;
   return [
     "-c", `permissions.${WORKTREE_PERMISSION_PROFILE}=${profile}`,
     "-c", `default_permissions=${JSON.stringify(WORKTREE_PERMISSION_PROFILE)}`,

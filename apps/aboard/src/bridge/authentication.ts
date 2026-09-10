@@ -21,12 +21,14 @@ export function isAuthorized(
 export interface BridgeTokens {
   readonly full: string;
   readonly command: string;
+  readonly delegation: string;
 }
 
 export const COMMAND_SCOPE_ROOT = "/commands";
+export const DELEGATION_SCOPE_ROOT = "/delegations";
 
 /** `out-of-scope` is a valid credential used on a route it does not cover. */
-export type AuthorizationOutcome = "authorized" | "unauthorized" | "out-of-scope";
+export type AuthorizationOutcome = "full" | "command" | "delegation" | "unauthorized" | "out-of-scope";
 
 function coversCommandScope(pathname: string): boolean {
   return pathname === COMMAND_SCOPE_ROOT || pathname.startsWith(`${COMMAND_SCOPE_ROOT}/`);
@@ -37,9 +39,10 @@ export function authorize(
   tokens: BridgeTokens,
   pathname: string,
 ): AuthorizationOutcome {
-  if (isAuthorized(authorization, tokens.full)) return "authorized";
-  if (!isAuthorized(authorization, tokens.command)) return "unauthorized";
-  return coversCommandScope(pathname) ? "authorized" : "out-of-scope";
+  if (isAuthorized(authorization, tokens.full)) return "full";
+  if (isAuthorized(authorization, tokens.command)) return coversCommandScope(pathname) ? "command" : "out-of-scope";
+  if (isAuthorized(authorization, tokens.delegation)) return pathname === DELEGATION_SCOPE_ROOT ? "delegation" : "out-of-scope";
+  return "unauthorized";
 }
 
 export function redactSecret(message: string, secret: string): string {

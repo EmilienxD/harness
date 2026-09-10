@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "platform": "claude",
+  "command": ["claude"],
+  "interactive": {
+    "model": "inherit",
+    "effort": "inherit",
+    "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+  },
+  "explore": {
+    "model": "haiku",
+    "effort": "low"
+  },
+  "implementer": {
+    "model": "by-difficulty",
+    "effort": "by-difficulty",
+    "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+  },
+  "reviewer": {
+    "model": "by-difficulty",
+    "effort": "by-difficulty",
+    "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+  }
+}

@@ -591,6 +591,7 @@ function harness(options: HarnessOptions = {}): Harness {
       root: isolatedRoot,
       git: trace(git, workspaceGitCalls),
       denyTools: [`Read(//C:/work/aboard/**)`],
+      writableRoots: ["C:/work/aboard/.git/worktrees/session"],
       isolated: true,
     }),
     release: async (_workspace, outcome) => { released.push(outcome); return undefined; },

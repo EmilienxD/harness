@@ -13,6 +13,7 @@ import {
   runWorkspacePath,
   setupCommandLine,
   setupCommandPath,
+  worktreeGitMetadataRoots,
   type RunWorkspaceDirectories,
   type SetupCommandRequest,
 } from "../src/auto/worktree.js";
@@ -194,6 +195,7 @@ function fixture(options: {
     directories,
     readSetupFile: async () => options.setupFile,
     overlayProjectConfiguration: async (request) => { overlays.push(request.worktreeRoot); },
+    resolveGitMetadataRoots: async (worktreeRoot) => [join(worktreeRoot, ".git-metadata")],
     setup: {
       run: async (request) => {
         setups.push(request);
@@ -222,6 +224,7 @@ test("preparing a checkout creates it from the local base and installs into it",
   assert.equal(workspace.root, path);
   assert.equal(workspace.isolated, true);
   assert.deepEqual(workspace.denyTools, isolationDenyRules(PROJECT));
+  assert.deepEqual(workspace.writableRoots, [join(path, ".git-metadata")]);
   assert.ok(git.calls.includes(`addWorktree ${path} run/test main`), git.calls.join(", "));
   // The setup command runs in the new checkout, from the project's own copy of
   // the file; the one the user edits, not whatever the branch carries.
@@ -231,6 +234,27 @@ test("preparing a checkout creates it from the local base and installs into it",
   assert.equal(setups[0]?.env.ABOARD_PROJECT_ROOT, PROJECT);
   assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "run/test");
   assert.ok(notifications.some((message) => message.includes(path)));
+});
+
+test("linked-worktree Git metadata exposes only the paths required to commit", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-git-metadata-"));
+  context.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const project = join(root, "project");
+  const checkout = join(root, "checkout");
+  const gitDirectory = join(project, ".git", "worktrees", "checkout");
+  await mkdir(gitDirectory, { recursive: true });
+  await mkdir(checkout, { recursive: true });
+  await writeFile(join(checkout, ".git"), `gitdir: ${gitDirectory}\n`);
+  await writeFile(join(gitDirectory, "commondir"), "../..\n");
+
+  assert.deepEqual(await worktreeGitMetadataRoots(checkout, project), [
+    gitDirectory,
+    join(project, ".git", "objects"),
+    join(project, ".git", "refs", "heads"),
+    join(project, ".git", "logs", "refs", "heads"),
+    join(project, ".git", "packed-refs"),
+    join(project, ".git", "packed-refs.lock"),
+  ]);
 });
 
 test("a checkout falls back to the remote base when no local base ref exists", async () => {

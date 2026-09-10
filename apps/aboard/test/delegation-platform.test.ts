@@ -104,6 +104,7 @@ test("shared delegation asks the selected platform for an executable launch plan
   assert.equal(launched.terminalId, "terminal-1");
   assert.equal(fleet.get("agent-1" as AgentId)?.platform, "claude");
   assert.equal(fleet.get("agent-1" as AgentId)?.sessionBinding, "bound");
+  assert.equal(fleet.get("agent-1" as AgentId)?.executionMode, "interactive");
 });
 
 test("shared delegation does not report a runtime-assigned session until its actual id is bound", async () => {
@@ -239,6 +240,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
     isolation: {
       cwd: "C:\\checkouts\\run-1\\work",
       denyTools: ["Read(//C:/work/**)", "Edit(//C:/work/**)"],
+      writableRoots: ["C:\\work\\.git\\worktrees\\work", "C:\\work\\.git\\objects"],
     },
   });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
@@ -250,13 +252,14 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   assert.match(command, /model_reasoning_effort="high"/u);
   assert.match(command, /default_permissions="aboard-worktree"/u);
   assert.match(command, /permissions\.aboard-worktree=/u);
-  assert.match(command, /extends=":workspace"/u);
+  assert.match(command, /workspace_roots=/u);
   assert.match(command, /approval_policy="never"/u);
-  assert.match(command, /C:\\\\work\\\\\*\*/u);
+  assert.match(command, /C:\\\\work\/\*\*/u);
   assert.match(delivered.at(-1) ?? "", /Chrome browser backend/u);
   assert.equal(lease.current()?.agentId, agentId);
   assert.equal(fleet.get(agentId)?.chromeEnabled, true);
   assert.equal(fleet.get(agentId)?.autoRunRestricted, true);
+  assert.equal(fleet.get(agentId)?.executionMode, "auto-run");
 
   coordinator.complete(agentId, {
     outcome: "succeeded", exitCode: 0, lastAssistantMessage: "Implemented issue #15.",
@@ -483,13 +486,15 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     spills: { prepare: async () => undefined, write: async () => "unused" },
     shell: "powershell",
     agentIdFactory: () => "unused" as AgentId,
+    resolveWorktreeGitMetadataRoots: async () => ["C:\\work\\.git\\worktrees\\work", "C:\\work\\.git\\objects"],
   });
 
   const resumed = coordinator.resumeAutomated(fleet.get(agentId)!, "Continue addressing issue #15.");
   while (host.terminals.length === 0) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /default_permissions="aboard-worktree"/u);
-  assert.match(command, /C:\\\\work\\\\\*\*/u);
+  assert.match(command, /C:\\\\work\/\*\*/u);
+  assert.match(command, /C:\\\\work\\\\\.git\\\\worktrees\\\\work/u);
 
   coordinator.complete(agentId, {
     outcome: "succeeded",

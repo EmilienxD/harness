@@ -5,7 +5,7 @@ import { LaunchFileError, type PlatformLaunchFile } from "../platform/launch-con
 import { CHATGPT_EFFORTS, CHATGPT_WEB_SEARCH_MODES, type ChatGptEffort, type ChatGptLaunchConfiguration, type ChatGptWebSearch } from "./launch.js";
 
 const PROFILE_NAMES = ["interactive", "explore", "implementer", "reviewer"] as const;
-const ROOT_FIELDS = new Set(["version", "platform", "command", ...PROFILE_NAMES]);
+const ROOT_FIELDS = new Set(["version", "platform", "command", "stopWaitHours", ...PROFILE_NAMES]);
 const PROFILE_FIELDS = new Set(["model", "effort", "webSearch", "subagents"]);
 const WORKER_FIELDS = new Set(["webSearch", "subagents"]);
 const CLAUDE_MODELS = new Set(["haiku", "sonnet", "opus"]);
@@ -60,7 +60,9 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
   public readonly platform = "chatgpt" as const;
   public constructor(private readonly command: readonly string[], private readonly profiles: Readonly<Record<ProfileName, Profile>>) {}
   public configuration(type: AgentType): ConfiguredLaunch {
-    const profile = this.profiles[type === "Explore" ? "explore" : type];
+    const profileName: ProfileName = type === "Explore" ? "explore"
+      : type === "implementer" || type === "reviewer" ? type : "interactive";
+    const profile = this.profiles[profileName];
     const common = {
       declaredCommand: this.command,
       ...(profile.model === undefined ? {} : { declaredModel: profile.model }),

@@ -302,11 +302,26 @@ function commandSequence(body: ResponsesRequest, steps: readonly { readonly chec
   calls.forEach((call, index) => {
     if (!matchingToolPair(call, outputs[index])) throw new ProtocolMismatch("$.input", "contains an unknown shell call output");
     const output = toolOutputText(outputs[index]);
-    if (steps[index]?.requireOutput !== undefined && !output.includes(steps[index].requireOutput)) throw new ProtocolMismatch("$.input", "read result omitted the expected fixture marker");
-    if (/failed|denied|reject|blocked|exited with (?:code|status) [1-9]/iu.test(output)) throw new ProtocolMismatch("$.input", "auto-run tool call failed");
+    if (toolCallFailed(output)) throw new ProtocolMismatch("$.input", "auto-run tool call failed");
+    if (steps[index]?.requireOutput !== undefined && !output.includes(steps[index].requireOutput)) {
+      throw new ProtocolMismatch("$.input", `read result omitted the expected fixture marker (${toolOutputShape(output)})`);
+    }
   });
   const next = steps[outputs.length];
   return next === undefined ? { checkpoint: finalCheckpoint, output: finalOutput(message) } : { checkpoint: next.checkpoint, output: functionOutput(next.command, body) };
+}
+
+function toolOutputShape(output: string): string {
+  const exitCode = /exit_code["']?\s*[:=]\s*(-?\d+)/iu.exec(output)?.[1];
+  const completion = /script completed/iu.test(output) ? "completed" : /script failed/iu.test(output) ? "failed" : "unclassified";
+  return `${completion}, exit ${exitCode ?? "unreported"}, ${output.length} characters`;
+}
+
+function toolCallFailed(output: string): boolean {
+  const exitCode = /exit_code["']?\s*[:=]\s*(-?\d+)/iu.exec(output)?.[1]
+    ?? /exited with (?:code|status)\s+(-?\d+)/iu.exec(output)?.[1];
+  if (exitCode !== undefined) return Number(exitCode) !== 0;
+  return /script failed|failed|denied|reject|blocked/iu.test(output);
 }
 
 function toolCalls(body: ResponsesRequest): readonly Record<string, unknown>[] {
@@ -355,7 +370,13 @@ function functionOutput(command: string, body: ResponsesRequest): ResponseOutput
   if (body.codeMode) {
     return {
       type: "custom_tool_call", id: stableId("ctc", body, true), call_id: stableId("call", body, true), name: "exec", status: "completed",
-      input: `const result = await tools.exec_command(${JSON.stringify({ cmd: command, yield_time_ms: 10_000, max_output_tokens: 1_000 })}); text(result);`,
+      input: [
+        '// @exec: {"yield_time_ms": 120000, "max_output_tokens": 1000}\n',
+        `let result = await tools.exec_command(${JSON.stringify({ cmd: command, yield_time_ms: 10_000, max_output_tokens: 1_000 })});`,
+        "for (let attempt = 0; result.session_id !== undefined && attempt < 6; attempt += 1) result = await tools.write_stdin({ session_id: result.session_id, chars: \"\", yield_time_ms: 10_000, max_output_tokens: 1_000 });",
+        "if (result.session_id !== undefined) throw new Error(\"command did not finish\");",
+        "text(JSON.stringify({ exit_code: result.exit_code, output: result.output ?? \"\" }));",
+      ].join(" "),
     };
   }
   return {

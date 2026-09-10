@@ -4,12 +4,14 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 export interface CommandEndpointRecord {
-  readonly version: 1;
+  readonly version: 2;
   readonly host: "127.0.0.1";
   readonly port: number;
   /** The window's workspace folder: how a script recognizes its own project. */
   readonly workspaceRoot: string;
   readonly commandToken: string;
+  /** Capability for creating manual delegated agents, and no other route. */
+  readonly delegationToken: string;
   /** Extension host process, so a reader can tell a live window from a leftover. */
   readonly pid: number;
   readonly activatedAt: string;

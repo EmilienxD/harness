@@ -2,17 +2,24 @@
  * Aboard session types after the REFACTOR.md redesign:
  * - interactive: Ordinary user-controlled agent TUI
  * - Explore: Read-only exploration session
+ * - Prototype, Web Search, Brainstorm, General: manual delegation identities whose
+ *   execution mode is recorded separately from Auto Run worker semantics
  * - implementer: Auto Run worker that implements one frozen issue
  * - reviewer: Auto Run worker that reviews (both AFK and HITL use this profile)
  */
 export const AGENT_TYPES = [
   "interactive",
   "Explore",
+  "Prototype",
+  "Web Search",
+  "Brainstorm",
+  "General",
   "implementer",
   "reviewer",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
+export type ExecutionMode = "interactive" | "auto" | "auto-run";
 
 /** All agent types can be launched by the user or Auto Run */
 export const LAUNCHABLE_AGENT_TYPES = AGENT_TYPES;
@@ -150,6 +157,8 @@ export interface AgentSession {
   readonly terminal: TerminalReference;
   readonly lifecycle: AgentLifecycle;
   readonly resultDelivery: ResultDelivery;
+  /** Execution semantics are independent from the visible fleet identity. */
+  readonly executionMode?: ExecutionMode;
   /** The user drives this session. Absence is the persisted form of unattended. */
   readonly attended?: true;
   readonly telemetry: AgentTelemetry;

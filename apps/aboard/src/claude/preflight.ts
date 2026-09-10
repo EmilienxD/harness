@@ -29,7 +29,7 @@ const DEFAULT_PROBE_TIMEOUT_MS = 15_000;
 
 export class ClaudePreflightError extends Error {
   public constructor(public readonly reason: string) {
-    super(`The configured Claude command cannot be run: ${reason}. Check .abd/launch.json.`);
+    super(`The configured Claude command cannot be run: ${reason}. Check .harness/launch.json.`);
     this.name = "ClaudePreflightError";
   }
 }

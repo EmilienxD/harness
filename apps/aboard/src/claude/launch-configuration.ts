@@ -4,10 +4,11 @@ import { LaunchFileError, type PlatformLaunchFile } from "../platform/launch-con
 import { BY_DIFFICULTY, EFFORT_LEVELS, type DeclaredEffort, type EffortLevel, type LaunchConfiguration } from "./launch.js";
 
 const PROFILE_NAMES = ["interactive", "explore", "implementer", "reviewer"] as const;
-const ROOT_FIELDS = new Set(["version", "platform", "command", ...PROFILE_NAMES]);
+const ROOT_FIELDS = new Set(["version", "platform", "command", "stopWaitHours", ...PROFILE_NAMES]);
 const PROFILE_FIELDS = new Set(["model", "effort", "deniedTools"]);
 const MODELS = ["haiku", "sonnet", "opus"] as const;
 const DEFAULT_DENIED_TOOLS = ["Agent", "WebSearch", "WebFetch"] as const;
+const WEB_TOOLS: ReadonlySet<string> = new Set(["WebSearch", "WebFetch"]);
 
 type ProfileName = (typeof PROFILE_NAMES)[number];
 type Model = (typeof MODELS)[number] | "inherit" | typeof BY_DIFFICULTY;
@@ -58,16 +59,21 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
   public constructor(private readonly command: readonly string[], private readonly profiles: Readonly<Record<ProfileName, Profile>>) {}
 
   public configuration(type: AgentType): ConfiguredLaunch {
-    const profileName = type === "Explore" ? "explore" : type;
+    const profileName: ProfileName = type === "Explore" ? "explore"
+      : type === "implementer" || type === "reviewer" ? type : "interactive";
     const profile = this.profiles[profileName];
     const common = {
       declaredCommand: this.command,
       ...(profile.model === "inherit" ? {} : { declaredModel: profile.model }),
       ...(profile.effort === "inherit" ? {} : { declaredEffort: profile.effort as DeclaredEffort }),
-      deniedTools: profile.deniedTools,
+      // The interactive profile denies web tools by default; a Web Search child
+      // exists to use them, so that one denial cannot apply to this identity.
+      deniedTools: type === "Web Search"
+        ? profile.deniedTools.filter((rule) => !WEB_TOOLS.has(rule))
+        : profile.deniedTools,
     };
     let settings: LaunchConfiguration;
-    if (type === "interactive") settings = { shape: "default", ...common };
+    if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(type)) settings = { shape: "default", ...common };
     else if (type === "Explore") settings = { shape: "builtin", agentName: "Explore", ...common };
     else if (type === "implementer") settings = { shape: "skill", skillName: "address-issue", ...common };
     // AFK and HITL are auto-run orchestration modes, not separate review skills.

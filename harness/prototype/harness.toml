@@ -1,16 +1,20 @@
 name = "prototype"
-version = "1.0.0"
+version = "1.1.0"
 description = "Interactive prototyping workflow placeholder"
 
 [platforms.claude]
 status = "supported"
 
 [platforms.chatgpt]
-status = "unsupported"
-reason = "This workflow currently targets Claude Code visible sessions."
+status = "supported"
 
 [[files]]
 src = "shared/skills/prototype/SKILL.md"
 dest = "prototype/SKILL.md"
 root = "skills"
 
+[[files]]
+src = "chatgpt/skills/prototype/agents/openai.yaml"
+dest = "prototype/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

@@ -70,13 +70,10 @@ export async function run(): Promise<void> {
     const existingTerminals = new Set(window.terminals);
     const opened: typeof window.terminals[number][] = [];
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
-    const implementer = await eventually(async () => {
-      const terminal = opened.find((candidate) => !existingTerminals.has(candidate));
-      if (terminal !== undefined) return terminal;
-      await commands.executeCommand("aboard.autoRun.refresh");
-      await commands.executeCommand("aboard.startAutoRun");
-      return undefined;
-    },
+    await commands.executeCommand("aboard.autoRun.refresh");
+    await commands.executeCommand("aboard.startAutoRun");
+    const implementer = await eventually(
+      () => opened.find((candidate) => !existingTerminals.has(candidate)),
       "auto-run did not launch a visible implementer terminal",
     );
     terminalListener.dispose();
@@ -136,12 +133,9 @@ export async function run(): Promise<void> {
     assert.ok(Number.isInteger(followup) && followup > 0);
     const opened: typeof window.terminals[number][] = [];
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
-    await eventually(async () => {
-      if (opened.length > 0) return opened[0];
-      await commands.executeCommand("aboard.autoRun.refresh");
-      await commands.executeCommand("aboard.startAutoRun");
-      return undefined;
-    }, "single-branch auto-run did not launch its first visible terminal");
+    await commands.executeCommand("aboard.autoRun.refresh");
+    await commands.executeCommand("aboard.startAutoRun");
+    await eventually(() => opened[0], "single-branch auto-run did not launch its first visible terminal");
 
     await eventually(async () => {
       const value = await diagnostics();

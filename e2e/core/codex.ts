@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { spawnableCommand } from "./path.js";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -55,9 +56,11 @@ export async function prepareCodexHome(options: CodexHomeOptions): Promise<strin
 }
 
 export async function validateCodexCli(): Promise<void> {
-  const version = (await execFileAsync("codex", ["--version"], { windowsHide: true })).stdout.trim();
+  const versionCommand = spawnableCommand("codex", ["--version"]);
+  const version = (await execFileAsync(versionCommand.file, [...versionCommand.args], { windowsHide: true })).stdout.trim();
   if (!/^codex-cli 0\.(?:15[3-9]|1[6-9]\d|[2-9]\d\d)\./u.test(version)) throw new Error(`Codex CLI >= 0.153 is required; found ${JSON.stringify(version)}`);
-  const help = (await execFileAsync("codex", ["exec", "--help"], { windowsHide: true })).stdout;
+  const helpCommand = spawnableCommand("codex", ["exec", "--help"]);
+  const help = (await execFileAsync(helpCommand.file, [...helpCommand.args], { windowsHide: true })).stdout;
   const required = ["--json", "--output-last-message", "--dangerously-bypass-hook-trust", "--sandbox <SANDBOX_MODE>"];
   const missing = required.filter((item) => !help.includes(item));
   if (missing.length > 0) throw new Error(`Codex CLI protocol mismatch; missing required help structures: ${missing.join(", ")}`);
@@ -65,7 +68,8 @@ export async function validateCodexCli(): Promise<void> {
 
 export function runCodex(args: readonly string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs = 120_000): Promise<CodexProcessResult> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("codex", [...args], { cwd, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const codex = spawnableCommand("codex", args);
+    const child = spawn(codex.file, [...codex.args], { cwd, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let timedOut = false;

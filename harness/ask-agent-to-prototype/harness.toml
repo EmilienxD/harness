@@ -1,16 +1,21 @@
 name = "ask-agent-to-prototype"
-version = "1.0.0"
+version = "1.1.0"
 description = "Launch a visible prototype child workflow placeholder"
-dependencies = ["harness-cli>=0.2.0,<0.3.0", "prototype>=1.0.0,<2.0.0", "communicate-to-agent>=1.0.0,<2.0.0"]
+dependencies = ["harness-cli>=0.3.0,<0.4.0", "communication-hooks>=1.0.0,<2.0.0", "prototype>=1.0.0,<2.0.0", "reply-to-agent>=1.0.0,<2.0.0"]
 
 [platforms.claude]
 status = "supported"
 
 [platforms.chatgpt]
-status = "unsupported"
-reason = "This workflow currently targets Claude Code visible sessions."
+status = "supported"
 
 [[files]]
 src = "shared/skills/ask-agent-to-prototype/SKILL.md"
 dest = "ask-agent-to-prototype/SKILL.md"
 root = "skills"
+
+[[files]]
+src = "chatgpt/skills/ask-agent-to-prototype/agents/openai.yaml"
+dest = "ask-agent-to-prototype/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

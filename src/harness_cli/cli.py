@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from harness_cli.installer import CatalogueInstaller, Change, InstallError, Targ
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform, get_adapter
 from harness_cli.receipts import ReceiptStore
-from harness_cli.sessions import SessionError, ask, launch, reply, resume
+from harness_cli.sessions import SessionError, launch, launch_delegated, resume
+from harness_cli.delegation import arm_reply, process_grant
 from harness_cli.tui import MenuOption, TerminalUI, terminal_keys
 
 
@@ -187,25 +189,25 @@ def catalogue_menu() -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    session_id = launch(" ".join(args.prompt).strip() or None)
+    session_id = launch(" ".join(args.prompt).strip() or None, provider=args.provider)
     print(f"Started visible session {session_id}")
     return 0
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
-    prompt = " ".join(args.prompt).strip()
-    if not prompt:
-        raise SessionError("harness ask requires a prompt")
-    request_id, child_id = ask(prompt)
-    print(f"Started child {child_id} for request {request_id}")
+    results = process_grant(args.grant_id, launch=launch_delegated)
+    launched = sum(result.status == "launched" for result in results)
+    failed = sum(result.status == "failed" for result in results)
+    print(f"Processed {len(results)} requests: {launched} launched, {failed} failed")
     return 0
 
 
 def cmd_reply(args: argparse.Namespace) -> int:
-    message = " ".join(args.message).strip()
-    if not message:
-        raise SessionError("harness reply requires a message")
-    print(f"Reply queued as delivery {reply(message)}")
+    session_id = os.environ.get("HARNESS_SESSION_ID")
+    if not session_id:
+        raise SessionError("harness reply must run inside a delegated child")
+    arm_reply(session_id)
+    print("The next successful Stop will reply to the parent")
     return 0
 
 
@@ -222,14 +224,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"harness {__version__}")
     commands = parser.add_subparsers(dest="command")
-    run_parser = commands.add_parser("run", help="open an independent visible Claude session")
+    run_parser = commands.add_parser("run", help="open an independent visible agent session")
+    run_parser.add_argument("--provider", choices=("claude", "chatgpt"), default="claude")
     run_parser.add_argument("prompt", nargs="*")
     run_parser.set_defaults(func=cmd_run)
-    ask_parser = commands.add_parser("ask", help="ask a child in an independent visible terminal")
-    ask_parser.add_argument("prompt", nargs="+")
+    ask_parser = commands.add_parser("ask", help="process a task-bound request inbox")
+    ask_parser.add_argument("grant_id")
     ask_parser.set_defaults(func=cmd_ask)
-    reply_parser = commands.add_parser("reply", help="reply once to the parent that launched this child")
-    reply_parser.add_argument("message", nargs="+")
+    reply_parser = commands.add_parser("reply", help="arm the next successful Stop as the parent reply")
     reply_parser.set_defaults(func=cmd_reply)
     resume_parser = commands.add_parser("resume", help="resume a Harness-launched session")
     resume_parser.add_argument("session_id")

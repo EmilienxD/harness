@@ -7,6 +7,7 @@ import {
   isInteractiveAgentType,
   type AgentId,
   type AgentType,
+  type ExecutionMode,
   type SessionId,
   type TerminalId,
 } from "../domain/contracts.js";
@@ -94,6 +95,9 @@ export interface CreateAboardTerminalRequest {
   readonly focus?: boolean;
   /** The user drives this session; reporting is configured independently. */
   readonly attended?: boolean;
+  /** Harness needs this before the first provider hook can race the launch response. */
+  readonly executionMode?: ExecutionMode;
+  readonly harnessRequestId?: string;
   readonly startupTimeoutMs?: number;
 }
 
@@ -235,6 +239,8 @@ export class TerminalController {
       env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");
     }
     if (request.attended === true) env.ABOARD_ATTENDED = "1";
+    if (request.executionMode !== undefined) env.HARNESS_EXECUTION_MODE = request.executionMode;
+    if (request.harnessRequestId !== undefined) env.HARNESS_REQUEST_ID = request.harnessRequestId;
 
     const creationOptions: TerminalCreationOptions = {
       cwd,

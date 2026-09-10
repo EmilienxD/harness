@@ -242,6 +242,20 @@ test("attended sessions carry ABOARD_ATTENDED independently of reporting", () =>
   assert.deepEqual(host.created[1]!.terminal.shows, [false]);
 });
 
+test("manual delegation mode is present before the child's first hook", () => {
+  const { controller, host } = setup();
+  controller.create({
+    agentId: agent("manual-auto"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "General",
+    executionMode: "auto",
+    harnessRequestId: "request-7",
+  });
+
+  assert.equal(host.created[0]!.options.env.HARNESS_EXECUTION_MODE, "auto");
+  assert.equal(host.created[0]!.options.env.HARNESS_REQUEST_ID, "request-7");
+});
+
 test("bulk restoration can suppress focus for user-facing sessions", () => {
   const { controller, host } = setup();
   controller.create({

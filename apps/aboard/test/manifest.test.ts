@@ -17,7 +17,7 @@ interface Manifest {
   };
 }
 
-test("launch command, model, effort, and denials live only in .abd/launch.json", async () => {
+test("launch command, model, effort, and denials live only in .harness/launch.json", async () => {
   const { contributes } = await manifest();
   const settings = Object.keys(contributes.configuration.properties);
   assert.equal(settings.includes("aboard.launch.claudeCommand"), false);

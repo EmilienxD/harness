@@ -85,6 +85,7 @@ class Tool:
     files: tuple[FileSpec, ...]
     requires: tuple[str, ...] = ()
     gitignore: tuple[str, ...] = ()
+    workspace_gitignore: tuple[str, ...] = ()
     platform_support: dict[Platform, PlatformSupport] = field(default_factory=dict)
     platform_fragments: dict[Platform, dict] = field(default_factory=dict)
     docs: str | None = None
@@ -304,12 +305,17 @@ def load_tool(directory: Path) -> Tool:
             raise ManifestError(f"{manifest_path}: fragment '{declaration.fragment_name}' does not exist")
         fragments[platform] = _read_fragment(fragment_path)
 
-    ignores = []
-    for entry in data.get("gitignore", []):
-        pattern = str(entry).replace("\\", "/").strip()
-        if not pattern or pattern.startswith("/") or pattern.startswith("../") or "/../" in pattern:
-            raise ManifestError(f"{manifest_path}: unsafe gitignore entry '{entry}'")
-        ignores.append(pattern)
+    def ignore_entries(field: str) -> tuple[str, ...]:
+        ignores = []
+        for entry in data.get(field, []):
+            pattern = str(entry).replace("\\", "/").strip()
+            if not pattern or pattern.startswith("/") or pattern.startswith("../") or "/../" in pattern:
+                raise ManifestError(f"{manifest_path}: unsafe {field} entry '{entry}'")
+            ignores.append(pattern)
+        return tuple(ignores)
+
+    ignores = ignore_entries("gitignore")
+    workspace_ignores = ignore_entries("workspace_gitignore")
 
     return Tool(
         name=data["name"],
@@ -318,7 +324,8 @@ def load_tool(directory: Path) -> Tool:
         root=directory,
         files=tuple(files),
         requires=tuple(data.get("requires", [])),
-        gitignore=tuple(ignores),
+        gitignore=ignores,
+        workspace_gitignore=workspace_ignores,
         platform_support=support,
         platform_fragments=fragments,
         docs=data.get("docs"),

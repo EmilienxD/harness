@@ -64,7 +64,7 @@ source tree or restore a `targets/` override directory.
   split; represent its ChatGPT policy in `agents/openai.yaml`.
 - There is no legacy manifest, scaffold, installation, or receipt compatibility layer.
 - `address-issue` and `issue-review` contain mandatory empty user-owned prompt placeholders; do not author
-  their bodies. The prototype, websearch, ask-agent, and communicate-to-agent workflow prompts are also
+  their bodies. The prototype, websearch, ask-agent, and reply-to-agent workflow prompts are also
   user-owned.
 - Keep Aboard's npm build and release history independent. Do not flatten it into the Python package,
   bundle its VSIX in the wheel, or squash its repository history when merging it.

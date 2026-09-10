@@ -350,6 +350,23 @@ test("an isolated ChatGPT worker requires a Codex version with permission profil
   await assert.rejects(platform.preflight(plan), /Codex 0\.138\.0 or later.*permission profile/u);
 });
 
+test("an isolated ChatGPT worker denies writes to the original checkout without denying reads", () => {
+  const plan = chatGpt().planLaunch({
+    ...implementer,
+    prompt: "Address the issue.",
+    disallowedTools: ["Read(//C:/project/**)", "Edit(//C:/project/**)"],
+    writableRoots: ["C:\\project\\.git\\worktrees\\work", "C:\\project\\.git\\objects"],
+  });
+  const profile = plan.args.find((argument) => argument.startsWith("permissions.aboard-worktree=")) ?? "";
+
+  assert.ok(profile.includes(`${JSON.stringify("C:\\project/**")}="read"`));
+  for (const metadata of ["C:\\project\\.git\\worktrees\\work", "C:\\project\\.git\\objects"]) {
+    assert.ok(profile.includes(`${JSON.stringify(metadata)}=true`), metadata);
+  }
+  assert.ok(profile.includes(`":workspace_roots"={"."="write"}`));
+  assert.doesNotMatch(profile, /="deny"/u);
+});
+
 test("a ChatGPT implementer profile can restore web search and subagents", () => {
   const plan = chatGpt().planLaunch({
     ...implementer,

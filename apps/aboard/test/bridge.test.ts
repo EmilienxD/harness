@@ -70,12 +70,28 @@ test("the command token opens the command endpoint and nothing else", async (con
   for (const path of ["/terminals", "/unknown", "/hook", "/sessions", "/commandsandmore"]) {
     const refused = await request(bridge.port, path, bridge.commandToken);
     assert.equal(refused.status, 403, path);
-    assert.deepEqual(refused.body, { ok: false, error: { code: "forbidden", message: "This credential only authorizes the command endpoint" } });
+    assert.deepEqual(refused.body, { ok: false, error: { code: "forbidden", message: "This credential does not authorize this endpoint" } });
   }
   assert.equal(calls, 2, "a refused request never reaches the handler");
   // The full token keeps reaching everything, including the command endpoint.
   assert.equal((await request(bridge.port, "/commands", bridge.token)).status, 200);
   assert.equal((await request(bridge.port, "/terminals", bridge.token)).status, 200);
+});
+
+test("the delegation token reaches only the delegation endpoint", async (context) => {
+  const bridge = await startBridge({
+    preferredPort: 0,
+    tokenFactory: () => "full-token",
+    commandTokenFactory: () => "command-token",
+    delegationTokenFactory: () => "delegation-token",
+    handler: (incoming) => ({ status: 200, body: { path: incoming.url.pathname } }),
+  });
+  context.after(() => bridge.stop());
+
+  assert.equal((await request(bridge.port, "/delegations", bridge.delegationToken, "{}")).status, 200);
+  for (const path of ["/commands", "/terminals", "/hooks/stop", "/delegations/extra"]) {
+    assert.equal((await request(bridge.port, path, bridge.delegationToken, "{}")).status, 403, path);
+  }
 });
 
 test("rotates the command token between activations and never logs it", async (context) => {

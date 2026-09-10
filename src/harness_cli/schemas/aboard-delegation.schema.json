@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harness.local/schemas/aboard-delegation.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["requestId", "task", "provider", "mode", "prompt", "cwd"],
+  "properties": {
+    "requestId": {"type": "string", "minLength": 1},
+    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "general"]},
+    "provider": {"enum": ["claude", "chatgpt"]},
+    "mode": {"enum": ["interactive", "auto"]},
+    "prompt": {"type": "string", "minLength": 1},
+    "cwd": {"type": "string", "minLength": 1}
+  }
+}

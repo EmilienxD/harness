@@ -32,10 +32,82 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
 from typing import Any
+
+
+def _npm_shim_command(shim: str, args: list[str]) -> list[str] | None:
+    """Translate a standard npm cmd-shim into a native Node invocation."""
+    try:
+        with open(shim, encoding="utf-8") as handle:
+            contents = handle.read(65_537)
+    except (OSError, UnicodeError):
+        return None
+    if len(contents) > 65_536:
+        return None
+    match = re.search(
+        r'&\s+"%_prog%"\s+"%dp0%\\([^"\r\n]+\.js)"\s+%\*\s*$',
+        contents,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    if match is None:
+        return None
+    shim_root = os.path.realpath(os.path.dirname(shim))
+    entry = os.path.realpath(os.path.join(shim_root, *match.group(1).split("\\")))
+    try:
+        if os.path.commonpath((shim_root, entry)) != shim_root or not os.path.isfile(entry):
+            return None
+    except ValueError:
+        return None
+    local_node = os.path.join(shim_root, "node.exe")
+    node = local_node if os.path.isfile(local_node) else shutil.which("node.exe")
+    if node is None:
+        return None
+    return [node, entry, *args]
+
+
+def _native_executable(command: str) -> str | None:
+    if os.path.isabs(command) or os.path.dirname(command):
+        return None
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        for suffix in (".exe", ".com"):
+            candidate = os.path.join(directory, f"{command}{suffix}")
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
+def _executable(command: list[str]) -> list[str]:
+    """Resolve the agent runtime to an image Windows can start with this argv.
+
+    CreateProcess searches PATH but only appends `.exe`, so a bare name misses
+    an npm-installed CLI. Translate a validated standard npm shim to its Node
+    entry point, fall through an unknown shim to a later native executable, and
+    otherwise refuse rather than let cmd.exe mangle hook configuration.
+    """
+    if os.name != "nt":
+        return command
+    resolved = shutil.which(command[0])
+    if resolved is None:
+        return command
+    if os.path.splitext(resolved)[1].lower() in {".cmd", ".bat"}:
+        npm_command = _npm_shim_command(resolved, command[1:])
+        if npm_command is not None:
+            return npm_command
+        native = _native_executable(command[0])
+        if native is not None:
+            return [native, *command[1:]]
+        raise OSError(
+            f"{command[0]} resolves to the script shim {resolved}, which cannot receive this "
+            "command line unchanged. Install a native executable for it, or put one earlier on PATH."
+        )
+    return [resolved, *command[1:]]
 
 
 def main() -> int:
@@ -113,7 +185,7 @@ def main() -> int:
     spawn_error: str | None = None
     try:
         try:
-            child = subprocess.Popen(command)
+            child = subprocess.Popen(_executable(command))
         except OSError as error:
             # The command itself could not be run: the shell found the wrapper
             # but not the configured agent runtime. Nothing else will report this.

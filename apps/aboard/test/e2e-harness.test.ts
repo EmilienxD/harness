@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { childEnvironment } from "../e2e/smoke.js";
 import { harnessWorktreePaths } from "../e2e/repository.js";
-import { FINAL_RESPONSE, SCENARIO_MARKER, ScenarioMismatch, parseMessagesRequest, transition, type Message } from "../e2e/scenario.js";
+import { AUTO_RUN_AFK_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE, FINAL_RESPONSE, SCENARIO_MARKER, ScenarioMismatch, parseMessagesRequest, transition, type Message } from "../e2e/scenario.js";
 import { startFakeAnthropicServer } from "../e2e/server.js";
 import { startFakeOpenAiServer } from "../e2e/codex-server.js";
 
@@ -113,6 +113,9 @@ test("OpenAI emulator drives a real Codex function turn and redacts diagnostics"
     const localCall = (completedResponse(await additionalTools.text()).output as Record<string, unknown>[])[0]!;
     assert.equal(localCall.type, "custom_tool_call");
     assert.equal(localCall.name, "exec");
+    assert.match(String(localCall.input), /^\/\/ @exec: \{"yield_time_ms": 120000/u);
+    assert.match(String(localCall.input), /tools\.write_stdin/u);
+    assert.match(String(localCall.input), /exit_code: result\.exit_code/u);
 
     const localResult = await fetch(`${server.baseUrl}/responses`, {
       method: "POST",
@@ -167,6 +170,44 @@ test("OpenAI emulator drives a real Codex function turn and redacts diagnostics"
   assert.doesNotMatch(diagnostics, /private-prompt|private-unknown|aboard-e2e-/);
   assert.match(diagnostics, /"protocol": "openai-responses"/);
   await rm(root, { recursive: true, force: true });
+});
+
+test("OpenAI auto-run accepts a successful commit with a nonfatal Git permission warning", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-codex-auto-run-"));
+  const server = await startFakeOpenAiServer({ repoRoot: root });
+  const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
+  const base = {
+    model: "codex-e2e", stream: true, store: false,
+    input: [{ type: "additional_tools", tools: [{ type: "custom", name: "exec" }] }, {
+      type: "message", role: "user", content: [{
+        type: "input_text",
+        text: `Address issue. ${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_PERMANENT_NOTE} ${AUTO_RUN_NESTED_CONTEXT}`,
+      }],
+    }],
+  };
+  let input = [...base.input] as Record<string, unknown>[];
+  try {
+    for (const output of [
+      "aboard e2e fixture: before\n",
+      "",
+      JSON.stringify({
+        exit_code: 0,
+        output: "error: Unable to create 'C:/fixture/.git/packed-refs.lock': Permission denied\n[run/e2e abc1234] Update deterministic fixture\n 1 file changed, 1 insertion(+), 1 deletion(-)",
+      }),
+    ]) {
+      const response = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ ...base, input }) });
+      assert.equal(response.status, 200);
+      const call = (completedResponse(await response.text()).output as Record<string, unknown>[])[0]!;
+      input = [...input, call, { type: "custom_tool_call_output", call_id: call.call_id, output }];
+    }
+    const complete = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ ...base, input }) });
+    assert.equal(complete.status, 200);
+    const message = (completedResponse(await complete.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(((message.content as Record<string, unknown>[])[0]!).text, FINAL_RESPONSE);
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 function completedResponse(stream: string): Record<string, unknown> {

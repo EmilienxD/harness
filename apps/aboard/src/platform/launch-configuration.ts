@@ -7,7 +7,9 @@ import type { AgentType } from "../domain/contracts.js";
 import type { AgentPlatformId, ConfiguredLaunch } from "./agent-platform.js";
 
 export interface LaunchFileDiagnostic { readonly severity: "warning"; readonly message: string; }
-export class LaunchFileError extends Error {}
+export class LaunchFileError extends Error {
+  public constructor(message: string, public readonly cause?: unknown) { super(message); }
+}
 
 export interface PlatformLaunchFile {
   readonly platform: AgentPlatformId;
@@ -35,7 +37,10 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   try { parsed = JSON.parse(text) as unknown; }
   catch (error) { throw new LaunchFileError(`launch.json contains invalid JSON: ${error instanceof Error ? error.message : "parse error"}`); }
   const root = object(parsed, "launch.json");
-  if (root.version !== 1) throw new LaunchFileError("launch.json version must be 1");
+  if (root.version !== 2) throw new LaunchFileError("launch.json version must be 2");
+  if (root.stopWaitHours !== undefined && (
+    typeof root.stopWaitHours !== "number" || !Number.isFinite(root.stopWaitHours) || root.stopWaitHours < 0
+  )) throw new LaunchFileError("launch.json stopWaitHours must be a non-negative finite number");
   const selectedPlatform = platform(root.platform);
   const parsedPlatform = (() => {
     switch (selectedPlatform) {
@@ -53,12 +58,45 @@ export async function readLaunchFile(path: string): Promise<ParsedLaunchFile> {
   try { return parseLaunchFile(await readFile(path, "utf8")); }
   catch (error) {
     if (error instanceof LaunchFileError) throw error;
-    throw new LaunchFileError(`Unable to read launch.json: ${error instanceof Error ? error.message : "unknown error"}`);
+    throw new LaunchFileError(`Unable to read launch.json: ${error instanceof Error ? error.message : "unknown error"}`, error);
   }
 }
 
+function missing(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return true;
+  return error instanceof LaunchFileError && missing(error.cause);
+}
+
+export interface LaunchConfigurationPaths {
+  readonly project: string;
+  readonly global: string;
+  readonly defaults?: string;
+}
+
+export function defaultLaunchFile(platform: AgentPlatformId = "claude"): ParsedLaunchFile {
+  return parseLaunchFile(JSON.stringify({ version: 2, platform }));
+}
+
 export class FileLaunchConfigurationSource implements DelegationConfigurationSource {
-  public constructor(private readonly path: string) {}
-  public async load(): Promise<ParsedLaunchFile> { return readLaunchFile(this.path); }
+  readonly #paths: LaunchConfigurationPaths;
+
+  public constructor(path: string | LaunchConfigurationPaths) {
+    this.#paths = typeof path === "string"
+      ? { project: path, global: `${path}.global-unconfigured` }
+      : path;
+  }
+
+  public async load(): Promise<ParsedLaunchFile> {
+    for (const path of [this.#paths.project, this.#paths.global]) {
+      try { return await readLaunchFile(path); }
+      catch (error) { if (!missing(error)) throw error; }
+    }
+    return this.#paths.defaults === undefined ? defaultLaunchFile() : parseLaunchFile(this.#paths.defaults);
+  }
   public async get(type: AgentType): Promise<ConfiguredLaunch> { return (await this.load()).value.configuration(type); }
+
+  public async getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch> {
+    const selected = await this.load();
+    return (selected.value.platform === platform ? selected : defaultLaunchFile(platform)).value.configuration(type);
+  }
 }

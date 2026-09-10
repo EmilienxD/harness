@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { spawnableCommand } from "./path.js";
 
 const execFileAsync = promisify(execFile);
 const MINIMUM_VERSION = [2, 1, 261] as const;
@@ -50,7 +51,8 @@ export function isolatedClaudeEnvironment(parent: NodeJS.ProcessEnv, overlay: Re
 
 export async function runClaude(args: readonly string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs = 120_000): Promise<CapturedProcess> {
   return new Promise((resolve, reject) => {
-    const child = spawn("claude", args, { cwd, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const claude = spawnableCommand("claude", args);
+    const child = spawn(claude.file, [...claude.args], { cwd, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let timedOut = false;

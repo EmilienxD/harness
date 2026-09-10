@@ -8,6 +8,7 @@ import {
   type AgentSession,
   type AgentTelemetry,
   type AgentType,
+  type ExecutionMode,
   type IsoTimestamp,
   type SessionId,
   type WorkerResult,
@@ -22,16 +23,19 @@ import {
   type WriteLeaseHolder,
 } from "../domain/lease.js";
 import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
-import { isolationDenyRules } from "../auto/worktree.js";
+import { isolationDenyRules, worktreeGitMetadataRoots } from "../auto/worktree.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
 export interface LaunchIsolation {
   readonly cwd: string;
   /** Permission deny rules added to this launch's `--disallowedTools`. */
   readonly denyTools: readonly string[];
+  readonly writableRoots: readonly string[];
 }
 
 export interface DelegationLaunchInput {
+  /** Stable Harness request identity for idempotency and child hook binding. */
+  readonly requestId?: string;
   readonly type: AgentType;
   readonly prompt?: string;
   /** Persistent configured note, ordered before the per-run guideline. */
@@ -51,6 +55,9 @@ export interface DelegationLaunchInput {
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
   readonly isolation?: LaunchIsolation;
   readonly difficulty?: IssueDifficulty;
+  readonly executionMode?: ExecutionMode;
+  /** A provider-explicit manual launch may bypass the project's default provider. */
+  readonly configuration?: ConfiguredLaunch;
 }
 
 /** What the engine needs back from a launch: the handles plus the result. */
@@ -126,6 +133,7 @@ export interface DelegationCoordinatorOptions {
   readonly maxInlinePromptChars?: number;
   readonly startupTimeoutMs?: number;
   readonly wrapper?: SessionWrapperLayout;
+  readonly resolveWorktreeGitMetadataRoots?: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
 }
 
 export class DelegationError extends Error {
@@ -178,7 +186,11 @@ export class DelegationCoordinator {
   }
 
   public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles> {
-    return this.#launch(input, { mode: "none" }, origin, true);
+    return this.#launch(input, { mode: "none" }, origin, true, "interactive");
+  }
+
+  public async launchManual(input: DelegationLaunchInput, mode: "interactive" | "auto"): Promise<InteractiveLaunchHandles> {
+    return this.#launch(input, { mode: "none" }, "user", mode === "interactive", mode);
   }
 
 
@@ -220,6 +232,9 @@ export class DelegationCoordinator {
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
     const attended = target.attended ?? true;
+    const writableRoots = target.autoRunRestricted === true && target.cwd !== undefined
+      ? await (this.options.resolveWorktreeGitMetadataRoots ?? worktreeGitMetadataRoots)(target.cwd, this.options.workspaceRoot)
+      : [];
 
     const plan = platform.planSessionResume({
       agentId: target.agentId,
@@ -239,6 +254,7 @@ export class DelegationCoordinator {
           ? isolationDenyRules(this.options.workspaceRoot)
           : []),
       ],
+      writableRoots,
       ...this.#effort(),
       ...this.#command(),
       ...(target.difficulty === undefined ? {} : { difficulty: target.difficulty }),
@@ -410,7 +426,7 @@ export class DelegationCoordinator {
   }
 
 
-  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean): Promise<{
+  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, executionMode: ExecutionMode = "auto-run"): Promise<{
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
     readonly terminalId: AgentSession["terminal"]["terminalId"];
@@ -418,7 +434,7 @@ export class DelegationCoordinator {
     const agentId = this.options.agentIdFactory();
     const agentType = input.type;
     const [configured, prompt] = await Promise.all([
-      this.options.configurations.get(agentType),
+      input.configuration === undefined ? this.options.configurations.get(agentType) : Promise.resolve(input.configuration),
       this.options.prompts.resolve(input, { interactive: attended }),
     ]);
     const platform = this.#platform(configured.platform);
@@ -439,6 +455,7 @@ export class DelegationCoordinator {
         ...(origin === "auto-run" ? AUTO_RUN_DISALLOWED_TOOLS : []),
         ...(input.isolation?.denyTools ?? []),
       ],
+      writableRoots: input.isolation?.writableRoots ?? [],
       ...this.#command(),
       ...this.#effort(),
       ...(input.difficulty === undefined ? {} : { difficulty: input.difficulty }),
@@ -466,6 +483,8 @@ export class DelegationCoordinator {
         ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,
         attended,
+        executionMode,
+        ...(input.requestId === undefined ? {} : { harnessRequestId: input.requestId }),
         // A failed launch prints to the terminal and exits before any hook; the
         // platform's start observation is the only trustworthy proof the session is up.
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
@@ -478,6 +497,7 @@ export class DelegationCoordinator {
           terminal: { terminalId: createdTerminal.terminalId, name: createdTerminal.name },
           lifecycle: { status: "starting", startedAt: occurredAt },
           resultDelivery,
+          executionMode,
           ...(attended ? { attended: true as const } : {}),
           telemetry: EMPTY_TELEMETRY,
           ...(input.chrome === true ? { chromeEnabled: true as const } : {}),

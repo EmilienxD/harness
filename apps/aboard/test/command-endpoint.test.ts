@@ -12,11 +12,12 @@ import {
 
 function record(overrides: Partial<CommandEndpointRecord> = {}): CommandEndpointRecord {
   return {
-    version: 1,
+    version: 2,
     host: "127.0.0.1",
     port: 4823,
     workspaceRoot: "C:\\work\\project",
     commandToken: "command-token",
+    delegationToken: "delegation-token",
     pid: 4242,
     activatedAt: "2026-08-22T09:00:00.000Z",
     ...overrides,

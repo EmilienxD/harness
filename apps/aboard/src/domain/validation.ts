@@ -404,6 +404,10 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     "session.resultDelivery",
     issues,
   );
+  const executionMode = record.executionMode === undefined ? undefined
+    : record.executionMode === "interactive" || record.executionMode === "auto" || record.executionMode === "auto-run"
+      ? record.executionMode
+      : (issues.push("session.executionMode must be interactive, auto, or auto-run"), undefined);
   const telemetry = parseTelemetry(record.telemetry, "session.telemetry", issues);
   let chromeEnabled: true | undefined;
   if (record.chromeEnabled !== undefined) {
@@ -447,7 +451,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
       issues.push("session.chromeEnabled is only legal for implementer agents");
     }
     if (
-      isAutomatedAgentType(identity.type) &&
+      isAutomatedAgentType(identity.type) && executionMode !== "auto" &&
       resultDelivery.mode === "none"
     ) {
       issues.push(
@@ -456,7 +460,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     }
     if (
       lifecycle?.status === "awaiting-user" &&
-      !INTERACTIVE_TYPES.has(identity.type)
+      !INTERACTIVE_TYPES.has(identity.type) && executionMode !== "interactive"
     ) {
       issues.push(
         `session.lifecycle.status awaiting-user is only legal for interactive agents`,
@@ -490,6 +494,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     terminal,
     lifecycle,
     resultDelivery,
+    ...(executionMode === undefined ? {} : { executionMode }),
     ...(attended === undefined ? {} : { attended }),
     telemetry,
     ...(chromeEnabled === undefined ? {} : { chromeEnabled }),

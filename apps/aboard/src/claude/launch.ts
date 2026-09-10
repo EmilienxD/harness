@@ -214,6 +214,8 @@ interface CommonPlanRequest {
   /** Absolute root in VS Code's workspace storage. */
   readonly runtimeDirectory?: string | undefined;
   readonly wrapper?: SessionWrapperLayout | undefined;
+  /** Additional native sandbox roots required by a provider-specific worker. */
+  readonly writableRoots?: readonly string[] | undefined;
 }
 
 export interface SessionWrapperLayout {
@@ -486,7 +488,7 @@ function wrapCommand(
 }
 
 function assertLaunchShape(agentType: AgentType, configuration: LaunchConfiguration): void {
-  if (agentType === "interactive") {
+  if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(agentType)) {
     if (configuration.shape !== "default") {
       throw new LaunchPlanError("shape-not-allowed", "interactive launches as Claude Code's default session");
     }

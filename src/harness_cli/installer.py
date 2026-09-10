@@ -468,6 +468,8 @@ class CatalogueInstaller:
         if fragment:
             _write_json(self.target.settings_path, self.target.adapter.merge_config(self.target.read_settings(), fragment))
         patterns = [entry if self.target.is_user else f"{self.target.adapter.project_platform_dir}/{entry}" for entry in tool.gitignore]
+        if not self.target.is_user:
+            patterns.extend(tool.workspace_gitignore)
         block = f"{tool.name}:{self.target.platform.value}"
         if patterns:
             before = self.target.gitignore_path.read_text(encoding="utf-8") if self.target.gitignore_path.is_file() else ""

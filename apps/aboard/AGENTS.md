@@ -40,6 +40,8 @@ points.
 - `interactive`: empty, user-controlled Claude Code or Codex TUI.
 - `Explore`: read-only exploration; Claude's built-in agent or a top-level Codex session enforced with
   `sandbox_mode="read-only"` and `approval_policy="never"`.
+- `Prototype`, `Web Search`, `Brainstorm`, and `General`: manual delegation identities. Their explicit
+  `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
 - `implementer`: Auto Run worker invoking `/address-issue` on Claude or `$address-issue` on ChatGPT.
 - `reviewer`: Auto Run worker invoking `/issue-review` on Claude or `$issue-review` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
@@ -47,7 +49,7 @@ points.
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.abd/launch.json` is the launch authority and is re-read for every new launch, resume, and reopen.
+`.harness/launch.json` version 2 is the launch authority and is re-read for every new launch, resume, and reopen.
 Existing processes retain their configuration. `platform` is explicit (`claude` or `chatgpt`) and is never
 inferred from the wrapper-friendly `command` array. Profiles select model and effort independently and may
 use `inherit`; Auto Run workers may use `by-difficulty`. Platform-specific values must be validated before
@@ -98,7 +100,7 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.autoRun.worktree.setupTimeoutSeconds` | `600` | Limit scaffold setup time. |
 
 Auto Run freezes run-specific settings for recovery. Launch configuration is not frozen; resumes use the
-latest valid `.abd/launch.json`.
+latest valid `.harness/launch.json`.
 
 ## Command Terminal API
 
@@ -119,7 +121,7 @@ Malformed bodies or missing directories return `400`; unknown IDs return `404`; 
 terminal returns `409`.
 
 Each initialized Aboard window publishes a versioned endpoint record containing `host`, `port`,
-`workspaceRoot`, `commandToken`, `pid`, and `activatedAt` in a per-user directory:
+`workspaceRoot`, command- and delegation-scoped tokens, `pid`, and `activatedAt` in a per-user directory:
 
 - Windows: `%LOCALAPPDATA%\abd\endpoints`
 - macOS: `~/Library/Application Support/abd/endpoints`
@@ -129,9 +131,9 @@ Readers must match `workspaceRoot` (case-insensitively on Windows), tolerate mul
 processes, and re-read after `401`; no record means no open initialized window. File names are implementation
 details. Aboard-launched processes instead inherit `ABOARD_BRIDGE_PORT` and `ABOARD_BRIDGE_TOKEN`.
 
-The in-memory full token reaches every route. The published per-activation command token reaches only
-`/commands`; all other routes return `403`. Endpoint records are outside workspaces, permissioned `0600`,
-and removed on window close.
+The in-memory full token reaches every route. The published command token reaches only `/commands`; the
+delegation token reaches exactly `POST /delegations`. Every other route returns `403`. Endpoint records
+are outside workspaces, permissioned `0600`, and removed on window close.
 
 ## Important Constraints
 

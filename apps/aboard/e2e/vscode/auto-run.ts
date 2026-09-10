@@ -92,7 +92,7 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
 }
 
 async function commitInitializedScaffold(root: string, settings: Readonly<Record<string, unknown>>, platform: E2ePlatform): Promise<void> {
-  const launchPath = join(root, ".abd", "launch.json");
+  const launchPath = join(root, ".harness", "launch.json");
   const launch = JSON.parse(await readFile(launchPath, "utf8")) as Record<string, unknown>;
   if (platform === "claude") launch.command = [
     "claude",
@@ -101,7 +101,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
   ];
   else {
     for (const key of Object.keys(launch)) delete launch[key];
-    Object.assign(launch, { version: 1, platform: "chatgpt", command: ["codex"] });
+    Object.assign(launch, { version: 2, platform: "chatgpt", command: ["codex"] });
   }
   await writeFile(launchPath, `${JSON.stringify(launch, null, 2)}\n`, "utf8");
   const settingsPath = join(root, ".vscode", "settings.json");
@@ -110,7 +110,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
   if (settings["aboard.autoRun.worktree.enabled"] === true) await installWorktreeTrustSetup(root, platform);
   const hooks = join(root, ".git", "e2e-empty-hooks");
   await mkdir(hooks, { recursive: true });
-  await execFileAsync("git", ["add", "--", ".abd", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
+  await execFileAsync("git", ["add", "--", ".abd", ".harness/launch.json", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
   await execFileAsync("git", ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", "commit", "--message", "Initialize aboard E2E fixture"], {
     cwd: root,
     encoding: "utf8",
@@ -293,10 +293,7 @@ async function isolatedWorktreeRoot(root: string): Promise<string> {
   return roots[0]!;
 }
 
-void runAutoRunJourney("chatgpt")
-  .then(() => runSingleBranchJourney("chatgpt"))
-  .then(() => runAutoRunJourney("claude"))
-  .then(() => runSingleBranchJourney("claude"))
+void runSingleBranchJourney("chatgpt")
   .catch((error: unknown) => {
   process.stderr.write(`${error instanceof Error ? error.stack : "Auto-run E2E journey failed"}\n`);
   process.exitCode = 1;

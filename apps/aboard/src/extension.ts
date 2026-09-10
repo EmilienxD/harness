@@ -10,6 +10,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
+import { createDelegationRoutes } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./claude/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -230,7 +231,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     log: (message) => output.appendLine(message),
     onDidChange: () => { for (const listener of activityListeners) listener(); },
   });
-  const launchFile = new FileLaunchConfigurationSource(join(workspaceRoot, ".abd", "launch.json"));
+  const launchFile = new FileLaunchConfigurationSource({
+    project: join(workspaceRoot, ".harness", "launch.json"),
+    global: join(homedir(), ".harness", "launch.json"),
+  });
   const claudePlatform = new ClaudeAgentPlatform({
     commandRunner: spawnCommandRunner(workspaceRoot),
     lifecycleAssets: {
@@ -305,7 +309,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (launchFileNotice !== undefined && notice.length === 0) void window.showInformationMessage("Launch configuration is valid. New and reopened sessions use it.");
       launchFileNotice = notice.length === 0 ? undefined : notice;
     } catch (error) {
-      const notice = error instanceof Error ? error.message : "Invalid .abd/launch.json";
+      const notice = error instanceof Error ? error.message : "Invalid .harness/launch.json";
       output.appendLine(`Launch configuration: ${notice}`);
       if (notice !== launchFileNotice) void window.showErrorMessage(`${notice}. New and reopened sessions are blocked until it is fixed.`);
       launchFileNotice = notice;
@@ -522,17 +526,30 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       createWorkerHookRoutes(workerHooks),
       createTerminalRoutes(terminals),
       createCommandRoutes(commandTerminals),
+      createDelegationRoutes({ launch: async (request) => {
+        const configured = await launchFile.getFor(request.provider, request.type);
+        return coordinator.launchManual({
+          requestId: request.requestId,
+          type: request.type,
+          prompt: request.prompt,
+          description: request.description,
+          isolation: { cwd: request.cwd, denyTools: [], writableRoots: [] },
+          executionMode: request.executionMode,
+          configuration: configured,
+        }, request.executionMode);
+      } }, { workspaceRoot }),
     ),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
     bridgeEnvironment = { port: bridge.port, token: bridge.token };
     try {
     const published = await commandEndpoint.publish({
-      version: 1,
+      version: 2,
       host: bridge.host,
       port: bridge.port,
       workspaceRoot,
       commandToken: bridge.commandToken,
+      delegationToken: bridge.delegationToken,
       pid: process.pid,
       activatedAt: new Date().toISOString(),
     });

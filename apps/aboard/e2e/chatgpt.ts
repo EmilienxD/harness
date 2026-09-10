@@ -251,7 +251,18 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
       ABOARD_AGENT_ID: agentId, ABOARD_SESSION_ID: expectedSessionId, ABOARD_AGENT_TYPE: agentType,
       ABOARD_RUNTIME_ROOT: runtimeRoot, ABOARD_WORKSPACE_ROOT: root, ABOARD_ATTENDED: "1",
     });
-    const started = await proof;
+    // A CLI that dies before its first observation leaves the proof to time
+    // out; its captured output is the only account of why.
+    let started: Awaited<typeof proof>;
+    try {
+      started = await proof;
+    } catch (error) {
+      const failed = await execution;
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)} Child exited ${failed.code}; `
+        + `stderr: ${redactProcessError(failed.stderr)}; output: ${redactProcessError(failed.stdout)}`,
+      );
+    }
     const actualSessionId = started.sessionId;
     if (resume === undefined && actualSessionId === PROVISIONAL) throw new Error("ChatGPT E2E did not bind the runtime-assigned Codex session id");
     if (resume !== undefined && actualSessionId !== resume) throw new Error("ChatGPT E2E resumed a different Codex session");
@@ -297,6 +308,11 @@ function spawnCaptured(file: string, args: readonly string[], cwd: string, env: 
 
 export { validateCodexCli } from "../../../e2e/core/codex.js";
 
-function redactProcessError(stderr: string): string {
-  return stderr.replace(/Bearer\s+\S+/giu, "Bearer [redacted]").replace(/aboard-e2e-[a-f0-9]+/giu, "[redacted]").slice(0, 1000).trim() || "no stderr";
+export function redactProcessError(captured: string): string {
+  if (captured.length === 0) return "no output";
+  const bytes = Buffer.byteLength(captured, "utf8");
+  if (/resolves to the script shim[\s\S]*cannot receive this command line unchanged/iu.test(captured)) {
+    return `unsupported Windows script shim (${bytes} bytes redacted)`;
+  }
+  return `${bytes} bytes redacted`;
 }

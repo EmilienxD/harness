@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harness.local/schemas/delegation-request.schema.json",
+  "title": "Delegation request frontmatter",
+  "description": "The YAML frontmatter of a request file. The prompt is the nonempty Markdown body that follows the frontmatter, not a frontmatter key.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task", "mode"],
+  "properties": {
+    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "general"]},
+    "provider": {
+      "description": "Defaults to the parent session's provider when omitted.",
+      "enum": ["claude", "chatgpt"]
+    },
+    "mode": {"enum": ["interactive", "auto"]}
+  }
+}
