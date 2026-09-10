@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 300,
+            "command": "uv",
+            "args": [
+              "run",
+              "--no-project",
+              "--no-managed-python",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

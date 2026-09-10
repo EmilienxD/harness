@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harness E2E"
+  short_description: "Run and extend deterministic real-CLI E2E"
+  default_prompt: "Use $harness-e2e to run or extend a deterministic Harness or Aboard E2E journey."

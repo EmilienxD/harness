@@ -82,10 +82,15 @@ uv run python scripts/update_references.py
 
 For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 
-## Tests and References
+## Tests
 
 - Run `uv run pytest` after catalogue or installer changes; the suite covers reconciliation and
   receipt-driven removal.
 - Use the `harness-e2e` skill for work under `e2e/` or `apps/aboard/e2e/`.
 - Use the `tdd` skill before adding unit or E2E tests.
 - Consult the mirrored official references for product behavior instead of relying on memory.
+
+## References
+
+- Use the `skill-prompt-engineering` skill when the user ask for writing/updating a SKILL.md file.
+- See docs/CHATGPT-REFERENCES.md and docs/CLAUDE-REFERENCES.md for up to date ChatGPT or Claude Code official documentation. Complete your search with websearches if you can't find what you are looking for there.
