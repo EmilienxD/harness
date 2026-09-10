@@ -16,15 +16,15 @@ installation and review/trust its project hooks when prompted. It requires `git`
 ## Use
 
 ```text
-/issue-review
-/issue-review focus on the error paths
+/review-issue
+/review-issue focus on the error paths
 ```
 
-Use `$issue-review` in ChatGPT, with any focus in the surrounding user text.
+Use `$review-issue` in ChatGPT, with any focus in the surrounding user text.
 
 ## The hook
 
-A synchronous `UserPromptSubmit` hook ignores unrelated prompts and, for an `issue-review`
+A synchronous `UserPromptSubmit` hook ignores unrelated prompts and, for an `review-issue`
 invocation:
 
 - Requires a completely clean worktree — staged, unstaged, and untracked changes all block

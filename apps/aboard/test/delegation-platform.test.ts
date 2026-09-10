@@ -293,7 +293,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
       requested.push(type);
       return {
         platform: "chatgpt",
-        settings: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+        settings: { shape: "skill", skillName: "review-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
@@ -306,7 +306,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.deepEqual(requested, ["reviewer"]);
-  assert.match(command, /\$issue-review/u);
+  assert.match(command, /\$review-issue/u);
   assert.match(command, /web_search="disabled"/u);
   assert.equal(lease.current()?.agentId, agentId);
   assert.equal(fleet.get(agentId)?.autoRunRestricted, true);
@@ -346,7 +346,7 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
       requested.push(type);
       return {
         platform: "chatgpt",
-        settings: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+        settings: { shape: "skill", skillName: "review-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
@@ -358,7 +358,7 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
   const handles = await coordinator.launchInteractive({ type: "reviewer", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
 
   assert.deepEqual(requested, ["reviewer"]);
-  assert.match(host.terminals[0]?.sent.at(-1) ?? "", /\$issue-review/u);
+  assert.match(host.terminals[0]?.sent.at(-1) ?? "", /\$review-issue/u);
   assert.equal(handles.sessionId, sessionId);
   const session = fleet.get(agentId);
   assert.equal(session?.attended, true);

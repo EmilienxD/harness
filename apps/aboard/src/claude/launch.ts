@@ -502,8 +502,8 @@ function assertLaunchShape(agentType: AgentType, configuration: LaunchConfigurat
   }
   if (agentType === "reviewer") {
     // One skill for both dispositions: AFK and HITL differ in orchestration.
-    if (configuration.shape !== "skill" || configuration.skillName !== "issue-review") {
-      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /issue-review");
+    if (configuration.shape !== "skill" || configuration.skillName !== "review-issue") {
+      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /review-issue");
     }
     return;
   }

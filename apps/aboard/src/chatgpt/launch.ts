@@ -17,7 +17,7 @@ export type ChatGptEffort = (typeof CHATGPT_EFFORTS)[number];
 export const CHATGPT_WEB_SEARCH_MODES = ["disabled", "cached", "indexed", "live"] as const;
 export type ChatGptWebSearch = (typeof CHATGPT_WEB_SEARCH_MODES)[number];
 
-export const CHATGPT_WORKER_SKILLS = ["address-issue", "issue-review"] as const;
+export const CHATGPT_WORKER_SKILLS = ["address-issue", "review-issue"] as const;
 
 export interface ChatGptDifficultyLaunchPolicy {
   readonly model: string;
@@ -216,8 +216,8 @@ function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfigura
       return;
     case "reviewer":
       // One skill for both dispositions: AFK and HITL differ in orchestration.
-      if (configuration.shape !== "skill" || configuration.skillName !== "issue-review") {
-        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $issue-review");
+      if (configuration.shape !== "skill" || configuration.skillName !== "review-issue") {
+        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $review-issue");
       }
       return;
   }

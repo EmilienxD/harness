@@ -284,7 +284,7 @@ export function commitSubject(title: string): string {
 }
 
 /** The two commit-signaling Harness worker skills, named as the user invokes them. */
-export type WorkerRole = "address-issue" | "issue-review";
+export type WorkerRole = "address-issue" | "review-issue";
 
 /**
  * What the run's checkout looked like immediately after a worker exited. It is
@@ -305,7 +305,7 @@ export interface WorkerRepositoryState {
 
 export type WorkerOutcome =
   | { readonly kind: "committed"; readonly sha: string }
-  /** Only `issue-review` may finish this way: it found nothing worth fixing. */
+  /** Only `review-issue` may finish this way: it found nothing worth fixing. */
   | { readonly kind: "unchanged" }
   | { readonly kind: "rejected"; readonly reason: string };
 
@@ -320,7 +320,7 @@ export function classifyWorkerResult(role: WorkerRole, state: WorkerRepositorySt
     };
   }
   if (state.headSha === state.startingSha) {
-    return role === "issue-review"
+    return role === "review-issue"
       ? { kind: "unchanged" }
       : { kind: "rejected", reason: `${role} finished without committing anything on top of ${state.startingSha.slice(0, 8)}` };
   }

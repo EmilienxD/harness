@@ -130,7 +130,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
 
 async function installHarnessWorkerSkills(configRoot: string): Promise<void> {
   const harnessRoot = resolve(__dirname, "..", "..", "..", "..", "..");
-  for (const name of ["address-issue", "issue-review"]) {
+  for (const name of ["address-issue", "review-issue"]) {
     const destination = join(configRoot, "skills", name, "SKILL.md");
     await mkdir(join(configRoot, "skills", name), { recursive: true });
     await copyFile(join(harnessRoot, "harness", name, "shared", "skills", name, "SKILL.md"), destination);

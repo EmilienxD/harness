@@ -1,7 +1,7 @@
 name = "aboard"
 version = "0.0.0"
 description = "Aboard VS Code integration for visible agents and Auto Run"
-dependencies = ["auto>=1.0.0,<2.0.0", "address-issue>=1.0.0,<2.0.0", "issue-review>=1.0.0,<2.0.0"]
+dependencies = ["auto>=1.0.0,<2.0.0", "address-issue>=1.0.0,<2.0.0", "review-issue>=1.0.0,<2.0.0"]
 
 [platforms.claude]
 status = "supported"

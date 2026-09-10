@@ -1,0 +1,30 @@
+name = "review-issue"
+version = "1.1.0"
+description = "Review the commit at HEAD on a clean checkout and commit straightforward fixes"
+requires = ["git"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/review-issue/README.md"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "shared/skills/review-issue/SKILL.md"
+dest = "review-issue/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "shared/hooks/review_issue_UserPromptSubmit_hook.py"
+dest = "review_issue_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "chatgpt/skills/review-issue/agents/openai.yaml"
+dest = "review-issue/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

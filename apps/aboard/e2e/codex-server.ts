@@ -224,11 +224,11 @@ async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenar
     return selected("implement");
   }
   if (text.includes("[E2E:chatgpt-review-changes]")) {
-    if (!text.includes("[E2E:issue-review-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the issue-review skill");
+    if (!text.includes("[E2E:review-issue-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-issue skill");
     return selected("review-changes");
   }
   if (text.includes("[E2E:chatgpt-review-approve]")) {
-    if (!text.includes("[E2E:issue-review-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the issue-review skill");
+    if (!text.includes("[E2E:review-issue-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-issue skill");
     return selected("review-approve");
   }
   if (text.includes("[E2E:chatgpt-success]")) return selected("attended");

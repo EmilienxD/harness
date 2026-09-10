@@ -63,7 +63,7 @@ test("launch.json resolves the four launch profiles", () => {
   const reviewerSettings = settings(reviewer);
   assert.equal(reviewerSettings.shape, "skill");
   if (reviewerSettings.shape !== "skill") assert.fail("reviewer must resolve to a skill launch");
-  assert.equal(reviewerSettings.skillName, "issue-review");
+  assert.equal(reviewerSettings.skillName, "review-issue");
 });
 
 test("manual delegation identities reuse the interactive profile but keep Web Search usable", () => {
@@ -168,7 +168,7 @@ test("launch.json routes ChatGPT reviewers through the review skill their dispos
   assert.deepEqual(parsed.diagnostics, []);
   assert.deepEqual(settings(parsed.value.configuration("reviewer")), {
     shape: "skill",
-    skillName: "issue-review",
+    skillName: "review-issue",
     declaredCommand: ["codex"],
     declaredModel: "by-difficulty",
     declaredEffort: "high",

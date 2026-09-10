@@ -5,7 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/issue_review_UserPromptSubmit_hook.py\"",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/review_issue_UserPromptSubmit_hook.py"],
             "timeout": 60
           }
         ]
