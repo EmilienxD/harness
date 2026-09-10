@@ -22,7 +22,14 @@ def test_first_party_tools_use_explicit_layered_payloads():
 
         for file_spec in manifest.get("files", []):
             layer = str(file_spec["src"]).replace("\\", "/").split("/", 1)[0]
-            assert layer in LAYERS, f"{tool.name}: {file_spec['src']} is outside a payload layer"
+            runtime_template = (
+                tool.name == "agent-launcher"
+                and str(file_spec["src"]).replace("\\", "/")
+                == "runtime/src/agent_launcher/templates"
+            )
+            assert layer in LAYERS or runtime_template, (
+                f"{tool.name}: {file_spec['src']} is outside a payload layer"
+            )
 
         for platform, declaration in platforms.items():
             fragment = declaration.get("fragment")

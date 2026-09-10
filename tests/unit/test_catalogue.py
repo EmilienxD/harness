@@ -9,7 +9,7 @@ from harness_cli import cli
 from harness_cli.cli import build_parser
 from harness_cli.installer import CatalogueInstaller, InstallError, Target
 from harness_cli.host_actions import HostActionError, PreparedAction, prepare
-from harness_cli.manifest import HostAction, discover, load_tool
+from harness_cli.manifest import HostAction, ManifestError, discover, load_tool
 from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore
 
@@ -127,6 +127,39 @@ def test_collision_is_detected_before_writing(tmp_path):
     with pytest.raises(InstallError, match="file collision"):
         manager(tools, target, tmp_path).reconcile({"a", "b"})
     assert not target.install_root.exists()
+
+
+def test_workspace_files_can_be_limited_to_project_installs(tmp_path):
+    root = tmp_path / "scoped"
+    root.mkdir()
+    (root / "payload").write_text("starter")
+    (root / "harness.toml").write_text(
+        'name="scoped"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        '[[files]]\nsrc="payload"\ndest=".harness/agent-launcher/config.py"\n'
+        'root="workspace"\nscopes=["project"]\nstarter=true\n'
+    )
+    tool = load_tool(root)
+
+    assert [item.dest for item in tool.expand("claude", "project")] == [
+        ".harness/agent-launcher/config.py"
+    ]
+    assert tool.expand("claude", "user") == []
+
+
+@pytest.mark.parametrize("scopes", ['"project"', '["machine"]', '[]'])
+def test_manifest_rejects_invalid_file_scopes(tmp_path, scopes):
+    root = tmp_path / "invalid-scopes"
+    root.mkdir()
+    (root / "payload").write_text("x")
+    (root / "harness.toml").write_text(
+        'name="invalid-scopes"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        f'[[files]]\nsrc="payload"\ndest="payload"\nscopes={scopes}\n'
+    )
+
+    with pytest.raises(ManifestError, match="files.scopes"):
+        load_tool(root)
 
 
 def test_receipt_driven_uninstall_keeps_modified_files(tmp_path):
@@ -302,7 +335,7 @@ def test_every_catalogue_manifest_loads():
         "building": {"issues", "tdd"},
         "shipping": {"commit"},
         "productivity": {
-            "caveman", "command-aliases", "create-skill", "handoff", "subagents",
+            "agent-launcher", "caveman", "command-aliases", "create-skill", "handoff", "subagents",
             "text-replacements", "zoom-out",
         },
         "guards": {
@@ -312,6 +345,7 @@ def test_every_catalogue_manifest_loads():
         },
         "extension": {"aboard", "auto"},
         "deprecated": {"improve-codebase-architecture", "senior-advisor"},
+        "setup-git-worktree-maker": {"setup-git-worktree-maker"},
     }
     actual_categories = {}
     catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")

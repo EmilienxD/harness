@@ -34,9 +34,9 @@ class PlatformSupport:
 class FileSpec:
     """One source-to-destination copy instruction.
 
-    ``root`` is a logical platform root: ``platform`` (``.claude`` or
-    ``.codex``), ``skills`` (``.claude/skills`` or ``.agents/skills``), or
-    ``hooks``.
+    ``root`` is a logical destination root: ``workspace``, ``platform``
+    (``.claude`` or ``.codex``), ``skills`` (``.claude/skills`` or
+    ``.agents/skills``), or ``hooks``.
     ``platforms`` may select payload variants; omitted entries are shared by
     every platform the tool declares supported.
     """
@@ -47,9 +47,12 @@ class FileSpec:
     platforms: tuple[Platform, ...] | None = None
     executable: bool = False
     starter: bool = False
+    scopes: tuple[str, ...] | None = None
 
-    def applies_to(self, platform: Platform) -> bool:
-        return self.platforms is None or platform in self.platforms
+    def applies_to(self, platform: Platform, scope: str) -> bool:
+        return (self.platforms is None or platform in self.platforms) and (
+            self.scopes is None or scope in self.scopes
+        )
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,7 @@ class ExpandedFile:
     root: str
     executable: bool
     starter: bool
+
 
 @dataclass(frozen=True)
 class PackageDependency:
@@ -104,13 +108,15 @@ class Tool:
     def fragment_for(self, platform: Platform | str = Platform.CLAUDE) -> dict:
         return self.platform_fragments.get(Platform.parse(platform), {})
 
-    def expand(self, platform: Platform | str = Platform.CLAUDE) -> list[ExpandedFile]:
+    def expand(
+        self, platform: Platform | str = Platform.CLAUDE, scope: str = "project"
+    ) -> list[ExpandedFile]:
         """Flatten applicable file specs into concrete payload files."""
         selected = Platform.parse(platform)
         out: list[ExpandedFile] = []
         seen: set[tuple[str, str]] = set()
         for spec in self.files:
-            if not spec.applies_to(selected):
+            if not spec.applies_to(selected, scope):
                 continue
             src = self.resolve(spec)
             if not src.exists():
@@ -281,6 +287,15 @@ def load_tool(directory: Path) -> Tool:
             platforms = tuple(Platform.parse(p) for p in selected) if selected is not None else None
         except (TypeError, ValueError) as exc:
             raise ManifestError(f"{manifest_path}: invalid files.platforms value") from exc
+        raw_scopes = entry.get("scopes")
+        if raw_scopes is not None and (
+            not isinstance(raw_scopes, list)
+            or not raw_scopes
+            or any(scope not in {"project", "user"} for scope in raw_scopes)
+        ):
+            raise ManifestError(
+                f"{manifest_path}: files.scopes must contain only 'project' and/or 'user'"
+            )
         files.append(
             FileSpec(
                 src=entry["src"],
@@ -289,6 +304,7 @@ def load_tool(directory: Path) -> Tool:
                 platforms=platforms,
                 executable=bool(entry.get("executable")),
                 starter=bool(entry.get("starter")),
+                scopes=tuple(raw_scopes) if raw_scopes is not None else None,
             )
         )
 

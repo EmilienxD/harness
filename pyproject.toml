@@ -40,4 +40,7 @@ include = ["src/harness_cli", "harness", "tests", "README.md", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["harness/productivity/subagents/runtime/src"]
+pythonpath = [
+    "harness/productivity/subagents/runtime/src",
+    "harness/productivity/agent-launcher/runtime/src",
+]

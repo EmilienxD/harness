@@ -20,7 +20,7 @@ from harness_cli.host_actions import HostActionError, PreparedAction, apply as a
 from harness_cli.host_actions import prepare as prepare_host_action
 from harness_cli.host_actions import is_installed as host_action_is_installed
 from harness_cli.host_actions import uninstall as uninstall_host_action
-from harness_cli.manifest import HostAction, SupportStatus, Tool
+from harness_cli.manifest import ExpandedFile, HostAction, SupportStatus, Tool
 from harness_cli.platforms import Platform, PlatformAdapter, get_adapter
 from harness_cli.receipts import ReceiptStore
 
@@ -215,6 +215,10 @@ class CatalogueInstaller:
     def installation(self) -> dict[str, Any]:
         return self.store.installation(self.target.scope_root, self.target.platform.value, create=True)
 
+    def _payloads(self, tool: Tool) -> list[ExpandedFile]:
+        scope = "user" if self.target.is_user else "project"
+        return tool.expand(self.target.platform, scope)
+
     def explicit_packages(self) -> set[str]:
         return {name for name, receipt in self.installation["packages"].items() if receipt.get("explicit") is True}
 
@@ -295,7 +299,7 @@ class CatalogueInstaller:
                 for file in receipt.get("files", []):
                     claimed[file["path"]] = owner
         for item in resolved:
-            for payload in item.tool.expand(self.target.platform):
+            for payload in self._payloads(item.tool):
                 path = str(self.target.destination_path(payload.root, payload.dest).resolve())
                 owner = claimed.get(path)
                 if owner is not None and owner != item.tool.name:
@@ -310,7 +314,11 @@ class CatalogueInstaller:
                     None,
                 ) if receipt else None
                 if owned is not None:
-                    if receipt.get("version") != item.tool.version and sha256(destination) != owned.get("digest"):
+                    if (
+                        receipt.get("version") != item.tool.version
+                        and sha256(destination) != owned.get("digest")
+                        and not payload.starter
+                    ):
                         raise InstallError(
                             f"cannot safely upgrade {item.tool.name}; installed file was modified: {destination}"
                         )
@@ -329,7 +337,7 @@ class CatalogueInstaller:
         local_paths.update(
             self.target.destination_path(payload.root, payload.dest)
             for item in resolved
-            for payload in item.tool.expand(self.target.platform)
+            for payload in self._payloads(item.tool)
         )
         try:
             transaction = _LocalTransaction(local_paths, self.store)
@@ -439,17 +447,17 @@ class CatalogueInstaller:
     ) -> None:
         tool = item.tool
         files: list[dict[str, Any]] = []
-        for payload in tool.expand(self.target.platform):
+        for payload in self._payloads(tool):
             destination = self.target.destination_path(payload.root, payload.dest)
+            if destination.exists() and payload.starter:
+                files.append({
+                    "path": str(destination.resolve()),
+                    "digest": sha256(destination),
+                    "starter": True,
+                    "owned": False,
+                })
+                continue
             if destination.exists() and sha256(destination) != sha256(payload.source):
-                if payload.starter:
-                    files.append({
-                        "path": str(destination.resolve()),
-                        "digest": sha256(destination),
-                        "starter": True,
-                        "owned": False,
-                    })
-                    continue
                 raise InstallError(f"refusing to overwrite unowned file {destination}")
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(payload.source, destination)

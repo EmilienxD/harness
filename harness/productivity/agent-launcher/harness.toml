@@ -1,0 +1,27 @@
+name = "agent-launcher"
+version = "1.0.0"
+description = "Project-configurable launcher for Claude Code and Codex"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "claude/skills/extend-claude-system-prompt"
+dest = "extend-claude-system-prompt"
+root = "skills"
+platforms = ["claude"]
+
+[[files]]
+src = "runtime/src/agent_launcher/templates"
+dest = ".harness/agent-launcher"
+root = "workspace"
+scopes = ["project"]
+starter = true
+
+[[actions]]
+type = "uv-tool"
+package = "harness-agent-launcher"
+source = "git+https://github.com/EmilienxD/harness@v0.5.0#subdirectory=harness/productivity/agent-launcher/runtime"
