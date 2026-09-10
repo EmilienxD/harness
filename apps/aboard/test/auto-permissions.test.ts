@@ -5,6 +5,9 @@ import { AUTO_RUN_DISALLOWED_TOOLS } from "../src/auto/permissions.js";
 
 test("auto-run denies mutating git and GitHub commands without denying their read surfaces", () => {
   for (const rule of [
+    "Agent",
+    "WebSearch",
+    "WebFetch",
     "Bash(git worktree*)",
     "Bash(git push*)",
     "Bash(git revert*)",

@@ -4,6 +4,10 @@
  * reach a remote, or mutate GitHub stays denied; aboard owns those.
  */
 export const AUTO_RUN_DISALLOWED_TOOLS: readonly string[] = [
+  "Agent",
+  "WebSearch",
+  "WebFetch",
+
   "Bash(git -*)",
   "Bash(git am*)",
   "Bash(git apply*)",

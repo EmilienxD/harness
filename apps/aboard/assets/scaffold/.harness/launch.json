@@ -4,8 +4,7 @@
   "command": ["claude"],
   "interactive": {
     "model": "inherit",
-    "effort": "inherit",
-    "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+    "effort": "inherit"
   },
   "explore": {
     "model": "haiku",
@@ -13,12 +12,10 @@
   },
   "implementer": {
     "model": "by-difficulty",
-    "effort": "by-difficulty",
-    "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+    "effort": "by-difficulty"
   },
   "reviewer": {
     "model": "by-difficulty",
-    "effort": "by-difficulty",
-    "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+    "effort": "by-difficulty"
   }
 }

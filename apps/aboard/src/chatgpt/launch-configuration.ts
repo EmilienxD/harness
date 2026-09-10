@@ -22,7 +22,7 @@ interface Profile {
   readonly subagents?: (typeof SUBAGENT_MODES)[number];
 }
 
-const WORKER_DEFAULTS: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, webSearch: "disabled", subagents: "denied" };
+const WORKER_DEFAULTS: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY };
 
 const DEFAULT_PROFILES: Readonly<Record<ProfileName, Profile>> = {
   interactive: {},

@@ -7,8 +7,6 @@ const PROFILE_NAMES = ["interactive", "explore", "implementer", "reviewer"] as c
 const ROOT_FIELDS = new Set(["version", "platform", "command", "stopWaitHours", ...PROFILE_NAMES]);
 const PROFILE_FIELDS = new Set(["model", "effort", "deniedTools"]);
 const MODELS = ["haiku", "sonnet", "opus"] as const;
-const DEFAULT_DENIED_TOOLS = ["Agent", "WebSearch", "WebFetch"] as const;
-const WEB_TOOLS: ReadonlySet<string> = new Set(["WebSearch", "WebFetch"]);
 
 type ProfileName = (typeof PROFILE_NAMES)[number];
 type Model = (typeof MODELS)[number] | "inherit" | typeof BY_DIFFICULTY;
@@ -16,10 +14,10 @@ type Effort = EffortLevel | "inherit" | typeof BY_DIFFICULTY;
 interface Profile { readonly model: Model; readonly effort: Effort; readonly deniedTools: readonly string[]; }
 
 const DEFAULT_PROFILES: Readonly<Record<ProfileName, Profile>> = {
-  interactive: { model: "inherit", effort: "inherit", deniedTools: DEFAULT_DENIED_TOOLS },
+  interactive: { model: "inherit", effort: "inherit", deniedTools: [] },
   explore: { model: "haiku", effort: "low", deniedTools: [] },
-  implementer: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: DEFAULT_DENIED_TOOLS },
-  reviewer: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: DEFAULT_DENIED_TOOLS },
+  implementer: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: [] },
+  reviewer: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: [] },
 };
 
 function object(value: unknown, path: string): Record<string, unknown> {
@@ -66,11 +64,7 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
       declaredCommand: this.command,
       ...(profile.model === "inherit" ? {} : { declaredModel: profile.model }),
       ...(profile.effort === "inherit" ? {} : { declaredEffort: profile.effort as DeclaredEffort }),
-      // The interactive profile denies web tools by default; a Web Search child
-      // exists to use them, so that one denial cannot apply to this identity.
-      deniedTools: type === "Web Search"
-        ? profile.deniedTools.filter((rule) => !WEB_TOOLS.has(rule))
-        : profile.deniedTools,
+      deniedTools: profile.deniedTools,
     };
     let settings: LaunchConfiguration;
     if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(type)) settings = { shape: "default", ...common };

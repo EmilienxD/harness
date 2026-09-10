@@ -74,6 +74,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   const configuration = request.configuration as ChatGptLaunchConfiguration;
   const explore = request.agentType === "Explore";
   const worker = isAutoRunWorkerType(request.agentType);
+  const autoRunRestricted = request.autoRunRestricted === true;
   assertShape(request.agentType, configuration);
   if (!SAFE_ID.test(request.agentId)) throw new LaunchPlanError("unsafe-agent-id", `Agent id is not safe as a file name: ${request.agentId}`);
   if (!UUID.test(request.sessionId)) throw new LaunchPlanError("invalid-session-id", kind === "start" ? "Provisional session id must be a UUID minted before launch" : "Saved session id must be a UUID");
@@ -95,10 +96,10 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     "-c",
     `hooks.${event}=[${entries.join(",")}]`,
   ];
-  const subagentsDenied = worker && configuration.subagents !== "allowed";
-  const denyCommands = worker ? commandDenyPatterns(request.disallowedTools) : [];
+  const subagentsDenied = autoRunRestricted || configuration.subagents === "denied";
+  const denyCommands = autoRunRestricted ? commandDenyPatterns(request.disallowedTools) : [];
   const readOnlyFiles = fileWriteRestrictionPatterns(request.disallowedTools);
-  const guard: RuntimeFile | undefined = worker
+  const guard: RuntimeFile | undefined = autoRunRestricted
     ? {
         agentId: request.agentId,
         relativePath: `${runtimeDirectory}/guard.json`,
@@ -114,7 +115,9 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     "-c", "features.hooks=true",
     ...(explore && readOnlyFiles.length === 0 ? READ_ONLY_POLICY : []),
     ...permissionProfile,
-    ...(worker ? ["-c", `web_search=${JSON.stringify(configuration.webSearch ?? "disabled")}`] : []),
+    ...(autoRunRestricted
+      ? ["-c", 'web_search="disabled"']
+      : configuration.webSearch === undefined ? [] : ["-c", `web_search=${JSON.stringify(configuration.webSearch)}`]),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
     ...config("SessionStart", [hookEntry("session-start", "startup|resume"), hookEntry("worker-reground", "compact")]),
     ...config("SessionEnd", [hookEntry("session-end")]),

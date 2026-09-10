@@ -203,6 +203,8 @@ interface CommonPlanRequest {
   readonly agentType: AgentType;
   readonly shell: ShellKind;
   readonly attended?: boolean | undefined;
+  /** True only when Aboard's Auto Run owns and controls this session. */
+  readonly autoRunRestricted?: true | undefined;
   readonly model?: string | undefined;
   readonly effort?: EffortLevel | undefined;
   readonly difficulty?: IssueDifficulty | undefined;

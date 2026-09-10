@@ -13,8 +13,7 @@ started.
   "stopWaitHours": 24,
   "interactive": {
     "model": "inherit",
-    "effort": "inherit",
-    "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+    "effort": "inherit"
   },
   "explore": { "model": "haiku", "effort": "low" },
   "implementer": { "model": "by-difficulty", "effort": "by-difficulty" },
@@ -25,12 +24,16 @@ started.
 `platform` is required and is either `claude` or `chatgpt`; it is never inferred from `command`.
 The four profiles configure ordinary sessions, read-only Explore children, and the two Auto Run
 worker roles. `inherit` leaves model or effort selection to the provider. `by-difficulty` is valid
-only for worker profiles. ChatGPT worker profiles additionally accept `webSearch` and `subagents`.
+only for worker profiles. Claude profiles additionally accept `deniedTools`. ChatGPT worker profiles
+accept `webSearch` and `subagents`; when omitted, the user's native Codex settings are inherited.
 
 The manual delegation identities (`Prototype`, `Web Search`, `Brainstorm`, and `General`) use the
-`interactive` profile. A Claude `Web Search` child drops `WebSearch` and `WebFetch` from that
-profile's denials, because those are the tools the identity exists to use; every other denial,
-including `Agent`, still applies.
+`interactive` profile. Aboard does not remove built-in agent or web tools from interactive or manual
+sessions. Explicit profile settings are preserved.
+
+Auto Run is extension-controlled: implementers and reviewers always disable built-in subagents and web
+search, regardless of permissive profile settings. Its Git/GitHub and worktree restrictions are also
+reapplied when an Auto Run conversation resumes.
 
 `stopWaitHours` controls how long a parent Stop hook waits for a successful delegated result and
 defaults to 24. The wait does not retain a database transaction. Failed or cancelled children do

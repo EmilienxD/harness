@@ -15,10 +15,10 @@ const defaults = `{
   "version": 2,
   "platform": "claude",
   "command": ["claude"],
-  "interactive": { "model": "inherit", "effort": "inherit", "deniedTools": ["Agent", "WebSearch", "WebFetch"] },
+  "interactive": { "model": "inherit", "effort": "inherit" },
   "explore": { "model": "haiku", "effort": "low" },
-  "implementer": { "model": "by-difficulty", "effort": "by-difficulty", "deniedTools": ["Agent", "WebSearch", "WebFetch"] },
-  "reviewer": { "model": "by-difficulty", "effort": "by-difficulty", "deniedTools": ["Agent", "WebSearch", "WebFetch"] }
+  "implementer": { "model": "by-difficulty", "effort": "by-difficulty" },
+  "reviewer": { "model": "by-difficulty", "effort": "by-difficulty" }
 }`;
 
 function settings(value: { readonly settings: unknown }): LaunchConfiguration {
@@ -34,7 +34,7 @@ test("launch.json resolves the four launch profiles", () => {
     settings: {
       shape: "default",
       declaredCommand: ["claude"],
-      deniedTools: ["Agent", "WebSearch", "WebFetch"],
+      deniedTools: [],
     },
   });
   assert.deepEqual(parsed.value.configuration("Explore"), {
@@ -56,7 +56,7 @@ test("launch.json resolves the four launch profiles", () => {
       declaredCommand: ["claude"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
-      deniedTools: ["Agent", "WebSearch", "WebFetch"],
+      deniedTools: [],
     },
   });
   const reviewer = parsed.value.configuration("reviewer");
@@ -66,7 +66,7 @@ test("launch.json resolves the four launch profiles", () => {
   assert.equal(reviewerSettings.skillName, "review-issue");
 });
 
-test("manual delegation identities reuse the interactive profile but keep Web Search usable", () => {
+test("manual delegation identities reuse the unrestricted interactive profile", () => {
   const parsed = parseLaunchFile(defaults);
 
   for (const type of ["Prototype", "Brainstorm", "General"] as const) {
@@ -75,7 +75,7 @@ test("manual delegation identities reuse the interactive profile but keep Web Se
       settings: {
         shape: "default",
         declaredCommand: ["claude"],
-        deniedTools: ["Agent", "WebSearch", "WebFetch"],
+        deniedTools: [],
       },
     });
   }
@@ -84,9 +84,21 @@ test("manual delegation identities reuse the interactive profile but keep Web Se
     settings: {
       shape: "default",
       declaredCommand: ["claude"],
-      deniedTools: ["Agent"],
+      deniedTools: [],
     },
   });
+});
+
+test("Claude preserves user-configured tool denials for every manual identity", () => {
+  const parsed = parseLaunchFile(`{
+    "version": 2,
+    "platform": "claude",
+    "interactive": { "deniedTools": ["Agent", "WebSearch", "WebFetch"] }
+  }`);
+
+  for (const type of ["interactive", "Prototype", "Web Search", "Brainstorm", "General"] as const) {
+    assert.deepEqual(settings(parsed.value.configuration(type)).deniedTools, ["Agent", "WebSearch", "WebFetch"]);
+  }
 });
 
 test("launch.json selects an attended ChatGPT session with its Codex command", () => {
@@ -135,7 +147,7 @@ test("launch.json selects a read-only ChatGPT Explore session and still refuses 
   );
 });
 
-test("launch.json routes a ChatGPT implementer through the implement skill with its own worker policy", () => {
+test("launch.json routes a ChatGPT implementer without overriding native tool settings", () => {
   const parsed = parseLaunchFile(`{
     "version": 2,
     "platform": "chatgpt",
@@ -151,8 +163,6 @@ test("launch.json routes a ChatGPT implementer through the implement skill with 
       declaredCommand: ["codex"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
-      webSearch: "disabled",
-      subagents: "denied",
     },
   });
 });
@@ -172,8 +182,6 @@ test("launch.json routes ChatGPT reviewers through the review skill their dispos
     declaredCommand: ["codex"],
     declaredModel: "by-difficulty",
     declaredEffort: "high",
-    webSearch: "disabled",
-    subagents: "denied",
   });
   // AFK and HITL are orchestration modes, so both resolve to the one skill.
   const implementer = settings(parsed.value.configuration("implementer"));
