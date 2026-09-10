@@ -1,17 +1,19 @@
 # Issues
 
-Everything for getting work out of a conversation and onto the GitHub tracker: one idea → one
-reviewed issue, a whole plan → a dependency-linked batch, an audit → one evidence-preserving issue
-per finding, or the current conversation → a spec (in chat, or as an issue). Nothing reaches the
-tracker before a human has looked at it.
+Everything for the GitHub issue lifecycle: turn conversations, plans, and audits into reviewed tracker
+items; implement an issue on a clean checkout; and review the resulting commit. Nothing drafted in a
+conversation reaches the tracker before a human has looked at it.
 
-One install ships six drafting/publishing skills, plus Claude Code's `/save-as-issue`
-command and response-cache hooks. Claude Code remains
+One install ships the six drafting/publishing skills, the `address-issue` and `review-issue` workers,
+plus Claude Code's `/save-as-issue` command and response-cache hooks. Claude Code remains
 the default target; pass `--platform chatgpt` for the native ChatGPT payload:
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
+
+The two worker `SKILL.md` files are user-owned starter placeholders: Harness creates their empty
+bodies only when absent and preserves any prompts written into them on later upgrades.
 
 ## Problem
 
@@ -194,13 +196,17 @@ additional API calls**.
 │   ├── publish-issues/SKILL.md         # user-invocable, empty body (hook does the work)
 │   ├── save-as-issue/SKILL.md          # publish the latest final response, no model turn
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
-│   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
+│   ├── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
+│   ├── address-issue/SKILL.md          # implement and commit an issue
+│   └── review-issue/SKILL.md           # review HEAD and commit straightforward fixes
 └── hooks/
     ├── publish_issues_UserPromptSubmit_hook.py  # drafting context, command dispatch, publishing
+    ├── address_issue_UserPromptSubmit_hook.py   # clean-tree check and issue context
+    ├── review_issue_UserPromptSubmit_hook.py    # clean-tree check and HEAD metadata
     └── save_as_issue.py                        # response caching and direct report publishing
 ```
 
-The hook is registered on `UserPromptSubmit`. It intercepts `/save-as-issue`, `/publish-issues`, and
+The publishing hook is registered on `UserPromptSubmit`. It intercepts `/save-as-issue`, `/publish-issues`, and
 `/publish-issue`, and adds setup context for the four explicit drafting skills. Every other prompt
 passes through untouched (exit 0) — carrying the pending-publish notice, if there is one — so it is
 safe alongside other `UserPromptSubmit` hooks. It is registered with `"timeout": 300`
@@ -309,14 +315,14 @@ For ChatGPT:
 uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
-That installs skills under `.agents/skills/`, the shared publishing core and a thin native adapter
-under `.codex/hooks/`, and registers the adapter in `.codex/hooks.json`. Review and trust the hook
-definition when ChatGPT prompts you. Its `UserPromptSubmit` adapter uses the same shared drafting
+That installs skills under `.agents/skills/`, the shared hooks and publishing core under
+`.codex/hooks/`, and registers them in `.codex/hooks.json`. Review and trust the hook definitions
+when ChatGPT prompts you. Its publishing adapter uses the same shared drafting
 setup as Claude Code, deriving a stable UUID-shaped batch id from the ChatGPT thread id and injecting
 the resulting values as developer context. The adapter also delegates publishing to the shared core,
 including 65,536-character splitting and resumable continuation comments.
 
-That copies the six skills and the hook into `.claude/` and merges the hook registration below
+That copies the complete issues skill set and its hooks into `.claude/` and merges the hook registrations
 into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry` first to
 see the exact file list and settings diff. See the [repo README](../../README.md) for `--user`,
 `--local`, and `uninstall`.
@@ -324,9 +330,9 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `shared/hooks/issues_core.py`, `claude/hooks/save_as_issue.py`, and
-   `claude/hooks/publish_issues_UserPromptSubmit_hook.py` into your repository's `.claude/hooks/`,
-   then copy the directories under `claude/skills/` into `.claude/skills/`. If you already have a
+1. Copy the scripts under `shared/hooks/` and `claude/hooks/` into your repository's `.claude/hooks/`,
+   then copy the skill directories under `shared/skills/` and `claude/skills/` into `.claude/skills/`.
+   If you already have a
    `.claude/settings.json`, merge each hook event array below into your existing file
    instead of overwriting it — Claude Code merges hook arrays, not whole files, so an overwrite would
    silently drop any hooks you already had.
@@ -351,6 +357,18 @@ see the exact file list and settings diff. See the [repo README](../../README.md
             "command": "python",
             "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"],
             "timeout": 300
+          },
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/address_issue_UserPromptSubmit_hook.py"],
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/review_issue_UserPromptSubmit_hook.py"],
+            "timeout": 60
           }
         ]
       }
@@ -409,6 +427,14 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 
 /to-spec-draft-issue
   → same synthesis, written to .issues-gateway/{session-id}/issue-{n}.md for /publish-issues
+
+/address-issue 42
+  → verifies a clean checkout, loads bounded issue context, implements and verifies the issue,
+    then creates exactly one commit
+
+/review-issue [optional focus]
+  → verifies a clean checkout, reviews HEAD, fixes straightforward findings, and creates at most
+    one commit
 ```
 
 The spec-to-sub-issues loop, end to end:

@@ -87,8 +87,10 @@ def test_dependencies_install_transitively_and_receipts_track_ownership(tmp_path
     resolved, _ = selected.plan({"aboard"})
     receipts = {item.tool.name: item.explicit for item in resolved}
     assert receipts["aboard"] is True
-    for dependency in ("auto", "address-issue", "review-issue"):
+    for dependency in ("auto", "issues"):
         assert receipts[dependency] is False
+    assert "address-issue" not in receipts
+    assert "review-issue" not in receipts
 
 
 def test_dependency_cycle_is_rejected(tmp_path):
@@ -291,8 +293,10 @@ def test_later_failure_restores_package_removed_earlier_in_reconciliation(monkey
 
 def test_every_catalogue_manifest_loads():
     tools = discover()
-    assert {"aboard", "subagents", "address-issue", "review-issue"} <= tools.keys()
-    assert {"harness-cli", "communication-hooks"}.isdisjoint(tools)
+    assert {"aboard", "subagents", "issues"} <= tools.keys()
+    assert {
+        "address-issue", "review-issue", "harness-cli", "communication-hooks",
+    }.isdisjoint(tools)
 
 
 def test_vsix_is_verified_before_host_install(monkeypatch):

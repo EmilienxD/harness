@@ -84,8 +84,14 @@ def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeyp
     assert captured["sessionId"] == "runtime-assigned"
 
 
-def test_worker_skill_bodies_are_empty_placeholders():
-    tools = discover()
+def test_issues_bundle_contains_both_empty_worker_skill_placeholders():
+    tool = discover()["issues"]
+    destinations = {
+        entry.dest: entry
+        for entry in tool.expand("claude")
+    }
     for name in ("address-issue", "review-issue"):
-        text = tools[name].expand("claude")[0].source.read_text(encoding="utf-8")
+        entry = destinations[f"{name}/SKILL.md"]
+        text = entry.source.read_text(encoding="utf-8")
         assert text.rstrip().endswith("---")
+        assert entry.starter is True

@@ -16,7 +16,7 @@ from harness_cli.receipts import ReceiptStore
 
 HOOK = (
     Path(__file__).resolve().parents[1]
-    / "harness/address-issue/shared/hooks/address_issue_UserPromptSubmit_hook.py"
+    / "harness/issues/shared/hooks/address_issue_UserPromptSubmit_hook.py"
 )
 spec = importlib.util.spec_from_file_location("address_issue_hook", HOOK)
 hook = importlib.util.module_from_spec(spec)
@@ -365,7 +365,7 @@ def test_dangling_relations_are_skipped(tmp_path, monkeypatch, capsys):
 @pytest.mark.parametrize("platform", ["claude", "chatgpt"])
 def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     tools = discover()
-    name = "address-issue"
+    name = "issues"
     target = Target.for_project(tmp_path / "project", platform=platform)
     CatalogueInstaller(
         {name: tools[name]}, target, ReceiptStore.load(tmp_path / "receipts.json"),
@@ -373,6 +373,7 @@ def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     skill = target.destination_path("skills", "address-issue/SKILL.md")
     assert skill.read_text(encoding="utf-8").rstrip().endswith("---")
     assert target.destination_path("hooks", "address_issue_UserPromptSubmit_hook.py").exists()
+    assert "address_issue_UserPromptSubmit_hook.py" in target.settings_path.read_text(encoding="utf-8")
     assert (
         target.destination_path("skills", "address-issue/agents/openai.yaml").exists()
         is (platform == "chatgpt")

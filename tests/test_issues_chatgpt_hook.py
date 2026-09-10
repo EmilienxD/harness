@@ -42,11 +42,15 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
 
     assert (tmp_path / ".codex/hooks/issues_core.py").is_file()
     assert (tmp_path / ".codex/hooks/issues_ChatGPT_hook.py").is_file()
+    assert (tmp_path / ".codex/hooks/address_issue_UserPromptSubmit_hook.py").is_file()
+    assert (tmp_path / ".codex/hooks/review_issue_UserPromptSubmit_hook.py").is_file()
     for name in (
+        "address-issue",
         "draft-audit-issues",
         "draft-issue",
         "draft-issues",
         "publish-issues",
+        "review-issue",
         "to-spec",
         "to-spec-draft-issue",
     ):
@@ -56,9 +60,11 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
     assert not (tmp_path / ".claude").exists()
 
     hooks = json.loads((tmp_path / ".codex/hooks.json").read_text(encoding="utf-8"))
-    command = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
-    assert "issues_ChatGPT_hook.py" in command
-    assert "${" not in command
+    commands = [hook["command"] for hook in hooks["hooks"]["UserPromptSubmit"][0]["hooks"]]
+    assert any("issues_ChatGPT_hook.py" in command for command in commands)
+    assert any("address_issue_UserPromptSubmit_hook.py" in command for command in commands)
+    assert any("review_issue_UserPromptSubmit_hook.py" in command for command in commands)
+    assert all("${" not in command for command in commands)
 
 
 def test_drafting_prompt_injects_stable_session_and_next_index(

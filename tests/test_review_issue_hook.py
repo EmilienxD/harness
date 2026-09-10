@@ -16,7 +16,7 @@ from harness_cli.receipts import ReceiptStore
 
 HOOK = (
     Path(__file__).resolve().parents[1]
-    / "harness/review-issue/shared/hooks/review_issue_UserPromptSubmit_hook.py"
+    / "harness/issues/shared/hooks/review_issue_UserPromptSubmit_hook.py"
 )
 spec = importlib.util.spec_from_file_location("review_issue_hook", HOOK)
 hook = importlib.util.module_from_spec(spec)
@@ -154,7 +154,7 @@ def test_missing_repository_blocks(tmp_path, monkeypatch, capsys):
 @pytest.mark.parametrize("platform", ["claude", "chatgpt"])
 def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     tools = discover()
-    name = "review-issue"
+    name = "issues"
     target = Target.for_project(tmp_path / "project", platform=platform)
     CatalogueInstaller(
         {name: tools[name]}, target, ReceiptStore.load(tmp_path / "receipts.json"),
@@ -162,6 +162,7 @@ def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     skill = target.destination_path("skills", "review-issue/SKILL.md")
     assert skill.read_text(encoding="utf-8").rstrip().endswith("---")
     assert target.destination_path("hooks", "review_issue_UserPromptSubmit_hook.py").exists()
+    assert "review_issue_UserPromptSubmit_hook.py" in target.settings_path.read_text(encoding="utf-8")
     assert (
         target.destination_path("skills", "review-issue/agents/openai.yaml").exists()
         is (platform == "chatgpt")
