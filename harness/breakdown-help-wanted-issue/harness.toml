@@ -1,0 +1,30 @@
+name = "breakdown-help-wanted-issue"
+version = "1.2.0"
+description = "Explore and clarify a request into a chat report for user validation"
+requires = ["git", "gh"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/breakdown-help-wanted-issue/README.md"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "shared/skills/breakdown-help-wanted-issue/SKILL.md"
+dest = "breakdown-help-wanted-issue/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "shared/hooks/breakdown_help_wanted_issue_UserPromptSubmit_hook.py"
+dest = "breakdown_help_wanted_issue_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "chatgpt/skills/breakdown-help-wanted-issue/agents/openai.yaml"
+dest = "breakdown-help-wanted-issue/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
