@@ -23,6 +23,13 @@ npm install
 npm run check
 npm test
 npm run e2e:on-edit-block
+npm run e2e:no-new-documents
 ```
 
 The `on-edit-block` journey stages the actual shipped hook in a temporary project, launches the installed Claude CLI, and proves that the hook denies an edit until its required guide has been supplied, after which the retry succeeds.
+
+The `no-new-documents` journey stages the actual shipped cross-platform hook,
+launches the installed Claude Code and Codex CLIs against authenticated
+loopback inference servers, and proves that a new file under a nested `docs/`
+directory is denied while the final response reports the proposed document and
+its rationale.

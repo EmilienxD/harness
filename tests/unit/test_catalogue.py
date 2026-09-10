@@ -301,9 +301,12 @@ def test_every_catalogue_manifest_loads():
         "planning": {"audit", "breakdown-help-wanted-issue", "grill-me", "prototype", "websearch"},
         "building": {"issues", "tdd"},
         "shipping": {"commit"},
-        "productivity": {"caveman", "create-skill", "handoff", "subagents", "zoom-out"},
+        "productivity": {
+            "caveman", "command-aliases", "create-skill", "handoff", "subagents",
+            "text-replacements", "zoom-out",
+        },
         "guards": {
-            "command-guard", "on-edit-block", "on-edit-reminder", "on-read-reminder",
+            "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",
             "prefer-edit-tool", "prefer-fewer-comments", "prefer-read-tool",
             "redirect-subagents", "usage-limit-wait",
         },

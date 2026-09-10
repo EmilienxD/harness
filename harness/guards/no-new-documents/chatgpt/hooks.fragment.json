@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/no_new_documents_PreToolUse_hook.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

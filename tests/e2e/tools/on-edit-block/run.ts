@@ -30,7 +30,7 @@ export async function runOnEditBlockJourney(): Promise<OnEditBlockJourneyResult>
     await mkdir(dirname(hookPath), { recursive: true });
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
-    await copyFile(join(harnessRoot, "harness", "on-edit-block", "claude", "hooks", "on_edit_block_PreToolUse_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness", "guards", "on-edit-block", "claude", "hooks", "on_edit_block_PreToolUse_hook.py"), hookPath);
     await writeFile(join(projectRoot, "target.txt"), TARGET_BEFORE, "utf8");
     await writeFile(join(projectRoot, "GUIDE.md"), `${GUIDE_MARKER}\n`, "utf8");
     await writeFile(join(claudeRoot, "on-edit-block.rules"), "target.txt -> GUIDE.md\n", "utf8");
@@ -91,7 +91,7 @@ async function findHarnessRoot(start: string): Promise<string> {
   let candidate = resolve(start);
   while (true) {
     try {
-      await readFile(join(candidate, "harness", "on-edit-block", "harness.toml"));
+      await readFile(join(candidate, "harness", "guards", "on-edit-block", "harness.toml"));
       return candidate;
     } catch { }
     const parent = dirname(candidate);

@@ -7,7 +7,9 @@
     "test:build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test",
     "test": "npm run test:build && node --test dist/test/*.test.js",
     "e2e:on-edit-block:build": "esbuild tools/on-edit-block/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/on-edit-block/cli.js --sourcemap",
-    "e2e:on-edit-block": "npm run e2e:on-edit-block:build && node dist/tools/on-edit-block/cli.js"
+    "e2e:on-edit-block": "npm run e2e:on-edit-block:build && node dist/tools/on-edit-block/cli.js",
+    "e2e:no-new-documents:build": "esbuild tools/no-new-documents/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/no-new-documents/cli.js --sourcemap",
+    "e2e:no-new-documents": "npm run e2e:no-new-documents:build && node dist/tools/no-new-documents/cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
