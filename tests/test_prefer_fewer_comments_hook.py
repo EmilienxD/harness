@@ -15,7 +15,7 @@ import pytest
 
 HOOK_DIR = (
     Path(__file__).resolve().parent.parent
-    / "harness" / "prefer-fewer-comments" / "shared" / "hooks"
+    / "harness" / "guards" / "prefer-fewer-comments" / "shared" / "hooks"
 )
 
 sys.path.insert(0, str(HOOK_DIR))

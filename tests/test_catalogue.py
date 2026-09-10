@@ -296,7 +296,26 @@ def test_every_catalogue_manifest_loads():
     assert {"aboard", "subagents", "issues"} <= tools.keys()
     assert {
         "address-issue", "review-issue", "harness-cli", "communication-hooks",
+        "improve-codebase-architecture", "senior-advisor",
     }.isdisjoint(tools)
+    expected_categories = {
+        "planning": {"audit", "breakdown-help-wanted-issue", "grill-me", "prototype", "websearch"},
+        "building": {"issues", "tdd"},
+        "shipping": {"commit"},
+        "productivity": {"caveman", "create-skill", "handoff", "subagents", "zoom-out"},
+        "guards": {
+            "command-guard", "on-edit-block", "on-edit-reminder", "on-read-reminder",
+            "prefer-edit-tool", "prefer-fewer-comments", "prefer-read-tool",
+            "redirect-subagents", "usage-limit-wait",
+        },
+        "extension": {"aboard", "auto"},
+    }
+    actual_categories = {}
+    catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")
+    for name, tool in tools.items():
+        category = tool.root.relative_to(catalogue_root).parts[0]
+        actual_categories.setdefault(category, set()).add(name)
+    assert actual_categories == expected_categories
 
 
 def test_vsix_is_verified_before_host_install(monkeypatch):

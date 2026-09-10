@@ -1,0 +1,21 @@
+name = "on-edit-block"
+version = "1.0.6"
+description = "PreToolUse hook that denies Write/Edit/MultiEdit on files matching gitignore-style patterns until the agent has read the required files"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/on-edit-block/README.md"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[[files]]
+src = "claude/hooks/on_edit_block_PreToolUse_hook.py"
+dest = "hooks/on_edit_block_PreToolUse_hook.py"
+platforms = ["claude"]
+executable = true
+
+# Starter rules file: all comments, edited into real rules per project. A
+# `--user` install puts it at ~/.claude/ where the hook reads global rules.
+[[files]]
+src = "claude/on-edit-block.rules"
+dest = "on-edit-block.rules"
+platforms = ["claude"]

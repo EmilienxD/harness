@@ -13,8 +13,8 @@ from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
 
 ROOT = Path(__file__).resolve().parent.parent
-CORE = ROOT / "harness/issues/shared/hooks/issues_core.py"
-ADAPTER = ROOT / "harness/issues/chatgpt/hooks/issues_ChatGPT_hook.py"
+CORE = ROOT / "harness/building/issues/shared/hooks/issues_core.py"
+ADAPTER = ROOT / "harness/building/issues/chatgpt/hooks/issues_ChatGPT_hook.py"
 
 core_spec = importlib.util.spec_from_file_location("issues_core", CORE)
 core = importlib.util.module_from_spec(core_spec)

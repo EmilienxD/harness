@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness"
-version = "0.4.0"
+version = "0.4.1"
 description = "Ephemeral catalogue installer for agent skills, hooks, tools, and apps"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,4 +40,4 @@ include = ["src/harness_cli", "harness", "tests", "README.md", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["harness/subagents/runtime/src"]
+pythonpath = ["harness/productivity/subagents/runtime/src"]

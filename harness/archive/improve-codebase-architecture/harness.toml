@@ -1,0 +1,36 @@
+name = "improve-codebase-architecture"
+version = "1.0.3"
+description = "Finds architectural friction and proposes concrete refactors"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/archive/improve-codebase-architecture/shared/skills/improve-codebase-architecture/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "shared/skills/improve-codebase-architecture/SKILL.md"
+dest = "improve-codebase-architecture/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/skills/improve-codebase-architecture/agents/openai.yaml"
+dest = "improve-codebase-architecture/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "shared/skills/improve-codebase-architecture/DEEPENING.md"
+dest = "improve-codebase-architecture/DEEPENING.md"
+root = "skills"
+
+[[files]]
+src = "shared/skills/improve-codebase-architecture/INTERFACE-DESIGN.md"
+dest = "improve-codebase-architecture/INTERFACE-DESIGN.md"
+root = "skills"
+
+[[files]]
+src = "shared/skills/improve-codebase-architecture/LANGUAGE.md"
+dest = "improve-codebase-architecture/LANGUAGE.md"
+root = "skills"

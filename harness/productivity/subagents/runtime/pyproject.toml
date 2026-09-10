@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-subagents-runtime"
+version = "1.0.1"
+description = "Persistent runtime for Harness visible-subagent workflows"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["PyYAML>=6.0,<7.0"]
+
+[project.scripts]
+harness = "subagents_runtime.cli:main"
+harness-subagents-hook = "subagents_runtime.hooks:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/subagents_runtime"]

@@ -91,9 +91,11 @@ complete list it tried.
 
 ## Catalogue model
 
-Each package lives under `harness/<name>/` and has a `harness.toml`. Manifests may declare platform
-payloads, executable requirements, package dependencies with semantic version constraints, host
-actions, and starter files.
+Each package lives under a functional category in `harness/` and has a `harness.toml`. The catalogue
+discovers manifests recursively outside `harness/archive/`, which also lets a package keep private
+workflow dependencies such as `extension/aboard/auto` and the ask/reply components under
+`productivity/subagents`. Manifests may declare platform payloads, executable requirements, package
+dependencies with semantic version constraints, host actions, and starter files.
 
 Harness validates the complete dependency graph and all file claims before writing. Cycles,
 incompatible catalogue versions, unsupported targets, missing executables, and cross-package file
@@ -110,9 +112,15 @@ The Harness-owned `/auto` hook fails closed outside an authenticated Aboard term
 ## Repository layout
 
 ```text
-harness/                 catalogue package payloads and manifests
+harness/planning/        planning and discovery workflows
+harness/building/        issue implementation and test-driven development
+harness/shipping/        delivery workflows
+harness/productivity/    delegation and general productivity skills
+harness/guards/          command and tool-use guardrails
+harness/extension/       extension catalogue entries and their internal dependencies
+harness/archive/         archived packages excluded from catalogue discovery
 src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
-harness/subagents/       complete ask/reply skills, hooks, and persistent runtime
+harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
 tests/                   behavioural and install round-trip coverage
 e2e/                     reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension

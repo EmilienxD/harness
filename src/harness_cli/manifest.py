@@ -337,9 +337,15 @@ def load_tool(directory: Path) -> Tool:
 def discover(root: Path | None = None) -> dict[str, Tool]:
     base = root or tools_root()
     found: dict[str, Tool] = {}
-    for directory in sorted(p for p in base.iterdir() if p.is_dir()):
-        if not (directory / "harness.toml").is_file():
+    for manifest_path in sorted(base.rglob("harness.toml")):
+        if manifest_path.relative_to(base).parts[0] == "archive":
             continue
+        directory = manifest_path.parent
         tool = load_tool(directory)
+        if tool.name in found:
+            first = found[tool.name].root
+            raise ManifestError(
+                f"duplicate catalogue package '{tool.name}' in {first} and {directory}"
+            )
         found[tool.name] = tool
     return dict(sorted(found.items()))

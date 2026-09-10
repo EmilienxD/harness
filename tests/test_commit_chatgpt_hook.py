@@ -13,8 +13,8 @@ from harness_cli.receipts import ReceiptStore
 
 
 ROOT = Path(__file__).resolve().parent.parent
-CORE = ROOT / "harness/commit/shared/hooks/commit_core.py"
-ADAPTER = ROOT / "harness/commit/chatgpt/hooks/commit_ChatGPT_hook.py"
+CORE = ROOT / "harness/shipping/commit/shared/hooks/commit_core.py"
+ADAPTER = ROOT / "harness/shipping/commit/chatgpt/hooks/commit_ChatGPT_hook.py"
 
 core_spec = importlib.util.spec_from_file_location("commit_core", CORE)
 core = importlib.util.module_from_spec(core_spec)

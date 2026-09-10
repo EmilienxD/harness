@@ -14,9 +14,9 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
 
 - `src/harness_cli/`: Ephemeral Python installer, catalogue, platform adapters, receipts, settings
   merging, and TUI.
-- `harness/subagents/`: Complete ask/reply bundle with internal provider hooks and an independently
+- `harness/productivity/subagents/`: Complete ask/reply bundle with internal provider hooks and an independently
   packaged persistent Python runtime.
-- `harness/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
+- `harness/<category>/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
   no README exists.
 - `apps/aboard/`: independent npm monorepo boundary for the Aboard VS Code extension. Its local
   `AGENTS.md` is the navigation map for extension work.
@@ -30,14 +30,16 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
 
 ## Catalogue Package Shape
 
-Each installable tool has a `harness.toml` with `name`, `version`, `description`, and at least one
+Each installable tool lives below a category directory and has a `harness.toml` with `name`, `version`,
+`description`, and at least one
 `[[files]]` or `[[actions]]` entry. Bump `version` whenever its payload, fragment, dependency, or action
 changes; a tool without a manifest is invisible to the installer.
+Packages below `harness/archive/` are retained for reference and excluded from catalogue discovery.
 
 Payloads use sibling layers:
 
 ```text
-harness/<tool>/
+harness/<category>/<tool>/
 ├── harness.toml
 ├── README.md
 ├── shared/          # installed unchanged for both products
