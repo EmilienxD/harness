@@ -1,8 +1,8 @@
 # usage-limit-wait
 
-A hook that **waits out your Claude subscription's usage limit** instead of letting
-the turn die. When the 5-hour or weekly window is exhausted, the session pauses
-until it resets — then carries on by itself.
+A hook that **waits out your Claude or ChatGPT subscription's usage limit** instead
+of letting the turn die. When the 5-hour or weekly window is exhausted, Claude Code
+or Codex pauses until usage is restored — then carries on by itself.
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
@@ -10,39 +10,36 @@ uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 
 ## Problem
 
-On a subscription, hitting the limit ends the turn with an API error. Whatever
-Claude was in the middle of stops there, and the work only resumes when you come
-back hours later and re-prompt. Nothing about the situation actually needs you:
-the reset time is known in advance, and the only correct action is to wait for it.
+On a subscription, hitting the limit can end the turn with an API error. Whatever
+the agent was doing stops there, and the work only resumes when you come back and
+re-prompt. The reset time is already known, so the hook can wait at the request
+boundary and let the agent continue automatically.
 
 ## Solution
 
-Claude's own usage endpoint reports every window's utilization and its
-`resets_at`. The hook reads it before Claude Code talks to the API, and if a
-window is at or over the threshold it simply blocks — `time.sleep` — until the
-window resets, re-polling along the way so an early reset (Anthropic grants
-those), a cancelled subscription, or a revoked token ends the wait promptly.
-After the announced reset, it keeps the pause for a further two minutes so
-Claude's usage service has time to apply the new allowance before work resumes.
+The provider's usage service reports both windows' utilization and reset time.
+The hook reads it before the next model request, and if a window is at or over the
+threshold it blocks until usage returns. It re-polls throughout the wait, so an
+early Anthropic reset or a ChatGPT reset ticket redeemed by the user resumes the
+session promptly. After an announced time-based reset, it allows a two-minute
+service-side grace period before giving up on an unreadable response.
 
-It runs on two events, which between them cover every point where the next
-request is about to be sent:
+The provider-native registrations cover the points where the next request is
+about to be sent:
 
-| Event | When |
+| Product | Events |
 |---|---|
-| `UserPromptSubmit` | before the first request of a turn |
-| `PostToolBatch` | once per tool batch, immediately before the next request |
+| Claude Code | `UserPromptSubmit`, then `PostToolBatch` once per tool batch |
+| Codex | `UserPromptSubmit`, then `PostToolUse` after supported local tools |
 
-`PostToolBatch` rather than `PostToolUse` on purpose: `PostToolUse` fires once
-per tool, so parallel tool calls would spawn several hook processes all sleeping
-through the same reset. `PostToolBatch` fires exactly once per model round trip.
+Claude uses `PostToolBatch` rather than `PostToolUse` so parallel tools do not
+create parallel waiters. Codex has no `PostToolBatch`; its hook uses a global
+cross-process lock so concurrent `PostToolUse` processes share one actual wait.
 
 ### One hook, with an out-of-band notification
 
-Claude Code waits for every hook on an event to finish before it renders any of
-their output. Splitting notification and waiting into parallel hooks therefore
-does not help: the notifier's `systemMessage` and `terminalSequence` remain
-buffered for as long as the waiter is running.
+Both clients wait for a synchronous hook to finish before continuing, so one
+process handles notification, polling, and completion.
 
 Instead, one process does both jobs. When it is about to wait, it asks the host
 OS to show a desktop notification and waits for that command to finish. Only
@@ -65,7 +62,7 @@ Warnings below the blocking threshold return immediately, so Claude Code can
 render them normally:
 
 ```
-Claude usage: the 5-hour window is 94% used and resets at 15:59, in 1h04m.
+Codex usage: the 5-hour window is 94% used and resets at 15:59, in 1h04m.
 The session will pause here by itself if it runs out.
 
 usage-limit-wait: waited 1h04m for the 5-hour limit to reset.
@@ -83,15 +80,14 @@ turns both off.
 
 ### It fails open, always
 
-The hook is only meaningful for a Claude subscription, and it exits 0 —
-silently, changing nothing — the moment anything says otherwise:
+The hook is only meaningful for a provider subscription, and it exits 0 —
+silently, changing nothing — whenever usage cannot be read safely:
 
 | Situation | How it's detected |
 |---|---|
-| Direct API key, or a bearer-token gateway | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` set |
-| Bedrock, Vertex, or Foundry | `CLAUDE_CODE_USE_BEDROCK` / `_USE_VERTEX` / `_USE_FOUNDRY` |
-| Logged out, or a third-party CLI | no OAuth token in `~/.claude/.credentials.json` |
-| Expired session, revoked access, endpoint down | the initial usage request fails, or the reading can't be parsed |
+| Claude direct API key, gateway, Bedrock, Vertex, or Foundry | Claude provider guards |
+| Codex API-key login or another model provider | Codex app-server rejects the subscription usage read |
+| Logged out, revoked access, missing client, or endpoint down | the initial usage request fails or cannot be parsed |
 | Reset is more than `MAX_WAIT` (7 days) away | there is no live subscription behind this session |
 
 It never blocks a tool call, never rejects a prompt, and never writes to the
@@ -106,13 +102,14 @@ the same time as ordinary model requests.
 
 ### Pay-as-you-go credits
 
-If your account has usage credits enabled, exhausting a window doesn't stop
-Claude Code, it starts charging you. That's a choice, not a default, so the hook
-waits even then unless you opt in with `USAGE_LIMIT_WAIT_USE_CREDITS=1`, which
-means *"don't wait, spend"*. It only takes effect when the account really does
-have credits enabled and unexhausted; otherwise the normal wait happens.
+If your account has usage credits enabled, exhausting included usage may start
+charging you. The hook waits unless you opt in with
+`USAGE_LIMIT_WAIT_USE_CREDITS=1`, meaning *"don't wait, spend"*. This setting
+does not redeem ChatGPT usage-restoration tickets.
 
-### Two ways to read usage
+### Usage readers
+
+Claude Code uses two defensive readers:
 
 1. `GET https://api.anthropic.com/api/oauth/usage` with the OAuth token from
    `~/.claude/.credentials.json` (`$CLAUDE_CONFIG_DIR` is honoured; on macOS the
@@ -123,13 +120,19 @@ have credits enabled and unexhausted; otherwise the normal wait happens.
    trigger this hook recursively, and it polls at most every 5 minutes because
    it costs a whole process.
 
-If both fail, the hook exits 0 and Claude Code behaves exactly as it does
-without it.
+Codex uses its local `codex app-server --stdio` protocol and calls
+`account/rateLimits/read` with `supportsLunaReserve: false` and
+`excludeResetCreditDetails: true`. Codex itself therefore owns credential-store
+access, OAuth refresh, workspace selection, and the private
+`/backend-api/wham/usage` request. The hook never reads `auth.json`, never handles
+tokens, and never calls the ticket-consumption method.
+
+If a reader fails, the hook exits 0 and the client behaves as it does without it.
 
 ### Cost
 
-Readings are cached in `~/.claude/.usage-limit-wait.cache.json`, shared by every
-session on the machine, with a TTL that tightens as you approach the wall: 5
+Readings are cached under the provider home (`~/.claude` or `~/.codex`), shared
+by every session on the machine, with a TTL that tightens near the wall: 5
 minutes below the warning level, 30 seconds from there to the threshold, and 15
 seconds once a window is exhausted. Failures are cached too, so a machine on an
 API key pays one wasted request every 5 minutes rather than one per prompt.
@@ -137,8 +140,8 @@ API key pays one wasted request every 5 minutes rather than one per prompt.
 
 ## Configuration
 
-All environment variables, all optional. Set them in your shell, or in the `env`
-block of `.claude/settings.json`.
+All environment variables are optional. Set them in your shell, or in the `env`
+block of `.claude/settings.json` for Claude Code.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -152,7 +155,7 @@ block of `.claude/settings.json`.
 | `USAGE_LIMIT_WAIT_POLL` | `60` | Seconds between re-checks while waiting; the final re-check happens after the fixed two-minute post-reset buffer |
 | `USAGE_LIMIT_WAIT_CACHE_TTL` | `300` | How long a below-threshold reading stays usable |
 | `USAGE_LIMIT_WAIT_IGNORE` | — | Comma-separated window kinds never waited on, e.g. `weekly_all` to accept multi-day waits never happening |
-| `USAGE_LIMIT_WAIT_FALLBACK` | on | Set to `0` to forbid the `claude -p /usage` fallback |
+| `USAGE_LIMIT_WAIT_FALLBACK` | on | Claude only: set to `0` to forbid the `claude -p /usage` fallback |
 
 The default threshold of 98% starts the wait just *before* exhaustion, so no
 request fails at all. The last couple of percent are discarded at the reset
@@ -162,19 +165,17 @@ anyway; use `USAGE_LIMIT_WAIT_THRESHOLD=100` if you want every drop.
 
 | File | Purpose |
 |---|---|
-| `.claude/settings.json` | Registers one hook on each of `UserPromptSubmit` and `PostToolBatch` |
-| `.claude/hooks/usage_limit_wait_hook.py` | Reads usage, reports it, and blocks until the reset |
+| `.claude/settings.json` | Registers Claude's `UserPromptSubmit` and `PostToolBatch` hooks |
+| `.claude/hooks/usage_limit_wait_hook.py` | Claude usage reader and waiter |
+| `.codex/hooks.json` | Registers Codex's `UserPromptSubmit` and `PostToolUse` hooks |
+| `.codex/hooks/usage_limit_wait_hook.py` | Codex app-server reader and waiter |
 
-One script serves both events — it needs nothing event-specific — which is why
-its filename has no `_<Event>_` infix like the other hooks in this repo. The
-obsolete `--notify` entry from version 1.1.0 is accepted as a no-op, so replacing
-the script by hand before cleaning up settings cannot create two waiters.
+Each provider has one script serving both of its events. The Claude variant still
+accepts the obsolete `--notify` entry from version 1.1.0 as a no-op.
 
-The `timeout` is the part you cannot omit on the waiter: `UserPromptSubmit`
-hooks default to 30 seconds and other events to 600, either of which would kill
-the wait long before the reset. The installed value matches
-`USAGE_LIMIT_WAIT_MAX_WAIT`, and the hook's own cap fires first. The notifier
-never blocks, so it keeps a small timeout of its own.
+The `timeout` is the part you cannot omit on the waiter: provider defaults are
+measured in seconds or minutes, not days. The installed value matches
+`USAGE_LIMIT_WAIT_MAX_WAIT`, and the hook's own cap fires first.
 
 ## Installation
 
@@ -182,14 +183,16 @@ never blocks, so it keeps a small timeout of its own.
 uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
 
-Add `--dry` first to see the exact file list and settings diff, `--user` to
-install into `~/.claude` for every project. See the [repo README](../../README.md)
-for `--local` and `uninstall`.
+Add `--dry` first to see the exact file list and settings diff. A user install
+lands in `~/.claude` or `~/.codex`; a local install lands in the matching project
+directory. See the [repo README](../../README.md) for installer details.
 
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/usage_limit_wait_hook.py` into `.claude/hooks/`.
+For Claude Code:
+
+1. Copy `claude/hooks/usage_limit_wait_hook.py` into `.claude/hooks/`.
 2. Make it executable: `chmod +x .claude/hooks/usage_limit_wait_hook.py`
 3. Merge into `.claude/settings.json`:
 
@@ -229,30 +232,53 @@ for `--local` and `uninstall`.
 `command` must resolve on the PATH of the machine running Claude Code. The
 `harness` installer sidesteps this by baking in an interpreter it has verified.
 
+For Codex, copy `chatgpt/hooks/usage_limit_wait_hook.py` into `.codex/hooks/`
+and merge this into `.codex/hooks.json` (replace `python3` when needed):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {"hooks": [{
+        "type": "command",
+        "command": "python3 \".codex/hooks/usage_limit_wait_hook.py\"",
+        "timeout": 604800
+      }]}
+    ],
+    "PostToolUse": [
+      {"hooks": [{
+        "type": "command",
+        "command": "python3 \".codex/hooks/usage_limit_wait_hook.py\"",
+        "timeout": 604800
+      }]}
+    ]
+  }
+}
+```
+
 </details>
 
-Requires a working Python 3 where the installer runs. Windows and macOS need no
+Requires a working Python 3 where the installer runs; the Codex variant also
+requires the `codex` executable on `PATH`. Windows and macOS need no
 additional notification utility; Linux desktop notifications require
 `notify-send` (usually supplied by `libnotify`). The waiting behavior itself is
 pure Python standard library on every platform.
 
 ## Known limits
 
-- The docs give no maximum for a hook `timeout`. If Claude Code clamps 604800,
-  a long wait is cut short; that fails open (a cancelled hook's output is
-  discarded and the session proceeds as it would without the hook).
-- The usage endpoint is undocumented and unversioned, and the `/usage` text
-  layout is not a contract either. Every parse is defensive: if both drift, the
-  hook degrades to doing nothing, never to stalling a session wrongly.
-- `statusMessage`, `systemMessage`, and `terminalSequence` are all handled by
-  Claude Code, so none can announce the pause before a long-running hook exits.
-  That is why the hook uses the OS directly. While the waiter sleeps you can
-  still see Claude Code's spinner; <kbd>Esc</kbd> interrupts it like any other
-  hook.
+- If a client clamps the week-long hook timeout, the wait is cut short and the
+  client resumes its normal behavior.
+- Claude's usage endpoint and `/usage` text layout are not contracts. Codex's
+  app-server is experimental and its underlying ChatGPT endpoint is private.
+  Every parse is defensive: protocol drift disables waiting rather than
+  stalling a healthy session.
+- Hook output is buffered until a long-running hook exits. The waiter therefore
+  uses an OS notification to announce the pause immediately. <kbd>Esc</kbd>
+  interrupts it like another synchronous hook.
 - Desktop notifications may be suppressed by Focus Assist / Do Not Disturb or
   by OS notification settings. On Linux, the current desktop session also needs
   a notification service and `notify-send` on `PATH`.
-- Notices are per session, tracked in `~/.claude/.usage-limit-wait.notices.json`.
+- Notices are per session, tracked below `~/.claude` or `~/.codex`.
   Two sessions near the wall each get told once, which is the point, and a
   session that runs for days keeps only a day of history.
 - With `USAGE_LIMIT_WAIT_USE_CREDITS=1` work continues at pay-as-you-go rates
