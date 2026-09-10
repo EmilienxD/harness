@@ -60,7 +60,7 @@ export async function runSmoke(config: HarnessConfig): Promise<void> {
       ANTHROPIC_BASE_URL: server.baseUrl,
       ANTHROPIC_AUTH_TOKEN: server.authToken,
       CLAUDE_CONFIG_DIR: config.claudeConfigRoot,
-      CLAUDE_CODE_PROJECT_DIR_NAME: "aboard-e2e",
+      CLAUDE_CODE_PROJECT_DIR_NAME: "harness-e2e",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       CLAUDE_CODE_MAX_RETRIES: "0",
       DISABLE_UPDATES: "1",

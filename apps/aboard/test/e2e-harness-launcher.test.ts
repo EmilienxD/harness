@@ -18,7 +18,7 @@ test("E2E configuration rejects malformed repository slugs", () => {
 });
 
 test("E2E configuration keeps every generated path outside the aboard checkout", () => {
-  const config = loadConfig({ ABOARD_E2E_ROOT: "C:\\aboard-e2e-independent" });
+  const config = loadConfig({ ABOARD_E2E_ROOT: "C:\\harness-e2e-independent" });
   const checkout = resolve(__dirname, "..", "..");
   for (const path of [config.runtimeRoot, config.cloneRoot, config.claudeConfigRoot, config.diagnosticsPath, config.ownershipPath, config.readinessPath]) {
     assert.equal(contains(checkout, path), false, path);

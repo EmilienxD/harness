@@ -23,7 +23,7 @@ test("scenario derives Read, Edit, and final response from complete history", ()
   const afterRead: Message[] = [
     ...initial,
     { role: "assistant", content: read.content },
-    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_e2e_read_target", content: "1→aboard e2e fixture: before", is_error: false }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_e2e_read_target", content: "1→harness e2e fixture: before", is_error: false }] },
   ];
   const edit = transition(request(afterRead), root);
   assert.equal(edit.checkpoint, "edit-target");
@@ -188,7 +188,7 @@ test("OpenAI auto-run accepts a successful commit with a nonfatal Git permission
   let input = [...base.input] as Record<string, unknown>[];
   try {
     for (const output of [
-      "aboard e2e fixture: before\n",
+      "harness e2e fixture: before\n",
       "",
       JSON.stringify({
         exit_code: 0,

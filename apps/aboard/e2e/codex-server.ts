@@ -238,7 +238,7 @@ async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenar
 function transition(body: ResponsesRequest, scenario: CodexScenario, text: string, repoRoot?: string): { readonly checkpoint: string; readonly output: ResponseOutput } {
   if (scenario === "auto-run-afk") return autoRunAfkTransition(body, text, requireRepoRoot(repoRoot));
   if (scenario === "auto-run-hitl") return autoRunSequentialTransition(body, requireRepoRoot(repoRoot), "auto-hitl", BEFORE_CONTENT, AFTER_CONTENT);
-  if (scenario === "auto-run-followup") return autoRunSequentialTransition(body, requireRepoRoot(repoRoot), "auto-followup", AFTER_CONTENT, "aboard e2e fixture: complete\n");
+  if (scenario === "auto-run-followup") return autoRunSequentialTransition(body, requireRepoRoot(repoRoot), "auto-followup", AFTER_CONTENT, "harness e2e fixture: complete\n");
   if (scenario === "process-failure") return { checkpoint: "failed", output: finalOutput("") };
   const outputs = toolOutputs(body);
   const calls = toolCalls(body);

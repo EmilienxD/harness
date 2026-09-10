@@ -119,9 +119,9 @@ export async function run(): Promise<void> {
       const status = (await execFileAsync("git", ["status", "--porcelain=v1", "--branch"], { cwd: root, encoding: "utf8" })).stdout;
       return /^## main\.\.\.origin\/main(?: \[behind \d+\])?\s*$/u.test(status) ? status : undefined;
     }, "auto-run did not restore clean main", 480);
-    assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "aboard e2e fixture: before\n");
+    assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
     const remoteFixture = (await execFileAsync("git", ["show", "origin/main:deterministic.txt"], { cwd: root, encoding: "utf8" })).stdout;
-    assert.equal(remoteFixture.replace(/\r\n/gu, "\n"), "aboard e2e fixture: after\n");
+    assert.equal(remoteFixture.replace(/\r\n/gu, "\n"), "harness e2e fixture: after\n");
     return;
   }
   if (phase === "auto-run-single") {
@@ -150,7 +150,7 @@ export async function run(): Promise<void> {
       return worktreeRoots(output).find((path) => path.toLowerCase() !== resolve(root).toLowerCase());
     }, "single-branch run did not create its isolated checkout");
     assert.notEqual(worktree.toLowerCase(), root.toLowerCase());
-    assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "aboard e2e fixture: before\n");
+    assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
 
     await eventually(async () => {
       await commands.executeCommand("aboard.continueAutoRun");
@@ -191,7 +191,7 @@ export async function run(): Promise<void> {
       const output = (await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })).stdout;
       return worktreeRoots(output).some((path) => path.toLowerCase() === worktree.toLowerCase()) ? undefined : true;
     }, "drained single-branch run did not remove its isolated checkout", 480);
-    assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "aboard e2e fixture: before\n");
+    assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
     const status = (await execFileAsync("git", ["status", "--porcelain=v1", "--branch"], { cwd: root, encoding: "utf8" })).stdout;
     assert.match(status, /^## main\.\.\.origin\/main\s*$/u);
     assert.ok(opened.length >= 2, "both single-branch implementers launched in visible terminals");

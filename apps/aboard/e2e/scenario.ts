@@ -20,8 +20,8 @@ export const AUTO_RUN_NESTED_CONTEXT = "E2E recursively resolved nested issue co
 export const AUTO_RUN_EXPLORE_REPORT = "Explore verified deterministic.txt contains the canonical before fixture for this auto-run issue.";
 export const AUTO_RUN_HITL_MARKER = "[E2E:auto-run-hitl]";
 export const AUTO_RUN_FOLLOWUP_MARKER = "[E2E:auto-run-followup]";
-export const BEFORE_CONTENT = "aboard e2e fixture: before\n";
-export const AFTER_CONTENT = "aboard e2e fixture: after\n";
+export const BEFORE_CONTENT = "harness e2e fixture: before\n";
+export const AFTER_CONTENT = "harness e2e fixture: after\n";
 /** No completion markup: a worker signals completion by committing. */
 export const FINAL_RESPONSE = "Fixture updated and verified.";
 export const WORKER_COMMIT_COMMAND = 'git add -A && git commit -m "Update deterministic fixture"';
@@ -35,7 +35,7 @@ export const SCENARIO_MANIFEST = {
   variables: { REPO_ROOT: { source: "runner", kind: "absolute_path" } },
   checkpoints: [
     { id: "read-target", when: { kind: "initial_request" }, respond: { kind: "tool_use", tool: "Read", toolUseId: "toolu_e2e_read_target", input: { file_path: "${REPO_ROOT}\\deterministic.txt" } } },
-    { id: "edit-target", when: { kind: "tool_result", toolUseId: "toolu_e2e_read_target", contentContains: "aboard e2e fixture: before" }, respond: { kind: "tool_use", tool: "Edit", toolUseId: "toolu_e2e_edit_target", input: { file_path: "${REPO_ROOT}\\deterministic.txt", old_string: "aboard e2e fixture: before", new_string: "aboard e2e fixture: after", replace_all: false } } },
+    { id: "edit-target", when: { kind: "tool_result", toolUseId: "toolu_e2e_read_target", contentContains: "harness e2e fixture: before" }, respond: { kind: "tool_use", tool: "Edit", toolUseId: "toolu_e2e_edit_target", input: { file_path: "${REPO_ROOT}\\deterministic.txt", old_string: "harness e2e fixture: before", new_string: "harness e2e fixture: after", replace_all: false } } },
     { id: "complete", when: { kind: "tool_result", toolUseId: "toolu_e2e_edit_target", isError: false }, respond: { kind: "text", stopReason: "end_turn", text: FINAL_RESPONSE } },
   ],
 } as const;
@@ -68,7 +68,7 @@ export function transition(request: MessagesRequest, repoRoot: string): Scenario
   });
   if (scenario === "auto-run-followup") return autoRunSequentialTransition(request, repoRoot, {
     scenario, checkpoint: "auto-followup", readId: "toolu_e2e_auto_followup_read", editId: "toolu_e2e_auto_followup_edit",
-    before: AFTER_CONTENT.trimEnd(), after: "aboard e2e fixture: complete",
+    before: AFTER_CONTENT.trimEnd(), after: "harness e2e fixture: complete",
   });
   return singleFileTransition(request, repoRoot);
 }
@@ -261,7 +261,7 @@ function singleFileTransition(request: MessagesRequest, repoRoot: string): Scena
     return toolResponse("read-target", READ_ID, "Read", { file_path: filePath });
   }
   if (readResult.is_error === true) throw new ScenarioMismatch("$.messages", "Read tool_result reported an error");
-  if (!contentContains(readResult.content, "aboard e2e fixture: before")) {
+  if (!contentContains(readResult.content, "harness e2e fixture: before")) {
     throw new ScenarioMismatch("$.messages", "Read tool_result did not contain the expected fixture marker");
   }
   if (!editResult) {

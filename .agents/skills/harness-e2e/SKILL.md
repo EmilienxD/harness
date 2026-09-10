@@ -1,6 +1,6 @@
 ---
 name: harness-e2e
-description: Operate, diagnose, or extend Harness's deterministic real-CLI E2E infrastructure and tool journeys, including Aboard's adapter and disposable GitHub fixture. Use for work under root e2e/, apps/aboard/e2e/, or the aboard-e2e runtime; not for ordinary unit or extension tests.
+description: Operate, diagnose, or extend Harness's deterministic real-CLI E2E infrastructure and tool journeys, including Aboard's adapter and the shared disposable GitHub fixture. Use for work under root e2e/, apps/aboard/e2e/, or the harness-e2e runtime; not for ordinary unit or extension tests.
 ---
 
 # Harness deterministic E2E
