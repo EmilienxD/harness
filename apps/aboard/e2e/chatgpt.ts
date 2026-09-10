@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import {
   prepareCodexHome as prepareCoreCodexHome,
   validateCodexCli,
-} from "../../../e2e/core/codex.js";
+} from "../../../tests/e2e/core/codex.js";
 
 import { createPlatformLifecycleRoutes } from "../src/bridge/platform-lifecycle.js";
 import { startBridge } from "../src/bridge/server.js";
@@ -96,7 +96,7 @@ function scenarioAgentType(scenario: Scenario): AgentType {
 
 function scenarioConfiguration(scenario: Scenario, command: readonly string[]): Record<string, unknown> {
   if (scenario.implement === true) return { shape: "skill", skillName: "address-issue", declaredCommand: command };
-  if (scenario.review !== undefined) return { shape: "skill", skillName: "issue-review", declaredCommand: command };
+  if (scenario.review !== undefined) return { shape: "skill", skillName: "review-issue", declaredCommand: command };
   return { shape: scenario.explore === true ? "explore" : "default", declaredCommand: command };
 }
 
@@ -111,7 +111,7 @@ function scenarioName(scenario: Scenario): string {
 export async function prepareCodexHome(root: string, baseUrl: string, trustedProjects: readonly string[] = []): Promise<string> {
   const home = await prepareCoreCodexHome({ root, baseUrl, model: CODEX_MODEL, providerName: "aboard-e2e", envKey: OPENAI_KEY_ENV, trustedProjects });
   await writeSkill(home, "address-issue", "[E2E:address-issue-skill-loaded] Follow the supplied issue and finish with the exact model-provided result.");
-  await writeSkill(home, "issue-review", "[E2E:issue-review-skill-loaded] Review the supplied change and finish with the exact model-provided disposition.");
+  await writeSkill(home, "review-issue", "[E2E:review-issue-skill-loaded] Review the supplied change and finish with the exact model-provided disposition.");
   return home;
 }
 
@@ -306,7 +306,7 @@ function spawnCaptured(file: string, args: readonly string[], cwd: string, env: 
   });
 }
 
-export { validateCodexCli } from "../../../e2e/core/codex.js";
+export { validateCodexCli } from "../../../tests/e2e/core/codex.js";
 
 export function redactProcessError(captured: string): string {
   if (captured.length === 0) return "no output";

@@ -26,6 +26,7 @@ async function prepared(context: { after(callback: () => Promise<void>): void })
     agentId,
     sessionId: provisional,
     agentType: "implementer",
+    autoRunRestricted: true,
     shell: "powershell",
     configuration: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"] },
     prompt: "Address issue #15.",

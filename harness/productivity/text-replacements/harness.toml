@@ -1,0 +1,14 @@
+name = "text-replacements"
+version = "1.0.0"
+description = "Add or change always-on AutoHotkey text replacements (Windows only)"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "shared/skills/text-replacements/SKILL.md"
+dest = "text-replacements/SKILL.md"
+root = "skills"

@@ -1661,7 +1661,7 @@ export class AutoRunEngine {
   }
 
   /**
-   * One `issue-review` worker, whatever the issue's disposition. AFK and HITL
+   * One `review-issue` worker, whatever the issue's disposition. AFK and HITL
    * differ only in what aboard does after a successful review: AFK carries on,
    * HITL waits for the user on the open pull request.
    */
@@ -1676,7 +1676,7 @@ export class AutoRunEngine {
       additionalGuideline: [baseGuidance.additionalGuideline, scope].filter((value) => value !== undefined).join("\n\n"),
     };
     const continued = this.#takeContinuation("reviewer", issue.number);
-    await this.#requireCleanCheckout("issue-review", issue);
+    await this.#requireCleanCheckout("review-issue", issue);
     const startingSha = await this.#git.headSha(false);
     await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha });
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
@@ -1702,7 +1702,7 @@ export class AutoRunEngine {
       throw new Error(`reviewer failed: ${outcome.result.failure.type}`);
     }
 
-    const classified = classifyWorkerResult("issue-review", await this.#workerState(startingSha));
+    const classified = classifyWorkerResult("review-issue", await this.#workerState(startingSha));
     if (classified.kind === "rejected") {
       await this.#markWorkerContinuable();
       throw new Error(classified.reason);

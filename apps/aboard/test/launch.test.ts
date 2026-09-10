@@ -23,7 +23,7 @@ const runtimeRoot = "C:\\storage\\aboard";
 function workerConfiguration(type: "implementer" | "reviewer"): LaunchConfiguration {
   return {
     shape: "skill",
-    skillName: type === "implementer" ? "address-issue" : "issue-review",
+    skillName: type === "implementer" ? "address-issue" : "review-issue",
     declaredModel: BY_DIFFICULTY,
     declaredEffort: BY_DIFFICULTY,
   };
@@ -86,7 +86,7 @@ test("plans Explore through Claude Code's builtin agent", () => {
 
 for (const [type, invocation] of [
   ["implementer", "/address-issue"],
-  ["reviewer", "/issue-review"],
+  ["reviewer", "/review-issue"],
 ] as const) {
   test(`plans ${type} as a literal skill invocation`, () => {
     const configuration = workerConfiguration(type);
@@ -165,7 +165,7 @@ test("resume restores policy and restrictions without re-expanding a skill", () 
   });
 
   assert.equal(hasPair(plan.args, "--resume", sessionId), true);
-  assert.equal(plan.args.some((argument) => argument.includes("/issue-review")), false);
+  assert.equal(plan.args.some((argument) => argument.includes("/review-issue")), false);
   assert.equal(hasPair(plan.args, "--disallowedTools", "Bash(git push*)"), true);
   assert.equal(plan.args.includes("--mcp-config"), false);
   assert.equal("agentDefinition" in plan, false);

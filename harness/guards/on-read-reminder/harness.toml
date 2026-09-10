@@ -1,0 +1,21 @@
+name = "on-read-reminder"
+version = "1.0.6"
+description = "PostToolUse hook that reminds the agent to read key files when it reads paths matching gitignore-style patterns"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/on-read-reminder/README.md"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[[files]]
+src = "claude/hooks/on_read_reminder_PostToolUse_hook.py"
+dest = "hooks/on_read_reminder_PostToolUse_hook.py"
+platforms = ["claude"]
+executable = true
+
+# Starter rules file: all comments, edited into real rules per project. A
+# `--user` install puts it at ~/.claude/ where the hook reads global rules.
+[[files]]
+src = "claude/on-read-reminder.rules"
+dest = "on-read-reminder.rules"
+platforms = ["claude"]

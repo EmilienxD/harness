@@ -94,8 +94,8 @@ test("auto-run AFK reviewer completes without changing the accepted diff", () =>
 
 test("single-branch HITL and follow-up workers apply sequential edits", () => {
   const cases = [
-    { marker: AUTO_RUN_HITL_MARKER, readId: "toolu_e2e_auto_hitl_read", editId: "toolu_e2e_auto_hitl_edit", before: "aboard e2e fixture: before", after: "aboard e2e fixture: after", checkpoint: "auto-hitl" },
-    { marker: AUTO_RUN_FOLLOWUP_MARKER, readId: "toolu_e2e_auto_followup_read", editId: "toolu_e2e_auto_followup_edit", before: "aboard e2e fixture: after", after: "aboard e2e fixture: complete", checkpoint: "auto-followup" },
+    { marker: AUTO_RUN_HITL_MARKER, readId: "toolu_e2e_auto_hitl_read", editId: "toolu_e2e_auto_hitl_edit", before: "harness e2e fixture: before", after: "harness e2e fixture: after", checkpoint: "auto-hitl" },
+    { marker: AUTO_RUN_FOLLOWUP_MARKER, readId: "toolu_e2e_auto_followup_read", editId: "toolu_e2e_auto_followup_edit", before: "harness e2e fixture: after", after: "harness e2e fixture: complete", checkpoint: "auto-followup" },
   ] as const;
   for (const item of cases) {
     const initial: Message[] = [{ role: "user", content: `Address issue. ${item.marker}` }];

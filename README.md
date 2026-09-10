@@ -1,13 +1,13 @@
 # Harness
 
-Harness is the canonical catalogue and installer for independently selectable agent skills,
-hooks, command-line tools, and optional apps. It also owns visible Claude Code and ChatGPT sessions
-and their durable delegation state.
+Harness is the canonical catalogue and ephemeral installer for independently selectable agent
+skills and optional apps. The `subagents` catalogue package owns visible Claude Code and ChatGPT
+sessions and their durable delegation state.
 
 Run the pinned, ephemeral installer:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.3.0 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.4.0 harness
 ```
 
 That opens the one installation menu. The menu reconciles its selection: newly selected packages
@@ -21,9 +21,10 @@ question. Tool selection comes first, followed by scope and platform. The defaul
 installs for both Claude Code and ChatGPT. A tool that supports only one of them is installed only
 there, and the review explains every skipped target before applying changes.
 
-The catalogue can independently select the persistent Harness CLI, Aboard, skills, and hooks.
-Aboard is a verified release artifact, not part of the Python wheel. Its manifest pins the URL,
-byte size, and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
+The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
+Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard
+is a verified release artifact, not part of the Python wheel. Its manifest pins the URL, byte size,
+and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
 
 The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
 It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
@@ -31,7 +32,7 @@ continue to use `v<version>` tags.
 
 ## Visible sessions
 
-When the persistent CLI is selected:
+When `subagents` is selected, its persistent runtime is installed automatically:
 
 ```bash
 harness run [--provider claude|chatgpt] [initial prompt]
@@ -90,9 +91,11 @@ complete list it tried.
 
 ## Catalogue model
 
-Each package lives under `harness/<name>/` and has a `harness.toml`. Manifests may declare platform
-payloads, executable requirements, package dependencies with semantic version constraints, host
-actions, and starter files.
+Each package lives under a functional category in `harness/` and has a `harness.toml`. The catalogue
+discovers manifests recursively outside `harness/archive/`, which also lets a package keep private
+workflow dependencies such as `extension/aboard/auto` and the ask/reply components under
+`productivity/subagents`. Manifests may declare platform payloads, executable requirements, package
+dependencies with semantic version constraints, host actions, and starter files.
 
 Harness validates the complete dependency graph and all file claims before writing. Cycles,
 incompatible catalogue versions, unsupported targets, missing executables, and cross-package file
@@ -100,17 +103,26 @@ collisions fail the operation. Receipts record versions, explicit/transitive own
 file digests, settings fragments, and host actions. Removal is dependent-aware and never deletes a
 file changed since installation.
 
-The Aboard package depends unconditionally on `auto`, `address-issue`, and `issue-review`.
-Both worker skill bodies are intentionally empty placeholders until their prompts are designed.
+The Aboard package depends unconditionally on `auto` and the complete `issues` bundle. That bundle
+includes the intentionally empty `address-issue` and `review-issue` worker skill placeholders, so
+initializing Aboard also installs the complete issue drafting, publishing, implementation, and review
+workflow.
 The Harness-owned `/auto` hook fails closed outside an authenticated Aboard terminal.
 
 ## Repository layout
 
 ```text
-harness/                 catalogue package payloads and manifests
-src/harness_cli/         installer, receipts, host actions, and session CLI
-tests/                   behavioural and install round-trip coverage
-e2e/                     reusable real-CLI and loopback-endpoint E2E core
+harness/planning/        planning and discovery workflows
+harness/building/        issue implementation and test-driven development
+harness/shipping/        delivery workflows
+harness/productivity/    delegation and general productivity skills
+harness/guards/          command and tool-use guardrails
+harness/extension/       extension catalogue entries and their internal dependencies
+harness/archive/         archived packages excluded from catalogue discovery
+src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
+harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
+tests/unit/              behavioural and install round-trip coverage
+tests/e2e/               reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension
 ```
 
@@ -126,4 +138,4 @@ uv run pytest
 uv run harness --help
 ```
 
-Reusable end-to-end infrastructure and tool journeys are documented in [`e2e/README.md`](e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/e2e/`.
+Reusable end-to-end infrastructure and tool journeys are documented in [`tests/e2e/README.md`](tests/e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/e2e/`.

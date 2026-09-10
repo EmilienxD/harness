@@ -482,7 +482,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const launcher: AutoRunLauncher = {
     runAutomated: async (input, signal) => {
       launches.push(input);
-      // address-issue and issue-review signal completion by committing;
+      // address-issue and review-issue signal completion by committing;
       // Explore is read-only.
       if (input.type === options.pendingWorkerType) {
         // Killed mid-edit: what it had written is still uncommitted.
@@ -1477,7 +1477,7 @@ test("a hitl reviewer stays open while the run awaits the user and closes after 
 
   assert.equal(context.engine.state()?.waiting, true);
   assert.equal(context.engine.owner(56)?.type, "reviewer");
-  // HITL is an orchestration mode: the same unattended issue-review worker runs
+  // HITL is an orchestration mode: the same unattended review-issue worker runs
   // and settles, and only then does the run wait for the user.
   assert.deepEqual(context.interactiveOrigins, []);
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);

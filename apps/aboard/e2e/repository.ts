@@ -43,7 +43,7 @@ export async function bootstrap(config: HarnessConfig, env: NodeJS.ProcessEnv = 
   if (repository.visibility !== "PRIVATE") throw new Error(`Existing repository ${config.repository} must be private`);
 
   await run("gh", ["repo", "delete", config.repository, "--yes"]);
-  await run("gh", ["repo", "create", config.repository, "--private", "--disable-wiki", "--description", "Disposable deterministic aboard E2E fixture"]);
+  await run("gh", ["repo", "create", config.repository, "--private", "--disable-wiki", "--description", "Disposable deterministic Harness E2E fixture"]);
   await reset(config);
 }
 
@@ -105,8 +105,8 @@ async function createSeedRepository(runtimeRoot: string): Promise<{ root: string
   await git(root, ["config", "commit.gpgSign", "false"]);
   await git(root, ["add", "--all"]);
   await git(root, ["commit", "--message", SEED_MESSAGE], {
-    GIT_AUTHOR_NAME: "aboard e2e", GIT_AUTHOR_EMAIL: "aboard-e2e@invalid.example",
-    GIT_COMMITTER_NAME: "aboard e2e", GIT_COMMITTER_EMAIL: "aboard-e2e@invalid.example",
+    GIT_AUTHOR_NAME: "harness e2e", GIT_AUTHOR_EMAIL: "harness-e2e@invalid.example",
+    GIT_COMMITTER_NAME: "harness e2e", GIT_COMMITTER_EMAIL: "harness-e2e@invalid.example",
     GIT_AUTHOR_DATE: FIXED_DATE, GIT_COMMITTER_DATE: FIXED_DATE,
   });
   return { root, sha: (await git(root, ["rev-parse", "HEAD"])).trim() };

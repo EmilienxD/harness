@@ -22,7 +22,7 @@ interface Profile {
   readonly subagents?: (typeof SUBAGENT_MODES)[number];
 }
 
-const WORKER_DEFAULTS: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, webSearch: "disabled", subagents: "denied" };
+const WORKER_DEFAULTS: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY };
 
 const DEFAULT_PROFILES: Readonly<Record<ProfileName, Profile>> = {
   interactive: {},
@@ -71,7 +71,7 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
     const settings: ChatGptLaunchConfiguration = isAutoRunWorkerType(type)
       ? {
           shape: "skill",
-          skillName: type === "implementer" ? "address-issue" : "issue-review",
+          skillName: type === "implementer" ? "address-issue" : "review-issue",
           ...common,
           ...(profile.webSearch === undefined ? {} : { webSearch: profile.webSearch }),
           ...(profile.subagents === undefined ? {} : { subagents: profile.subagents }),

@@ -1,6 +1,6 @@
 # Aboard E2E adapter
 
-Read this reference for work under apps/aboard/e2e/ or against the disposable aboard-e2e repository.
+Read this reference for work under apps/aboard/e2e/ or against the disposable harness-e2e repository.
 
 ## Ownership and sources
 
@@ -21,8 +21,8 @@ Keep Aboard markers, GitHub orchestration, VS Code behavior, and canonical fixtu
 
 ## Runtime
 
-- ABOARD_E2E_ROOT defaults to C:\Users\emb\dev\aboard-e2e-runtime.
-- ABOARD_E2E_REPOSITORY defaults to EmilienxD/aboard-e2e.
+- ABOARD_E2E_ROOT defaults to C:\Users\emb\dev\harness-e2e-runtime.
+- ABOARD_E2E_REPOSITORY defaults to EmilienxD/harness-e2e.
 - The verified checkout is <runtime root>\repository.
 - Claude state is <runtime root>\claude-config.
 - Diagnostics, readiness, ownership, ChatGPT state, and worktrees remain below the runtime root.
@@ -51,7 +51,7 @@ Bootstrap recreates the repository and is not routine verification. Reset restor
 
 Bootstrap deletes and recreates a GitHub repository. Run it only when the user explicitly asks to recreate the fixture.
 
-Before deletion it must verify the active account is EmilienxD, the exact slug is EmilienxD/aboard-e2e, the repository is private, ABOARD_E2E_RECREATE exactly matches, and the credential has delete_repo.
+Before deletion it must verify the active account is EmilienxD, the exact slug is EmilienxD/harness-e2e, the repository is private, ABOARD_E2E_RECREATE exactly matches, and the credential has delete_repo.
 
 If scope is missing, report:
 
@@ -62,7 +62,7 @@ gh auth refresh -h github.com -s delete_repo
 For an authorized bootstrap:
 
 ~~~powershell
-$env:ABOARD_E2E_RECREATE = "EmilienxD/aboard-e2e"
+$env:ABOARD_E2E_RECREATE = "EmilienxD/harness-e2e"
 npm run e2e:bootstrap
 Remove-Item Env:ABOARD_E2E_RECREATE
 ~~~

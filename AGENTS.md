@@ -12,14 +12,16 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
 
 ## Repository Layout
 
-- `src/harness_cli/`: Python installer, catalogue, platform adapters, receipts, settings merging, TUI, and
-  persistent session commands.
-- `harness/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
+- `src/harness_cli/`: Ephemeral Python installer, catalogue, platform adapters, receipts, settings
+  merging, and TUI.
+- `harness/productivity/subagents/`: Complete ask/reply bundle with internal provider hooks and an independently
+  packaged persistent Python runtime.
+- `harness/<category>/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
   no README exists.
 - `apps/aboard/`: independent npm monorepo boundary for the Aboard VS Code extension. Its local
   `AGENTS.md` is the navigation map for extension work.
-- `tests/`: installer, catalogue, platform, settings, receipt, and session tests.
-- `e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
+- `tests/unit/`: installer, catalogue, platform, settings, receipt, and session tests.
+- `tests/e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
 - `docs/CLAUDE-REFERENCES/`: mirrored official Claude Code documentation.
 - `docs/CHATGPT-REFERENCES/`: mirrored official ChatGPT documentation.
 - `docs/CHATGPT-COMPATIBILITY.md`: native ChatGPT target feasibility and implementation map.
@@ -28,14 +30,16 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
 
 ## Catalogue Package Shape
 
-Each installable tool has a `harness.toml` with `name`, `version`, `description`, and at least one
+Each installable tool lives below a category directory and has a `harness.toml` with `name`, `version`,
+`description`, and at least one
 `[[files]]` or `[[actions]]` entry. Bump `version` whenever its payload, fragment, dependency, or action
 changes; a tool without a manifest is invisible to the installer.
+Packages below `harness/archive/` are retained for reference and excluded from catalogue discovery.
 
 Payloads use sibling layers:
 
 ```text
-harness/<tool>/
+harness/<category>/<tool>/
 ├── harness.toml
 ├── README.md
 ├── shared/          # installed unchanged for both products
@@ -63,7 +67,7 @@ source tree or restore a `targets/` override directory.
   injection, `$ARGUMENTS`, or reference variants. `disable-model-invocation` alone does not require a
   split; represent its ChatGPT policy in `agents/openai.yaml`.
 - There is no legacy manifest, scaffold, installation, or receipt compatibility layer.
-- `address-issue` and `issue-review` contain mandatory empty user-owned prompt placeholders; do not author
+- `address-issue` and `review-issue` contain mandatory empty user-owned prompt placeholders; do not author
   their bodies. The prototype, websearch, ask-agent, and reply-to-agent workflow prompts are also
   user-owned.
 - Keep Aboard's npm build and release history independent. Do not flatten it into the Python package,
@@ -86,7 +90,7 @@ For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 
 - Run `uv run pytest` after catalogue or installer changes; the suite covers reconciliation and
   receipt-driven removal.
-- Use the `harness-e2e` skill for work under `e2e/` or `apps/aboard/e2e/`.
+- Use the `harness-e2e` skill for work under `tests/e2e/` or `apps/aboard/e2e/`.
 - Use the `tdd` skill before adding unit or E2E tests.
 - Consult the mirrored official references for product behavior instead of relying on memory.
 

@@ -1,0 +1,18 @@
+name = "create-skill"
+version = "1.0.3"
+description = "Guide for authoring new Claude Skills"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/create-skill/shared/skills/create-skill/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "replacement"
+replacement = "ChatGPT's built-in skill creator"
+reason = "The native capability is the maintained equivalent of this Claude Code guide."
+
+[[files]]
+src = "shared/skills/create-skill/SKILL.md"
+dest = "create-skill/SKILL.md"
+root = "skills"
+platforms = ["claude"]

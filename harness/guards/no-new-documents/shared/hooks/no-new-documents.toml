@@ -1,0 +1,7 @@
+# Directories in which agents may edit existing files but may not create files.
+# Each path is matched at any project-relative depth and below it.
+paths = ["docs"]
+
+# Maximum number of directory segments allowed before a configured path.
+# -1 means any depth; 0 means only a path directly below the project root.
+max_depth = -1

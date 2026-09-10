@@ -1,0 +1,48 @@
+name = "commit"
+version = "1.5.0"
+description = "Zero-model-call /commit — stages and commits via native prompt hooks"
+requires = ["git"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/shipping/commit/README.md"
+
+# Secret/config files used by `--ai`. Paths are relative to the selected
+# platform directory, so project installs ignore `.claude/...` or `.codex/...`.
+gitignore = ["commit-ai.key", "settings.local.json"]
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "shared/hooks/commit_core.py"
+dest = "commit_core.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "claude/hooks/commit_UserPromptSubmit_hook.py"
+dest = "commit_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+platforms = ["claude"]
+
+[[files]]
+src = "shared/skills/commit"
+dest = "commit"
+root = "skills"
+
+[[files]]
+src = "chatgpt/hooks/commit_ChatGPT_hook.py"
+dest = "commit_ChatGPT_hook.py"
+root = "hooks"
+executable = true
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/commit/agents/openai.yaml"
+dest = "commit/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

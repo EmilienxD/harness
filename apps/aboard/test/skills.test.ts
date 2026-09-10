@@ -34,8 +34,8 @@ test("missing worker skill reports the Harness installation repair", async (t) =
   t.after(() => rm(root, { recursive: true, force: true }));
 
   await assert.rejects(
-    requireHarnessSkill(join(root, "project"), "issue-review", join(root, "personal")),
-    /Required Harness skill \/issue-review is not installed.*Harness installer/u,
+    requireHarnessSkill(join(root, "project"), "review-issue", join(root, "personal")),
+    /Required Harness skill \/review-issue is not installed.*Harness installer/u,
   );
 });
 
@@ -43,17 +43,17 @@ test("Aboard requires both empty worker skill placeholders", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "aboard-skills-"));
   const personal = join(root, "personal");
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const skill of ["address-issue", "issue-review"]) {
+  for (const skill of ["address-issue", "review-issue"]) {
     const path = join(personal, "skills", skill, "SKILL.md");
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, "");
   }
 
   await requireHarnessWorkerSkills(join(root, "project"), personal);
-  await rm(join(personal, "skills", "issue-review", "SKILL.md"));
+  await rm(join(personal, "skills", "review-issue", "SKILL.md"));
   await assert.rejects(
     requireHarnessWorkerSkills(join(root, "project"), personal),
-    /Required Harness skill \/issue-review is not installed/u,
+    /Required Harness skill \/review-issue is not installed/u,
   );
 });
 
@@ -75,15 +75,15 @@ test("the ChatGPT worker skills resolve from the repository or the user's agent 
   assert.equal(await chatGptSkillIsResolvable(project, "address-issue", home), true);
   await rm(join(project, ".agents"), { recursive: true });
 
-  for (const skill of ["address-issue", "issue-review"]) {
+  for (const skill of ["address-issue", "review-issue"]) {
     const userSkill = join(home, ".agents", "skills", skill, "SKILL.md");
     await mkdir(dirname(userSkill), { recursive: true });
     await writeFile(userSkill, "");
   }
   await requireChatGptWorkerSkills(project, home);
-  await rm(join(home, ".agents", "skills", "issue-review", "SKILL.md"));
+  await rm(join(home, ".agents", "skills", "review-issue", "SKILL.md"));
   await assert.rejects(
     requireChatGptWorkerSkills(project, home),
-    /Required Harness skill \$issue-review is not installed for ChatGPT/u,
+    /Required Harness skill \$review-issue is not installed for ChatGPT/u,
   );
 });

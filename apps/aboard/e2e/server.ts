@@ -3,10 +3,10 @@ import { createHash } from "node:crypto";
 import {
   startFakeAnthropicServer as startCoreServer,
   type FakeAnthropicServer,
-} from "../../../e2e/core/anthropic-server.js";
+} from "../../../tests/e2e/core/anthropic-server.js";
 import { parseMessagesRequest, transition } from "./scenario.js";
 
-export type { FakeAnthropicServer, ServerAssertions, StructuralObservation } from "../../../e2e/core/anthropic-server.js";
+export type { FakeAnthropicServer, ServerAssertions, StructuralObservation } from "../../../tests/e2e/core/anthropic-server.js";
 
 const CATALOG = "single-file-success:v1|auto-run-afk:v1|auto-run-hitl:v1|auto-run-followup:v1";
 

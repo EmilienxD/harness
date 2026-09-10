@@ -212,7 +212,7 @@ test("a ChatGPT Explore session refuses to launch without an exploration task or
   );
   assert.throws(
     () => platform.planLaunch({ ...request, agentType: "reviewer", configuration: { shape: "explore", declaredCommand: ["codex"] }, prompt: "Review the change." }),
-    /reviewer must launch through \$issue-review/u,
+    /reviewer must launch through \$review-issue/u,
   );
 });
 
@@ -321,6 +321,7 @@ test("a ChatGPT implementer keeps its skill invocation when the frozen contract 
 test("a ChatGPT implementer cannot spawn subagents, search the web, or mutate Aboard-owned Git state", () => {
   const plan = chatGpt().planLaunch({
     ...implementer,
+    autoRunRestricted: true,
     prompt: "Address the issue.",
     disallowedTools: ["Bash(git commit*)", "Bash(gh pr merge*)", "Bash(git commit*)", "Read(//C:/project/**)"],
   });
@@ -367,16 +368,35 @@ test("an isolated ChatGPT worker denies writes to the original checkout without 
   assert.doesNotMatch(profile, /="deny"/u);
 });
 
-test("a ChatGPT implementer profile can restore web search and subagents", () => {
+test("a manual ChatGPT implementer can inherit or explicitly configure native tool settings", () => {
+  const inherited = chatGpt().planLaunch({
+    ...implementer,
+    configuration: { ...implementer.configuration, webSearch: undefined, subagents: undefined },
+    prompt: "Address the issue.",
+  });
   const plan = chatGpt().planLaunch({
     ...implementer,
     configuration: { ...implementer.configuration, webSearch: "live", subagents: "allowed" },
     prompt: "Address the issue.",
   });
 
+  assert.doesNotMatch(inherited.args.join("\n"), /web_search|multi_agent|agents\.enabled|worker-guard/u);
   assert.equal(plan.args.includes('web_search="live"'), true);
   assert.equal(plan.args.includes("features.multi_agent=false"), false);
-  assert.deepEqual(JSON.parse(plan.guard?.contents ?? "{}"), { denySubagents: false, denyCommands: [] });
+  assert.equal(plan.guard, undefined);
+});
+
+test("Auto Run overrides permissive ChatGPT worker tool settings", () => {
+  const plan = chatGpt().planLaunch({
+    ...implementer,
+    autoRunRestricted: true,
+    configuration: { ...implementer.configuration, webSearch: "live", subagents: "allowed" },
+    prompt: "Address the issue.",
+  });
+
+  assert.equal(plan.args.includes('web_search="disabled"'), true);
+  assert.equal(plan.args.includes("features.multi_agent=false"), true);
+  assert.deepEqual(JSON.parse(plan.guard?.contents ?? "{}"), { denySubagents: true, denyCommands: [] });
 });
 
 test("an ordinary ChatGPT launch never mentions browser configuration", () => {
@@ -429,6 +449,7 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
     agentId: "reviewer-1" as AgentId,
     sessionId: provisional,
     agentType: "reviewer",
+    autoRunRestricted: true,
     shell: "powershell",
     runtimeDirectory: "C:/aboard/runtime",
     difficulty: "advanced",
@@ -438,10 +459,10 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
 
   const afk = chatGpt().planLaunch({
     ...reviewer,
-    configuration: { shape: "skill", skillName: "issue-review", ...settings },
+    configuration: { shape: "skill", skillName: "review-issue", ...settings },
     prompt: "Review pull request #42.",
   });
-  assert.deepEqual(afk.args.slice(-2), ["--", "$issue-review Review pull request #42."]);
+  assert.deepEqual(afk.args.slice(-2), ["--", "$review-issue Review pull request #42."]);
   assert.equal(afk.writeCapability, "write-capable");
   assert.equal(afk.requiresWriteLease, true);
   assert.equal(afk.args.includes('web_search="disabled"'), true);
@@ -453,11 +474,11 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
 
   const hitl = chatGpt().planLaunch({
     ...reviewer,
-    configuration: { shape: "skill", skillName: "issue-review", ...settings },
+    configuration: { shape: "skill", skillName: "review-issue", ...settings },
     prompt: "Review pull request #42.",
     attended: true,
   });
-  assert.deepEqual(hitl.args.slice(-2), ["--", "$issue-review Review pull request #42."]);
+  assert.deepEqual(hitl.args.slice(-2), ["--", "$review-issue Review pull request #42."]);
   assert.equal(hitl.requiresWriteLease, true);
 });
 
@@ -466,8 +487,9 @@ test("a resumed ChatGPT reviewer keeps its restrictions and does not re-invoke i
     agentId: "reviewer-1" as AgentId,
     sessionId: actual,
     agentType: "reviewer",
+    autoRunRestricted: true,
     shell: "powershell",
-    configuration: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+    configuration: { shape: "skill", skillName: "review-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
     runtimeDirectory: "C:/aboard/runtime",
     prompt: "Continue",
     difficulty: "expert",
@@ -495,14 +517,14 @@ test("a ChatGPT reviewer refuses a skill that is not its review mode", () => {
 
   assert.throws(
     () => chatGpt().planLaunch({ ...request, configuration: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"] } }),
-    /reviewer must launch through \$issue-review/u,
+    /reviewer must launch through \$review-issue/u,
   );
   assert.throws(
     () => chatGpt().planLaunch({ ...request, configuration: { shape: "default", declaredCommand: ["codex"] } }),
-    /reviewer must launch through \$issue-review/u,
+    /reviewer must launch through \$review-issue/u,
   );
   assert.throws(
-    () => chatGpt().planLaunch({ ...request, agentType: "implementer", configuration: { shape: "skill", skillName: "issue-review", declaredCommand: ["codex"] } }),
+    () => chatGpt().planLaunch({ ...request, agentType: "implementer", configuration: { shape: "skill", skillName: "review-issue", declaredCommand: ["codex"] } }),
     /implementer must launch through \$address-issue/u,
   );
 });

@@ -43,7 +43,7 @@ points.
 - `Prototype`, `Web Search`, `Brainstorm`, and `General`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
 - `implementer`: Auto Run worker invoking `/address-issue` on Claude or `$address-issue` on ChatGPT.
-- `reviewer`: Auto Run worker invoking `/issue-review` on Claude or `$issue-review` on ChatGPT. AFK and
+- `reviewer`: Auto Run worker invoking `/review-issue` on Claude or `$review-issue` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
 
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
@@ -64,11 +64,11 @@ Difficulty routing:
 | `[AI]-advanced-difficulty` | `opus`, medium | `gpt-5.6-sol`, medium |
 | `[AI]-expert-difficulty` or none | `opus`, high | `gpt-5.6-sol`, high |
 
-Claude interactive and worker profiles deny `Agent`, `WebSearch`, and `WebFetch` by default. ChatGPT
-workers map `webSearch` to `web_search` and `subagents: "denied"` to disabled multi-agent settings, with
-extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT Explore must pass managed-policy
-checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` workers require `chrome`
-in `BROWSER_USE_AVAILABLE_BACKENDS` before launch.
+Interactive and manual sessions inherit the user's native Claude Code or Codex tool settings, including
+built-in subagents and web search. Auto Run workers deny those tools regardless of permissive launch-profile
+settings, with extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT Explore must pass
+managed-policy checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` workers
+require `chrome` in `BROWSER_USE_AVAILABLE_BACKENDS` before launch.
 
 Worktree runs copy ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without
 overwriting checkout files or copying live session state. Refuse the run when a copied path is not ignored.
