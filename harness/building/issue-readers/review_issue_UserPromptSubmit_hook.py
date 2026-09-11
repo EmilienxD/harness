@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard and preload commit metadata for an review-issue invocation.
+"""Guard and preload commit metadata for a review-this invocation.
 
 Blocks before model invocation when the worktree is dirty, and injects the
 `HEAD` commit's identity, subject, and changed-file list. The diff is left
@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 INVOCATION = re.compile(
-    r"(?:[/$]review-issue|\[\$review-issue\]\([^\r\n]+\))(?=$|\s)"
+    r"(?:[/$]review-this|\[\$review-this\]\([^\r\n]+\))(?=$|\s)"
 )
 STATUS_NAMES = {
     "A": "added", "M": "modified", "D": "deleted",
@@ -35,7 +35,7 @@ def git(arguments: list[str], cwd: Path) -> str:
     )
     if result.returncode != 0:
         raise Blocked(
-            "review-issue requires a Git repository with at least one commit: "
+            "review-this requires a Git repository with at least one commit: "
             f"`git {' '.join(arguments)}` failed. {result.stderr.strip()}"
         )
     return result.stdout
@@ -52,10 +52,10 @@ def require_clean_worktree(cwd: Path) -> None:
         listed = "\n".join(entries[:20])
         more = "" if len(entries) <= 20 else f"\n… and {len(entries) - 20} more."
         raise Blocked(
-            "review-issue requires a completely clean Git worktree, but the "
+            "review-this requires a completely clean Git worktree, but the "
             "checkout has staged, unstaged, or untracked changes:\n"
             f"{listed}{more}\nCommit, discard, or set them aside, then invoke "
-            "review-issue again."
+            "review-this again."
         )
 
 
@@ -95,9 +95,9 @@ def build_context(cwd: Path) -> str:
     parent = parent_sha(cwd)
     files = changed_files(cwd)
     lines = [
-        "Review-issue context, prepared by a hook from the local repository.",
+        "Review-this context, prepared by a hook from the local repository.",
         "",
-        "Worktree verified clean by the review-issue hook before this "
+        "Worktree verified clean by the review-this hook before this "
         "invocation; every change now present is yours.",
         "",
         f"- Starting HEAD: {head}",
@@ -138,7 +138,7 @@ def main() -> None:
         print(str(error), file=sys.stderr)
         raise SystemExit(2)
     except subprocess.TimeoutExpired:
-        print("review-issue timed out reading the repository.", file=sys.stderr)
+        print("review-this timed out reading the repository.", file=sys.stderr)
         raise SystemExit(2)
     json.dump(
         {"hookSpecificOutput": {

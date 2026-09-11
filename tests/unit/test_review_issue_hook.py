@@ -1,4 +1,4 @@
-"""Commit metadata injection and worktree blocking for review-issue."""
+"""Commit metadata injection and worktree blocking for review."""
 
 import importlib.util
 import io
@@ -73,17 +73,17 @@ def blocked(prompt, cwd, monkeypatch, capsys):
 
 @pytest.mark.parametrize("prompt", [
     "Review the last commit",
-    "/review-issueer",
-    "Explain what /review-issue does",
+    "/reviewer",
+    "Explain what /review-this does",
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
     assert run_hook(prompt, repository(tmp_path), monkeypatch, capsys) is None
 
 
 @pytest.mark.parametrize("prompt", [
-    "/review-issue",
-    " $review-issue focus on error paths\n",
-    "[$review-issue](C:/p/.agents/skills/review-issue/SKILL.md)",
+    "/review-this",
+    " $review-this focus on error paths\n",
+    "[$review-this](C:/p/.agents/skills/review-this/SKILL.md)",
 ])
 def test_head_metadata_and_changed_files_are_injected_without_the_diff(
     prompt, tmp_path, monkeypatch, capsys,
@@ -108,13 +108,13 @@ def test_renames_are_reported_with_both_paths(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
     git(root, "mv", "new.py", "renamed.py")
     git(root, "commit", "-m", "rename")
-    context = run_hook("/review-issue", root, monkeypatch, capsys)
+    context = run_hook("/review-this", root, monkeypatch, capsys)
     assert "- renamed: new.py -> renamed.py" in context
 
 
 def test_root_commit_reports_no_parent(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path, commits=1)
-    context = run_hook("/review-issue", root, monkeypatch, capsys)
+    context = run_hook("/review-this", root, monkeypatch, capsys)
     assert "- Parent commit: none (root commit)" in context
     assert "- added: README.md" in context
 
@@ -130,7 +130,7 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
         (root / "README.md").write_text("changed again\n", encoding="utf-8")
         if dirty == "staged":
             git(root, "add", "-A")
-    error = blocked("/review-issue", root, monkeypatch, capsys)
+    error = blocked("/review-this", root, monkeypatch, capsys)
     assert "completely clean Git worktree" in error
 
 
@@ -141,7 +141,7 @@ def test_ignored_files_do_not_count_as_dirty(tmp_path, monkeypatch, capsys):
     git(root, "commit", "-m", "ignore")
     (root / "build").mkdir()
     (root / "build" / "artifact.js").write_text("x\n", encoding="utf-8")
-    assert "verified clean" in run_hook("/review-issue", root, monkeypatch, capsys)
+    assert "verified clean" in run_hook("/review-this", root, monkeypatch, capsys)
 
 
 def test_missing_repository_blocks(tmp_path, monkeypatch, capsys):
@@ -149,7 +149,7 @@ def test_missing_repository_blocks(tmp_path, monkeypatch, capsys):
     plain.mkdir()
     # Prevent Git from searching upward into a repository that contains tmp_path.
     (plain / ".git").write_text("not a gitdir", encoding="utf-8")
-    error = blocked("/review-issue", plain, monkeypatch, capsys)
+    error = blocked("/review-this", plain, monkeypatch, capsys)
     assert "requires a Git repository" in error
 
 
@@ -161,11 +161,11 @@ def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     CatalogueInstaller(
         {name: tools[name]}, target, ReceiptStore.load(tmp_path / "receipts.json"),
     ).reconcile({name})
-    skill = target.destination_path("skills", "review-issue/SKILL.md")
+    skill = target.destination_path("skills", "review-this/SKILL.md")
     assert skill.read_text(encoding="utf-8").rstrip().endswith("---")
     assert target.destination_path("hooks", "review_issue_UserPromptSubmit_hook.py").exists()
     assert "review_issue_UserPromptSubmit_hook.py" in target.settings_path.read_text(encoding="utf-8")
     assert (
-        target.destination_path("skills", "review-issue/agents/openai.yaml").exists()
+        target.destination_path("skills", "review-this/agents/openai.yaml").exists()
         is (platform == "chatgpt")
     )

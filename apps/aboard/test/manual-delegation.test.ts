@@ -44,11 +44,11 @@ test("manual issue delegation invokes the reader worker skills", async () => {
   assert.deepEqual(launches, [
     {
       requestId: "request-0", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "$address-issue\n\nDo it.", cwd: "C:\\work", description: "Issue Implementation",
+      prompt: "$adress-this\n\nDo it.", cwd: "C:\\work", description: "Issue Implementation",
     },
     {
       requestId: "request-1", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "$review-issue\n\nDo it.", cwd: "C:\\work", description: "Issue Review",
+      prompt: "$review-this\n\nDo it.", cwd: "C:\\work", description: "Issue Review",
     },
   ]);
 });

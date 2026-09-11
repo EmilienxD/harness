@@ -196,7 +196,7 @@ export function nextStep(input: ReducerInput): AutoRunStep {
       case "publish":
         if (facts.workingTreeDirty) return { action: "stop", reason: dirtyReason(issue, facts) };
         if (!facts.hasCommit) {
-          return { action: "stop", reason: `address-issue produced no commit for issue #${issue.number}` };
+          return { action: "stop", reason: `adress-this produced no commit for issue #${issue.number}` };
         }
         if (facts.commitPushed) continue;
         return { action: "publish", issue };
@@ -273,7 +273,7 @@ export function commitSubject(title: string): string {
 }
 
 /** The two commit-signaling Harness worker skills, named as the user invokes them. */
-export type WorkerRole = "address-issue" | "review-issue";
+export type WorkerRole = "adress-this" | "review-this";
 
 /**
  * What the run's checkout looked like immediately after a worker exited. It is
@@ -294,7 +294,7 @@ export interface WorkerRepositoryState {
 
 export type WorkerOutcome =
   | { readonly kind: "committed"; readonly sha: string }
-  /** Only `review-issue` may finish this way: it found nothing worth fixing. */
+  /** Only `review-this` may finish this way: it found nothing worth fixing. */
   | { readonly kind: "unchanged" }
   | { readonly kind: "rejected"; readonly reason: string };
 
@@ -322,7 +322,7 @@ export function classifyWorkerResult(role: WorkerRole, state: WorkerRepositorySt
     };
   }
   if (state.headSha === state.startingSha) {
-    return role === "review-issue"
+    return role === "review-this"
       ? { kind: "unchanged" }
       : { kind: "rejected", reason: `${role} finished without committing anything on top of ${state.startingSha.slice(0, 8)}` };
   }

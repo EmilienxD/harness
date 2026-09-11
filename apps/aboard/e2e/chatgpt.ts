@@ -95,8 +95,8 @@ function scenarioAgentType(scenario: Scenario): AgentType {
 }
 
 function scenarioConfiguration(scenario: Scenario, command: readonly string[]): Record<string, unknown> {
-  if (scenario.implement === true) return { shape: "skill", skillName: "address-issue", declaredCommand: command };
-  if (scenario.review !== undefined) return { shape: "skill", skillName: "review-issue", declaredCommand: command };
+  if (scenario.implement === true) return { shape: "skill", skillName: "adress-this", declaredCommand: command };
+  if (scenario.review !== undefined) return { shape: "skill", skillName: "review-this", declaredCommand: command };
   return { shape: scenario.explore === true ? "explore" : "default", declaredCommand: command };
 }
 
@@ -110,8 +110,8 @@ function scenarioName(scenario: Scenario): string {
 
 export async function prepareCodexHome(root: string, baseUrl: string, trustedProjects: readonly string[] = []): Promise<string> {
   const home = await prepareCoreCodexHome({ root, baseUrl, model: CODEX_MODEL, providerName: "aboard-e2e", envKey: OPENAI_KEY_ENV, trustedProjects });
-  await writeSkill(home, "address-issue", "[E2E:address-issue-skill-loaded] Follow the supplied issue and finish with the exact model-provided result.");
-  await writeSkill(home, "review-issue", "[E2E:review-issue-skill-loaded] Review the supplied change and finish with the exact model-provided disposition.");
+  await writeSkill(home, "adress-this", "[E2E:adress-this-skill-loaded] Follow the supplied issue and finish with the exact model-provided result.");
+  await writeSkill(home, "review-this", "[E2E:review-this-skill-loaded] Review the supplied change and finish with the exact model-provided disposition.");
   return home;
 }
 

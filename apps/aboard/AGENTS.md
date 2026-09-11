@@ -42,8 +42,8 @@ points.
   `sandbox_mode="read-only"` and `approval_policy="never"`.
 - `Prototype`, `Web Search`, `Brainstorm`, and `General`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
-- `implementer`: Auto Run worker invoking `/address-issue` on Claude or `$address-issue` on ChatGPT.
-- `reviewer`: Auto Run worker invoking `/review-issue` on Claude or `$review-issue` on ChatGPT. AFK and
+- `implementer`: Auto Run worker invoking `/adress-this` on Claude or `$adress-this` on ChatGPT.
+- `reviewer`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
 
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command

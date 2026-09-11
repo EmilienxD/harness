@@ -475,7 +475,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const launcher: AutoRunLauncher = {
     runAutomated: async (input, signal) => {
       launches.push(input);
-      // address-issue and review-issue signal completion by committing;
+      // implement and review signal completion by committing;
       // Explore is read-only.
       if (input.type === options.pendingWorkerType) {
         // Killed mid-edit: what it had written is still uncommitted.
@@ -817,7 +817,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
     // published yet, and is published before any issue starts.
     `createBranch ${SESSION} main`, `push ${SESSION} -u`,
     `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch issue/34-add-retry-backoff ${SESSION}`,
-    // address-issue made the commit itself; aboard only publishes it.
+    // implement made the commit itself; aboard only publishes it.
     "push issue/34-add-retry-backoff -u",
     // After the merge, so the record carries the session branch tip the merge
     // produced rather than the one it had before.
@@ -1447,7 +1447,7 @@ test("an implementer that commits nothing stops for user judgment", async () => 
   assert.equal(context.launches.length, 1);
   assert.equal(context.gitCalls.includes("deleteBranch issue/34-add-retry-backoff"), false);
   assert.equal(context.comments.length, 0);
-  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*address-issue finished without committing/);
+  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*adress-this finished without committing/);
   assert.equal(context.state.cleared, false);
 });
 

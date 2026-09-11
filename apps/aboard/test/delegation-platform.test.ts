@@ -224,7 +224,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
     workspaceRoot: "C:/work", fleet, lease, terminals,
     configurations: { get: async () => ({
       platform: "chatgpt",
-      settings: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
+      settings: { shape: "skill", skillName: "adress-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
     }) },
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => resolvedPromptFromText("The checked-out branch is for issue #15.") },
@@ -246,7 +246,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.match(command, /\$address-issue/u);
+  assert.match(command, /\$adress-this/u);
   assert.match(command, /web_search="disabled"/u);
   assert.match(command, /features\.multi_agent=false/u);
   assert.match(command, /--model gpt-5\.6/u);
@@ -294,7 +294,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
       requested.push(type);
       return {
         platform: "chatgpt",
-        settings: { shape: "skill", skillName: "review-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
+        settings: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
@@ -307,7 +307,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.deepEqual(requested, ["reviewer"]);
-  assert.match(command, /\$review-issue/u);
+  assert.match(command, /\$review-this/u);
   assert.match(command, /web_search="disabled"/u);
   assert.equal(lease.current()?.agentId, agentId);
   assert.equal(fleet.get(agentId)?.autoRunRestricted, true);
@@ -347,7 +347,7 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
       requested.push(type);
       return {
         platform: "chatgpt",
-        settings: { shape: "skill", skillName: "review-issue", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
+        settings: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
@@ -360,7 +360,7 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
 
   assert.deepEqual(requested, ["reviewer"]);
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.match(command, /\$review-issue/u);
+  assert.match(command, /\$review-this/u);
   assert.match(command, /web_search="disabled"/u);
   assert.match(command, /features\.multi_agent=false/u);
   assert.equal(handles.sessionId, sessionId);
@@ -483,7 +483,7 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     terminals,
     configurations: { get: async () => ({
       platform: "chatgpt",
-      settings: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"], webSearch: "live", subagents: "allowed" },
+      settings: { shape: "skill", skillName: "adress-this", declaredCommand: ["codex"], webSearch: "live", subagents: "allowed" },
     }) },
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => undefined },

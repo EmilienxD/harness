@@ -89,8 +89,8 @@ def test_dependencies_install_transitively_and_receipts_track_ownership(tmp_path
     assert receipts["aboard"] is True
     for dependency in ("auto", "issue-readers"):
         assert receipts[dependency] is False
-    assert "address-issue" not in receipts
-    assert "review-issue" not in receipts
+    assert "adress-this" not in receipts
+    assert "review-this" not in receipts
 
 
 def test_dependency_cycle_is_rejected(tmp_path):
@@ -328,7 +328,7 @@ def test_every_catalogue_manifest_loads():
     tools = discover()
     assert {"aboard", "subagents", "issue-readers", "issue-writers"} <= tools.keys()
     assert {
-        "address-issue", "review-issue", "harness-cli", "communication-hooks",
+        "adress-this", "review-this", "harness-cli", "communication-hooks",
     }.isdisjoint(tools)
     expected_categories = {
         "planning": {"audit", "breakdown-help-wanted-issue", "grill-me", "prototype", "websearch"},

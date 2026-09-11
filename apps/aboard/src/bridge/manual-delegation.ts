@@ -16,8 +16,8 @@ const SKILLS: Readonly<Record<string, string>> = {
   prototype: "prototype",
   websearch: "websearch",
   brainstorm: "grill-me",
-  implement: "address-issue",
-  review: "review-issue",
+  implement: "adress-this",
+  review: "review-this",
 };
 const DESCRIPTIONS: Readonly<Record<string, string>> = {
   implement: "Issue Implementation",

@@ -52,7 +52,7 @@ test("launch.json resolves the four launch profiles", () => {
     platform: "claude",
     settings: {
       shape: "skill",
-      skillName: "address-issue",
+      skillName: "adress-this",
       declaredCommand: ["claude"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
@@ -63,7 +63,7 @@ test("launch.json resolves the four launch profiles", () => {
   const reviewerSettings = settings(reviewer);
   assert.equal(reviewerSettings.shape, "skill");
   if (reviewerSettings.shape !== "skill") assert.fail("reviewer must resolve to a skill launch");
-  assert.equal(reviewerSettings.skillName, "review-issue");
+  assert.equal(reviewerSettings.skillName, "review-this");
 });
 
 test("manual delegation identities reuse the unrestricted interactive profile", () => {
@@ -159,7 +159,7 @@ test("launch.json routes a ChatGPT implementer without overriding native tool se
     platform: "chatgpt",
     settings: {
       shape: "skill",
-      skillName: "address-issue",
+      skillName: "adress-this",
       declaredCommand: ["codex"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
@@ -178,14 +178,14 @@ test("launch.json routes ChatGPT reviewers through the review skill their dispos
   assert.deepEqual(parsed.diagnostics, []);
   assert.deepEqual(settings(parsed.value.configuration("reviewer")), {
     shape: "skill",
-    skillName: "review-issue",
+    skillName: "review-this",
     declaredCommand: ["codex"],
     declaredModel: "by-difficulty",
     declaredEffort: "high",
   });
   // AFK and HITL are orchestration modes, so both resolve to the one skill.
   const implementer = settings(parsed.value.configuration("implementer"));
-  assert.equal(implementer.shape === "skill" ? implementer.skillName : undefined, "address-issue");
+  assert.equal(implementer.shape === "skill" ? implementer.skillName : undefined, "adress-this");
 });
 
 test("a ChatGPT implementer profile is configurable independently of Claude routing", () => {
@@ -197,7 +197,7 @@ test("a ChatGPT implementer profile is configurable independently of Claude rout
 
   assert.deepEqual(settings(parsed.value.configuration("implementer")), {
     shape: "skill",
-    skillName: "address-issue",
+    skillName: "adress-this",
     declaredCommand: ["codex"],
     declaredModel: "gpt-5.6-sol",
     declaredEffort: "xhigh",

@@ -93,7 +93,7 @@ def test_issue_readers_owns_both_empty_worker_skill_placeholders():
         entry.dest: entry
         for entry in tools["issue-readers"].expand("claude")
     }
-    for name in ("address-issue", "review-issue"):
+    for name in ("adress-this", "review-this"):
         entry = destinations[f"{name}/SKILL.md"]
         text = entry.source.read_text(encoding="utf-8")
         assert text.rstrip().endswith("---")
@@ -103,5 +103,5 @@ def test_issue_readers_owns_both_empty_worker_skill_placeholders():
         entry.dest
         for entry in tools["issue-writers"].expand("claude")
     }
-    assert "address-issue/SKILL.md" not in writer_destinations
-    assert "review-issue/SKILL.md" not in writer_destinations
+    assert "adress-this/SKILL.md" not in writer_destinations
+    assert "review-this/SKILL.md" not in writer_destinations

@@ -219,16 +219,16 @@ async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenar
   if (text.includes("[E2E:chatgpt-process-failure]")) return selected("process-failure");
   if (text.includes("[E2E:chatgpt-explore]")) return selected("explore");
   if (text.includes("[E2E:chatgpt-implement]")) {
-    if (!text.includes("[E2E:address-issue-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the address-issue skill");
+    if (!text.includes("[E2E:adress-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the adress-this skill");
     if (text.includes("with Chrome") && !text.includes("Chrome browser backend")) throw new ProtocolMismatch("$.input", "lost the Chrome backend instruction");
     return selected("implement");
   }
   if (text.includes("[E2E:chatgpt-review-changes]")) {
-    if (!text.includes("[E2E:review-issue-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-issue skill");
+    if (!text.includes("[E2E:review-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-this skill");
     return selected("review-changes");
   }
   if (text.includes("[E2E:chatgpt-review-approve]")) {
-    if (!text.includes("[E2E:review-issue-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-issue skill");
+    if (!text.includes("[E2E:review-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-this skill");
     return selected("review-approve");
   }
   if (text.includes("[E2E:chatgpt-success]")) return selected("attended");

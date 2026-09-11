@@ -156,7 +156,7 @@ test("exploration context is recognizable without hidden or product-specific mar
 });
 
 test("a worker's single commit on top of its starting tip is the success signal", () => {
-  const committed = classifyWorkerResult("address-issue", {
+  const committed = classifyWorkerResult("adress-this", {
     startingSha: "a".repeat(40),
     headSha: "b".repeat(40),
     dirtyPaths: [],
@@ -166,16 +166,16 @@ test("a worker's single commit on top of its starting tip is the success signal"
   assert.deepEqual(committed, { kind: "committed", sha: "b".repeat(40) });
 });
 
-test("review-issue may finish untouched, but address-issue may not", () => {
+test("review may finish untouched, but implement may not", () => {
   const untouched = { startingSha: "a".repeat(40), headSha: "a".repeat(40), dirtyPaths: [], descendsFromStart: true, newCommitCount: 0 } as const;
-  assert.deepEqual(classifyWorkerResult("review-issue", untouched), { kind: "unchanged" });
-  const rejected = classifyWorkerResult("address-issue", untouched);
+  assert.deepEqual(classifyWorkerResult("review-this", untouched), { kind: "unchanged" });
+  const rejected = classifyWorkerResult("adress-this", untouched);
   assert.equal(rejected.kind, "rejected");
   assert.match(rejected.kind === "rejected" ? rejected.reason : "", /without committing/);
 });
 
 test("residual changes reject a worker even when it also committed", () => {
-  for (const role of ["address-issue", "review-issue"] as const) {
+  for (const role of ["adress-this", "review-this"] as const) {
     const outcome = classifyWorkerResult(role, {
       startingSha: "a".repeat(40),
       headSha: "b".repeat(40),
@@ -189,7 +189,7 @@ test("residual changes reject a worker even when it also committed", () => {
 });
 
 test("rewritten history and extra commits are rejected", () => {
-  const moved = classifyWorkerResult("address-issue", {
+  const moved = classifyWorkerResult("adress-this", {
     startingSha: "a".repeat(40),
     headSha: "b".repeat(40),
     dirtyPaths: [],
@@ -199,7 +199,7 @@ test("rewritten history and extra commits are rejected", () => {
   assert.equal(moved.kind, "rejected");
   assert.match(moved.kind === "rejected" ? moved.reason : "", /moved HEAD off/);
 
-  const extra = classifyWorkerResult("review-issue", {
+  const extra = classifyWorkerResult("review-this", {
     startingSha: "a".repeat(40),
     headSha: "b".repeat(40),
     dirtyPaths: [],
@@ -228,7 +228,7 @@ test("uncommitted changes stop the run instead of feeding a worker or a commit",
   assert.equal(afterImplementation.action, "stop");
 
   const nothingCommitted = step("publish", { pullRequest: { number: 56, state: "open" } });
-  assert.deepEqual(nothingCommitted, { action: "stop", reason: `address-issue produced no commit for issue #${issue.number}` });
+  assert.deepEqual(nothingCommitted, { action: "stop", reason: `adress-this produced no commit for issue #${issue.number}` });
 });
 
 test("every already-satisfied postcondition short circuits", () => {
