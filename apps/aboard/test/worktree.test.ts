@@ -289,6 +289,16 @@ test("a resumed run re-attaches to its checkout without setting it up again", as
   assert.ok(!git.calls.some((call) => call.startsWith("addWorktree")), git.calls.join(", "));
 });
 
+test("an unrelated checkout at the run path is never removed as an incomplete retry", async () => {
+  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const { provider, git } = fixture({
+    git: { worktrees: [{ path, branch: "user/in-progress" }] },
+  });
+
+  await assert.rejects(provider.prepare(REQUEST), /user\/in-progress.*run\/test/u);
+  assert.ok(!git.calls.some((call) => call.startsWith("removeWorktree")), git.calls.join(", "));
+});
+
 test("a failing setup command refuses the run rather than starting agents in a half-installed tree", async () => {
   const { provider } = fixture({ setupFile: "npm ci\n", setupFails: true });
   await assert.rejects(provider.prepare(REQUEST), (error: unknown) => {

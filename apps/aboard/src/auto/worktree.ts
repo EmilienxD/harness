@@ -405,6 +405,12 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   async #checkout(path: string, request: RunWorkspaceRequest): Promise<boolean> {
     const existing = (await this.options.git.worktrees()).find((worktree) => samePath(worktree.path, path));
     if (existing !== undefined) {
+      if (existing.branch !== request.sessionBranch) {
+        const actual = existing.branch ?? "a detached HEAD";
+        throw new RunWorkspaceError(
+          `${path} is already registered for ${actual}, not this run's session branch ${request.sessionBranch}. Remove it, or point aboard.autoRun.worktree.root elsewhere.`,
+        );
+      }
       if (request.prepared === true) return false;
       await this.options.git.removeWorktree(path, true).catch((error: unknown) => {
         throw new RunWorkspaceError(
