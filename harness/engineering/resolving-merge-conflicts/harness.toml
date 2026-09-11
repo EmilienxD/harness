@@ -1,0 +1,21 @@
+name = "resolving-merge-conflicts"
+version = "1.0.0"
+description = "Resolves in-progress Git merge and rebase conflicts"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/engineering/resolving-merge-conflicts/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "resolving-merge-conflicts/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "resolving-merge-conflicts/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

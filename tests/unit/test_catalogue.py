@@ -335,6 +335,7 @@ def test_every_catalogue_manifest_loads():
             "audit", "breakdown-help-wanted-issue", "grill-me", "lavish", "prototype",
             "read-all-adrs", "websearch",
         },
+        "engineering": {"resolving-merge-conflicts"},
         "building": {"issue-readers", "issue-writers", "tdd"},
         "shipping": {"commit", "setup-help"},
         "productivity": {

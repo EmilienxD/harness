@@ -31,6 +31,7 @@ and other visual responses into browser-based HTML artifacts that users can anno
 feedback.
 New standalone skills include Productivity's `stop-overthinking`, Planning's `read-all-adrs`, and
 Shipping's `setup-help`, all for Claude Code and ChatGPT.
+Engineering's `resolving-merge-conflicts` helps resolve in-progress Git merge and rebase conflicts.
 
 The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
 It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
