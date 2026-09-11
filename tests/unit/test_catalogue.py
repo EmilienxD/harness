@@ -351,7 +351,8 @@ def test_every_catalogue_manifest_loads():
         "shipping": {"commit"},
         "productivity": {
             "agent-launcher", "caveman", "command-aliases", "handoff", "subagents",
-            "setup-git-worktree-maker", "text-replacements", "writing-for-agents", "zoom-out",
+            "setup-git-worktree-maker", "text-replacements", "todo-hitl", "writing-for-agents",
+            "zoom-out",
         },
         "guards": {
             "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",

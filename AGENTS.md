@@ -101,5 +101,5 @@ For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 
 ## References
 
-- Use the `skill-prompt-engineering` skill when the user ask for writing/updating a SKILL.md file.
+- Use the `writing-for-agents` skill when the user ask for writing/updating a SKILL.md file.
 - See docs/CHATGPT-REFERENCES.md and docs/CLAUDE-REFERENCES.md for up to date ChatGPT or Claude Code official documentation. Complete your search with websearches if you can't find what you are looking for there.

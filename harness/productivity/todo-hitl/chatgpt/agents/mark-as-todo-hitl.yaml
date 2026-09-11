@@ -1,0 +1,7 @@
+interface:
+  display_name: "Mark as TODO(HITL)"
+  short_description: "Leave a concise TODO(HITL) code comment"
+  default_prompt: "Use $mark-as-todo-hitl to mark this deferred work for human review."
+
+policy:
+  allow_implicit_invocation: false
