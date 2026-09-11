@@ -29,6 +29,8 @@ and SHA-256 digest; Harness verifies all three before asking VS Code to install 
 The planning catalogue also includes `lavish`, which turns plans, comparisons, diagrams, reports,
 and other visual responses into browser-based HTML artifacts that users can annotate and return for
 feedback.
+New standalone skills include Productivity's `stop-overthinking`, Planning's `read-all-adrs`, and
+Shipping's `setup-help`, all for Claude Code and ChatGPT.
 
 The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
 It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
