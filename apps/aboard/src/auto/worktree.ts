@@ -128,6 +128,8 @@ export interface RunWorkspace {
   readonly writableRoots: readonly string[];
   /** Whether `root` is a checkout this run created and may remove. */
   readonly isolated: boolean;
+  /** Frozen cleanup policy for an isolated checkout after the run drains. */
+  readonly keepAfterDrain: boolean;
 }
 
 export interface RunWorkspaceRequest {
@@ -196,7 +198,11 @@ export function samePath(left: string, right: string): boolean {
 
 export function isolationDenyRules(projectRoot: string): readonly string[] {
   const path = resolve(projectRoot).replaceAll("\\", "/").replace(/\/+$/u, "");
-  if (path.length === 0 || path.includes(",")) return [];
+  if (path.length === 0 || path.includes(",")) {
+    throw new RunWorkspaceError(
+      `Aboard cannot isolate the run from the project path ${path || projectRoot}: commas are not supported in Claude tool-deny rules. Move the project to a path without a comma before using worktree mode.`,
+    );
+  }
   return [`Read(//${path}/**)`, `Edit(//${path}/**)`];
 }
 
@@ -341,8 +347,18 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   public async prepare(request: RunWorkspaceRequest): Promise<RunWorkspace> {
     const settings = request.worktree ?? this.options.settings();
     if (!settings.enabled) {
-      return { root: this.options.workspaceRoot, git: this.options.git, denyTools: [], writableRoots: [], isolated: false };
+      return {
+        root: this.options.workspaceRoot,
+        git: this.options.git,
+        denyTools: [],
+        writableRoots: [],
+        isolated: false,
+        keepAfterDrain: false,
+      };
     }
+    // Validate the native isolation rule before creating a checkout. An
+    // unrepresentable path must fail closed without leaving run artifacts.
+    const denyTools = isolationDenyRules(this.options.workspaceRoot);
     const path = runWorkspacePath({
       workspaceRoot: this.options.workspaceRoot,
       runId: request.runId,
@@ -356,7 +372,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
           worktreeRoot: path,
           git: this.options.gitFor(path),
         });
-        await this.#runSetup(path, request);
+        await this.#runSetup(path, request, settings.setupTimeoutSeconds);
       }
       await this.#requireCleanCheckout(path, created);
     } catch (error) {
@@ -367,16 +383,16 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     return {
       root: path,
       git: this.options.gitFor(path),
-      denyTools: isolationDenyRules(this.options.workspaceRoot),
+      denyTools,
       writableRoots: await this.#resolveGitMetadataRoots(path, this.options.workspaceRoot),
       isolated: true,
+      keepAfterDrain: settings.keep,
     };
   }
 
   public async release(workspace: RunWorkspace, outcome: RunWorkspaceOutcome): Promise<KeptRunWorkspace | undefined> {
     if (!workspace.isolated) return undefined;
-    const settings = this.options.settings();
-    if (settings.keep) return { path: workspace.root, reason: "kept-by-setting" };
+    if (workspace.keepAfterDrain) return { path: workspace.root, reason: "kept-by-setting" };
     if (outcome === "interrupted") return { path: workspace.root, reason: "left-for-the-user" };
     try {
       await this.options.git.removeWorktree(workspace.root, true);
@@ -449,7 +465,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     }
   }
 
-  async #runSetup(path: string, request: RunWorkspaceRequest): Promise<void> {
+  async #runSetup(path: string, request: RunWorkspaceRequest, setupTimeoutSeconds: number): Promise<void> {
     const relativePath = setupCommandPath(this.#platform);
     // The project root's copy, not the checkout's: the user edits the former,
     // while the latter is whatever the session branch happens to carry.
@@ -458,7 +474,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     if (source === undefined || !hasSetupCommands(source)) return;
     const { command, args } = setupCommandLine(script, this.#platform);
     this.options.notify(autoRunMessage.setup(relativePath));
-    const timeoutMs = Math.max(1, this.options.settings().setupTimeoutSeconds) * 1_000;
+    const timeoutMs = Math.max(1, setupTimeoutSeconds) * 1_000;
     try {
       await this.#setup.run({
         command,

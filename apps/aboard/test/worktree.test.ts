@@ -62,7 +62,7 @@ test("isolation deny rules fence the file tools out of the user's checkout", () 
   assert.deepEqual(isolationDenyRules(PROJECT), [`Read(//${absolute}/**)`, `Edit(//${absolute}/**)`]);
   // The rules travel as one comma-separated `--disallowedTools` value, so a rule
   // containing a comma would arrive split in half and deny something else.
-  assert.deepEqual(isolationDenyRules(resolve("a,b")), []);
+  assert.throws(() => isolationDenyRules(resolve("a,b")), /cannot isolate.*comma/iu);
 });
 
 test("an untouched setup file asks for nothing", () => {
@@ -167,9 +167,11 @@ interface Fixture {
   readonly created: string[];
   readonly removed: string[];
   readonly overlays: string[];
+  readonly settings: { -readonly [Key in keyof WorktreeSettings]: WorktreeSettings[Key] };
 }
 
 function fixture(options: {
+  readonly workspaceRoot?: string;
   readonly settings?: Partial<WorktreeSettings>;
   readonly git?: FakeGitOptions;
   readonly setupFile?: string;
@@ -182,6 +184,7 @@ function fixture(options: {
   const created: string[] = [];
   const removed: string[] = [];
   const overlays: string[] = [];
+  const settings: { -readonly [Key in keyof WorktreeSettings]: WorktreeSettings[Key] } = { ...ENABLED, ...options.settings };
   const present = new Set(options.existingDirectories ?? []);
   const directories: RunWorkspaceDirectories = {
     exists: async (path) => present.has(path),
@@ -189,10 +192,10 @@ function fixture(options: {
     remove: async (path) => { removed.push(path); present.delete(path); },
   };
   const provider = new WorktreeRunWorkspaces({
-    workspaceRoot: PROJECT,
+    workspaceRoot: options.workspaceRoot ?? PROJECT,
     git: git.client,
     gitFor: () => git.client,
-    settings: () => ({ ...ENABLED, ...options.settings }),
+    settings: () => settings,
     notify: (message) => notifications.push(message),
     platform: "win32",
     directories,
@@ -206,7 +209,7 @@ function fixture(options: {
       },
     },
   });
-  return { provider, git, notifications, setups, created, removed, overlays };
+  return { provider, git, notifications, setups, created, removed, overlays, settings };
 }
 
 const REQUEST = { runId: "run_test", sessionBranch: "run/test", base: "main" } as const;
@@ -218,6 +221,13 @@ test("worktree mode off leaves the run in the user's own checkout", async () => 
   assert.equal(workspace.root, PROJECT);
   assert.deepEqual(workspace.denyTools, [], "an in-place run has nothing to fence itself out of");
   assert.deepEqual(git.calls, [], "no checkout is created, and git is not asked about one");
+});
+
+test("an unsupported project path refuses worktree mode before creating anything", async () => {
+  const context = fixture({ workspaceRoot: resolve("C:/work/aboard,unsafe") });
+  await assert.rejects(context.provider.prepare(REQUEST), /cannot isolate.*comma/iu);
+  assert.deepEqual(context.git.calls, []);
+  assert.deepEqual(context.created, []);
 });
 
 test("preparing a checkout creates it from the local base and installs into it", async () => {
@@ -237,6 +247,15 @@ test("preparing a checkout creates it from the local base and installs into it",
   assert.equal(setups[0]?.env.ABOARD_PROJECT_ROOT, PROJECT);
   assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "run/test");
   assert.ok(notifications.some((message) => message.includes(path)));
+});
+
+test("setup uses the run's frozen timeout instead of live settings", async () => {
+  const context = fixture({ settings: { setupTimeoutSeconds: 5 }, setupFile: "npm ci\n" });
+  await context.provider.prepare({
+    ...REQUEST,
+    worktree: { ...ENABLED, setupTimeoutSeconds: 37 },
+  });
+  assert.equal(context.setups[0]?.timeoutMs, 37_000);
 });
 
 test("linked-worktree Git metadata exposes only the paths required to commit", async (context) => {
@@ -508,6 +527,17 @@ test("keeping the checkout is a setting, and a removal that fails is reported ra
   const stuck = fixture({ git: { removeFails: true } });
   const held = await stuck.provider.prepare(REQUEST);
   assert.deepEqual(await stuck.provider.release(held, "drained"), { path: held.root, reason: "removal-failed" });
+});
+
+test("cleanup uses the run's frozen keep behavior instead of live settings", async () => {
+  const context = fixture();
+  const workspace = await context.provider.prepare({
+    ...REQUEST,
+    worktree: { ...ENABLED, keep: false },
+  });
+  context.settings.keep = true;
+  assert.equal(await context.provider.release(workspace, "drained"), undefined);
+  assert.ok(context.git.calls.includes(`removeWorktree ${workspace.root} --force`));
 });
 
 test("an in-place run's release never touches anything", async () => {

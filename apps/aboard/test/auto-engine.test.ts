@@ -597,6 +597,7 @@ function harness(options: HarnessOptions = {}): Harness {
       denyTools: [`Read(//C:/work/aboard/**)`],
       writableRoots: ["C:/work/aboard/.git/worktrees/session"],
       isolated: true,
+      keepAfterDrain: false,
     }),
     release: async (_workspace, outcome) => { released.push(outcome); return undefined; },
     removeRecorded: async (root) => { recordedWorkspaceRemovals.push(root); return true; },
