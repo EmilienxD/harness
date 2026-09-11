@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 from typing import Any
 import urllib.error
@@ -51,6 +52,47 @@ def matches(pattern: str, segment: str) -> bool:
     return re.fullmatch(expression, " ".join(segment.split())) is not None
 
 
+def executable_name(word: str) -> str:
+    name = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def command_candidates(segment: str) -> list[str]:
+    normalized = " ".join(segment.split())
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return [normalized]
+    candidates = [normalized]
+    while words and executable_name(words[0]) in {"env", "command"}:
+        wrapper = executable_name(words[0])
+        words = words[1:]
+        while words:
+            word = words[0]
+            if word == "--":
+                words = words[1:]
+                break
+            if wrapper == "env" and word in {"-u", "--unset", "-C", "--chdir"}:
+                words = words[2:] if len(words) >= 2 else []
+                continue
+            if word.startswith("-"):
+                words = words[1:]
+                continue
+            if wrapper == "env" and word.split("=", 1)[0].isidentifier() and "=" in word:
+                words = words[1:]
+                continue
+            break
+    unwrapped = " ".join(words)
+    if unwrapped and unwrapped not in candidates:
+        candidates.append(unwrapped)
+    if words and executable_name(words[0]) in {"sh", "bash", "dash", "ksh", "zsh"}:
+        for index, word in enumerate(words[1:], start=1):
+            if word.startswith("-") and "c" in word[1:] and index + 1 < len(words):
+                candidates.extend(command_candidates(words[index + 1]))
+                break
+    return candidates
+
+
 def guard(payload: dict[str, Any]) -> int:
     if payload.get("hook_event_name") != "PreToolUse":
         return 0
@@ -71,8 +113,9 @@ def guard(payload: dict[str, Any]) -> int:
     for segment in re.split(r"&&|\|\||[;\n|]", command):
         if not segment.strip():
             continue
+        candidates = command_candidates(segment)
         for pattern in patterns:
-            if matches(pattern, segment):
+            if any(matches(pattern, candidate) for candidate in candidates):
                 return deny(
                     f"aboard owns this run's git and GitHub state; {' '.join(segment.split())} is blocked. "
                     "Leave your work uncommitted in the working tree and use git and gh only for read-only inspection."

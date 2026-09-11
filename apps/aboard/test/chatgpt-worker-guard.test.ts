@@ -31,14 +31,14 @@ async function prepared(context: { after(callback: () => Promise<void>): void })
     configuration: { shape: "skill", skillName: "address-issue", declaredCommand: ["codex"] },
     prompt: "Address issue #15.",
     runtimeDirectory: root.replaceAll("\\", "/"),
-    disallowedTools: ["Bash(git commit*)", "Bash(git -*)", "Bash(gh pr merge*)", "Agent"],
+    disallowedTools: ["Bash(git commit*)", "Bash(git push*)", "Bash(git checkout*)", "Bash(git -*)", "Bash(gh pr merge*)", "Agent"],
   });
   const store = new FileSystemPromptSpillStore(root, root, new Map([["chatgpt", platform.lifecycleAssets]]));
   await store.prepare(plan);
   const guard = join(root, "agents", agentId, "guard.json");
   assert.deepEqual(JSON.parse(await readFile(guard, "utf8")), {
     denySubagents: true,
-    denyCommands: ["git commit*", "git -*", "gh pr merge*"],
+    denyCommands: ["git commit*", "git push*", "git checkout*", "git -*", "gh pr merge*"],
   });
   return { script: join(root, "agents", agentId, "scripts", "abd_hook.py"), guard };
 }
@@ -77,10 +77,37 @@ test("the ChatGPT worker guard denies Aboard-owned Git and GitHub mutations", as
   }
 });
 
+test("the ChatGPT worker guard denies wrapped Git and GitHub mutations", async (context) => {
+  const { script } = await prepared(context);
+
+  for (const command of [
+    "env git push origin HEAD",
+    "/usr/bin/env MODE=worker git push origin HEAD",
+    "env -u GIT_CONFIG_GLOBAL git push origin HEAD",
+    "env -S \"git push origin HEAD\"",
+    "command git checkout main",
+    "sh -c \"gh pr merge 15 --squash\"",
+  ]) {
+    const decision = decide(script, bash(command));
+    assert.equal(decision.status, 0, command);
+    assert.equal(decision.decision, "deny", command);
+    assert.match(decision.reason ?? "", /aboard owns this run's git and GitHub state/u);
+  }
+});
+
 test("the ChatGPT worker guard lets ordinary source work and read-only inspection through", async (context) => {
   const { script } = await prepared(context);
 
-  for (const command of ["git status --short", "git log -5", "npm test", "gh pr view 15", "cat src/main.ts"]) {
+  for (const command of [
+    "git status --short",
+    "git log -5",
+    "npm test",
+    "gh pr view 15",
+    "cat src/main.ts",
+    "env git status --short",
+    "command git log -5",
+    "sh -c \"gh pr view 15\"",
+  ]) {
     assert.deepEqual(decide(script, bash(command)), { status: 0 }, command);
   }
   assert.deepEqual(decide(script, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "git commit -m x" } }), { status: 0 });
