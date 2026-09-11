@@ -192,7 +192,7 @@ directory. See the [repo README](../../README.md) for installer details.
 
 For Claude Code:
 
-1. Copy `claude/hooks/usage_limit_wait_hook.py` into `.claude/hooks/`.
+1. Copy `claude/usage_limit_wait_hook.py` into `.claude/hooks/`.
 2. Make it executable: `chmod +x .claude/hooks/usage_limit_wait_hook.py`
 3. Merge into `.claude/settings.json`:
 
@@ -232,7 +232,7 @@ For Claude Code:
 `command` must resolve on the PATH of the machine running Claude Code. The
 `harness` installer sidesteps this by baking in an interpreter it has verified.
 
-For Codex, copy `chatgpt/hooks/usage_limit_wait_hook.py` into `.codex/hooks/`
+For Codex, copy `chatgpt/usage_limit_wait_hook.py` into `.codex/hooks/`
 and merge this into `.codex/hooks.json` (replace `python3` when needed):
 
 ```json

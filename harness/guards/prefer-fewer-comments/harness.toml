@@ -1,5 +1,5 @@
 name = "prefer-fewer-comments"
-version = "1.0.0"
+version = "1.0.1"
 description = "PostToolUse hook that reads what a write added and asks for less commentary when a comment, a docstring, or the change as a whole runs over budget"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/prefer-fewer-comments/README.md"
 
@@ -12,7 +12,7 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "shared/hooks/prefer_fewer_comments_PostToolUse_hook.py"
+src = "prefer_fewer_comments_PostToolUse_hook.py"
 dest = "prefer_fewer_comments_PostToolUse_hook.py"
 root = "hooks"
 executable = true
@@ -21,6 +21,6 @@ executable = true
 # defaults until the user edits it; `starter` keeps those edits across
 # upgrades. A `--user` install puts it where the hook reads global rules.
 [[files]]
-src = "shared/prefer-fewer-comments.rules"
+src = "prefer-fewer-comments.rules"
 dest = "prefer-fewer-comments.rules"
 starter = true

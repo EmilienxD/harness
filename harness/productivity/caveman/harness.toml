@@ -1,7 +1,7 @@
 name = "caveman"
-version = "1.0.3"
+version = "1.0.4"
 description = "Ultra-compressed communication mode (~75% fewer tokens)"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/caveman/shared/skills/caveman/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/caveman/SKILL.md"
 
 [platforms.claude]
 status = "supported"
@@ -10,12 +10,12 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/caveman/SKILL.md"
+src = "SKILL.md"
 dest = "caveman/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/skills/caveman/agents/openai.yaml"
+src = "chatgpt/openai.yaml"
 dest = "caveman/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

@@ -36,20 +36,25 @@ Each installable tool lives below a category directory and has a `harness.toml` 
 changes; a tool without a manifest is invisible to the installer.
 Packages below `harness/archive/` are retained for reference and excluded from catalogue discovery.
 
-Payloads use sibling layers:
+Shared payloads live at the package root; shallow product folders are overlays:
 
 ```text
 harness/<category>/<tool>/
 ├── harness.toml
 ├── README.md
-├── shared/          # installed unchanged for both products
-├── claude/          # Claude-native variants and metadata
-└── chatgpt/         # ChatGPT-native variants and metadata
+├── SKILL.md          # one shared skill, with support files beside it
+├── <skill>/         # each shared skill when a package contains several
+├── <shared-hook>.py # one or two simple shared hook payloads
+├── hooks/            # optional grouping for several related shared hooks
+├── claude/           # shallow Claude-only files and settings.fragment.json
+└── chatgpt/          # shallow ChatGPT-only files and hooks.fragment.json
 ```
 
-Omit empty layers. Keep manifests and product-neutral documentation at the tool root. Mirror logical
-roots such as `hooks/` and `skills/` inside payload layers; never use one product as another's implicit
-source tree or restore a `targets/` override directory.
+Omit empty overlays. Keep manifests and product-neutral documentation at the tool root. A single-skill
+package stores ChatGPT metadata at `chatgpt/openai.yaml`; a multi-skill package stores it at
+`chatgpt/agents/<skill-name>.yaml`. Manifests map those sources to installed `skills/` and `hooks/`
+destinations explicitly. Preserve real internal project trees such as `runtime/src/`; never mirror
+installation roots inside overlays or restore a `targets/` override directory.
 
 ## Important Constraints
 

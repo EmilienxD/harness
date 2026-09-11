@@ -1,5 +1,5 @@
 name = "websearch"
-version = "1.1.0"
+version = "1.1.1"
 description = "Interactive web research workflow placeholder"
 
 [platforms.claude]
@@ -9,12 +9,12 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/websearch/SKILL.md"
+src = "SKILL.md"
 dest = "websearch/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/skills/websearch/agents/openai.yaml"
+src = "chatgpt/openai.yaml"
 dest = "websearch/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

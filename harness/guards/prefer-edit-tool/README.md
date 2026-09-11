@@ -92,7 +92,7 @@ the [repo README](../../README.md) for `--user`, `--local`, and `uninstall`.
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/prefer_edit_tool_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
+1. Copy `claude/prefer_edit_tool_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
 2. Make it executable: `chmod +x .claude/hooks/prefer_edit_tool_PostToolUse_hook.py`
 3. Add (or merge) the following into your repo's `.claude/settings.json`:
 

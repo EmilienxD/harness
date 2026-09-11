@@ -1,7 +1,7 @@
 name = "grill-me"
-version = "1.0.3"
+version = "1.0.4"
 description = "Interviews you to stress-test a plan or design"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/grill-me/shared/skills/grill-me/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/grill-me/SKILL.md"
 
 [platforms.claude]
 status = "supported"
@@ -10,12 +10,12 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/grill-me/SKILL.md"
+src = "SKILL.md"
 dest = "grill-me/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/skills/grill-me/agents/openai.yaml"
+src = "chatgpt/openai.yaml"
 dest = "grill-me/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

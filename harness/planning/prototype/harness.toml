@@ -1,5 +1,5 @@
 name = "prototype"
-version = "1.2.0"
+version = "1.2.1"
 description = "Build throwaway design prototypes outside the codebase"
 
 [platforms.claude]
@@ -9,22 +9,22 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/prototype/SKILL.md"
+src = "SKILL.md"
 dest = "prototype/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "shared/skills/prototype/LOGIC.md"
+src = "LOGIC.md"
 dest = "prototype/LOGIC.md"
 root = "skills"
 
 [[files]]
-src = "shared/skills/prototype/UI.md"
+src = "UI.md"
 dest = "prototype/UI.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/skills/prototype/agents/openai.yaml"
+src = "chatgpt/openai.yaml"
 dest = "prototype/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

@@ -1,102 +1,102 @@
 name = "subagents"
-version = "1.1.0"
+version = "1.1.1"
 description = "Visible subagent delegation with task-specific workflows"
 dependencies = ["prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0", "issue-readers>=1.0.0,<2.0.0"]
 workspace_gitignore = [".harness/runtime/"]
 
 [platforms.claude]
 status = "supported"
-fragment = "hooks/claude/settings.fragment.json"
+fragment = "claude/settings.fragment.json"
 
 [platforms.chatgpt]
 status = "supported"
-fragment = "hooks/chatgpt/hooks.fragment.json"
+fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "shared/skills/ask-agent"
+src = "ask-agent"
 dest = "ask-agent"
 root = "skills"
 
 [[files]]
-src = "shared/skills/ask-agent-to-explore"
+src = "ask-agent-to-explore"
 dest = "ask-agent-to-explore"
 root = "skills"
 
 [[files]]
-src = "shared/skills/ask-agent-to-prototype"
+src = "ask-agent-to-prototype"
 dest = "ask-agent-to-prototype"
 root = "skills"
 
 [[files]]
-src = "shared/skills/ask-agent-to-websearch"
+src = "ask-agent-to-websearch"
 dest = "ask-agent-to-websearch"
 root = "skills"
 
 [[files]]
-src = "shared/skills/ask-agent-to-brainstorm"
+src = "ask-agent-to-brainstorm"
 dest = "ask-agent-to-brainstorm"
 root = "skills"
 
 [[files]]
-src = "shared/skills/ask-agent-to-implement"
+src = "ask-agent-to-implement"
 dest = "ask-agent-to-implement"
 root = "skills"
 
 [[files]]
-src = "shared/skills/ask-agent-to-review"
+src = "ask-agent-to-review"
 dest = "ask-agent-to-review"
 root = "skills"
 
 [[files]]
-src = "shared/skills/reply-to-agent"
+src = "reply-to-agent"
 dest = "reply-to-agent"
 root = "skills"
 
 [[files]]
-src = "chatgpt/skills/ask-agent"
-dest = "ask-agent"
+src = "chatgpt/agents/ask-agent.yaml"
+dest = "ask-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/ask-agent-to-explore"
-dest = "ask-agent-to-explore"
+src = "chatgpt/agents/ask-agent-to-explore.yaml"
+dest = "ask-agent-to-explore/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/ask-agent-to-prototype"
-dest = "ask-agent-to-prototype"
+src = "chatgpt/agents/ask-agent-to-prototype.yaml"
+dest = "ask-agent-to-prototype/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/ask-agent-to-websearch"
-dest = "ask-agent-to-websearch"
+src = "chatgpt/agents/ask-agent-to-websearch.yaml"
+dest = "ask-agent-to-websearch/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/ask-agent-to-brainstorm"
-dest = "ask-agent-to-brainstorm"
+src = "chatgpt/agents/ask-agent-to-brainstorm.yaml"
+dest = "ask-agent-to-brainstorm/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/ask-agent-to-implement"
-dest = "ask-agent-to-implement"
+src = "chatgpt/agents/ask-agent-to-implement.yaml"
+dest = "ask-agent-to-implement/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/ask-agent-to-review"
-dest = "ask-agent-to-review"
+src = "chatgpt/agents/ask-agent-to-review.yaml"
+dest = "ask-agent-to-review/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/reply-to-agent"
-dest = "reply-to-agent"
+src = "chatgpt/agents/reply-to-agent.yaml"
+dest = "reply-to-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 

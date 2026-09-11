@@ -1,5 +1,5 @@
 name = "agent-launcher"
-version = "1.0.0"
+version = "1.0.1"
 description = "Project-configurable launcher for Claude Code and Codex"
 
 [platforms.claude]
@@ -9,8 +9,8 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "claude/skills/extend-claude-system-prompt"
-dest = "extend-claude-system-prompt"
+src = "claude/SKILL.md"
+dest = "extend-claude-system-prompt/SKILL.md"
 root = "skills"
 platforms = ["claude"]
 

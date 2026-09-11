@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "1.0.0"
+version = "1.0.1"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issue-writers/README.md"
@@ -13,98 +13,98 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "claude/hooks/copy_message_as_issue.py"
+src = "claude/copy_message_as_issue.py"
 dest = "copy_message_as_issue.py"
 root = "hooks"
 executable = true
 platforms = ["claude"]
 
 [[files]]
-src = "shared/skills/copy-message-as-issue"
+src = "copy-message-as-issue"
 dest = "copy-message-as-issue"
 root = "skills"
 platforms = ["claude"]
 
 [[files]]
-src = "shared/hooks/issues_core.py"
+src = "issues_core.py"
 dest = "issues_core.py"
 root = "hooks"
 executable = true
 
 [[files]]
-src = "claude/hooks/publish_issues_UserPromptSubmit_hook.py"
+src = "claude/publish_issues_UserPromptSubmit_hook.py"
 dest = "publish_issues_UserPromptSubmit_hook.py"
 root = "hooks"
 executable = true
 platforms = ["claude"]
 
 [[files]]
-src = "shared/skills/draft-issue"
+src = "draft-issue"
 dest = "draft-issue"
 root = "skills"
 
 [[files]]
-src = "shared/skills/draft-issues"
+src = "draft-issues"
 dest = "draft-issues"
 root = "skills"
 
 [[files]]
-src = "shared/skills/draft-audit-issues"
+src = "draft-audit-issues"
 dest = "draft-audit-issues"
 root = "skills"
 
 [[files]]
-src = "shared/skills/publish-issues"
+src = "publish-issues"
 dest = "publish-issues"
 root = "skills"
 
 [[files]]
-src = "shared/skills/to-spec"
+src = "to-spec"
 dest = "to-spec"
 root = "skills"
 
 [[files]]
-src = "shared/skills/to-spec-draft-issue"
+src = "to-spec-draft-issue"
 dest = "to-spec-draft-issue"
 root = "skills"
 
 [[files]]
-src = "chatgpt/hooks/issues_ChatGPT_hook.py"
+src = "chatgpt/issues_ChatGPT_hook.py"
 dest = "issues_ChatGPT_hook.py"
 root = "hooks"
 executable = true
 platforms = ["chatgpt"]
 [[files]]
-src = "chatgpt/skills/draft-issue/agents/openai.yaml"
+src = "chatgpt/agents/draft-issue.yaml"
 dest = "draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 [[files]]
-src = "chatgpt/skills/draft-issues/agents/openai.yaml"
+src = "chatgpt/agents/draft-issues.yaml"
 dest = "draft-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/draft-audit-issues/agents/openai.yaml"
+src = "chatgpt/agents/draft-audit-issues.yaml"
 dest = "draft-audit-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/publish-issues/agents/openai.yaml"
+src = "chatgpt/agents/publish-issues.yaml"
 dest = "publish-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/to-spec/agents/openai.yaml"
+src = "chatgpt/agents/to-spec.yaml"
 dest = "to-spec/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/skills/to-spec-draft-issue/agents/openai.yaml"
+src = "chatgpt/agents/to-spec-draft-issue.yaml"
 dest = "to-spec-draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

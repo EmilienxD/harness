@@ -335,8 +335,8 @@ def test_every_catalogue_manifest_loads():
         "building": {"issue-readers", "issue-writers", "tdd"},
         "shipping": {"commit"},
         "productivity": {
-            "caveman", "command-aliases", "create-skill", "handoff", "subagents",
-            "text-replacements", "writing-for-agents", "zoom-out",
+            "agent-launcher", "caveman", "command-aliases", "handoff", "subagents",
+            "setup-git-worktree-maker", "text-replacements", "writing-for-agents", "zoom-out",
         },
         "guards": {
             "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",
@@ -345,7 +345,6 @@ def test_every_catalogue_manifest_loads():
         },
         "extension": {"aboard", "auto"},
         "deprecated": {"improve-codebase-architecture", "senior-advisor"},
-        "setup-git-worktree-maker": {"setup-git-worktree-maker"},
     }
     actual_categories = {}
     catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")

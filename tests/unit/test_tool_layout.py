@@ -9,36 +9,91 @@ from pathlib import Path
 from harness_cli.manifest import discover
 
 
-LAYERS = {"shared", "claude", "chatgpt"}
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_first_party_tools_use_explicit_layered_payloads():
+def has_payload_files(directory: Path) -> bool:
+    return directory.exists() and any(
+        path.is_file() and "__pycache__" not in path.parts for path in directory.rglob("*")
+    )
+
+
+def test_first_party_tools_use_root_shared_shallow_platform_overlays():
     for tool in discover().values():
         manifest = tomllib.loads((tool.root / "harness.toml").read_text(encoding="utf-8"))
         platforms = manifest.get("platforms", {})
         assert "claude" in platforms, f"{tool.name} must declare Claude support explicitly"
         assert not (tool.root / "targets").exists(), f"{tool.name} still has a targets/ layer"
+        assert not has_payload_files(tool.root / "shared"), f"{tool.name} still has a shared/ layer"
+        assert not has_payload_files(tool.root / "claude" / "skills"), (
+            f"{tool.name} still mirrors the installed skills/ hierarchy under claude/"
+        )
+        assert not has_payload_files(tool.root / "chatgpt" / "skills"), (
+            f"{tool.name} still mirrors the installed skills/ hierarchy under chatgpt/"
+        )
+        assert not has_payload_files(tool.root / "claude" / "hooks"), (
+            f"{tool.name} still mirrors the installed hooks/ hierarchy under claude/"
+        )
+        assert not has_payload_files(tool.root / "chatgpt" / "hooks"), (
+            f"{tool.name} still mirrors the installed hooks/ hierarchy under chatgpt/"
+        )
 
-        for file_spec in manifest.get("files", []):
-            layer = str(file_spec["src"]).replace("\\", "/").split("/", 1)[0]
-            runtime_template = (
-                tool.name == "agent-launcher"
-                and str(file_spec["src"]).replace("\\", "/")
-                == "runtime/src/agent_launcher/templates"
+        shared_skills = [
+            path
+            for path in tool.root.rglob("SKILL.md")
+            if not {"claude", "chatgpt", "runtime"}.intersection(
+                path.relative_to(tool.root).parts
             )
-            assert layer in LAYERS or runtime_template, (
-                f"{tool.name}: {file_spec['src']} is outside a payload layer"
+        ]
+        if len(shared_skills) == 1:
+            assert shared_skills[0].parent == tool.root, (
+                f"{tool.name}: a single shared skill must live at the package root"
+            )
+        elif len(shared_skills) > 1:
+            assert all(path.parent.parent == tool.root for path in shared_skills), (
+                f"{tool.name}: multi-skill packages must use <package>/<skill>/SKILL.md"
             )
 
         for platform, declaration in platforms.items():
             fragment = declaration.get("fragment")
             if fragment:
                 normalized = str(fragment).replace("\\", "/")
-                allowed_roots = (f"{platform}/", f"hooks/{platform}/")
-                assert normalized.startswith(allowed_roots), (
-                    f"{tool.name}: {platform} fragment is outside its payload layer"
+                expected = {
+                    "claude": "claude/settings.fragment.json",
+                    "chatgpt": "chatgpt/hooks.fragment.json",
+                }[platform]
+                assert normalized == expected, (
+                    f"{tool.name}: {platform} fragment must be {expected}"
                 )
+
+        metadata_specs = [
+            file_spec
+            for file_spec in manifest.get("files", [])
+            if str(file_spec["dest"]).replace("\\", "/").endswith("/agents/openai.yaml")
+            and "chatgpt" in file_spec.get("platforms", [])
+        ]
+        for file_spec in metadata_specs:
+            skill_name = str(file_spec["dest"]).replace("\\", "/").split("/", 1)[0]
+            expected = (
+                "chatgpt/openai.yaml"
+                if len(shared_skills) == 1
+                else f"chatgpt/agents/{skill_name}.yaml"
+            )
+            assert str(file_spec["src"]).replace("\\", "/") == expected, (
+                f"{tool.name}: ChatGPT metadata for {skill_name} must be {expected}"
+            )
+
+
+def test_no_catalogue_or_archive_package_has_a_shared_payload_directory():
+    nested_repository = ROOT / "harness" / "itsclaudehistory"
+    shared_directories = [
+        path
+        for path in (ROOT / "harness").rglob("shared")
+        if path.is_dir()
+        and nested_repository not in path.parents
+        and has_payload_files(path)
+    ]
+    assert shared_directories == []
 
 
 def test_first_party_skills_do_not_use_dynamic_shell_injection():

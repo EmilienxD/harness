@@ -17,7 +17,6 @@ HOOK = (
     / "guards"
     / "usage-limit-wait"
     / "chatgpt"
-    / "hooks"
     / "usage_limit_wait_hook.py"
 )
 

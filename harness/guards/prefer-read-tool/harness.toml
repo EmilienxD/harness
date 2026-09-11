@@ -1,5 +1,5 @@
 name = "prefer-read-tool"
-version = "1.0.10"
+version = "1.0.11"
 description = "PostToolUse nudge to prefer the Read tool over shell file-read commands"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/prefer-read-tool/README.md"
 
@@ -12,7 +12,7 @@ status = "unsupported"
 reason = "This preference is specific to Claude Code's Read tool; shell and local reads are native ChatGPT workflows."
 
 [[files]]
-src = "claude/hooks/prefer_read_tool_PostToolUse_hook.py"
+src = "claude/prefer_read_tool_PostToolUse_hook.py"
 dest = "hooks/prefer_read_tool_PostToolUse_hook.py"
 platforms = ["claude"]
 executable = true

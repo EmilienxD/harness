@@ -14,7 +14,7 @@ from harness_cli.receipts import ReceiptStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
-HOOK = ROOT / "harness/guards/command-guard/shared/hooks/command_guard_PreToolUse_hook.py"
+HOOK = ROOT / "harness/guards/command-guard/command_guard_PreToolUse_hook.py"
 
 
 def run_payload(payload, *, hook_path=HOOK, raw=None) -> tuple[int, dict | None, str]:

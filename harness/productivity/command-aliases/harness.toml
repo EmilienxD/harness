@@ -1,5 +1,5 @@
 name = "command-aliases"
-version = "1.0.0"
+version = "1.0.1"
 description = "Add or modify cross-platform shell command aliases (PowerShell, Bash, Zsh)"
 
 [platforms.claude]
@@ -9,6 +9,6 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/command-aliases/SKILL.md"
+src = "SKILL.md"
 dest = "command-aliases/SKILL.md"
 root = "skills"

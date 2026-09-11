@@ -1,7 +1,7 @@
 name = "handoff"
-version = "1.1.0"
+version = "1.1.1"
 description = "Compacts the conversation into a handoff doc for another agent"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/handoff/shared/skills/handoff/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/handoff/SKILL.md"
 
 [platforms.claude]
 status = "supported"
@@ -10,12 +10,12 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/handoff/SKILL.md"
+src = "SKILL.md"
 dest = "handoff/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/skills/handoff/agents/openai.yaml"
+src = "chatgpt/openai.yaml"
 dest = "handoff/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

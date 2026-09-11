@@ -1,5 +1,5 @@
 name = "text-replacements"
-version = "1.0.0"
+version = "1.0.1"
 description = "Add or change always-on AutoHotkey text replacements (Windows only)"
 
 [platforms.claude]
@@ -9,6 +9,6 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/text-replacements/SKILL.md"
+src = "SKILL.md"
 dest = "text-replacements/SKILL.md"
 root = "skills"

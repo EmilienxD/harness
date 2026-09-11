@@ -1,7 +1,7 @@
 name = "writing-for-agents"
-version = "1.0.0"
+version = "1.0.1"
 description = "Guidance for writing predictable documents consumed by agents"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/writing-for-agents/shared/skills/writing-for-agents/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/writing-for-agents/SKILL.md"
 
 [platforms.claude]
 status = "supported"
@@ -10,17 +10,17 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/writing-for-agents/SKILL.md"
+src = "SKILL.md"
 dest = "writing-for-agents/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "shared/skills/writing-for-agents/SKILL-MECHANICS.md"
+src = "SKILL-MECHANICS.md"
 dest = "writing-for-agents/SKILL-MECHANICS.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/skills/writing-for-agents/agents/openai.yaml"
+src = "chatgpt/openai.yaml"
 dest = "writing-for-agents/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

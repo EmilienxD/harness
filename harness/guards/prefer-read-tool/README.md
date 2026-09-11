@@ -61,7 +61,7 @@ file list and settings diff. See the [repo README](../../README.md) for
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/prefer_read_tool_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
+1. Copy `claude/prefer_read_tool_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
 2. Make it executable: `chmod +x .claude/hooks/prefer_read_tool_PostToolUse_hook.py`
 3. Add (or merge) the following into your repo's `.claude/settings.json`:
 

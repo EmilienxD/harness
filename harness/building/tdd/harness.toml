@@ -1,7 +1,7 @@
 name = "tdd"
-version = "1.0.0"
+version = "1.0.1"
 description = "Test-driven development through behavior-focused red-green vertical slices"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/tdd/shared/skills/tdd/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/tdd/SKILL.md"
 
 [platforms.claude]
 status = "supported"
@@ -10,6 +10,16 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "shared/skills/tdd"
-dest = "tdd"
+src = "SKILL.md"
+dest = "tdd/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "tests.md"
+dest = "tdd/tests.md"
+root = "skills"
+
+[[files]]
+src = "mocking.md"
+dest = "tdd/mocking.md"
 root = "skills"

@@ -9,8 +9,8 @@ import time
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SHARED = ROOT / "harness/building/issue-writers/shared/hooks"
-CLAUDE = ROOT / "harness/building/issue-writers/claude/hooks"
+SHARED = ROOT / "harness/building/issue-writers"
+CLAUDE = ROOT / "harness/building/issue-writers/claude"
 sys.path.insert(0, str(SHARED))
 sys.path.insert(0, str(CLAUDE))
 import issues_core as core

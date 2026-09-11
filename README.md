@@ -93,7 +93,7 @@ complete list it tried.
 
 Each package lives under a functional category in `harness/` and has a `harness.toml`. The catalogue
 discovers manifests recursively outside `harness/archive/`, which also lets a package keep private
-workflow dependencies such as `extension/aboard/auto` and the ask/reply components under
+workflow dependencies such as `extension/auto` and the ask/reply components under
 `productivity/subagents`. Manifests may declare platform payloads, executable requirements, package
 dependencies with semantic version constraints, host actions, and starter files.
 
@@ -121,6 +121,7 @@ harness/extension/       extension catalogue entries and their internal dependen
 harness/archive/         archived packages excluded from catalogue discovery
 src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
 harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
+harness/productivity/setup-git-worktree-maker/ project-native Git worktree command skill
 tests/unit/              behavioural and install round-trip coverage
 tests/e2e/               reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension

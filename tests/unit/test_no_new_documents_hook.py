@@ -16,7 +16,7 @@ from harness_cli.receipts import ReceiptStore
 ROOT = Path(__file__).resolve().parents[2]
 HOOK = (
     ROOT
-    / "harness/guards/no-new-documents/shared/hooks"
+    / "harness/guards/no-new-documents"
     / "no_new_documents_PreToolUse_hook.py"
 )
 

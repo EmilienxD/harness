@@ -131,7 +131,7 @@ executable, and merges the `PostToolUse` registration below into
 <details>
 <summary>Installing by hand</summary>
 
-1. Copy `hooks/on_edit_reminder_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
+1. Copy `claude/on_edit_reminder_PostToolUse_hook.py` into `.claude/hooks/` in your repo.
 2. Make it executable: `chmod +x .claude/hooks/on_edit_reminder_PostToolUse_hook.py`
 3. Copy `on-edit-reminder.rules` into `.claude/` and write your rules.
 4. Add (or merge) the following into your repo's `.claude/settings.json`:
