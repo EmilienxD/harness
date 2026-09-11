@@ -1,6 +1,6 @@
 name = "prototype"
-version = "1.1.0"
-description = "Interactive prototyping workflow placeholder"
+version = "1.2.0"
+description = "Build throwaway design prototypes outside the codebase"
 
 [platforms.claude]
 status = "supported"
@@ -11,6 +11,16 @@ status = "supported"
 [[files]]
 src = "shared/skills/prototype/SKILL.md"
 dest = "prototype/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "shared/skills/prototype/LOGIC.md"
+dest = "prototype/LOGIC.md"
+root = "skills"
+
+[[files]]
+src = "shared/skills/prototype/UI.md"
+dest = "prototype/UI.md"
 root = "skills"
 
 [[files]]

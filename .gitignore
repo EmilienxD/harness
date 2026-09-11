@@ -12,3 +12,4 @@ commit-ai.key
 .aboard/runtime/
 .claude/settings.local.json
 temp/
+.pytest*

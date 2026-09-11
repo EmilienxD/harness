@@ -302,8 +302,8 @@ def test_every_catalogue_manifest_loads():
         "building": {"issues", "tdd"},
         "shipping": {"commit"},
         "productivity": {
-            "caveman", "command-aliases", "create-skill", "handoff", "subagents",
-            "text-replacements", "zoom-out",
+            "caveman", "command-aliases", "handoff", "subagents", "text-replacements",
+            "writing-for-agents", "zoom-out",
         },
         "guards": {
             "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",
