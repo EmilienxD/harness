@@ -1,5 +1,5 @@
 name = "text-replacements"
-version = "1.0.1"
+version = "1.0.2"
 description = "Add or change always-on AutoHotkey text replacements (Windows only)"
 
 [platforms.claude]
