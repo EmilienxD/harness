@@ -74,7 +74,7 @@ def save(payload: dict) -> str:
         return "Usage: /copy-message-as-issue (no arguments)."
     path = cache_path(payload)
     if not path.exists():
-        return "No completed response cached. Finish a Claude response after installing issues, then run /copy-message-as-issue."
+        return "No completed response cached. Finish a Claude response after installing issue-writers, then run /copy-message-as-issue."
     with core.file_lock(path.with_suffix(".lock")) as acquired:
         if not acquired:
             return "This session is already saving a response; retry when it finishes."

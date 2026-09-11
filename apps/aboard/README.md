@@ -20,7 +20,7 @@ Auto Run continues to support issue dispositions, difficulty routing, optional E
 
 ## Harness boundary
 
-Harness is the canonical catalogue and installer for skills, user-facing hooks, and the `harness run`, `ask`, `reply`, and `resume` commands. Selecting Aboard in that catalogue installs the complete `issues` bundle plus `auto`; Aboard itself does not package, scaffold, copy, inspect, or transform Harness-owned skill or hook bodies.
+Harness is the canonical catalogue and installer for skills, user-facing hooks, and the `harness run`, `ask`, `reply`, and `resume` commands. Selecting Aboard in that catalogue installs `issue-readers` plus `auto`; Aboard itself does not package, scaffold, copy, inspect, or transform Harness-owned skill or hook bodies.
 
 Aboard does not provide a Manager role, roadmap/TODO workflow, MCP server, custom agent definitions, `/queue`, or standalone PR review. The dormant queue and standalone review implementations may remain compiled but have no command, panel, menu, hook, or MCP entry point.
 

@@ -15,13 +15,20 @@ def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     return sessions.launch(cwd=tmp_path)
 
 
-def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("launcher", [
+    "ask-agent-to-prototype",
+    "ask-agent-to-implement",
+    "ask-agent-to-review",
+])
+def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
+    launcher: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     parent = configured(tmp_path, monkeypatch)
 
     output = hooks.handle({
         "session_id": parent,
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "/ask-agent-to-prototype make a child",
+        "prompt": f"/{launcher} make a child",
         "cwd": str(tmp_path),
     })
 
@@ -29,10 +36,10 @@ def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(tmp_path: Path
     context = output["hookSpecificOutput"]["additionalContext"]
     connection = sqlite3.connect(tmp_path / "state" / "sessions.sqlite3")
     try:
-        skill, inbox = connection.execute("SELECT skill, inbox FROM grants").fetchone()
+        selected_skill, inbox = connection.execute("SELECT skill, inbox FROM grants").fetchone()
     finally:
         connection.close()
-    assert skill == "ask-agent-to-prototype"
+    assert selected_skill == launcher
     assert inbox in context
     assert Path(inbox).parent.name != parent
 

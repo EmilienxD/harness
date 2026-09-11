@@ -1,19 +1,15 @@
-# Issues
+# issue-writers
 
-Everything for the GitHub issue lifecycle: turn conversations, plans, and audits into reviewed tracker
-items; implement an issue on a clean checkout; and review the resulting commit. Nothing drafted in a
-conversation reaches the tracker before a human has looked at it.
+Turns conversations, plans, and audits into reviewed GitHub issue drafts, then publishes them only
+after a human has looked at them.
 
-One install ships the six drafting/publishing skills, the `address-issue` and `review-issue` workers,
-plus Claude Code's `/copy-message-as-issue` command and response-cache hooks. Claude Code remains
-the default target; pass `--platform chatgpt` for the native ChatGPT payload:
+One install ships the six drafting/publishing skills plus Claude Code's `/copy-message-as-issue`
+command and response-cache hooks. Claude Code remains the default target; select ChatGPT for the
+native ChatGPT payload:
 
 ```bash
 uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
 ```
-
-The two worker `SKILL.md` files are user-owned starter placeholders: Harness creates their empty
-bodies only when absent and preserves any prompts written into them on later upgrades.
 
 ## Problem
 
@@ -196,13 +192,9 @@ additional API calls**.
 │   ├── publish-issues/SKILL.md         # user-invocable, empty body (hook does the work)
 │   ├── copy-message-as-issue/SKILL.md  # publish the latest final response, no model turn
 │   ├── to-spec/SKILL.md                # conversation -> spec, in chat
-│   ├── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
-│   ├── address-issue/SKILL.md          # implement and commit an issue
-│   └── review-issue/SKILL.md           # review HEAD and commit straightforward fixes
+│   └── to-spec-draft-issue/SKILL.md    # conversation -> spec, into .issues-gateway/
 └── hooks/
     ├── publish_issues_UserPromptSubmit_hook.py  # drafting context, command dispatch, publishing
-    ├── address_issue_UserPromptSubmit_hook.py   # clean-tree check and issue context
-    ├── review_issue_UserPromptSubmit_hook.py    # clean-tree check and HEAD metadata
     └── copy_message_as_issue.py                # response caching and direct report publishing
 ```
 
@@ -322,7 +314,7 @@ setup as Claude Code, deriving a stable UUID-shaped batch id from the ChatGPT th
 the resulting values as developer context. The adapter also delegates publishing to the shared core,
 including 65,536-character splitting and resumable continuation comments.
 
-That copies the complete issues skill set and its hooks into `.claude/` and merges the hook registrations
+That copies the complete issue-writing skill set and its hooks into `.claude/` and merges the hook registrations
 into `.claude/settings.json`, leaving any hooks you already had in place. Add `--dry` first to
 see the exact file list and settings diff. See the [repo README](../../README.md) for `--user`,
 `--local`, and `uninstall`.
@@ -357,18 +349,6 @@ see the exact file list and settings diff. See the [repo README](../../README.md
             "command": "python",
             "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"],
             "timeout": 300
-          },
-          {
-            "type": "command",
-            "command": "python",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/address_issue_UserPromptSubmit_hook.py"],
-            "timeout": 120
-          },
-          {
-            "type": "command",
-            "command": "python",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/review_issue_UserPromptSubmit_hook.py"],
-            "timeout": 60
           }
         ]
       }
@@ -428,13 +408,6 @@ see the exact file list and settings diff. See the [repo README](../../README.md
 /to-spec-draft-issue
   → same synthesis, written to .issues-gateway/{session-id}/issue-{n}.md for /publish-issues
 
-/address-issue 42
-  → verifies a clean checkout, loads bounded issue context, implements and verifies the issue,
-    then creates exactly one commit
-
-/review-issue [optional focus]
-  → verifies a clean checkout, reviews HEAD, fixes straightforward findings, and creates at most
-    one commit
 ```
 
 The spec-to-sub-issues loop, end to end:

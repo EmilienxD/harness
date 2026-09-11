@@ -24,6 +24,35 @@ test("manual delegation maps task identity and explicit execution mode", async (
   }]);
 });
 
+test("manual issue delegation invokes the reader worker skills", async () => {
+  const launches: unknown[] = [];
+  const handler = createDelegationRoutes({
+    launch: async (request) => { launches.push(request); return { agentId: "agent-4", sessionId: "session", terminalId: "terminal" }; },
+  });
+
+  for (const [index, task] of ["implement", "review"].entries()) {
+    const response = await handler({
+      method: "POST",
+      url: new URL("http://127.0.0.1/delegations"),
+      headers: {},
+      body: { requestId: `request-${index}`, task, provider: "chatgpt", mode: "auto", prompt: "Do it.", cwd: "C:\\work" },
+      signal: new AbortController().signal,
+    });
+    assert.equal(response.status, 201);
+  }
+
+  assert.deepEqual(launches, [
+    {
+      requestId: "request-0", type: "General", provider: "chatgpt", executionMode: "auto",
+      prompt: "$address-issue\n\nDo it.", cwd: "C:\\work", description: "Issue Implementation",
+    },
+    {
+      requestId: "request-1", type: "General", provider: "chatgpt", executionMode: "auto",
+      prompt: "$review-issue\n\nDo it.", cwd: "C:\\work", description: "Issue Review",
+    },
+  ]);
+});
+
 test("manual delegation rejects unknown fields and task-mode combinations", async () => {
   const handler = createDelegationRoutes({ launch: async () => { throw new Error("must not launch"); } });
   for (const body of [
