@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-agent-launcher"
+version = "1.0.0"
+description = "Project-configurable agent launcher"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+cch = "agent_launcher.cli:claude_entrypoint"
+cxh = "agent_launcher.cli:chatgpt_entrypoint"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_launcher"]

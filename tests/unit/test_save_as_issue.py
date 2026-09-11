@@ -33,6 +33,7 @@ def remote(monkeypatch):
     monkeypatch.setattr(core, "gh_repository", lambda: (True, "owner/repo"))
     monkeypatch.setattr(core, "gh_find_reserved_issue", lambda *a: (True, None))
     monkeypatch.setattr(core, "gh_existing_comment_parts", lambda *a: (True, set()))
+    monkeypatch.setattr(core, "clean_publication_parts", lambda *a: (True, ""))
 
     def create(title, body, labels, parent):
         calls.append((title, body, labels, parent))

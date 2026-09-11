@@ -234,6 +234,26 @@ def test_bare_numbers_preload_full_context_from_the_current_repository(
     assert "Body of 42." in context
 
 
+def test_preloaded_context_omits_legacy_gateway_markers(
+    tmp_path, monkeypatch, capsys,
+):
+    root = repository(tmp_path)
+    marker = (
+        "<!-- issues-gateway:3b08c3cd-2726-471d-b4cc-18248cec7eeb/7:"
+        "sha256:da4f1703b26558394463b5e6a78dd43297469a99019a4665b75fb4798d4c83e5:"
+        "part:1/1 -->"
+    )
+    value = issue(42, body=f"Body of 42.\n\n{marker}", comments=1)
+    value["comments"]["nodes"][0]["body"] = f"Useful comment.\n\n{marker}"
+    fake_github(monkeypatch, {(REPOSITORY, 42): value})
+
+    context = run_hook("/address-issue 42", root, monkeypatch, capsys)
+
+    assert "Body of 42." in context
+    assert "Useful comment." in context
+    assert "issues-gateway:" not in context
+
+
 def test_full_urls_preload_from_their_identified_repositories(
     tmp_path, monkeypatch, capsys,
 ):

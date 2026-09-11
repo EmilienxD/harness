@@ -940,6 +940,14 @@ def render_publication_parts(body: str, key: str) -> list[str]:
     return render_oversized_parts(body, key)
 
 
+def marker_free_part(payload: str, marker: str) -> str:
+    """Remove one generated trailing marker without touching authored content."""
+    suffix = f"\n\n{marker}"
+    if not payload.endswith(suffix):
+        raise ValueError("publication part does not end with its recovery marker")
+    return payload[:-len(suffix)]
+
+
 def publication_fingerprint(
     repository: str, title: str, labels: list[str], parent: str | None, body: str
 ) -> str:
@@ -1011,6 +1019,52 @@ def gh_comment_issue(issue_url: str, body: str) -> tuple[bool, str]:
     if result.returncode != 0:
         return False, (result.stderr or result.stdout or "unknown gh error").strip()
     return True, (result.stdout or "").strip()
+
+
+def gh_replace_issue_body(
+    issue_url: str, expected_body: str, clean_body: str
+) -> tuple[bool, str]:
+    """Replace a marker-bearing issue body, safely and idempotently."""
+    viewed = run_gh(
+        ["gh", "issue", "view", issue_url, "--json", "body"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    try:
+        current = json.loads(viewed.stdout).get("body")
+    except (ValueError, AttributeError):
+        current = None
+    if viewed.returncode != 0 or not isinstance(current, str):
+        return False, f"could not inspect issue body at {issue_url}"
+    current = current.replace("\r\n", "\n").rstrip()
+    if current == clean_body.rstrip():
+        return True, ""
+    if current != expected_body.rstrip():
+        return (
+            False,
+            f"issue body changed before recovery metadata could be removed at {issue_url}",
+        )
+
+    edited = _run_with_body_file(
+        ["gh", "issue", "edit", issue_url], clean_body
+    )
+    if edited.returncode != 0:
+        return False, (edited.stderr or edited.stdout or "unknown gh error").strip()
+
+    verified = run_gh(
+        ["gh", "issue", "view", issue_url, "--json", "body"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    try:
+        updated = json.loads(verified.stdout).get("body")
+    except (ValueError, AttributeError):
+        updated = None
+    if (
+        verified.returncode != 0
+        or not isinstance(updated, str)
+        or updated.replace("\r\n", "\n").rstrip() != clean_body.rstrip()
+    ):
+        return False, f"could not verify recovery metadata cleanup at {issue_url}"
+    return True, ""
 
 
 def gh_repository() -> tuple[bool, str]:
@@ -1092,6 +1146,132 @@ def gh_existing_comment_parts(
             break
         page_number += 1
     return True, found
+
+
+def gh_list_issue_comments(
+    repository: str, issue_number: str
+) -> tuple[bool, list[dict] | str]:
+    comments: list[dict] = []
+    page_number = 1
+    while True:
+        ok, page = _gh_json(
+            [
+                "gh", "api",
+                f"repos/{repository}/issues/{issue_number}/comments"
+                f"?per_page=100&page={page_number}",
+            ]
+        )
+        if not ok:
+            return False, page
+        comments.extend(value for value in page if isinstance(value, dict))
+        if len(page) < 100:
+            return True, comments
+        page_number += 1
+
+
+def gh_replace_comment_body(
+    repository: str, comment_id: int, expected_body: str, clean_body: str
+) -> tuple[bool, str]:
+    """Replace one known marker-bearing comment body."""
+    endpoint = f"repos/{repository}/issues/comments/{comment_id}"
+    viewed = run_gh(
+        ["gh", "api", endpoint],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    try:
+        current = json.loads(viewed.stdout).get("body")
+    except (ValueError, AttributeError):
+        current = None
+    if viewed.returncode != 0 or not isinstance(current, str):
+        return False, f"could not inspect continuation comment {comment_id}"
+    current = current.replace("\r\n", "\n").rstrip()
+    if current == clean_body.rstrip():
+        return True, ""
+    if current != expected_body.rstrip():
+        return False, f"continuation comment {comment_id} changed before cleanup"
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8", newline="\n"
+    ) as tmp:
+        json.dump({"body": clean_body}, tmp, ensure_ascii=False)
+        tmp_path = tmp.name
+    try:
+        result = run_gh(
+            [
+                "gh", "api", "--method", "PATCH",
+                endpoint,
+                "--input", tmp_path,
+            ],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    if result.returncode != 0:
+        return False, (result.stderr or result.stdout or "unknown gh error").strip()
+    try:
+        updated = json.loads(result.stdout).get("body")
+    except (ValueError, AttributeError):
+        updated = None
+    if (
+        not isinstance(updated, str)
+        or updated.replace("\r\n", "\n").rstrip() != clean_body.rstrip()
+    ):
+        return False, f"could not verify recovery metadata cleanup on comment {comment_id}"
+    return True, ""
+
+
+def clean_publication_parts(
+    repository: str,
+    issue_number: str,
+    issue_url: str,
+    key: str,
+    digest: str,
+    parts: list[str],
+) -> tuple[bool, str]:
+    """Remove temporary recovery markers after every part is durable."""
+    total = len(parts)
+    clean_parts = [
+        marker_free_part(payload, part_marker(key, digest, index, total))
+        for index, payload in enumerate(parts, 1)
+    ]
+    cleaned, error = gh_replace_issue_body(issue_url, parts[0], clean_parts[0])
+    if not cleaned:
+        return False, error
+    if total == 1:
+        return True, ""
+
+    inspected, comments_or_error = gh_list_issue_comments(repository, issue_number)
+    if not inspected:
+        return False, f"could not inspect continuation comments: {comments_or_error}"
+    comments = comments_or_error
+    for index in range(2, total + 1):
+        expected = parts[index - 1].replace("\r\n", "\n").rstrip()
+        clean = clean_parts[index - 1]
+        clean_normalized = clean.replace("\r\n", "\n").rstrip()
+        marked_matches = []
+        clean_matches = []
+        for comment in comments:
+            body = str(comment.get("body") or "").replace("\r\n", "\n").rstrip()
+            if body == expected:
+                marked_matches.append(comment)
+            elif body == clean_normalized:
+                clean_matches.append(comment)
+        if clean_matches:
+            continue
+        if len(marked_matches) != 1:
+            return False, (
+                f"continuation part {index} changed or is missing; "
+                "recovery metadata was not removed"
+            )
+        comment_id = marked_matches[0].get("id")
+        if not isinstance(comment_id, int):
+            return False, f"continuation part {index} has no usable comment id"
+        cleaned, error = gh_replace_comment_body(
+            repository, comment_id, parts[index - 1], clean
+        )
+        if not cleaned:
+            return False, error
+    return True, ""
 
 
 def reserve_inflight(
@@ -1316,6 +1496,11 @@ def publish_reserved_issue(
             )
 
     if len(parts) == 1:
+        cleaned, error = clean_publication_parts(
+            repository, issue_number, issue_url, key, digest, parts
+        )
+        if not cleaned:
+            return False, record, f"could not remove recovery metadata: {error}"
         return True, record, ""
 
     inspected, existing_or_error = gh_existing_comment_parts(
@@ -1345,6 +1530,11 @@ def publish_reserved_issue(
                 f"partial issue {issue_url}: part {index} posted but progress could not be recorded",
             )
 
+    cleaned, error = clean_publication_parts(
+        repository, issue_number, issue_url, key, digest, parts
+    )
+    if not cleaned:
+        return False, record, f"could not remove recovery metadata: {error}"
     return True, record, ""
 
 

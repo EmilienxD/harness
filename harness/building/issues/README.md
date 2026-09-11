@@ -88,8 +88,9 @@ silently publish an earlier response. Subagent responses are ignored.
 
 The body bypasses draft parsing: headings, apparent label lines, parent sections, and
 draft references are preserved as text. No labels or parent links are added. The publisher
-adds its hidden recovery marker; oversized responses use the existing numbered continuation
-comments. Repeating the command for the same cached response returns the existing issue,
+uses a temporary hidden recovery marker while creating the issue, then removes it; oversized
+responses use the existing numbered continuation comments. Repeating the command for the same
+cached response returns the existing issue,
 or resumes an incomplete publication, with its original title. A separate completed turn
 can be saved as a new issue even if its text is identical.
 
@@ -133,11 +134,13 @@ comments. Splitting prefers paragraphs, then lines, and only hard-splits excepti
 Fenced code blocks are kept together where possible and are closed/reopened with the same language
 when a block itself cannot fit.
 
-Every issue and continuation part carries a hidden draft-key/content-digest/index marker. Before creating
-the issue, the hook reserves an `inflight` state entry. If a run stops after creation or between
-comments, rerunning `/publish-issues` finds the existing marker-bearing issue and comments, skips
-parts already present, and continues without duplicating content. The draft is retained until every
-continuation exists. Editing its processed title, labels, parent, or body while it is incomplete
+During publication, every issue and continuation part carries a hidden
+draft-key/content-digest/index marker. Before creating the issue, the hook reserves an `inflight`
+state entry. If a run stops after creation or between comments, rerunning `/publish-issues` finds
+the existing marker-bearing issue and comments, skips parts already present, and continues without
+duplicating content. Once every part is durable, the hook removes all markers and verifies the
+marker-free bodies before completing the publication. Cleanup is retryable and the draft is retained
+until it succeeds. Editing a processed title, labels, parent, or body while publication is incomplete
 causes the rerun to stop that draft and report the partial issue URL rather than mixing versions.
 The returned issue URL is checked against its title and body before any number enters the state.
 If a create response is lost and recovery cannot find its marker yet, the hook refuses another
@@ -297,11 +300,13 @@ At runtime the hook creates a gateway folder at the project root — `.issues-ga
   makes issue creation and comment posting resumable; malformed inflight entries are ignored without
   disturbing valid `published` or `pending_notice` data.
 - **Successful publish cleanup**: every issue is recorded after creation is verified, then its
-  draft is deleted before its recovery state is cleared. An oversized draft is deleted, removed from `inflight`, counted as
-  published, and queued for the normal agent notice only after all continuation markers exist. A
-  continuation failure retains the draft and progress, reports the partial URL and failed part, and
-  does not prevent unrelated drafts from being processed. If another draft fails later in the same
-  run, known references are still rewritten to their real `#<number>` form before it is retained.
+  temporary markers are removed and the final bodies are verified. Only then is its draft deleted
+  and its recovery state cleared. An oversized draft is removed from `inflight`, counted as
+  published, and queued for the normal agent notice only after every continuation exists and all
+  markers have been cleaned. A continuation or cleanup failure retains the draft and progress,
+  reports the partial URL, and does not prevent unrelated drafts from being processed. If another
+  draft fails later in the same run, known references are still rewritten to their real
+  `#<number>` form before it is retained.
 
 ## Installation
 

@@ -34,6 +34,9 @@ sys.path.insert(0, str(HOOK.parent))
 import issues_core as hook  # noqa: E402
 
 SID = "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55"
+REAL_CLEAN_PUBLICATION_PARTS = hook.clean_publication_parts
+REAL_GH_REPLACE_ISSUE_BODY = hook.gh_replace_issue_body
+REAL_GH_REPLACE_COMMENT_BODY = hook.gh_replace_comment_body
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +44,8 @@ def publication_remote(monkeypatch):
     monkeypatch.setattr(hook, "gh_repository", lambda: (True, "x/y"))
     monkeypatch.setattr(hook, "gh_find_reserved_issue", lambda *args: (True, None))
     monkeypatch.setattr(hook, "gh_existing_comment_parts", lambda *args: (True, set()))
+    monkeypatch.setattr(hook, "gh_replace_issue_body", lambda *args: (True, ""))
+    monkeypatch.setattr(hook, "clean_publication_parts", lambda *args: (True, ""))
 
 
 def _labels(body: str):
@@ -584,6 +589,61 @@ def test_small_issue_recovers_lost_response_without_recreating(tmp_path, monkeyp
     assert record["number"] == "335" and record["title"] == "Runtime"
 
 
+def test_successful_publish_leaves_the_remote_body_marker_free(tmp_path, monkeypatch):
+    path = _draft(tmp_path, "issue-0.md", "# Runtime\n\n> mode:afk\n\nbody")
+    remote = {"title": "", "body": ""}
+
+    def fake_run(args, **kwargs):
+        if args[:3] == ["gh", "issue", "create"]:
+            remote["title"] = args[args.index("--title") + 1]
+            remote["body"] = Path(args[args.index("--body-file") + 1]).read_text(
+                encoding="utf-8"
+            )
+            return subprocess.CompletedProcess(
+                args, 0, "https://github.com/x/y/issues/335\n", ""
+            )
+        if args[:3] == ["gh", "issue", "view"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps(remote), "")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(hook, "run_gh", fake_run)
+
+    def replace_body(issue_url, expected_body, clean_body):
+        assert issue_url.endswith("/335")
+        assert remote["body"] == expected_body
+        remote["body"] = clean_body
+        return True, ""
+
+    monkeypatch.setattr(hook, "gh_replace_issue_body", replace_body)
+    monkeypatch.setattr(hook, "clean_publication_parts", REAL_CLEAN_PUBLICATION_PARTS)
+
+    assert hook.publish_batch(path.parent, False, []) == (1, 0)
+    assert remote["body"] == "body"
+
+
+def test_failed_marker_cleanup_retries_without_recreating(tmp_path, monkeypatch):
+    path = _draft(tmp_path, "issue-0.md", "# Runtime\n\n> mode:afk\n\nbody")
+    created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/335"])
+    attempts = []
+
+    def clean(*args):
+        attempts.append(args)
+        if len(attempts) == 1:
+            return False, "temporary edit failure"
+        return True, ""
+
+    monkeypatch.setattr(hook, "clean_publication_parts", clean)
+
+    assert hook.publish_batch(path.parent, False, []) == (0, 1)
+    assert path.exists()
+    assert _state(path.parent.parent)["inflight"][f"{SID}/0"]["issue_number"] == "335"
+
+    assert hook.publish_batch(path.parent, False, []) == (1, 0)
+    assert len(created) == 1
+    assert len(attempts) == 2
+    assert not path.exists()
+
+
 def test_cleanup_failure_retains_recovery_state(tmp_path, monkeypatch):
     path = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody")
     created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/335"])
@@ -755,6 +815,106 @@ def test_oversized_publish_records_comments_then_cleans_up(tmp_path, monkeypatch
     assert f"{SID}/0" not in state.get("inflight", {})
     assert state["published"][f"{SID}/0"]["url"].endswith("/42")
     assert created[0]["number"] == "42"
+
+
+def test_oversized_publish_leaves_every_remote_part_marker_free(tmp_path, monkeypatch):
+    remote = {"issue": "", "comments": []}
+
+    def create(title, body, labels, parent=None):
+        remote["issue"] = body
+        return True, "https://github.com/x/y/issues/42"
+
+    def comment(issue_url, body):
+        remote["comments"].append(
+            {"id": len(remote["comments"]) + 100, "body": body}
+        )
+        return True, "ok"
+
+    def replace_issue(issue_url, expected_body, clean_body):
+        assert remote["issue"] == expected_body
+        remote["issue"] = clean_body
+        return True, ""
+
+    def list_comments(repository, issue_number):
+        return True, [dict(value) for value in remote["comments"]]
+
+    def replace_comment(repository, comment_id, expected_body, clean_body):
+        found = next(value for value in remote["comments"] if value["id"] == comment_id)
+        assert found["body"] == expected_body
+        found["body"] = clean_body
+        return True, ""
+
+    monkeypatch.setattr(hook, "gh_create_issue", create)
+    monkeypatch.setattr(hook, "gh_comment_issue", comment)
+    monkeypatch.setattr(hook, "gh_replace_issue_body", replace_issue)
+    monkeypatch.setattr(hook, "gh_list_issue_comments", list_comments, raising=False)
+    monkeypatch.setattr(hook, "gh_replace_comment_body", replace_comment, raising=False)
+    monkeypatch.setattr(hook, "clean_publication_parts", REAL_CLEAN_PUBLICATION_PARTS)
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 70_000)
+    )
+
+    assert hook.publish_batch(path.parent, dry=False, report=[]) == (1, 0)
+    assert "<!-- issues-gateway:" not in remote["issue"]
+    assert remote["comments"]
+    assert all(
+        "<!-- issues-gateway:" not in value["body"] for value in remote["comments"]
+    )
+
+
+def test_interrupted_oversized_cleanup_resumes_without_reposting(
+    tmp_path, monkeypatch,
+):
+    remote = {"issue": "", "comments": []}
+    calls = {"creates": 0, "comments": 0, "cleanup_failures": 0}
+
+    def create(title, body, labels, parent=None):
+        calls["creates"] += 1
+        remote["issue"] = body
+        return True, "https://github.com/x/y/issues/42"
+
+    def comment(issue_url, body):
+        calls["comments"] += 1
+        remote["comments"].append({"id": calls["comments"] + 100, "body": body})
+        return True, "ok"
+
+    def replace_issue(issue_url, expected_body, clean_body):
+        if remote["issue"].rstrip() == clean_body.rstrip():
+            return True, ""
+        assert remote["issue"] == expected_body
+        remote["issue"] = clean_body
+        return True, ""
+
+    def list_comments(repository, issue_number):
+        return True, [dict(value) for value in remote["comments"]]
+
+    def replace_comment(repository, comment_id, expected_body, clean_body):
+        found = next(value for value in remote["comments"] if value["id"] == comment_id)
+        if "part:3/3" in expected_body and calls["cleanup_failures"] == 0:
+            calls["cleanup_failures"] += 1
+            return False, "temporary edit failure"
+        found["body"] = clean_body
+        return True, ""
+
+    monkeypatch.setattr(hook, "gh_create_issue", create)
+    monkeypatch.setattr(hook, "gh_comment_issue", comment)
+    monkeypatch.setattr(hook, "gh_replace_issue_body", replace_issue)
+    monkeypatch.setattr(hook, "gh_list_issue_comments", list_comments)
+    monkeypatch.setattr(hook, "gh_replace_comment_body", replace_comment)
+    monkeypatch.setattr(hook, "clean_publication_parts", REAL_CLEAN_PUBLICATION_PARTS)
+    path = _draft(
+        tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\n" + ("x" * 130_000)
+    )
+
+    assert hook.publish_batch(path.parent, dry=False, report=[]) == (0, 1)
+    assert path.exists()
+    assert calls == {"creates": 1, "comments": 2, "cleanup_failures": 1}
+
+    assert hook.publish_batch(path.parent, dry=False, report=[]) == (1, 0)
+    assert calls == {"creates": 1, "comments": 2, "cleanup_failures": 1}
+    assert not path.exists()
+    assert "issues-gateway:" not in remote["issue"]
+    assert all("issues-gateway:" not in value["body"] for value in remote["comments"])
 
 
 def test_labels_references_and_native_parent_are_processed_before_chunking(
@@ -939,6 +1099,80 @@ def test_comment_body_file_uses_lf_newlines(monkeypatch):
     args, payload = captured[0]
     assert args[:4] == ["gh", "issue", "comment", "https://github.com/x/y/issues/42"]
     assert payload == b"a\nb\n"
+
+
+def test_issue_body_cleanup_uses_body_file_and_is_idempotent(monkeypatch):
+    remote = {"body": "authored\n\n<!-- marker -->"}
+    edits = []
+
+    def fake_run(args, **kwargs):
+        if args[:3] == ["gh", "issue", "view"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps(remote), "")
+        if args[:3] == ["gh", "issue", "edit"]:
+            assert "--body-file" in args and "--body" not in args
+            remote["body"] = Path(args[args.index("--body-file") + 1]).read_text(
+                encoding="utf-8"
+            )
+            edits.append(remote["body"])
+            return subprocess.CompletedProcess(args, 0, "", "")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(hook, "run_gh", fake_run)
+    assert REAL_GH_REPLACE_ISSUE_BODY(
+        "https://github.com/x/y/issues/42",
+        "authored\n\n<!-- marker -->",
+        "authored",
+    ) == (True, "")
+    assert remote["body"] == "authored"
+    assert len(edits) == 1
+
+    assert REAL_GH_REPLACE_ISSUE_BODY(
+        "https://github.com/x/y/issues/42",
+        "authored\n\n<!-- marker -->",
+        "authored",
+    ) == (True, "")
+    assert len(edits) == 1
+
+
+def test_comment_cleanup_sends_utf8_json_and_verifies_the_response(monkeypatch):
+    captured = []
+
+    def fake_run(args, **kwargs):
+        if "--input" not in args:
+            return subprocess.CompletedProcess(
+                args, 0, json.dumps({"body": "cafÃ©\n\n<!-- marker -->"}), ""
+            )
+        payload = json.loads(
+            Path(args[args.index("--input") + 1]).read_text(encoding="utf-8")
+        )
+        captured.append((args, payload))
+        return subprocess.CompletedProcess(
+            args, 0, json.dumps(payload, ensure_ascii=False), ""
+        )
+
+    monkeypatch.setattr(hook, "run_gh", fake_run)
+    assert REAL_GH_REPLACE_COMMENT_BODY(
+        "x/y", 123, "cafÃ©\n\n<!-- marker -->", "cafÃ©"
+    ) == (True, "")
+    args, payload = captured[0]
+    assert args[:4] == ["gh", "api", "--method", "PATCH"]
+    assert args[4] == "repos/x/y/issues/comments/123"
+    assert payload == {"body": "cafÃ©"}
+
+
+def test_comment_cleanup_refuses_to_overwrite_a_changed_comment(monkeypatch):
+    def fake_run(args, **kwargs):
+        assert "--method" not in args
+        return subprocess.CompletedProcess(
+            args, 0, json.dumps({"body": "edited by a user"}), ""
+        )
+
+    monkeypatch.setattr(hook, "run_gh", fake_run)
+    ok, error = REAL_GH_REPLACE_COMMENT_BODY(
+        "x/y", 123, "authored\n\n<!-- marker -->", "authored"
+    )
+    assert not ok
+    assert "changed" in error
 
 
 def test_oversized_dry_run_reports_parts_without_state_or_gh(tmp_path, monkeypatch):

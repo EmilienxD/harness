@@ -1,0 +1,15 @@
+name = "setup-git-worktree-maker"
+version = "1.0.0"
+description = "Creates a project-native command for fully initialized Git worktrees"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/setup-git-worktree-maker/shared/skills/setup-git-worktree-maker/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "shared/skills/setup-git-worktree-maker"
+dest = "setup-git-worktree-maker"
+root = "skills"

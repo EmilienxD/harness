@@ -29,7 +29,7 @@ class Platform(str, Enum):
             raise ValueError(f"unknown platform '{value}'") from exc
 
 
-DESTINATION_ROOTS = frozenset({"platform", "skills", "hooks"})
+DESTINATION_ROOTS = frozenset({"platform", "skills", "hooks", "workspace"})
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,8 @@ class PlatformAdapter:
         return scope_root / (self.user_platform_dir if is_user else self.project_platform_dir)
 
     def destination_root(self, scope_root: Path, is_user: bool, root: str) -> Path:
+        if root == "workspace":
+            return scope_root
         if root == "platform":
             return self.platform_root(scope_root, is_user)
         if root == "skills":
