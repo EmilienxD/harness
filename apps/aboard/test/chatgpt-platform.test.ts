@@ -313,7 +313,7 @@ test("a ChatGPT implementer keeps its skill invocation when the frozen contract 
   });
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.match(plan.args.at(-1) ?? "", /^\$adress-this Your full task is in @/u);
+  assert.match(plan.args.at(-1) ?? "", /^\$adress-this Perform the task described in @/u);
   assert.match(plan.spill?.contents ?? "", /^frozen issue contract/u);
   assert.match(plan.task?.contents ?? "", /^frozen issue contract/u);
 });
@@ -413,7 +413,7 @@ test("a Chrome-required ChatGPT launch tells the worker to use the Chrome backen
   const plan = platform.planLaunch({ ...implementer, prompt: "Address the issue.", chrome: true });
 
   assert.equal(plan.chromeRequired, true);
-  assert.match(plan.args.at(-1) ?? "", /^\$adress-this Your full task is in @/u);
+  assert.match(plan.args.at(-1) ?? "", /^\$adress-this Perform the task described in @/u);
   assert.match(plan.spill?.contents ?? "", /^This issue requires the Chrome browser backend\./u);
   assert.match(plan.spill?.contents ?? "", /Address the issue\.\n$/u);
   await platform.preflight(plan);

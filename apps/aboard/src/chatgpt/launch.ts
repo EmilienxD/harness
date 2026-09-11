@@ -153,7 +153,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         const relativePath = `${join(tmpdir(), "abd-prompts", identity, request.agentId, "prompt.md").replaceAll("\\", "/")}`;
         if (/\s/u.test(relativePath)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${relativePath}`);
         spill = { agentId: request.agentId, relativePath, contents: `${text}\n` };
-        const reference = `Your full task is in @${relativePath}; follow it.`;
+        const reference = `Perform the task described in @${relativePath}.`;
         promptArgs = ["--", invocation === undefined ? reference : `${invocation} ${reference}`];
       }
     }

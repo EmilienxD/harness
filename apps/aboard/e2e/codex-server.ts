@@ -210,7 +210,7 @@ function toolNames(tool: Record<string, unknown>): string[] {
 
 async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenario: CodexScenario; readonly spilled: boolean; readonly text: string }> {
   const inputText = requestText(body);
-  const spill = /Your full task is in @([^;]+); follow it\./u.exec(inputText);
+  const spill = /Perform the task described in @(.+)\.$/u.exec(inputText);
   const text = spill === null ? inputText : `${inputText}\n${await readSpill(spill[1]!)}`;
   const selected = (scenario: CodexScenario): { readonly scenario: CodexScenario; readonly spilled: boolean; readonly text: string } => ({ scenario, spilled: spill !== null, text });
   if (text.includes(AUTO_RUN_FOLLOWUP_MARKER)) return selected("auto-run-followup");

@@ -364,7 +364,7 @@ function planPrompt(
   }
 
   const relativePath = spillRelativePath(options.runtimeDirectory, options.agentId, options.stem);
-  const reference = `Your full task is in @${relativePath}; follow it.`;
+  const reference = `Perform the task described in @${relativePath}.`;
   const prefix = options.invocation === undefined ? "" : `${options.invocation} `;
   const withHeadline = `${prefix}${prompt.headline} ${reference}`;
   const stub =
