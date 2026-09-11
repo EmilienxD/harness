@@ -1,11 +1,10 @@
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createVSIX, listFiles, PackageManager } from "@vscode/vsce";
 
 
 const root = process.cwd();
-const output = join(root, "dist", "aboard-0.0.0.vsix");
 
 const required = [
   "dist/extension.js",
@@ -34,6 +33,13 @@ const forbidden = [
 ];
 
 async function main(): Promise<void> {
+  const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
+    version?: unknown;
+  };
+  if (typeof packageJson.version !== "string" || packageJson.version.length === 0) {
+    throw new Error("package.json must contain a non-empty version");
+  }
+  const output = join(root, "dist", `aboard-${packageJson.version}.vsix`);
   const files = (await listFiles({ cwd: root, packageManager: PackageManager.None }))
     .map((file) => file.replaceAll("\\", "/"));
   const missing = required.filter((file) => !files.includes(file));

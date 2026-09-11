@@ -13,3 +13,4 @@ commit-ai.key
 .claude/settings.local.json
 temp/
 .pytest*
+.tmp*

@@ -1,0 +1,39 @@
+name: Aboard CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/aboard/**"
+      - ".github/workflows/aboard-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/aboard/**"
+      - ".github/workflows/aboard-ci.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/aboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/aboard/package-lock.json
+      - run: npm ci
+      - name: Check package versions agree
+        run: |
+          node - <<'NODE'
+          const packageJson = require('./package.json');
+          const lock = require('./package-lock.json');
+          if (packageJson.version !== lock.version || packageJson.version !== lock.packages[''].version) {
+            throw new Error('package.json and package-lock.json versions must agree');
+          }
+          NODE
+      - run: npm test
+      - run: npm run package
+

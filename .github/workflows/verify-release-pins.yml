@@ -1,0 +1,23 @@
+name: Verify release pins
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 6 * * 1"
+  pull_request:
+    paths:
+      - "harness/**/harness.toml"
+      - "scripts/aboard_release.py"
+      - ".github/workflows/verify-release-pins.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/aboard_release.py verify-pins

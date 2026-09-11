@@ -42,3 +42,11 @@ npm run package
 
 See `AGENTS.md` for the project map and architectural boundaries, and
 [`docs/configuration.md`](docs/configuration.md) for the version-2 launch file.
+
+## Releasing
+
+Bump the version in `package.json` and `package-lock.json` in a normal pull request. After it merges,
+run the **Release Aboard** workflow with that version. The workflow tests and packages the extension,
+publishes an immutable `aboard-v<version>` GitHub release, then opens a second pull request that bumps
+and updates Harness's catalogue pin from the exact uploaded bytes. Reruns reuse the published asset;
+they never rebuild an existing release name.
