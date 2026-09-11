@@ -1,0 +1,7 @@
+interface:
+  display_name: "Address TODO(HITL)"
+  short_description: "Investigate and resolve one TODO(HITL)"
+  default_prompt: "Use $address-todo-hitl to recommend how to address the most important TODO(HITL)."
+
+policy:
+  allow_implicit_invocation: false
