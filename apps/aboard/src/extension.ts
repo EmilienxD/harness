@@ -48,6 +48,7 @@ import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
 import { createPlatformLifecycleRoutes } from "./bridge/platform-lifecycle.js";
+import { createAutoRoutes } from "./bridge/auto.js";
 
 import { GitWorkingTreeInspector, WorkerLifecycleReconciler, reportsResult } from "./bridge/lifecycle.js";
 import {
@@ -525,6 +526,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
     handler: combineHandlers(
+      createAutoRoutes(autoRun),
       createPlatformLifecycleRoutes({ fleet, platforms, sessions: sessionLifecycle, workers: lifecycle, compactions: workerHooks, sessionBindings: [lease, terminals], proofs: sessionProofs }),
       createWorkerHookRoutes(workerHooks),
       createTerminalRoutes(terminals),
