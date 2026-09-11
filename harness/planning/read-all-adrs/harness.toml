@@ -1,0 +1,21 @@
+name = "read-all-adrs"
+version = "1.0.0"
+description = "Reads every project ADR for complete architectural context"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/read-all-adrs/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "read-all-adrs/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "read-all-adrs/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
