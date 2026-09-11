@@ -1,5 +1,5 @@
 name = "agent-launcher"
-version = "1.0.1"
+version = "1.0.2"
 description = "Project-configurable launcher for Claude Code and Codex"
 
 [platforms.claude]
@@ -24,4 +24,4 @@ starter = true
 [[actions]]
 type = "uv-tool"
 package = "harness-agent-launcher"
-source = "git+https://github.com/EmilienxD/harness@v0.5.0#subdirectory=harness/productivity/agent-launcher/runtime"
+source = "git+https://github.com/EmilienxD/harness@075132346243ceb15e0bda2d585df5277f9c7761#subdirectory=harness/productivity/agent-launcher/runtime"

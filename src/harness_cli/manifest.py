@@ -202,9 +202,9 @@ def _parse_actions(data: dict, manifest_path: Path) -> tuple[HostAction, ...]:
             if not all(isinstance(entry.get(key), str) and entry[key] for key in ("source", "package")):
                 raise ManifestError(f"{manifest_path}: uv-tool action requires source and package")
             source = entry["source"]
-            revision = source.rsplit("@", 1)[-1] if "@" in source else ""
-            if not revision or revision.lower() in {"main", "master", "head", "dev"}:
-                raise ManifestError(f"{manifest_path}: uv-tool source must pin an immutable revision")
+            revision = source.rsplit("@", 1)[-1].split("#", 1)[0] if "@" in source else ""
+            if not re.fullmatch(r"[0-9a-fA-F]{40}", revision):
+                raise ManifestError(f"{manifest_path}: uv-tool source must pin a full commit SHA")
         else:
             required_strings = ("url", "sha256", "extension_id")
             if not all(isinstance(entry.get(key), str) and entry[key] for key in required_strings):

@@ -26,7 +26,7 @@ def installer(target, store, monkeypatch, actions=None, removals=None):
 
 def test_catalogue_declares_shared_dual_provider_runtime_and_claude_skill():
     tool = discover()["agent-launcher"]
-    assert tool.version == "1.0.1"
+    assert tool.version == "1.0.2"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert len(tool.actions) == 1
@@ -104,7 +104,7 @@ def test_modified_shared_starter_survives_upgrade_and_uninstall(tmp_path, monkey
     config.write_text("# user configuration\n", encoding="utf-8")
 
     tool = discover()["agent-launcher"]
-    object.__setattr__(tool, "version", "1.0.1")
+    object.__setattr__(tool, "version", "1.0.2")
     selected.available[tool.name] = tool
     selected.reconcile({"agent-launcher"})
     selected.reconcile(set())

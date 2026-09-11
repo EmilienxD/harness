@@ -162,6 +162,20 @@ def test_manifest_rejects_invalid_file_scopes(tmp_path, scopes):
         load_tool(root)
 
 
+def test_manifest_rejects_uv_tool_source_without_full_commit_sha(tmp_path):
+    root = tmp_path / "mutable-uv-tool-source"
+    root.mkdir()
+    (root / "harness.toml").write_text(
+        'name="mutable-uv-tool-source"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        '[[actions]]\ntype="uv-tool"\npackage="example"\n'
+        'source="git+https://example.test/harness@v1.0.0"\n'
+    )
+
+    with pytest.raises(ManifestError, match="full commit SHA"):
+        load_tool(root)
+
+
 def test_receipt_driven_uninstall_keeps_modified_files(tmp_path):
     tool = discover()["caveman"]
     target = Target.for_project(tmp_path / "project")
@@ -188,7 +202,7 @@ def transactional_package(tmp_path, name, *, action=False):
     if action:
         manifest += (
             '[[actions]]\ntype="uv-tool"\n'
-            'source="git+https://example.test/harness@0123456789abcdef"\n'
+            'source="git+https://example.test/harness@0123456789abcdef0123456789abcdef01234567"\n'
             f'package="{name}-test"\n'
         )
     (root / "harness.toml").write_text(manifest)
