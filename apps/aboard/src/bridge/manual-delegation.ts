@@ -40,6 +40,9 @@ export interface ManualDelegationLauncher {
 }
 
 function parse(body: unknown): ManualDelegationLaunch | undefined {
+  // The published subagents JSON schema describes the wire shape. TASKS adds
+  // Aboard's authorization policy, especially task-specific execution modes,
+  // so this boundary check intentionally remains local to the bridge.
   if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
   const value = body as Record<string, unknown>;
   if (Object.keys(value).some((key) => !["requestId", "task", "provider", "mode", "prompt", "cwd"].includes(key))) return undefined;
