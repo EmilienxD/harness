@@ -1,0 +1,7 @@
+interface:
+  display_name: "Report Gotchas"
+  short_description: "Send implementation gotchas to Discord"
+  default_prompt: "Use $report-gotchas to record the noteworthy caveats from this implementation."
+
+policy:
+  allow_implicit_invocation: true

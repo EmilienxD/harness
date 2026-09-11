@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "harness-report-gotchas-hook",
+            "args": ["claude"],
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

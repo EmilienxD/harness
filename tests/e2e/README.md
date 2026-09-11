@@ -24,6 +24,7 @@ npm run check
 npm test
 npm run e2e:on-edit-block
 npm run e2e:no-new-documents
+npm run e2e:report-gotchas
 ```
 
 The `on-edit-block` journey stages the actual shipped hook in a temporary project, launches the installed Claude CLI, and proves that the hook denies an edit until its required guide has been supplied, after which the retry succeeds.
@@ -33,3 +34,11 @@ launches the installed Claude Code and Codex CLIs against authenticated
 loopback inference servers, and proves that a new file under a nested `docs/`
 directory is denied while the final response reports the proposed document and
 its rationale.
+
+The `report-gotchas` journey is an opt-in live external test. It stages the
+shipped skill and runtime outside the repository, drives both real provider
+CLIs through loopback inference, and sends one identifiable report per provider
+to the configured Discord webhook. Configure the webhook with
+`harness-report-gotchas configure` before running it. The default `npm test`
+suite skips these two live cases unless
+`HARNESS_REPORT_GOTCHAS_LIVE_E2E=1` is set.

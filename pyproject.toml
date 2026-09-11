@@ -43,4 +43,5 @@ testpaths = ["tests"]
 pythonpath = [
     "harness/productivity/subagents/runtime/src",
     "harness/productivity/agent-launcher/runtime/src",
+    "harness/productivity/report-gotchas/runtime/src",
 ]
