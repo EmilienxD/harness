@@ -60,7 +60,7 @@ import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionWrap
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./claude/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
-import { FileSystemPromptSpillStore } from "./claude/spill.js";
+import { FileSystemPromptSpillStore, createPromptSpillRoot } from "./claude/spill.js";
 import { readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -317,11 +317,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }
   };
   await validateLaunchFile();
+  const promptRoot = await createPromptSpillRoot();
+  context.subscriptions.push({ dispose: () => { void rm(promptRoot, { recursive: true, force: true }); } });
   const runtimeFiles = new FileSystemPromptSpillStore(
     workspaceRoot,
     runtime.root,
     new Map([...platforms.values()].map((platform) => [platform.id, platform.lifecycleAssets])),
-    runtimeAdmission,
+    { admission: runtimeAdmission, promptRoot },
   );
   const liveTaskAgents = new Set(fleet.list().map((session) => session.identity.agentId as string));
   await runtimeFiles.prune(liveTaskAgents, new Set([
@@ -331,7 +333,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "abd_wrapper.py"));
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, promptRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,

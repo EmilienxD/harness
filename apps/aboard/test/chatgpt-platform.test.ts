@@ -306,9 +306,11 @@ test("a ChatGPT implementer invokes the installed implement skill with the froze
 });
 
 test("a ChatGPT implementer keeps its skill invocation when the frozen contract spills to a file", () => {
+  const promptRoot = "C:/Temp/abd-K7M2Q1";
   const plan = chatGpt().planLaunch({
     ...implementer,
     prompt: "frozen issue contract ".repeat(200),
+    promptRoot,
     maxInlinePromptChars: 40,
   });
 
@@ -316,6 +318,8 @@ test("a ChatGPT implementer keeps its skill invocation when the frozen contract 
   assert.match(plan.args.at(-1) ?? "", /^\$adress-this Perform the task described in @/u);
   assert.match(plan.spill?.contents ?? "", /^frozen issue contract/u);
   assert.match(plan.task?.contents ?? "", /^frozen issue contract/u);
+  assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/implementer-1/task.md");
+  assert.equal(plan.task?.relativePath, plan.spill?.relativePath);
 });
 
 test("a ChatGPT implementer cannot spawn subagents, search the web, or mutate Aboard-owned Git state", () => {

@@ -122,16 +122,15 @@ test("preserves immutable and isolation deny rules without MCP allowlisting", ()
 
 test("spills long skill prompts and keeps the original task separately", () => {
   const prompt = "Investigate the boundary. ".repeat(100);
-  const plan = planLaunch(request({ prompt, maxInlinePromptChars: 40 }));
+  const promptRoot = "C:/Temp/abd-K7M2Q1";
+  const plan = planLaunch(request({ prompt, promptRoot, maxInlinePromptChars: 40 }));
 
   assert.equal(plan.promptDelivery, "spilled");
   assert.match(plan.args.at(-1) ?? "", /^\/adress-this .*@.*\.md/u);
   assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
   assert.equal(plan.task?.contents, `${prompt.trim()}\n`);
-  assert.equal(
-    plan.spill?.relativePath.startsWith(`${promptSpillRoot(runtimeRoot).replaceAll("\\", "/")}/${agentId}/`),
-    true,
-  );
+  assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/agent-1/task.md");
+  assert.equal(plan.task?.relativePath, plan.spill?.relativePath);
 });
 
 test("uses a wrapper request to keep child argv out of terminal input", () => {
@@ -169,6 +168,23 @@ test("resume restores policy and restrictions without re-expanding a skill", () 
   assert.equal(hasPair(plan.args, "--disallowedTools", "Bash(git push*)"), true);
   assert.equal(plan.args.includes("--mcp-config"), false);
   assert.equal("agentDefinition" in plan, false);
+});
+
+test("spilled continuation prompts use short fresh names under the activation root", () => {
+  const plan = planSessionResume({
+    agentId,
+    sessionId,
+    agentType: "reviewer",
+    shell: "powershell",
+    configuration: workerConfiguration("reviewer"),
+    runtimeDirectory: runtimeRoot,
+    promptRoot: "C:/Temp/abd-K7M2Q1",
+    prompt: "Continue with the review context. ".repeat(100),
+    maxInlinePromptChars: 40,
+  });
+
+  assert.equal(plan.promptDelivery, "spilled");
+  assert.match(plan.spill?.relativePath ?? "", /^C:\/Temp\/abd-K7M2Q1\/agent-1\/c-[0-9a-f]{16}\.md$/u);
 });
 
 test("Chrome is available only to implementers and is replayed on resume", () => {

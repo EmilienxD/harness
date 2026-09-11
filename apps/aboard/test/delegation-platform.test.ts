@@ -83,6 +83,7 @@ test("shared delegation asks the selected platform for an executable launch plan
   });
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\work",
+    promptRoot: "C:\\Temp\\abd-K7M2Q1",
     fleet,
     lease: new WriteLease(),
     terminals,
@@ -99,6 +100,7 @@ test("shared delegation asks the selected platform for an executable launch plan
   assert.equal(planned.length, 1);
   assert.equal(createdSessions, 1);
   assert.equal(planned[0]?.configuration, opaqueSettings);
+  assert.equal(planned[0]?.promptRoot, "C:\\Temp\\abd-K7M2Q1");
   assert.equal(planned[0]?.autoRunRestricted, undefined);
   assert.deepEqual(preflighted, [["runtime-wrapper", "profile"]]);
   assert.equal(host.terminals[0]?.sent.at(-1), "runtime-wrapper profile --start");

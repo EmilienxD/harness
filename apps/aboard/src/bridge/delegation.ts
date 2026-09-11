@@ -112,6 +112,8 @@ export interface DelegationCoordinatorOptions {
   readonly workspaceRoot: string;
   /** Absolute mutable-state root supplied by the extension host. */
   readonly runtimeDirectory?: string;
+  /** Activation-owned temporary root for prompt files referenced with `@`. */
+  readonly promptRoot?: string;
   readonly fleet: FleetRegistry;
   readonly lease: WriteLease;
   readonly terminals: TerminalController;
@@ -246,6 +248,7 @@ export class DelegationCoordinator {
       ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
+      ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
       ...(target.prompt === undefined ? {} : { prompt: target.prompt }),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       disallowedTools: [
@@ -451,6 +454,7 @@ export class DelegationCoordinator {
       ...(agentType === "implementer" && input.chrome === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
+      ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
       prompt,
       disallowedTools: [
         ...(this.options.disallowedTools ?? []),

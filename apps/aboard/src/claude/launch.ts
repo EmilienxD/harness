@@ -19,7 +19,7 @@ import {
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 /** Planner-only fallback; production supplies VS Code's workspace storage root. */
@@ -215,6 +215,8 @@ interface CommonPlanRequest {
   readonly maxInlinePromptChars?: number | undefined;
   /** Absolute root in VS Code's workspace storage. */
   readonly runtimeDirectory?: string | undefined;
+  /** Activation-owned temporary root for prompt files referenced with `@`. */
+  readonly promptRoot?: string | undefined;
   readonly wrapper?: SessionWrapperLayout | undefined;
   /** Additional native sandbox roots required by a provider-specific worker. */
   readonly writableRoots?: readonly string[] | undefined;
@@ -302,21 +304,23 @@ function normalizePrompt(
   return resolved.text.trim().length === 0 ? undefined : normalizeGeneratedPrompt(resolved);
 }
 
-/** Namespace temp prompts by workspace storage so cleanup cannot affect another project. */
-export function promptSpillRoot(runtimeDirectory: string): string {
+/** Legacy deterministic root retained for planner fallbacks and migration cleanup. */
+export function promptSpillRoot(runtimeDirectory: string, promptRoot?: string): string {
+  if (promptRoot !== undefined) return promptRoot;
   const identity = createHash("sha256").update(resolve(runtimeDirectory)).digest("hex");
   return join(tmpdir(), "abd-prompts", identity);
 }
 
-export function taskPromptPath(runtimeDirectory: string, agentId: AgentId): string {
-  const path = `${promptSpillRoot(runtimeDirectory).replaceAll("\\", "/")}/${agentId}/task.md`;
+export function taskPromptPath(runtimeDirectory: string, agentId: AgentId, promptRoot?: string): string {
+  const path = `${promptSpillRoot(runtimeDirectory, promptRoot).replaceAll("\\", "/")}/${agentId}/task.md`;
   if (/\s/.test(path)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${path}`);
   return path;
 }
 
-function spillRelativePath(runtimeDirectory: string, agentId: AgentId, stem: string): string {
-  const directory = promptSpillRoot(runtimeDirectory).replaceAll("\\", "/");
-  const path = `${directory}/${agentId}/${stem}-${randomUUID()}.md`;
+function spillRelativePath(runtimeDirectory: string, agentId: AgentId, stem: string, promptRoot?: string): string {
+  const directory = promptSpillRoot(runtimeDirectory, promptRoot).replaceAll("\\", "/");
+  const prefix = stem === "continue" ? "c" : "p";
+  const path = `${directory}/${agentId}/${prefix}-${randomBytes(8).toString("hex")}.md`;
   // `@path` expansion has no quoting of its own, so the reference must not
   // contain whitespace even when the surrounding argument is quoted.
   if (/\s/.test(path)) {
@@ -353,6 +357,8 @@ function planPrompt(
     readonly runtimeDirectory: string;
     readonly stem: string;
     readonly invocation?: string;
+    readonly promptRoot?: string;
+    readonly spillPath?: string;
   },
 ): PromptPlan {
   if (prompt === undefined) return { delivery: "none", args: [] };
@@ -363,7 +369,8 @@ function planPrompt(
     return { delivery: "inline", args: [inline] };
   }
 
-  const relativePath = spillRelativePath(options.runtimeDirectory, options.agentId, options.stem);
+  const relativePath = options.spillPath
+    ?? spillRelativePath(options.runtimeDirectory, options.agentId, options.stem, options.promptRoot);
   const reference = `Perform the task described in @${relativePath}.`;
   const prefix = options.invocation === undefined ? "" : `${options.invocation} `;
   const withHeadline = `${prefix}${prompt.headline} ${reference}`;
@@ -532,7 +539,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   const task = prompt !== undefined && (agentType === "implementer" || agentType === "reviewer")
-    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId), contents: `${prompt.text.trim()}\n` }
+    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId, request.promptRoot), contents: `${prompt.text.trim()}\n` }
     : undefined;
   const shapeArguments: string[] = [
     "--add-dir", launchRuntimeDirectory,
@@ -571,6 +578,8 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       threshold: promptThreshold,
       runtimeDirectory,
       stem: "prompt",
+      ...(request.promptRoot === undefined ? {} : { promptRoot: request.promptRoot }),
+      ...(task === undefined ? {} : { spillPath: task.relativePath }),
       ...(configuration.shape === "skill" ? { invocation: `/${configuration.skillName}` } : {}),
     });
     const args = [...fixedArguments, ...plan.args];
@@ -649,6 +658,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       threshold: promptThreshold,
       runtimeDirectory,
       stem: "continue",
+      ...(request.promptRoot === undefined ? {} : { promptRoot: request.promptRoot }),
     });
     const args = [...fixedArguments, ...promptPlan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);

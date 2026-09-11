@@ -1,4 +1,5 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { promptSpillRoot, taskPromptPath, type RuntimeFile } from "./launch.js";
@@ -8,16 +9,32 @@ import type { PlatformLaunchPlan, PlatformLifecycleAssets, PromptSpillStore } fr
 
 export class PromptSpillPathError extends Error {}
 
+/** A short root whose atomic creation isolates one extension activation. */
+export function createPromptSpillRoot(parent = tmpdir()): Promise<string> {
+  return mkdtemp(join(parent, "abd-"));
+}
+
+export interface FileSystemPromptSpillStoreOptions {
+  readonly admission?: RuntimeAdmission;
+  readonly promptRoot?: string;
+}
+
 export class FileSystemPromptSpillStore implements PromptSpillStore {
+  readonly #admission: RuntimeAdmission;
+  readonly #promptRoot: string;
+
   public constructor(
     _projectRoot: string,
     private readonly runtimeRoot: string,
     private readonly lifecycleAssets: ReadonlyMap<string, PlatformLifecycleAssets>,
-    private readonly admission: RuntimeAdmission = new RuntimeAdmission(true),
-  ) {}
+    options: FileSystemPromptSpillStoreOptions = {},
+  ) {
+    this.#admission = options.admission ?? new RuntimeAdmission(true);
+    this.#promptRoot = options.promptRoot ?? promptSpillRoot(runtimeRoot);
+  }
 
   public async write(file: RuntimeFile, root?: string): Promise<string> {
-    return this.admission.run(() => this.#write(file, this.#promptDirectory(file.agentId)));
+    return this.#admission.run(() => this.#write(file, this.#promptDirectory(file.agentId)));
   }
 
   async #write(file: RuntimeFile, allowedRoot = this.runtimeRoot): Promise<string> {
@@ -29,7 +46,7 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
   }
 
   public async prepare(plan: PlatformLaunchPlan, root?: string): Promise<void> {
-    return this.admission.run(() => this.#prepare(plan, root));
+    return this.#admission.run(() => this.#prepare(plan, root));
   }
 
   async #prepare(plan: PlatformLaunchPlan, _root?: string): Promise<void> {
@@ -56,14 +73,14 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
   }
 
   public async task(agentId: AgentId): Promise<{ readonly path: string; readonly contents: string } | undefined> {
-    return this.admission.run(async () => {
+    return this.#admission.run(async () => {
       let contents: string;
       try { contents = await readFile(this.#taskArchivePath(agentId), "utf8"); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
         throw error;
       }
-      const path = await this.#write({ agentId, relativePath: taskPromptPath(this.runtimeRoot, agentId), contents }, this.#promptDirectory(agentId));
+      const path = await this.#write({ agentId, relativePath: taskPromptPath(this.runtimeRoot, agentId, this.#promptRoot), contents }, this.#promptDirectory(agentId));
       return { path: path.replaceAll("\\", "/"), contents };
     });
   }
@@ -74,15 +91,15 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
   }
 
   public async remove(agentId: string): Promise<void> {
-    const promptDirectory = this.#promptDirectory(agentId);
+    this.#promptDirectory(agentId);
     await Promise.all([
       rm(join(this.runtimeRoot, "agents", agentId), { recursive: true, force: true }),
-      rm(promptDirectory, { recursive: true, force: true }),
+      ...this.#promptRoots().map((root) => rm(join(root, agentId), { recursive: true, force: true })),
     ]);
   }
 
   public async prune(retainedAgentIds: ReadonlySet<string>, retainedTaskAgentIds = retainedAgentIds): Promise<void> {
-    for (const root of [join(this.runtimeRoot, "agents"), promptSpillRoot(this.runtimeRoot)]) {
+    for (const root of [join(this.runtimeRoot, "agents"), ...this.#promptRoots()]) {
       let entries: readonly import("node:fs").Dirent[];
       try { entries = await readdir(root, { withFileTypes: true }); }
       catch { continue; }
@@ -101,7 +118,11 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
 
   #promptDirectory(agentId: string): string {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(agentId)) throw new PromptSpillPathError("Invalid prompt agent id");
-    return join(promptSpillRoot(this.runtimeRoot), agentId);
+    return join(this.#promptRoot, agentId);
+  }
+
+  #promptRoots(): readonly string[] {
+    return [...new Set([this.#promptRoot, promptSpillRoot(this.runtimeRoot)])];
   }
 
   #resolvePath(candidate: string, allowedRoot = this.runtimeRoot): string {

@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import type { WriteCapability } from "../domain/capability.js";
 import { isAutoRunWorkerType, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "../claude/shell.js";
-import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../claude/launch.js";
+import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../claude/launch.js";
 import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest } from "../platform/agent-platform.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
@@ -136,6 +135,11 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     ...(task === undefined || task.length === 0 ? [] : [task]),
   ];
   const text = promptParts.length === 0 ? undefined : promptParts.join("\n\n");
+  // Only a launch owns the frozen task; a resume message must not replace the
+  // archive that regrounds the worker after compaction.
+  const archived: RuntimeFile | undefined = worker && kind === "start" && text !== undefined
+    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeRoot, request.agentId, request.promptRoot), contents: `${text}\n` }
+    : undefined;
   // A resume continues the conversation the skill already governs.
   const invocation = kind === "start" && configuration.shape === "skill" ? `$${configuration.skillName ?? ""}` : undefined;
   const planFor = (promptThreshold: number): { readonly promptDelivery: PromptDelivery; readonly spill?: RuntimeFile; readonly args: readonly string[]; readonly commandLine: string; readonly wrapperRequest?: RuntimeFile } => {
@@ -149,8 +153,8 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         promptArgs = ["--", inline];
       } else {
         promptDelivery = "spilled";
-        const identity = createHash("sha256").update(resolve(runtimeRoot)).digest("hex");
-        const relativePath = `${join(tmpdir(), "abd-prompts", identity, request.agentId, "prompt.md").replaceAll("\\", "/")}`;
+        const relativePath = archived?.relativePath
+          ?? `${join(promptSpillRoot(runtimeRoot, request.promptRoot), request.agentId, "prompt.md").replaceAll("\\", "/")}`;
         if (/\s/u.test(relativePath)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${relativePath}`);
         spill = { agentId: request.agentId, relativePath, contents: `${text}\n` };
         const reference = `Perform the task described in @${relativePath}.`;
@@ -172,11 +176,6 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   if (built.commandLine.length > limit && built.promptDelivery === "inline") built = planFor(0);
   if (built.commandLine.length > limit) throw new LaunchPlanError("command-line-too-long", `ChatGPT launch command line is ${built.commandLine.length} characters, over the ${limit} the ${request.shell} shell accepts, even with the prompt spilled to a file`);
   const writeCapability: WriteCapability = explore ? "read-only" : "write-capable";
-  // Only a launch owns the frozen task; a resume message must not replace the
-  // archive that regrounds the worker after compaction.
-  const archived: RuntimeFile | undefined = worker && kind === "start" && text !== undefined
-    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeRoot, request.agentId), contents: `${text}\n` }
-    : undefined;
   return {
     platform: "chatgpt",
     kind,
