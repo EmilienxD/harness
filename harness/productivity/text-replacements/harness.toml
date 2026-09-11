@@ -1,5 +1,5 @@
 name = "text-replacements"
-version = "1.0.1"
+version = "1.0.2"
 description = "Add or change always-on AutoHotkey text replacements (Windows only)"
 
 [platforms.claude]
@@ -12,3 +12,9 @@ status = "supported"
 src = "SKILL.md"
 dest = "text-replacements/SKILL.md"
 root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "text-replacements/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

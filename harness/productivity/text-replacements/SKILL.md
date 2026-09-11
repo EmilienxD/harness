@@ -1,6 +1,7 @@
 ---
 name: text-replacements
 description: Add or change always-on AutoHotkey text replacements when the user asks for a new trigger or expansion.
+disable-model-invocation: true
 ---
 
 Update `C:\Users\emb\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\CodingHotstrings.ahk`.

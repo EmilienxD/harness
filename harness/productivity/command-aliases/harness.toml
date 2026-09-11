@@ -1,5 +1,5 @@
 name = "command-aliases"
-version = "1.0.1"
+version = "1.0.2"
 description = "Add or modify cross-platform shell command aliases (PowerShell, Bash, Zsh)"
 
 [platforms.claude]
@@ -12,3 +12,9 @@ status = "supported"
 src = "SKILL.md"
 dest = "command-aliases/SKILL.md"
 root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "command-aliases/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
