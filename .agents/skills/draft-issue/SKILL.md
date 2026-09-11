@@ -39,7 +39,7 @@ Both the difficulty and mode labels are defaults, not requirements: if the user 
 
 If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
 
-### 2. Write one file
+### 4. Write one file
 
 Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
 <next-free-issue-index>
@@ -86,6 +86,6 @@ Examples:
 > mode:afk
 ```
 
-### 3. Hand off to the user
+### 5. Hand off to the user
 
 Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing.  Ask if they want you to make changes. Mention they can run `$publish-issues --dry` first to preview what would be created without touching the tracker, or `$publish-issues` to publish for real.

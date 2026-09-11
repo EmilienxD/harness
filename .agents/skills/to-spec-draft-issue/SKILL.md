@@ -26,7 +26,7 @@ Sketch out the seams at which you're going to test the feature. Existing seams s
 
 If the feature is too unclear to write a useful spec, say what is missing instead of inventing requirements.
 
-### 2. Write 1 file
+### 4. Write 1 file
 
 Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
 <next-free-issue-index>
@@ -109,7 +109,7 @@ Examples:
 > spec, good first issue
 ```
 
-### 3. Hand off to the user
+### 5. Hand off to the user
 
 Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention they can run `$publish-issues --dry` first to preview what would be created without touching the tracker, or `$publish-issues` to publish for real.
 
