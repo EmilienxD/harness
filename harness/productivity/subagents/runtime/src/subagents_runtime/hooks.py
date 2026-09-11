@@ -24,7 +24,7 @@ from subagents_runtime.delegation import (
 )
 
 
-INVOCATION = re.compile(r"^[/\$](ask-agent(?:-to-(?:explore|prototype|websearch|brainstorm))?|reply-to-agent)(?:\s|$)")
+INVOCATION = re.compile(r"^[/\$](ask-agent(?:-to-(?:explore|prototype|websearch|brainstorm|implement|review))?|reply-to-agent)(?:\s|$)")
 STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
 
 

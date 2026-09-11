@@ -6,7 +6,7 @@
   "required": ["requestId", "task", "provider", "mode", "prompt", "cwd"],
   "properties": {
     "requestId": {"type": "string", "minLength": 1},
-    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "general"]},
+    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "implement", "review", "general"]},
     "provider": {"enum": ["claude", "chatgpt"]},
     "mode": {"enum": ["interactive", "auto"]},
     "prompt": {"type": "string", "minLength": 1},

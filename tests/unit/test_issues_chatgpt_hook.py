@@ -13,8 +13,8 @@ from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE = ROOT / "harness/building/issues/shared/hooks/issues_core.py"
-ADAPTER = ROOT / "harness/building/issues/chatgpt/hooks/issues_ChatGPT_hook.py"
+CORE = ROOT / "harness/building/issue-writers/shared/hooks/issues_core.py"
+ADAPTER = ROOT / "harness/building/issue-writers/chatgpt/hooks/issues_ChatGPT_hook.py"
 
 core_spec = importlib.util.spec_from_file_location("issues_core", CORE)
 core = importlib.util.module_from_spec(core_spec)
@@ -36,21 +36,17 @@ def _run(payload, monkeypatch, capsys):
 
 
 def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
-    tool = discover()["issues"]
+    tool = discover()["issue-writers"]
     target = Target.for_project(tmp_path, platform="chatgpt")
     CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
 
     assert (tmp_path / ".codex/hooks/issues_core.py").is_file()
     assert (tmp_path / ".codex/hooks/issues_ChatGPT_hook.py").is_file()
-    assert (tmp_path / ".codex/hooks/address_issue_UserPromptSubmit_hook.py").is_file()
-    assert (tmp_path / ".codex/hooks/review_issue_UserPromptSubmit_hook.py").is_file()
     for name in (
-        "address-issue",
         "draft-audit-issues",
         "draft-issue",
         "draft-issues",
         "publish-issues",
-        "review-issue",
         "to-spec",
         "to-spec-draft-issue",
     ):
@@ -62,8 +58,6 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
     hooks = json.loads((tmp_path / ".codex/hooks.json").read_text(encoding="utf-8"))
     commands = [hook["command"] for hook in hooks["hooks"]["UserPromptSubmit"][0]["hooks"]]
     assert any("issues_ChatGPT_hook.py" in command for command in commands)
-    assert any("address_issue_UserPromptSubmit_hook.py" in command for command in commands)
-    assert any("review_issue_UserPromptSubmit_hook.py" in command for command in commands)
     assert all("${" not in command for command in commands)
 
 

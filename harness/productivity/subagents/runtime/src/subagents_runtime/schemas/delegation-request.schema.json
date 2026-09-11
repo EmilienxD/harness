@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["task", "mode"],
   "properties": {
-    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "general"]},
+    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "implement", "review", "general"]},
     "provider": {
       "description": "Defaults to the parent session's provider when omitted.",
       "enum": ["claude", "chatgpt"]

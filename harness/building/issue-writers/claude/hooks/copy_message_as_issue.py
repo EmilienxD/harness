@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cache Claude's final text and publish it only on /save-as-issue."""
+"""Cache Claude's final text and publish it only on /copy-message-as-issue."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ import uuid
 
 import issues_core as core
 
-PROMPT_PATTERN = re.compile(r"^/save-as-issue(?:\s|$)")
+PROMPT_PATTERN = re.compile(r"^/copy-message-as-issue(?:\s|$)")
 
 
 def cache_path(payload: dict) -> Path:
@@ -70,11 +70,11 @@ def session_title(transcript_path: str, session_id: str) -> str:
 
 
 def save(payload: dict) -> str:
-    if payload.get("prompt", "").strip() != "/save-as-issue":
-        return "Usage: /save-as-issue (no arguments)."
+    if payload.get("prompt", "").strip() != "/copy-message-as-issue":
+        return "Usage: /copy-message-as-issue (no arguments)."
     path = cache_path(payload)
     if not path.exists():
-        return "No completed response cached. Finish a Claude response after installing issues, then run /save-as-issue."
+        return "No completed response cached. Finish a Claude response after installing issue-writers, then run /copy-message-as-issue."
     with core.file_lock(path.with_suffix(".lock")) as acquired:
         if not acquired:
             return "This session is already saving a response; retry when it finishes."
@@ -86,7 +86,7 @@ def save(payload: dict) -> str:
         key = f"save-{session_id}/{response_id}"
         with core._locked_state(core.GATEWAY_DIR) as (state_path, state):
             if state_path is None:
-                return "Issue state is busy; retry /save-as-issue."
+                return "Issue state is busy; retry /copy-message-as-issue."
             published = state.get("published", {}).get(key)
             inflight = state.get("inflight", {}).get(key)
         if published and not inflight:
@@ -106,7 +106,7 @@ def save(payload: dict) -> str:
             gateway_dir=core.GATEWAY_DIR, report=report,
         )
         if not ok:
-            report.append(f"Save failed: {error}. Retry /save-as-issue to recover.")
+            report.append(f"Copy failed: {error}. Retry /copy-message-as-issue to recover.")
         elif not core.finish_inflight(key, core.GATEWAY_DIR):
             report.append(f"Saved: {record['url']}; retry to finish recording completion.")
         else:
@@ -119,9 +119,9 @@ def handle_save(payload: dict) -> None:
     try:
         result = save(payload)
     except subprocess.TimeoutExpired:
-        result = "GitHub operation timed out. Retry /save-as-issue to recover any partial publication."
+        result = "GitHub operation timed out. Retry /copy-message-as-issue to recover any partial publication."
     except Exception as exc:
-        result = f"Save failed: {exc}. Retry /save-as-issue; no model fallback was invoked."
+        result = f"Copy failed: {exc}. Retry /copy-message-as-issue; no model fallback was invoked."
     finally:
         core.GH_DEADLINE.reset(token)
     sys.stderr.write("\n\n" + result + "\n")
@@ -141,7 +141,7 @@ def main() -> None:
             invalidate(payload)
     except Exception as exc:
         # Cache maintenance must never request another model turn.
-        sys.stderr.write(f"save-as-issue response cache unavailable: {exc}\n")
+        sys.stderr.write(f"copy-message-as-issue response cache unavailable: {exc}\n")
 
 
 if __name__ == "__main__":

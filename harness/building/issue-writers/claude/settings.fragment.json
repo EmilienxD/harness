@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/copy_message_as_issue.py"]}]}
+    ],
+    "StopFailure": [
+      {"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/copy_message_as_issue.py"]}]}
+    ],
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/copy_message_as_issue.py"]}]}
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/publish_issues_UserPromptSubmit_hook.py"],
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

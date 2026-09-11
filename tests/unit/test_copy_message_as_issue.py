@@ -9,12 +9,12 @@ import time
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SHARED = ROOT / "harness/building/issues/shared/hooks"
-CLAUDE = ROOT / "harness/building/issues/claude/hooks"
+SHARED = ROOT / "harness/building/issue-writers/shared/hooks"
+CLAUDE = ROOT / "harness/building/issue-writers/claude/hooks"
 sys.path.insert(0, str(SHARED))
 sys.path.insert(0, str(CLAUDE))
 import issues_core as core
-import save_as_issue as hook
+import copy_message_as_issue as hook
 
 SID = "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55"
 
@@ -22,7 +22,7 @@ SID = "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55"
 @pytest.fixture
 def payload(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    return {"session_id": SID, "cwd": str(tmp_path), "prompt": "/save-as-issue",
+    return {"session_id": SID, "cwd": str(tmp_path), "prompt": "/copy-message-as-issue",
             "transcript_path": str(tmp_path / "transcript.jsonl"),
             "last_assistant_message": "# Report\n\n> spec\n\n## Parent\n#42\n\n" + SID + "/0\n"}
 
@@ -105,7 +105,7 @@ def test_repeated_stop_keeps_identity(payload):
 def test_missing_cache_and_arguments_do_not_publish(payload, remote):
     assert "No completed response" in hook.save(payload)
     hook.capture(payload)
-    assert "Usage:" in hook.save({**payload, "prompt": "/save-as-issue extra"})
+    assert "Usage:" in hook.save({**payload, "prompt": "/copy-message-as-issue extra"})
     assert remote == []
 
 
@@ -113,7 +113,7 @@ def test_partial_continuation_resumes_with_original_title(payload, remote, monke
     payload["last_assistant_message"] = "Long report\n\n" * 6000
     hook.capture(payload)
     monkeypatch.setattr(core, "gh_comment_issue", lambda *a: (False, "offline"))
-    assert "Save failed" in hook.save(payload)
+    assert "Copy failed" in hook.save(payload)
     write_titles(payload)
     comments = []
     monkeypatch.setattr(core, "gh_comment_issue", lambda *a: (comments.append(a) or True, ""))
@@ -155,7 +155,7 @@ def run_adapter(payload, filename):
 @pytest.mark.parametrize("event", ["SessionStart", "StopFailure"])
 def test_lifecycle_invalidates_cache(payload, event):
     hook.capture(payload)
-    result = run_adapter({**payload, "hook_event_name": event}, "save_as_issue.py")
+    result = run_adapter({**payload, "hook_event_name": event}, "copy_message_as_issue.py")
     assert result.returncode == 0 and not result.stdout
     assert not hook.cache_path(payload).exists()
 
@@ -171,7 +171,7 @@ def test_prompt_dispatch_blocks_save_and_invalidates_on_regular_prompt(payload):
 
 
 def test_stop_adapter_captures_without_model_output(payload):
-    result = run_adapter({**payload, "hook_event_name": "Stop"}, "save_as_issue.py")
+    result = run_adapter({**payload, "hook_event_name": "Stop"}, "copy_message_as_issue.py")
     assert result.returncode == 0 and not result.stdout
     assert json.loads(hook.cache_path(payload).read_text())["body"] == payload["last_assistant_message"]
 
