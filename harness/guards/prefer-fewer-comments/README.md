@@ -29,12 +29,12 @@ being exercised.
 The hook lexes the added text with the comment syntax for the file's language,
 then checks each comment the write actually touched against a budget:
 
-| Kind | Default budget | Why |
-|---|---|---|
-| Comment | 2 lines, 240 characters | Roughly two sentences: enough for a *why*, not for a narration |
-| Docstring | 5 lines, 600 characters | A contract — what goes in, what comes out, what surprises the caller |
-| File header | 15 lines, 1500 characters | A module's purpose has nowhere else to live |
-| Density | 30% of added lines, for changes of 20+ lines | Catches many small comments, which no per-comment budget can |
+| Kind | | Why |
+|---|---|
+| Comment | Roughly two sentences: enough for a *why*, not for a narration |
+| Docstring |A contract — what goes in, what comes out, what surprises the caller |
+| File header | A module's purpose has nowhere else to live |
+| Density | Catches many small comments, which no per-comment budget can |
 
 Anything over budget produces `additionalContext` naming the file, the line,
 and the first words of each offending comment, followed by the budget and —
