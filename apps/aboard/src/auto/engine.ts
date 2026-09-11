@@ -989,6 +989,7 @@ export class AutoRunEngine {
       sessionBranch: record.sessionBranch,
       base: record.targetBranch ?? await this.options.git.defaultBranch(),
       worktree: record.settings.worktree,
+      prepared: record.workspaceCreated === true,
     });
     this.#workspace = workspace;
     if (workspace.isolated) this.options.notifier.notify(autoRunMessage.workspace(workspace.root));

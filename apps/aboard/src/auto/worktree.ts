@@ -135,6 +135,8 @@ export interface RunWorkspaceRequest {
   readonly sessionBranch: string;
   readonly base: string;
   readonly worktree?: WorktreeSettings;
+  /** The persisted run record confirms that this checkout finished preparation. */
+  readonly prepared?: boolean;
 }
 
 /** How a run ended, as far as its checkout is concerned. */
@@ -347,15 +349,20 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
       root: settings.root,
     });
     const created = await this.#checkout(path, request);
-    if (created) {
-      await this.#overlayProjectConfiguration({
-        workspaceRoot: this.options.workspaceRoot,
-        worktreeRoot: path,
-        git: this.options.gitFor(path),
-      });
-      await this.#runSetup(path, request);
+    try {
+      if (created) {
+        await this.#overlayProjectConfiguration({
+          workspaceRoot: this.options.workspaceRoot,
+          worktreeRoot: path,
+          git: this.options.gitFor(path),
+        });
+        await this.#runSetup(path, request);
+      }
+      await this.#requireCleanCheckout(path, created);
+    } catch (error) {
+      if (created) await this.#discardFailedCheckout(path);
+      throw error;
     }
-    await this.#requireCleanCheckout(path, created);
     this.options.notify(autoRunMessage.workspace(path));
     return {
       root: path,
@@ -397,7 +404,15 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   /** Creates the checkout, or re-attaches to the one a previous attempt made. */
   async #checkout(path: string, request: RunWorkspaceRequest): Promise<boolean> {
     const existing = (await this.options.git.worktrees()).find((worktree) => samePath(worktree.path, path));
-    if (existing !== undefined) return false;
+    if (existing !== undefined) {
+      if (request.prepared === true) return false;
+      await this.options.git.removeWorktree(path, true).catch((error: unknown) => {
+        throw new RunWorkspaceError(
+          `The incomplete run checkout at ${path} could not be removed before setup was retried: ${describe(error)}`,
+        );
+      });
+      await this.#directories.remove(dirname(path)).catch(() => undefined);
+    }
     if (await this.#directories.exists(path)) {
       throw new RunWorkspaceError(
         `${path} already exists and is not a checkout of this repository. Remove it, or point aboard.autoRun.worktree.root elsewhere.`,
@@ -417,6 +432,15 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
       : `origin/${request.base}`;
     await this.options.git.addWorktree(path, request.sessionBranch, startPoint);
     return true;
+  }
+
+  async #discardFailedCheckout(path: string): Promise<void> {
+    try {
+      await this.options.git.removeWorktree(path, true);
+      await this.#directories.remove(dirname(path)).catch(() => undefined);
+    } catch (error) {
+      this.options.log?.(`auto-run could not remove its incomplete checkout at ${path}: ${describe(error)}`);
+    }
   }
 
   async #runSetup(path: string, request: RunWorkspaceRequest): Promise<void> {

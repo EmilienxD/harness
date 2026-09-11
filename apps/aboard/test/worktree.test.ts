@@ -11,6 +11,7 @@ import {
   isolationDenyRules,
   overlayProjectConfiguration,
   runWorkspacePath,
+  samePath,
   setupCommandLine,
   setupCommandPath,
   worktreeGitMetadataRoots,
@@ -142,6 +143,8 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     removeWorktree: async (path: string, force: boolean) => {
       calls.push(`removeWorktree ${path}${force ? " --force" : ""}`);
       if (options.removeFails === true) throw new Error("the checkout is in use");
+      const index = worktrees.findIndex((worktree) => samePath(worktree.path, path));
+      if (index >= 0) worktrees.splice(index, 1);
     },
     // The SHA-aware surface belongs to recovery and cleanup, not to workspaces.
     branchSha: async () => undefined,
@@ -170,7 +173,7 @@ function fixture(options: {
   readonly settings?: Partial<WorktreeSettings>;
   readonly git?: FakeGitOptions;
   readonly setupFile?: string;
-  readonly setupFails?: boolean;
+  readonly setupFails?: boolean | "once";
   readonly existingDirectories?: readonly string[];
 } = {}): Fixture {
   const git = fakeGit(options.git);
@@ -199,7 +202,7 @@ function fixture(options: {
     setup: {
       run: async (request) => {
         setups.push(request);
-        if (options.setupFails === true) throw new Error("npm ci failed");
+        if (options.setupFails === true || (options.setupFails === "once" && setups.length === 1)) throw new Error("npm ci failed");
       },
     },
   });
@@ -280,7 +283,7 @@ test("a resumed run re-attaches to its checkout without setting it up again", as
     // A resumed run's checkout legitimately holds an implementer's work.
     ...{},
   });
-  const workspace = await provider.prepare(REQUEST);
+  const workspace = await provider.prepare({ ...REQUEST, prepared: true });
   assert.equal(workspace.root, path);
   assert.equal(setups.length, 0, "installing again would undo work in flight");
   assert.ok(!git.calls.some((call) => call.startsWith("addWorktree")), git.calls.join(", "));
@@ -293,6 +296,23 @@ test("a failing setup command refuses the run rather than starting agents in a h
     assert.match(error.message, /session-setup\.ps1 failed/u);
     return true;
   });
+});
+
+test("retrying a failed first setup recreates and fully prepares its checkout", async () => {
+  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const { provider, git, overlays, setups } = fixture({
+    setupFile: "npm ci\n",
+    setupFails: "once",
+    git: { dirty: ["setup-leftover.txt"] },
+  });
+
+  await assert.rejects(provider.prepare(REQUEST), /session-setup\.ps1 failed/u);
+  await assert.rejects(provider.prepare(REQUEST), /setup-leftover\.txt/u);
+
+  assert.deepEqual(overlays, [path, path], "the replacement checkout receives the full overlay");
+  assert.equal(setups.length, 2, "the replacement checkout runs setup from the beginning");
+  assert.equal(git.calls.filter((call) => call.startsWith("addWorktree")).length, 2);
+  assert.ok(git.calls.includes(`removeWorktree ${path} --force`), git.calls.join(", "));
 });
 
 test("setup leftovers the run would commit refuse it too", async () => {
