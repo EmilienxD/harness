@@ -1,0 +1,29 @@
+name = "report-gotchas"
+version = "1.0.0"
+description = "Send noteworthy agent handoff gotchas to Discord"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/report-gotchas/README.md"
+requires = ["git"]
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "SKILL.md"
+dest = "report-gotchas/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "report-gotchas/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[actions]]
+type = "uv-tool"
+package = "harness-report-gotchas-runtime"
+source = "git+https://github.com/EmilienxD/harness@v0.5.0#subdirectory=harness/productivity/report-gotchas/runtime"

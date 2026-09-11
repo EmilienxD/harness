@@ -350,7 +350,7 @@ def test_every_catalogue_manifest_loads():
         "building": {"issue-readers", "issue-writers", "tdd"},
         "shipping": {"commit"},
         "productivity": {
-            "agent-launcher", "caveman", "command-aliases", "handoff", "subagents",
+            "agent-launcher", "caveman", "command-aliases", "handoff", "report-gotchas", "subagents",
             "setup-git-worktree-maker", "text-replacements", "todo-hitl", "writing-for-agents",
             "zoom-out",
         },
