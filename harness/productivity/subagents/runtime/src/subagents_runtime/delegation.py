@@ -34,6 +34,8 @@ GRANT_POLICIES = {
     "ask-agent-to-prototype": GrantPolicy("prototype", frozenset({"interactive", "auto"})),
     "ask-agent-to-websearch": GrantPolicy("websearch", frozenset({"interactive", "auto"})),
     "ask-agent-to-brainstorm": GrantPolicy("brainstorm", frozenset({"interactive"})),
+    "ask-agent-to-implement": GrantPolicy("implement", frozenset({"interactive", "auto"})),
+    "ask-agent-to-review": GrantPolicy("review", frozenset({"interactive", "auto"})),
     "ask-agent": GrantPolicy("general", frozenset({"interactive", "auto"})),
 }
 

@@ -1,0 +1,49 @@
+name = "issue-readers"
+version = "1.0.0"
+description = "Prepare issue and commit context for implementation and review workers"
+requires = ["git", "gh"]
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issue-readers/README.md"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "shared/skills/address-issue"
+dest = "address-issue"
+root = "skills"
+starter = true
+
+[[files]]
+src = "shared/skills/review-issue"
+dest = "review-issue"
+root = "skills"
+starter = true
+
+[[files]]
+src = "shared/hooks/address_issue_UserPromptSubmit_hook.py"
+dest = "address_issue_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "shared/hooks/review_issue_UserPromptSubmit_hook.py"
+dest = "review_issue_UserPromptSubmit_hook.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "chatgpt/skills/address-issue/agents/openai.yaml"
+dest = "address-issue/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/skills/review-issue/agents/openai.yaml"
+dest = "review-issue/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

@@ -16,7 +16,7 @@ from harness_cli.receipts import ReceiptStore
 
 HOOK = (
     Path(__file__).resolve().parents[2]
-    / "harness/building/issues/shared/hooks/review_issue_UserPromptSubmit_hook.py"
+    / "harness/building/issue-readers/shared/hooks/review_issue_UserPromptSubmit_hook.py"
 )
 spec = importlib.util.spec_from_file_location("review_issue_hook", HOOK)
 hook = importlib.util.module_from_spec(spec)
@@ -156,7 +156,7 @@ def test_missing_repository_blocks(tmp_path, monkeypatch, capsys):
 @pytest.mark.parametrize("platform", ["claude", "chatgpt"])
 def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     tools = discover()
-    name = "issues"
+    name = "issue-readers"
     target = Target.for_project(tmp_path / "project", platform=platform)
     CatalogueInstaller(
         {name: tools[name]}, target, ReceiptStore.load(tmp_path / "receipts.json"),

@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/address_issue_UserPromptSubmit_hook.py"],
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/review_issue_UserPromptSubmit_hook.py"],
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

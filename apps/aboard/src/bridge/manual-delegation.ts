@@ -8,8 +8,21 @@ const TASKS = {
   prototype: { type: "Prototype", modes: ["interactive", "auto"] },
   websearch: { type: "Web Search", modes: ["interactive", "auto"] },
   brainstorm: { type: "Brainstorm", modes: ["interactive"] },
+  implement: { type: "General", modes: ["interactive", "auto"] },
+  review: { type: "General", modes: ["interactive", "auto"] },
   general: { type: "General", modes: ["interactive", "auto"] },
 } as const;
+const SKILLS: Readonly<Record<string, string>> = {
+  prototype: "prototype",
+  websearch: "websearch",
+  brainstorm: "grill-me",
+  implement: "address-issue",
+  review: "review-issue",
+};
+const DESCRIPTIONS: Readonly<Record<string, string>> = {
+  implement: "Issue Implementation",
+  review: "Issue Review",
+};
 const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
 
 export interface ManualDelegationLaunch {
@@ -39,7 +52,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
   if (SKILL_INVOCATION.test(value.prompt.trim())) return undefined;
   if (typeof value.cwd !== "string" || value.cwd.trim().length === 0) return undefined;
-  const skill = { prototype: "prototype", websearch: "websearch", brainstorm: "grill-me" }[value.task];
+  const skill = SKILLS[value.task];
   const prompt = skill === undefined ? value.prompt : `${value.provider === "chatgpt" ? "$" : "/"}${skill}\n\n${value.prompt}`;
   return {
     requestId: value.requestId,
@@ -48,7 +61,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
     executionMode: value.mode,
     prompt,
     cwd: value.cwd,
-    description: task.type,
+    description: DESCRIPTIONS[value.task] ?? task.type,
   };
 }
 

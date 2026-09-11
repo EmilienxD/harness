@@ -103,10 +103,10 @@ collisions fail the operation. Receipts record versions, explicit/transitive own
 file digests, settings fragments, and host actions. Removal is dependent-aware and never deletes a
 file changed since installation.
 
-The Aboard package depends unconditionally on `auto` and the complete `issues` bundle. That bundle
-includes the intentionally empty `address-issue` and `review-issue` worker skill placeholders, so
-initializing Aboard also installs the complete issue drafting, publishing, implementation, and review
-workflow.
+The Aboard package depends unconditionally on `auto` and `issue-readers`. The reader bundle includes
+the intentionally empty `address-issue` and `review-issue` worker skill placeholders, so initializing
+Aboard installs the implementation and review workflows without also installing issue drafting and
+publishing.
 The Harness-owned `/auto` hook fails closed outside an authenticated Aboard terminal.
 
 ## Repository layout

@@ -1,8 +1,8 @@
-name = "issues"
-version = "1.20.0"
-description = "Draft, publish, address, and review GitHub issues"
+name = "issue-writers"
+version = "1.0.0"
+description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issues/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issue-writers/README.md"
 
 [platforms.claude]
 status = "supported"
@@ -64,30 +64,6 @@ dest = "to-spec"
 root = "skills"
 
 [[files]]
-src = "shared/skills/address-issue"
-dest = "address-issue"
-root = "skills"
-starter = true
-
-[[files]]
-src = "shared/skills/review-issue"
-dest = "review-issue"
-root = "skills"
-starter = true
-
-[[files]]
-src = "shared/hooks/address_issue_UserPromptSubmit_hook.py"
-dest = "address_issue_UserPromptSubmit_hook.py"
-root = "hooks"
-executable = true
-
-[[files]]
-src = "shared/hooks/review_issue_UserPromptSubmit_hook.py"
-dest = "review_issue_UserPromptSubmit_hook.py"
-root = "hooks"
-executable = true
-
-[[files]]
 src = "shared/skills/to-spec-draft-issue"
 dest = "to-spec-draft-issue"
 root = "skills"
@@ -135,14 +111,3 @@ dest = "to-spec-draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
-[[files]]
-src = "chatgpt/skills/address-issue/agents/openai.yaml"
-dest = "address-issue/agents/openai.yaml"
-root = "skills"
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/skills/review-issue/agents/openai.yaml"
-dest = "review-issue/agents/openai.yaml"
-root = "skills"
-platforms = ["chatgpt"]

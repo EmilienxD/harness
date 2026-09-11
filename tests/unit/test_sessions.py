@@ -65,16 +65,21 @@ def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypat
     assert captured["body"]["cwd"] == str(project.resolve())
 
 
-def test_native_provider_adapter_injects_the_requested_skill_and_exact_cwd(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("task", "skill"), [
+    ("websearch", "websearch"),
+    ("implement", "address-issue"),
+    ("review", "review-issue"),
+])
+def test_native_provider_adapter_injects_the_requested_skill_and_exact_cwd(task, skill, tmp_path, monkeypatch):
     launches = []
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, provider="claude": ["codex" if provider == "chatgpt" else "claude"])
     monkeypatch.setattr(sessions, "_visible_terminal", lambda argv, environment, cwd: launches.append((argv, environment, cwd)))
-    request = type("Request", (), {"task": "websearch", "provider": "chatgpt", "mode": "interactive", "prompt": "Find it."})()
+    request = type("Request", (), {"task": task, "provider": "chatgpt", "mode": "interactive", "prompt": "Do it."})()
     sessions.launch_delegated(request, "request", 2, tmp_path)
     argv, environment, cwd = launches[0]
-    assert argv[-2:] == ["--", "$websearch\n\nFind it."]
+    assert argv[-2:] == ["--", f"${skill}\n\nDo it."]
     assert environment["HARNESS_EXECUTION_MODE"] == "interactive"
     assert cwd == tmp_path.resolve()
 
