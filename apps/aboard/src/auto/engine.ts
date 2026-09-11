@@ -1945,9 +1945,17 @@ export class AutoRunEngine {
         this.options.notifier.notify(autoRunMessage.unpublishedTarget(base, record.unpublishedTargetCommits));
       }
       const snapshot = await this.options.github.getPullRequest(prNumber);
-      // A run the user interrupted must not finish by landing a batch of
-      // automated work on their branch.
-      if (!record.settings.mergeRunPullRequest || signal.aborted) {
+      // Only a completed run may land its batch on the user's branch. Failed,
+      // paused, and interrupted attempts retain their partial PR for recovery
+      // or inspection, even when automatic run-PR merging was enabled.
+      if (end.outcome !== "succeeded" || signal.aborted) {
+        const reason = end.outcome !== "succeeded" && end.outcome.kind === "failed"
+          ? `the run stopped: ${end.outcome.reason}`
+          : "the run did not complete";
+        this.options.notifier.alert(autoRunMessage.runParked(prNumber, base, reason), snapshot?.url);
+        return end;
+      }
+      if (!record.settings.mergeRunPullRequest) {
         this.options.notifier.alert(autoRunMessage.runWaiting(prNumber, base), snapshot?.url);
         return end;
       }

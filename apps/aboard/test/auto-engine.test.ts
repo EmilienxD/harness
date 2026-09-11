@@ -94,6 +94,7 @@ interface HarnessOptions {
   /** Whether a worker commits before it exits. Defaults to true. */
   readonly producesChanges?: boolean;
   readonly implementerFails?: boolean;
+  readonly implementerFailsForIssue?: number;
   readonly exploreFails?: boolean;
   readonly explorationReport?: string;
   /** Final message returned by the implementer. */
@@ -509,7 +510,10 @@ function harness(options: HarnessOptions = {}): Harness {
         queue.find((entry) => entry.number === input.issues?.[0])?.labels.splice(0, Infinity, "[AI]-hitl");
       }
       const implementer = input.type === "implementer";
-      const failed = (implementer && options.implementerFails === true)
+      const failed = (implementer && (
+        options.implementerFails === true
+        || options.implementerFailsForIssue === input.issues?.[0]
+      ))
         || (input.type === "Explore" && options.exploreFails === true);
       return {
         agentId: `agent-${launches.length}` as AgentId,
@@ -1003,6 +1007,24 @@ test("the run merges its own pull request only when the setting allows it", asyn
   // target it, and deleting a base branch closes them.
   assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: false }, { pr: 57, deleteBranch: false }]);
   assert.match(context.notifications.join("\n"), /PR #57 merged into feature\/wip\. Pull feature\/wip/);
+});
+
+test("a failed run leaves its partial run pull request open even when automatic merge is enabled", async () => {
+  const context = harness({
+    startBranch: "feature/wip",
+    settings: { mergeRunPullRequest: true },
+    issues: [
+      { number: 34, title: "land first", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+      { number: 35, title: "fail second", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
+    ],
+    implementerFailsForIssue: 35,
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.equal(context.pullRequests.get(57)?.state, "open");
+  assert.deepEqual(context.merges, [{ pr: 56, deleteBranch: false }]);
+  assert.equal(context.record()?.outcome?.kind, "failed");
 });
 
 test("unpublished target commits are frozen, warned about, and included in the final PR guidance", async () => {
