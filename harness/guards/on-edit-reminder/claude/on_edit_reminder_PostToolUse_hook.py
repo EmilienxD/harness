@@ -408,6 +408,8 @@ def main() -> int:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0
+    if not isinstance(event, dict):
+        return 0
 
     if event.get("tool_name") not in EDIT_TOOLS:
         return 0

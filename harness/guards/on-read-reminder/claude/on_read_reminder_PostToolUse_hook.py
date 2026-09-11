@@ -224,6 +224,8 @@ def main() -> int:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0
+    if not isinstance(event, dict):
+        return 0
 
     tool_name = event.get("tool_name", "")
     tool_input = event.get("tool_input")
