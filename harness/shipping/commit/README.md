@@ -75,7 +75,7 @@ the edit tools: a `cat > f <<'EOF'` heredoc, `sed -i`, an inline
 PowerShell `Set-Content`, or a plain `mv`/`rm`/`touch` all change files that
 belong in the commit. `Bash` and `PowerShell` calls in the transcript are
 parsed for their targets, so a session that mixed both kinds of write stages
-both. (The [`prefer-edit-tool`](../prefer-edit-tool/README.md) hook nudges
+both. (The [`prefer-edit-tool`](../../guards/prefer-edit-tool/README.md) hook nudges
 Claude towards Write/Edit in the first place; `/commit` doesn't assume it is
 installed.)
 
@@ -208,28 +208,33 @@ python .claude/hooks/commit_UserPromptSubmit_hook.py \
 Claude Code (the backward-compatible default):
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.4.2 harness
 ```
+
+Select `commit` in the catalogue, then choose the desired product and scope.
 
 ChatGPT:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness
+uvx --from git+https://github.com/EmilienxD/harness@v0.4.2 harness
 ```
+
+Select `commit` in the catalogue, then choose the ChatGPT product and desired scope.
 
 After installing for ChatGPT, restart it and open `/hooks` to review and trust
 the three native hook definitions. Until they are trusted, ChatGPT skips them.
 
-The default command copies the hook and the skill into `.claude/`, marks the
+When `commit` is selected for a project install, Harness copies the hook and the skill into `.claude/`, marks the
 hook executable,
 merges the `UserPromptSubmit` registration below into `.claude/settings.json`
 without disturbing any hooks you already had, and adds a small fenced block to
 the repo's `.gitignore` so the two places `--ai` looks for an API key
 (`.claude/commit-ai.key` and `.claude/settings.local.json`) can never be
-committed. Add `--dry` first to see the exact file list, settings diff, and
-`.gitignore` diff. Uninstalling removes the block again, leaving any rules you
-wrote yourself untouched. See the [repo README](../../README.md) for `--user`,
-`--local`, and `uninstall`.
+committed. The hook's `/commit --dry` mode shows the exact file list, settings
+diff, and `.gitignore` diff. To remove the package, rerun the catalogue and
+deselect `commit`; Harness removes only files and settings owned by its receipt,
+leaving any rules you wrote yourself untouched. See the [repo README](../../../README.md)
+for the catalogue workflow.
 
 <details>
 <summary>Installing by hand</summary>
