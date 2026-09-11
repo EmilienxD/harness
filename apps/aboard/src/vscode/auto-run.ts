@@ -294,8 +294,8 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
       const { state, record } = card;
       return {
         label: `Auto-run ${record.runId}`,
-        description: `waiting for you · issue #${state.currentIssue ?? "?"}`,
-        tooltip: `${runTooltip(record, state)}\n\nMerge the pull request, or approve it from another account, and the run continues.`,
+        description: `Waiting for commit · issue #${state.currentIssue ?? "?"}`,
+        tooltip: `${runTooltip(record, state)}\n\nCommit all accepted changes to continue Auto Run.`,
         icon: "person",
         contextValue: "aboard.autoRun.waiting",
         collapsible: true,
@@ -441,11 +441,16 @@ function describeOutcome(record: AutoRunRecord): string {
 }
 
 function runTooltip(record: AutoRunRecord, state?: AutoRunState): string {
+  const progress = record.currentIssue === undefined ? undefined : record.progress[String(record.currentIssue)];
   return [
     `Run ${record.runId} (attempt ${record.attempt})`,
     `Session branch: ${record.sessionBranch}`,
     `Target branch: ${record.targetBranch ?? "the repository default"}`,
     `Branch mode: ${record.settings.branchMode ?? "per-issue"}`,
+    state?.expectedBranch === undefined ? "" : `Expected branch: ${state.expectedBranch}`,
+    state?.dirtyPaths === undefined ? "" : state.dirtyPaths.length === 0 ? "Working tree: clean" : `Uncommitted paths: ${state.dirtyPaths.join(", ")}`,
+    progress?.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined ? `Accepted range: ${progress.beforeSha}..${progress.implementationSha}` : "",
+    progress?.state === "current" && progress.reviewedSha !== undefined ? `Reviewed through: ${progress.reviewedSha}` : "",
     record.settings.workspaceRoot === undefined ? "Working in your checkout" : `Working in ${record.settings.workspaceRoot}`,
     `Fresh Explore context ${record.settings.exploreBeforeImplement ? "on" : "off"}`,
     `Review ${record.settings.review ? "on" : "off"}`,

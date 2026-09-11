@@ -3,7 +3,9 @@ import { execFile } from "node:child_process";
 import { access, readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { commands, extensions, window, workspace } from "vscode";
+import { commands, extensions, window, workspace, type Terminal } from "vscode";
+
+import { HITL_ACCEPT_PROMPT } from "../scenario.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -26,6 +28,18 @@ async function diagnostics(): Promise<Diagnostics | undefined> {
   assert.ok(path, "diagnostics path is configured");
   try { return JSON.parse(await readFile(path, "utf8")) as Diagnostics; }
   catch { return undefined; }
+}
+
+async function submitHitlAcceptance(terminal: Terminal): Promise<void> {
+  terminal.show();
+  terminal.sendText(HITL_ACCEPT_PROMPT, false);
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    terminal.sendText("\r", false);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const value = await diagnostics();
+    if (value?.observations.some((item) => item.checkpoint === "auto-hitl-commit")) return;
+  }
+  throw new Error("HITL terminal did not submit the acceptance instruction");
 }
 
 async function endpoint(directory: string, root: string): Promise<CommandEndpoint | undefined> {
@@ -139,12 +153,8 @@ export async function run(): Promise<void> {
 
     await eventually(async () => {
       const value = await diagnostics();
-      return value?.observations.some((item) => item.checkpoint === "auto-hitl-complete") ? value : undefined;
+      return value?.observations.some((item) => item.checkpoint === "auto-hitl-handoff") ? value : undefined;
     }, "single-branch HITL implementer did not complete", 480);
-    const runPullRequest = await eventually(async () => {
-      const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--limit", "10", "--json", "number,headRefName,baseRefName,body"], { encoding: "utf8" })).stdout) as { number?: number; headRefName?: string; baseRefName?: string; body?: string }[];
-      return rows.find((row) => row.headRefName?.startsWith("run/") && row.baseRefName === "main");
-    }, "single-branch run did not open its cumulative pull request", 480);
     const worktree = await eventually(async () => {
       const output = (await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })).stdout;
       return worktreeRoots(output).find((path) => path.toLowerCase() !== resolve(root).toLowerCase());
@@ -152,11 +162,25 @@ export async function run(): Promise<void> {
     assert.notEqual(worktree.toLowerCase(), root.toLowerCase());
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
 
+    assert.ok(window.terminals.includes(opened[0]!), "HITL keeps the same visible terminal");
+    const dirty = (await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: worktree, encoding: "utf8" })).stdout;
+    assert.match(dirty, /deterministic.txt/);
+    const beforeAcceptance = (await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--json", "number"], { encoding: "utf8" })).stdout;
+    assert.deepEqual(JSON.parse(beforeAcceptance), [], "no PR exists before acceptance");
+    // The response server persists the handoff just before Codex redraws its
+    // interactive prompt. Give the TUI time to become input-ready so this
+    // models a deliberate user follow-up instead of racing task settlement.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await submitHitlAcceptance(opened[0]!);
+
     await eventually(async () => {
-      await commands.executeCommand("aboard.continueAutoRun");
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(hitl), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
       return issue.state === "CLOSED" ? issue : undefined;
-    }, "single-branch HITL issue was not explicitly accepted", 480);
+    }, "HITL acceptance commit did not advance Auto Run", 480);
+    const runPullRequest = await eventually(async () => {
+      const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--limit", "10", "--json", "number,headRefName,baseRefName,body"], { encoding: "utf8" })).stdout) as { number?: number; headRefName?: string; baseRefName?: string; body?: string }[];
+      return rows.find((row) => row.headRefName?.startsWith("run/") && row.baseRefName === "main");
+    }, "single-branch run did not open its cumulative pull request", 480);
     await new Promise((resolve) => setTimeout(resolve, 1000));
     assert.equal((await diagnostics())?.observations.some((item) => item.checkpoint === "auto-followup-read"), false, "pauseAfterHitl must stop before the next issue");
 
@@ -172,7 +196,7 @@ export async function run(): Promise<void> {
     }, "single-branch follow-up implementer did not complete", 480);
     const successes = completed.observations.filter((item) => item.scenario !== null && item.result === "success");
     assert.deepEqual(successes.map((item) => item.checkpoint), [
-      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff", "auto-hitl-commit", "auto-hitl-complete",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ]);
     assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);

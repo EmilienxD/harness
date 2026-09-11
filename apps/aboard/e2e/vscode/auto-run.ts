@@ -38,6 +38,8 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
       CLAUDE_CONFIG_DIR: platformConfigRoot,
       CLAUDE_CODE_PROJECT_DIR_NAME: "harness-e2e",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
+      CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1",
       CLAUDE_CODE_MAX_RETRIES: "0",
       DISABLE_UPDATES: "1",
       DISABLE_AUTOUPDATER: "1",
@@ -133,7 +135,7 @@ async function installHarnessWorkerSkills(configRoot: string): Promise<void> {
   for (const name of ["address-issue", "review-issue"]) {
     const destination = join(configRoot, "skills", name, "SKILL.md");
     await mkdir(join(configRoot, "skills", name), { recursive: true });
-    await copyFile(join(harnessRoot, "harness", name, "shared", "skills", name, "SKILL.md"), destination);
+    await copyFile(join(harnessRoot, "harness", "building", "issue-readers", name, "SKILL.md"), destination);
   }
 }
 
@@ -200,9 +202,13 @@ async function createIssue(repository: string, title: string, body: string, labe
   return Number(match[1]);
 }
 
-async function runSingleBranchJourney(platform: E2ePlatform): Promise<void> {
+async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "single-branch"): Promise<void> {
   const config = loadConfig();
   await resetHarness();
+  // Windows' unelevated sandbox provisions every writable Git object path.
+  // Keep the long-lived disposable fixture packed so linked-worktree launches
+  // exercise the permission boundary instead of timing out on stale loose objects.
+  await execFileAsync("git", ["gc"], { cwd: config.cloneRoot, encoding: "utf8", windowsHide: true });
   await clearTestAutoRunRecords();
   const hitl = await createIssue(config.repository, "Accept deterministic single-branch change", `${AUTO_RUN_HITL_MARKER}\n\nChange deterministic.txt from before to after.`, ["[AI]-hitl", "[AI]-advanced-difficulty"]);
   const followup = await createIssue(config.repository, "Finish deterministic single-branch change", `${AUTO_RUN_FOLLOWUP_MARKER}\n\nChange deterministic.txt from after to complete.`, ["[AI]-afk", "[AI]-expert-difficulty"]);
@@ -223,6 +229,8 @@ async function runSingleBranchJourney(platform: E2ePlatform): Promise<void> {
       CLAUDE_CONFIG_DIR: platformConfigRoot,
       CLAUDE_CODE_PROJECT_DIR_NAME: "harness-e2e",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
+      CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1",
       CLAUDE_CODE_MAX_RETRIES: "0",
       DISABLE_UPDATES: "1",
       DISABLE_AUTOUPDATER: "1",
@@ -251,14 +259,13 @@ async function runSingleBranchJourney(platform: E2ePlatform): Promise<void> {
         launchArgs: [config.cloneRoot, "--disable-extensions"],
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
-        "aboard.autoRun.branchMode": "single-branch",
+        "aboard.autoRun.branchMode": branchMode,
         "aboard.autoRun.review": false,
         "aboard.autoRun.exploreBeforeImplement": false,
         "aboard.autoRun.issueContextDepth": 1,
         "aboard.autoRun.pauseAfterHitl": true,
         "aboard.autoRun.mergeStrategy": "rebase",
         "aboard.autoRun.mergeRunPullRequest": false,
-        "aboard.autoRun.pollSeconds": 3600,
         "aboard.autoRun.discardBehavior": "full-cleanup",
         "aboard.autoRun.worktree.enabled": true,
         "aboard.autoRun.worktree.root": join(config.runtimeRoot, "worktrees"),
@@ -269,14 +276,14 @@ async function runSingleBranchJourney(platform: E2ePlatform): Promise<void> {
     }
     const assertions = server.assertions();
     for (const checkpoint of [
-      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff", "auto-hitl-commit", "auto-hitl-complete",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ]) {
       const scenario = checkpoint.startsWith("auto-hitl-") ? "auto-run-hitl" : "auto-run-followup";
       const expected = platform === "chatgpt" ? `${scenario}:${checkpoint}` : checkpoint;
       if (!assertions.checkpoints.includes(expected)) throw new Error(`Single-branch auto-run did not reach ${checkpoint}`);
     }
-    if (assertions.inferenceRequests !== 8 || assertions.unexpectedRequests !== 0) throw new Error("Unexpected single-branch inference activity");
+    if (assertions.inferenceRequests !== 9 || assertions.unexpectedRequests !== 0) throw new Error("Unexpected single-branch inference activity");
   } finally {
     await server.close();
     await resetHarness();
@@ -293,7 +300,14 @@ async function isolatedWorktreeRoot(root: string): Promise<string> {
   return roots[0]!;
 }
 
-void runSingleBranchJourney("chatgpt")
+void (async () => {
+  for (const platform of ["claude", "chatgpt"] as const) {
+    const selected = process.argv.find((arg) => arg.startsWith("--platform="))?.split("=")[1];
+    if (selected !== undefined && selected !== platform) continue;
+    if (!process.argv.includes("--hitl")) await runAutoRunJourney(platform);
+    for (const mode of ["per-issue", "single-branch"] as const) await runHitlJourney(platform, mode);
+  }
+})()
   .catch((error: unknown) => {
   process.stderr.write(`${error instanceof Error ? error.stack : "Auto-run E2E journey failed"}\n`);
   process.exitCode = 1;

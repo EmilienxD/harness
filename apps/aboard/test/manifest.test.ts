@@ -114,6 +114,10 @@ test("reopening is always offered, and bulk fleet restoration no longer exists",
 
 test("the auto-run card offers exactly the actions its state allows", async () => {
   const { contributes } = await manifest();
+  assert.equal(contributes.commands.some((entry) => entry.command === "aboard.continueAutoRun"), false);
+  assert.equal(JSON.stringify(contributes.menus).includes("aboard.continueAutoRun"), false);
+  assert.equal(JSON.stringify(contributes.menus).includes("aboard.autoRunWaiting"), false);
+  assert.equal("aboard.autoRun.pollSeconds" in contributes.configuration.properties, false);
   const title = (contributes.menus["view/title"] ?? []).filter((entry) => (entry.when ?? "").includes("aboard.autoRun"));
   const inline = contributes.menus["view/item/context"] ?? [];
   const action = (command: string) => inline.find((entry) => entry.command === command);

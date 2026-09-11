@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { FleetRegistry } from "../src/domain/fleet.js";
 import { ActivityRecorder } from "../src/runtime/activity-recorder.js";
 import type { ActivityDto } from "../src/domain/activity.js";
-import { FileActivityStore, FileAutoRunStore, PersistOnChange, parseAutoRunRecord, FileFleetStore } from "../src/runtime/persistence.js";
+import { FileActivityStore, FileAutoRunStore, PersistOnChange, isFixedPlanRecord, parseAutoRunRecord, FileFleetStore } from "../src/runtime/persistence.js";
 import type { AutoRunRecord } from "../src/domain/run-plan.js";
 import { combineHandlers } from "../src/bridge/router.js";
 import type { AuthenticatedBridgeRequest } from "../src/bridge/protocol.js";
@@ -113,10 +113,10 @@ test("removing private runtime state drops the activity cache instead of resurre
   assert.deepEqual(persisted.entries.map((entry) => entry.kind === "run" ? entry.runId : entry.kind), ["run_after"]);
 });
 
-/** A complete version-2 record, so each test states only what it is about. */
+/** A complete version-3 record, so each test states only what it is about. */
 function fixedPlanRecord(): AutoRunRecord {
   return {
-    version: 2,
+    version: 3,
     runId: "run_return",
     startedAt: "2026-07-31T09:12:04.221Z",
     updatedAt: "2026-07-31T10:00:00.000Z",
@@ -128,7 +128,6 @@ function fixedPlanRecord(): AutoRunRecord {
       mergeStrategy: "merge",
       mergeRunPullRequest: true,
       pauseAfterHitl: false,
-      pollSeconds: 45,
       worktree: { enabled: true, root: "C:/checkouts", keep: false, setupTimeoutSeconds: 900 },
       workspaceRoot: "C:/checkouts/run_return/aboard",
       permanentPrompt: "run browser tests",
@@ -140,7 +139,7 @@ function fixedPlanRecord(): AutoRunRecord {
     ],
     progress: {
       "34": { state: "done", result: "landed", prNumber: 56, issueClosed: true },
-      "35": { state: "current", phase: "await-approval", prNumber: 57, headSha: "b".repeat(40), reviewed: true },
+      "35": { state: "current", phase: "await-commit", prNumber: 57, headSha: "b".repeat(40), reviewed: true },
     },
     sessionBranch: "run/return",
     targetBranch: "feature/wip",
@@ -157,7 +156,14 @@ function fixedPlanRecord(): AutoRunRecord {
   };
 }
 
-test("a version-2 record round-trips every discriminated state it can hold", async () => {
+test("only a version-3 Auto Run record is a fixed commit-driven plan", () => {
+  const current = fixedPlanRecord();
+  assert.equal(isFixedPlanRecord(current), true);
+  assert.equal(isFixedPlanRecord({ version: 2, runId: current.runId, startedAt: current.startedAt }), false);
+  assert.equal(isFixedPlanRecord(undefined), false);
+});
+
+test("a version-3 record round-trips every discriminated state it can hold", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-autorun-record-"));
   const runtime = new RuntimeLayout(root);
   const store = new FileAutoRunStore(runtime);
@@ -208,8 +214,8 @@ test("a failed worker session reference survives runtime parsing", () => {
     continuable: true,
   } as const;
   const parsed = parseAutoRunRecord({ ...fixedPlanRecord(), workerSession });
-  assert.equal(parsed?.version, 2);
-  assert.deepEqual(parsed?.version === 2 ? parsed.workerSession : undefined, workerSession);
+  assert.equal(parsed?.version, 3);
+  assert.deepEqual(parsed?.version === 3 ? parsed.workerSession : undefined, workerSession);
 });
 
 test("every pending-action and progress shape survives a round trip", async () => {
@@ -217,7 +223,9 @@ test("every pending-action and progress shape survives a round trip", async () =
   const store = new FileAutoRunStore(new RuntimeLayout(root));
   const actions = [
     { kind: "create-branch", branch: "issue/34-x", base: "run/return", baseSha: "c".repeat(40) },
-    { kind: "commit", branch: "issue/34-x", parentSha: "d".repeat(40), message: "Add retry backoff", treeSha: "e".repeat(40), fingerprint: ["src/a.ts", "src/b.ts"] },
+    { kind: "worker-commit", branch: "issue/34-x", parentSha: "d".repeat(40), role: "implementer", outcome: "succeeded" },
+    { kind: "close-issue", issue: 34, prNumber: 56, comment: "Accepted" },
+    { kind: "cleanup-issue", issue: 34, branch: "issue/34-x", sha: "e".repeat(40) },
     { kind: "push", branch: "issue/34-x", sha: "e".repeat(40) },
     { kind: "create-issue-pr", issue: 34, head: "issue/34-x", base: "run/return" },
     { kind: "merge-issue-pr", prNumber: 56, head: "issue/34-x", base: "run/return", headSha: "a".repeat(40), baseSha: "b".repeat(40) },
@@ -228,14 +236,14 @@ test("every pending-action and progress shape survives a round trip", async () =
     const record = { ...fixedPlanRecord(), pendingAction };
     await store.save(record);
     const loaded = await store.load();
-    assert.equal(loaded?.version, 2);
-    assert.deepEqual(loaded?.version === 2 ? loaded.pendingAction : undefined, pendingAction, pendingAction.kind);
+    assert.equal(loaded?.version, 3);
+    assert.deepEqual(loaded?.version === 3 ? loaded.pendingAction : undefined, pendingAction, pendingAction.kind);
   }
   for (const outcome of [{ kind: "cancelled" }, { kind: "interrupted" }, { kind: "failed", reason: "boom" }] as const) {
     const record = { ...fixedPlanRecord(), outcome };
     await store.save(record);
     const loaded = await store.load();
-    assert.deepEqual(loaded?.version === 2 ? loaded.outcome : undefined, outcome, outcome.kind);
+    assert.deepEqual(loaded?.version === 3 ? loaded.outcome : undefined, outcome, outcome.kind);
   }
 });
 
@@ -246,7 +254,7 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
   assert.ok(parseAutoRunRecord(valid));
   for (const broken of [
     undefined, null, [], "run",
-    { ...valid, version: 3 },
+    { ...valid, version: 4 },
     { ...valid, runId: "" },
     { ...valid, startedAt: "yesterday" },
     { ...valid, checkpoint: "publishing" },
@@ -259,6 +267,9 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, plan: [{ number: 34 }] },
     { ...valid, branchShas: { "run/return": "short" } },
     { ...valid, pendingAction: { kind: "push", branch: "run/return", sha: "short" } },
+    { ...valid, pendingAction: { kind: "worker-commit", branch: "run/return", parentSha: "a".repeat(40) } },
+    { ...valid, pendingAction: { kind: "worker-commit", branch: "run/return", parentSha: "a".repeat(40), role: "explorer" } },
+    { ...valid, pendingAction: { kind: "worker-commit", branch: "run/return", parentSha: "a".repeat(40), role: "implementer", outcome: "unknown" } },
     { ...valid, progress: { ...valid.progress, "35": { state: "current", phase: "commit", headSha: "short" } } },
     { ...valid, outcome: { kind: "failed" } },
     { ...valid, workerSession: { agentId: "worker-19", sessionId: "session", type: "implementer", issueNumber: 35, continuable: false } },
@@ -269,23 +280,23 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     ...valid,
     settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "issueContextDepth")),
   });
-  assert.equal(priorRecord?.version === 2 ? priorRecord.settings.issueContextDepth : undefined, 1);
+  assert.equal(priorRecord?.version === 3 ? priorRecord.settings.issueContextDepth : undefined, 1);
   const priorExplorationRecord = parseAutoRunRecord({
     ...valid,
     settings: Object.fromEntries(Object.entries(valid.settings).filter(([key]) => key !== "exploreBeforeImplement")),
   });
-  assert.equal(priorExplorationRecord?.version === 2 ? priorExplorationRecord.settings.exploreBeforeImplement : undefined, false);
+  assert.equal(priorExplorationRecord?.version === 3 ? priorExplorationRecord.settings.exploreBeforeImplement : undefined, false);
   assert.equal(parseAutoRunRecord({
     ...valid,
     workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35 },
-  })?.version, 2);
+  })?.version, 3);
   // An authoritative record is all-or-nothing: silently turning damaged
   // progress into pending work could repeat an issue or a side effect.
   const damaged = parseAutoRunRecord({ ...valid, progress: { ...valid.progress, "35": { state: "halfway" } } });
   assert.equal(damaged, undefined);
 });
 
-test("a version-1 record surfaces as unsupported rather than disappearing or migrating", () => {
+test("older Auto Run records surface as unsupported rather than disappearing or migrating", () => {
   const legacy = parseAutoRunRecord({
     version: 1,
     runId: "run_old",
@@ -296,6 +307,8 @@ test("a version-1 record surfaces as unsupported rather than disappearing or mig
     startedAt: "2026-07-31T09:12:04.221Z",
   });
   assert.deepEqual(legacy, { version: 1, runId: "run_old", startedAt: "2026-07-31T09:12:04.221Z" });
+  const oldApprovalRecord = { ...fixedPlanRecord(), version: 2 };
+  assert.deepEqual(parseAutoRunRecord(oldApprovalRecord), { version: 2, runId: oldApprovalRecord.runId, startedAt: oldApprovalRecord.startedAt });
 });
 
 test("combined bridge handlers stop at the first owned route", async () => {

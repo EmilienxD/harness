@@ -120,13 +120,12 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   const mergeStrategy = (MERGE_STRATEGIES as readonly string[]).includes(value.mergeStrategy as string)
     ? value.mergeStrategy as MergeStrategy
     : undefined;
-  const pollSeconds = positiveInteger(value.pollSeconds);
   if (
     typeof value.review !== "boolean"
     || (value.exploreBeforeImplement !== undefined && typeof value.exploreBeforeImplement !== "boolean")
     || (value.issueContextDepth !== undefined && !isDepth(value.issueContextDepth))
     || typeof value.mergeRunPullRequest !== "boolean" || typeof value.pauseAfterHitl !== "boolean"
-    || mergeStrategy === undefined || pollSeconds === undefined
+    || mergeStrategy === undefined
     || typeof worktree.enabled !== "boolean" || typeof worktree.root !== "string"
     || typeof worktree.keep !== "boolean" || positiveInteger(worktree.setupTimeoutSeconds) === undefined
   ) return undefined;
@@ -146,7 +145,6 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     mergeStrategy,
     mergeRunPullRequest: value.mergeRunPullRequest,
     pauseAfterHitl: value.pauseAfterHitl,
-    pollSeconds,
     worktree: {
       enabled: worktree.enabled,
       root: worktree.root,
@@ -193,8 +191,9 @@ function parseProgress(value: unknown): IssueProgress | undefined {
     if (value.prNumber !== undefined && prNumber === undefined) return undefined;
     if (value.headSha !== undefined && headSha === undefined) return undefined;
     if (value.reviewed !== undefined && value.reviewed !== true) return undefined;
-    if (value.awaitingAcceptance !== undefined && value.awaitingAcceptance !== true) return undefined;
-    if (value.accepted !== undefined && value.accepted !== true) return undefined;
+    if (value.expectedBranch !== undefined && nonEmptyString(value.expectedBranch) === undefined) return undefined;
+    if (value.mergeSha !== undefined && fullSha(value.mergeSha) === undefined) return undefined;
+    if (value.issueClosed !== undefined && value.issueClosed !== true) return undefined;
     for (const sha of [value.beforeSha, value.implementationSha, value.reviewedSha]) if (sha !== undefined && fullSha(sha) === undefined) return undefined;
     return {
       state: "current",
@@ -205,8 +204,9 @@ function parseProgress(value: unknown): IssueProgress | undefined {
       ...(value.beforeSha === undefined ? {} : { beforeSha: value.beforeSha as string }),
       ...(value.implementationSha === undefined ? {} : { implementationSha: value.implementationSha as string }),
       ...(value.reviewedSha === undefined ? {} : { reviewedSha: value.reviewedSha as string }),
-      ...(value.awaitingAcceptance === true ? { awaitingAcceptance: true as const } : {}),
-      ...(value.accepted === true ? { accepted: true as const } : {}),
+      ...(value.expectedBranch === undefined ? {} : { expectedBranch: value.expectedBranch as string }),
+      ...(value.mergeSha === undefined ? {} : { mergeSha: value.mergeSha as string }),
+      ...(value.issueClosed === true ? { issueClosed: true as const } : {}),
     };
   }
   if (value.state !== "done") return undefined;
@@ -228,23 +228,33 @@ function parsePendingAction(value: unknown): PendingAction | undefined {
   const base = nonEmptyString(value.base);
   const prNumber = positiveInteger(value.prNumber);
   switch (value.kind) {
+    case "comment-issue": {
+      const issue = positiveInteger(value.issue);
+      if (issue === undefined || typeof value.body !== "string") return undefined;
+      return { kind: "comment-issue", issue, body: value.body };
+    }
+    case "close-issue": {
+      const issue = positiveInteger(value.issue);
+      if (issue === undefined || prNumber === undefined || typeof value.comment !== "string") return undefined;
+      return { kind: "close-issue", issue, prNumber, comment: value.comment };
+    }
+    case "cleanup-issue": {
+      const issue = positiveInteger(value.issue);
+      const sha = fullSha(value.sha);
+      if (issue === undefined || branch === undefined || sha === undefined) return undefined;
+      return { kind: "cleanup-issue", issue, branch, sha };
+    }
     case "create-branch": {
       const baseSha = fullSha(value.baseSha);
       if (branch === undefined || base === undefined || baseSha === undefined) return undefined;
       return { kind: "create-branch", branch, base, baseSha };
     }
-    case "commit": {
-      const parentSha = fullSha(value.parentSha);
-      const message = nonEmptyString(value.message);
-      const treeSha = fullSha(value.treeSha);
-      const fingerprint = strings(value.fingerprint);
-      if (branch === undefined || parentSha === undefined || message === undefined || treeSha === undefined || fingerprint === undefined) return undefined;
-      return { kind: "commit", branch, parentSha, message, treeSha, fingerprint };
-    }
     case "worker-commit": {
       const parentSha = fullSha(value.parentSha);
-      if (branch === undefined || parentSha === undefined) return undefined;
-      return { kind: "worker-commit", branch, parentSha };
+      if (branch === undefined || parentSha === undefined || (value.role !== "implementer" && value.role !== "reviewer")) return undefined;
+      if (value.outcome !== undefined && value.outcome !== "succeeded" && value.outcome !== "failed") return undefined;
+      return { kind: "worker-commit", branch, parentSha, role: value.role,
+        ...(value.outcome === undefined ? {} : { outcome: value.outcome }) };
     }
     case "push": {
       const sha = fullSha(value.sha);
@@ -289,8 +299,8 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
   const runId = nonEmptyString(value.runId);
   const startedAt = timestamp(value.startedAt);
   if (runId === undefined || startedAt === undefined) return undefined;
-  if (value.version === 1) return { version: 1, runId, startedAt };
-  if (value.version !== 2) return undefined;
+  if ((value.version === 1 || value.version === 2)) return { version: value.version, runId, startedAt };
+  if (value.version !== 3) return undefined;
 
   const settings = parseFrozenSettings(value.settings);
   const sessionBranch = nonEmptyString(value.sessionBranch);
@@ -348,7 +358,7 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
   )) return undefined;
   if (currentIssue !== undefined && (!issueNumbers.has(String(currentIssue)) || progress[String(currentIssue)]?.state !== "current")) return undefined;
   return {
-    version: 2,
+    version: 3,
     runId,
     startedAt,
     updatedAt,
@@ -400,5 +410,5 @@ export class PersistOnChange {
 
 /** Narrowing helper so callers can accept only the fixed-plan shape. */
 export function isFixedPlanRecord(record: PersistedAutoRunRecord | undefined): record is AutoRunRecord {
-  return record?.version === 2;
+  return record?.version === 3;
 }

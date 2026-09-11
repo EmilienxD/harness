@@ -14,7 +14,7 @@ import { parseAutoRunRecord } from "../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../src/bridge/delegation.js";
 
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
-const SETTINGS: AutoRunSettings = { review: false, exploreBeforeImplement: false, issueContextDepth: 1, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, pollSeconds: 1, worktree: WORKTREE_OFF };
+const SETTINGS: AutoRunSettings = { review: false, exploreBeforeImplement: false, issueContextDepth: 1, permanentPrompt: "", discardBehavior: "record-only", pauseAfterHitl: false, mergeStrategy: "squash", mergeRunPullRequest: false, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "run/test";
@@ -36,6 +36,7 @@ interface Harness {
   /** Issues aboard closed itself, with the comment it closed them with. */
   readonly closures: { readonly issue: number; readonly body: string }[];
   readonly createdPullRequests: { readonly title: string; readonly body: string; readonly head: string; readonly base: string }[];
+  readonly updatedPullRequests: { readonly number: number; readonly title: string; readonly body: string }[];
   /** Every merge the engine asked for, and whether it asked to delete the branch. */
   readonly merges: { readonly pr: number; readonly deleteBranch: boolean }[];
   readonly launches: DelegationLaunchInput[];
@@ -88,6 +89,9 @@ interface QueueIssue {
 }
 
 interface HarnessOptions {
+  readonly beforeFastForward?: (branch: string) => void;
+  readonly hitlUncommitted?: boolean;
+  readonly interruptBeforeSave?: (record: AutoRunRecord) => boolean;
   readonly settings?: Partial<AutoRunSettings>;
   /** The open issue queue the repository reports, in any order. */
   readonly issues?: readonly QueueIssue[];
@@ -106,12 +110,10 @@ interface HarnessOptions {
   /** Whether the reviewer finds anything to fix. Defaults to `producesChanges`. */
   readonly reviewerProducesChanges?: boolean;
   /** Called once a hitl pull request has been observed as open; returns its next state. */
-  readonly resolveHitl?: "merged" | "closed";
   readonly startDirty?: boolean;
   readonly pushFails?: boolean;
   readonly githubAuthenticationFails?: boolean;
   /** Simulates a HITL reviewer applying fixes the user approved, mid-wait. */
-  readonly dirtyDuringWait?: boolean;
   /** The branch checked out when the run starts. Defaults to `main`. */
   readonly startBranch?: string;
   /** Pull requests GitHub reports as conflicting with their base. */
@@ -155,14 +157,16 @@ test("single-branch processes sequential AFK issues without issue branches or is
   const started = await context.engine.start();
   assert.equal(started.started, true);
   await context.engine.settle();
+  assert.equal(context.state.cleared, true, context.notifications.join("\n"));
   assert.equal(context.createdPullRequests.length, 1);
   assert.equal(context.createdPullRequests[0]?.head, SESSION);
   assert.equal(context.gitCalls.some((call) => call.includes("issue/34-") || call.includes("issue/35-")), false);
   assert.deepEqual(context.closures.map((closure) => closure.issue), [34, 35]);
 });
 
-test("single-branch HITL waits for explicit Aboard acceptance and scopes review to its SHA range", async () => {
+test("single-branch HITL waits for a deliberate commit before publishing and reviewing its range", async () => {
   const context = harness({
+    hitlUncommitted: true,
     settings: { branchMode: "single-branch", review: true },
     issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
   });
@@ -170,10 +174,16 @@ test("single-branch HITL waits for explicit Aboard acceptance and scopes review 
   for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(context.engine.state()?.waiting, true);
   assert.equal(context.closures.length, 0);
+  assert.equal(context.engine.state()?.phase, "await-commit");
+  assert.equal(context.createdPullRequests.length, 0);
+  assert.equal(context.launches.length, 1);
+  assert.deepEqual(context.closedTerminals, []);
+  await context.git.add();
+  await context.git.commit("User accepts", "");
+  await context.engine.settle();
+  assert.equal(context.state.cleared, true, context.notifications.join("\n"));
   const review = context.launches.find((launch) => launch.type === "reviewer");
   assert.match(review?.additionalGuideline ?? "", /Review only issue #35's changes in exact range .{40}\.\..{40}/);
-  context.engine.continueNow();
-  await context.engine.settle();
   assert.deepEqual(context.closures.map((closure) => closure.issue), [35]);
   assert.equal(context.merges.length, 0, "the cumulative PR is not an issue-acceptance signal");
 });
@@ -210,7 +220,6 @@ function harness(options: HarnessOptions = {}): Harness {
   let currentBranch = options.startBranch ?? "main";
   let dirty = options.startDirty === true;
   let nextPr = 56;
-  let hitlPolls = 0;
   const shas = new Map<string, number>();
   const inheritedShas = new Map<string, string>();
   const remoteShas = new Map<string, string>();
@@ -315,6 +324,7 @@ function harness(options: HarnessOptions = {}): Harness {
     deleteBranch: async (branch) => { gitCalls.push(`deleteBranch ${branch}`); branches.delete(branch); inheritedShas.delete(branch); },
     fastForward: async (branch) => {
       gitCalls.push(`fastForward ${branch}`);
+      options.beforeFastForward?.(branch);
       const remote = remoteShas.get(branch);
       if (remote !== undefined) inheritedShas.set(branch, remote);
     },
@@ -333,9 +343,11 @@ function harness(options: HarnessOptions = {}): Harness {
       // The session branch's own push is infrastructure, not the issue's commit;
       // a `pushFails` test is about the latter.
       if (options.pushFails === true && branch !== SESSION) throw new Error("push rejected");
-      if (remoteShas.has(branch) && remoteShas.get(branch) !== shaFor(branch)) throw new Error("non-fast-forward");
+      const remote = remoteShas.get(branch);
+      if (remote !== undefined && remote !== shaFor(branch) && !chain(shaFor(branch)).includes(remote)) throw new Error("non-fast-forward");
       pushed.add(branch);
       remoteBranches.add(branch);
+      remoteShas.set(branch, shaFor(branch));
     },
     isPushed: async (branch) => pushed.has(branch),
     ignoredPaths: async (paths) => [...paths],
@@ -375,6 +387,7 @@ function harness(options: HarnessOptions = {}): Harness {
     getIssue: async (number) => ({
       state: open.has(number) ? "open" as const : "closed" as const,
       labels: queue.find((entry) => entry.number === number)?.labels ?? [],
+      comments: comments.filter((entry) => entry.issue === number),
     }),
     addIssueComment: async (number, body) => {
       if (options.commentFails === true) throw new Error("gh issue comment failed");
@@ -407,24 +420,6 @@ function harness(options: HarnessOptions = {}): Harness {
     },
     getPullRequest: async (number) => {
       const pr = pullRequests.get(number);
-      const waiting = notifications.some((entry) => entry.includes("is hitl; PR"));
-      if (pr?.state === "open" && waiting && isHitl(number)) {
-        hitlPolls += 1;
-        // The doctor applies what the user approved once, mid-wait and uncommitted.
-        if (options.dirtyDuringWait === true && hitlPolls === 1) dirty = true;
-        if (hitlPolls >= 2 && options.resolveHitl !== undefined) {
-          const base = basesByPr.get(number);
-          if (options.resolveHitl === "merged" && base !== undefined) {
-            advance(base);
-            remoteShas.set(base, shaFor(base));
-          }
-          pullRequests.set(number, {
-            ...pr,
-            state: options.resolveHitl,
-            ...(options.resolveHitl === "merged" && base !== undefined ? { mergeCommitSha: shaFor(base) } : {}),
-          });
-        }
-      }
       return pr === undefined ? undefined : {
         ...pr,
         number,
@@ -447,11 +442,8 @@ function harness(options: HarnessOptions = {}): Harness {
       if (pr?.mergeable === "conflicting") throw new Error("Pull request is not mergeable");
       // The merge moves the base branch, exactly as a real one does.
       const base = basesByPr.get(number);
-      if (base !== undefined) {
-        advance(base);
-        remoteShas.set(base, shaFor(base));
-      }
-      pullRequests.set(number, { state: "merged", ...(base === undefined ? {} : { mergeCommitSha: shaFor(base) }) });
+      const mergedSha = base === undefined ? undefined : advanceRemote(base);
+      pullRequests.set(number, { state: "merged", ...(mergedSha === undefined ? {} : { mergeCommitSha: mergedSha }) });
     },
     closePullRequestIf: async (number, expected) => {
       const pr = pullRequests.get(number);
@@ -502,7 +494,8 @@ function harness(options: HarnessOptions = {}): Harness {
       const commits = input.type === "reviewer" && options.reviewerProducesChanges !== undefined
         ? options.reviewerProducesChanges
         : options.producesChanges !== false;
-      if (input.type !== "Explore" && commits) {
+      if (input.type === "implementer" && options.hitlUncommitted) dirty = true;
+      else if (input.type !== "Explore" && commits) {
         for (let made = 0; made < (options.workerCommitCount ?? 1); made += 1) commitOn(currentBranch);
         if (options.workerLeavesDirtyTree === true) dirty = true;
       }
@@ -563,13 +556,21 @@ function harness(options: HarnessOptions = {}): Harness {
   // The engine creates the PR before it knows the branch mapping, so record it
   // as each pull request is opened.
   const createdPullRequests: { title: string; body: string; head: string; base: string }[] = [];
+  const updatedPullRequests: { number: number; title: string; body: string }[] = [];
+  const pullRequestText = new Map<number, { title: string; body: string }>();
   const wrappedGithub: AutoRunGitHub = {
     ...github,
+    getPullRequest: async (number) => {
+      const snapshot = await github.getPullRequest(number);
+      return snapshot === undefined ? undefined : { ...snapshot, ...pullRequestText.get(number) };
+    },
+    updatePullRequest: async (number, input) => { updatedPullRequests.push({ number, ...input }); pullRequestText.set(number, input); },
     createPullRequest: async (input) => {
       const number = await github.createPullRequest(input);
       branchesByPr.set(number, input.head);
       basesByPr.set(number, input.base);
       createdPullRequests.push({ ...input });
+      pullRequestText.set(number, input);
       return number;
     },
   };
@@ -617,7 +618,8 @@ function harness(options: HarnessOptions = {}): Harness {
       // The store is a real one, not a sink: fixed-plan recovery re-reads what
       // the engine wrote, so a fake that forgets would test nothing.
       save: async (record) => {
-        if (record.version !== 2) throw new Error("the engine must only ever write version-2 records");
+        if (record.version !== 3) throw new Error("the engine must only ever write version-3 records");
+        if (options.interruptBeforeSave?.(record)) throw new Error("simulated extension interruption");
         stored = record;
         saved.push(record);
       },
@@ -666,6 +668,7 @@ function harness(options: HarnessOptions = {}): Harness {
     isolatedRoot,
     closedPullRequests,
     recordedWorkspaceRemovals,
+    updatedPullRequests,
     record: () => stored,
     seed: (record: AutoRunRecord) => { stored = record; },
     branchExists: (branch: string) => branches.has(branch),
@@ -692,7 +695,7 @@ async function waitForLaunch(context: Harness, type: DelegationLaunchInput["type
 
 function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 2,
+    version: 3,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -704,7 +707,7 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
-      pollSeconds: 1,
+
       worktree: WORKTREE_OFF,
     },
     plan: [{ number: 34, title: "Add retry backoff", branch: "issue/34-add-retry-backoff", disposition: "afk", dependsOn: [] }],
@@ -895,7 +898,7 @@ test("exploration comment failure does not withhold direct context", async () =>
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer"]);
   assert.match(context.launches[1]?.codebaseContext ?? "", /Relevant code lives/);
-  assert.match(context.logs.join("\n"), /could not publish codebase context/);
+  assert.match(context.logs.join("\n"), /could not comment on issue/);
 });
 
 test("resume creates a missing session branch from the unpublished local target", async () => {
@@ -1149,26 +1152,6 @@ test("a target branch that is not on origin still leaves the work pushed and say
   assert.equal(context.createdPullRequests.filter((pr) => pr.head === SESSION).length, 0);
 });
 
-test("an externally closed hitl pull request creates no concluding side effect", async () => {
-  const context = harness({
-    issues: [
-      { number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
-      { number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
-    ],
-    resolveHitl: "closed",
-  });
-  await context.engine.start();
-  await context.engine.settle();
-
-  // Closing a known PR is a structural mismatch. Existing work stays put, but
-  // the run must not infer a new concluding side effect from a changed plan.
-  assert.match(context.notifications.join("\n"), /stopped at issue #35/);
-  assert.deepEqual(context.createdPullRequests.map((pullRequest) => pullRequest.head), [
-    "issue/34-add-retry-backoff",
-    "issue/35-migrate-the-queue",
-  ]);
-});
-
 test("[AI]-chrome is frozen per issue and reaches that issue's implementer only", async () => {
   const context = harness({
     settings: { review: true },
@@ -1247,7 +1230,7 @@ test("a user cancellation still restores the original branch", async () => {
   context.engine.stop();
   await context.engine.settle();
 
-  assert.equal(context.gitCalls[context.gitCalls.length - 1], "checkout feature/wip");
+  assert.equal(await context.git.currentBranch(), "feature/wip");
 });
 
 test("cancelling a running implementer settles its terminal and records cancellation", async () => {
@@ -1264,7 +1247,7 @@ test("cancelling a running implementer settles its terminal and records cancella
 
   assert.deepEqual(context.record()?.outcome, { kind: "cancelled" });
   assert.deepEqual(context.closedTerminals, ["terminal-1"]);
-  assert.equal(context.gitCalls.at(-1), "checkout feature/wip");
+  assert.equal(await context.git.currentBranch(), "issue/34-add-retry-backoff");
   assert.doesNotMatch(context.notifications.join("\n"), /Foreground wait/u);
 });
 
@@ -1282,7 +1265,7 @@ test("cancelling a running implementer keeps its partial edits on the issue bran
   assert.deepEqual(context.record()?.outcome, { kind: "cancelled" });
   assert.deepEqual(context.closedTerminals, ["terminal-1"]);
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
-  assert.match(context.notifications.join("\n"), /stayed on issue\/34-add-retry-backoff.*uncommitted work remains/u);
+  assert.equal((await context.git.status()).entries.length, 1);
 });
 
 test("cancelling a running automated reviewer uses the same owned-terminal path", async () => {
@@ -1378,7 +1361,7 @@ test("a merge refused for a reason other than a conflict still stops the whole r
   // Branch protection applies to every pull request this run would open, so it
   // is not something to retry an issue at a time.
   assert.deepEqual(context.launches.map((launch) => launch.issues), [[34]]);
-  assert.match(context.alerts[0]?.message ?? "", /auto-run cannot approve its own pull request/);
+  assert.match(context.alerts[0]?.message ?? "", /Resolve the repository integration policy/);
   assert.equal(context.state.cleared, false);
 });
 
@@ -1438,101 +1421,6 @@ test("an unrated issue is delegated with no difficulty at all, rather than a gue
   assert.deepEqual(context.launches.map((launch) => launch.difficulty), [undefined, undefined]);
 });
 
-test("a hitl issue waits at its pull request and continues once the user merges", async () => {
-  const context = harness({
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
-    resolveHitl: "merged",
-  });
-  await context.engine.start();
-  await context.engine.settle();
-
-  assert.match(context.notifications.join("\n"), /issue #35 is hitl; PR #56 is open and waiting for you/);
-  assert.match(context.notifications.join("\n"), /PR #56 merged by you; continuing/);
-  assert.equal(
-    context.saved.some((record) => record.branchShas[SESSION] === context.sha(SESSION)),
-    true,
-    "the exact session tip produced by the user's merge is adopted before continuing",
-  );
-  assert.deepEqual(context.closedTerminals, ["terminal-1"], "the implementer closes but no interactive reviewer was launched");
-  assert.equal(context.state.cleared, true);
-});
-
-test("resume adopts a hitl squash merge before trying to publish the session branch again", async () => {
-  const context = harness({
-    issues: [
-      { number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00.000Z" },
-      { number: 36, title: "Add queue metrics", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
-    ],
-  });
-  await context.engine.start();
-  for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) {
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  assert.equal(context.engine.state()?.waiting, true);
-
-  context.engine.interrupt();
-  await context.engine.settle();
-  const mergeCommitSha = context.advanceRemote(SESSION);
-  context.pullRequests.set(56, { state: "merged", mergeable: "mergeable", mergeCommitSha });
-
-  assert.equal((await context.engine.resume()).started, true);
-  await context.engine.settle();
-
-  assert.deepEqual(context.launches.map((launch) => launch.issues?.[0]), [35, 36]);
-  assert.equal(
-    context.gitCalls.filter((call) => call === `push ${SESSION} -u`).length,
-    1,
-    "resume must not push the stale pre-merge session tip before HITL adoption",
-  );
-  assert.equal(context.closures.some((entry) => entry.issue === 35), true);
-  assert.equal(context.state.cleared, true);
-});
-
-test("a hitl reviewer stays open while the run awaits the user and closes after resolution", async () => {
-  const context = harness({
-    settings: { review: true },
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
-  });
-  await context.engine.start();
-  for (let attempt = 0; attempt < 100 && context.engine.state()?.waiting !== true; attempt += 1) {
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-
-  assert.equal(context.engine.state()?.waiting, true);
-  assert.equal(context.engine.owner(56)?.type, "reviewer");
-  // HITL is an orchestration mode: the same unattended review-issue worker runs
-  // and settles, and only then does the run wait for the user.
-  assert.deepEqual(context.interactiveOrigins, []);
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
-
-  context.advance(SESSION);
-  context.pullRequests.set(56, { state: "merged", mergeable: "mergeable", mergeCommitSha: context.sha(SESSION) });
-  context.engine.continueNow();
-  await context.engine.settle();
-
-  assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
-});
-
-test("a hitl pull request closed unmerged stops the run and leaves the branch alone", async () => {
-  const context = harness({
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
-    resolveHitl: "closed",
-  });
-  await context.engine.start();
-  await context.engine.settle();
-
-  assert.match(context.notifications.join("\n"), /stopped at issue #35 .*closed without merging/);
-  const branchCreated = context.gitCalls.lastIndexOf(`createBranch issue/35-migrate-the-queue ${SESSION}`);
-  assert.notEqual(branchCreated, -1, "the issue branch was created");
-  assert.deepEqual(
-    context.gitCalls.slice(branchCreated + 1).filter((call) => call.startsWith("checkout ")),
-    [],
-    "no cleanup or original-branch checkout followed the failure",
-  );
-  assert.equal(context.state.cleared, false, "the record survives a stop so an explicit resume can re-enter");
-});
-
 test("a failing implementer stops the run with no commit and no pull request", async () => {
   const context = harness({ implementerFails: true });
   await context.engine.start();
@@ -1578,7 +1466,7 @@ test("residual uncommitted changes stop the run even though the worker also comm
   assert.equal((await context.engine.resume()).started, true);
   await context.engine.settle();
   assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1);
-  assert.match(context.notifications.join("\n"), /uncommitted changes on issue\/34-add-retry-backoff/);
+  assert.match(context.notifications.join("\n"), /uncommitted path\(s\).*src\/a.ts/);
 });
 
 test("a failed run can continue its exact ended worker with one Continue message", async () => {
@@ -1842,21 +1730,6 @@ test("a branch that already has a pull request refuses the run the same way", as
   assert.deepEqual(context.saved, []);
 });
 
-test("a hitl pull request approved by another account is adopted without waiting for a merge", async () => {
-  const context = harness({
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
-    resolveHitl: "merged",
-    hitlReviewDecision: "approved",
-  });
-  await context.engine.start();
-  await context.engine.settle();
-
-  // The approval rides in the pull-request snapshot, so the run does not wait
-  // for the user to merge by hand before continuing.
-  assert.match(context.notifications.join("\n"), /issue #35 merged/);
-  assert.equal(context.state.cleared, true);
-});
-
 test("an unauthenticated GitHub CLI refuses the run before querying or persisting a plan", async () => {
   const context = harness({ githubAuthenticationFails: true });
   const result = await context.engine.start();
@@ -2085,33 +1958,8 @@ test("a version-1 record is unsupported: it is neither resumed nor silently drop
   assert.equal((await context.engine.refresh())?.state, "broken");
   const result = await context.engine.resume();
   assert.equal(result.started, false);
-  assert.match((result as { reason: string }).reason, /predates fixed-plan recovery/);
+  assert.match((result as { reason: string }).reason, /predates commit-driven acceptance/);
   assert.equal(context.launches.length, 0);
-});
-
-test("a HITL reviewer's approved fixes are committed to the pull request before it merges", async () => {
-  // Without this the user merges a pull request that does not contain the
-  // changes they just approved, and the work is stranded uncommitted.
-  const context = harness({
-    settings: { review: true },
-    issues: [{ number: 35, title: "Migrate the queue", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
-    resolveHitl: "merged",
-    dirtyDuringWait: true,
-  });
-  await context.engine.start({ additionalGuideline: "keep migration reversible" });
-  await context.engine.settle();
-
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["keep migration reversible", "keep migration reversible"]);
-  // Both dispositions run the same unattended worker; only the pause differs.
-  assert.deepEqual(context.interactiveOrigins, []);
-  // The workers commit for themselves; aboard's only commit is the capture of
-  // what the user changed while the pull request was open.
-  assert.equal(context.gitCalls.filter((call) => call === "commit").length, 1);
-  assert.match(context.notifications.join("\n"), /committed 1 changed path\(s\) from issue #35's open terminals to PR #56/);
-  // The capture must land before the merge is observed, or it missed the boat.
-  const log = context.notifications.join("\n");
-  assert.ok(log.indexOf("open terminals") < log.indexOf("merged by you"), "fixes were committed before the merge was observed");
 });
 
 test("a commit that failed to push resumes by pushing, not by reporting no changes", async () => {
@@ -2135,7 +1983,7 @@ test("a recorded pull request that no longer exists makes the run broken rather 
     currentIssue: 34,
     checkpoint: "issue",
     branchShas: { [SESSION]: context.sha(SESSION) },
-    progress: { "34": { state: "current", phase: "await-approval", prNumber: 999 } },
+    progress: { "34": { state: "current", phase: "await-commit", prNumber: 999 } },
   }));
 
   const eligibility = await context.engine.refresh();
@@ -2167,3 +2015,219 @@ test("a review already recorded is not repeated after a restart", async () => {
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
 });
+
+async function waitForCommit(context: Harness): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (context.engine.state()?.phase === "await-commit") return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.fail(context.notifications.join("\n"));
+}
+
+test("recovery fast-forwards an already merged issue without merging or implementing again", async () => {
+  let interrupted = false;
+  const context = harness({ beforeFastForward: (branch) => {
+    if (interrupted || branch !== SESSION || context.merges.length === 0) return;
+    interrupted = true;
+    throw new Error("extension stopped before fast-forward");
+  } });
+  await context.engine.start();
+  await context.engine.settle();
+  assert.equal(context.record()?.pendingAction?.kind, "merge-issue-pr");
+  assert.notEqual(await context.git.branchSha(SESSION), await context.git.remoteBranchSha(SESSION));
+  assert.equal((await context.engine.resume()).started, true);
+  await context.engine.settle();
+  assert.equal(context.state.cleared, true, context.notifications.join("\n"));
+  assert.equal(context.launches.length, 1);
+  assert.equal(context.merges.length, 1);
+  assert.equal(await context.git.branchSha(SESSION), await context.git.remoteBranchSha(SESSION));
+});
+
+for (const branchMode of ["per-issue", "single-branch"] as const) {
+  for (const reviewerProducesChanges of [false, true]) {
+    test(`${branchMode}: HITL accepts multiple clean commits, then reviews and integrates automatically (fixes=${reviewerProducesChanges})`, async () => {
+      const context = harness({ hitlUncommitted: true, reviewerProducesChanges,
+        settings: { branchMode, review: true },
+        issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+      });
+      await context.engine.start();
+      await waitForCommit(context);
+      assert.equal(context.createdPullRequests.length, 0);
+      assert.equal(context.launches.length, 1);
+      assert.deepEqual(context.commitCalls, []);
+      assert.equal(context.closedTerminals.length, 0);
+      await context.git.commit("Intermediate accepted work", "");
+      context.setDirty();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(context.engine.state()?.waiting, true, "a commit followed by edits is not acceptance");
+      await context.git.commit("Finish accepted work", "");
+      await context.engine.settle();
+      assert.equal(context.state.cleared, true, context.notifications.join("\n"));
+      assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+      assert.equal(context.merges.length, branchMode === "per-issue" ? 1 : 0);
+      assert.equal(context.createdPullRequests.at(-1)?.base, "main");
+      assert.deepEqual(context.closures.map((entry) => entry.issue), [35]);
+      assert.equal(context.commitCalls.length, 2, "Aboard never manufactures acceptance");
+      assert.ok(context.closedTerminals.includes("terminal-1" as TerminalId), "settled HITL terminal is released after integration");
+      const landed = [...context.saved].reverse().find((record) => record.progress["35"]?.state === "done")?.progress["35"];
+      assert.ok(landed?.state === "done" && landed.result === "landed" && landed.beforeSha && landed.implementationSha);
+      assert.notEqual(landed.beforeSha, landed.implementationSha);
+    });
+  }
+
+  for (const pauseAfterHitl of [false, true]) {
+    test(`${branchMode}: pauseAfterHitl=${pauseAfterHitl} applies after integration`, async () => {
+      const context = harness({ settings: { branchMode, pauseAfterHitl },
+        issues: [
+          { number: 35, title: "first", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-01T00:00:00Z" },
+          { number: 36, title: "second", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [35], createdAt: "2026-01-02T00:00:00Z" },
+        ],
+      });
+      await context.engine.start();
+      await context.engine.settle();
+      assert.equal(context.launches.length, pauseAfterHitl ? 1 : 2, context.notifications.join("\n"));
+      assert.equal(context.closures[0]?.issue, 35);
+      if (pauseAfterHitl) {
+        assert.equal(context.record()?.progress["35"]?.state, "done");
+        assert.equal((await context.engine.resume()).started, true);
+        await context.engine.settle();
+      }
+      assert.equal(context.state.cleared, true, context.notifications.join("\n"));
+      assert.deepEqual(context.closures.map((entry) => entry.issue), [35, 36]);
+    });
+  }
+
+  test(`${branchMode}: resume observes a HITL commit made while the extension was closed`, async () => {
+    const context = harness({ hitlUncommitted: true, settings: { branchMode },
+      issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+    });
+    await context.engine.start();
+    await waitForCommit(context);
+    context.engine.interrupt();
+    await context.engine.settle();
+    assert.equal(context.record()?.progress["35"]?.state, "current");
+    assert.equal((await context.engine.refresh())?.state, "resumable");
+    await context.git.commit("Accepted while closed", "");
+    assert.equal((await context.engine.resume()).started, true);
+    await context.engine.settle();
+    assert.equal(context.state.cleared, true, context.notifications.join("\n"));
+    assert.equal(context.launches.length, 1, "resume must not repeat implementation");
+  });
+
+  test(`${branchMode}: failed HITL launch stops before handoff even with a commit`, async () => {
+    const context = harness({ implementerFails: true, settings: { branchMode },
+      issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+    });
+    await context.engine.start();
+    await context.engine.settle();
+    assert.equal(context.states.some((state) => state.waiting), false);
+    assert.equal(context.record()?.outcome?.kind, "failed");
+    assert.deepEqual(context.createdPullRequests, []);
+    assert.deepEqual(context.merges, []);
+  });
+
+  test(`${branchMode}: GitHub approval cannot accept dirty HITL work`, async () => {
+    const context = harness({ hitlUncommitted: true, hitlReviewDecision: "approved", settings: { branchMode },
+      issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+    });
+    await context.engine.start();
+    await waitForCommit(context);
+    await context.engine.refresh();
+    assert.equal(context.engine.state()?.waiting, true);
+    assert.deepEqual(context.createdPullRequests, []);
+    context.engine.stop();
+    await context.engine.settle();
+  });
+
+  test(`${branchMode}: closing the HITL terminal before acceptance stops without publishing`, async () => {
+    const context = harness({ hitlUncommitted: true, settings: { branchMode },
+      issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+    });
+    await context.engine.start();
+    await waitForCommit(context);
+    context.engine.terminalClosed("terminal-1" as TerminalId);
+    await context.engine.settle();
+    assert.equal(context.record()?.outcome?.kind, "failed");
+    assert.deepEqual(context.createdPullRequests, []);
+    assert.deepEqual(context.commitCalls, []);
+  });
+
+  test(`${branchMode}: switching branches during HITL is a structural failure`, async () => {
+    const context = harness({ hitlUncommitted: true, settings: { branchMode },
+      issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
+    });
+    await context.engine.start();
+    await waitForCommit(context);
+    await context.git.checkout("main");
+    context.engine.repositoryChanged();
+    await context.engine.settle();
+    assert.equal((await context.engine.refresh())?.state, "broken");
+    assert.deepEqual(context.merges, []);
+  });
+
+  test(`${branchMode}: final PR description includes issues completed after a HITL pause`, async () => {
+    const context = harness({ settings: { branchMode, pauseAfterHitl: true }, issues: [
+      { number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] },
+      { number: 36, title: "followup", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [35] },
+    ] });
+    await context.engine.start();
+    await context.engine.settle();
+    assert.equal(context.record()?.progress["35"]?.state, "done");
+    assert.equal(context.launches.length, 1);
+    await context.engine.resume();
+    await context.engine.settle();
+    assert.match(context.updatedPullRequests.at(-1)?.body ?? "", /#35[\s\S]*#36/);
+  });
+
+  for (const reviewerProducesChanges of [false, true]) {
+    test(`${branchMode}: interrupted reviewer adopts only a fix commit when its result was not recorded (fixes=${reviewerProducesChanges})`, async () => {
+      let interrupted: AutoRunRecord | undefined;
+      const context = harness({ reviewerProducesChanges, settings: { branchMode, review: true },
+        interruptBeforeSave: (next) => {
+          if (interrupted !== undefined || next.pendingAction?.kind !== "worker-commit" || next.pendingAction.role !== "reviewer" || next.pendingAction.outcome !== "succeeded") return false;
+          interrupted = context.record();
+          return true;
+        },
+      });
+      await context.engine.start();
+      await context.engine.settle();
+      assert.ok(interrupted);
+      context.seed(interrupted);
+      assert.equal((await context.engine.resume()).started, true);
+      await context.engine.settle();
+      assert.equal(context.state.cleared, true, context.notifications.join("\n"));
+      assert.equal(context.launches.filter((launch) => launch.type === "reviewer").length, reviewerProducesChanges ? 1 : 2);
+    });
+  }
+
+  for (const boundary of ["implementation", "publish", "review", "comment-issue", "create-issue-pr", "merge-issue-pr", "cleanup-issue", "close-issue", "create-run-pr", "update-run-pr", "merge-run-pr"] as const) {
+    if (branchMode === "single-branch" && ["create-issue-pr", "merge-issue-pr", "cleanup-issue"].includes(boundary)) continue;
+    test(`${branchMode}: recovery adopts ${boundary} without repeating a worker or push`, async () => {
+      let interrupted: AutoRunRecord | undefined;
+      let enabled = true;
+      const context = harness({ settings: { branchMode, review: true, mergeRunPullRequest: boundary === "merge-run-pr" },
+        interruptBeforeSave: (next) => {
+          const previous = context.record();
+          const action = previous?.pendingAction;
+          const matches = boundary === "publish" ? action?.kind === "push" && previous?.currentIssue !== undefined && next.pendingAction === undefined
+            : boundary === "implementation" || boundary === "review" ? action?.kind === "worker-commit" && action.outcome === "succeeded" && action.role === (boundary === "review" ? "reviewer" : "implementer") && next.pendingAction === undefined
+              : action?.kind === boundary && next.pendingAction === undefined;
+          if (!enabled || !matches) return false;
+          enabled = false;
+          interrupted = previous;
+          return true;
+        },
+      });
+      await context.engine.start();
+      await context.engine.settle();
+      assert.ok(interrupted, `did not interrupt at ${boundary}`);
+      const updatesBeforeResume = context.updatedPullRequests.length;
+      context.seed(interrupted);
+      assert.equal((await context.engine.resume()).started, true, context.notifications.join("\n"));
+      await context.engine.settle();
+      assert.equal(context.state.cleared, true, context.notifications.join("\n"));
+      assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+      if (boundary === "update-run-pr") assert.equal(context.updatedPullRequests.length, updatesBeforeResume, "completed PR update must not be repeated");
+    });
+  }
+}

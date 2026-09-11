@@ -200,10 +200,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     commands.registerCommand("aboard.openPullRequest", (value: unknown) => void openNumber(typeof value === "number" ? value : undefined)),
     commands.registerCommand("aboard.autoRun.refresh", async () => {
       await checkAutoRun(true);
-      // A waiting run polls GitHub on its own interval; "Check Now" is the user
-      // saying they have just merged and would rather not wait for it.
-      const record = engine.persisted();
-      if (engine.state()?.waiting === true && record?.version === 2 && record.settings.branchMode !== "single-branch") engine.continueNow();
+      engine.repositoryChanged();
     }),
     commands.registerCommand("aboard.autoRun.openCurrentIssue", () => {
       const record = cardRecord(autoRunCard(autoRunSources));
@@ -265,7 +262,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
         return;
       }
       const persisted = engine.persisted();
-      const candidate = persisted?.version === 2 ? continuationSessionFor(persisted, fleet.list()) : undefined;
+      const candidate = persisted?.version === 3 ? continuationSessionFor(persisted, fleet.list()) : undefined;
       const cwd = candidate?.cwd ?? workspace.workspaceFolders?.[0]?.uri.fsPath;
       const canContinue = candidate !== undefined && cwd !== undefined
         ? await options.isResumable(candidate.platform, candidate.sessionId, cwd, candidate.identity.type)

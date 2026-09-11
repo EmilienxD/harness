@@ -19,12 +19,13 @@ export const AUTO_RUN_PERMANENT_NOTE = "E2E permanent auto-run guidance.";
 export const AUTO_RUN_NESTED_CONTEXT = "E2E recursively resolved nested issue context.";
 export const AUTO_RUN_EXPLORE_REPORT = "Explore verified deterministic.txt contains the canonical before fixture for this auto-run issue.";
 export const AUTO_RUN_HITL_MARKER = "[E2E:auto-run-hitl]";
+export const HITL_ACCEPT_PROMPT = "Please commit all accepted changes now. [E2E:accept-hitl]";
 export const AUTO_RUN_FOLLOWUP_MARKER = "[E2E:auto-run-followup]";
 export const BEFORE_CONTENT = "harness e2e fixture: before\n";
 export const AFTER_CONTENT = "harness e2e fixture: after\n";
 /** No completion markup: a worker signals completion by committing. */
 export const FINAL_RESPONSE = "Fixture updated and verified.";
-export const WORKER_COMMIT_COMMAND = 'git add -A && git commit -m "Update deterministic fixture"';
+export const WORKER_COMMIT_COMMAND = 'git add -A; git commit -m "Update deterministic fixture"';
 
 export type ScenarioId = "single-file-success" | "auto-run-afk" | "auto-run-hitl" | "auto-run-followup";
 
@@ -112,6 +113,10 @@ function autoRunSequentialTransition(request: MessagesRequest, repoRoot: string,
   }
   if (edit.is_error === true) throw new ScenarioMismatch("$.messages", "Edit tool_result reported an error", input.scenario);
   const commit = results.get(commitId);
+  if (input.scenario === "auto-run-hitl" && !messageText(request.messages.filter((message) => message.role === "user")).includes(HITL_ACCEPT_PROMPT)) {
+    if (commit) throw new ScenarioMismatch("$.messages", "HITL committed before user acceptance", input.scenario);
+    return { scenario: input.scenario, checkpoint: "auto-hitl-handoff", messageId: scenarioStableId(input.scenario, "auto-hitl-handoff"), stopReason: "end_turn", content: [{ type: "text", text: "Implementation is ready for your review; changes are uncommitted." }] };
+  }
   if (!commit) {
     requireScenarioTool(request, "Bash", input.scenario);
     return {

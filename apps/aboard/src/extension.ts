@@ -193,6 +193,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         });
       }
       if (event.type === "terminal-closed") {
+        activeAutoRun?.terminalClosed(event.terminalId);
         output.appendLine(`Terminal ${event.terminalId} closed (${event.reason}, exit ${event.exitCode ?? "unknown"})`);
         // The terminal close is authoritative: stop tracking the process so a
         // later poll does not report it as dead when the shell dumped it.
@@ -486,9 +487,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       }),
       runDiscarded: (record) => activity.recordRun({
         runId: record.runId,
-        attempt: record.version === 2 ? record.attempt : 1,
+        attempt: record.version === 3 ? record.attempt : 1,
         outcome: "discarded",
-        ...(record.version === 2 ? { issueNumbers: record.plan.map((issue) => issue.number) } : {}),
+        ...(record.version === 3 ? { issueNumbers: record.plan.map((issue) => issue.number) } : {}),
       }),
     },
     settings: () => currentConfiguration.autoRun,
@@ -610,7 +611,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const publishAutoRunState = async (state: ReturnType<AutoRunEngine["state"]> | undefined): Promise<void> => {
     fleetUi?.refresh();
     await commands.executeCommand("setContext", "aboard.autoRunActive", state !== undefined);
-    await commands.executeCommand("setContext", "aboard.autoRunWaiting", state?.waiting === true);
   };
   await publishAutoRunState(undefined);
   // Persisting into an uninitialized project would recreate `.abd/` behind the
@@ -756,12 +756,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       error: (message) => { void window.showErrorMessage(message); },
     }, reopen),
     commands.registerCommand("aboard.stopAutoRun", () => { if (requireInitialized()) autoRun.stop(); }),
-    commands.registerCommand("aboard.continueAutoRun", () => { if (requireInitialized()) autoRun.continueNow(); }),
-    // A wait outstanding when the window regains focus is polled immediately,
-    // so returning to VS Code after merging does not cost a poll interval.
+    workspace.onDidSaveTextDocument(() => autoRun.repositoryChanged()),
     window.onDidChangeWindowState((state) => {
-      const record = autoRun.persisted();
-      if (state.focused && autoRun.state()?.waiting === true && record?.version === 2 && record.settings.branchMode !== "single-branch") autoRun.continueNow();
+      if (state.focused) autoRun.repositoryChanged();
     }),
   );
   // Recovery has no notification: the Auto Run view is the place, and it

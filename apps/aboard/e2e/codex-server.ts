@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { AFTER_CONTENT, AUTO_RUN_AFK_MARKER, AUTO_RUN_EXPLORE_REPORT, AUTO_RUN_FOLLOWUP_MARKER, AUTO_RUN_HITL_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE, BEFORE_CONTENT, FINAL_RESPONSE, WORKER_COMMIT_COMMAND } from "./scenario.js";
+import { AFTER_CONTENT, AUTO_RUN_AFK_MARKER, AUTO_RUN_EXPLORE_REPORT, AUTO_RUN_FOLLOWUP_MARKER, AUTO_RUN_HITL_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE, BEFORE_CONTENT, FINAL_RESPONSE, HITL_ACCEPT_PROMPT, WORKER_COMMIT_COMMAND } from "./scenario.js";
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
@@ -288,6 +288,12 @@ function autoRunAfkTransition(body: ResponsesRequest, text: string, repoRoot: st
 }
 
 function autoRunSequentialTransition(body: ResponsesRequest, repoRoot: string, prefix: "auto-hitl" | "auto-followup", before: string, after: string): { readonly checkpoint: string; readonly output: ResponseOutput } {
+  if (prefix === "auto-hitl" && !requestText(body).includes(HITL_ACCEPT_PROMPT)) {
+    return commandSequence(body, [
+      { checkpoint: "auto-hitl-read", command: readCommand(repoRoot), requireOutput: before.trimEnd() },
+      { checkpoint: "auto-hitl-edit", command: writeCommand(repoRoot, after) },
+    ], "auto-hitl-handoff", "Implementation is ready for your review; changes are uncommitted.");
+  }
   return commandSequence(body, [
     { checkpoint: `${prefix}-read`, command: readCommand(repoRoot), requireOutput: before.trimEnd() },
     { checkpoint: `${prefix}-edit`, command: writeCommand(repoRoot, after) },

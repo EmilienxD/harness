@@ -15,7 +15,7 @@ const SHA = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 2,
+    version: 3,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -27,7 +27,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
-      pollSeconds: 30,
+
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
     plan: [
@@ -176,7 +176,7 @@ test("a dependency edge that reaches outside the plan fails, because the plan cl
 // --- pull requests ----------------------------------------------------------
 
 function pullRequest(overrides: Partial<PullRequestObservation> & { readonly number: number }): PullRequestObservation {
-  return { state: "open", head: "issue/34-add-retry-backoff", base: SESSION, approvedByOther: false, ...overrides };
+  return { state: "open", head: "issue/34-add-retry-backoff", base: SESSION, ...overrides };
 }
 
 function working(progress: IssueProgress, number = 34): AutoRunRecord {
@@ -193,7 +193,7 @@ const withIssueBranch = (number = 34, name = "issue/34-add-retry-backoff") => ob
 });
 
 test("a recorded pull request must still be the pull request the record described", () => {
-  const current = working({ state: "current", phase: "await-approval", prNumber: 56 });
+  const current = working({ state: "current", phase: "await-commit", prNumber: 56 });
   const base = withIssueBranch();
 
   assert.match(reason(current, { ...base, pullRequests: [] }) ?? "", /#56 no longer exists/);
@@ -241,9 +241,8 @@ test("a journalled merge explains the CLI having deleted its issue branch", () =
   assert.equal(reason(current, observed), undefined);
 });
 
-test("a hitl pull request the user merged or another account approved is allowed", () => {
-  // These two are the whole point of the hitl disposition.
-  const current = working({ state: "current", phase: "await-approval", prNumber: 57 }, 35);
+test("an unjournalled HITL merge is rejected just like an unjournalled AFK merge", () => {
+  const current = working({ state: "current", phase: "await-commit", prNumber: 57 }, 35);
   const observed = observations({ branches: [branch(SESSION, SHA("a")), branch("issue/35-migrate-the-queue", SHA("c"))] });
 
   const mergedByUser = {
@@ -257,7 +256,7 @@ test("a hitl pull request the user merged or another account approved is allowed
       mergeCommitSha: SHA("d"),
     })],
   };
-  assert.equal(reason(current, mergedByUser), undefined);
+  assert.match(reason(current, mergedByUser) ?? "", /has moved/);
 
   const wrongHead = {
     ...mergedByUser,
@@ -277,7 +276,7 @@ test("a hitl pull request the user merged or another account approved is allowed
   };
   assert.match(reason(current, movedAgain) ?? "", new RegExp(`${SESSION} has moved`));
 
-  const approved = { ...observed, pullRequests: [pullRequest({ number: 57, head: "issue/35-migrate-the-queue", approvedByOther: true })] };
+  const approved = { ...observed, pullRequests: [pullRequest({ number: 57, head: "issue/35-migrate-the-queue" })] };
   assert.equal(reason(current, approved), undefined);
 });
 
@@ -340,4 +339,3 @@ test("the run's own checkout is required only after its creation was checkpointe
   assert.match(reason(after, observations({ workspacePresent: false })) ?? "", /run's own checkout is gone/);
   assert.equal(reason(after, observations({ workspacePresent: true })), undefined);
 });
-

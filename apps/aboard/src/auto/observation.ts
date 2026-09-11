@@ -62,7 +62,17 @@ export async function observeRun(record: AutoRunRecord, sources: RunObservationS
   const observed = gitHubAuthenticated ? await observeIssues(record, github) : { issues: [], titles: {} };
   const pullRequests = gitHubAuthenticated ? await observePullRequests(record, github) : [];
 
+  const progress = record.currentIssue === undefined ? undefined : issueProgress(record, record.currentIssue);
+  const startingSha = record.pendingAction?.kind === "worker-commit" ? record.pendingAction.parentSha
+    : progress?.state === "current" ? progress.beforeSha : undefined;
+  const headSha = repositoryUsable && startingSha !== undefined ? await git.headSha(false) : undefined;
+  const descendsFromStart = startingSha !== undefined && headSha !== undefined && (startingSha === headSha || await git.isAncestor(startingSha, headSha));
+  const issueRange = startingSha === undefined || headSha === undefined ? undefined : {
+    startingSha, headSha, dirtyPaths: workingTree.dirtyPaths, descendsFromStart,
+    newCommitCount: descendsFromStart ? (await git.aheadBehind(headSha, startingSha)).ahead : 0,
+  };
   return {
+    ...(issueRange === undefined ? {} : { issueRange }),
     repositoryUsable,
     gitHubAuthenticated,
     targetBranchExists,
@@ -120,16 +130,13 @@ async function observePullRequests(record: AutoRunRecord, github: AutoRunGitHub)
   return Promise.all([...wanted].map(async (number): Promise<PullRequestObservation> => {
     const snapshot = await github.getPullRequest(number).catch(() => undefined);
     if (snapshot === undefined) {
-      return { number, state: "missing", head: "", base: "", approvedByOther: false };
+      return { number, state: "missing", head: "", base: "" };
     }
     return {
       number,
       state: snapshot.state,
       head: snapshot.headBranch,
       base: snapshot.baseBranch,
-      // The decision rides along in the pull-request snapshot; a missing field
-      // means this surface could not see it, which is not an approval.
-      approvedByOther: snapshot.reviewDecision === "approved",
       ...(snapshot.headSha === undefined ? {} : { headSha: snapshot.headSha }),
       ...(snapshot.mergeCommitSha === undefined ? {} : { mergeCommitSha: snapshot.mergeCommitSha }),
     };

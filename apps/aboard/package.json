@@ -64,12 +64,6 @@
         "icon": "$(debug-stop)"
       },
       {
-        "command": "aboard.continueAutoRun",
-        "title": "Continue Auto Run",
-        "category": "Aboard",
-        "icon": "$(debug-continue)"
-      },
-      {
         "command": "aboard.focusAgent",
         "title": "Focus Agent",
         "category": "Aboard",
@@ -286,10 +280,6 @@
           "when": "aboard.initialized && aboard.autoRunActive"
         },
         {
-          "command": "aboard.continueAutoRun",
-          "when": "aboard.initialized && aboard.autoRunWaiting"
-        },
-        {
           "command": "aboard.focusAgent",
           "when": "false"
         },
@@ -458,7 +448,10 @@
         },
         "aboard.autoRun.branchMode": {
           "type": "string",
-          "enum": ["per-issue", "single-branch"],
+          "enum": [
+            "per-issue",
+            "single-branch"
+          ],
           "default": "per-issue",
           "description": "Use one branch and pull request per issue, or commit all issues directly to the run session branch and use only its cumulative pull request."
         },
@@ -482,7 +475,7 @@
         "aboard.autoRun.pauseAfterHitl": {
           "type": "boolean",
           "default": false,
-          "description": "Stop the run after a hitl issue is accepted instead of continuing automatically. In per-issue mode acceptance comes from its merge or a third-party approval; in single-branch mode it is the explicit Aboard Continue action."
+          "description": "Pause before launching the next issue after a HITL acceptance commit has been published, reviewed if configured, and integrated. Resume Auto Run starts the next issue."
         },
         "aboard.autoRun.mergeStrategy": {
           "type": "string",
@@ -498,13 +491,6 @@
           "type": "boolean",
           "default": false,
           "description": "Merge the run's own pull request when the run ends. An auto-run addresses each issue on its own branch, merges those into one session branch, and opens a single pull request from it into the branch you were on when the run started. Off by default: that branch is one you are working on, so a conflict there is likely and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, reconciles a conflict it can resolve, and otherwise leaves the pull request open for you."
-        },
-        "aboard.autoRun.pollSeconds": {
-          "type": "integer",
-          "default": 30,
-          "minimum": 1,
-          "maximum": 3600,
-          "description": "How often auto-run checks a hitl pull request for resolution while waiting. Window focus and the Continue action poll immediately regardless."
         },
         "aboard.autoRun.discardBehavior": {
           "type": "string",

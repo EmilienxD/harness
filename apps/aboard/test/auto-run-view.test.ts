@@ -10,7 +10,7 @@ const SESSION = "run/test";
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 2,
+    version: 3,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -22,7 +22,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
-      pollSeconds: 30,
+
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
     plan: [
@@ -32,7 +32,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     ],
     progress: {
       "34": { state: "done", result: "landed", prNumber: 56, issueClosed: true },
-      "35": { state: "current", phase: "await-approval", prNumber: 57 },
+      "35": { state: "current", phase: "await-commit", prNumber: 57 },
       "36": { state: "pending" },
     },
     sessionBranch: SESSION,
@@ -48,7 +48,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
 function state(overrides: Partial<AutoRunState> = {}): AutoRunState {
   return {
     runId: "run_test",
-    phase: "await-approval",
+    phase: "await-commit",
     currentIssue: 35,
     completedCount: 1,
     totalCount: 3,
@@ -349,15 +349,15 @@ test("a live run outranks any recovery question about its own record", () => {
   assert.equal(active.kind, "active");
   const { item } = rootItem({ persisted: record(), state: state() });
   assert.equal(item.contextValue, "aboard.autoRun.active");
-  assert.match(item.description, /await-approval · issue #35 · 1\/3/);
+  assert.match(item.description, /await-commit · issue #35 · 1\/3/);
   assert.equal(item.icon, "sync~spin");
 });
 
 test("a run waiting for the user is its own state, with its own actions", () => {
   const { item } = rootItem({ persisted: record(), state: state({ waiting: true }) });
   assert.equal(item.contextValue, "aboard.autoRun.waiting");
-  assert.match(item.description, /waiting for you · issue #35/);
-  assert.match(item.tooltip, /Merge the pull request, or approve it from another account/);
+  assert.match(item.description, /Waiting for commit · issue #35/);
+  assert.match(item.tooltip, /Commit all accepted changes to continue Auto Run/);
 });
 
 test("Resume is absent while eligibility is still being computed", () => {
@@ -440,7 +440,7 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
     "#35 Migrate the queue",
     "#36 Trim the cache",
   ]);
-  assert.deepEqual(rows.map((row) => row.description), ["done · PR #56", "current · await-approval", "pending"]);
+  assert.deepEqual(rows.map((row) => row.description), ["done · PR #56", "current · await-commit", "pending"]);
   assert.deepEqual(rows.map((row) => row.icon), ["pass", "circle-filled", "circle-outline"]);
   assert.deepEqual(rows.map((row) => row.contextValue), [
     "aboard.autoRun.issue.done",

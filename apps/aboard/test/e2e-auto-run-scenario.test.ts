@@ -9,7 +9,9 @@ import {
   AUTO_RUN_PERMANENT_NOTE,
   AUTO_RUN_FOLLOWUP_MARKER,
   AUTO_RUN_HITL_MARKER,
+  HITL_ACCEPT_PROMPT,
   BEFORE_CONTENT,
+  WORKER_COMMIT_COMMAND,
   parseMessagesRequest,
   transition,
   type Message,
@@ -61,7 +63,7 @@ test("auto-run AFK implementer reads, edits, and reports a valid completion", ()
   const commit = transition(request(afterEdit), root);
   assert.equal(commit.checkpoint, "auto-afk-commit");
   assert.equal(commit.content[0]?.name, "Bash");
-  assert.match(String((commit.content[0]?.input as { command?: string }).command), /^git add -A && git commit /u);
+  assert.equal((commit.content[0]?.input as { command?: string }).command, WORKER_COMMIT_COMMAND);
 
   const complete = transition(request([
     ...afterEdit,
@@ -106,6 +108,12 @@ test("single-branch HITL and follow-up workers apply sequential edits", () => {
     assert.equal(edit.checkpoint, `${item.checkpoint}-edit`);
     assert.equal((edit.content[0]?.input as { new_string?: string }).new_string, item.after);
     const afterEdit: Message[] = [...afterRead, { role: "assistant", content: edit.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: item.editId, content: "updated", is_error: false }] }];
+    if (item.marker === AUTO_RUN_HITL_MARKER) {
+      const handoff = transition(request(afterEdit), root);
+      assert.equal(handoff.checkpoint, "auto-hitl-handoff");
+      assert.equal(handoff.stopReason, "end_turn");
+      afterEdit.push({ role: "assistant", content: handoff.content }, { role: "user", content: HITL_ACCEPT_PROMPT });
+    }
     const commit = transition(request(afterEdit), root);
     assert.equal(commit.checkpoint, `${item.checkpoint}-commit`);
     const complete = transition(request([...afterEdit, { role: "assistant", content: commit.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: `${item.editId}_commit`, content: "1 file changed", is_error: false }] }]), root);

@@ -92,7 +92,6 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.autoRun.pauseAfterHitl` | `false` | Pause after accepting a HITL issue. |
 | `aboard.autoRun.mergeStrategy` | `squash` | PR merge method. |
 | `aboard.autoRun.mergeRunPullRequest` | `false` | Merge the final run PR when safe. |
-| `aboard.autoRun.pollSeconds` | `30` | External-action polling interval. |
 | `aboard.autoRun.discardBehavior` | `record-only` | Record-only, local, or full cleanup. |
 | `aboard.autoRun.worktree.enabled` | `false` | Use an isolated checkout. |
 | `aboard.autoRun.worktree.root` | sibling directory | Override checkout location. |
@@ -137,9 +136,20 @@ are outside workspaces, permissioned `0600`, and removed on window close.
 
 ## Important Constraints
 
-- Preserve Auto Run behavior except for the intentional custom-agent-to-skill worker launch change.
-- Workers signal completion with exactly one commit. They receive only `git add` and `git commit`; Aboard
-  owns every other Auto Run Git and GitHub mutation.
+- Auto Run injects its commit contract at launch; user-owned skill prompt placeholders stay empty.
+  AFK requires a successful turn and exactly one clean descendant commit. HITL's successful initial
+  turn leaves edits for interactive review; a clean descendant range of one or more user-accepted
+  commits advances the run. Reviewers may leave zero commits or exactly one clean fix commit.
+- Workers receive read-only Git commands plus `git add` and `git commit`; Aboard owns every other
+  Auto Run Git and GitHub mutation. Aboard observes acceptance commits and never creates them.
+- HITL waits in `await-commit` on its recorded branch and starting SHA. Both dispositions automatically
+  integrate internal issue PRs after acceptance and configured review. Single-branch runs publish each
+  accepted range directly to the run branch and update the cumulative PR. Only the final run PR into
+  the original target may need manual merging; `mergeRunPullRequest` controls its automatic merge.
+- `pauseAfterHitl` pauses after integration, before the next issue. Resume Auto Run resumes this pause.
+  File and Git changes, view refresh, and window focus wake acceptance observation; an internal timer
+  supplies a one-second fallback. Recovery uses version-3 records; older records remain discardable
+  but cannot resume. Persist mutation intent, then observed postconditions, before clearing the journal.
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.
   Never parse final-response markup or generate/read worker commit messages.
 - Auto Run adds non-removable Git/GitHub restrictions and, for worktrees, original-checkout path

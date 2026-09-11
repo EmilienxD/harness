@@ -11,6 +11,7 @@ import {
   issueClosedComment,
   issueCommentBody,
   classifyWorkerResult,
+  classifyHitlCommit,
   nextStep,
   pullRequestBody,
   runPullRequestBody,
@@ -44,11 +45,25 @@ function step(_expected: AutoRunPhase, overrides: Partial<RepositoryFacts> = {},
     issue: options.issue ?? issue,
     baseBranch: SESSION_BRANCH,
     reviewMode: options.reviewMode ?? false,
-    facts: facts(overrides),
+    facts: facts({ ...(overrides.hasCommit || overrides.pullRequest !== undefined ? { implementationSha: "b".repeat(40) } : {}), ...overrides }),
   });
 }
 
 const SESSION_BRANCH = "run/abc123";
+
+test("a PR cannot bypass implementation acceptance, even when already merged", () => {
+  assert.equal(nextStep({ issue, baseBranch: SESSION_BRANCH, reviewMode: false,
+    facts: facts({ hasCommit: true, pullRequest: { number: 57, state: "merged" } }) }).action, "stop");
+});
+
+test("HITL accepts a clean descendant range and waits for all remaining edits", () => {
+  const state = { startingSha: "a".repeat(40), headSha: "b".repeat(40), dirtyPaths: [], descendsFromStart: true, newCommitCount: 2 };
+  assert.deepEqual(classifyHitlCommit(state, issue.branch, issue.branch), { kind: "committed", sha: state.headSha });
+  assert.deepEqual(classifyHitlCommit({ ...state, dirtyPaths: ["file.ts"] }, issue.branch, issue.branch), { kind: "waiting" });
+  assert.deepEqual(classifyHitlCommit({ ...state, headSha: state.startingSha, newCommitCount: 0 }, issue.branch, issue.branch), { kind: "waiting" });
+  assert.equal(classifyHitlCommit(state, "main", issue.branch).kind, "rejected");
+  assert.equal(classifyHitlCommit({ ...state, descendsFromStart: false }, issue.branch, issue.branch).kind, "rejected");
+});
 
 test("slug normalization collapses punctuation, trims, and never cuts mid-word", () => {
   assert.equal(slugify("Add retry backoff"), "add-retry-backoff");
@@ -200,7 +215,7 @@ test("the reducer walks the phases in order from a clean start", () => {
   assert.deepEqual(step("branch", { branchExists: false, currentBranch: "main" }), { action: "branch", branch: issue.branch, base: SESSION_BRANCH });
   assert.deepEqual(step("implement"), { action: "implement", issue });
   // The worker committed; the commit phase only publishes what it produced.
-  assert.deepEqual(step("commit", { hasCommit: true }), { action: "commit", issue });
+  assert.deepEqual(step("publish", { hasCommit: true }), { action: "publish", issue });
 });
 
 test("uncommitted changes stop the run instead of feeding a worker or a commit", () => {
@@ -209,10 +224,10 @@ test("uncommitted changes stop the run instead of feeding a worker or a commit",
   assert.equal(beforeImplementation.action, "stop");
   assert.match(beforeImplementation.action === "stop" ? beforeImplementation.reason : "", /src\/a\.ts/);
 
-  const afterImplementation = step("commit", { ...dirty, hasCommit: true });
+  const afterImplementation = step("publish", { ...dirty, hasCommit: true });
   assert.equal(afterImplementation.action, "stop");
 
-  const nothingCommitted = step("commit", { pullRequest: { number: 56, state: "open", approvedByOther: false } });
+  const nothingCommitted = step("publish", { pullRequest: { number: 56, state: "open" } });
   assert.deepEqual(nothingCommitted, { action: "stop", reason: `address-issue produced no commit for issue #${issue.number}` });
 });
 
@@ -222,12 +237,12 @@ test("every already-satisfied postcondition short circuits", () => {
   const resumed = step("branch", {
     hasCommit: true,
     commitPushed: true,
-    pullRequest: { number: 56, state: "open", approvedByOther: false },
+    pullRequest: { number: 56, state: "open" },
   });
   assert.deepEqual(resumed, { action: "merge", issue, prNumber: 56 });
   // Already merged: nothing left but cleanup.
   assert.deepEqual(
-    step("merge", { hasCommit: true, commitPushed: true, pullRequest: { number: 56, state: "merged", approvedByOther: false } }),
+    step("merge", { hasCommit: true, commitPushed: true, pullRequest: { number: 56, state: "merged" } }),
     { action: "cleanup", issue },
   );
 });
@@ -238,16 +253,16 @@ test("a merged pull request reaches cleanup even when its disposable branch is g
     currentBranch: SESSION_BRANCH,
     hasCommit: false,
     commitPushed: false,
-    pullRequest: { number: 56, state: "merged", approvedByOther: false },
+    pullRequest: { number: 56, state: "merged" },
   });
   assert.deepEqual(outcome, { action: "cleanup", issue });
 });
 
 test("a branch with a pull request but nothing to commit is a failure, not a commit", () => {
-  const outcome = step("commit", {
+  const outcome = step("publish", {
     workingTreeDirty: false,
     hasCommit: false,
-    pullRequest: { number: 56, state: "open", approvedByOther: false },
+    pullRequest: { number: 56, state: "open" },
   });
   assert.equal(outcome.action, "stop");
   assert.match((outcome as { reason: string }).reason, /produced no commit/);
@@ -260,35 +275,35 @@ test("uncommitted work on the wrong branch stops the run instead of being checke
 });
 
 test("review runs only when enabled and only once", () => {
-  const open = { number: 56, state: "open", approvedByOther: false } as const;
+  const open = { number: 56, state: "open" } as const;
   const base = { hasCommit: true, commitPushed: true, pullRequest: open };
   assert.deepEqual(step("review", base, { reviewMode: true }), { action: "review", issue, prNumber: 56 });
   assert.deepEqual(step("review", base, { reviewMode: false }), { action: "merge", issue, prNumber: 56 });
   assert.deepEqual(step("review", { ...base, reviewed: true }, { reviewMode: true }), { action: "merge", issue, prNumber: 56 });
 });
 
-test("a hitl issue waits at the gate and continues on merge or third-party approval", () => {
+test("HITL waits before publication and automatically merges after acceptance", () => {
   const hitl: PlannedIssue = { ...issue, number: 35, disposition: "hitl", branch: "issue/35-migrate-the-queue" };
   const base = { hasCommit: true, commitPushed: true, currentBranch: hitl.branch };
-  const waiting = step("await-approval", { ...base, pullRequest: { number: 57, state: "open", approvedByOther: false } }, { issue: hitl });
-  assert.deepEqual(waiting, { action: "await-approval", issue: hitl, prNumber: 57 });
+  const waiting = step("await-commit", { ...base, awaitingCommit: true, workingTreeDirty: true }, { issue: hitl });
+  assert.deepEqual(waiting, { action: "await-commit", issue: hitl });
 
-  const approved = step("await-approval", { ...base, pullRequest: { number: 57, state: "open", approvedByOther: true } }, { issue: hitl });
+  const approved = step("await-commit", { ...base, pullRequest: { number: 57, state: "open" } }, { issue: hitl });
   assert.deepEqual(approved, { action: "merge", issue: hitl, prNumber: 57 });
 
-  const merged = step("await-approval", { ...base, pullRequest: { number: 57, state: "merged", approvedByOther: false } }, { issue: hitl });
+  const merged = step("await-commit", { ...base, pullRequest: { number: 57, state: "merged" } }, { issue: hitl });
   assert.deepEqual(merged, { action: "cleanup", issue: hitl });
 
-  const rejected = step("await-approval", { ...base, pullRequest: { number: 57, state: "closed", approvedByOther: false } }, { issue: hitl });
+  const rejected = step("await-commit", { ...base, pullRequest: { number: 57, state: "closed" } }, { issue: hitl });
   assert.equal(rejected.action, "stop");
   assert.match((rejected as { reason: string }).reason, /closed without merging/);
 });
 
 test("an afk issue has no approval gate", () => {
-  const outcome = step("await-approval", {
+  const outcome = step("await-commit", {
     hasCommit: true,
     commitPushed: true,
-    pullRequest: { number: 56, state: "open", approvedByOther: false },
+    pullRequest: { number: 56, state: "open" },
   });
   assert.deepEqual(outcome, { action: "merge", issue, prNumber: 56 });
 });

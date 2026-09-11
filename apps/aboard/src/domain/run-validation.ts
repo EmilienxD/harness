@@ -1,6 +1,6 @@
 
 import type { IssueDifficulty } from "../shared/labels.js";
-import type { IssueDisposition } from "./auto-run.js";
+import type { WorkerRepositoryState, IssueDisposition } from "./auto-run.js";
 import {
   issueProgress,
   type AutoRunRecord,
@@ -32,14 +32,13 @@ export interface PullRequestObservation {
   readonly state: "open" | "closed" | "merged" | "missing";
   readonly head: string;
   readonly base: string;
-  /** An approval from an account other than the one that opened it. */
-  readonly approvedByOther: boolean;
   readonly headSha?: string;
   readonly mergeCommitSha?: string;
 }
 
 /** Everything the boundary gathered for one validation pass. */
 export interface RunObservations {
+  readonly issueRange?: WorkerRepositoryState;
   readonly repositoryUsable: boolean;
   readonly gitHubAuthenticated: boolean;
   readonly targetBranchExists: boolean;
@@ -112,23 +111,29 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
   for (const name of required) {
     const observed = branchOf(observations, name);
     const expected = record.branchShas[name];
-    const merge = mergePostcondition(record.pendingAction, name, observations)
-      ?? hitlMergePostcondition(record, name, observations);
+    const merge = mergePostcondition(record.pendingAction, name, observations);
     // A journalled worker owns exactly one commit on its branch. Its ancestry
     // and count are checked where the worker settles, not from a bare SHA here.
     const workerRunning = record.pendingAction?.kind === "worker-commit" && record.pendingAction.branch === name;
     if (observed?.localSha === undefined && observed?.remoteSha === undefined) {
+      const progress = current === undefined ? undefined : issueProgress(record, current.number);
+      if (current?.branch === name && progress?.state === "current" && progress.phase === "cleanup" && progress.mergeSha !== undefined) continue;
       const mergedHeadWasDeleted = record.pendingAction?.kind === "merge-issue-pr"
         && record.pendingAction.head === name
         && mergePostcondition(record.pendingAction, record.pendingAction.base, observations) !== undefined;
       if (mergedHeadWasDeleted) continue;
       return broken(`the run's branch ${name} no longer exists`);
     }
-    if (expected === undefined || workerRunning) continue;
-    if (observed.localSha !== undefined && observed.localSha !== expected && merge?.mergeCommitSha !== observed.localSha) {
+    const progress = current === undefined ? undefined : issueProgress(record, current.number);
+    const range = observations.issueRange;
+    const waiting = progress?.state === "current" && progress.phase === "await-commit" && progress.expectedBranch === name;
+    const recordedLocal = progress?.state === "current" && progress.expectedBranch === name ? progress.reviewedSha ?? progress.implementationSha : undefined;
+    if ((waiting || workerRunning) && range !== undefined && !range.descendsFromStart) return broken(`${name} no longer descends from the recorded starting commit`);
+    if (expected === undefined) continue;
+    if (observed.localSha !== undefined && observed.localSha !== expected && observed.localSha !== recordedLocal && !workerRunning && !(waiting && range?.descendsFromStart === true && range.headSha === observed.localSha) && merge?.mergeCommitSha !== observed.localSha) {
       return broken(`${name} has moved since the run last pushed it`);
     }
-    if (observed.remoteSha !== undefined && observed.remoteSha !== expected && merge?.mergeCommitSha !== observed.remoteSha) {
+    if (observed.remoteSha !== undefined && observed.remoteSha !== expected && !(record.pendingAction?.kind === "push" && record.pendingAction.branch === name && record.pendingAction.sha === observed.remoteSha) && merge?.mergeCommitSha !== observed.remoteSha) {
       return broken(`origin/${name} has moved since the run last pushed it`);
     }
   }
@@ -159,32 +164,6 @@ function mergePostcondition(
   return pullRequest;
 }
 
-/**
- * A user merging the current HITL pull request is the one unjournalled change
- * allowed to move the session branch. Keep the exception as exact as a
- * journalled merge: the recorded issue head must be what GitHub merged, and
- * the observed branch movement must stop at GitHub's merge commit.
- */
-function hitlMergePostcondition(
-  record: AutoRunRecord,
-  branch: string,
-  observations: RunObservations,
-): PullRequestObservation | undefined {
-  if (branch !== record.sessionBranch) return undefined;
-  const issue = currentIssue(record);
-  if (issue?.disposition !== "hitl") return undefined;
-  const progress = issueProgress(record, issue.number);
-  if (progress.state !== "current" || progress.prNumber === undefined) return undefined;
-  const expectedHead = record.branchShas[issue.branch];
-  if (expectedHead === undefined) return undefined;
-  const pullRequest = pullRequestOf(observations, progress.prNumber);
-  if (pullRequest?.state !== "merged" || pullRequest.head !== issue.branch || pullRequest.base !== branch) return undefined;
-  if (pullRequest.headSha !== expectedHead || pullRequest.mergeCommitSha === undefined) return undefined;
-  const baseBranch = branchOf(observations, branch);
-  if (baseBranch?.localSha !== pullRequest.mergeCommitSha && baseBranch?.remoteSha !== pullRequest.mergeCommitSha) return undefined;
-  return pullRequest;
-}
-
 function issueOf(observations: RunObservations, number: number): IssueObservation | undefined {
   return observations.issues.find((issue) => issue.number === number);
 }
@@ -206,6 +185,7 @@ function validateIssues(record: AutoRunRecord, observations: RunObservations): R
       continue;
     }
     if (observed.state === "closed") {
+      if (progress.state === "current" && (progress.issueClosed === true || record.pendingAction?.kind === "close-issue" && record.pendingAction.issue === issue.number)) continue;
       return broken(`issue #${issue.number} was closed while the run still had it queued`);
     }
     if (observed.disposition !== issue.disposition) {
@@ -282,7 +262,8 @@ function validatePullRequests(record: AutoRunRecord, observations: RunObservatio
     if (observed!.state === "closed") {
       return broken(`pull request #${prNumber} for issue #${issue.number} was closed without merging`);
     }
-    if (observed!.state === "merged" && !journalMerges(record.pendingAction, observed!) && issue.disposition !== "hitl") {
+    const recordedMerge = progress.state === "current" && progress.implementationSha !== undefined && progress.mergeSha === observed!.mergeCommitSha && observed!.headSha === (progress.reviewedSha ?? progress.implementationSha);
+    if (observed!.state === "merged" && !journalMerges(record.pendingAction, observed!) && !recordedMerge) {
       return broken(`pull request #${prNumber} for issue #${issue.number} was merged outside the run`);
     }
   }
@@ -313,10 +294,13 @@ function validatePullRequestIdentity(
 }
 
 function validateWorkingTree(record: AutoRunRecord, observations: RunObservations): RecoveryEligibility {
-  if (observations.workingTree.dirtyPaths.length === 0) return RESUMABLE;
   const current = currentIssue(record);
   const branch = observations.workingTree.branch;
   const expected = record.settings.branchMode === "single-branch" ? record.sessionBranch : current?.branch;
+  const progress = current === undefined ? undefined : issueProgress(record, current.number);
+  if (record.pendingAction?.kind === "merge-issue-pr" && branch === record.pendingAction.base && observations.workingTree.dirtyPaths.length === 0 && mergePostcondition(record.pendingAction, branch, observations) !== undefined) return RESUMABLE;
+  if (progress?.state === "current" && progress.beforeSha !== undefined && progress.phase !== "branch" && progress.phase !== "cleanup" && branch !== expected) return broken(`the checkout is on ${branch ?? "a detached HEAD"}; expected ${expected}`);
+  if (observations.workingTree.dirtyPaths.length === 0) return RESUMABLE;
   if (current !== undefined && branch === expected) return RESUMABLE;
   return broken(
     `there are uncommitted changes on ${branch ?? "a detached HEAD"}, which is not the branch this run is working`,

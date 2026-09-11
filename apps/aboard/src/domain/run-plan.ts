@@ -33,7 +33,6 @@ export interface FrozenRunSettings {
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
   readonly pauseAfterHitl: boolean;
-  readonly pollSeconds: number;
   readonly worktree: WorktreeSettings;
   readonly workspaceRoot?: string;
   /** Configured note added before any per-run guidance. */
@@ -71,8 +70,9 @@ export type IssueProgress =
       readonly beforeSha?: string;
       readonly implementationSha?: string;
       readonly reviewedSha?: string;
-      readonly awaitingAcceptance?: true;
-      readonly accepted?: true;
+      readonly expectedBranch?: string;
+      readonly mergeSha?: string;
+      readonly issueClosed?: true;
     }
   | {
       readonly state: "done";
@@ -92,24 +92,16 @@ export type RunAttemptOutcome =
   | { readonly kind: "failed"; readonly reason: string };
 
 export type PendingAction =
+  | { readonly kind: "comment-issue"; readonly issue: number; readonly body: string }
+  | { readonly kind: "close-issue"; readonly issue: number; readonly prNumber: number; readonly comment: string }
+  | { readonly kind: "cleanup-issue"; readonly issue: number; readonly branch: string; readonly sha: string }
   | { readonly kind: "create-branch"; readonly branch: string; readonly base: string; readonly baseSha: string }
-  | {
-      readonly kind: "commit";
-      readonly branch: string;
-      readonly parentSha: string;
-      /** The complete subject and body passed to git. */
-      readonly message: string;
-      /** The exact tree the staged changes are intended to produce. */
-      readonly treeSha: string;
-      /** Sorted paths that were dirty when the commit was decided. */
-      readonly fingerprint: readonly string[];
-    }
   /**
    * A commit-signaling worker is running on `branch`. Its own commit is the
-   * only movement expected there, so recovery and validation both tolerate one
-   * descendant commit while this is journalled.
+   * only movement expected there. The engine records process success before
+   * accepting its repository state; HITL then waits on the implementation range.
    */
-  | { readonly kind: "worker-commit"; readonly branch: string; readonly parentSha: string }
+  | { readonly kind: "worker-commit"; readonly branch: string; readonly parentSha: string; readonly role: "implementer" | "reviewer"; readonly outcome?: "succeeded" | "failed" }
   | { readonly kind: "push"; readonly branch: string; readonly sha: string }
   | { readonly kind: "create-issue-pr"; readonly issue: number; readonly head: string; readonly base: string }
   | { readonly kind: "merge-issue-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string }
@@ -118,7 +110,7 @@ export type PendingAction =
   | { readonly kind: "merge-run-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string };
 
 export interface AutoRunRecord {
-  readonly version: 2;
+  readonly version: 3;
   readonly runId: string;
   readonly startedAt: string;
   readonly updatedAt: string;
@@ -161,11 +153,11 @@ export type RecoveryEligibility =
   | { readonly state: "resumable" }
   | { readonly state: "broken"; readonly reason: string };
 
-/** The reason a version-1 record is shown as broken rather than migrated. */
-export const UNSUPPORTED_RECORD_REASON = "run predates fixed-plan recovery";
+/** Approval-oriented records are shown as broken rather than migrated. */
+export const UNSUPPORTED_RECORD_REASON = "run predates commit-driven acceptance; discard this unsupported record";
 
 export interface UnsupportedAutoRunRecord {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly runId: string;
   readonly startedAt: string;
 }
@@ -173,7 +165,7 @@ export interface UnsupportedAutoRunRecord {
 export type PersistedAutoRunRecord = AutoRunRecord | UnsupportedAutoRunRecord;
 
 export function isUnsupportedRecord(record: PersistedAutoRunRecord): record is UnsupportedAutoRunRecord {
-  return record.version === 1;
+  return record.version !== 3;
 }
 
 export function issueProgress(record: AutoRunRecord, issueNumber: number): IssueProgress {

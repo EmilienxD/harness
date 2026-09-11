@@ -217,7 +217,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
       agentId, sessionId: PROVISIONAL, agentType, shell: process.platform === "win32" ? "powershell" : "git-bash",
       configuration: scenarioConfiguration(scenario, CODEX_COMMAND), prompt,
       runtimeDirectory: runtimeRoot, maxInlinePromptChars: expectedExit === 0 ? 4000 : 20, wrapper,
-      ...(worker ? { disallowedTools: AUTO_RUN_DISALLOWED_TOOLS } : {}),
+      ...(worker ? { autoRunRestricted: true as const, disallowedTools: AUTO_RUN_DISALLOWED_TOOLS } : {}),
       ...(scenario.chrome === "declared" ? { chrome: true as const } : {}),
     } as const;
     const plan = resume === undefined

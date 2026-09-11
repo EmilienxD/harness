@@ -26,7 +26,6 @@ export const ABOARD_SETTINGS = [
   "aboard.autoRun.pauseAfterHitl",
   "aboard.autoRun.mergeStrategy",
   "aboard.autoRun.mergeRunPullRequest",
-  "aboard.autoRun.pollSeconds",
   "aboard.autoRun.discardBehavior",
   "aboard.autoRun.worktree.enabled",
   "aboard.autoRun.worktree.root",
@@ -135,7 +134,6 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
       pauseAfterHitl: flag(reader, "aboard.autoRun.pauseAfterHitl", false, diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),
       mergeRunPullRequest: flag(reader, "aboard.autoRun.mergeRunPullRequest", false, diagnostics),
-      pollSeconds: integer(reader, "aboard.autoRun.pollSeconds", 30, 1, 3_600, diagnostics),
       discardBehavior: choice<DiscardBehavior>(reader, "aboard.autoRun.discardBehavior", DISCARD_BEHAVIORS, "record-only", diagnostics),
       worktree: {
         enabled: flag(reader, "aboard.autoRun.worktree.enabled", false, diagnostics),

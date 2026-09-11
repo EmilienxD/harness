@@ -155,7 +155,7 @@ export function renderFleetStatus(
   const autoRunLines = autoRun === undefined
     ? ["Auto Run: inactive"]
     : [
-        `Auto Run: ${autoRun.waiting ? "waiting for you" : "running"}`,
+        `Auto Run: ${autoRun.waiting ? "waiting for commit" : "running"}`,
         `Run: ${autoRun.runId}`,
         `Phase: ${autoRun.phase}`,
         `Current issue: ${autoRun.currentIssue === undefined ? "none" : `#${autoRun.currentIssue}`}`,

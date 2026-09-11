@@ -168,7 +168,7 @@ test("a plan freezes the title its branch is named from", () => {
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 2,
+    version: 3,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -180,7 +180,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
-      pollSeconds: 30,
+
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
     plan: [

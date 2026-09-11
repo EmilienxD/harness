@@ -25,10 +25,10 @@ function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result"
   };
 }
 
-function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }) {
+function setup(clean = true, delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }, autoRunRestricted = false) {
   const fleet = new FleetRegistry();
 
-  fleet.register(worker(delivery), startedAt);
+  fleet.register({ ...worker(delivery), ...(autoRunRestricted ? { autoRunRestricted: true as const } : {}) }, startedAt);
   fleet.transition(agent("worker-10"), { status: "running", startedAt }, startedAt);
   const lease = new WriteLease();
   lease.acquire("write-capable", { agentId: agent("worker-10"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee") }, startedAt, "test launch");
@@ -85,12 +85,10 @@ test("dirty write-capable Stop becomes no-commit", async () => {
   assert.equal(lease.current(), undefined);
 });
 
-test("every write-capable agent owes a commit, auto-run worker or not", async () => {
-  // Workers signal completion by committing, so no launch shape may leave the
-  // tree dirty and still be called a success.
-  const dirty = setup(false);
+test("Auto Run receives process success independently of dirty repository state", async () => {
+  const dirty = setup(false, { mode: "tool-result" }, true);
   await dirty.reconciler.stop({ ...identity, cwd: "C:\\repo", lastAssistantMessage: "left the change in the tree" });
-  assert.equal(dirty.delivered[0]?.outcome === "failed" && dirty.delivered[0].failure.type, "no-commit");
+  assert.equal(dirty.delivered[0]?.outcome, "succeeded");
   assert.equal(dirty.lease.current(), undefined);
 
   const committed = setup();

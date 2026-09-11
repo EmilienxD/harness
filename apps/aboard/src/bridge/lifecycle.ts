@@ -70,9 +70,9 @@ export class WorkerLifecycleReconciler {
       if (exitCode !== 0) {
         return this.#finish(observation.agentId, failure("crashed", exitCode, observation.lastAssistantMessage));
       }
-      // A worker signals completion with a commit, so a dirty tree at Stop is
-      // unfinished work rather than a result.
-      if (this.options.lease.current()?.agentId === observation.agentId) {
+      // Auto Run classifies repository acceptance after process settlement,
+      // including a successful HITL turn that deliberately leaves open edits.
+      if (this.options.fleet.get(observation.agentId)?.autoRunRestricted !== true && this.options.lease.current()?.agentId === observation.agentId) {
         let clean = false;
         try {
           clean = await this.options.workingTree.isClean(observation.cwd);

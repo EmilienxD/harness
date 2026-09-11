@@ -1,10 +1,12 @@
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
+import { join, resolve } from "node:path";
 
 import {
   autoRunTargetBranchBlocker,
   autoRunMessage,
   classifyWorkerResult,
+  classifyHitlCommit,
   explorationCommentBody,
   issueClosedComment,
   issueCommentBody,
@@ -46,7 +48,7 @@ import { validateRun, type RunObservations } from "../domain/run-validation.js";
 import { planDiscard, type DiscardBehavior, type DiscardPlan, type DiscardResult } from "../domain/run-cleanup.js";
 import type { AgentId, AgentSession, SessionId, TerminalId } from "../domain/contracts.js";
 import type { LaunchOrigin } from "../domain/lease.js";
-import { GitBoundaryError, type GitClient, type GitStatus } from "../git/client.js";
+import { GitBoundaryError, type GitClient } from "../git/client.js";
 import { GitHubBoundaryError } from "../github/client.js";
 import type { AutomatedLaunchOutcome, DelegationLaunchInput, InteractiveLaunchHandles, LaunchIsolation } from "../bridge/delegation.js";
 import { runWorkspacePath, type RunWorkspace, type RunWorkspaceOutcome, type RunWorkspaceProvider } from "./worktree.js";
@@ -55,6 +57,8 @@ import type { IssueDifficulty } from "../shared/labels.js";
 
 export interface PullRequestObservation {
   readonly number: number;
+  readonly title?: string;
+  readonly body?: string;
   readonly state: "open" | "closed" | "merged";
   readonly mergeable: "mergeable" | "conflicting" | "unknown";
   readonly url: string;
@@ -71,7 +75,7 @@ export interface AutoRunGitHub {
   /** Proves that gh can authenticate to and resolve the workspace repository. */
   checkAuthentication(): Promise<void>;
   listImplementableIssues(): Promise<{ readonly candidates: readonly CandidateIssue[] }>;
-  getIssue(number: number): Promise<{ readonly state: "open" | "closed"; readonly labels: readonly string[] } | undefined>;
+  getIssue(number: number): Promise<{ readonly state: "open" | "closed"; readonly labels: readonly string[]; readonly comments?: readonly { readonly body: string }[] } | undefined>;
   addIssueComment(number: number, body: string): Promise<void>;
   closeIssue(number: number, comment: string): Promise<void>;
   createPullRequest(input: { readonly title: string; readonly body: string; readonly head: string; readonly base: string }): Promise<number>;
@@ -162,6 +166,8 @@ export interface AutoRunState {
   readonly completedCount: number;
   readonly totalCount: number;
   readonly waiting: boolean;
+  readonly expectedBranch?: string;
+  readonly dirtyPaths?: readonly string[];
   readonly currentPullRequest: number | undefined;
 }
 
@@ -307,6 +313,7 @@ export class AutoRunEngine {
   }
 
   public async refresh(): Promise<RecoveryEligibility | undefined> {
+    this.repositoryChanged();
     if (this.#checking !== undefined) return this.#checking;
     const generation = ++this.#generation;
     this.#checking = this.#refresh(generation).finally(() => {
@@ -544,7 +551,6 @@ export class AutoRunEngine {
       mergeStrategy: settings.mergeStrategy,
       mergeRunPullRequest: settings.mergeRunPullRequest,
       pauseAfterHitl: settings.pauseAfterHitl,
-      pollSeconds: settings.pollSeconds,
       worktree: settings.worktree,
       ...(isolated
         ? { workspaceRoot: runWorkspacePath({ workspaceRoot: this.options.workspaceRoot, runId, root: settings.worktree.root }) }
@@ -554,7 +560,7 @@ export class AutoRunEngine {
     };
     const now = this.#now().toISOString();
     const record: AutoRunRecord = {
-      version: 2,
+      version: 3,
       runId,
       startedAt: now,
       updatedAt: now,
@@ -689,17 +695,13 @@ export class AutoRunEngine {
 
   #cancelled = false;
 
-  /** "Continue now": short-circuits the HITL wait's poll interval. */
-  public continueNow(): void {
-    if (this.#record?.settings.branchMode === "single-branch" && this.#record.currentIssue !== undefined) {
-      const issueNumber = this.#record.currentIssue;
-      const progress = issueProgress(this.#record, issueNumber);
-      if (progress.state === "current" && progress.awaitingAcceptance === true) {
-        void this.#save(withProgress(this.#record, issueNumber, { ...progress, accepted: true })).then(() => this.#wake?.());
-        return;
-      }
-    }
-    this.#wake?.();
+  /** Wake repository observation after a filesystem, lifecycle, focus, or refresh event. */
+  public repositoryChanged(): void { this.#wake?.(); }
+
+  readonly #closedTerminals = new Set<TerminalId>();
+  public terminalClosed(terminalId: TerminalId): void {
+    this.#closedTerminals.add(terminalId);
+    this.repositoryChanged();
   }
 
   public async settle(): Promise<void> {
@@ -818,12 +820,12 @@ export class AutoRunEngine {
       .catch((error: unknown) => {
         this.options.log?.(`auto-run failed: ${message(error)}`);
       })
-      .finally(() => {
+      .finally(async () => {
         this.#controller = undefined;
-        void this.#restoreOriginalBranch(homeBranch, attemptEnd).finally(() => {
+        await this.#restoreOriginalBranch(homeBranch, attemptEnd).finally(async () => {
           this.#workspace = undefined;
           this.#publish(undefined);
-          void this.refresh();
+          await this.refresh();
         });
       });
   }
@@ -832,6 +834,7 @@ export class AutoRunEngine {
     if (
       branch === undefined
       || this.#workspace?.isolated === true
+      || (this.#persisted !== undefined && !isUnsupportedRecord(this.#persisted) && this.#persisted.currentIssue !== undefined)
       || end === undefined
       || (end.outcome !== "succeeded" && end.outcome.kind === "failed")
     ) return;
@@ -1000,11 +1003,7 @@ export class AutoRunEngine {
     const record = this.#current;
     const base = record.targetBranch ?? await this.#git.defaultBranch();
     this.options.notifier.notify(autoRunMessage.session(record.sessionBranch, base));
-    // Once published, the session branch may legitimately move on origin when
-    // the user merges a HITL pull request while aboard is not running. The
-    // issue phase validates and adopts that exact merge. Re-running setup here
-    // would instead try to push the stale local tip over it and fail before the
-    // adoption path gets a chance to run.
+    // A recovered issue merge is reconciled before session setup.
     if (checkpointReached(record.checkpoint, "session-branch-ready")) return;
     await this.#git.fetch();
     const baseOnRemote = await this.#git.remoteBranchExists(base);
@@ -1032,6 +1031,18 @@ export class AutoRunEngine {
     const action = record.pendingAction;
     if (action === undefined) return;
     switch (action.kind) {
+      case "comment-issue":
+        await this.#publishIssueComment(action.issue, action.body);
+        return;
+      case "close-issue": {
+        const issue = record.plan.find((item) => item.number === action.issue);
+        if (issue === undefined) throw new StructuralError("unknown issue closure");
+        await this.#closeAcceptedIssue(issue, action.prNumber, action.comment);
+        return;
+      }
+      case "cleanup-issue":
+        await this.#cleanup(record.sessionBranch, action.branch);
+        return;
       case "create-branch": {
         const sha = await this.#git.branchSha(action.branch);
         if (sha !== undefined && sha !== action.baseSha) {
@@ -1040,37 +1051,38 @@ export class AutoRunEngine {
         await this.#settled(sha === action.baseSha ? this.#patchBranchSha(action.branch, sha) : {});
         return;
       }
-      case "commit": {
-        const head = await this.#git.commitDetails(action.branch).catch(() => undefined);
-        const adopted = head !== undefined
-          && head.parents.length === 1 && head.parents[0] === action.parentSha
-          && head.message === action.message
-          && head.treeSha === action.treeSha;
-        if (adopted) {
-          await this.#settled(this.#patchBranchSha(action.branch, head.sha));
+      case "worker-commit": {
+        const issue = record.plan.find((item) => item.number === record.currentIssue);
+        if (issue === undefined || action.branch !== this.#workingBranch(issue) || await this.#git.currentBranch() !== action.branch) throw new StructuralError("worker recovery does not match its recorded branch");
+        const state = await this.#workerState(action.parentSha);
+        if (action.outcome === "failed") {
+          if (state.headSha !== action.parentSha) throw new StructuralError("a failed worker's commit cannot be accepted");
+          await this.#settled();
           return;
         }
-        if (head?.sha !== action.parentSha) {
-          throw new StructuralError(`${action.branch} contains a commit other than the one aboard journalled`);
+        const progress = issueProgress(record, issue.number);
+        if (progress.state !== "current") throw new StructuralError("missing worker recovery progress");
+        if (action.role === "reviewer" && action.outcome === undefined && state.headSha === action.parentSha) {
+          // No repository evidence distinguishes an interrupted review from a
+          // completed no-change review. Re-run it instead of assuming success.
+          await this.#settled();
+          return;
         }
-        const status = await this.#git.status();
-        const treeSha = await this.#git.stagedTreeSha().catch(() => undefined);
-        if (status.branch !== action.branch || treeSha !== action.treeSha || !sameFingerprint(action.fingerprint, fingerprint(status))) {
-          throw new StructuralError(`the staged changes on ${action.branch} no longer match the journalled commit`);
+        if (action.role !== "reviewer" && action.outcome !== "succeeded") {
+          if (state.headSha !== action.parentSha) throw new StructuralError("implementation process success was not recorded; inspect the recovery checkout");
+          await this.#settled();
+          return;
         }
-        await this.#settled();
-        return;
-      }
-      case "worker-commit": {
-        // The worker's outcome is unknown after a crash. Adopt its commit only
-        // when the branch advanced by exactly one descendant; anything else is
-        // left for the ordinary phase observation to stop on.
-        const sha = await this.#git.branchSha(action.branch);
-        const advancedOnce = sha !== undefined
-          && sha !== action.parentSha
-          && await this.#git.isAncestor(action.parentSha, sha)
-          && (await this.#git.aheadBehind(sha, action.parentSha)).ahead === 1;
-        await this.#settled(advancedOnce ? this.#patchBranchSha(action.branch, sha) : {});
+        if (action.role !== "reviewer" && issue.disposition === "hitl") {
+          await this.#settled({ progress: withProgress(record, issue.number, { ...progress, phase: "await-commit" }).progress });
+          return;
+        }
+        const classified = classifyWorkerResult(action.role === "reviewer" ? "review-issue" : "address-issue", state);
+        if (classified.kind === "rejected") throw new StructuralError(classified.reason);
+        if (action.role === "reviewer") {
+          await this.#settled({ progress: withProgress(record, issue.number, { ...progress, reviewed: true, reviewedSha: state.headSha }).progress,
+            reviewedIssues: [...new Set([...record.reviewedIssues, issue.number])] });
+        } else if (classified.kind === "committed") await this.#recordImplementation(issue, classified.sha);
         return;
       }
       case "push": {
@@ -1099,9 +1111,7 @@ export class AutoRunEngine {
         return;
       }
       case "update-run-pr":
-        if (this.options.github.updatePullRequest === undefined) throw new StructuralError("the recorded run pull request update is unsupported by this GitHub boundary");
-        await this.options.github.updatePullRequest(action.prNumber, { title: action.title, body: action.body });
-        await this.#settled();
+        await this.#publishRunPullRequestText(action);
         return;
       case "merge-issue-pr":
       case "merge-run-pr": {
@@ -1119,7 +1129,11 @@ export class AutoRunEngine {
           await this.#git.checkout(action.base);
           await this.#git.fastForward(action.base);
         }
-        await this.#save({ ...this.#current, ...this.#patchBranchSha(action.base, baseSha) });
+        if (action.kind === "merge-issue-pr") {
+          const issue = record.plan.find((item) => item.branch === action.head);
+          if (issue === undefined) throw new StructuralError("unknown merged issue");
+          await this.#recordIssueMerge(issue, baseSha);
+        } else await this.#save({ ...this.#current, ...this.#patchBranchSha(action.base, baseSha) });
         return;
       }
     }
@@ -1128,7 +1142,7 @@ export class AutoRunEngine {
   #issuePullRequestPatch(issueNumber: number, prNumber: number): Partial<AutoRunRecord> {
     const progress = issueProgress(this.#current, issueNumber);
     if (progress.state !== "current") return {};
-    return withProgress(this.#current, issueNumber, { ...progress, prNumber }) as Partial<AutoRunRecord>;
+    return { progress: withProgress(this.#current, issueNumber, { ...progress, prNumber }).progress };
   }
 
   async #processSingleBranchIssue(
@@ -1137,40 +1151,24 @@ export class AutoRunEngine {
   ): Promise<{ readonly kind: "done" } | { readonly kind: "aborted" } | { readonly kind: "stopped"; readonly reason: string }> {
     try {
       const branch = this.#current.sessionBranch;
-      if (await this.#git.currentBranch() !== branch) await this.#git.checkout(branch);
       let progress = issueProgress(this.#current, issue.number);
+      if (await this.#git.currentBranch() !== branch) {
+        if (progress.state === "current") throw new StructuralError(`expected checkout on ${branch}`);
+        if ((await this.#git.status()).entries.length > 0) throw new StructuralError("cannot resume over uncommitted work");
+        await this.#git.checkout(branch);
+      }
       if (progress.state !== "current") {
         const beforeSha = await this.#git.headSha(false);
-        progress = { state: "current", phase: "implement", beforeSha };
+        progress = { state: "current", phase: "implement", beforeSha, expectedBranch: branch };
         await this.#save({ ...withProgress(this.#current, issue.number, progress), checkpoint: "issue", currentIssue: issue.number });
       }
 
       if (progress.implementationSha === undefined) {
-        if (progress.beforeSha !== undefined) {
-          const head = await this.#git.commitDetails(branch).catch(() => undefined);
-          // Ancestry alone identifies the worker's commit; aboard neither wrote
-          // nor reads its message.
-          if (head !== undefined && head.parents.length === 1 && head.parents[0] === progress.beforeSha) {
-            if (await this.#git.remoteBranchSha(branch) !== head.sha) {
-              await this.#journal({ kind: "push", branch, sha: head.sha });
-              await this.#git.push(branch, false);
-              await this.#settled(this.#patchBranchSha(branch, head.sha));
-            }
-            progress = { ...progress, phase: "pr", implementationSha: head.sha };
-            await this.#save(withProgress(this.#current, issue.number, progress));
-          }
-        }
-      }
-
-      if (progress.implementationSha === undefined) {
-        this.#publish({ runId: this.#current.runId, phase: "implement", currentIssue: issue.number, completedCount: completedCount(this.#current), totalCount: this.#current.plan.length, waiting: false, currentPullRequest: this.#current.runPullRequest });
         const implementation = await this.#implement(issue, signal);
         if (signal.aborted) return { kind: "aborted" };
         await this.#comment(issue.number, implementation.report);
-        progress = { ...progress, phase: "pr", implementationSha: implementation.sha };
-        await this.#save(withProgress(this.#current, issue.number, progress));
       }
-
+      await this.#publishImplementation(issue);
       const prNumber = await this.#ensureCumulativePullRequest();
       progress = issueProgress(this.#current, issue.number);
       if (progress.state !== "current") throw new Error(`issue #${issue.number} lost its current progress`);
@@ -1183,32 +1181,18 @@ export class AutoRunEngine {
         await this.#review(issue, prNumber, signal);
         if (signal.aborted) return { kind: "aborted" };
         const reviewedSha = await this.#git.headSha(false);
-        progress = { ...progress, phase: issue.disposition === "hitl" ? "await-approval" : "cleanup", reviewed: true, reviewedSha };
+        progress = { ...progress, phase: "cleanup", reviewed: true, reviewedSha };
         await this.#save({ ...withProgress(this.#current, issue.number, progress), reviewedIssues: [...new Set([...this.#current.reviewedIssues, issue.number])] });
       }
 
       progress = issueProgress(this.#current, issue.number);
       if (progress.state !== "current") throw new Error(`issue #${issue.number} lost its current progress`);
-      if (issue.disposition === "hitl" && progress.accepted !== true) {
-        if (progress.awaitingAcceptance !== true) {
-          progress = { ...progress, phase: "await-approval", awaitingAcceptance: true };
-          await this.#save(withProgress(this.#current, issue.number, progress));
-        }
-        this.#publish({ runId: this.#current.runId, phase: "await-approval", currentIssue: issue.number, completedCount: completedCount(this.#current), totalCount: this.#current.plan.length, waiting: true, currentPullRequest: prNumber });
-        this.options.notifier.notify(`auto-run: issue #${issue.number} is awaiting explicit acceptance on cumulative PR #${prNumber} (${progress.beforeSha?.slice(0, 8)}..${(progress.reviewedSha ?? progress.implementationSha)?.slice(0, 8)}).`);
-        while (!signal.aborted) {
-          const latest = issueProgress(this.#current, issue.number);
-          if (latest.state === "current" && latest.accepted === true) { progress = latest; break; }
-          await this.#waitForPoll(this.#current.settings.pollSeconds, signal);
-        }
-        if (signal.aborted) return { kind: "aborted" };
-        await this.#captureOpenWork(issue, prNumber);
-      }
-
       const latestSha = await this.#git.headSha(false);
-      progress = { ...progress, reviewedSha: latestSha };
+      await this.#requireCleanCheckout("address-issue", issue);
+      progress = { ...progress, phase: "cleanup" };
       await this.#save(withProgress(this.#current, issue.number, progress));
       const closed = await this.#closeSingleBranchIssue(issue, prNumber, progress);
+      for (const terminalId of this.#openTerminals) this.#closeSettledTerminal(terminalId);
       await this.#finishIssue(issue, { state: "done", result: "landed", prNumber, issueClosed: closed,
         ...(progress.beforeSha === undefined ? {} : { beforeSha: progress.beforeSha }),
         ...(progress.implementationSha === undefined ? {} : { implementationSha: progress.implementationSha }),
@@ -1239,22 +1223,32 @@ export class AutoRunEngine {
     const record = this.#current;
     const base = record.targetBranch ?? await this.#git.defaultBranch();
     const landed = landedIssues(record);
-    const input = { title: runPullRequestTitle(landed), body: runPullRequestBody(landed, record.sessionBranch, base, record.unpublishedTargetCommits ?? 0, "single-branch") };
+    const input = { title: runPullRequestTitle(landed), body: runPullRequestBody(landed, record.sessionBranch, base, record.unpublishedTargetCommits ?? 0, record.settings.branchMode ?? "per-issue") };
     await this.#journal({ kind: "update-run-pr", prNumber: number, ...input });
-    await this.options.github.updatePullRequest(number, input);
+    await this.#publishRunPullRequestText({ kind: "update-run-pr", prNumber: number, ...input });
+  }
+
+  async #publishRunPullRequestText(action: Extract<PendingAction, { kind: "update-run-pr" }>): Promise<void> {
+    await this.#validate();
+    const observe = async () => {
+      const snapshot = await this.options.github.getPullRequest(action.prNumber);
+      if (snapshot === undefined || snapshot.headBranch !== this.#current.sessionBranch || snapshot.baseBranch !== this.#current.targetBranch) throw new StructuralError("run pull request update does not match its recorded branches");
+      return snapshot;
+    };
+    let snapshot = await observe();
+    if (snapshot.title !== action.title || snapshot.body !== action.body) {
+      if (this.options.github.updatePullRequest === undefined) throw new StructuralError("the recorded run pull request update is unsupported by this GitHub boundary");
+      await this.options.github.updatePullRequest(action.prNumber, { title: action.title, body: action.body });
+      snapshot = await observe();
+      if (snapshot.title !== action.title || snapshot.body !== action.body) throw new Error("run pull request update did not reach its postcondition");
+    }
     await this.#settled();
   }
 
   async #closeSingleBranchIssue(issue: FrozenIssue, prNumber: number, progress: Extract<IssueProgress, { state: "current" }>): Promise<boolean> {
     const end = progress.reviewedSha ?? progress.implementationSha;
     const range = progress.beforeSha !== undefined && end !== undefined ? `${progress.beforeSha.slice(0, 8)}..${end.slice(0, 8)}` : "its recorded commit range";
-    try {
-      await this.options.github.closeIssue(issue.number, `Accepted on cumulative run PR #${prNumber}; issue work is ${range} on \`${this.#current.sessionBranch}\`. The work reaches \`${this.#current.targetBranch}\` when that PR merges.`);
-      return true;
-    } catch (error) {
-      this.options.notifier.notify(autoRunMessage.notClosed(issue.number, message(error)));
-      return false;
-    }
+    return this.#closeAcceptedIssue(issue, prNumber, `Accepted on cumulative run PR #${prNumber}; issue work is ${range} on \`${this.#current.sessionBranch}\`. The work reaches \`${this.#current.targetBranch}\` when that PR merges.`);
   }
 
 
@@ -1275,7 +1269,7 @@ export class AutoRunEngine {
       ...this.#current,
       checkpoint: "issue",
       currentIssue: issue.number,
-      progress: { ...this.#current.progress, [String(issue.number)]: { state: "current", phase: "branch", ...(prNumber === undefined ? {} : { prNumber }) } },
+      progress: { ...this.#current.progress, [String(issue.number)]: { ...(existing.state === "current" ? existing : {}), state: "current", phase: existing.state === "current" ? existing.phase : "branch", ...(prNumber === undefined ? {} : { prNumber }) } },
     });
 
     for (;;) {
@@ -1295,10 +1289,12 @@ export class AutoRunEngine {
         currentIssue: issue.number,
         completedCount: completedCount(this.#current),
         totalCount: this.#current.plan.length,
-        waiting: step.action === "await-approval",
+        waiting: step.action === "await-commit",
         currentPullRequest: prNumber,
       });
+      const progress = issueProgress(this.#current, issue.number);
       await this.#save(withProgress(this.#current, issue.number, {
+        ...(progress.state === "current" ? progress : {}),
         state: "current",
         phase,
         ...(prNumber === undefined ? {} : { prNumber }),
@@ -1311,14 +1307,15 @@ export class AutoRunEngine {
           case "branch":
             await this.#branch(issue.branch, this.#current.sessionBranch);
             break;
+          case "await-commit":
           case "implement": {
             implementation = await this.#implement(issue, signal);
             await this.#comment(issue.number, implementation.report);
             this.options.notifier.notify(autoRunMessage.implemented(issue.number, issue.branch));
             break;
           }
-          case "commit": {
-            const sha = await this.#commit(issue);
+          case "publish": {
+            const sha = await this.#publishImplementation(issue);
             const opened = prNumber ?? await this.#openPullRequest(issue, implementation?.report ?? "");
             prNumber = opened;
             this.#attach(issue.number, opened);
@@ -1337,12 +1334,6 @@ export class AutoRunEngine {
             reviewed.add(issue.number);
             await this.#save({ ...this.#current, reviewedIssues: [...reviewed] });
             break;
-          case "await-approval": {
-            const waited = await this.#awaitResolution(issue, step.prNumber, signal);
-            if (waited === "aborted") return { kind: "aborted" };
-            if (waited === "rejected") return { kind: "stopped", reason: `PR #${step.prNumber} was closed without merging` };
-            break;
-          }
           case "merge": {
             const merged = await this.#merge(issue, step.prNumber);
             if (merged !== "merged") return { kind: "stopped", reason: merged.reason };
@@ -1350,15 +1341,12 @@ export class AutoRunEngine {
           }
           case "cleanup": {
             const landed = facts.pullRequest?.state === "merged" ? facts.pullRequest.number : undefined;
-            if (landed !== undefined && issue.disposition === "hitl") {
-              await this.#adoptHitlMerge(issue, landed);
-            }
             let closed = facts.issueClosed;
             if (landed !== undefined && !facts.issueClosed) closed = await this.#closeIssue(issue, landed);
             await this.#cleanup(this.#current.sessionBranch, issue.branch);
             await this.#finishIssue(issue, landed === undefined
               ? { state: "done", result: "no-changes" }
-              : { state: "done", result: "landed", prNumber: landed, issueClosed: closed });
+              : { state: "done", result: "landed", prNumber: landed, issueClosed: closed, ...this.#issueRange(issue) });
             return { kind: "done" };
           }
           case "advance":
@@ -1383,8 +1371,8 @@ export class AutoRunEngine {
   /** Reads the repository for the current issue's phase decision. */
   async #observe(issue: FrozenIssue, knownPullRequest: number | undefined, reviewed: ReadonlySet<number>): Promise<RepositoryFacts> {
     const status = await this.#git.status();
+    const progress = issueProgress(this.#current, issue.number);
     const onBranch = status.branch === issue.branch;
-    const baseBranch = this.#current.sessionBranch;
     // Independent reads run together; the dependent ones keep their guards.
     const [branchExists, issueSnapshot] = await Promise.all([
       this.#git.branchExists(issue.branch),
@@ -1395,14 +1383,13 @@ export class AutoRunEngine {
       branchExists ? this.options.github.findOpenPullRequestForBranch(issue.branch) : Promise.resolve(undefined),
     ]);
     const prNumber = openPr ?? knownPullRequest;
-    const known = this.#owners.get(prNumber ?? -1);
     let pullRequest: RepositoryFacts["pullRequest"];
     const [snapshot, commitPushed] = await Promise.all([
       prNumber === undefined ? Promise.resolve(undefined) : this.options.github.getPullRequest(prNumber),
       hasCommit ? this.#git.isPushed(issue.branch) : Promise.resolve(false),
     ]);
     if (prNumber !== undefined && snapshot !== undefined) {
-      pullRequest = { number: prNumber, state: snapshot.state, approvedByOther: snapshot.reviewDecision === "approved" };
+      pullRequest = { number: prNumber, state: snapshot.state };
     }
     return {
       currentBranch: status.branch,
@@ -1410,9 +1397,11 @@ export class AutoRunEngine {
       workingTreeDirty: status.entries.length > 0,
       dirtyPaths: status.entries.map((entry) => entry.path),
       hasCommit,
+      ...(progress.state === "current" && progress.implementationSha !== undefined ? { implementationSha: progress.implementationSha } : {}),
+      awaitingCommit: progress.state === "current" && progress.phase === "await-commit",
       commitPushed,
       pullRequest,
-      reviewed: reviewed.has(issue.number) || (known !== undefined && known.type !== "implementer"),
+      reviewed: reviewed.has(issue.number),
       issueClosed: issueSnapshot?.state === "closed",
     };
   }
@@ -1457,6 +1446,7 @@ export class AutoRunEngine {
    */
   async #requireCleanCheckout(role: WorkerRole, issue: FrozenIssue): Promise<void> {
     const status = await this.#git.status();
+    if (status.branch !== this.#workingBranch(issue)) throw new StructuralError(`the checkout is on ${status.branch ?? "a detached HEAD"}; expected ${this.#workingBranch(issue)}`);
     if (status.entries.length === 0) return;
     const paths = status.entries.slice(0, 10).map((entry) => entry.path).join(", ");
     throw new Error(
@@ -1485,6 +1475,8 @@ export class AutoRunEngine {
   }
 
   async #implement(issue: FrozenIssue, signal: AbortSignal): Promise<ImplementationResult> {
+    const previous = issueProgress(this.#current, issue.number);
+    if (previous.state === "current" && previous.phase === "await-commit") return { sha: await this.#awaitCommit(issue, signal), report: "" };
     const continued = this.#takeContinuation("implementer", issue.number);
     const codebaseContext = continued === undefined && this.#current.settings.exploreBeforeImplement
       ? await this.#explore(issue, signal)
@@ -1495,7 +1487,8 @@ export class AutoRunEngine {
     }
     await this.#requireCleanCheckout("address-issue", issue);
     const startingSha = await this.#git.headSha(false);
-    await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha });
+    await this.#save(withProgress(this.#current, issue.number, { ...(previous.state === "current" ? previous : {}), state: "current", phase: "implement", beforeSha: startingSha, expectedBranch: this.#workingBranch(issue) }));
+    await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha, role: "implementer" });
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
       ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
       : await this.options.launcher.runAutomated({
@@ -1506,12 +1499,13 @@ export class AutoRunEngine {
       description: `address issue ${issue.number}`,
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
-      prompt: `${WORKER_GIT_PROTOCOL} The checked-out branch is for issue #${issue.number}. Work only in the directory you started in; it holds the whole repository. Make exactly one commit, only after the implementation is complete and verified.${issue.chrome === true ? " Use the required Chrome browser capability to visualize, test, debug." : ""}`,
+      prompt: `${WORKER_GIT_PROTOCOL} The checked-out branch is for issue #${issue.number}. Work only in the directory you started in; it holds the whole repository. ${issue.disposition === "afk" ? `Finish and verify the requested work, leave the checkout completely clean, and create exactly one commit on top of ${startingSha}.` : "Leave the implementation available for interactive user review in this session. Do not commit during this initial turn. The user will ask you to commit after accepting the work."}${issue.chrome === true ? " Use the required Chrome browser capability to visualize, test, debug." : ""}`,
       ...this.#guidance(),
       ...this.#isolation(),
       }, signal);
     this.#openTerminals.add(outcome.terminalId);
     await this.#remember(issue, outcome, "implementer");
+    await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha, role: "implementer", outcome: outcome.result.outcome });
     if (signal.aborted) {
       this.#closeSettledTerminal(outcome.terminalId);
       throw new AutomatedWorkerCancelled();
@@ -1520,12 +1514,18 @@ export class AutoRunEngine {
       await this.#markWorkerContinuable();
       throw new Error(`implementer failed: ${outcome.result.failure.type}`);
     }
+    if (issue.disposition === "hitl") {
+      const progress = issueProgress(this.#current, issue.number);
+      if (progress.state !== "current") throw new StructuralError("missing implementation progress");
+      await this.#settled({ progress: withProgress(this.#current, issue.number, { ...progress, phase: "await-commit" }).progress });
+      return { sha: await this.#awaitCommit(issue, signal), report: outcome.result.lastAssistantMessage.trim() };
+    }
     const classified = classifyWorkerResult("address-issue", await this.#workerState(startingSha));
     if (classified.kind !== "committed") {
       await this.#markWorkerContinuable();
       throw new Error(classified.kind === "rejected" ? classified.reason : `address-issue produced no commit for issue #${issue.number}`);
     }
-    await this.#settleWorkerCommit(issue, classified.sha);
+    await this.#recordImplementation(issue, classified.sha);
     await this.#validate();
     this.#closeSettledTerminal(outcome.terminalId);
     return { sha: classified.sha, report: outcome.result.lastAssistantMessage.trim() };
@@ -1575,61 +1575,155 @@ export class AutoRunEngine {
   async #comment(issueNumber: number, summary: string): Promise<void> {
     const body = issueCommentBody(summary);
     if (body === undefined) return;
-    try {
-      await this.options.github.addIssueComment(issueNumber, body);
-    } catch (error) {
-      this.options.log?.(`auto-run could not comment on issue #${issueNumber}: ${message(error)}`);
-    }
+    await this.#publishIssueComment(issueNumber, body);
   }
 
   async #commentExploration(issueNumber: number, headSha: string, report: string): Promise<void> {
-    try {
-      await this.options.github.addIssueComment(issueNumber, explorationCommentBody({
+    await this.#publishIssueComment(issueNumber, explorationCommentBody({
         runId: this.#current.runId,
         issueNumber,
         headSha,
         report,
       }));
-    } catch (error) {
-      this.options.log?.(`auto-run could not publish codebase context on issue #${issueNumber}: ${message(error)}`);
+  }
+
+  async #publishIssueComment(issueNumber: number, body: string): Promise<void> {
+    await this.#validate();
+    await this.#journal({ kind: "comment-issue", issue: issueNumber, body });
+    const posted = async () => (await this.options.github.getIssue(issueNumber))?.comments?.some((comment) => comment.body === body) === true;
+    if (!await posted()) {
+      try {
+        await this.options.github.addIssueComment(issueNumber, body);
+      } catch (error) {
+        // Comments are supplementary. Observe an ambiguous write before
+        // abandoning it; repository acceptance never depends on this text.
+        await posted();
+        this.options.log?.(`auto-run could not comment on issue #${issueNumber}: ${message(error)}`);
+        await this.#settled();
+        return;
+      }
+      if (!await posted()) throw new Error(`issue #${issueNumber} comment did not reach its postcondition`);
     }
+    await this.#settled();
   }
 
   async #closeIssue(issue: FrozenIssue, prNumber: number): Promise<boolean> {
-    const record = this.#current;
-    const base = record.targetBranch ?? "the branch you started on";
-    try {
-      await this.options.github.closeIssue(issue.number, issueClosedComment(prNumber, record.sessionBranch, base));
-      this.options.notifier.notify(autoRunMessage.closed(issue.number));
-      return true;
-    } catch (error) {
-      this.options.notifier.notify(autoRunMessage.notClosed(issue.number, message(error)));
-      return false;
-    }
+    return this.#closeAcceptedIssue(issue, prNumber, issueClosedComment(prNumber, this.#current.sessionBranch, this.#current.targetBranch ?? "the original target"));
   }
 
-  /** Publishes the commit address-issue already made; aboard creates none of its own. */
-  async #commit(issue: FrozenIssue): Promise<string> {
-    const current = await this.#git.currentBranch();
-    if (current !== issue.branch) {
-      throw new Error(`the repository is on ${current ?? "a detached HEAD"} but issue #${issue.number} belongs on ${issue.branch}`);
+  async #closeAcceptedIssue(issue: FrozenIssue, prNumber: number, comment: string): Promise<boolean> {
+    await this.#validate();
+    const progress = issueProgress(this.#current, issue.number);
+    if (progress.state !== "current" || progress.implementationSha === undefined) throw new StructuralError("cannot close an unaccepted issue");
+    if (progress.issueClosed === true) return true;
+    await this.#journal({ kind: "close-issue", issue: issue.number, prNumber, comment });
+    try {
+      if ((await this.options.github.getIssue(issue.number))?.state !== "closed") await this.options.github.closeIssue(issue.number, comment);
+    } catch (error) {
+      this.options.notifier.notify(autoRunMessage.notClosed(issue.number, message(error)));
+      await this.#settled();
+      return false;
     }
-    const status = await this.#git.status();
-    if (status.entries.length > 0) {
-      const paths = status.entries.slice(0, 10).map((entry) => entry.path).join(", ");
-      throw new Error(`issue #${issue.number} has ${status.entries.length} uncommitted path(s) on ${issue.branch} (${paths}); address-issue commits its own work, so the run stops for you to inspect them`);
+    if ((await this.options.github.getIssue(issue.number))?.state !== "closed") throw new Error("issue closure did not reach its postcondition");
+    await this.#settled({ progress: withProgress(this.#current, issue.number, { ...progress, issueClosed: true }).progress });
+    this.options.notifier.notify(autoRunMessage.closed(issue.number));
+    return true;
+  }
+
+  async #recordIssueMerge(issue: FrozenIssue, sha: string): Promise<void> {
+    const progress = issueProgress(this.#current, issue.number);
+    if (progress.state !== "current") throw new StructuralError("missing merged issue progress");
+    if (await this.#git.branchSha(this.#current.sessionBranch) !== sha) throw new StructuralError("session branch did not fast-forward to the issue merge");
+    await this.#settled({ ...this.#patchBranchSha(this.#current.sessionBranch, sha),
+      progress: withProgress(this.#current, issue.number, { ...progress, phase: "cleanup", mergeSha: sha }).progress });
+  }
+
+  #issueRange(issue: FrozenIssue): { beforeSha?: string; implementationSha?: string; reviewedSha?: string } {
+    const progress = issueProgress(this.#current, issue.number);
+    if (progress.state !== "current") return {};
+    return {
+      ...(progress.beforeSha === undefined ? {} : { beforeSha: progress.beforeSha }),
+      ...(progress.implementationSha === undefined ? {} : { implementationSha: progress.implementationSha }),
+      ...(progress.reviewedSha === undefined ? {} : { reviewedSha: progress.reviewedSha }),
+    };
+  }
+
+  async #recordImplementation(issue: FrozenIssue, sha: string): Promise<void> {
+    const progress = issueProgress(this.#current, issue.number);
+    if (progress.state !== "current") throw new StructuralError("missing implementation progress");
+    await this.#settled({ progress: withProgress(this.#current, issue.number, { ...progress, phase: "publish", implementationSha: sha }).progress });
+  }
+
+  async #awaitCommit(issue: FrozenIssue, signal: AbortSignal): Promise<string> {
+    const progress = issueProgress(this.#current, issue.number);
+    if (progress.state !== "current" || progress.beforeSha === undefined || progress.expectedBranch !== this.#workingBranch(issue)) throw new StructuralError("missing HITL acceptance boundary");
+    this.options.notifier.notify(autoRunMessage.waiting(issue.number));
+    const watchers = this.#watchAcceptance();
+    try {
+      while (!signal.aborted) {
+        const state = await this.#workerState(progress.beforeSha);
+        const branch = await this.#git.currentBranch();
+        const classified = classifyHitlCommit(state, branch, progress.expectedBranch);
+        if (classified.kind === "rejected") throw new StructuralError(classified.reason);
+        this.#publish({ runId: this.#current.runId, phase: "await-commit", currentIssue: issue.number, completedCount: completedCount(this.#current), totalCount: this.#current.plan.length, waiting: true, currentPullRequest: undefined,
+          expectedBranch: progress.expectedBranch, dirtyPaths: state.dirtyPaths });
+        if (classified.kind === "committed") {
+          await this.#validate();
+          await this.#recordImplementation(issue, classified.sha);
+          return classified.sha;
+        }
+        const terminal = this.#pending.get(issue.number)?.terminalId;
+        if (terminal !== undefined && this.#closedTerminals.has(terminal)) throw new Error("the HITL terminal closed before an acceptance commit; resume after reviewing the checkout");
+        await this.#waitForRepositoryChange(signal);
+      }
+      throw new AutomatedWorkerCancelled();
+    } finally { watchers.forEach((watcher) => watcher.close()); }
+  }
+
+  #watchAcceptance(): FSWatcher[] {
+    const root = this.#current.settings.workspaceRoot ?? this.options.workspaceRoot;
+    if (root === undefined) return [];
+    const paths = new Set([root]);
+    try {
+      const pointer = join(root, ".git");
+      const gitDir = statSync(pointer).isDirectory() ? pointer : resolve(root, readFileSync(pointer, "utf8").trim().replace(/^gitdir:\s*/u, ""));
+      paths.add(gitDir);
+      const common = join(gitDir, "commondir");
+      if (existsSync(common)) paths.add(join(resolve(gitDir, readFileSync(common, "utf8").trim()), "refs"));
+    } catch { /* The internal timer still observes missing or unavailable paths. */ }
+    const watchers: FSWatcher[] = [];
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+    const changed = (): void => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => this.repositoryChanged(), 100);
+    };
+    for (const path of paths) {
+      try {
+        const watcher = watch(path, { recursive: true }, changed);
+        watcher.on("error", () => watcher.close());
+        watcher.on("close", () => clearTimeout(debounce));
+        watchers.push(watcher);
+      } catch { /* Filesystem watching is optional; repository checks remain authoritative. */ }
     }
-    if (!await this.#hasIssueCommit(issue.branch)) {
-      throw new Error(`address-issue produced no commit for issue #${issue.number}`);
+    return watchers;
+  }
+
+  /** Publish only the exact accepted implementation or reviewed ending SHA. */
+  async #publishImplementation(issue: FrozenIssue): Promise<string> {
+    await this.#validate();
+    await this.#requireCleanCheckout("address-issue", issue);
+    const progress = issueProgress(this.#current, issue.number);
+    if (progress.state !== "current" || progress.beforeSha === undefined || progress.implementationSha === undefined) throw new StructuralError("no accepted implementation to publish");
+    const sha = progress.reviewedSha ?? progress.implementationSha;
+    if (await this.#git.headSha(false) !== sha || !await this.#git.isAncestor(progress.beforeSha, sha)) throw new StructuralError("accepted commit range changed before publishing");
+    const branch = this.#workingBranch(issue);
+    this.#publishIssuePhase(issue, "publish");
+    if (await this.#git.remoteBranchSha(branch) !== sha) {
+      await this.#journal({ kind: "push", branch, sha });
+      await this.#git.push(branch, true);
+      if (await this.#git.remoteBranchSha(branch) !== sha) throw new Error("push did not publish the accepted commit");
     }
-    const sha = await this.#git.headSha(false);
-    if (await this.#git.remoteBranchSha(issue.branch) !== sha) {
-      await this.#journal({ kind: "push", branch: issue.branch, sha });
-      await this.#git.push(issue.branch, true);
-      await this.#settled(this.#patchBranchSha(issue.branch, sha));
-    } else {
-      await this.#save({ ...this.#current, branchShas: { ...this.#current.branchShas, [issue.branch]: sha } });
-    }
+    await this.#settled(this.#patchBranchSha(branch, sha));
     return sha;
   }
 
@@ -1657,18 +1751,19 @@ export class AutoRunEngine {
       head: issue.branch,
       base,
     });
-    await this.#settled();
+    await this.#settled(this.#issuePullRequestPatch(issue.number, created));
     return created;
   }
 
   /**
-   * One `review-issue` worker, whatever the issue's disposition. AFK and HITL
-   * differ only in what aboard does after a successful review: AFK carries on,
-   * HITL waits for the user on the open pull request.
+   * Review accepted work automatically in either disposition.
    */
   async #review(issue: FrozenIssue, prNumber: number, signal: AbortSignal): Promise<void> {
     const baseGuidance = this.#guidance();
     const progress = issueProgress(this.#current, issue.number);
+    if (progress.state !== "current") throw new StructuralError("missing review progress");
+    await this.#save(withProgress(this.#current, issue.number, { ...progress, phase: "review" }));
+    this.#publishIssuePhase(issue, "review");
     const scope = this.#current.settings.branchMode === "single-branch" && progress.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined
       ? `Review only issue #${issue.number}'s changes in exact range ${progress.beforeSha}..${progress.implementationSha} on this pull request. Do not re-review earlier commits.`
       : undefined;
@@ -1679,7 +1774,7 @@ export class AutoRunEngine {
     const continued = this.#takeContinuation("reviewer", issue.number);
     await this.#requireCleanCheckout("review-issue", issue);
     const startingSha = await this.#git.headSha(false);
-    await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha });
+    await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha, role: "reviewer" });
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
       ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
       : await this.options.launcher.runAutomated({
@@ -1687,13 +1782,14 @@ export class AutoRunEngine {
       issues: [issue.number],
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
-      prompt: `${WORKER_GIT_PROTOCOL} Review the commit at HEAD. Fix straightforward findings yourself and make exactly one commit, only when no unresolved blocker remains; make no commit at all when there is nothing to fix.`,
+      prompt: `${WORKER_GIT_PROTOCOL} Review the accepted issue changes${scope === undefined ? " in this pull request" : " in the recorded issue range"}. Fix straightforward findings yourself and make exactly one commit, only when no unresolved blocker remains; make no commit at all when there is nothing to fix.`,
       ...guidance,
       ...this.#difficulty(issue),
       ...this.#isolation(),
       }, signal);
     this.#openTerminals.add(outcome.terminalId);
     await this.#remember(issue, outcome, "reviewer");
+    await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha, role: "reviewer", outcome: outcome.result.outcome });
     if (signal.aborted) {
       this.#closeSettledTerminal(outcome.terminalId);
       throw new AutomatedWorkerCancelled();
@@ -1708,90 +1804,15 @@ export class AutoRunEngine {
       await this.#markWorkerContinuable();
       throw new Error(classified.reason);
     }
-    if (classified.kind === "committed") await this.#settleWorkerCommit(issue, classified.sha);
-    else await this.#settled();
+    const reviewedSha = classified.kind === "committed" ? classified.sha : startingSha;
+    const current = issueProgress(this.#current, issue.number);
+    if (current.state !== "current") throw new StructuralError("missing review progress");
+    await this.#settled({ progress: withProgress(this.#current, issue.number, { ...current, reviewed: true, reviewedSha }).progress,
+      reviewedIssues: [...new Set([...this.#current.reviewedIssues, issue.number])] });
+    await this.#publishImplementation(issue);
     await this.#validate();
     this.options.notifier.notify(autoRunMessage.reviewed(issue.number, classified.kind === "committed" ? classified.sha : undefined));
     this.#closeSettledTerminal(outcome.terminalId);
-  }
-
-  /**
-   * Closes the journalled worker commit. A branch origin already carries is
-   * pushed in the same step it is recorded, so it never looks as if it drifted
-   * from its remote; an unpublished issue branch is published by `commit`.
-   */
-  async #settleWorkerCommit(issue: FrozenIssue, sha: string): Promise<void> {
-    const branch = this.#workingBranch(issue);
-    if (await this.#git.remoteBranchExists(branch)) {
-      await this.#journal({ kind: "push", branch, sha });
-      await this.#git.push(branch, false);
-    }
-    await this.#settled(this.#patchBranchSha(branch, sha));
-  }
-
-  /**
-   * Captures edits the user made in an open HITL checkout. Workers commit their
-   * own work; this is aboard committing someone else's, journalled like every
-   * other mutation it owns.
-   */
-  async #commitFixes(issue: FrozenIssue, subject: string, body: string): Promise<void> {
-    const branch = this.#current.settings.branchMode === "single-branch" ? this.#current.sessionBranch : issue.branch;
-    const status = await this.#git.status();
-    if (status.entries.length === 0) return;
-    const parent = await this.#git.headSha(false);
-    await this.#git.add();
-    const staged = await this.#git.status();
-    await this.#journal({
-      kind: "commit",
-      branch,
-      parentSha: parent,
-      message: `${subject}\n\n${body}`,
-      treeSha: await this.#git.stagedTreeSha(),
-      fingerprint: fingerprint(staged),
-    });
-    await this.#git.commit(subject, body);
-    const committedSha = await this.#git.headSha(false);
-    await this.#settled(this.#patchBranchSha(branch, committedSha));
-    const sha = await this.#git.headSha(false);
-    await this.#journal({ kind: "push", branch, sha });
-    await this.#git.push(branch, false);
-    await this.#settled(this.#patchBranchSha(branch, sha));
-  }
-
-  async #awaitResolution(issue: FrozenIssue, prNumber: number, signal: AbortSignal): Promise<"merged" | "rejected" | "aborted"> {
-    this.options.notifier.notify(autoRunMessage.waiting(issue.number, prNumber));
-    // The wait polls one pull request rather than re-validating the whole plan
-    // every tick. Full validation still runs before the loop's only possible
-    // side effect (capturing edits), at the next phase boundary, and on the
-    // Auto Run view's own refresh cadence.
-    while (!signal.aborted) {
-      await this.#captureOpenWork(issue, prNumber);
-      const snapshot = await this.options.github.getPullRequest(prNumber);
-      if (snapshot?.state === "merged") {
-        this.options.notifier.notify(autoRunMessage.resolved(prNumber));
-        return "merged";
-      }
-      if (snapshot?.state === "closed") return "rejected";
-      if (snapshot?.reviewDecision === "approved") return "merged";
-      await this.#waitForPoll(this.#current.settings.pollSeconds, signal);
-    }
-    return "aborted";
-  }
-
-  async #captureOpenWork(issue: FrozenIssue, prNumber: number): Promise<void> {
-    const status = await this.#git.status();
-    if (status.entries.length === 0) return;
-    const branch = this.#current.settings.branchMode === "single-branch" ? this.#current.sessionBranch : issue.branch;
-    if (status.branch !== branch) {
-      this.options.log?.(`auto-run left uncommitted work on ${status.branch ?? "a detached HEAD"}: issue #${issue.number} belongs on ${branch}`);
-      return;
-    }
-    // The capture commits and pushes, so the frozen plan is validated first —
-    // same as before every other phase side effect.
-    await this.#validate();
-    const paths = status.entries.map((entry) => entry.path);
-    await this.#commitFixes(issue, `Address review findings on #${issue.number}`, `Applied while PR #${prNumber} was open for review.`);
-    this.options.notifier.notify(autoRunMessage.captured(issue.number, prNumber, paths));
   }
 
   async #merge(issue: FrozenIssue, prNumber: number): Promise<"merged" | { readonly reason: string; readonly pullRequestUrl: string | undefined }> {
@@ -1820,7 +1841,7 @@ export class AutoRunEngine {
           return { reason: `PR #${prNumber} conflicts with ${base}`, pullRequestUrl: after.url };
         } else {
           await this.#settled();
-          throw new Error(`merging PR #${prNumber} failed (${message(error)}). If the branch requires a review, auto-run cannot approve its own pull request; merge it yourself and resume the run.`);
+          throw new Error(`merging PR #${prNumber} failed (${message(error)}). Resolve the repository integration policy and resume Auto Run.`);
         }
       }
       await this.#git.fetch({ fresh: true }).catch(() => undefined);
@@ -1831,40 +1852,11 @@ export class AutoRunEngine {
       }
       await this.#git.checkout(base);
       await this.#git.fastForward(base);
-      await this.#save({ ...this.#current, ...(baseSha === undefined ? {} : this.#patchBranchSha(base, baseSha)) });
+      await this.#recordIssueMerge(issue, baseSha);
     }
     this.options.notifier.notify(autoRunMessage.merged(issue.number, base));
     this.#owners.delete(prNumber);
     return "merged";
-  }
-
-  /** Adopt the exact session-branch tip produced by the user's HITL merge. */
-  async #adoptHitlMerge(issue: FrozenIssue, prNumber: number): Promise<void> {
-    const base = this.#current.sessionBranch;
-    const expectedHead = this.#current.branchShas[issue.branch];
-    const snapshot = await this.options.github.getPullRequest(prNumber);
-    if (
-      expectedHead === undefined
-      || snapshot?.state !== "merged"
-      || snapshot.headBranch !== issue.branch
-      || snapshot.baseBranch !== base
-      || snapshot.headSha !== expectedHead
-      || snapshot.mergeCommitSha === undefined
-    ) {
-      throw new StructuralError(`pull request #${prNumber} did not produce the expected HITL merge`);
-    }
-    await this.#git.fetch({ fresh: true });
-    const remoteSha = await this.#git.remoteBranchSha(base);
-    if (remoteSha !== snapshot.mergeCommitSha) {
-      throw new StructuralError(`pull request #${prNumber} did not produce the expected HITL merge`);
-    }
-    await this.#git.checkout(base);
-    await this.#git.fastForward(base);
-    const localSha = await this.#git.branchSha(base);
-    if (localSha !== snapshot.mergeCommitSha) {
-      throw new StructuralError(`${base} did not fast-forward to the HITL merge for pull request #${prNumber}`);
-    }
-    await this.#save({ ...this.#current, ...this.#patchBranchSha(base, localSha) });
   }
 
   async #reconcile(branch: string, base: string): Promise<boolean> {
@@ -1880,20 +1872,19 @@ export class AutoRunEngine {
   }
 
   async #cleanup(sessionBranch: string, issueBranch?: string): Promise<void> {
-    for (const terminalId of this.#openTerminals) {
-      try { this.options.terminals.close(terminalId); } catch { /* already closed */ }
-    }
-    this.#openTerminals.clear();
-    try {
+    const issue = this.#current.plan.find((item) => item.branch === issueBranch);
+    const expectedSha = issueBranch === undefined ? undefined : this.#current.branchShas[issueBranch];
+    if (issue !== undefined && expectedSha !== undefined) {
+      await this.#validate();
+      if ((await this.#git.status()).entries.length > 0) throw new StructuralError("uncommitted changes prevent issue cleanup");
+      await this.#journal({ kind: "cleanup-issue", issue: issue.number, branch: issue.branch, sha: expectedSha });
       await this.#git.checkout(sessionBranch);
-      const expectedSha = issueBranch === undefined ? undefined : this.#current.branchShas[issueBranch];
-      if (issueBranch !== undefined && expectedSha !== undefined) {
-        await this.#git.deleteBranchAt(issueBranch, expectedSha);
-        await this.#git.deleteRemoteBranchAt(issueBranch, expectedSha);
-      }
-    } catch (error) {
-      this.options.log?.(`auto-run cleanup could not return to ${sessionBranch}: ${message(error)}`);
+      await this.#git.deleteBranchAt(issue.branch, expectedSha);
+      await this.#git.deleteRemoteBranchAt(issue.branch, expectedSha);
+      if (await this.#git.branchSha(issue.branch) !== undefined || await this.#git.remoteBranchSha(issue.branch) !== undefined) throw new StructuralError("issue branch cleanup did not reach its postcondition");
+      await this.#settled();
     }
+    for (const terminalId of this.#openTerminals) this.#closeSettledTerminal(terminalId);
   }
 
   #closeSettledTerminal(terminalId: TerminalId): void {
@@ -1941,6 +1932,7 @@ export class AutoRunEngine {
       } else if (record.runPullRequest !== prNumber) {
         await this.#save({ ...this.#current, runPullRequest: prNumber });
       }
+      if (this.#current.pendingAction?.kind !== "merge-run-pr") await this.#updateCumulativePullRequest(prNumber);
       this.options.notifier.notify(autoRunMessage.runOpened(prNumber, base, landed.length));
       if (targetStillUnpublished && record.unpublishedTargetCommits !== undefined) {
         this.options.notifier.notify(autoRunMessage.unpublishedTarget(base, record.unpublishedTargetCommits));
@@ -2132,12 +2124,12 @@ export class AutoRunEngine {
     return undefined;
   }
 
-  async #waitForPoll(seconds: number, signal: AbortSignal): Promise<void> {
+  async #waitForRepositoryChange(signal: AbortSignal): Promise<void> {
     await new Promise<void>((resolve) => {
       let settled = false;
       const finish = (): void => { if (!settled) { settled = true; this.#wake = undefined; resolve(); } };
       this.#wake = finish;
-      void this.#sleep(Math.max(1, seconds) * 1_000, signal).then(finish, finish);
+      void this.#sleep(1_000, signal).then(finish, finish);
     });
   }
 
@@ -2206,8 +2198,10 @@ export function continuationSessionFor(
 
 function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+    const finish = (): void => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
+    const timer = setTimeout(finish, milliseconds);
+    if (signal.aborted) finish();
+    else signal.addEventListener("abort", finish, { once: true });
   });
 }
 
@@ -2231,14 +2225,6 @@ function message(error: unknown): string {
   // Git/GitHub diagnostics explain lookup and network failures, but a remote
   // URL may contain credentials. Keep the diagnostic while dropping whole URLs.
   return `${error.message}: ${firstLine.replace(/\b(?:https?|ssh):\/\/\S+/giu, "<remote>")}`;
-}
-
-function fingerprint(status: GitStatus): readonly string[] {
-  return status.entries.map((entry) => `${entry.status}:${entry.path}`).sort();
-}
-
-function sameFingerprint(expected: readonly string[], observed: readonly string[]): boolean {
-  return expected.length === observed.length && expected.every((entry, index) => entry === observed[index]);
 }
 
 function guidelineProperty(value: string | undefined): { readonly additionalGuideline?: string } {

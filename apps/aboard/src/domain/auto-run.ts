@@ -4,10 +4,10 @@ import type { IssueDifficulty } from "../shared/labels.js";
 export const AUTO_RUN_PHASES = [
   "branch",
   "implement",
-  "commit",
+  "await-commit",
+  "publish",
   "pr",
   "review",
-  "await-approval",
   "merge",
   "cleanup",
 ] as const;
@@ -69,7 +69,6 @@ export interface AutoRunSettings {
   readonly discardBehavior: DiscardBehavior;
   readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;
-  readonly pollSeconds: number;
   readonly mergeRunPullRequest: boolean;
   readonly worktree: WorktreeSettings;
 }
@@ -138,6 +137,8 @@ export interface RepositoryFacts {
   /** Paths reported dirty, used to name them in a refusal or a notification. */
   readonly dirtyPaths: readonly string[];
   readonly hasCommit: boolean;
+  readonly awaitingCommit?: boolean;
+  readonly implementationSha?: string;
   readonly commitPushed: boolean;
   readonly pullRequest: PullRequestFacts | undefined;
   /** Whether a reviewer has already run against the open pull request. */
@@ -148,16 +149,15 @@ export interface RepositoryFacts {
 export interface PullRequestFacts {
   readonly number: number;
   readonly state: "open" | "closed" | "merged";
-  readonly approvedByOther: boolean;
 }
 
 export type AutoRunStep =
   | { readonly action: "branch"; readonly branch: string; readonly base: string }
   | { readonly action: "implement"; readonly issue: PlannedIssue }
-  | { readonly action: "commit"; readonly issue: PlannedIssue }
+  | { readonly action: "publish"; readonly issue: PlannedIssue }
+  | { readonly action: "await-commit"; readonly issue: PlannedIssue }
   | { readonly action: "pr"; readonly issue: PlannedIssue }
   | { readonly action: "review"; readonly issue: PlannedIssue; readonly prNumber: number }
-  | { readonly action: "await-approval"; readonly issue: PlannedIssue; readonly prNumber: number }
   | { readonly action: "merge"; readonly issue: PlannedIssue; readonly prNumber: number }
   | { readonly action: "cleanup"; readonly issue: PlannedIssue }
   | { readonly action: "advance" }
@@ -172,6 +172,8 @@ export interface ReducerInput {
 
 export function nextStep(input: ReducerInput): AutoRunStep {
   const { issue, facts, reviewMode } = input;
+  if ((facts.hasCommit || facts.pullRequest !== undefined) && facts.implementationSha === undefined && !facts.awaitingCommit) return { action: "stop", reason: `issue #${issue.number} has no recorded accepted implementation` };
+  if (facts.awaitingCommit) return { action: "await-commit", issue };
   if (facts.issueClosed) return { action: "cleanup", issue };
   if (facts.pullRequest?.state === "merged") return { action: "cleanup", issue };
   for (const phase of AUTO_RUN_PHASES) {
@@ -186,19 +188,18 @@ export function nextStep(input: ReducerInput): AutoRunStep {
         }
         return { action: "branch", branch: issue.branch, base: input.baseBranch };
       case "implement":
-        // A commit or a pull request already carries the implementation.
-        if (facts.hasCommit || facts.pullRequest !== undefined) continue;
-        // address-issue commits its own verified work, so nothing may be
-        // waiting in the tree; leftover edits are the user's to review.
+        if (facts.implementationSha !== undefined) continue;
         if (facts.workingTreeDirty) return { action: "stop", reason: dirtyReason(issue, facts) };
         return { action: "implement", issue };
-      case "commit":
+      case "await-commit":
+        continue;
+      case "publish":
         if (facts.workingTreeDirty) return { action: "stop", reason: dirtyReason(issue, facts) };
         if (!facts.hasCommit) {
           return { action: "stop", reason: `address-issue produced no commit for issue #${issue.number}` };
         }
         if (facts.commitPushed) continue;
-        return { action: "commit", issue };
+        return { action: "publish", issue };
       case "pr": {
         if (facts.pullRequest !== undefined) continue;
         return { action: "pr", issue };
@@ -208,18 +209,6 @@ export function nextStep(input: ReducerInput): AutoRunStep {
         if (pr.action === "stop") return pr;
         if (!reviewMode || facts.reviewed) continue;
         return { action: "review", issue, prNumber: pr.number };
-      }
-      case "await-approval": {
-        const pr = requirePullRequest(facts, issue);
-        if (pr.action === "stop") return pr;
-        if (issue.disposition === "afk") continue;
-        if (facts.pullRequest?.state === "closed") {
-          return { action: "stop", reason: `pull request #${pr.number} was closed without merging, so issue #${issue.number} was rejected` };
-        }
-        // A third-party approval is the secondary signal; the extension cannot
-        // approve its own pull request, so the user's merge is the primary one.
-        if (facts.pullRequest?.approvedByOther === true) continue;
-        return { action: "await-approval", issue, prNumber: pr.number };
       }
       case "merge": {
         const pr = requirePullRequest(facts, issue);
@@ -308,6 +297,19 @@ export type WorkerOutcome =
   /** Only `review-issue` may finish this way: it found nothing worth fixing. */
   | { readonly kind: "unchanged" }
   | { readonly kind: "rejected"; readonly reason: string };
+
+/** User acceptance is a clean descendant range on the recorded checkout. */
+export function classifyHitlCommit(
+  state: WorkerRepositoryState,
+  currentBranch: string | undefined,
+  expectedBranch: string,
+): WorkerOutcome | { readonly kind: "waiting" } {
+  if (currentBranch !== expectedBranch) return { kind: "rejected", reason: `the checkout moved to ${currentBranch ?? "a detached HEAD"}; expected ${expectedBranch}` };
+  if (!state.descendsFromStart) return { kind: "rejected", reason: "HITL work moved HEAD off the recorded starting commit" };
+  if (state.dirtyPaths.length > 0 || state.headSha === state.startingSha) return { kind: "waiting" };
+  if (state.newCommitCount < 1) return { kind: "rejected", reason: "HITL work contains no descendant commit" };
+  return { kind: "committed", sha: state.headSha };
+}
 
 /** Decides a worker's success from process-independent repository state alone. */
 export function classifyWorkerResult(role: WorkerRole, state: WorkerRepositoryState): WorkerOutcome {
@@ -430,8 +432,6 @@ export const autoRunMessage = {
   committed: (issue: number, sha: string, pr: number): string => `auto-run: issue #${issue} committed (${sha}) and opened PR #${pr}.`,
   reviewed: (issue: number, sha: string | undefined): string =>
     `auto-run: issue #${issue} reviewed; ${sha === undefined ? "no fixes were needed" : `fixes committed (${sha.slice(0, 8)})`}.`,
-  captured: (issue: number, pr: number, paths: readonly string[]): string =>
-    `auto-run: committed ${paths.length} changed path(s) from issue #${issue}'s open terminals to PR #${pr}: ${paths.slice(0, 10).join(", ")}.`,
   workspace: (path: string): string =>
     `auto-run: working in its own checkout at ${path}; your files stay as they are and nothing this run does touches them.`,
   workspaceKept: (path: string, reason: "kept-by-setting" | "left-for-the-user" | "removal-failed"): string => {
@@ -472,8 +472,7 @@ export const autoRunMessage = {
     `auto-run: issue #${issue} conflicted with ${base}; merged ${base} into its branch and pushed before retrying PR #${pr}.`,
   parked: (issue: number, pr: number, reason: string): string =>
     `auto-run: issue #${issue} parked; PR #${pr} needs you (${reason}). Its branch, terminals, and pull request are left in place; the run continues with the next issue.`,
-  waiting: (issue: number, pr: number): string => `auto-run: issue #${issue} is hitl; PR #${pr} is open and waiting for you. The run is paused.`,
-  resolved: (pr: number): string => `auto-run: PR #${pr} merged by you; continuing.`,
+  waiting: (issue: number): string => `Issue #${issue} is ready for review. Commit all accepted changes to continue Auto Run.`,
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
   returnBlocked: (target: string, current: string, paths: readonly string[]): string =>

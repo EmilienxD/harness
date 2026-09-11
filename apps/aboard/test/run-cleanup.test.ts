@@ -10,7 +10,7 @@ const SHA = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 2,
+    version: 3,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -22,7 +22,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
       pauseAfterHitl: false,
-      pollSeconds: 30,
+
       worktree: { enabled: true, root: "", keep: false, setupTimeoutSeconds: 600 },
       workspaceRoot: "C:/checkouts/run_test/repo",
     },
@@ -62,9 +62,9 @@ function observations(overrides: Partial<RunObservations> = {}): RunObservations
     ],
     issues: [],
     pullRequests: [
-      { number: 56, state: "merged", head: "issue/34-one", base: SESSION, approvedByOther: false },
-      { number: 57, state: "open", head: "issue/35-two", base: SESSION, approvedByOther: false },
-      { number: 60, state: "open", head: SESSION, base: "feature/wip", approvedByOther: false },
+      { number: 56, state: "merged", head: "issue/34-one", base: SESSION },
+      { number: 57, state: "open", head: "issue/35-two", base: SESSION },
+      { number: 60, state: "open", head: SESSION, base: "feature/wip" },
     ],
     workingTree: { branch: SESSION, dirtyPaths: [] },
     titles: {},
@@ -125,7 +125,7 @@ test("an artifact that moved since the run recorded it is kept and reported", ()
 
 test("a retargeted pull request is not one this run still owns", () => {
   const retargeted = observations({
-    pullRequests: [{ number: 57, state: "open", head: "issue/35-two", base: "main", approvedByOther: false }],
+    pullRequests: [{ number: 57, state: "open", head: "issue/35-two", base: "main" }],
   });
   const result = plan("full-cleanup", record(), retargeted);
   assert.deepEqual(result.pullRequests.map((pullRequest) => pullRequest.number), []);

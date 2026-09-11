@@ -14,9 +14,15 @@ Aboard tracks Interactive, Explore, Prototype, Web Search, Brainstorm, General, 
 
 ## Auto Run
 
-`/auto` starts Auto Run immediately and `/auto --dry` produces a forecast. The panel offers a separate review-and-start path. Aboard owns all Auto Run Git and GitHub mutations. Workers receive complete issue or pull-request context through the Harness-installed `/address-issue` and `/review-issue` skills, and signal completion by committing on the branch Aboard put them on. Aboard grants them `git add` and `git commit` and keeps every other Git and GitHub operation to itself.
+`/auto` starts Auto Run immediately and `/auto --dry` produces a forecast. The panel offers a review-and-start path. Aboard freezes the issue order and run settings, creates `run/<run-id>`, and supplies issue context and mode-specific guidance through the Harness-installed Address Issue and Review Issue skills. Their user-owned prompt placeholders remain untouched. Workers can use read-only Git commands, `git add`, and `git commit`; Aboard owns branch operations, publication, integration, and GitHub mutations.
 
-Auto Run continues to support issue dispositions, difficulty routing, optional Explore sessions, per-issue and single-branch modes, worktrees, review, recovery, cancellation, and run activity.
+AFK workers must finish successfully with exactly one clean descendant commit. HITL workers leave their initial implementation uncommitted in the visible terminal. Inspect it, test it, continue the conversation, and ask the agent to commit—or commit manually. Auto Run displays “Waiting for commit” until at least one descendant commit exists and all staged, unstaged, and untracked changes are gone. Multiple HITL commits form one accepted range. A changed branch or rewritten history stops the attempt; a failed initial turn never enters the waiting phase.
+
+In per-issue mode, Aboard pushes the accepted range, creates an internal issue PR into the run branch, runs the optional reviewer, and automatically merges and cleans up that PR. In single-branch mode, work stays on the run branch and Aboard updates one cumulative PR; review covers only the current issue's recorded SHA range. Reviewer fixes proceed automatically. HITL requires no GitHub approval or manual issue-PR merge.
+
+After integration, `pauseAfterHitl` optionally pauses before the next issue; use Resume Auto Run to resume. Once the plan drains, only the final PR from the run branch into the original target may require your merge. `mergeRunPullRequest` enables automatic final merging when safe. Conflicts and unsafe unpublished-target ancestry leave that PR open with a reason.
+
+Repository changes, saving files, focusing the view, and refreshing trigger acceptance checks, with a one-second internal fallback. Stop preserves unfinished recovery state; Discard follows the configured cleanup policy. Version-3 records retain starting, accepted, and reviewed SHAs and journal pending mutations. Older records are unsupported and discardable. Run settings remain frozen, while each new or resumed agent launch reads the current launch configuration.
 
 ## Harness boundary
 
