@@ -17,7 +17,8 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
 - `harness/productivity/subagents/`: Complete ask/reply bundle with internal provider hooks and an independently
   packaged persistent Python runtime.
 - `harness/<category>/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
-  no README exists.
+  no README exists. The `extension/aboard` package is an exception: it has neither file and is navigated from its
+  local `AGENTS.md`.
 - `apps/aboard/`: independent npm monorepo boundary for the Aboard VS Code extension. Its local
   `AGENTS.md` is the navigation map for extension work.
 - `tests/unit/`: installer, catalogue, platform, settings, receipt, and session tests.
@@ -26,7 +27,6 @@ Do not add named install, uninstall, upgrade, list, or info commands. The only n
 - `docs/CHATGPT-REFERENCES/`: mirrored official ChatGPT documentation.
 - `docs/CHATGPT-COMPATIBILITY.md`: native ChatGPT target feasibility and implementation map.
 - `scripts/update_references.py`: refreshes the mirrored upstream documentation.
-- `harness/itsclaudehistory/`: nested Git repository; leave its internals alone unless explicitly asked.
 
 ## Catalogue Package Shape
 

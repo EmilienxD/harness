@@ -85,12 +85,10 @@ def test_first_party_tools_use_root_shared_shallow_platform_overlays():
 
 
 def test_no_catalogue_or_archive_package_has_a_shared_payload_directory():
-    nested_repository = ROOT / "harness" / "itsclaudehistory"
     shared_directories = [
         path
         for path in (ROOT / "harness").rglob("shared")
         if path.is_dir()
-        and nested_repository not in path.parents
         and has_payload_files(path)
     ]
     assert shared_directories == []
@@ -99,8 +97,6 @@ def test_no_catalogue_or_archive_package_has_a_shared_payload_directory():
 def test_first_party_skills_do_not_use_dynamic_shell_injection():
     dynamic_shell = re.compile(r"(?m)^\s*(?:!`|```!)")
     for skill in (ROOT / "harness").rglob("SKILL.md"):
-        if "itsclaudehistory" in skill.parts:
-            continue
         body = skill.read_text(encoding="utf-8")
         assert not dynamic_shell.search(body), (
             f"{skill.relative_to(ROOT)} uses dynamic shell injection; prepare dynamic "
