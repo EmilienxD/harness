@@ -26,6 +26,10 @@ Its hooks and persistent runtime are internal dependencies, not separate catalog
 is a verified release artifact, not part of the Python wheel. Its manifest pins the URL, byte size,
 and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
 
+The planning catalogue also includes `lavish`, which turns plans, comparisons, diagrams, reports,
+and other visual responses into browser-based HTML artifacts that users can annotate and return for
+feedback.
+
 The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
 It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
 continue to use `v<version>` tags.
@@ -122,6 +126,7 @@ harness/archive/         archived packages excluded from catalogue discovery
 src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
 harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
 harness/productivity/setup-git-worktree-maker/ project-native Git worktree command skill
+harness/planning/lavish/ browser-based HTML artifact and annotation workflow
 tests/unit/              behavioural and install round-trip coverage
 tests/e2e/               reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension

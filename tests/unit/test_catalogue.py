@@ -331,7 +331,7 @@ def test_every_catalogue_manifest_loads():
         "address-issue", "review-issue", "harness-cli", "communication-hooks",
     }.isdisjoint(tools)
     expected_categories = {
-        "planning": {"audit", "breakdown-help-wanted-issue", "grill-me", "prototype", "websearch"},
+        "planning": {"audit", "breakdown-help-wanted-issue", "grill-me", "lavish", "prototype", "websearch"},
         "building": {"issue-readers", "issue-writers", "tdd"},
         "shipping": {"commit"},
         "productivity": {
