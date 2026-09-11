@@ -24,31 +24,35 @@ import type { GitClient, GitStatus, GitWorktree } from "../src/git/client.js";
 const PROJECT = resolve("C:/work/aboard");
 const ENABLED: WorktreeSettings = { enabled: true, root: "", keep: false, setupTimeoutSeconds: 600 };
 
-test("a run's checkout is a sibling of the project, named after the repository", () => {
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123" });
-  assert.equal(dirname(dirname(path)), join(dirname(PROJECT), ".abd-sessions"));
-  // The leaf is the repository's own name: from inside, the checkout looks like
-  // an ordinary clone rather than something an agent should reason about.
-  assert.equal(basename(path), basename(PROJECT));
+test("a run's checkout is a short, ordinary-looking sibling of the project", () => {
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
+  assert.equal(dirname(path), dirname(PROJECT));
+  assert.equal(basename(path), "aboard-1");
   assert.ok(!path.toLowerCase().includes("worktree"), `${path} must not announce what it is`);
-  // Derived from the run id alone, so a resumed run finds the same directory
-  // without the record having to carry a copy of the path.
-  assert.equal(path, runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123" }));
-  assert.notEqual(path, runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_def456" }));
+  assert.ok(!path.toLowerCase().includes("session"), `${path} must not announce what it is`);
+});
+
+test("a run's checkout uses the first available sibling index", () => {
+  const occupied = new Set([
+    join(dirname(PROJECT), "aboard-1"),
+    join(dirname(PROJECT), "aboard-2"),
+  ]);
+  const path = runWorkspacePath({ workspaceRoot: PROJECT, exists: (candidate) => occupied.has(candidate) });
+  assert.equal(path, join(dirname(PROJECT), "aboard-3"));
 });
 
 test("a configured root is honoured, and one inside the project is refused", () => {
-  const custom = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123", root: resolve("D:/checkouts") });
-  assert.equal(custom, join(resolve("D:/checkouts"), "run_abc123", basename(PROJECT)));
+  const custom = runWorkspacePath({ workspaceRoot: PROJECT, root: resolve("D:/checkouts") });
+  assert.equal(custom, join(resolve("D:/checkouts"), "aboard-1"));
   // A relative root resolves against the project, which is exactly how a user
   // writes "next to it"; and how they could accidentally write "inside it".
   assert.equal(
-    runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123", root: "../elsewhere" }),
-    join(resolve(PROJECT, "../elsewhere"), "run_abc123", basename(PROJECT)),
+    runWorkspacePath({ workspaceRoot: PROJECT, root: "../elsewhere" }),
+    join(resolve(PROJECT, "../elsewhere"), "aboard-1"),
   );
   for (const inside of [".abd/checkouts", "build", "."]) {
     assert.throws(
-      () => runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_abc123", root: inside }),
+      () => runWorkspacePath({ workspaceRoot: PROJECT, root: inside }),
       RunWorkspaceError,
       `${inside} is inside the project and must be refused`,
     );
@@ -233,7 +237,7 @@ test("an unsupported project path refuses worktree mode before creating anything
 test("preparing a checkout creates it from the local base and installs into it", async () => {
   const { provider, git, setups, notifications } = fixture({ setupFile: "npm ci\n" });
   const workspace = await provider.prepare(REQUEST);
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   assert.equal(workspace.root, path);
   assert.equal(workspace.isolated, true);
   assert.deepEqual(workspace.denyTools, isolationDenyRules(PROJECT));
@@ -247,6 +251,14 @@ test("preparing a checkout creates it from the local base and installs into it",
   assert.equal(setups[0]?.env.ABOARD_PROJECT_ROOT, PROJECT);
   assert.equal(setups[0]?.env.ABOARD_SESSION_BRANCH, "run/test");
   assert.ok(notifications.some((message) => message.includes(path)));
+});
+
+test("preparing a checkout uses the path frozen when the run was planned", async () => {
+  const { provider, git } = fixture();
+  const checkoutRoot = join(dirname(PROJECT), "aboard-2");
+  const workspace = await provider.prepare({ ...REQUEST, checkoutRoot });
+  assert.equal(workspace.root, checkoutRoot);
+  assert.ok(git.calls.includes(`addWorktree ${checkoutRoot} run/test main`), git.calls.join(", "));
 });
 
 test("setup uses the run's frozen timeout instead of live settings", async () => {
@@ -282,19 +294,19 @@ test("linked-worktree Git metadata exposes only the paths required to commit", a
 test("a checkout falls back to the remote base when no local base ref exists", async () => {
   const { provider, git } = fixture({ git: { branches: [] } });
   await provider.prepare(REQUEST);
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   assert.ok(git.calls.includes(`addWorktree ${path} run/test origin/main`), git.calls.join(", "));
 });
 
 test("an existing session branch is checked out rather than created a second time", async () => {
   const { provider, git } = fixture({ git: { branches: ["run/test"] } });
   await provider.prepare(REQUEST);
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   assert.ok(git.calls.includes(`addWorktree ${path} run/test`), git.calls.join(", "));
 });
 
 test("a resumed run re-attaches to its checkout without setting it up again", async () => {
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   const { provider, git, setups } = fixture({
     setupFile: "npm ci\n",
     // Spelled as git reports it on Windows, which is not how Node spells it.
@@ -309,7 +321,7 @@ test("a resumed run re-attaches to its checkout without setting it up again", as
 });
 
 test("an unrelated checkout at the run path is never removed as an incomplete retry", async () => {
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   const { provider, git } = fixture({
     git: { worktrees: [{ path, branch: "user/in-progress" }] },
   });
@@ -328,7 +340,7 @@ test("a failing setup command refuses the run rather than starting agents in a h
 });
 
 test("retrying a failed first setup recreates and fully prepares its checkout", async () => {
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   const { provider, git, overlays, setups } = fixture({
     setupFile: "npm ci\n",
     setupFails: "once",
@@ -496,7 +508,7 @@ test("the project overlay never follows a missing symbolic link", async (context
 });
 
 test("a directory in the way is reported rather than checked out over", async () => {
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   const { provider } = fixture({ existingDirectories: [path] });
   await assert.rejects(provider.prepare(REQUEST), RunWorkspaceError);
 });
@@ -506,7 +518,7 @@ test("a drained run's checkout is removed; an interrupted one is left where the 
   const workspace = await drained.provider.prepare(REQUEST);
   assert.equal(await drained.provider.release(workspace, "drained"), undefined);
   assert.ok(drained.git.calls.includes(`removeWorktree ${workspace.root} --force`));
-  assert.deepEqual(drained.removed, [dirname(workspace.root)], "the per-run directory goes with the checkout");
+  assert.deepEqual(drained.removed, [workspace.root], "cleanup never targets the checkout's parent directory");
 
   const parked = fixture();
   const kept = await parked.provider.prepare(REQUEST);
@@ -548,10 +560,11 @@ test("an in-place run's release never touches anything", async () => {
 });
 
 test("recorded checkout removal requires a registered clean checkout", async () => {
-  const path = runWorkspacePath({ workspaceRoot: PROJECT, runId: "run_test" });
+  const path = runWorkspacePath({ workspaceRoot: PROJECT });
   const clean = fixture({ git: { worktrees: [{ path, branch: "run/test" }] } });
   assert.equal(await clean.provider.removeRecorded(path), true);
   assert.ok(clean.git.calls.includes(`removeWorktree ${path} --force`));
+  assert.deepEqual(clean.removed, [path], "record cleanup never targets the checkout's parent directory");
 
   const dirty = fixture({ git: { worktrees: [{ path, branch: "run/test" }], dirty: ["src/a.ts"] } });
   assert.equal(await dirty.provider.removeRecorded(path), false);

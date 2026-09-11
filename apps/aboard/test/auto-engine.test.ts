@@ -589,9 +589,10 @@ function harness(options: HarnessOptions = {}): Harness {
       };
     },
   });
-  const isolatedRoot = "C:/checkouts/run_test/aboard";
+  const isolatedRoot = "C:/checkouts/aboard-1";
   const workspaces: RunWorkspaceProvider = {
     isolates: () => true,
+    nextRoot: () => isolatedRoot,
     prepare: async () => ({
       root: isolatedRoot,
       git: trace(git, workspaceGitCalls),

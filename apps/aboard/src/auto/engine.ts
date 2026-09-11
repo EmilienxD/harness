@@ -553,7 +553,10 @@ export class AutoRunEngine {
       pauseAfterHitl: settings.pauseAfterHitl,
       worktree: settings.worktree,
       ...(isolated
-        ? { workspaceRoot: runWorkspacePath({ workspaceRoot: this.options.workspaceRoot, runId, root: settings.worktree.root }) }
+        ? {
+            workspaceRoot: this.options.workspaces?.nextRoot(settings.worktree)
+              ?? runWorkspacePath({ workspaceRoot: this.options.workspaceRoot, root: settings.worktree.root }),
+          }
         : {}),
       ...permanentPromptProperty(settings.permanentPrompt),
       ...guidelineProperty(options.additionalGuideline),
@@ -992,6 +995,7 @@ export class AutoRunEngine {
       sessionBranch: record.sessionBranch,
       base: record.targetBranch ?? await this.options.git.defaultBranch(),
       worktree: record.settings.worktree,
+      ...(record.settings.workspaceRoot === undefined ? {} : { checkoutRoot: record.settings.workspaceRoot }),
       prepared: record.workspaceCreated === true,
     });
     this.#workspace = workspace;

@@ -1,13 +1,11 @@
 
 import { execFile } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { autoRunMessage, type WorktreeSettings } from "../domain/auto-run.js";
 import { isWorkingTreeClean, type GitClient } from "../git/client.js";
-
-export const RUN_WORKSPACE_CONTAINER = ".abd-sessions";
 
 interface ProjectOverlayFile {
   readonly source: string;
@@ -136,6 +134,8 @@ export interface RunWorkspaceRequest {
   readonly runId: string;
   readonly sessionBranch: string;
   readonly base: string;
+  /** The checkout path frozen in the run record before any Git side effects. */
+  readonly checkoutRoot?: string;
   readonly worktree?: WorktreeSettings;
   /** The persisted run record confirms that this checkout finished preparation. */
   readonly prepared?: boolean;
@@ -156,6 +156,8 @@ export interface KeptRunWorkspace {
 
 export interface RunWorkspaceProvider {
   isolates(): boolean;
+  /** Chooses an unused path that can be frozen into a new run record. */
+  nextRoot(worktree: WorktreeSettings): string;
   /** Creates or re-attaches the run's checkout, with the session branch on it. */
   prepare(request: RunWorkspaceRequest): Promise<RunWorkspace>;
   release(workspace: RunWorkspace, outcome: RunWorkspaceOutcome): Promise<KeptRunWorkspace | undefined>;
@@ -165,21 +167,26 @@ export interface RunWorkspaceProvider {
 
 export function runWorkspacePath(options: {
   readonly workspaceRoot: string;
-  readonly runId: string;
   readonly root?: string;
+  readonly exists?: (path: string) => boolean;
 }): string {
   const workspaceRoot = resolve(options.workspaceRoot);
   const configured = options.root?.trim() ?? "";
   const container = configured.length === 0
-    ? join(dirname(workspaceRoot), RUN_WORKSPACE_CONTAINER)
+    ? dirname(workspaceRoot)
     : isAbsolute(configured) ? resolve(configured) : resolve(workspaceRoot, configured);
-  const path = join(container, options.runId, basename(workspaceRoot));
-  if (!isOutside(path, workspaceRoot)) {
+  const first = join(container, `${basename(workspaceRoot)}-1`);
+  if (!isOutside(first, workspaceRoot)) {
     throw new RunWorkspaceError(
-      `The run's checkout would be created at ${path}, inside the project at ${workspaceRoot}. Point aboard.autoRun.worktree.root somewhere outside the project.`,
+      `The run's checkout would be created at ${first}, inside the project at ${workspaceRoot}. Point aboard.autoRun.worktree.root somewhere outside the project.`,
     );
   }
-  return path;
+  const exists = options.exists ?? existsSync;
+  for (let index = 1; index < Number.MAX_SAFE_INTEGER; index += 1) {
+    const candidate = join(container, `${basename(workspaceRoot)}-${index}`);
+    if (!exists(candidate)) return candidate;
+  }
+  throw new RunWorkspaceError(`Aboard could not find an available checkout name beside ${workspaceRoot}.`);
 }
 
 function isOutside(path: string, root: string): boolean {
@@ -344,6 +351,10 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     return this.options.settings().enabled;
   }
 
+  public nextRoot(worktree: WorktreeSettings): string {
+    return runWorkspacePath({ workspaceRoot: this.options.workspaceRoot, root: worktree.root });
+  }
+
   public async prepare(request: RunWorkspaceRequest): Promise<RunWorkspace> {
     const settings = request.worktree ?? this.options.settings();
     if (!settings.enabled) {
@@ -359,9 +370,8 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     // Validate the native isolation rule before creating a checkout. An
     // unrepresentable path must fail closed without leaving run artifacts.
     const denyTools = isolationDenyRules(this.options.workspaceRoot);
-    const path = runWorkspacePath({
+    const path = request.checkoutRoot ?? runWorkspacePath({
       workspaceRoot: this.options.workspaceRoot,
-      runId: request.runId,
       root: settings.root,
     });
     const created = await this.#checkout(path, request);
@@ -402,9 +412,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
       this.options.log?.(`auto-run could not remove its checkout at ${workspace.root}: ${describe(error)}`);
       return { path: workspace.root, reason: "removal-failed" };
     }
-    // `git worktree remove` takes the checkout, not the per-run directory that
-    // held it.
-    await this.#directories.remove(dirname(workspace.root)).catch(() => undefined);
+    await this.#directories.remove(workspace.root).catch(() => undefined);
     return undefined;
   }
 
@@ -413,7 +421,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     if (!registered) return false;
     if (!isWorkingTreeClean(await this.options.gitFor(root).status())) return false;
     await this.options.git.removeWorktree(root, true);
-    await this.#directories.remove(dirname(root)).catch(() => undefined);
+    await this.#directories.remove(root).catch(() => undefined);
     return true;
   }
 
@@ -433,7 +441,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
           `The incomplete run checkout at ${path} could not be removed before setup was retried: ${describe(error)}`,
         );
       });
-      await this.#directories.remove(dirname(path)).catch(() => undefined);
+      await this.#directories.remove(path).catch(() => undefined);
     }
     if (await this.#directories.exists(path)) {
       throw new RunWorkspaceError(
@@ -459,7 +467,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   async #discardFailedCheckout(path: string): Promise<void> {
     try {
       await this.options.git.removeWorktree(path, true);
-      await this.#directories.remove(dirname(path)).catch(() => undefined);
+      await this.#directories.remove(path).catch(() => undefined);
     } catch (error) {
       this.options.log?.(`auto-run could not remove its incomplete checkout at ${path}: ${describe(error)}`);
     }
