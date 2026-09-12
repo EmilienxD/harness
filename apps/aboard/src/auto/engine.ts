@@ -1768,8 +1768,11 @@ export class AutoRunEngine {
     if (progress.state !== "current") throw new StructuralError("missing review progress");
     await this.#save(withProgress(this.#current, issue.number, { ...progress, phase: "review" }));
     this.#publishIssuePhase(issue, "review");
-    const scope = this.#current.settings.branchMode === "single-branch" && progress.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined
-      ? `Review only issue #${issue.number}'s changes in exact range ${progress.beforeSha}..${progress.implementationSha} on this pull request. Do not re-review earlier commits.`
+    const exactRange = this.#current.settings.branchMode === "single-branch" && progress.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined
+      ? `${progress.beforeSha}..${progress.implementationSha}`
+      : undefined;
+    const scope = exactRange !== undefined
+      ? `Review only issue #${issue.number}'s changes in exact range ${exactRange} on this pull request. Do not re-review earlier commits.`
       : undefined;
     const guidance = scope === undefined ? baseGuidance : {
       ...baseGuidance,
@@ -1786,7 +1789,9 @@ export class AutoRunEngine {
       issues: [issue.number],
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
-      prompt: `${WORKER_GIT_PROTOCOL} Review the accepted issue changes${scope === undefined ? " in this pull request" : " in the recorded issue range"}. Fix straightforward findings yourself and make exactly one commit, only when no unresolved blocker remains; make no commit at all when there is nothing to fix.`,
+      prompt: `${WORKER_GIT_PROTOCOL} ${exactRange === undefined
+        ? "Pin the accepted issue changes in this pull request as the fixed review scope. They are the whole diff to review."
+        : `Pin the exact accepted range ${exactRange} as the fixed review scope. It is the whole diff to review.`} Fix straightforward findings yourself. A completed review must create exactly one commit: commit the fixes normally, or create an empty commit when the review completed with no findings. If any unresolved blocker remains, report it and create no commit.`,
       ...guidance,
       ...this.#difficulty(issue),
       ...this.#isolation(),
@@ -1808,14 +1813,14 @@ export class AutoRunEngine {
       await this.#markWorkerContinuable();
       throw new Error(classified.reason);
     }
-    const reviewedSha = classified.kind === "committed" ? classified.sha : startingSha;
+    const reviewedSha = classified.sha;
     const current = issueProgress(this.#current, issue.number);
     if (current.state !== "current") throw new StructuralError("missing review progress");
     await this.#settled({ progress: withProgress(this.#current, issue.number, { ...current, reviewed: true, reviewedSha }).progress,
       reviewedIssues: [...new Set([...this.#current.reviewedIssues, issue.number])] });
     await this.#publishImplementation(issue);
     await this.#validate();
-    this.options.notifier.notify(autoRunMessage.reviewed(issue.number, classified.kind === "committed" ? classified.sha : undefined));
+    this.options.notifier.notify(autoRunMessage.reviewed(issue.number, classified.sha));
     this.#closeSettledTerminal(outcome.terminalId);
   }
 

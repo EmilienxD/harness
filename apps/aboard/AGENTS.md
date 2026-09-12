@@ -136,10 +136,13 @@ are outside workspaces, permissioned `0600`, and removed on window close.
 
 ## Important Constraints
 
-- Auto Run injects its commit contract at launch; user-owned skill prompt placeholders stay empty.
+- Auto Run injects its commit contract and pinned review scope at launch; the user-owned worker skills
+  supply reusable implementation and review behavior.
   AFK requires a successful turn and exactly one clean descendant commit. HITL's successful initial
   turn leaves edits for interactive review; a clean descendant range of one or more user-accepted
-  commits advances the run. Reviewers may leave zero commits or exactly one clean fix commit.
+  commits advances the run. A completed reviewer leaves exactly one clean commit: an ordinary fix commit
+  when it found problems, or an empty commit when the pinned diff was sound. Zero commits means the review
+  did not complete and stops the run.
 - Workers receive read-only Git commands plus `git add` and `git commit`; Aboard owns every other
   Auto Run Git and GitHub mutation. Aboard observes acceptance commits and never creates them.
 - HITL waits in `await-commit` on its recorded branch and starting SHA. Both dispositions automatically

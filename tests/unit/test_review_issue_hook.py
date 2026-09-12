@@ -162,7 +162,7 @@ def test_skill_and_hook_install_for_both_products(platform, tmp_path):
         {name: tools[name]}, target, ReceiptStore.load(tmp_path / "receipts.json"),
     ).reconcile({name})
     skill = target.destination_path("skills", "review-this/SKILL.md")
-    assert skill.read_text(encoding="utf-8").rstrip().endswith("---")
+    assert skill.read_text(encoding="utf-8").split("---", 2)[2].strip()
     assert target.destination_path("hooks", "review_issue_UserPromptSubmit_hook.py").exists()
     assert "review_issue_UserPromptSubmit_hook.py" in target.settings_path.read_text(encoding="utf-8")
     assert (

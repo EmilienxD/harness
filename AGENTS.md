@@ -72,9 +72,9 @@ installation roots inside overlays or restore a `targets/` override directory.
   injection, `$ARGUMENTS`, or reference variants. `disable-model-invocation` alone does not require a
   split; represent its ChatGPT policy in `agents/openai.yaml`.
 - There is no legacy manifest, scaffold, installation, or receipt compatibility layer.
-- `address-this` and `review-this` contain mandatory empty user-owned prompt placeholders; do not author
-  their bodies. The prototype, websearch, ask-agent, and reply-to-agent workflow prompts are also
-  user-owned.
+- `address-this` and `review-this` are user-owned starter worker skills: their catalogue bodies seed only
+  absent installs and never overwrite user edits. The prototype, websearch, ask-agent, and reply-to-agent
+  workflow prompts are also user-owned.
 - Keep Aboard's npm build and release history independent. Do not flatten it into the Python package,
   bundle its VSIX in the wheel, or squash its repository history when merging it.
 

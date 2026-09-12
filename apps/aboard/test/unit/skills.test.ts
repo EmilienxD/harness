@@ -39,7 +39,7 @@ test("missing worker skill reports the Harness installation repair", async (t) =
   );
 });
 
-test("Aboard requires both empty worker skill placeholders", async (t) => {
+test("Aboard requires both worker skill files", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "aboard-skills-"));
   const personal = join(root, "personal");
   t.after(() => rm(root, { recursive: true, force: true }));

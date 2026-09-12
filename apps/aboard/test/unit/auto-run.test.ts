@@ -166,12 +166,13 @@ test("a worker's single commit on top of its starting tip is the success signal"
   assert.deepEqual(committed, { kind: "committed", sha: "b".repeat(40) });
 });
 
-test("review may finish untouched, but implement may not", () => {
+test("review and implementation both require a completion commit", () => {
   const untouched = { startingSha: "a".repeat(40), headSha: "a".repeat(40), dirtyPaths: [], descendsFromStart: true, newCommitCount: 0 } as const;
-  assert.deepEqual(classifyWorkerResult("review-this", untouched), { kind: "unchanged" });
-  const rejected = classifyWorkerResult("address-this", untouched);
-  assert.equal(rejected.kind, "rejected");
-  assert.match(rejected.kind === "rejected" ? rejected.reason : "", /without committing/);
+  for (const role of ["address-this", "review-this"] as const) {
+    const rejected = classifyWorkerResult(role, untouched);
+    assert.equal(rejected.kind, "rejected");
+    assert.match(rejected.kind === "rejected" ? rejected.reason : "", /without committing/);
+  }
 });
 
 test("residual changes reject a worker even when it also committed", () => {

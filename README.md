@@ -119,10 +119,8 @@ file digests, settings fragments, and host actions. Removal is dependent-aware a
 file changed since installation.
 
 The Aboard package depends unconditionally on the hidden `auto` package and on `issue-readers`. The
-reader bundle includes
-the intentionally empty `address-this` and `review-this` worker skill placeholders, so initializing
-Aboard installs the implementation and review workflows without also installing issue drafting and
-publishing.
+reader bundle includes the `address-this` and `review-this` worker skills, so initializing Aboard
+installs the implementation and review workflows without also installing issue drafting and publishing.
 The Harness-owned `/auto` hook fails closed outside an authenticated Aboard terminal.
 
 ## Repository layout
