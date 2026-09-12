@@ -7,14 +7,13 @@ visible Claude Code and ChatGPT sessions and their durable delegation state.
 Run the pinned, ephemeral installer:
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@v0.4.0 harness
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness
 ```
 
-That opens the one installation menu. The menu reconciles its selection: newly selected packages
-are installed, deselected packages are removed, and mandatory dependencies remain transitive
-selections. There are no separate install, uninstall, list, info, or upgrade commands. Rerun the
-same pinned entry point to change or upgrade the installation. If a reconciliation step fails,
-Harness restores the prior files, configuration, receipts, and completed host actions.
+With no command, Harness opens the interactive installation menu. The menu reconciles its selection:
+newly selected packages are installed, deselected packages are removed, and mandatory dependencies
+remain transitive selections. If a reconciliation step fails, Harness restores the prior files,
+configuration, receipts, and completed host actions.
 
 The installer uses a compact guided flow: choose Claude Code and/or ChatGPT, choose project or user
 scope, then select catalogue packages. Packages are grouped by category and start selected exactly
@@ -26,6 +25,41 @@ packages that were already installed. Enter confirms a step and Escape or Ctrl+C
 changing the installation. A summary lists every install, upgrade, removal, and skipped target
 before the final confirmation. A package that supports only one chosen provider is installed only
 there.
+
+## Non-interactive installer CLI
+
+Use the same pinned `uvx` entry point with a command for scripts, CI, and AI agents:
+
+```bash
+# Add packages; preserve every other installed selection
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install caveman tdd
+
+# Preview changes, targeting only ChatGPT
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install caveman \
+  --platform chatgpt --dry-run --json
+
+# Inspect the catalogue and package metadata
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness list --json
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness info subagents --json
+
+# Upgrade the existing selection, or remove named packages
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness upgrade --json
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness uninstall caveman --json
+```
+
+CLI operations default to project scope in the current directory and target both `claude` and `chatgpt`.
+Use `--scope user` for a user installation, `--root <path>` for another project, and repeat `--platform`
+to select one or more platforms. `install` is additive; use its explicit `--all` to install the complete
+catalogue. `uninstall` removes only the named explicit selections and requires `--all` to remove every
+selection. `upgrade` preserves the selection and reconciles it to the pinned catalogue versions. A
+project root must already exist; `--root` is rejected with `--scope user`.
+
+Every mutating command supports `--dry-run`. Every installer command supports `--json`, which writes
+exactly one schema-versioned JSON object to stdout and never prompts. Exit status is `0` for success or a
+valid no-op, `1` for an operational or target failure, `2` for invalid or ambiguous usage, and `130` for
+an interrupt. Package objects from `list` include `available: true`; `list --installed` also reports
+receipt-owned packages absent from the pinned catalogue with `available: false`, so they remain
+discoverable and uninstallable.
 
 The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
 Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard
@@ -45,7 +79,8 @@ continue to use `v<version>` tags.
 
 ## Visible sessions
 
-When `subagents` is selected, its persistent runtime is installed automatically:
+When `subagents` is selected, its persistent runtime is installed automatically. These session commands
+are separate from the non-interactive installer CLI above:
 
 ```bash
 harness run [--provider claude|chatgpt] [initial prompt]

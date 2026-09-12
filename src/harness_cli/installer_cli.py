@@ -1,0 +1,442 @@
+"""Non-interactive command surface for the catalogue installer."""
+
+from __future__ import annotations
+
+import json
+from argparse import Namespace
+from pathlib import Path
+
+from harness_cli.installer import CatalogueInstaller, Change, InstallError, Target, installed_packages
+from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
+from harness_cli.platforms import Platform
+from harness_cli.receipts import ReceiptStore
+
+
+SCHEMA_VERSION = 1
+PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
+
+
+class UsageError(Exception):
+    """The requested operation is ambiguous or internally contradictory."""
+
+
+def _selected_platforms(args: Namespace) -> tuple[Platform, ...]:
+    selected = args.platform or [platform.value for platform in PLATFORMS]
+    return tuple(Platform.parse(value) for value in dict.fromkeys(selected))
+
+
+def _targets(args: Namespace, platforms: tuple[Platform, ...]) -> list[Target]:
+    if args.scope == "user":
+        if args.root is not None:
+            raise UsageError("--root cannot be used with --scope user")
+        return [Target.for_user(platform) for platform in platforms]
+    root = Path(args.root).expanduser() if args.root is not None else Path.cwd()
+    if not root.is_dir():
+        raise UsageError(f"project root is not an existing directory: {root}")
+    return [Target.for_project(root, platform) for platform in platforms]
+
+
+def _change(change: Change) -> dict[str, str]:
+    return {"action": change.action, "package": change.package, "reason": change.reason}
+
+
+def _summary(results: list[dict]) -> dict[str, int]:
+    return {
+        "targets": len(results),
+        "changedTargets": sum(result["status"] == "changed" for result in results),
+        "unchangedTargets": sum(result["status"] == "unchanged" for result in results),
+        "failedTargets": sum(result["status"] == "failed" for result in results),
+        "changes": sum(len(result["changes"]) for result in results),
+        "skipped": sum(len(result["skipped"]) for result in results),
+    }
+
+
+def _emit(payload: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    for result in payload["results"]:
+        print(f"{payload['scope'].title()} · {result['product']}")
+        if result["status"] == "failed":
+            print(f"  failed: {result['error']}")
+            continue
+        for change in result["changes"]:
+            reason = f" ({change['reason']})" if change["reason"] else ""
+            print(f"  {change['action']} {change['package']}{reason}")
+        for skipped in result["skipped"]:
+            print(f"  skip {skipped['package']} ({skipped['reason']})")
+        if not result["changes"] and not result["skipped"]:
+            print("  already up to date")
+
+
+def _apply(planned: list[tuple[CatalogueInstaller, set[str], dict]], dry_run: bool) -> bool:
+    if dry_run:
+        return True
+    ok = True
+    for installer, selected, result in planned:
+        try:
+            installer.reconcile(selected)
+        except (InstallError, ManifestError, ValueError) as exc:
+            result["status"] = "failed"
+            result["error"] = str(exc)
+            ok = False
+    return ok
+
+
+def _validate_selectable(names: set[str], available: dict[str, Tool]) -> None:
+    unknown = sorted(name for name in names if name not in available or not available[name].selectable)
+    if unknown:
+        raise InstallError("unknown catalogue package(s): " + ", ".join(unknown))
+
+
+def run_install(args: Namespace) -> int:
+    available = discover()
+    requested = set(args.packages)
+    if args.all and requested:
+        raise UsageError("--all cannot be combined with package names")
+    if not args.all and not requested:
+        raise UsageError("specify package names or use --all")
+    if args.all:
+        requested = {name for name, tool in available.items() if tool.selectable}
+    _validate_selectable(requested, available)
+    platforms = _selected_platforms(args)
+    targets = _targets(args, platforms)
+    store = ReceiptStore.load()
+    planned: list[tuple[CatalogueInstaller, set[str], dict]] = []
+
+    for target in targets:
+        explicit = {
+            name
+            for name, receipt in installed_packages(target, store).items()
+            if receipt.get("explicit") is True
+        }
+        compatible_requested = {
+            name
+            for name in requested
+            if available[name].support_for(target.platform).status is SupportStatus.SUPPORTED
+        }
+        selected = explicit | compatible_requested
+        skipped = [
+            {
+                "package": name,
+                "reason": available[name].support_for(target.platform).reason
+                or available[name].support_for(target.platform).status.value,
+            }
+            for name in sorted(requested - compatible_requested)
+        ]
+        installer = CatalogueInstaller(available, target, store)
+        _, changes = installer.plan(selected)
+        result = {
+            "platform": target.platform.value,
+            "product": target.adapter.product_name,
+            "status": "changed" if changes else "unchanged",
+            "changes": [_change(change) for change in changes],
+            "skipped": skipped,
+        }
+        planned.append((installer, selected, result))
+
+    if requested and all(
+        all(item["package"] in requested for item in result["skipped"])
+        and requested <= {item["package"] for item in result["skipped"]}
+        for _, _, result in planned
+    ):
+        raise InstallError("none of the requested packages support the selected platforms")
+
+    ok = _apply(planned, args.dry_run)
+
+    results = [result for _, _, result in planned]
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "command": "install",
+        "ok": ok,
+        "scope": args.scope,
+        "root": str(targets[0].scope_root),
+        "platforms": [platform.value for platform in platforms],
+        "dryRun": args.dry_run,
+        "results": results,
+        "summary": _summary(results),
+    }
+    _emit(payload, args.json)
+    return 0 if ok else 1
+
+
+def run_uninstall(args: Namespace) -> int:
+    requested = set(args.packages)
+    if args.all and requested:
+        raise UsageError("--all cannot be combined with package names")
+    if not args.all and not requested:
+        raise UsageError("specify package names or use --all")
+
+    available = discover()
+    platforms = _selected_platforms(args)
+    targets = _targets(args, platforms)
+    store = ReceiptStore.load()
+    receipts = {
+        target.platform: installed_packages(target, store)
+        for target in targets
+    }
+    unknown = requested - available.keys()
+    installed_names = {
+        name
+        for packages in receipts.values()
+        for name in packages
+    }
+    if missing := sorted(unknown - installed_names):
+        raise InstallError("unknown catalogue package(s): " + ", ".join(missing))
+    planned: list[tuple[CatalogueInstaller, set[str], dict]] = []
+    for target in targets:
+        explicit = {
+            name
+            for name, receipt in receipts[target.platform].items()
+            if receipt.get("explicit") is True
+        }
+        selected = set() if args.all else explicit - requested
+        skipped = [
+            {"package": name, "reason": "not installed explicitly"}
+            for name in sorted(requested - explicit)
+        ]
+        installer = CatalogueInstaller(available, target, store)
+        _, changes = installer.plan(selected)
+        result = {
+            "platform": target.platform.value,
+            "product": target.adapter.product_name,
+            "status": "changed" if changes else "unchanged",
+            "changes": [_change(change) for change in changes],
+            "skipped": skipped,
+        }
+        planned.append((installer, selected, result))
+
+    ok = _apply(planned, args.dry_run)
+
+    results = [result for _, _, result in planned]
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "command": "uninstall",
+        "ok": ok,
+        "scope": args.scope,
+        "root": str(targets[0].scope_root),
+        "platforms": [platform.value for platform in platforms],
+        "dryRun": args.dry_run,
+        "results": results,
+        "summary": _summary(results),
+    }
+    _emit(payload, args.json)
+    return 0 if ok else 1
+
+
+def run_upgrade(args: Namespace) -> int:
+    available = discover()
+    platforms = _selected_platforms(args)
+    targets = _targets(args, platforms)
+    store = ReceiptStore.load()
+    planned: list[tuple[CatalogueInstaller, set[str], dict]] = []
+    for target in targets:
+        explicit = {
+            name
+            for name, receipt in installed_packages(target, store).items()
+            if receipt.get("explicit") is True
+        }
+        selected = explicit
+        skipped = []
+        installer = CatalogueInstaller(available, target, store)
+        _, changes = installer.plan(selected)
+        result = {
+            "platform": target.platform.value,
+            "product": target.adapter.product_name,
+            "status": "changed" if changes else "unchanged",
+            "changes": [_change(change) for change in changes],
+            "skipped": skipped,
+        }
+        planned.append((installer, selected, result))
+
+    ok = _apply(planned, args.dry_run)
+
+    results = [result for _, _, result in planned]
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "command": "upgrade",
+        "ok": ok,
+        "scope": args.scope,
+        "root": str(targets[0].scope_root),
+        "platforms": [platform.value for platform in platforms],
+        "dryRun": args.dry_run,
+        "results": results,
+        "summary": _summary(results),
+    }
+    _emit(payload, args.json)
+    return 0 if ok else 1
+
+
+def _support(tool: Tool, platforms: tuple[Platform, ...]) -> dict[str, dict[str, str]]:
+    result = {}
+    for platform in platforms:
+        support = tool.support_for(platform)
+        details = {"status": support.status.value}
+        if support.reason:
+            details["reason"] = support.reason
+        if support.replacement:
+            details["replacement"] = support.replacement
+        result[platform.value] = details
+    return result
+
+
+def run_list(args: Namespace) -> int:
+    available = discover()
+    platforms = _selected_platforms(args)
+    targets = _targets(args, platforms)
+    store = ReceiptStore.load()
+    receipts = {
+        target.platform: installed_packages(target, store)
+        for target in targets
+    }
+    packages = []
+    candidates = available.values() if args.installed else (
+        item for item in available.values() if item.selectable
+    )
+    for tool in sorted(
+        candidates,
+        key=lambda item: (item.root.parent.name, item.name),
+    ):
+        installed = [
+            {
+                "platform": platform.value,
+                "version": receipt["version"],
+                "ownership": "explicit" if receipt.get("explicit") else "transitive",
+            }
+            for platform in platforms
+            if (receipt := receipts[platform].get(tool.name)) is not None
+        ]
+        if args.installed and not installed:
+            continue
+        packages.append(
+            {
+                "name": tool.name,
+                "available": True,
+                "version": tool.version,
+                "description": tool.description,
+                "category": tool.root.parent.name,
+                "docs": tool.docs,
+                "support": _support(tool, platforms),
+                "installed": installed,
+            }
+        )
+
+    unavailable = sorted(
+        {
+            name
+            for packages_for_platform in receipts.values()
+            for name in packages_for_platform
+        }
+        - available.keys()
+    )
+    for name in unavailable:
+        packages.append(
+            {
+                "name": name,
+                "available": False,
+                "installed": [
+                    {
+                        "platform": platform.value,
+                        "version": receipt["version"],
+                        "ownership": "explicit" if receipt.get("explicit") else "transitive",
+                    }
+                    for platform in platforms
+                    if (receipt := receipts[platform].get(name)) is not None
+                ],
+            }
+        )
+
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "command": "list",
+        "ok": True,
+        "scope": args.scope,
+        "root": str(targets[0].scope_root),
+        "platforms": [platform.value for platform in platforms],
+        "packages": packages,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    elif not packages:
+        print("No packages match.")
+    else:
+        for package in packages:
+            states = ", ".join(
+                f"{item['platform']}: {item['ownership']}@{item['version']}"
+                for item in package["installed"]
+            ) or "not installed"
+            if package["available"]:
+                print(f"{package['name']} {package['version']} [{states}] - {package['description']}")
+            else:
+                print(f"{package['name']} [{states}] - not in pinned catalogue")
+    return 0
+
+
+def run_info(args: Namespace) -> int:
+    available = discover()
+    requested = set(args.packages)
+    unknown = sorted(requested - available.keys())
+    if unknown:
+        raise InstallError("unknown catalogue package(s): " + ", ".join(unknown))
+    packages = []
+    for name in args.packages:
+        tool = available[name]
+        packages.append(
+            {
+                "name": tool.name,
+                "version": tool.version,
+                "description": tool.description,
+                "category": tool.root.parent.name,
+                "docs": tool.docs,
+                "selectable": tool.selectable,
+                "platforms": _support(tool, PLATFORMS),
+                "dependencies": [
+                    {"name": dependency.name, "constraint": dependency.constraint}
+                    for dependency in tool.dependencies
+                ],
+                "requires": list(tool.requires),
+                "actions": [action.type for action in tool.actions],
+            }
+        )
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "command": "info",
+        "ok": True,
+        "packages": packages,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    else:
+        for index, package in enumerate(packages):
+            if index:
+                print()
+            print(f"{package['name']} {package['version']}")
+            print(f"  {package['description']}")
+            print(f"  Category: {package['category']}")
+            if package["dependencies"]:
+                dependencies = ", ".join(
+                    item["name"] + item["constraint"] for item in package["dependencies"]
+                )
+                print(f"  Dependencies: {dependencies}")
+            support = ", ".join(
+                f"{platform}: {details['status']}"
+                for platform, details in package["platforms"].items()
+            )
+            print(f"  Platforms: {support}")
+            if package["docs"]:
+                print(f"  Docs: {package['docs']}")
+    return 0
+
+
+def run(args: Namespace) -> int:
+    if args.operation == "install":
+        return run_install(args)
+    if args.operation == "uninstall":
+        return run_uninstall(args)
+    if args.operation == "upgrade":
+        return run_upgrade(args)
+    if args.operation == "list":
+        return run_list(args)
+    if args.operation == "info":
+        return run_info(args)
+    raise InstallError(f"unsupported installer command '{args.operation}'")

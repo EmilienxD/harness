@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from harness_cli.installer import (
     Target,
     installed_packages,
 )
+from harness_cli.installer_cli import UsageError, run as run_installer_command
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform, get_adapter
 from harness_cli.receipts import ReceiptStore
@@ -21,6 +23,11 @@ from harness_cli.tui import MenuOption, TerminalUI, terminal_keys
 
 
 PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
+
+
+class HarnessArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise UsageError(message)
 
 
 # Reading order for the catalogue: the workflow categories first, then the
@@ -243,11 +250,82 @@ def catalogue_menu() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = HarnessArgumentParser(
         prog="harness",
         description="Install and reconcile the Harness catalogue.",
     )
     parser.add_argument("--version", action="version", version=f"harness {__version__}")
+    commands = parser.add_subparsers(dest="command")
+    install = commands.add_parser(
+        "install",
+        help="add packages without changing other selections",
+        description="Install named packages while preserving the other packages selected for each target.",
+    )
+    install.add_argument("packages", nargs="*", metavar="PACKAGE")
+    install.add_argument("--all", action="store_true", help="install every supported package")
+    install.add_argument(
+        "--platform", action="append", choices=[item.value for item in PLATFORMS],
+        help="target platform; repeat to select several (default: both)",
+    )
+    install.add_argument(
+        "--scope", choices=("project", "user"), default="project",
+        help="installation scope (default: project)",
+    )
+    install.add_argument("--root", type=Path, help="project root (default: current directory)")
+    install.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
+    install.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
+    install.set_defaults(operation="install")
+    uninstall = commands.add_parser(
+        "uninstall", aliases=["remove"], help="remove named packages",
+        description="Remove named explicit selections, or every selection with --all.",
+    )
+    uninstall.add_argument("packages", nargs="*", metavar="PACKAGE")
+    uninstall.add_argument("--all", action="store_true", help="remove every explicit package")
+    uninstall.add_argument(
+        "--platform", action="append", choices=[item.value for item in PLATFORMS],
+        help="target platform; repeat to select several (default: both)",
+    )
+    uninstall.add_argument(
+        "--scope", choices=("project", "user"), default="project",
+        help="installation scope (default: project)",
+    )
+    uninstall.add_argument("--root", type=Path, help="project root (default: current directory)")
+    uninstall.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
+    uninstall.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
+    uninstall.set_defaults(operation="uninstall")
+    upgrade = commands.add_parser(
+        "upgrade", aliases=["update"], help="upgrade installed packages",
+        description="Reconcile every installed selection to the versions in this pinned catalogue.",
+    )
+    upgrade.add_argument(
+        "--platform", action="append", choices=[item.value for item in PLATFORMS],
+        help="target platform; repeat to select several (default: both)",
+    )
+    upgrade.add_argument(
+        "--scope", choices=("project", "user"), default="project",
+        help="installation scope (default: project)",
+    )
+    upgrade.add_argument("--root", type=Path, help="project root (default: current directory)")
+    upgrade.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
+    upgrade.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
+    upgrade.set_defaults(operation="upgrade")
+    list_parser = commands.add_parser("list", help="list catalogue packages and installation state")
+    list_parser.add_argument("--installed", action="store_true", help="show only installed packages")
+    list_parser.add_argument(
+        "--platform", action="append", choices=[item.value for item in PLATFORMS],
+        help="target platform; repeat to select several (default: both)",
+    )
+    list_parser.add_argument(
+        "--scope", choices=("project", "user"), default="project",
+        help="installation scope (default: project)",
+    )
+    list_parser.add_argument("--root", type=Path, help="project root (default: current directory)")
+    list_parser.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
+    list_parser.set_defaults(operation="list")
+    info = commands.add_parser("info", help="show package details")
+    info.add_argument("packages", nargs="+", metavar="PACKAGE")
+    info.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
+    info.set_defaults(operation="info")
     return parser
 
 
@@ -255,11 +333,40 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
-    build_parser().parse_args(argv)
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    args = None
     try:
+        args = build_parser().parse_args(raw_args)
+        if args.command is not None:
+            return run_installer_command(args)
         return catalogue_menu()
+    except UsageError as exc:
+        if "--json" in raw_args:
+            command = getattr(args, "operation", None) if args is not None else None
+            if command is None and raw_args:
+                command = {
+                    "remove": "uninstall",
+                    "update": "upgrade",
+                }.get(raw_args[0], raw_args[0])
+            print(json.dumps({
+                "schemaVersion": 1,
+                "command": command,
+                "ok": False,
+                "error": {"type": "usage", "message": str(exc)},
+            }, ensure_ascii=False, sort_keys=True))
+        else:
+            print(f"error: {exc}", file=sys.stderr)
+        return 2
     except (InstallError, ManifestError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        if "--json" in raw_args:
+            print(json.dumps({
+                "schemaVersion": 1,
+                "command": getattr(args, "operation", args.command if args is not None else None),
+                "ok": False,
+                "error": {"type": "operation", "message": str(exc)},
+            }, ensure_ascii=False, sort_keys=True))
+        else:
+            print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         return 130

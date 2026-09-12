@@ -19,9 +19,11 @@ def manager(tools, target, tmp_path):
     return CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
 
 
-def test_installer_cli_does_not_expose_runtime_commands():
+def test_installer_cli_exposes_catalogue_commands_without_runtime_commands():
     parser = build_parser()
-    assert all(action.dest != "command" for action in parser._actions)
+    command = next(action for action in parser._actions if action.dest == "command")
+    assert {"install", "uninstall", "upgrade", "list", "info"} <= set(command.choices)
+    assert {"run", "ask", "reply", "resume"}.isdisjoint(command.choices)
 
 
 class InteractiveInput:

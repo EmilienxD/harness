@@ -6,9 +6,9 @@ Harness is the canonical catalogue and installer for independently selectable ag
 command-line tools, and optional apps for Claude Code and ChatGPT. It also owns persistent visible-session
 commands and ask/reply state.
 
-`uvx --from <pinned source> harness` opens the only installer interface: one interactive catalogue menu.
-Do not add named install, uninstall, upgrade, list, or info commands. The only named commands are `run`,
-`ask`, `reply`, and `resume`.
+`uvx --from <pinned source> harness` opens the interactive catalogue menu by default and also exposes the
+non-interactive installer commands `install`, `uninstall`, `upgrade`, `list`, and `info`. Keep installer
+operations distinct from the persistent-session commands `run`, `ask`, `reply`, and `resume`.
 
 ## Repository Layout
 
@@ -85,6 +85,7 @@ From the repository root:
 ```powershell
 uv sync
 uv run harness
+uv run harness --help
 uv run pytest
 uv run python scripts/update_references.py
 ```
