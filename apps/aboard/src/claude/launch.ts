@@ -504,8 +504,8 @@ function assertLaunchShape(agentType: AgentType, configuration: LaunchConfigurat
     return;
   }
   if (agentType === "implementer") {
-    if (configuration.shape !== "skill" || configuration.skillName !== "adress-this") {
-      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /adress-this");
+    if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
+      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /address-this");
     }
     return;
   }

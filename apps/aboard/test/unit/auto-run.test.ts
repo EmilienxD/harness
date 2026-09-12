@@ -156,7 +156,7 @@ test("exploration context is recognizable without hidden or product-specific mar
 });
 
 test("a worker's single commit on top of its starting tip is the success signal", () => {
-  const committed = classifyWorkerResult("adress-this", {
+  const committed = classifyWorkerResult("address-this", {
     startingSha: "a".repeat(40),
     headSha: "b".repeat(40),
     dirtyPaths: [],
@@ -169,13 +169,13 @@ test("a worker's single commit on top of its starting tip is the success signal"
 test("review may finish untouched, but implement may not", () => {
   const untouched = { startingSha: "a".repeat(40), headSha: "a".repeat(40), dirtyPaths: [], descendsFromStart: true, newCommitCount: 0 } as const;
   assert.deepEqual(classifyWorkerResult("review-this", untouched), { kind: "unchanged" });
-  const rejected = classifyWorkerResult("adress-this", untouched);
+  const rejected = classifyWorkerResult("address-this", untouched);
   assert.equal(rejected.kind, "rejected");
   assert.match(rejected.kind === "rejected" ? rejected.reason : "", /without committing/);
 });
 
 test("residual changes reject a worker even when it also committed", () => {
-  for (const role of ["adress-this", "review-this"] as const) {
+  for (const role of ["address-this", "review-this"] as const) {
     const outcome = classifyWorkerResult(role, {
       startingSha: "a".repeat(40),
       headSha: "b".repeat(40),
@@ -189,7 +189,7 @@ test("residual changes reject a worker even when it also committed", () => {
 });
 
 test("rewritten history and extra commits are rejected", () => {
-  const moved = classifyWorkerResult("adress-this", {
+  const moved = classifyWorkerResult("address-this", {
     startingSha: "a".repeat(40),
     headSha: "b".repeat(40),
     dirtyPaths: [],
@@ -228,7 +228,7 @@ test("uncommitted changes stop the run instead of feeding a worker or a commit",
   assert.equal(afterImplementation.action, "stop");
 
   const nothingCommitted = step("publish", { pullRequest: { number: 56, state: "open" } });
-  assert.deepEqual(nothingCommitted, { action: "stop", reason: `adress-this produced no commit for issue #${issue.number}` });
+  assert.deepEqual(nothingCommitted, { action: "stop", reason: `address-this produced no commit for issue #${issue.number}` });
 });
 
 test("every already-satisfied postcondition short circuits", () => {

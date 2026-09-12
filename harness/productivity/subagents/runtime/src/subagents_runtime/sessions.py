@@ -425,7 +425,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
         "prototype": "prototype",
         "websearch": "websearch",
         "brainstorm": "grill-me",
-        "implement": "adress-this",
+        "implement": "address-this",
         "review": "review-this",
     }.get(request.task)
     prompt = request.prompt if skill is None else f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{request.prompt}"

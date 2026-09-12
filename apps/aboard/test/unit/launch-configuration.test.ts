@@ -52,7 +52,7 @@ test("launch.json resolves the four launch profiles", () => {
     platform: "claude",
     settings: {
       shape: "skill",
-      skillName: "adress-this",
+      skillName: "address-this",
       declaredCommand: ["claude"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
@@ -159,7 +159,7 @@ test("launch.json routes a ChatGPT implementer without overriding native tool se
     platform: "chatgpt",
     settings: {
       shape: "skill",
-      skillName: "adress-this",
+      skillName: "address-this",
       declaredCommand: ["codex"],
       declaredModel: "by-difficulty",
       declaredEffort: "by-difficulty",
@@ -185,7 +185,7 @@ test("launch.json routes ChatGPT reviewers through the review skill their dispos
   });
   // AFK and HITL are orchestration modes, so both resolve to the one skill.
   const implementer = settings(parsed.value.configuration("implementer"));
-  assert.equal(implementer.shape === "skill" ? implementer.skillName : undefined, "adress-this");
+  assert.equal(implementer.shape === "skill" ? implementer.skillName : undefined, "address-this");
 });
 
 test("a ChatGPT implementer profile is configurable independently of Claude routing", () => {
@@ -197,7 +197,7 @@ test("a ChatGPT implementer profile is configurable independently of Claude rout
 
   assert.deepEqual(settings(parsed.value.configuration("implementer")), {
     shape: "skill",
-    skillName: "adress-this",
+    skillName: "address-this",
     declaredCommand: ["codex"],
     declaredModel: "gpt-5.6-sol",
     declaredEffort: "xhigh",

@@ -1,5 +1,5 @@
 name = "issue-readers"
-version = "1.0.3"
+version = "1.0.4"
 description = "Prepare issue and commit context for implementation and review workers"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issue-readers/README.md"
@@ -13,8 +13,8 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "adress-this"
-dest = "adress-this"
+src = "address-this"
+dest = "address-this"
 root = "skills"
 starter = true
 
@@ -37,8 +37,8 @@ root = "hooks"
 executable = true
 
 [[files]]
-src = "chatgpt/agents/adress-this.yaml"
-dest = "adress-this/agents/openai.yaml"
+src = "chatgpt/agents/address-this.yaml"
+dest = "address-this/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 

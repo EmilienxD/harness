@@ -67,7 +67,7 @@ def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypat
 
 @pytest.mark.parametrize(("task", "skill"), [
     ("websearch", "websearch"),
-    ("implement", "adress-this"),
+    ("implement", "address-this"),
     ("review", "review-this"),
 ])
 def test_native_provider_adapter_injects_the_requested_skill_and_exact_cwd(task, skill, tmp_path, monkeypatch):

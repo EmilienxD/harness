@@ -23,7 +23,7 @@ const runtimeRoot = "C:\\storage\\aboard";
 function workerConfiguration(type: "implementer" | "reviewer"): LaunchConfiguration {
   return {
     shape: "skill",
-    skillName: type === "implementer" ? "adress-this" : "review-this",
+    skillName: type === "implementer" ? "address-this" : "review-this",
     declaredModel: BY_DIFFICULTY,
     declaredEffort: BY_DIFFICULTY,
   };
@@ -85,7 +85,7 @@ test("plans Explore through Claude Code's builtin agent", () => {
 });
 
 for (const [type, invocation] of [
-  ["implementer", "/adress-this"],
+  ["implementer", "/address-this"],
   ["reviewer", "/review-this"],
 ] as const) {
   test(`plans ${type} as a literal skill invocation`, () => {
@@ -126,7 +126,7 @@ test("spills long skill prompts and keeps the original task separately", () => {
   const plan = planLaunch(request({ prompt, promptRoot, maxInlinePromptChars: 40 }));
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.match(plan.args.at(-1) ?? "", /^\/adress-this .*@.*\.md/u);
+  assert.match(plan.args.at(-1) ?? "", /^\/address-this .*@.*\.md/u);
   assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
   assert.equal(plan.task?.contents, `${prompt.trim()}\n`);
   assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/agent-1/task.md");
@@ -147,7 +147,7 @@ test("uses a wrapper request to keep child argv out of terminal input", () => {
   const child = JSON.parse(plan.wrapperRequest?.contents ?? "{}") as { command?: string[] };
   assert.equal(child.command?.[0], "claude");
   assert.equal(child.command?.includes("--session-id"), true);
-  assert.equal(child.command?.at(-1), "/adress-this Address issue #47.");
+  assert.equal(child.command?.at(-1), "/address-this Address issue #47.");
 });
 
 test("resume restores policy and restrictions without re-expanding a skill", () => {

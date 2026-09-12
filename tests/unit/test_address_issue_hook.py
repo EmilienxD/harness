@@ -110,11 +110,11 @@ def blocked(prompt, cwd, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("prompt, argument", [
-    ("/adress-this 42", "42"),
-    (" $adress-this 42, 51 \n", "42, 51"),
-    ("[$adress-this](C:/p/.agents/skills/adress-this/SKILL.md) 42", "42"),
-    ("/adress-this", ""),
-    ("/adress-this\nFull issue text", "Full issue text"),
+    ("/address-this 42", "42"),
+    (" $address-this 42, 51 \n", "42, 51"),
+    ("[$address-this](C:/p/.agents/skills/address-this/SKILL.md) 42", "42"),
+    ("/address-this", ""),
+    ("/address-this\nFull issue text", "Full issue text"),
 ])
 def test_invocation_argument_is_everything_after_the_reference(prompt, argument):
     assert hook.parse_invocation(prompt) == argument
@@ -122,8 +122,8 @@ def test_invocation_argument_is_everything_after_the_reference(prompt, argument)
 
 @pytest.mark.parametrize("prompt", [
     "Please address issue #42",
-    "/adress-thiss 42",
-    "Explain what /adress-this does",
+    "/address-thiss 42",
+    "Explain what /address-this does",
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
     fake_github(monkeypatch, {})
@@ -164,7 +164,7 @@ def test_supplied_issue_text_containing_a_reference_triggers_no_lookup(
     root = repository(tmp_path)
     requested = fake_github(monkeypatch, {(REPOSITORY, 123): issue(123)})
     context = run_hook(
-        "/adress-this Fix the parser. Related to #123.", root, monkeypatch, capsys,
+        "/address-this Fix the parser. Related to #123.", root, monkeypatch, capsys,
     )
     assert requested == []
     assert "verified clean" in context
@@ -186,7 +186,7 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
         (root / "README.md").write_text("changed\n", encoding="utf-8")
         if dirty == "staged":
             subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
-    error = blocked("/adress-this 42", root, monkeypatch, capsys)
+    error = blocked("/address-this 42", root, monkeypatch, capsys)
     assert "completely clean Git worktree" in error
 
 
@@ -198,7 +198,7 @@ def test_ignored_files_do_not_count_as_dirty(tmp_path, monkeypatch, capsys):
     (root / "build").mkdir()
     (root / "build" / "artifact.js").write_text("x\n", encoding="utf-8")
     fake_github(monkeypatch, {(REPOSITORY, 42): issue(42)})
-    context = run_hook("/adress-this 42", root, monkeypatch, capsys)
+    context = run_hook("/address-this 42", root, monkeypatch, capsys)
     assert "verified clean" in context
 
 
@@ -218,7 +218,7 @@ def test_bare_numbers_preload_full_context_from_the_current_repository(
         (REPOSITORY, 9): issue(9, body="Referenced body."),
     }
     requested = fake_github(monkeypatch, issues)
-    context = run_hook("/adress-this 42, 51", root, monkeypatch, capsys)
+    context = run_hook("/address-this 42, 51", root, monkeypatch, capsys)
 
     assert requested == [
         (REPOSITORY, 42), (REPOSITORY, 51),
@@ -247,7 +247,7 @@ def test_preloaded_context_omits_legacy_gateway_markers(
     value["comments"]["nodes"][0]["body"] = f"Useful comment.\n\n{marker}"
     fake_github(monkeypatch, {(REPOSITORY, 42): value})
 
-    context = run_hook("/adress-this 42", root, monkeypatch, capsys)
+    context = run_hook("/address-this 42", root, monkeypatch, capsys)
 
     assert "Body of 42." in context
     assert "Useful comment." in context
@@ -262,7 +262,7 @@ def test_full_urls_preload_from_their_identified_repositories(
               ("other/repo", 3): issue(3, body="Elsewhere parent.")}
     requested = fake_github(monkeypatch, issues, repo_failure=True)
     context = run_hook(
-        "/adress-this https://github.com/other/repo/issues/7", root, monkeypatch, capsys,
+        "/address-this https://github.com/other/repo/issues/7", root, monkeypatch, capsys,
     )
     assert requested == [("other/repo", 7), ("other/repo", 3)]
     assert "## Issue other/repo#7" in context
@@ -290,7 +290,7 @@ def test_relation_depth_is_configurable_and_defaults_to_one(
         monkeypatch.delenv(hook.DEPTH_VARIABLE, raising=False)
     else:
         monkeypatch.setenv(hook.DEPTH_VARIABLE, depth)
-    run_hook("/adress-this 1", root, monkeypatch, capsys)
+    run_hook("/address-this 1", root, monkeypatch, capsys)
     assert requested == expected
 
 
@@ -298,7 +298,7 @@ def test_invalid_depth_blocks_with_an_actionable_message(tmp_path, monkeypatch, 
     root = repository(tmp_path)
     fake_github(monkeypatch, {(REPOSITORY, 1): issue(1)})
     monkeypatch.setenv(hook.DEPTH_VARIABLE, "deep")
-    error = blocked("/adress-this 1", root, monkeypatch, capsys)
+    error = blocked("/address-this 1", root, monkeypatch, capsys)
     assert hook.DEPTH_VARIABLE in error
 
 
@@ -309,7 +309,7 @@ def test_related_issue_count_is_capped_and_disclosed(tmp_path, monkeypatch, caps
     for number in children:
         issues[(REPOSITORY, number)] = issue(number)
     requested = fake_github(monkeypatch, issues)
-    context = run_hook("/adress-this 1", root, monkeypatch, capsys)
+    context = run_hook("/address-this 1", root, monkeypatch, capsys)
     assert len(requested) == hook.MAX_RELATED_ISSUES + 1
     assert "## Omitted context" in context
     assert f"{hook.MAX_RELATED_ISSUES}-issue limit" in context
@@ -320,7 +320,7 @@ def test_only_the_newest_comments_are_rendered_and_omissions_disclosed(
 ):
     root = repository(tmp_path)
     fake_github(monkeypatch, {(REPOSITORY, 1): issue(1, comments=40)})
-    context = run_hook("/adress-this 1", root, monkeypatch, capsys)
+    context = run_hook("/address-this 1", root, monkeypatch, capsys)
     assert f"### Comments ({hook.MAX_COMMENTS} of 40)" in context
     assert "20 older comment(s) omitted." in context
 
@@ -332,7 +332,7 @@ def test_total_context_is_bounded_and_drops_are_disclosed(tmp_path, monkeypatch,
         (REPOSITORY, 2): issue(2, body="second"),
     }
     fake_github(monkeypatch, issues)
-    context = run_hook("/adress-this 1", root, monkeypatch, capsys)
+    context = run_hook("/address-this 1", root, monkeypatch, capsys)
     assert f"## Sub-issue {REPOSITORY}#2" not in context
     assert f"Omitted for context size: {REPOSITORY}#2" in context
 
@@ -343,21 +343,21 @@ def test_total_context_is_bounded_and_drops_are_disclosed(tmp_path, monkeypatch,
 def test_missing_primary_issue_blocks(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
     fake_github(monkeypatch, {})
-    error = blocked("/adress-this 42", root, monkeypatch, capsys)
+    error = blocked("/address-this 42", root, monkeypatch, capsys)
     assert "could not find issue example/project#42" in error
 
 
 def test_closed_primary_issue_blocks(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
     fake_github(monkeypatch, {(REPOSITORY, 42): issue(42, state="CLOSED")})
-    error = blocked("/adress-this 42", root, monkeypatch, capsys)
+    error = blocked("/address-this 42", root, monkeypatch, capsys)
     assert "only addresses open issues" in error
 
 
 def test_unauthenticated_gh_blocks(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
     fake_github(monkeypatch, {(REPOSITORY, 42): issue(42)}, repo_failure=True)
-    error = blocked("/adress-this 42", root, monkeypatch, capsys)
+    error = blocked("/address-this 42", root, monkeypatch, capsys)
     assert "could not resolve the current GitHub repository" in error
 
 
@@ -366,14 +366,14 @@ def test_closed_related_issues_are_still_included(tmp_path, monkeypatch, capsys)
     issues = {(REPOSITORY, 1): issue(1, parent=2),
               (REPOSITORY, 2): issue(2, state="CLOSED", body="closed parent")}
     fake_github(monkeypatch, issues)
-    context = run_hook("/adress-this 1", root, monkeypatch, capsys)
+    context = run_hook("/address-this 1", root, monkeypatch, capsys)
     assert "closed parent" in context
 
 
 def test_dangling_relations_are_skipped(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
     fake_github(monkeypatch, {(REPOSITORY, 1): issue(1, body="see #99", sub_issues=[98])})
-    context = run_hook("/adress-this 1", root, monkeypatch, capsys)
+    context = run_hook("/address-this 1", root, monkeypatch, capsys)
     assert "#98" in context  # listed as a sub-issue of the primary
     assert "## Sub-issue" not in context
     assert "## Referenced issue" not in context
@@ -390,11 +390,11 @@ def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     CatalogueInstaller(
         {name: tools[name]}, target, ReceiptStore.load(tmp_path / "receipts.json"),
     ).reconcile({name})
-    skill = target.destination_path("skills", "adress-this/SKILL.md")
+    skill = target.destination_path("skills", "address-this/SKILL.md")
     assert skill.read_text(encoding="utf-8").rstrip().endswith("---")
     assert target.destination_path("hooks", "address_issue_UserPromptSubmit_hook.py").exists()
     assert "address_issue_UserPromptSubmit_hook.py" in target.settings_path.read_text(encoding="utf-8")
     assert (
-        target.destination_path("skills", "adress-this/agents/openai.yaml").exists()
+        target.destination_path("skills", "address-this/agents/openai.yaml").exists()
         is (platform == "chatgpt")
     )

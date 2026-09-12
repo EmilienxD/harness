@@ -221,7 +221,7 @@ const EXPLORATION_REPORT_MAX_CHARS = 6_000;
 const WORKER_GIT_PROTOCOL =
   "You may use read-only git and gh commands plus git add and git commit. Do not push, fetch, pull, merge, rebase, reset, switch branches, or touch branches, tags, remotes, or worktrees, and do not change any GitHub state. Your final response needs no completion markup; the repository state is the signal.";
 
-/** What an `adress-this` worker left behind, once aboard has accepted it. */
+/** What an `address-this` worker left behind, once aboard has accepted it. */
 interface ImplementationResult {
   /** The single commit the worker made. */
   readonly sha: string;
@@ -1081,7 +1081,7 @@ export class AutoRunEngine {
           await this.#settled({ progress: withProgress(record, issue.number, { ...progress, phase: "await-commit" }).progress });
           return;
         }
-        const classified = classifyWorkerResult(action.role === "reviewer" ? "review-this" : "adress-this", state);
+        const classified = classifyWorkerResult(action.role === "reviewer" ? "review-this" : "address-this", state);
         if (classified.kind === "rejected") throw new StructuralError(classified.reason);
         if (action.role === "reviewer") {
           await this.#settled({ progress: withProgress(record, issue.number, { ...progress, reviewed: true, reviewedSha: state.headSha }).progress,
@@ -1192,7 +1192,7 @@ export class AutoRunEngine {
       progress = issueProgress(this.#current, issue.number);
       if (progress.state !== "current") throw new Error(`issue #${issue.number} lost its current progress`);
       const latestSha = await this.#git.headSha(false);
-      await this.#requireCleanCheckout("adress-this", issue);
+      await this.#requireCleanCheckout("address-this", issue);
       progress = { ...progress, phase: "cleanup" };
       await this.#save(withProgress(this.#current, issue.number, progress));
       const closed = await this.#closeSingleBranchIssue(issue, prNumber, progress);
@@ -1489,7 +1489,7 @@ export class AutoRunEngine {
       await this.#validate();
       this.#publishIssuePhase(issue, "implement");
     }
-    await this.#requireCleanCheckout("adress-this", issue);
+    await this.#requireCleanCheckout("address-this", issue);
     const startingSha = await this.#git.headSha(false);
     await this.#save(withProgress(this.#current, issue.number, { ...(previous.state === "current" ? previous : {}), state: "current", phase: "implement", beforeSha: startingSha, expectedBranch: this.#workingBranch(issue) }));
     await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha, role: "implementer" });
@@ -1524,10 +1524,10 @@ export class AutoRunEngine {
       await this.#settled({ progress: withProgress(this.#current, issue.number, { ...progress, phase: "await-commit" }).progress });
       return { sha: await this.#awaitCommit(issue, signal), report: outcome.result.lastAssistantMessage.trim() };
     }
-    const classified = classifyWorkerResult("adress-this", await this.#workerState(startingSha));
+    const classified = classifyWorkerResult("address-this", await this.#workerState(startingSha));
     if (classified.kind !== "committed") {
       await this.#markWorkerContinuable();
-      throw new Error(classified.kind === "rejected" ? classified.reason : `adress-this produced no commit for issue #${issue.number}`);
+      throw new Error(classified.kind === "rejected" ? classified.reason : `address-this produced no commit for issue #${issue.number}`);
     }
     await this.#recordImplementation(issue, classified.sha);
     await this.#validate();
@@ -1715,7 +1715,7 @@ export class AutoRunEngine {
   /** Publish only the exact accepted implementation or reviewed ending SHA. */
   async #publishImplementation(issue: FrozenIssue): Promise<string> {
     await this.#validate();
-    await this.#requireCleanCheckout("adress-this", issue);
+    await this.#requireCleanCheckout("address-this", issue);
     const progress = issueProgress(this.#current, issue.number);
     if (progress.state !== "current" || progress.beforeSha === undefined || progress.implementationSha === undefined) throw new StructuralError("no accepted implementation to publish");
     const sha = progress.reviewedSha ?? progress.implementationSha;

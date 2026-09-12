@@ -226,7 +226,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
     workspaceRoot: "C:/work", fleet, lease, terminals,
     configurations: { get: async () => ({
       platform: "chatgpt",
-      settings: { shape: "skill", skillName: "adress-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
+      settings: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
     }) },
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => resolvedPromptFromText("The checked-out branch is for issue #15.") },
@@ -248,7 +248,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.match(command, /\$adress-this/u);
+  assert.match(command, /\$address-this/u);
   assert.match(command, /web_search="disabled"/u);
   assert.match(command, /features\.multi_agent=false/u);
   assert.match(command, /--model gpt-5\.6/u);
@@ -485,7 +485,7 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     terminals,
     configurations: { get: async () => ({
       platform: "chatgpt",
-      settings: { shape: "skill", skillName: "adress-this", declaredCommand: ["codex"], webSearch: "live", subagents: "allowed" },
+      settings: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"], webSearch: "live", subagents: "allowed" },
     }) },
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => undefined },

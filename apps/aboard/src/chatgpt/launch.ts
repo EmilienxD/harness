@@ -16,7 +16,7 @@ export type ChatGptEffort = (typeof CHATGPT_EFFORTS)[number];
 export const CHATGPT_WEB_SEARCH_MODES = ["disabled", "cached", "indexed", "live"] as const;
 export type ChatGptWebSearch = (typeof CHATGPT_WEB_SEARCH_MODES)[number];
 
-export const CHATGPT_WORKER_SKILLS = ["adress-this", "review-this"] as const;
+export const CHATGPT_WORKER_SKILLS = ["address-this", "review-this"] as const;
 
 export interface ChatGptDifficultyLaunchPolicy {
   readonly model: string;
@@ -212,8 +212,8 @@ function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfigura
       if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "Explore launches as a read-only Codex session");
       return;
     case "implementer":
-      if (configuration.shape !== "skill" || configuration.skillName !== "adress-this") {
-        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $adress-this");
+      if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
+        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $address-this");
       }
       return;
     case "reviewer":

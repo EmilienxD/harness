@@ -116,7 +116,7 @@ file digests, settings fragments, and host actions. Removal is dependent-aware a
 file changed since installation.
 
 The Aboard package depends unconditionally on `auto` and `issue-readers`. The reader bundle includes
-the intentionally empty `adress-this` and `review-this` worker skill placeholders, so initializing
+the intentionally empty `address-this` and `review-this` worker skill placeholders, so initializing
 Aboard installs the implementation and review workflows without also installing issue drafting and
 publishing.
 The Harness-owned `/auto` hook fails closed outside an authenticated Aboard terminal.

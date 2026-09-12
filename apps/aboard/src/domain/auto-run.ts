@@ -196,7 +196,7 @@ export function nextStep(input: ReducerInput): AutoRunStep {
       case "publish":
         if (facts.workingTreeDirty) return { action: "stop", reason: dirtyReason(issue, facts) };
         if (!facts.hasCommit) {
-          return { action: "stop", reason: `adress-this produced no commit for issue #${issue.number}` };
+          return { action: "stop", reason: `address-this produced no commit for issue #${issue.number}` };
         }
         if (facts.commitPushed) continue;
         return { action: "publish", issue };
@@ -273,7 +273,7 @@ export function commitSubject(title: string): string {
 }
 
 /** The two commit-signaling Harness worker skills, named as the user invokes them. */
-export type WorkerRole = "adress-this" | "review-this";
+export type WorkerRole = "address-this" | "review-this";
 
 /**
  * What the run's checkout looked like immediately after a worker exited. It is

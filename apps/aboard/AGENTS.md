@@ -42,7 +42,7 @@ points.
   `sandbox_mode="read-only"` and `approval_policy="never"`.
 - `Prototype`, `Web Search`, `Brainstorm`, and `General`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
-- `implementer`: Auto Run worker invoking `/adress-this` on Claude or `$adress-this` on ChatGPT.
+- `implementer`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
 - `reviewer`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
 

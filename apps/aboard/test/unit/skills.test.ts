@@ -13,20 +13,20 @@ test("required worker skills resolve from project or personal Claude skills", as
   const personal = join(root, "personal");
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  assert.equal(await harnessSkillIsResolvable(project, "adress-this", personal), false);
+  assert.equal(await harnessSkillIsResolvable(project, "address-this", personal), false);
 
-  const projectSkill = join(project, ".claude", "skills", "adress-this", "SKILL.md");
+  const projectSkill = join(project, ".claude", "skills", "address-this", "SKILL.md");
   await mkdir(projectSkill, { recursive: true });
-  assert.equal(await harnessSkillIsResolvable(project, "adress-this", personal), false);
+  assert.equal(await harnessSkillIsResolvable(project, "address-this", personal), false);
   await rm(projectSkill, { recursive: true });
   await writeFile(projectSkill, "");
-  assert.equal(await harnessSkillIsResolvable(project, "adress-this", personal), true);
+  assert.equal(await harnessSkillIsResolvable(project, "address-this", personal), true);
   await rm(join(project, ".claude"), { recursive: true });
 
-  const personalSkill = join(personal, "skills", "adress-this", "SKILL.md");
+  const personalSkill = join(personal, "skills", "address-this", "SKILL.md");
   await mkdir(dirname(personalSkill), { recursive: true });
   await writeFile(personalSkill, "");
-  assert.equal(await harnessSkillIsResolvable(project, "adress-this", personal), true);
+  assert.equal(await harnessSkillIsResolvable(project, "address-this", personal), true);
 });
 
 test("missing worker skill reports the Harness installation repair", async (t) => {
@@ -43,7 +43,7 @@ test("Aboard requires both empty worker skill placeholders", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "aboard-skills-"));
   const personal = join(root, "personal");
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const skill of ["adress-this", "review-this"]) {
+  for (const skill of ["address-this", "review-this"]) {
     const path = join(personal, "skills", skill, "SKILL.md");
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, "");
@@ -63,19 +63,19 @@ test("the ChatGPT worker skills resolve from the repository or the user's agent 
   const home = join(root, "home");
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  assert.equal(await chatGptSkillIsResolvable(project, "adress-this", home), false);
+  assert.equal(await chatGptSkillIsResolvable(project, "address-this", home), false);
   await assert.rejects(
     requireChatGptWorkerSkills(project, home),
-    /Required Harness skill \$adress-this is not installed for ChatGPT.*Harness installer/u,
+    /Required Harness skill \$address-this is not installed for ChatGPT.*Harness installer/u,
   );
 
-  const projectSkill = join(project, ".agents", "skills", "adress-this", "SKILL.md");
+  const projectSkill = join(project, ".agents", "skills", "address-this", "SKILL.md");
   await mkdir(dirname(projectSkill), { recursive: true });
   await writeFile(projectSkill, "");
-  assert.equal(await chatGptSkillIsResolvable(project, "adress-this", home), true);
+  assert.equal(await chatGptSkillIsResolvable(project, "address-this", home), true);
   await rm(join(project, ".agents"), { recursive: true });
 
-  for (const skill of ["adress-this", "review-this"]) {
+  for (const skill of ["address-this", "review-this"]) {
     const userSkill = join(home, ".agents", "skills", skill, "SKILL.md");
     await mkdir(dirname(userSkill), { recursive: true });
     await writeFile(userSkill, "");

@@ -69,7 +69,7 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
     let settings: LaunchConfiguration;
     if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(type)) settings = { shape: "default", ...common };
     else if (type === "Explore") settings = { shape: "builtin", agentName: "Explore", ...common };
-    else if (type === "implementer") settings = { shape: "skill", skillName: "adress-this", ...common };
+    else if (type === "implementer") settings = { shape: "skill", skillName: "address-this", ...common };
     // AFK and HITL are auto-run orchestration modes, not separate review skills.
     else settings = { shape: "skill", skillName: "review-this", ...common };
     return { platform: this.platform, settings };

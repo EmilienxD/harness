@@ -219,7 +219,7 @@ async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenar
   if (text.includes("[E2E:chatgpt-process-failure]")) return selected("process-failure");
   if (text.includes("[E2E:chatgpt-explore]")) return selected("explore");
   if (text.includes("[E2E:chatgpt-implement]")) {
-    if (!text.includes("[E2E:adress-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the adress-this skill");
+    if (!text.includes("[E2E:address-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the address-this skill");
     if (text.includes("with Chrome") && !text.includes("Chrome browser backend")) throw new ProtocolMismatch("$.input", "lost the Chrome backend instruction");
     return selected("implement");
   }

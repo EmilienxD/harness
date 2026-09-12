@@ -1448,7 +1448,7 @@ test("an implementer that commits nothing stops for user judgment", async () => 
   assert.equal(context.launches.length, 1);
   assert.equal(context.gitCalls.includes("deleteBranch issue/34-add-retry-backoff"), false);
   assert.equal(context.comments.length, 0);
-  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*adress-this finished without committing/);
+  assert.match(context.notifications.join("\n"), /stopped at issue #34 .*address-this finished without committing/);
   assert.equal(context.state.cleared, false);
 });
 

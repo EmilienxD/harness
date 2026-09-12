@@ -71,7 +71,7 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
     const settings: ChatGptLaunchConfiguration = isAutoRunWorkerType(type)
       ? {
           shape: "skill",
-          skillName: type === "implementer" ? "adress-this" : "review-this",
+          skillName: type === "implementer" ? "address-this" : "review-this",
           ...common,
           ...(profile.webSearch === undefined ? {} : { webSearch: profile.webSearch }),
           ...(profile.subagents === undefined ? {} : { subagents: profile.subagents }),
