@@ -184,7 +184,7 @@ def test_configure_reads_the_webhook_secret_without_echoing_it(
 
 def test_catalogue_exposes_model_invokable_dual_platform_skill_and_runtime() -> None:
     tool = discover()["report-gotchas"]
-    assert tool.version == "1.0.0"
+    assert tool.version == "1.0.1"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert tool.requires == ("git",)
