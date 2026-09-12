@@ -343,3 +343,17 @@ def test_target_failures_are_structured_and_return_one(tmp_path, monkeypatch, ca
     }
     assert result["results"][0]["status"] == "failed"
     assert "installed file was modified" in result["results"][0]["error"]
+
+
+def test_invalid_nested_receipt_is_reported_as_an_operation_error(tmp_path, monkeypatch, capsys):
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "receipts.json").write_text(
+        json.dumps({"version": 1, "installations": {"bad": {"packages": {"x": []}}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
+
+    assert main(["list", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"]["type"] == "operation"

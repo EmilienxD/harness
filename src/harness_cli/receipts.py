@@ -43,6 +43,31 @@ class ReceiptStore:
             raise ValueError(f"unsupported Harness receipt store at {selected}")
         if not isinstance(data.get("installations"), dict):
             raise ValueError(f"invalid Harness receipt store at {selected}")
+        for key, installation in data["installations"].items():
+            if not isinstance(key, str) or not isinstance(installation, dict):
+                raise ValueError(f"invalid Harness receipt store at {selected}")
+            packages = installation.get("packages")
+            if not isinstance(packages, dict):
+                raise ValueError(f"invalid Harness receipt store at {selected}")
+            for name, receipt in packages.items():
+                if not isinstance(name, str) or not isinstance(receipt, dict):
+                    raise ValueError(f"invalid Harness receipt store at {selected}")
+                if not isinstance(receipt.get("version"), str):
+                    raise ValueError(f"invalid Harness receipt store at {selected}")
+                files = receipt.get("files", [])
+                if not isinstance(files, list) or any(
+                    not isinstance(record, dict)
+                    or not isinstance(record.get("path"), str)
+                    or not isinstance(record.get("owned"), bool)
+                    for record in files
+                ):
+                    raise ValueError(f"invalid Harness receipt store at {selected}")
+                actions = receipt.get("actions", [])
+                if not isinstance(actions, list) or any(
+                    not isinstance(action, dict) or not isinstance(action.get("type"), str)
+                    for action in actions
+                ):
+                    raise ValueError(f"invalid Harness receipt store at {selected}")
         return cls(selected, data)
 
     def installation(self, scope_root: Path, platform: str, create: bool = False) -> dict[str, Any]:

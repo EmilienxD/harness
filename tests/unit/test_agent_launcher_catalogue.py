@@ -26,7 +26,7 @@ def installer(target, store, monkeypatch, actions=None, removals=None):
 
 def test_catalogue_declares_shared_dual_provider_runtime_and_claude_skill():
     tool = discover()["agent-launcher"]
-    assert tool.version == "1.1.0"
+    assert tool.version == "1.1.1"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert len(tool.actions) == 1
@@ -113,6 +113,23 @@ def test_modified_shared_starter_survives_upgrade_and_uninstall(tmp_path, monkey
     selected.reconcile({"agent-launcher"})
     selected.reconcile(set())
     assert config.read_text(encoding="utf-8") == "# user configuration\n"
+
+
+def test_unmodified_shared_starter_has_the_same_uninstall_policy_for_both_platforms(
+    tmp_path, monkeypatch
+):
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    project = tmp_path / "project"
+    claude = installer(Target.for_project(project, "claude"), store, monkeypatch)
+    chatgpt = installer(Target.for_project(project, "chatgpt"), store, monkeypatch)
+    claude.reconcile({"agent-launcher"})
+    chatgpt.reconcile({"agent-launcher"})
+    config = project / ".harness" / "agent-launcher" / "config.py"
+
+    claude.reconcile(set())
+    chatgpt.reconcile(set())
+
+    assert config.is_file()
 
 
 def test_installer_and_both_entrypoints_use_identical_starters(tmp_path, monkeypatch):

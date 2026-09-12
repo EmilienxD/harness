@@ -112,7 +112,7 @@ def normalize_scope(matcher) -> tuple | None:
     if not (isinstance(matcher, dict) and "hooks" in matcher):
         return None
     m = matcher.get("matcher", "")
-    return ("matcher", "_any_" if m in ("", ".*") else m)
+    return ("matcher", "_any_" if m in ("", "*", ".*") else m)
 
 
 def _is_group(item) -> bool:
@@ -186,7 +186,7 @@ def _merge_lists(base: list, incoming: list, *, hook_event: bool | None = None) 
 
 def _flatten_group(group: dict) -> dict:
     """Write a match-everything group's scope the canonical way: no `matcher` key."""
-    if group.get("matcher") in ("", ".*"):
+    if group.get("matcher") in ("", "*", ".*"):
         return {k: v for k, v in group.items() if k != "matcher"}
     return group
 
@@ -297,6 +297,111 @@ def unmerge(base: dict, fragment: dict) -> dict:
                 del out[key]
         elif current == value:
             del out[key]
+    return out
+
+
+def additions(base: dict, fragment: dict) -> dict:
+    """Return only settings entries that merging ``fragment`` adds to ``base``.
+
+    This is used for ownership receipts: an entry already present in the
+    user's settings must not become Harness-owned merely because its spelling
+    happens to equal our fragment.
+    """
+    out: dict = {}
+    for key, value in fragment.items():
+        if key not in base:
+            out[key] = json.loads(json.dumps(value))
+            continue
+        current = base[key]
+        if isinstance(current, dict) and isinstance(value, dict):
+            child = additions(current, value)
+        elif isinstance(current, list) and isinstance(value, list):
+            child = _list_additions(current, value)
+        elif current == value:
+            child = None
+        else:
+            # Scalar replacement is intentionally recorded.  Unmerge will
+            # leave it alone if the user subsequently edits the value.
+            child = value
+        if child not in (None, {}, []):
+            out[key] = child
+    return out
+
+
+def remove_shared(fragment: dict, shared: list[dict]) -> dict:
+    """Remove contributions also supplied by another installed package."""
+    if not shared:
+        return fragment
+    out: dict = {}
+    for key, value in fragment.items():
+        peers = [item[key] for item in shared if key in item]
+        if not peers:
+            out[key] = value
+            continue
+        current = value
+        if isinstance(current, dict) and all(isinstance(peer, dict) for peer in peers):
+            child = remove_shared(current, peers)
+        elif isinstance(current, list) and all(isinstance(peer, list) for peer in peers):
+            child = _remove_shared_list(current, peers)
+        elif any(current == peer for peer in peers):
+            child = None
+        else:
+            child = current
+        if child not in (None, {}, []):
+            out[key] = child
+    return out
+
+
+def _remove_shared_list(base: list, peers: list[list]) -> list:
+    all_peers = [item for peer in peers for item in peer]
+    hook_event = any(_is_group(v) for v in (*base, *all_peers))
+    if not hook_event:
+        shared_ids = {identity(item) for item in all_peers}
+        return [item for item in base if identity(item) not in shared_ids]
+    out: list = []
+    for group in base:
+        scope = normalize_scope(group)
+        if scope is None:
+            if identity(group) not in {identity(item) for item in all_peers}:
+                out.append(group)
+            continue
+        shared_hooks = {
+            identity(hook)
+            for peer in all_peers
+            if normalize_scope(peer) == scope
+            for hook in peer.get("hooks", [])
+        }
+        hooks = [hook for hook in group.get("hooks", []) if identity(hook) not in shared_hooks]
+        if hooks:
+            updated = dict(group)
+            updated["hooks"] = hooks
+            out.append(updated)
+    return out
+
+
+def _list_additions(base: list, incoming: list) -> list:
+    hook_event = any(_is_group(v) for v in (*base, *incoming))
+    if not hook_event:
+        existing = {identity(item) for item in base}
+        return [item for item in incoming if identity(item) not in existing]
+    out: list = []
+    for item in incoming:
+        scope = normalize_scope(item)
+        if scope is None:
+            if identity(item) not in {identity(v) for v in base}:
+                out.append(item)
+            continue
+        groups = [v for v in base if normalize_scope(v) == scope]
+        existing_hooks = {
+            identity(hook)
+            for group in groups
+            for hook in group.get("hooks", [])
+        }
+        hooks = [hook for hook in item.get("hooks", []) if identity(hook) not in existing_hooks]
+        if hooks:
+            group = dict(item)
+            group["hooks"] = hooks
+            out.append(group)
     return out
 
 

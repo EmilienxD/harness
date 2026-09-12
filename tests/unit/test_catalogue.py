@@ -1,6 +1,8 @@
 import hashlib
 import io
 import json
+import re
+import subprocess
 from contextlib import nullcontext
 
 import pytest
@@ -8,7 +10,7 @@ import pytest
 from harness_cli.catalogue import CatalogueError, resolve_dependencies
 from harness_cli import cli
 from harness_cli.cli import build_parser
-from harness_cli.installer import CatalogueInstaller, InstallError, Target
+from harness_cli.installer import CatalogueInstaller, Change, InstallError, Target
 from harness_cli.host_actions import HostActionError, PreparedAction, prepare
 from harness_cli.manifest import HostAction, ManifestError, discover, load_tool
 from harness_cli.platforms import Platform
@@ -334,6 +336,156 @@ def test_collision_is_detected_before_writing(tmp_path):
     with pytest.raises(InstallError, match="file collision"):
         manager(tools, target, tmp_path).reconcile({"a", "b"})
     assert not target.install_root.exists()
+
+
+@pytest.mark.parametrize("destination", ["..", "C:/outside/payload", "nested/../payload"])
+def test_manifest_rejects_destinations_outside_their_logical_root(tmp_path, destination):
+    root = tmp_path / "unsafe-destination"
+    root.mkdir()
+    (root / "payload").write_text("x")
+    (root / "harness.toml").write_text(
+        'name="unsafe-destination"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        f'[[files]]\nsrc="payload"\ndest="{destination}"\n'
+    )
+
+    with pytest.raises(ManifestError, match="unsafe dest"):
+        load_tool(root)
+
+
+@pytest.mark.parametrize("source", ["..", "C:/outside/payload", "nested/../payload"])
+def test_manifest_rejects_sources_outside_the_catalogue_package(tmp_path, source):
+    root = tmp_path / "unsafe-source"
+    root.mkdir()
+    (root / "harness.toml").write_text(
+        'name="unsafe-source"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        f'[[files]]\nsrc="{source}"\ndest="payload"\n'
+    )
+
+    with pytest.raises(ManifestError, match="unsafe src"):
+        load_tool(root)
+
+
+def test_uninstall_does_not_delete_an_identical_preexisting_file(tmp_path):
+    root = tmp_path / "identical"
+    root.mkdir()
+    (root / "payload").write_text("user and catalogue agree")
+    (root / "harness.toml").write_text(
+        'name="identical"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        '[[files]]\nsrc="payload"\ndest="skills/identical/SKILL.md"\n'
+    )
+    tool = load_tool(root)
+    target = Target.for_project(tmp_path / "project")
+    destination = target.install_root / "skills/identical/SKILL.md"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("user and catalogue agree")
+    selected = manager({tool.name: tool}, target, tmp_path)
+
+    selected.reconcile({tool.name})
+    selected.reconcile(set())
+
+    assert destination.read_text() == "user and catalogue agree"
+
+
+def test_uninstall_does_not_remove_an_identical_preexisting_hook(tmp_path):
+    root = tmp_path / "identical-hook"
+    root.mkdir()
+    (root / "payload").write_text("x")
+    hook = {"type": "command", "command": "mine"}
+    fragment = {"hooks": {"UserPromptSubmit": [{"hooks": [hook]}]}}
+    (root / "fragment.json").write_text(json.dumps(fragment))
+    (root / "harness.toml").write_text(
+        'name="identical-hook"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\nfragment="fragment.json"\n'
+        '[[files]]\nsrc="payload"\ndest="payload"\n'
+    )
+    tool = load_tool(root)
+    target = Target.for_project(tmp_path / "project")
+    target.settings_path.parent.mkdir(parents=True)
+    target.settings_path.write_text(json.dumps(fragment))
+    selected = manager({tool.name: tool}, target, tmp_path)
+
+    selected.reconcile({tool.name})
+    selected.reconcile(set())
+
+    assert target.read_settings() == fragment
+
+
+def test_removing_one_package_keeps_a_hook_still_required_by_another(tmp_path):
+    tools = {}
+    for name in ("first", "second"):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "payload").write_text(name)
+        (root / "fragment.json").write_text(json.dumps({
+            "hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": "shared"}]}]}
+        }))
+        (root / "harness.toml").write_text(
+            f'name="{name}"\nversion="1.0.0"\ndescription="x"\n'
+            '[platforms.claude]\nstatus="supported"\nfragment="fragment.json"\n'
+            f'[[files]]\nsrc="payload"\ndest="{name}.txt"\n'
+        )
+        tools[name] = load_tool(root)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager(tools, target, tmp_path)
+    selected.reconcile({"first", "second"})
+    selected.reconcile({"second"})
+
+    settings = target.read_settings()
+    assert settings["hooks"]["UserPromptSubmit"][0]["hooks"] == [
+        {"type": "command", "command": "shared"}
+    ]
+
+
+def test_reconcile_repairs_a_missing_owned_file_at_the_same_version(tmp_path):
+    tool = discover()["caveman"]
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({tool.name: tool}, target, tmp_path)
+    selected.reconcile({tool.name})
+    skill = target.install_root / "skills/caveman/SKILL.md"
+    skill.unlink()
+
+    _resolved, changes = selected.plan({tool.name})
+    selected.reconcile({tool.name})
+
+    assert changes == [Change("update", tool.name, "missing installed files")]
+    assert skill.is_file()
+
+
+def test_receipt_paths_cannot_escape_the_target_root(tmp_path):
+    tool = discover()["caveman"]
+    target = Target.for_project(tmp_path / "project")
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    installation = store.installation(target.scope_root, target.platform.value, create=True)
+    installation["packages"][tool.name] = {
+        "version": tool.version,
+        "explicit": True,
+        "dependencies": [],
+        "files": [{"path": str(tmp_path / "outside.txt"), "owned": True, "digest": ""}],
+        "actions": [],
+    }
+    selected = CatalogueInstaller({tool.name: tool}, target, store)
+
+    with pytest.raises(InstallError, match="escapes target root"):
+        selected.plan({tool.name})
+
+
+def test_uv_action_pins_contain_the_runtime_shipped_by_the_catalogue():
+    for tool in discover().values():
+        for action in tool.actions:
+            if action.type != "uv-tool":
+                continue
+            match = re.search(r"@([0-9a-f]{40})#subdirectory=(.+)$", action.data["source"])
+            assert match is not None, tool.name
+            revision, runtime = match.groups()
+            result = subprocess.run(
+                ["git", "diff", "--exit-code", revision, "--", runtime],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, f"{tool.name} action pin is stale:\n{result.stdout}"
 
 
 def test_workspace_files_can_be_limited_to_project_installs(tmp_path):

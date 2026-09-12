@@ -98,7 +98,14 @@ class Tool:
     actions: tuple[HostAction, ...] = ()
 
     def resolve(self, spec: FileSpec) -> Path:
-        return self.root / spec.src
+        source = self.root / spec.src
+        resolved_root = self.root.resolve()
+        resolved_source = source.resolve(strict=False)
+        if resolved_source != resolved_root and resolved_root not in resolved_source.parents:
+            raise ManifestError(f"{self.name}: source escapes package root: {spec.src}")
+        if source.is_symlink():
+            raise ManifestError(f"{self.name}: source may not be a symlink: {spec.src}")
+        return source
 
     def support_for(self, platform: Platform | str) -> PlatformSupport:
         selected = Platform.parse(platform)
@@ -126,9 +133,17 @@ class Tool:
                 sorted(p for p in src.rglob("*") if p.is_file()) if src.is_dir() else [src]
             )
             for child in children:
+                if child.is_symlink():
+                    raise ManifestError(f"{self.name}: payload may not contain symlinks: {child}")
+                resolved_child = child.resolve(strict=False)
+                resolved_root = self.root.resolve()
+                if resolved_child != resolved_root and resolved_root not in resolved_child.parents:
+                    raise ManifestError(f"{self.name}: payload escapes package root: {child}")
                 suffix = child.relative_to(src).as_posix() if src.is_dir() else ""
                 dest = f"{spec.dest}/{suffix}" if suffix else spec.dest
-                key = (spec.root, dest)
+                # Package destinations must be unique on every supported
+                # filesystem; Windows treats differently-cased names as one.
+                key = (spec.root, dest.casefold())
                 if key in seen:
                     raise ManifestError(
                         f"{self.name}: multiple payloads target {spec.root}:{dest} on {selected.value}"
@@ -149,8 +164,16 @@ def tools_root() -> Path:
 
 
 def _safe_relative(value: str, manifest_path: Path, label: str) -> str:
-    normalized = str(value).replace("\\", "/").strip("/")
-    if not normalized or normalized.startswith("../") or "/../" in normalized:
+    raw = str(value).replace("\\", "/")
+    normalized = raw.strip("/")
+    parts = normalized.split("/") if normalized else []
+    if (
+        not normalized
+        or raw.startswith("/")
+        or raw.startswith("//")
+        or re.fullmatch(r"[A-Za-z]:.*", raw)
+        or any(part in {"..", "."} for part in parts)
+    ):
         raise ManifestError(f"{manifest_path}: unsafe {label} '{value}'")
     return normalized
 
@@ -277,6 +300,11 @@ def load_tool(directory: Path) -> Tool:
     for entry in raw_files:
         if "src" not in entry or "dest" not in entry:
             raise ManifestError(f"{manifest_path}: every [[files]] entry needs 'src' and 'dest'")
+        if not isinstance(entry["src"], str):
+            raise ManifestError(f"{manifest_path}: files.src must be a string")
+        if not isinstance(entry["dest"], str):
+            raise ManifestError(f"{manifest_path}: files.dest must be a string")
+        src = _safe_relative(entry["src"], manifest_path, "src")
         dest = _safe_relative(entry["dest"], manifest_path, "dest")
         root = entry.get("root", "platform")
         if root not in DESTINATION_ROOTS:
@@ -299,7 +327,7 @@ def load_tool(directory: Path) -> Tool:
             )
         files.append(
             FileSpec(
-                src=entry["src"],
+                src=src,
                 dest=dest,
                 root=root,
                 platforms=platforms,

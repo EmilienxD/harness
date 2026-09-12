@@ -9,6 +9,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import tempfile
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,10 @@ class InstallError(Exception):
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _canonical_path(path: Path | str) -> str:
+    return os.path.normcase(str(Path(path).resolve()))
 
 
 @dataclass(frozen=True)
@@ -64,7 +69,20 @@ class Target:
         return self.install_root / ".gitignore" if self.is_user else self.scope_root / ".gitignore"
 
     def destination_path(self, root: str, dest: str) -> Path:
-        return self.adapter.destination_root(self.scope_root, self.is_user, root) / dest
+        destination_root = self.adapter.destination_root(self.scope_root, self.is_user, root)
+        if destination_root.is_symlink():
+            raise InstallError(f"refusing to install through symlinked directory {destination_root}")
+        path = destination_root / dest
+        resolved_root = destination_root.resolve()
+        resolved_path = path.resolve(strict=False)
+        if resolved_path != resolved_root and resolved_root not in resolved_path.parents:
+            raise InstallError(f"destination escapes installation root: {path}")
+        current = path
+        while current != destination_root:
+            if current.is_symlink():
+                raise InstallError(f"refusing to install through symlink {current}")
+            current = current.parent
+        return path
 
     def read_settings(self) -> dict[str, Any]:
         if not self.settings_path.is_file():
@@ -123,8 +141,27 @@ def _substitute(value: Any, target: Target, python: tuple[str, list[str]] | None
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
+    if path.is_symlink():
+        raise InstallError(f"refusing to replace symlink {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(settings_merge.dumps(value), encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.harness-{os.getpid()}-{next(tempfile._get_candidate_names())}")
+    try:
+        temporary.write_text(settings_merge.dumps(value), encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _copy_atomic(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(
+        f".{destination.name}.harness-{os.getpid()}-{next(tempfile._get_candidate_names())}"
+    )
+    try:
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _make_executable(path: Path) -> None:
@@ -164,7 +201,15 @@ class _LocalTransaction:
     def __init__(self, paths: set[Path], store: ReceiptStore):
         self._store = store
         self._store_data = deepcopy(store.data)
-        paths = {path.resolve() for path in paths | {store.path}}
+        paths = {path.absolute() for path in paths | {store.path}}
+        for path in paths:
+            current = path
+            while True:
+                if current.is_symlink():
+                    raise OSError(f"refusing to snapshot symlinked path {current}")
+                if current.parent == current:
+                    break
+                current = current.parent
         self._files = [
             _FileSnapshot(
                 path,
@@ -230,16 +275,30 @@ class CatalogueInstaller:
         )
 
     def _file_owned_in_another_installation(self, path: str) -> bool:
+        canonical = _canonical_path(path)
         current = self.installation
         return any(
             installation is not current
             and any(
-                record.get("path") == path
+                _canonical_path(record["path"]) == canonical
                 for receipt in installation.get("packages", {}).values()
                 for record in receipt.get("files", [])
             )
             for installation in self.store.data["installations"].values()
         )
+
+    def _validate_receipt_paths(self, packages: dict[str, Any]) -> None:
+        """Reject receipt paths that could make an operation touch elsewhere."""
+        root = self.target.scope_root.resolve()
+        for package, receipt in packages.items():
+            for record in receipt.get("files", []):
+                path = Path(record["path"])
+                try:
+                    resolved = path.resolve(strict=False)
+                except OSError as exc:
+                    raise InstallError(f"cannot resolve receipt path for {package}: {path}") from exc
+                if resolved != root and root not in resolved.parents:
+                    raise InstallError(f"receipt path for {package} escapes target root: {path}")
 
     @staticmethod
     def _removal_order(packages: dict[str, Any], desired: set[str]) -> list[str]:
@@ -275,6 +334,7 @@ class CatalogueInstaller:
             if support.status is not SupportStatus.SUPPORTED:
                 raise InstallError(f"{item.tool.name} is {support.status.value} for {self.target.adapter.product_name}")
         current = self.installation["packages"]
+        self._validate_receipt_paths(current)
         changes = [Change("remove", name) for name in self._removal_order(current, set(desired))]
         for item in resolved:
             receipt = current.get(item.tool.name)
@@ -284,6 +344,11 @@ class CatalogueInstaller:
                 changes.append(Change("upgrade", item.tool.name, f"{receipt.get('version')} -> {item.tool.version}"))
             elif bool(receipt.get("explicit")) != item.explicit:
                 changes.append(Change("ownership", item.tool.name, "explicit" if item.explicit else "transitive"))
+            elif any(
+                record.get("owned") and not Path(record["path"]).is_file()
+                for record in receipt.get("files", [])
+            ):
+                changes.append(Change("update", item.tool.name, "missing installed files"))
         return resolved, changes
 
     def reconcile(self, requested_names: set[str]) -> list[Change]:
@@ -297,20 +362,21 @@ class CatalogueInstaller:
                 if installation is current_installation and owner not in desired:
                     continue
                 for file in receipt.get("files", []):
-                    claimed[file["path"]] = owner
+                    claimed[_canonical_path(file["path"])] = owner
         for item in resolved:
             for payload in self._payloads(item.tool):
                 path = str(self.target.destination_path(payload.root, payload.dest).resolve())
-                owner = claimed.get(path)
+                path_key = _canonical_path(path)
+                owner = claimed.get(path_key)
                 if owner is not None and owner != item.tool.name:
                     raise InstallError(f"file collision: {item.tool.name} and {owner} both own {path}")
-                claimed[path] = item.tool.name
+                claimed[path_key] = item.tool.name
                 destination = Path(path)
                 if not destination.exists():
                     continue
                 receipt = packages.get(item.tool.name)
                 owned = next(
-                    (record for record in receipt.get("files", []) if record["path"] == path),
+                    (record for record in receipt.get("files", []) if _canonical_path(record["path"]) == path_key),
                     None,
                 ) if receipt else None
                 if owned is not None:
@@ -322,6 +388,13 @@ class CatalogueInstaller:
                         raise InstallError(
                             f"cannot safely upgrade {item.tool.name}; installed file was modified: {destination}"
                         )
+                    if (
+                        receipt.get("version") == item.tool.version
+                        and owned.get("owned")
+                        and sha256(destination) != owned.get("digest")
+                        and not payload.starter
+                    ):
+                        raise InstallError(f"refusing to overwrite modified file {destination}")
                 elif sha256(destination) != sha256(payload.source) and not payload.starter:
                     raise InstallError(f"refusing to overwrite unowned file {destination}")
 
@@ -356,6 +429,14 @@ class CatalogueInstaller:
                 raise InstallError("missing required executable(s): " + ", ".join(missing_requirements))
             for item in resolved:
                 current = packages.get(item.tool.name)
+                repair = (
+                    current is not None
+                    and current.get("version") == item.tool.version
+                    and any(
+                        record.get("owned") and not Path(record["path"]).is_file()
+                        for record in current.get("files", [])
+                    )
+                )
                 if current is None or current.get("version") != item.tool.version:
                     shared_host_owner = current is None and self._owned_in_another_installation(item.tool.name)
                     if current is None and not shared_host_owner:
@@ -391,6 +472,8 @@ class CatalogueInstaller:
                         host_undo,
                         rollback_prepared.get(item.tool.name, []) if replacing else [],
                     )
+                elif repair:
+                    self._install(item, [], host_undo, [])
                 else:
                     current["explicit"] = item.explicit
                     current["dependencies"] = [dependency.name for dependency in item.tool.dependencies]
@@ -447,6 +530,7 @@ class CatalogueInstaller:
     ) -> None:
         tool = item.tool
         files: list[dict[str, Any]] = []
+        prior_receipt = self.installation["packages"].get(tool.name)
         for payload in self._payloads(tool):
             destination = self.target.destination_path(payload.root, payload.dest)
             if destination.exists() and payload.starter:
@@ -457,10 +541,26 @@ class CatalogueInstaller:
                     "owned": False,
                 })
                 continue
+            if destination.exists() and sha256(destination) == sha256(payload.source):
+                prior = next(
+                    (
+                        record
+                        for record in (prior_receipt or {}).get("files", [])
+                        if _canonical_path(record["path"]) == _canonical_path(destination)
+                    ),
+                    None,
+                )
+                files.append({
+                    "path": str(destination.resolve()),
+                    "digest": sha256(destination),
+                    "starter": payload.starter,
+                    "owned": bool(prior and prior.get("owned")),
+                })
+                continue
             if destination.exists() and sha256(destination) != sha256(payload.source):
                 raise InstallError(f"refusing to overwrite unowned file {destination}")
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(payload.source, destination)
+            _copy_atomic(payload.source, destination)
             if payload.executable:
                 _make_executable(destination)
             files.append({
@@ -474,15 +574,27 @@ class CatalogueInstaller:
         python = _python_command() if "${PYTHON}" in json.dumps(raw_fragment) else None
         fragment = _substitute(raw_fragment, self.target, python)
         if fragment:
-            _write_json(self.target.settings_path, self.target.adapter.merge_config(self.target.read_settings(), fragment))
+            before = self.target.read_settings()
+            _write_json(self.target.settings_path, self.target.adapter.merge_config(before, fragment))
+            fragment = settings_merge.additions(before, fragment)
         patterns = [entry if self.target.is_user else f"{self.target.adapter.project_platform_dir}/{entry}" for entry in tool.gitignore]
         if not self.target.is_user:
             patterns.extend(tool.workspace_gitignore)
         block = f"{tool.name}:{self.target.platform.value}"
         if patterns:
+            if self.target.gitignore_path.is_symlink():
+                raise InstallError(f"refusing to replace symlink {self.target.gitignore_path}")
             before = self.target.gitignore_path.read_text(encoding="utf-8") if self.target.gitignore_path.is_file() else ""
             self.target.gitignore_path.parent.mkdir(parents=True, exist_ok=True)
-            self.target.gitignore_path.write_text(gitignore.apply(before, block, patterns), encoding="utf-8")
+            updated = gitignore.apply(before, block, patterns)
+            temporary = self.target.gitignore_path.with_name(
+                f".{self.target.gitignore_path.name}.harness-{os.getpid()}-{next(tempfile._get_candidate_names())}"
+            )
+            try:
+                temporary.write_text(updated, encoding="utf-8")
+                os.replace(temporary, self.target.gitignore_path)
+            finally:
+                temporary.unlink(missing_ok=True)
         restore_previous = bool(previous_actions)
         for action in prepared:
             apply_host_action(action)
@@ -534,6 +646,31 @@ class CatalogueInstaller:
                     current = current.parent
         fragment = receipt.get("fragment")
         if isinstance(fragment, dict) and fragment and self.target.settings_path.is_file():
+            if self.target.settings_path.is_symlink():
+                raise InstallError(f"refusing to modify symlink {self.target.settings_path}")
+            shared: list[dict] = []
+            for other_name, other_receipt in self.installation["packages"].items():
+                if other_name == name:
+                    continue
+                other_fragment = other_receipt.get("fragment")
+                tool = self.available.get(other_name)
+                if tool is not None:
+                    raw = tool.fragment_for(self.target.platform)
+                    if raw:
+                        try:
+                            other_fragment = _substitute(raw, self.target, _python_command())
+                        except InstallError:
+                            # A peer's receipt is already resolved and remains the
+                            # authoritative ownership record.  If its source can no
+                            # longer be substituted (for example, uv disappeared),
+                            # retain that receipt rather than making uninstall fail.
+                            pass
+                if isinstance(other_fragment, dict) and other_fragment:
+                    shared.append(other_fragment)
+            fragment = settings_merge.remove_shared(fragment, shared)
+            if not fragment:
+                fragment = None
+        if isinstance(fragment, dict) and fragment and self.target.settings_path.is_file():
             after = self.target.adapter.unmerge_config(self.target.read_settings(), fragment)
             if after:
                 _write_json(self.target.settings_path, after)
@@ -541,6 +678,8 @@ class CatalogueInstaller:
                 self.target.settings_path.unlink(missing_ok=True)
         block = receipt.get("gitignoreBlock")
         if isinstance(block, str) and self.target.gitignore_path.is_file():
+            if self.target.gitignore_path.is_symlink():
+                raise InstallError(f"refusing to modify symlink {self.target.gitignore_path}")
             after = gitignore.remove(self.target.gitignore_path.read_text(encoding="utf-8"), block)
             if after.strip():
                 self.target.gitignore_path.write_text(after, encoding="utf-8")

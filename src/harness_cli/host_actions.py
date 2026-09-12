@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +18,31 @@ from harness_cli.manifest import HostAction
 
 class HostActionError(RuntimeError):
     pass
+
+
+def _download_request(url: str) -> urllib.request.Request:
+    """Build a release download request, authenticating private GitHub assets."""
+    token = os.environ.get("GH_TOKEN")
+    match = re.fullmatch(
+        r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/]+)", url
+    )
+    if not token or not match:
+        return urllib.request.Request(url)
+    owner, repository, tag, asset_name = match.groups()
+    headers = {"Authorization": f"Bearer {token}"}
+    metadata_request = urllib.request.Request(
+        f"https://api.github.com/repos/{owner}/{repository}/releases/tags/{tag}",
+        headers=headers,
+    )
+    with urllib.request.urlopen(metadata_request, timeout=60) as response:
+        release = json.load(response)
+    asset = next((item for item in release.get("assets", []) if item.get("name") == asset_name), None)
+    if asset is None or not isinstance(asset.get("url"), str):
+        raise HostActionError(f"{url}: release has no asset named {asset_name}")
+    return urllib.request.Request(
+        asset["url"],
+        headers={**headers, "Accept": "application/octet-stream"},
+    )
 
 
 @dataclass
@@ -49,7 +77,8 @@ def prepare(action: HostAction) -> PreparedAction:
     handle = tempfile.NamedTemporaryFile(prefix="harness-", suffix=".vsix", delete=False)
     path = Path(handle.name)
     try:
-        with urllib.request.urlopen(url, timeout=60) as response, handle:
+        request = _download_request(url)
+        with urllib.request.urlopen(request, timeout=60) as response, handle:
             remaining = expected_size + 1
             while remaining:
                 chunk = response.read(min(1024 * 1024, remaining))

@@ -34,8 +34,8 @@ export async function runNoNewDocumentsJourney(platform: Platform): Promise<NoNe
     const hookRoot = join(projectRoot, platform === "claude" ? ".claude" : ".codex", "hooks");
     const hookPath = join(hookRoot, "no_new_documents_PreToolUse_hook.py");
     await mkdir(hookRoot, { recursive: true });
-    await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "shared", "hooks", "no_new_documents_PreToolUse_hook.py"), hookPath);
-    await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "shared", "hooks", "no-new-documents.toml"), join(hookRoot, "no-new-documents.toml"));
+    await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "no_new_documents_PreToolUse_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "no-new-documents.toml"), join(hookRoot, "no-new-documents.toml"));
 
     let finalText: string;
     if (platform === "claude") {

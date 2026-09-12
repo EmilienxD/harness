@@ -160,6 +160,15 @@ def test_catchall_matchers_normalize_into_matcherless_group():
     assert entries == [group(hook("x"), hook("y"))]
 
 
+def test_star_catchall_normalizes_into_matcherless_group():
+    user = {"hooks": {"PreToolUse": [group(hook("x"), matcher="*")]}}
+    fragment = {"hooks": {"PreToolUse": [group(hook("y"))]}}
+
+    assert merge(user, fragment)["hooks"]["PreToolUse"] == [
+        group(hook("x"), hook("y"))
+    ]
+
+
 def test_unmerge_emptied_matchless_group_is_dropped():
     merged = merge({}, COMMIT)
     assert unmerge(merged, COMMIT) == {}
