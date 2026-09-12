@@ -13,7 +13,6 @@ from harness_cli.host_actions import HostActionError, PreparedAction, prepare
 from harness_cli.manifest import HostAction, ManifestError, discover, load_tool
 from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore
-from harness_cli.tui import PickerResult
 
 
 def manager(tools, target, tmp_path):
@@ -43,7 +42,7 @@ def wire_menu(monkeypatch, tools, ui_factory, installer_factory, installed=()):
     )
 
 
-def test_catalogue_picks_tools_on_one_screen_and_defaults_to_both_platforms(monkeypatch):
+def test_catalogue_defaults_to_both_providers_and_stops_when_up_to_date(monkeypatch):
     aboard = discover()["aboard"]
     screens = []
     planned = {}
@@ -52,17 +51,22 @@ def test_catalogue_picks_tools_on_one_screen_and_defaults_to_both_platforms(monk
         def __init__(self, read_key):
             pass
 
-        def picker(self, title, options, selected=None, toggles=(), confirm="Install"):
-            screens.append(title)
-            assert [toggle.key for toggle in toggles] == ["p", "t"]
-            return PickerResult("confirm", {0})
+        def intro(self, label):
+            screens.append(label)
 
-        def choose(self, title, options, default=0, note=""):
+        def multiselect(self, title, options, selected=None, **settings):
+            screens.append(title)
+            if title == "Select providers":
+                assert selected == {0, 1}
+                return {0, 1}
+            return {0}
+
+        def select(self, title, options, default=0):
             screens.append(title)
             return 0
 
-        def message(self, title, lines):
-            screens.append(title)
+        def outro(self, message):
+            screens.append(message)
 
     class FakeInstaller:
         def __init__(self, available, target, store):
@@ -78,8 +82,88 @@ def test_catalogue_picks_tools_on_one_screen_and_defaults_to_both_platforms(monk
     wire_menu(monkeypatch, [aboard], FakeUI, FakeInstaller)
 
     assert cli.catalogue_menu() == 0
-    assert screens == ["Harness catalogue", "Harness catalogue"]
+    assert screens == [
+        "harness",
+        "Select providers",
+        "Installation scope",
+        "Select packages",
+        "Catalogue already matches that selection.",
+    ]
     assert planned == {Platform.CLAUDE: {"aboard"}, Platform.CHATGPT: {"aboard"}}
+
+
+def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monkeypatch):
+    aboard = discover()["aboard"]
+    auto = discover()["auto"]
+    events = []
+    reconciled = {}
+
+    class FakeUI:
+        def __init__(self, read_key):
+            pass
+
+        def intro(self, label):
+            events.append(("intro", label))
+
+        def multiselect(self, title, options, selected=None, **settings):
+            events.append(("multiselect", title, [option.label for option in options], settings))
+            if title == "Select providers":
+                return {0, 1}
+            return set(range(len(options)))
+
+        def select(self, title, options, default=0):
+            events.append(("select", title, [option.label for option in options]))
+            return 0
+
+        def note(self, title, lines):
+            events.append(("note", title, tuple(lines)))
+
+        def confirm(self, title, default=True):
+            events.append(("confirm", title))
+            return True
+
+        def progress(self, active, complete, action):
+            events.append(("progress", active, complete))
+            return action()
+
+        def outro(self, message):
+            events.append(("outro", message))
+
+    class FakeInstaller:
+        def __init__(self, available, target, store):
+            self.target = target
+
+        def plan(self, requested):
+            return [], [cli.Change("install", name, "selected") for name in requested]
+
+        def reconcile(self, requested):
+            reconciled[self.target.platform] = requested
+
+    wire_menu(monkeypatch, [aboard, auto], FakeUI, FakeInstaller)
+
+    assert cli.catalogue_menu() == 0
+    assert [event[:2] for event in events] == [
+        ("intro", "harness"),
+        ("multiselect", "Select providers"),
+        ("select", "Installation scope"),
+        ("multiselect", "Select packages"),
+        ("note", "Installation Summary"),
+        ("confirm", "Proceed with changes?"),
+        ("progress", "Applying catalogue changes"),
+        ("outro", "Done!  Review installed packages before use."),
+    ]
+    provider_event = events[1]
+    assert provider_event[2] == ["Claude Code", "ChatGPT"]
+    package_event = events[3]
+    assert package_event[2] == ["aboard"]
+    assert [(option.label, option.detail) for option in cli._provider_options()] == [
+        ("Claude Code", ""),
+        ("ChatGPT", ""),
+    ]
+    assert reconciled == {
+        Platform.CLAUDE: {"aboard"},
+        Platform.CHATGPT: {"aboard"},
+    }
 
 
 def test_already_installed_packages_start_selected(monkeypatch):
@@ -90,12 +174,20 @@ def test_already_installed_packages_start_selected(monkeypatch):
         def __init__(self, read_key):
             pass
 
-        def picker(self, title, options, selected=None, toggles=(), confirm="Install"):
+        def intro(self, label):
+            pass
+
+        def multiselect(self, title, options, selected=None, **settings):
+            if title == "Select providers":
+                return {0, 1}
             seen["selected"] = selected
             seen["installed"] = {option.label for option in options if option.installed}
-            return PickerResult("cancel", set())
+            return None
 
-        def message(self, title, lines):
+        def select(self, title, options, default=0):
+            return 0
+
+        def outro(self, message):
             pass
 
     wire_menu(monkeypatch, [aboard], FakeUI, None, installed={"aboard"})
@@ -104,33 +196,48 @@ def test_already_installed_packages_start_selected(monkeypatch):
     assert seen == {"selected": {0}, "installed": {"aboard"}}
 
 
-def test_scope_and_platform_toggles_re_enter_the_same_screen(monkeypatch):
+def test_provider_and_scope_prompts_define_the_install_target(monkeypatch):
     aboard = discover()["aboard"]
-    toggled = []
+    planned = []
 
     class FakeUI:
         def __init__(self, read_key):
             pass
 
-        def picker(self, title, options, selected=None, toggles=(), confirm="Install"):
-            toggled.append(tuple(toggle.value for toggle in toggles))
-            if len(toggled) == 1:
-                return PickerResult("toggle", set(), 0)
-            if len(toggled) == 2:
-                return PickerResult("toggle", set(), 1)
-            return PickerResult("cancel", set())
-
-        def message(self, title, lines):
+        def intro(self, label):
             pass
 
-    wire_menu(monkeypatch, [aboard], FakeUI, None)
+        def multiselect(self, title, options, selected=None, **settings):
+            return {1} if title == "Select providers" else {0}
+
+        def select(self, title, options, default=0):
+            assert [(option.label, option.detail) for option in options] == [
+                (
+                    "Project",
+                    "Install in current directory (committed with your project)",
+                ),
+                (
+                    "Global",
+                    "Install in home directory (available across all projects)",
+                ),
+            ]
+            return 1
+
+        def outro(self, message):
+            pass
+
+    class FakeInstaller:
+        def __init__(self, available, target, store):
+            self.target = target
+
+        def plan(self, requested):
+            planned.append((self.target.platform, self.target.is_user, requested))
+            return [], []
+
+    wire_menu(monkeypatch, [aboard], FakeUI, FakeInstaller)
 
     assert cli.catalogue_menu() == 0
-    assert toggled == [
-        ("This project", "Claude + ChatGPT"),
-        ("This user", "Claude + ChatGPT"),
-        ("This user", "Claude Code only"),
-    ]
+    assert planned == [(Platform.CHATGPT, True, {"aboard"})]
 
 
 def test_catalogue_rows_are_grouped_by_category_in_reading_order():
@@ -139,11 +246,43 @@ def test_catalogue_rows_are_grouped_by_category_in_reading_order():
     categories = list(dict.fromkeys(cli._category(tool) for tool in ordered))
 
     assert categories[0] == "planning"
-    assert categories[-1] == "deprecated"
+    assert categories[-1] == "extension"
 
 
-def test_aboard_is_labelled_cross_platform():
-    assert cli._compatibility(discover()["aboard"]) == "Claude + ChatGPT"
+def test_catalogue_only_labels_unsupported_selected_providers():
+    tools = discover()
+    options = {
+        tool.name: option
+        for tool, option in zip(
+            (tools["aboard"], tools["on-edit-block"]),
+            cli._tool_options(
+                [tools["aboard"], tools["on-edit-block"]],
+                set(),
+                (Platform.CLAUDE, Platform.CHATGPT),
+            ),
+        )
+    }
+
+    assert options["aboard"].badge == ""
+    assert options["on-edit-block"].badge == "ChatGPT not supported"
+    claude_only = cli._tool_options(
+        [tools["on-edit-block"]], set(), (Platform.CLAUDE,)
+    )
+    assert claude_only[0].badge == ""
+
+
+def test_review_scope_does_not_leak_the_installation_path(tmp_path):
+    target = Target.for_project(tmp_path, Platform.CLAUDE)
+
+    lines = cli._review_lines(
+        [discover()["aboard"]],
+        {"aboard"},
+        [target],
+        {Platform.CLAUDE: []},
+    )
+
+    assert lines[0] == "  Install to  Project"
+    assert str(tmp_path) not in "\n".join(lines)
 
 
 def test_dependencies_install_transitively_and_receipts_track_ownership(tmp_path):

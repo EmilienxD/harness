@@ -17,32 +17,10 @@ from harness_cli.installer import (
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform, get_adapter
 from harness_cli.receipts import ReceiptStore
-from harness_cli.tui import MenuOption, PickerResult, TerminalUI, Toggle, terminal_keys
+from harness_cli.tui import MenuOption, TerminalUI, terminal_keys
 
 
-PLATFORM_CHOICES = (
-    (Platform.CLAUDE, Platform.CHATGPT),
-    (Platform.CLAUDE,),
-    (Platform.CHATGPT,),
-)
-PLATFORM_LABELS = ("Claude + ChatGPT", "Claude Code only", "ChatGPT only")
-SCOPE_LABELS = ("This project", "This user")
-
-
-def _compatibility(tool: Tool) -> str:
-    claude = tool.support_for(Platform.CLAUDE)
-    chatgpt = tool.support_for(Platform.CHATGPT)
-    if claude.status is SupportStatus.SUPPORTED and chatgpt.status is SupportStatus.SUPPORTED:
-        return "Claude + ChatGPT"
-    if claude.status is SupportStatus.SUPPORTED:
-        if chatgpt.status is SupportStatus.REPLACEMENT:
-            return f"Claude; ChatGPT alternative: {chatgpt.replacement}"
-        return "Claude only"
-    if chatgpt.status is SupportStatus.SUPPORTED:
-        if claude.status is SupportStatus.REPLACEMENT:
-            return f"ChatGPT; Claude alternative: {claude.replacement}"
-        return "ChatGPT only"
-    return "Unavailable"
+PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
 
 
 # Reading order for the catalogue: the workflow categories first, then the
@@ -71,17 +49,39 @@ def _category_rank(tool: Tool) -> tuple[int, str]:
     return 1, category
 
 
-def _tool_options(tools: list[Tool], installed: set[str]) -> list[MenuOption]:
+def _tool_options(
+    tools: list[Tool],
+    installed: set[str],
+    platforms: tuple[Platform, ...] = PLATFORMS,
+) -> list[MenuOption]:
     return [
         MenuOption(
             label=tool.name,
             detail=tool.description,
             group=_category(tool),
-            badge=_compatibility(tool),
+            badge="; ".join(
+                f"{get_adapter(platform).product_name} not supported"
+                for platform in platforms
+                if tool.support_for(platform).status is not SupportStatus.SUPPORTED
+            ),
             installed=tool.name in installed,
         )
         for tool in tools
     ]
+
+
+def _provider_options() -> tuple[MenuOption, ...]:
+    return tuple(
+        MenuOption(get_adapter(platform).product_name)
+        for platform in PLATFORMS
+    )
+
+
+def _cancel(ui: TerminalUI) -> None:
+    """Render a consistent cancellation status, including for test doubles."""
+
+    handler = getattr(ui, "cancelled", ui.outro)
+    handler("Installation cancelled.  No changes made.")
 
 
 def _targets(scope: int, platforms: tuple[Platform, ...]) -> list[Target]:
@@ -123,7 +123,7 @@ def _review_lines(
     targets: list[Target],
     changes_by_platform: dict[Platform, list[Change]],
 ) -> list[str]:
-    scope = "This user" if targets[0].is_user else str(targets[0].scope_root)
+    scope = "Global" if targets[0].is_user else "Project"
     platforms = ", ".join(target.adapter.product_name for target in targets)
     lines = [f"  Install to  {scope}", f"  Platforms   {platforms}", ""]
     for target in targets:
@@ -150,87 +150,96 @@ def _review_lines(
     return lines
 
 
-def _pick(
-    ui: TerminalUI, tools: list[Tool], selected: set[str], installed: set[str], scope: int, platform: int
-) -> PickerResult:
-    return ui.picker(
-        "Harness catalogue",
-        _tool_options(tools, installed),
-        {index for index, tool in enumerate(tools) if tool.name in selected},
-        (
-            Toggle("p", "Install to", SCOPE_LABELS[scope], str(Path.cwd()) if scope == 0 else "Available across projects"),
-            Toggle("t", "Platforms", PLATFORM_LABELS[platform], "Unsupported tools are skipped per platform"),
-        ),
-        confirm="Apply",
-    )
-
-
 def catalogue_menu() -> int:
     if not sys.stdin.isatty():
         raise InstallError("the catalogue is interactive; run `harness` in a terminal")
     available = discover()
-    tools = sorted(available.values(), key=lambda tool: (_category_rank(tool), tool.name))
+    tools = sorted(
+        (tool for tool in available.values() if tool.selectable),
+        key=lambda tool: (_category_rank(tool), tool.name),
+    )
     store = ReceiptStore.load()
-    scope = 0
-    platform_index = 0
-    selected_names: set[str] | None = None
-
     with terminal_keys() as read_key:
         ui = TerminalUI(read_key)
-        while True:
-            targets = _targets(scope, PLATFORM_CHOICES[platform_index])
-            installed = _explicit_packages(targets, store)
-            if selected_names is None:
-                selected_names = set(installed)
+        ui.intro("harness")
 
-            result = _pick(ui, tools, selected_names, installed, scope, platform_index)
-            selected_names = {tools[index].name for index in result.selected}
-            if result.action == "cancel":
-                ui.message("Harness catalogue", ["Cancelled. No changes made."])
-                return 0
-            if result.action == "toggle":
-                if result.toggle == 0:
-                    scope = (scope + 1) % len(SCOPE_LABELS)
-                else:
-                    platform_index = (platform_index + 1) % len(PLATFORM_LABELS)
-                continue
+        provider_selection = ui.multiselect(
+            "Select providers",
+            _provider_options(),
+            selected={0, 1},
+            required=True,
+            searchable=False,
+        )
+        if provider_selection is None:
+            _cancel(ui)
+            return 0
 
-            installers = [CatalogueInstaller(available, target, store) for target in targets]
-            requests = {
-                target.platform: {
-                    name
-                    for name in selected_names
-                    if available[name].support_for(target.platform).status is SupportStatus.SUPPORTED
-                }
-                for target in targets
+        platforms = tuple(PLATFORMS[index] for index in sorted(provider_selection))
+        scope = ui.select(
+            "Installation scope",
+            (
+                MenuOption("Project", "Install in current directory (committed with your project)"),
+                MenuOption("Global", "Install in home directory (available across all projects)"),
+            ),
+        )
+        if scope is None:
+            _cancel(ui)
+            return 0
+
+        targets = _targets(scope, platforms)
+        installed = _explicit_packages(targets, store)
+        package_selection = ui.multiselect(
+            "Select packages",
+            _tool_options(tools, installed, platforms),
+            selected={index for index, tool in enumerate(tools) if tool.name in installed},
+            select_all=True,
+            select_groups=True,
+        )
+        if package_selection is None:
+            _cancel(ui)
+            return 0
+        selected_names = {tools[index].name for index in package_selection}
+
+        installers = [CatalogueInstaller(available, target, store) for target in targets]
+        requests = {
+            target.platform: {
+                name
+                for name in selected_names
+                if available[name].support_for(target.platform).status is SupportStatus.SUPPORTED
             }
-            if selected_names and not any(requests.values()):
-                ui.choose(
-                    "No compatible tools",
-                    (MenuOption("Go back", "Choose another platform or tool"),),
-                    note="  None of the selected tools support this platform.",
-                )
-                continue
-
-            changes_by_platform = {}
-            for installer in installers:
-                _, changes = installer.plan(requests[installer.target.platform])
-                changes_by_platform[installer.target.platform] = changes
-            if not any(changes_by_platform.values()):
-                ui.message("Harness catalogue", ["  ✓ Catalogue already matches that selection.", ""])
-                return 0
-            review = _review_lines(tools, selected_names, targets, changes_by_platform)
-            confirmation = ui.choose(
-                "Review changes",
-                (MenuOption("Apply", "Write these changes now"), MenuOption("Go back", "Keep editing the selection")),
-                note="\n".join(review),
+            for target in targets
+        }
+        if selected_names and not any(requests.values()):
+            ui.note(
+                "No compatible packages",
+                ("None of the selected packages support the selected providers.",),
             )
-            if confirmation is None or confirmation == 1:
-                continue
+            _cancel(ui)
+            return 0
+
+        changes_by_platform = {}
+        for installer in installers:
+            _, changes = installer.plan(requests[installer.target.platform])
+            changes_by_platform[installer.target.platform] = changes
+        if not any(changes_by_platform.values()):
+            ui.outro("Catalogue already matches that selection.")
+            return 0
+
+        ui.note(
+            "Installation Summary",
+            _review_lines(tools, selected_names, targets, changes_by_platform),
+        )
+        if ui.confirm("Proceed with changes?") is not True:
+            _cancel(ui)
+            return 0
+
+        def apply_changes() -> None:
             for installer in installers:
                 installer.reconcile(requests[installer.target.platform])
-            ui.message("Harness catalogue", ["  ✓ Catalogue updated.", ""])
-            return 0
+
+        ui.progress("Applying catalogue changes", "Catalogue updated", apply_changes)
+        ui.outro("Done!  Review installed packages before use.")
+        return 0
 
 
 def build_parser() -> argparse.ArgumentParser:

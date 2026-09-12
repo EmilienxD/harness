@@ -87,6 +87,7 @@ class Tool:
     description: str
     root: Path
     files: tuple[FileSpec, ...]
+    selectable: bool = True
     requires: tuple[str, ...] = ()
     gitignore: tuple[str, ...] = ()
     workspace_gitignore: tuple[str, ...] = ()
@@ -332,6 +333,9 @@ def load_tool(directory: Path) -> Tool:
 
     ignores = ignore_entries("gitignore")
     workspace_ignores = ignore_entries("workspace_gitignore")
+    selectable = data.get("selectable", True)
+    if not isinstance(selectable, bool):
+        raise ManifestError(f"{manifest_path}: 'selectable' must be a boolean")
 
     return Tool(
         name=data["name"],
@@ -339,6 +343,7 @@ def load_tool(directory: Path) -> Tool:
         description=data["description"],
         root=directory,
         files=tuple(files),
+        selectable=selectable,
         requires=tuple(data.get("requires", [])),
         gitignore=ignores,
         workspace_gitignore=workspace_ignores,

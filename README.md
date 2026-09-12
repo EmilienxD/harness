@@ -1,8 +1,8 @@
 # Harness
 
 Harness is the canonical catalogue and ephemeral installer for independently selectable agent
-skills and optional apps. The `subagents` catalogue package owns visible Claude Code and ChatGPT
-sessions and their durable delegation state.
+skills, hooks, command-line tools, and optional apps. The `subagents` catalogue package owns
+visible Claude Code and ChatGPT sessions and their durable delegation state.
 
 Run the pinned, ephemeral installer:
 
@@ -16,15 +16,16 @@ selections. There are no separate install, uninstall, list, info, or upgrade com
 same pinned entry point to change or upgrade the installation. If a reconciliation step fails,
 Harness restores the prior files, configuration, receipts, and completed host actions.
 
-Everything is picked on one screen. Tools are grouped by category and start out selected exactly as
-they are currently installed, so the screen always shows what you have before you change it. Arrow
-keys, Page Up/Down, Home, and End move; Space selects; `/` searches; `a` and `n` select or clear
-everything the search currently shows. The action bar is pinned to the bottom of the screen, so
-Enter always applies and Escape always quits, whatever the list is doing. Scope and platform are
-`p` and `t` in the header rather than separate questions. The default platform choice installs for
-both Claude Code and ChatGPT. A tool that supports only one of them is installed only there, and
-the review screen lists every install, upgrade, removal, and skipped target before applying
-changes.
+The installer uses a compact guided flow: choose Claude Code and/or ChatGPT, choose project or user
+scope, then select catalogue packages. Packages are grouped by category and start selected exactly
+as they are installed for that scope and those providers. Compatibility is called out only when a
+selected provider is unsupported. Type to filter the list; Arrow keys, Page Up/Down, Home, and End
+move; Space toggles an item or category; Left and Right collapse or expand categories; and the
+Select All row selects the complete catalogue or clears only newly selected packages, preserving
+packages that were already installed. Enter confirms a step and Escape or Ctrl+C cancels without
+changing the installation. A summary lists every install, upgrade, removal, and skipped target
+before the final confirmation. A package that supports only one chosen provider is installed only
+there.
 
 The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
 Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard
@@ -108,6 +109,8 @@ discovers manifests recursively outside `harness/archive/`, which also lets a pa
 workflow dependencies such as `extension/auto` and the ask/reply components under
 `productivity/subagents`. Manifests may declare platform payloads, executable requirements, package
 dependencies with semantic version constraints, host actions, and starter files.
+Dependency-only manifests set `selectable = false`; they remain available to dependency resolution
+but do not appear as direct choices in the installer.
 
 Harness validates the complete dependency graph and all file claims before writing. Cycles,
 incompatible catalogue versions, unsupported targets, missing executables, and cross-package file
@@ -115,7 +118,8 @@ collisions fail the operation. Receipts record versions, explicit/transitive own
 file digests, settings fragments, and host actions. Removal is dependent-aware and never deletes a
 file changed since installation.
 
-The Aboard package depends unconditionally on `auto` and `issue-readers`. The reader bundle includes
+The Aboard package depends unconditionally on the hidden `auto` package and on `issue-readers`. The
+reader bundle includes
 the intentionally empty `address-this` and `review-this` worker skill placeholders, so initializing
 Aboard installs the implementation and review workflows without also installing issue drafting and
 publishing.
