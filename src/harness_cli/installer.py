@@ -79,8 +79,8 @@ class Target:
 
 
 def _python_command() -> tuple[str, list[str]] | None:
-    if uv := shutil.which("uv"):
-        return uv, ["run", "--no-project", "--no-managed-python"]
+    if shutil.which("uv"):
+        return "uv", ["run", "--no-project", "--no-managed-python"]
     for name in ("python3", "python", "py"):
         if executable := shutil.which(name):
             try:

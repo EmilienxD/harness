@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 from contextlib import nullcontext
 
 import pytest
@@ -210,6 +211,48 @@ def test_workspace_files_can_be_limited_to_project_installs(tmp_path):
         ".harness/agent-launcher/config.py"
     ]
     assert tool.expand("claude", "user") == []
+
+
+def test_installed_hook_definitions_keep_uv_as_a_path_command(tmp_path, monkeypatch):
+    root = tmp_path / "portable-uv"
+    root.mkdir()
+    (root / "hook.py").write_text("pass\n")
+    (root / "claude.json").write_text(json.dumps({
+        "hooks": {"PostToolUse": [{"hooks": [{
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/hook.py"],
+        }]}]},
+    }))
+    (root / "chatgpt.json").write_text(json.dumps({
+        "hooks": {"PostToolUse": [{
+            "type": "command",
+            "command": '${PYTHON} "${HOOKS_DIR}/hook.py"',
+        }]},
+    }))
+    (root / "harness.toml").write_text(
+        'name="portable-uv"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\nfragment="claude.json"\n'
+        '[platforms.chatgpt]\nstatus="supported"\nfragment="chatgpt.json"\n'
+        '[[files]]\nsrc="hook.py"\ndest="hook.py"\nroot="hooks"\n'
+    )
+    tool = load_tool(root)
+    monkeypatch.setattr(
+        "harness_cli.installer.shutil.which",
+        lambda name: "/opt/uv/bin/uv" if name == "uv" else None,
+    )
+
+    claude = Target.for_project(tmp_path / "claude-project", Platform.CLAUDE)
+    manager({tool.name: tool}, claude, tmp_path / "claude-receipts").reconcile({tool.name})
+    claude_hook = claude.read_settings()["hooks"]["PostToolUse"][0]["hooks"][0]
+    assert claude_hook["command"] == "uv"
+    assert claude_hook["args"][:3] == ["run", "--no-project", "--no-managed-python"]
+
+    chatgpt = Target.for_project(tmp_path / "chatgpt-project", Platform.CHATGPT)
+    manager({tool.name: tool}, chatgpt, tmp_path / "chatgpt-receipts").reconcile({tool.name})
+    chatgpt_hook = chatgpt.read_settings()["hooks"]["PostToolUse"][0]
+    assert chatgpt_hook["command"].startswith("uv run --no-project --no-managed-python ")
+    assert "/opt/uv/bin/uv" not in chatgpt_hook["command"]
 
 
 @pytest.mark.parametrize("scopes", ['"project"', '["machine"]', '[]'])
