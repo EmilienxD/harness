@@ -4,7 +4,7 @@ description: Break a plan, spec, or the current conversation into a set of trace
 disable-model-invocation: true
 ---
 
-A `UserPromptSubmit` hook has supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them unless you need another fresh index later in the same turn.
+Use what the user provided alongside the invocation as this skill's input. A provider-specific hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
 
 Break a plan, spec, or conversation into a set of GitHub **issues**: tracer-bullet vertical slices, each declaring the issues that **block** it.
 
@@ -66,8 +66,9 @@ Iterate until the user approves the breakdown. Stop after presenting or revising
 
 ### 5. Write one file per issue
 
-For each approved issue, create `.issues-gateway/<issues-session-id>/issue-{i}.md` where `{i}` starts at `<next-free-issue-index>`
-in the order you plan to publish them (blockers before what they block). Do not spend time checking whether the folder exists or what it already contains — just write the files using multiple Write tool calls in parallel.
+For each approved issue, create `.issues-gateway/<issues-session-id>/issue-{i}.md` where `{i}` is the issue number starting at:
+<next-free-issue-index>
+in the order you plan to publish them (blockers before what they block). Do not spend time checking whether the folder exists or what it already contains — just write all files together.
 
 Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels, defined during mapping, and must contain nothing else:
 
@@ -113,4 +114,4 @@ In "Parent" and "Blocked by", reference other issues drafted in this turn by the
 
 ### 6. Hand off to the user
 
-List the relative file paths you created and tell the user they can review them. They can edit any file directly — title, labels, body, blockers — before publishing. Ask if they want you to make changes. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real.
+List the relative file paths you created and tell the user they can review them. They can edit any file directly — title, labels, body, blockers — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview what would be created without touching the tracker, or without `--dry` to publish for real.

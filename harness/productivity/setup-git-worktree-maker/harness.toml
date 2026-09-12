@@ -1,5 +1,5 @@
 name = "setup-git-worktree-maker"
-version = "1.0.1"
+version = "1.0.2"
 description = "Creates a project-native command for fully initialized Git worktrees"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/setup-git-worktree-maker/SKILL.md"
 
@@ -18,3 +18,9 @@ root = "skills"
 src = "references"
 dest = "setup-git-worktree-maker/references"
 root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "setup-git-worktree-maker/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

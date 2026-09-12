@@ -12,6 +12,7 @@ from harness_cli.host_actions import HostActionError, PreparedAction, prepare
 from harness_cli.manifest import HostAction, ManifestError, discover, load_tool
 from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore
+from harness_cli.tui import PickerResult
 
 
 def manager(tools, target, tmp_path):
@@ -23,30 +24,44 @@ def test_installer_cli_does_not_expose_runtime_commands():
     assert all(action.dest != "command" for action in parser._actions)
 
 
-def test_catalogue_asks_for_tools_before_scope_and_defaults_to_both_platforms(monkeypatch):
-    aboard = discover()["aboard"]
-    questions = []
-    planned = {}
+class InteractiveInput:
+    @staticmethod
+    def isatty():
+        return True
 
-    class InteractiveInput:
-        @staticmethod
-        def isatty():
-            return True
+
+def wire_menu(monkeypatch, tools, ui_factory, installer_factory, installed=()):
+    monkeypatch.setattr(cli.sys, "stdin", InteractiveInput())
+    monkeypatch.setattr(cli, "discover", lambda: {tool.name: tool for tool in tools})
+    monkeypatch.setattr(cli, "terminal_keys", lambda: nullcontext(lambda: ""))
+    monkeypatch.setattr(cli, "TerminalUI", ui_factory)
+    monkeypatch.setattr(cli, "CatalogueInstaller", installer_factory)
+    monkeypatch.setattr(cli.ReceiptStore, "load", lambda: object())
+    monkeypatch.setattr(
+        cli, "installed_packages", lambda target, store: {name: {"explicit": True} for name in installed}
+    )
+
+
+def test_catalogue_picks_tools_on_one_screen_and_defaults_to_both_platforms(monkeypatch):
+    aboard = discover()["aboard"]
+    screens = []
+    planned = {}
 
     class FakeUI:
         def __init__(self, read_key):
             pass
 
-        def checklist(self, title, options, selected):
-            questions.append(title)
-            return {0}
+        def picker(self, title, options, selected=None, toggles=(), confirm="Install"):
+            screens.append(title)
+            assert [toggle.key for toggle in toggles] == ["p", "t"]
+            return PickerResult("confirm", {0})
 
         def choose(self, title, options, default=0, note=""):
-            questions.append(title)
+            screens.append(title)
             return 0
 
         def message(self, title, lines):
-            questions.append(title)
+            screens.append(title)
 
     class FakeInstaller:
         def __init__(self, available, target, store):
@@ -59,21 +74,71 @@ def test_catalogue_asks_for_tools_before_scope_and_defaults_to_both_platforms(mo
         def reconcile(self, requested):
             raise AssertionError("nothing should be reconciled when there are no changes")
 
-    monkeypatch.setattr(cli.sys, "stdin", InteractiveInput())
-    monkeypatch.setattr(cli, "discover", lambda: {aboard.name: aboard})
-    monkeypatch.setattr(cli, "terminal_keys", lambda: nullcontext(lambda: ""))
-    monkeypatch.setattr(cli, "TerminalUI", FakeUI)
-    monkeypatch.setattr(cli, "CatalogueInstaller", FakeInstaller)
-    monkeypatch.setattr(cli.ReceiptStore, "load", lambda: object())
+    wire_menu(monkeypatch, [aboard], FakeUI, FakeInstaller)
 
     assert cli.catalogue_menu() == 0
-    assert questions[:4] == [
-        "Choose tools",
-        "Where should Harness install them?",
-        "Which agent platforms?",
-        "Review installation",
-    ]
+    assert screens == ["Harness catalogue", "Harness catalogue"]
     assert planned == {Platform.CLAUDE: {"aboard"}, Platform.CHATGPT: {"aboard"}}
+
+
+def test_already_installed_packages_start_selected(monkeypatch):
+    aboard = discover()["aboard"]
+    seen = {}
+
+    class FakeUI:
+        def __init__(self, read_key):
+            pass
+
+        def picker(self, title, options, selected=None, toggles=(), confirm="Install"):
+            seen["selected"] = selected
+            seen["installed"] = {option.label for option in options if option.installed}
+            return PickerResult("cancel", set())
+
+        def message(self, title, lines):
+            pass
+
+    wire_menu(monkeypatch, [aboard], FakeUI, None, installed={"aboard"})
+
+    assert cli.catalogue_menu() == 0
+    assert seen == {"selected": {0}, "installed": {"aboard"}}
+
+
+def test_scope_and_platform_toggles_re_enter_the_same_screen(monkeypatch):
+    aboard = discover()["aboard"]
+    toggled = []
+
+    class FakeUI:
+        def __init__(self, read_key):
+            pass
+
+        def picker(self, title, options, selected=None, toggles=(), confirm="Install"):
+            toggled.append(tuple(toggle.value for toggle in toggles))
+            if len(toggled) == 1:
+                return PickerResult("toggle", set(), 0)
+            if len(toggled) == 2:
+                return PickerResult("toggle", set(), 1)
+            return PickerResult("cancel", set())
+
+        def message(self, title, lines):
+            pass
+
+    wire_menu(monkeypatch, [aboard], FakeUI, None)
+
+    assert cli.catalogue_menu() == 0
+    assert toggled == [
+        ("This project", "Claude + ChatGPT"),
+        ("This user", "Claude + ChatGPT"),
+        ("This user", "Claude Code only"),
+    ]
+
+
+def test_catalogue_rows_are_grouped_by_category_in_reading_order():
+    tools = discover()
+    ordered = sorted(tools.values(), key=lambda tool: (cli._category_rank(tool), tool.name))
+    categories = list(dict.fromkeys(cli._category(tool) for tool in ordered))
+
+    assert categories[0] == "planning"
+    assert categories[-1] == "deprecated"
 
 
 def test_aboard_is_labelled_cross_platform():
@@ -346,13 +411,16 @@ def test_every_catalogue_manifest_loads():
         "improve-codebase-architecture", "senior-advisor",
     }.isdisjoint(tools)
     expected_categories = {
-        "planning": {"audit", "breakdown-help-wanted-issue", "grill-me", "prototype", "websearch"},
+        "planning": {
+            "audit", "breakdown-help-wanted-issue", "grill-me", "lavish", "prototype",
+            "read-all-adrs", "websearch",
+        },
+        "engineering": {"resolving-merge-conflicts"},
         "building": {"issue-readers", "issue-writers", "tdd"},
-        "shipping": {"commit"},
+        "shipping": {"commit", "setup-help"},
         "productivity": {
-            "agent-launcher", "caveman", "command-aliases", "handoff", "report-gotchas", "subagents",
-            "setup-git-worktree-maker", "text-replacements", "todo-hitl", "writing-for-agents",
-            "zoom-out",
+            "agent-launcher", "caveman", "command-aliases", "handoff", "decisions", "report-gotchas", "subagents", "next-decision",
+            "setup-git-worktree-maker", "text-replacements", "todo-hitl", "writing-for-agents", "stop-overthinking", "zoom-out",
         },
         "guards": {
             "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",

@@ -12,3 +12,9 @@ status = "supported"
 src = "SKILL.md"
 dest = "text-replacements/SKILL.md"
 root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "text-replacements/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

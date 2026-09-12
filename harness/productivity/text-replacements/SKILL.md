@@ -1,6 +1,7 @@
 ---
 name: text-replacements
 description: Add or change always-on AutoHotkey text replacements when the user asks for a new trigger or expansion.
+disable-model-invocation: true
 ---
 
 Update the AutoHotkey startup script at `A_Startup\CodingHotstrings.ahk` (`A_Startup` is AutoHotkey's per-user Startup folder).

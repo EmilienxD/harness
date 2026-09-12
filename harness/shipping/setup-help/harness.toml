@@ -1,0 +1,21 @@
+name = "setup-help"
+version = "1.0.0"
+description = "Guides users through setup one step at a time"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/shipping/setup-help/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "setup-help/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "setup-help/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

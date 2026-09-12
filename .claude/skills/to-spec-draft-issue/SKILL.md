@@ -4,7 +4,7 @@ description: Turn the current conversation into a spec, as a draft issue — no 
 disable-model-invocation: true
 ---
 
-A `UserPromptSubmit` hook has supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them unless you need another fresh index later in the same turn.
+Use what the user provided alongside the invocation as this skill's input. A provider-specific hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
 
 Turn the current conversation context and codebase understanding into a single GitHub **spec issue**. Do NOT interview the user; just synthesize what you already know.
 
@@ -30,7 +30,7 @@ If the feature is too unclear to write a useful spec, say what is missing instea
 ### 2. Write 1 file
 
 Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
-`<next-free-issue-index>`
+<next-free-issue-index>
 
 Do not spend time checking whether the folder exists or what it already contains — just write the file.
 
@@ -112,4 +112,5 @@ Examples:
 
 ### 3. Hand off to the user
 
-Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention they can run `/publish-issues --dry` first to preview what would be created without touching the tracker, or `/publish-issues` to publish for real.
+Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview what would be created without touching the tracker, or without `--dry` to publish for real.
+

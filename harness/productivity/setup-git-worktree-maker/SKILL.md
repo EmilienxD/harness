@@ -1,6 +1,7 @@
 ---
 name: setup-git-worktree-maker
 description: Create or update a repository-specific, agent-free command that creates and fully initializes Git worktrees. Use when setting up reusable worktree automation for a project; optional arguments describe copied files, setup commands, or script preferences, not a branch to create now.
+disable-model-invocation: true
 ---
 
 # Set Up a Git Worktree Maker

@@ -1,9 +1,10 @@
 ---
 name: draft-audit-issues
 description: Turn an existing codebase audit into one evidence-preserving GitHub issue draft per finding, ready for review and publication through the issues gateway.
+disable-model-invocation: true
 ---
 
-The invocation's surrounding user text is this skill's input. A `UserPromptSubmit` hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as developer context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
+Use what the user provided alongside the invocation as this skill's input. A provider-specific hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
 
 Turn the findings from an existing audit into GitHub issue drafts. Preserve a strict one-finding-to-one-issue mapping and the audit's evidence-oriented format.
 
@@ -50,7 +51,7 @@ State the issue count and confirm that it equals the included finding count. Ask
 
 ## 4. Write one file per finding
 
-Create `.issues-gateway/<issues-session-id>/issue-{i}.md`, beginning with `<next-free-issue-index>`. Number consecutive files in audit finding order unless real dependencies require blockers first. Write all files in one `apply_patch` call. Do not inspect the gateway directory; the hook prepared it and selected the first free index.
+Create `.issues-gateway/<issues-session-id>/issue-{i}.md`, beginning with `<next-free-issue-index>`. Number consecutive files in audit finding order unless real dependencies require blockers first. Write all files together. Do not inspect the gateway directory; the hook prepared it and selected the first free index.
 
 Use this template, omitting optional sections that do not apply:
 
@@ -97,4 +98,4 @@ For relationships between drafts from this turn, use the plain `<issues-session-
 
 ## 5. Hand off
 
-List the relative draft paths and confirm the number of files equals the number of included audit findings. Tell the user the drafts are reviewable and editable. Mention `$publish-issues --dry` for a non-mutating preview and `$publish-issues` to publish.
+List the relative draft paths and confirm the number of files equals the number of included audit findings. Tell the user the drafts are reviewable and editable. Mention invoking `publish-issues` with `--dry` for a non-mutating preview or without `--dry` to publish.

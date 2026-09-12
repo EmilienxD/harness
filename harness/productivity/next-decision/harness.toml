@@ -1,0 +1,21 @@
+name = "next-decision"
+version = "1.0.1"
+description = "Resolves a plan's open decisions one at a time with focused choices and a recommendation"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/next-decision/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "next-decision/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "next-decision/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

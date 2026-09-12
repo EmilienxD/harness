@@ -16,15 +16,27 @@ selections. There are no separate install, uninstall, list, info, or upgrade com
 same pinned entry point to change or upgrade the installation. If a reconciliation step fails,
 Harness restores the prior files, configuration, receipts, and completed host actions.
 
-Use the arrow keys to move, Enter to toggle or select, and Escape to return to the previous
-question. Tool selection comes first, followed by scope and platform. The default platform choice
-installs for both Claude Code and ChatGPT. A tool that supports only one of them is installed only
-there, and the review explains every skipped target before applying changes.
+Everything is picked on one screen. Tools are grouped by category and start out selected exactly as
+they are currently installed, so the screen always shows what you have before you change it. Arrow
+keys, Page Up/Down, Home, and End move; Space selects; `/` searches; `a` and `n` select or clear
+everything the search currently shows. The action bar is pinned to the bottom of the screen, so
+Enter always applies and Escape always quits, whatever the list is doing. Scope and platform are
+`p` and `t` in the header rather than separate questions. The default platform choice installs for
+both Claude Code and ChatGPT. A tool that supports only one of them is installed only there, and
+the review screen lists every install, upgrade, removal, and skipped target before applying
+changes.
 
 The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
 Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard
 is a verified release artifact, not part of the Python wheel. Its manifest pins the URL, byte size,
 and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
+
+The planning catalogue also includes `lavish`, which turns plans, comparisons, diagrams, reports,
+and other visual responses into browser-based HTML artifacts that users can annotate and return for
+feedback.
+New standalone skills include Productivity's `stop-overthinking`, Planning's `read-all-adrs`, and
+Shipping's `setup-help`, all for Claude Code and ChatGPT.
+Engineering's `resolving-merge-conflicts` helps resolve in-progress Git merge and rebase conflicts.
 
 The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
 It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
@@ -122,6 +134,7 @@ harness/archive/         archived packages excluded from catalogue discovery
 src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
 harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
 harness/productivity/setup-git-worktree-maker/ project-native Git worktree command skill
+harness/planning/lavish/ browser-based HTML artifact and annotation workflow
 tests/unit/              behavioural and install round-trip coverage
 tests/e2e/               reusable real-CLI and loopback-endpoint E2E core
 apps/aboard/             intended monorepo location for the Aboard extension

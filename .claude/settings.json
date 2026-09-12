@@ -5,13 +5,83 @@
         "hooks": [
           {
             "type": "command",
+            "timeout": 120,
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "args": [
+              "run",
+              "--no-project",
+              "--no-managed-python",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/address_issue_UserPromptSubmit_hook.py"
+            ]
+          },
+          {
+            "type": "command",
+            "timeout": 60,
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "args": [
+              "run",
+              "--no-project",
+              "--no-managed-python",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/review_issue_UserPromptSubmit_hook.py"
+            ]
+          },
+          {
+            "type": "command",
             "timeout": 300,
-            "command": "uv",
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
             "args": [
               "run",
               "--no-project",
               "--no-managed-python",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"
+            ]
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "args": [
+              "run",
+              "--no-project",
+              "--no-managed-python",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/copy_message_as_issue.py"
+            ]
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "args": [
+              "run",
+              "--no-project",
+              "--no-managed-python",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/copy_message_as_issue.py"
+            ]
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "args": [
+              "run",
+              "--no-project",
+              "--no-managed-python",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/copy_message_as_issue.py"
             ]
           }
         ]

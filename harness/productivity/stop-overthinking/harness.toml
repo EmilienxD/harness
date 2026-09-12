@@ -1,0 +1,21 @@
+name = "stop-overthinking"
+version = "1.0.0"
+description = "Stops overthinking and gives a short, practical decision"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/stop-overthinking/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "stop-overthinking/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "stop-overthinking/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
