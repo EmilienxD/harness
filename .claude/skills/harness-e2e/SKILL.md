@@ -2,7 +2,7 @@
 
 name: harness-e2e
 
-description: Operate, diagnose, or extend Harness's deterministic real-CLI E2E infrastructure and tool journeys, including Aboard's adapter and the shared disposable GitHub fixture. Use for work under root tests/e2e/, apps/aboard/e2e/, or the harness-e2e runtime; not for ordinary unit or extension tests.
+description: Operate, diagnose, or extend Harness's deterministic real-CLI E2E infrastructure and tool journeys, including Aboard's adapter and the shared disposable GitHub fixture. Use for work under root tests/e2e/, apps/aboard/test/e2e/, or the harness-e2e runtime; not for ordinary unit or extension tests.
 
 ---
 
@@ -32,7 +32,7 @@ Read the implementation at the boundary being changed:
 
 * `tests/e2e/README.md`: current ownership and commands.
 
-* `apps/aboard/e2e/`: Aboard-only repository lifecycle, fixture, scenario catalog, Responses endpoint scenarios, extension hosts, bridge lifecycle, and Auto Run orchestration.
+* `apps/aboard/test/e2e/`: Aboard-only repository lifecycle, fixture, scenario catalog, Responses endpoint scenarios, extension hosts, bridge lifecycle, and Auto Run orchestration.
 
 For Aboard work, read [references/aboard.md](references/aboard.md) before changing its adapter, runtime repository, or external journeys.
 

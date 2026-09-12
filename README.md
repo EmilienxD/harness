@@ -152,4 +152,4 @@ uv run pytest
 uv run harness --help
 ```
 
-Reusable end-to-end infrastructure and tool journeys are documented in [`tests/e2e/README.md`](tests/e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/e2e/`.
+Reusable end-to-end infrastructure and tool journeys are documented in [`tests/e2e/README.md`](tests/e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/test/e2e/`.

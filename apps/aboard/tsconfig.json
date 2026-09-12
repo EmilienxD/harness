@@ -20,8 +20,8 @@
   },
   "include": [
     "src/**/*.ts",
-    "test/**/*.ts",
-    "e2e/**/*.ts",
+    "test/unit/**/*.ts",
+    "test/e2e/**/*.ts",
     "../../tests/e2e/core/**/*.ts"
   ]
 }

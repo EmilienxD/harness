@@ -1,21 +1,21 @@
 # Aboard E2E adapter
 
-Read this reference for work under apps/aboard/e2e/ or against the disposable harness-e2e repository.
+Read this reference for work under apps/aboard/test/e2e/ or against the disposable harness-e2e repository.
 
 ## Ownership and sources
 
 Aboard consumes the Harness core; it does not own generic Claude/Codex launch or Anthropic transport code.
 
-- apps/aboard/e2e/config.ts: Aboard repository/runtime configuration.
-- apps/aboard/e2e/repository.ts: bootstrap, reset, labels, ownership, and canonical seed.
-- apps/aboard/e2e/scenario.ts: Aboard Claude scenario catalog and history transitions.
-- apps/aboard/e2e/server.ts: thin wiring to e2e/core/anthropic-server.ts.
-- apps/aboard/e2e/smoke.ts: fixture assertions using e2e/core/claude.ts.
-- apps/aboard/e2e/codex-server.ts: Aboard-specific Responses scenarios for lifecycle, guards, reviews, and Auto Run.
-- apps/aboard/e2e/chatgpt.ts: Aboard ChatGPT journey using shared Codex helpers.
-- apps/aboard/e2e/vscode/: extension-host and Auto Run journeys.
-- apps/aboard/e2e/fixture/repository/: canonical minimal repository bytes.
-- apps/aboard/test/e2e-*.test.ts: fast adapter, protocol, safety, and redaction tests.
+- apps/aboard/test/e2e/config.ts: Aboard repository/runtime configuration.
+- apps/aboard/test/e2e/repository.ts: bootstrap, reset, labels, ownership, and canonical seed.
+- apps/aboard/test/e2e/scenario.ts: Aboard Claude scenario catalog and history transitions.
+- apps/aboard/test/e2e/server.ts: thin wiring to e2e/core/anthropic-server.ts.
+- apps/aboard/test/e2e/smoke.ts: fixture assertions using e2e/core/claude.ts.
+- apps/aboard/test/e2e/codex-server.ts: Aboard-specific Responses scenarios for lifecycle, guards, reviews, and Auto Run.
+- apps/aboard/test/e2e/chatgpt.ts: Aboard ChatGPT journey using shared Codex helpers.
+- apps/aboard/test/e2e/vscode/: extension-host and Auto Run journeys.
+- apps/aboard/test/e2e/fixture/repository/: canonical minimal repository bytes.
+- apps/aboard/test/unit/e2e-*.test.ts: fast adapter, protocol, safety, and redaction tests.
 
 Keep Aboard markers, GitHub orchestration, VS Code behavior, and canonical fixtures here. Put reusable protocol validation, loopback transport, CLI isolation, and process execution in e2e/core/.
 

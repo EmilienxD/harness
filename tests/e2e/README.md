@@ -10,7 +10,7 @@ This directory owns the reusable deterministic E2E infrastructure for Harness to
 - `core/codex.ts` owns Codex CLI compatibility checks, deterministic `CODEX_HOME` creation, and bounded process execution.
 - `tools/<tool>/` owns a tool-specific scenario and journey. It may use the checked-in tool payload but must not depend on an app.
 
-App-specific repository fixtures, GitHub lifecycle, extension-host journeys, and scenario catalogs stay with their app. Aboard's adapter is in `apps/aboard/e2e/`.
+App-specific repository fixtures, GitHub lifecycle, extension-host journeys, and scenario catalogs stay with their app. Aboard's adapter is in `apps/aboard/test/e2e/`.
 
 Generated config, transcripts, diagnostics, and fixture checkouts must remain outside the repository. Endpoint diagnostics contain structure only and retain `upstreamMode: "forbidden"`.
 

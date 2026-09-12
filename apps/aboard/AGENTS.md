@@ -31,8 +31,8 @@ points.
 - `src/vscode/`: tree views, commands, native UI, terminals, reviews, and activity presentation.
 - `assets/scaffold/`: project files installed into `.abd/`.
 - `assets/runtime/`: extension-owned runtime assets.
-- `test/`: bundled Node unit tests and VS Code integration suite.
-- `e2e/`: deterministic real-CLI and VS Code journeys; use the `harness-e2e` skill here.
+- `test/unit/`: bundled Node unit tests and VS Code integration suite.
+- `test/e2e/`: deterministic real-CLI and VS Code journeys; use the `harness-e2e` skill here.
 - `scripts/package.ts`: VSIX packaging and verification.
 
 ## Session and Runtime Model
@@ -171,7 +171,7 @@ npm run package
 
 Use `npm run test:integration` for unit plus VS Code integration tests. Use `npm run e2e:full` only for the
 complete disposable real-CLI journey. Invoke the `tdd` skill before adding unit or E2E tests, and the
-`harness-e2e` skill for any work under `e2e/`.
+`harness-e2e` skill for any work under `test/e2e/`.
 
 ## Useful References
 
