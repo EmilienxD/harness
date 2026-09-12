@@ -16,10 +16,15 @@ selections. There are no separate install, uninstall, list, info, or upgrade com
 same pinned entry point to change or upgrade the installation. If a reconciliation step fails,
 Harness restores the prior files, configuration, receipts, and completed host actions.
 
-Use the arrow keys to move, Enter to toggle or select, and Escape to return to the previous
-question. Tool selection comes first, followed by scope and platform. The default platform choice
-installs for both Claude Code and ChatGPT. A tool that supports only one of them is installed only
-there, and the review explains every skipped target before applying changes.
+Everything is picked on one screen. Tools are grouped by category and start out selected exactly as
+they are currently installed, so the screen always shows what you have before you change it. Arrow
+keys, Page Up/Down, Home, and End move; Space selects; `/` searches; `a` and `n` select or clear
+everything the search currently shows. The action bar is pinned to the bottom of the screen, so
+Enter always applies and Escape always quits, whatever the list is doing. Scope and platform are
+`p` and `t` in the header rather than separate questions. The default platform choice installs for
+both Claude Code and ChatGPT. A tool that supports only one of them is installed only there, and
+the review screen lists every install, upgrade, removal, and skipped target before applying
+changes.
 
 The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
 Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness"
-version = "0.4.2"
+version = "0.5.0"
 description = "Ephemeral catalogue installer for agent skills, hooks, tools, and apps"
 readme = "README.md"
 requires-python = ">=3.11"
