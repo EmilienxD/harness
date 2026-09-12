@@ -93,7 +93,7 @@ export interface AutoRunGitHub {
 
 export interface AutoRunLauncher {
   runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome>;
-  resumeAutomated?(session: AgentSession, prompt: string, difficulty?: IssueDifficulty, signal?: AbortSignal): Promise<AutomatedLaunchOutcome>;
+  resumeAutomated?(session: AgentSession, prompt: string, difficulty?: IssueDifficulty, signal?: AbortSignal, completionCommitStartingSha?: string): Promise<AutomatedLaunchOutcome>;
   launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles>;
 }
 
@@ -1494,13 +1494,14 @@ export class AutoRunEngine {
     await this.#save(withProgress(this.#current, issue.number, { ...(previous.state === "current" ? previous : {}), state: "current", phase: "implement", beforeSha: startingSha, expectedBranch: this.#workingBranch(issue) }));
     await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha, role: "implementer" });
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
-      ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
+      ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal, issue.disposition === "afk" ? startingSha : undefined)
       : await this.options.launcher.runAutomated({
       type: "implementer",
       issues: [issue.number],
       issueContextDepth: this.#current.settings.issueContextDepth,
       ...(codebaseContext === undefined ? {} : { codebaseContext }),
       description: `address issue ${issue.number}`,
+      ...(issue.disposition === "afk" ? { completionCommitStartingSha: startingSha } : {}),
       ...(issue.chrome === true ? { chrome: true } : {}),
       ...this.#difficulty(issue),
       prompt: `${WORKER_GIT_PROTOCOL} The checked-out branch is for issue #${issue.number}. Work only in the directory you started in; it holds the whole repository. ${issue.disposition === "afk" ? `Finish and verify the requested work, leave the checkout completely clean, and create exactly one commit on top of ${startingSha}.` : "Leave the implementation available for interactive user review in this session. Do not commit during this initial turn. The user will ask you to commit after accepting the work."}${issue.chrome === true ? " Use the required Chrome browser capability to visualize, test, debug." : ""}`,
@@ -1783,12 +1784,13 @@ export class AutoRunEngine {
     const startingSha = await this.#git.headSha(false);
     await this.#journal({ kind: "worker-commit", branch: this.#workingBranch(issue), parentSha: startingSha, role: "reviewer" });
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
-      ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal)
+      ? await this.options.launcher.resumeAutomated(continued, "Continue", issue.difficulty, signal, startingSha)
       : await this.options.launcher.runAutomated({
       type: "reviewer",
       issues: [issue.number],
       pullRequest: prNumber,
       description: `review pull request ${prNumber}`,
+      completionCommitStartingSha: startingSha,
       prompt: `${WORKER_GIT_PROTOCOL} ${exactRange === undefined
         ? "Pin the accepted issue changes in this pull request as the fixed review scope. They are the whole diff to review."
         : `Pin the exact accepted range ${exactRange} as the fixed review scope. It is the whole diff to review.`} Fix straightforward findings yourself. A completed review must create exactly one commit: commit the fixes normally, or create an empty commit when the review completed with no findings. If any unresolved blocker remains, report it and create no commit.`,

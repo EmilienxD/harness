@@ -179,6 +179,7 @@ test("single-branch HITL waits for a deliberate commit before publishing and rev
   assert.equal(context.engine.state()?.phase, "await-commit");
   assert.equal(context.createdPullRequests.length, 0);
   assert.equal(context.launches.length, 1);
+  assert.equal(context.launches[0]?.completionCommitStartingSha, undefined, "the HITL implementer must leave its initial edits uncommitted");
   assert.deepEqual(context.closedTerminals, []);
   await context.git.add();
   await context.git.commit("User accepts", "");
@@ -1382,6 +1383,8 @@ test("a review that finds nothing records an empty completion commit", async () 
   assert.equal(context.pullRequests.get(56)?.state, "merged");
   const landed = [...context.saved].reverse().find((record) => record.progress["34"]?.state === "done")?.progress["34"];
   assert.ok(landed?.state === "done" && landed.result === "landed" && landed.reviewedSha && landed.implementationSha);
+  assert.equal(context.launches[0]?.completionCommitStartingSha, landed.beforeSha);
+  assert.equal(context.launches[1]?.completionCommitStartingSha, landed.implementationSha);
   assert.notEqual(landed.reviewedSha, landed.implementationSha);
 });
 
