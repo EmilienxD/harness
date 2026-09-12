@@ -345,6 +345,23 @@ def test_target_failures_are_structured_and_return_one(tmp_path, monkeypatch, ca
     assert "installed file was modified" in result["results"][0]["error"]
 
 
+def test_multi_platform_failure_leaves_every_target_unchanged(tmp_path, monkeypatch, capsys):
+    state = tmp_path / "state"
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
+    conflicting = tmp_path / ".agents" / "skills" / "caveman" / "SKILL.md"
+    conflicting.parent.mkdir(parents=True)
+    conflicting.write_text("user-owned", encoding="utf-8")
+
+    assert main(["install", "caveman", "--root", str(tmp_path), "--json"]) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert [result["status"] for result in payload["results"]] == ["failed", "failed"]
+    assert not (tmp_path / ".claude" / "skills" / "caveman" / "SKILL.md").exists()
+    assert conflicting.read_text(encoding="utf-8") == "user-owned"
+    assert not (state / "receipts.json").exists()
+
+
 def test_invalid_nested_receipt_is_reported_as_an_operation_error(tmp_path, monkeypatch, capsys):
     state = tmp_path / "state"
     state.mkdir()

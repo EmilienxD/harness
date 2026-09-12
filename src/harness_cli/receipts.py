@@ -6,9 +6,12 @@ import hashlib
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+import portalocker
 
 
 SCHEMA_VERSION = 1
@@ -18,6 +21,19 @@ def receipt_path() -> Path:
     configured = os.environ.get("HARNESS_STATE_DIR")
     root = Path(configured).expanduser() if configured else Path.home() / ".harness"
     return root / "receipts.json"
+
+
+@contextmanager
+def installation_lock(path: Path | None = None, *, timeout: float = 60) -> Iterator[None]:
+    """Exclude other installer processes that share this receipt store."""
+    selected = path or receipt_path()
+    selected.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = selected.with_name(f".{selected.name}.lock")
+    try:
+        with portalocker.Lock(lock_path, mode="a", timeout=timeout):
+            yield
+    except portalocker.exceptions.LockException as exc:
+        raise ValueError(f"could not acquire Harness installer lock {lock_path}: {exc}") from exc
 
 
 def installation_id(scope_root: Path, platform: str) -> str:

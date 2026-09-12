@@ -6,10 +6,17 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
-from harness_cli.installer import CatalogueInstaller, Change, InstallError, Target, installed_packages
+from harness_cli.installer import (
+    CatalogueInstaller,
+    Change,
+    InstallError,
+    Target,
+    installed_packages,
+    reconcile_targets,
+)
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform
-from harness_cli.receipts import ReceiptStore
+from harness_cli.receipts import ReceiptStore, installation_lock
 
 
 SCHEMA_VERSION = 1
@@ -72,15 +79,14 @@ def _emit(payload: dict, as_json: bool) -> None:
 def _apply(planned: list[tuple[CatalogueInstaller, set[str], dict]], dry_run: bool) -> bool:
     if dry_run:
         return True
-    ok = True
-    for installer, selected, result in planned:
-        try:
-            installer.reconcile(selected)
-        except (InstallError, ManifestError, ValueError) as exc:
+    try:
+        reconcile_targets([(installer, selected) for installer, selected, _ in planned])
+    except (InstallError, ManifestError, ValueError) as exc:
+        for _, _, result in planned:
             result["status"] = "failed"
             result["error"] = str(exc)
-            ok = False
-    return ok
+        return False
+    return True
 
 
 def _validate_selectable(names: set[str], available: dict[str, Tool]) -> None:
@@ -430,11 +436,20 @@ def run_info(args: Namespace) -> int:
 
 def run(args: Namespace) -> int:
     if args.operation == "install":
-        return run_install(args)
+        if args.dry_run:
+            return run_install(args)
+        with installation_lock():
+            return run_install(args)
     if args.operation == "uninstall":
-        return run_uninstall(args)
+        if args.dry_run:
+            return run_uninstall(args)
+        with installation_lock():
+            return run_uninstall(args)
     if args.operation == "upgrade":
-        return run_upgrade(args)
+        if args.dry_run:
+            return run_upgrade(args)
+        with installation_lock():
+            return run_upgrade(args)
     if args.operation == "list":
         return run_list(args)
     if args.operation == "info":

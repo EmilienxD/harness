@@ -10,7 +10,7 @@ import pytest
 from harness_cli.catalogue import CatalogueError, resolve_dependencies
 from harness_cli import cli
 from harness_cli.cli import build_parser
-from harness_cli.installer import CatalogueInstaller, Change, InstallError, Target
+from harness_cli.installer import CatalogueInstaller, Change, InstallError, Target, reconcile_targets
 from harness_cli.host_actions import HostActionError, PreparedAction, prepare
 from harness_cli.manifest import HostAction, ManifestError, discover, load_tool
 from harness_cli.platforms import Platform
@@ -39,7 +39,13 @@ def wire_menu(monkeypatch, tools, ui_factory, installer_factory, installed=()):
     monkeypatch.setattr(cli, "discover", lambda: {tool.name: tool for tool in tools})
     monkeypatch.setattr(cli, "terminal_keys", lambda: nullcontext(lambda: ""))
     monkeypatch.setattr(cli, "TerminalUI", ui_factory)
+    monkeypatch.setattr(cli, "installation_lock", nullcontext)
     monkeypatch.setattr(cli, "CatalogueInstaller", installer_factory)
+    monkeypatch.setattr(
+        cli,
+        "reconcile_targets",
+        lambda requests: [installer.reconcile(requested) for installer, requested in requests],
+    )
     monkeypatch.setattr(cli.ReceiptStore, "load", lambda: object())
     monkeypatch.setattr(
         cli, "installed_packages", lambda target, store: {name: {"explicit": True} for name in installed}
@@ -610,6 +616,33 @@ def transactional_package(tmp_path, name, *, action=False):
     return load_tool(root)
 
 
+def test_multi_target_reconciliation_rolls_every_target_back(tmp_path):
+    root = tmp_path / "dual"
+    root.mkdir()
+    (root / "payload").write_text("catalogue")
+    (root / "harness.toml").write_text(
+        'name="dual"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        '[platforms.chatgpt]\nstatus="supported"\n'
+        '[[files]]\nsrc="payload"\ndest="payload.txt"\n'
+    )
+    tool = load_tool(root)
+    project = tmp_path / "project"
+    conflicting = project / ".codex" / "payload.txt"
+    conflicting.parent.mkdir(parents=True)
+    conflicting.write_text("user-owned")
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    claude = CatalogueInstaller({tool.name: tool}, Target.for_project(project, "claude"), store)
+    chatgpt = CatalogueInstaller({tool.name: tool}, Target.for_project(project, "chatgpt"), store)
+
+    with pytest.raises(InstallError, match="unowned file"):
+        reconcile_targets([(claude, {tool.name}), (chatgpt, {tool.name})])
+
+    assert not (project / ".claude" / "payload.txt").exists()
+    assert conflicting.read_text() == "user-owned"
+    assert not store.path.exists()
+
+
 def test_failed_host_action_rolls_back_local_installation(monkeypatch, tmp_path):
     tool = transactional_package(tmp_path, "failing", action=True)
     project = tmp_path / "project"
@@ -794,3 +827,47 @@ def test_vsix_is_verified_before_host_install(monkeypatch):
     broken = HostAction("vscode-extension", {**action.data, "sha256": "0" * 64})
     with pytest.raises(HostActionError, match="SHA-256"):
         prepare(broken)
+
+
+def test_private_github_vsix_uses_the_logged_in_gh_credential(monkeypatch):
+    content = b"private signed release artifact"
+    release_url = (
+        "https://github.com/example/private/releases/download/aboard-v1.2.3/aboard-1.2.3.vsix"
+    )
+    asset_url = "https://api.github.com/repos/example/private/releases/assets/123"
+    requests = []
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr("harness_cli.host_actions.shutil.which", lambda command: f"/bin/{command}")
+    monkeypatch.setattr(
+        "harness_cli.host_actions.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "secret-token\n", ""),
+    )
+
+    def urlopen(request, timeout):
+        requests.append(request)
+        if request.full_url.endswith("/releases/tags/aboard-v1.2.3"):
+            payload = {"assets": [{"name": "aboard-1.2.3.vsix", "url": asset_url}]}
+            return io.BytesIO(json.dumps(payload).encode())
+        assert request.full_url == asset_url
+        assert request.get_header("Authorization") == "Bearer secret-token"
+        assert request.get_header("Accept") == "application/octet-stream"
+        return io.BytesIO(content)
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    action = HostAction(
+        "vscode-extension",
+        {
+            "url": release_url,
+            "size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "extension_id": "aboard.aboard",
+        },
+    )
+
+    prepared = prepare(action)
+    try:
+        assert prepared.artifact.read_bytes() == content
+        assert len(requests) == 2
+    finally:
+        prepared.cleanup()

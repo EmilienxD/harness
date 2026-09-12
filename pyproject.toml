@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "EmilienxD" }]
 keywords = ["claude", "claude-code", "chatgpt", "skills", "hooks", "agent"]
-dependencies = []
+dependencies = ["portalocker>=4.2.0"]
 
 [project.urls]
 Homepage = "https://github.com/EmilienxD/harness"
@@ -22,7 +22,6 @@ harness = "harness_cli.cli:main"
 
 [dependency-groups]
 dev = [
-    "portalocker>=4.2.0",
     "pytest>=8.0",
     "PyYAML>=6.0,<7.0",
 ]

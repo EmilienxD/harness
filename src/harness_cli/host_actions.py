@@ -12,6 +12,7 @@ import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 from harness_cli.manifest import HostAction
 
@@ -20,18 +21,40 @@ class HostActionError(RuntimeError):
     pass
 
 
+def _github_token() -> str | None:
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        return token
+    if shutil.which("gh") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    discovered = result.stdout.strip()
+    return discovered if result.returncode == 0 and discovered else None
+
+
 def _download_request(url: str) -> urllib.request.Request:
     """Build a release download request, authenticating private GitHub assets."""
-    token = os.environ.get("GH_TOKEN")
     match = re.fullmatch(
         r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/]+)", url
     )
-    if not token or not match:
+    if not match:
+        return urllib.request.Request(url)
+    token = _github_token()
+    if not token:
         return urllib.request.Request(url)
     owner, repository, tag, asset_name = match.groups()
     headers = {"Authorization": f"Bearer {token}"}
     metadata_request = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repository}/releases/tags/{tag}",
+        f"https://api.github.com/repos/{owner}/{repository}/releases/tags/{quote(tag)}",
         headers=headers,
     )
     with urllib.request.urlopen(metadata_request, timeout=60) as response:
@@ -94,6 +117,7 @@ def prepare(action: HostAction) -> PreparedAction:
             raise HostActionError("VSIX SHA-256 mismatch")
         return PreparedAction(action, path)
     except Exception as exc:
+        handle.close()
         path.unlink(missing_ok=True)
         if isinstance(exc, HostActionError):
             raise

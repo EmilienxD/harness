@@ -14,11 +14,12 @@ from harness_cli.installer import (
     InstallError,
     Target,
     installed_packages,
+    reconcile_targets,
 )
 from harness_cli.installer_cli import UsageError, run as run_installer_command
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform, get_adapter
-from harness_cli.receipts import ReceiptStore
+from harness_cli.receipts import ReceiptStore, installation_lock
 from harness_cli.tui import MenuOption, TerminalUI, terminal_keys
 
 
@@ -241,8 +242,28 @@ def catalogue_menu() -> int:
             return 0
 
         def apply_changes() -> None:
-            for installer in installers:
-                installer.reconcile(requests[installer.target.platform])
+            with installation_lock():
+                locked_store = ReceiptStore.load()
+                locked_installers = [
+                    CatalogueInstaller(available, target, locked_store)
+                    for target in targets
+                ]
+                locked_changes = {
+                    installer.target.platform: installer.plan(
+                        requests[installer.target.platform]
+                    )[1]
+                    for installer in locked_installers
+                }
+                if locked_changes != changes_by_platform:
+                    raise InstallError(
+                        "installation state changed while awaiting confirmation; run Harness again"
+                    )
+                reconcile_targets(
+                    [
+                        (installer, requests[installer.target.platform])
+                        for installer in locked_installers
+                    ]
+                )
 
         ui.progress("Applying catalogue changes", "Catalogue updated", apply_changes)
         ui.outro("Done!  Review installed packages before use.")

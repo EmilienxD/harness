@@ -64,7 +64,8 @@ discoverable and uninstallable.
 The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
 Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard
 is a verified release artifact, not part of the Python wheel. Its manifest pins the URL, byte size,
-and SHA-256 digest; Harness verifies all three before asking VS Code to install it.
+and SHA-256 digest; Harness verifies all three before asking VS Code to install it. For private GitHub
+releases, Harness uses `GH_TOKEN`, then `GITHUB_TOKEN`, then the active `gh auth` login.
 
 The planning catalogue also includes `lavish`, which turns plans, comparisons, diagrams, reports,
 and other visual responses into browser-based HTML artifacts that users can annotate and return for

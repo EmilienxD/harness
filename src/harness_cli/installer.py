@@ -351,7 +351,30 @@ class CatalogueInstaller:
                 changes.append(Change("update", item.tool.name, "missing installed files"))
         return resolved, changes
 
-    def reconcile(self, requested_names: set[str]) -> list[Change]:
+    def _local_paths(self, resolved: list[ResolvedPackage]) -> set[Path]:
+        packages = self.installation["packages"]
+        paths = {self.target.settings_path, self.target.gitignore_path}
+        paths.update(
+            Path(record["path"])
+            for receipt in packages.values()
+            for record in receipt.get("files", [])
+        )
+        paths.update(
+            self.target.destination_path(payload.root, payload.dest)
+            for item in resolved
+            for payload in self._payloads(item.tool)
+        )
+        return paths
+
+    def reconcile(
+        self,
+        requested_names: set[str],
+        *,
+        _transaction: _LocalTransaction | None = None,
+        _host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
+        _persist: bool = True,
+        _deferred_cleanup: list[PreparedAction] | None = None,
+    ) -> list[Change]:
         resolved, changes = self.plan(requested_names)
         desired = {item.tool.name: item for item in resolved}
         packages = self.installation["packages"]
@@ -400,22 +423,14 @@ class CatalogueInstaller:
 
         prepared: dict[str, list[PreparedAction]] = {}
         rollback_prepared: dict[str, list[PreparedAction]] = {}
-        host_undo: list[tuple[str, HostAction | PreparedAction]] = []
-        local_paths = {self.target.settings_path, self.target.gitignore_path}
-        local_paths.update(
-            Path(record["path"])
-            for receipt in packages.values()
-            for record in receipt.get("files", [])
-        )
-        local_paths.update(
-            self.target.destination_path(payload.root, payload.dest)
-            for item in resolved
-            for payload in self._payloads(item.tool)
-        )
-        try:
-            transaction = _LocalTransaction(local_paths, self.store)
-        except OSError as exc:
-            raise InstallError(str(exc)) from exc
+        host_undo = _host_undo if _host_undo is not None else []
+        owns_transaction = _transaction is None
+        transaction = _transaction
+        if transaction is None:
+            try:
+                transaction = _LocalTransaction(self._local_paths(resolved), self.store)
+            except OSError as exc:
+                raise InstallError(str(exc)) from exc
         try:
             missing_requirements = sorted(
                 {
@@ -477,12 +492,15 @@ class CatalogueInstaller:
                 else:
                     current["explicit"] = item.explicit
                     current["dependencies"] = [dependency.name for dependency in item.tool.dependencies]
-            if self.installation["packages"]:
-                self.store.save()
-            else:
-                self.store.prune()
+            if _persist:
+                if self.installation["packages"]:
+                    self.store.save()
+                else:
+                    self.store.prune()
             return changes
         except Exception as exc:
+            if not owns_transaction:
+                raise
             rollback_errors = self._rollback(host_undo, transaction)
             detail = str(exc)
             if rollback_errors:
@@ -491,9 +509,16 @@ class CatalogueInstaller:
                 raise
             raise InstallError(detail) from exc
         finally:
-            for actions in [*prepared.values(), *rollback_prepared.values()]:
+            actions = [
+                action
+                for group in [*prepared.values(), *rollback_prepared.values()]
+                for action in group
+            ]
+            if _deferred_cleanup is None:
                 for action in actions:
                     action.cleanup()
+            else:
+                _deferred_cleanup.extend(actions)
 
     @staticmethod
     def _receipt_action(raw: dict[str, Any]) -> HostAction:
@@ -686,6 +711,52 @@ class CatalogueInstaller:
             else:
                 self.target.gitignore_path.unlink(missing_ok=True)
         del self.installation["packages"][name]
+
+def reconcile_targets(
+    requests: list[tuple[CatalogueInstaller, set[str]]],
+) -> list[list[Change]]:
+    """Reconcile several targets as one local and host-level transaction."""
+    if not requests:
+        return []
+    store = requests[0][0].store
+    if any(installer.store is not store for installer, _ in requests):
+        raise InstallError("multi-target reconciliation requires one shared receipt store")
+
+    local_paths: set[Path] = set()
+    for installer, requested in requests:
+        resolved, _ = installer.plan(requested)
+        local_paths.update(installer._local_paths(resolved))
+    try:
+        transaction = _LocalTransaction(local_paths, store)
+    except OSError as exc:
+        raise InstallError(str(exc)) from exc
+
+    host_undo: list[tuple[str, HostAction | PreparedAction]] = []
+    cleanup: list[PreparedAction] = []
+    try:
+        changes = [
+            installer.reconcile(
+                requested,
+                _transaction=transaction,
+                _host_undo=host_undo,
+                _persist=False,
+                _deferred_cleanup=cleanup,
+            )
+            for installer, requested in requests
+        ]
+        store.prune()
+        return changes
+    except Exception as exc:
+        rollback_errors = CatalogueInstaller._rollback(host_undo, transaction)
+        detail = str(exc)
+        if rollback_errors:
+            detail += "; rollback also failed: " + "; ".join(rollback_errors)
+        if isinstance(exc, InstallError) and not rollback_errors:
+            raise
+        raise InstallError(detail) from exc
+    finally:
+        for action in cleanup:
+            action.cleanup()
 
 
 def installed_packages(target: Target, store: ReceiptStore | None = None) -> dict[str, dict[str, Any]]:
