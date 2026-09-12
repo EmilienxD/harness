@@ -26,7 +26,7 @@ def installer(target, store, monkeypatch, actions=None, removals=None):
 
 def test_catalogue_declares_shared_dual_provider_runtime_and_claude_skill():
     tool = discover()["agent-launcher"]
-    assert tool.version == "1.0.2"
+    assert tool.version == "1.1.0"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert len(tool.actions) == 1
@@ -47,6 +47,8 @@ def test_catalogue_declares_shared_dual_provider_runtime_and_claude_skill():
     expected_starters = {
         ".harness/agent-launcher/config.py",
         ".harness/agent-launcher/system-prompt.md",
+        ".harness/agent-launcher/claude/settings.json",
+        ".harness/agent-launcher/chatgpt/config.toml",
         ".harness/agent-launcher/extensions/__init__.py",
     }
     assert {item.dest for item in claude_files if item.starter} == expected_starters
@@ -71,6 +73,8 @@ def test_project_starters_are_shared_but_skill_is_platform_specific(tmp_path, mo
     root = project / ".harness" / "agent-launcher"
     assert (root / "config.py").is_file()
     assert (root / "system-prompt.md").is_file()
+    assert (root / "claude" / "settings.json").is_file()
+    assert (root / "chatgpt" / "config.toml").is_file()
     assert (root / "extensions" / "__init__.py").is_file()
     assert claude_target.destination_path(
         "skills", "extend-claude-system-prompt/SKILL.md"
@@ -104,7 +108,7 @@ def test_modified_shared_starter_survives_upgrade_and_uninstall(tmp_path, monkey
     config.write_text("# user configuration\n", encoding="utf-8")
 
     tool = discover()["agent-launcher"]
-    object.__setattr__(tool, "version", "1.0.2")
+    object.__setattr__(tool, "version", "1.1.0")
     selected.available[tool.name] = tool
     selected.reconcile({"agent-launcher"})
     selected.reconcile(set())
@@ -121,7 +125,13 @@ def test_installer_and_both_entrypoints_use_identical_starters(tmp_path, monkeyp
 
     initialized = tmp_path / "initialized"
     initialize(initialized)
-    for relative in ("config.py", "system-prompt.md", "extensions/__init__.py"):
+    for relative in (
+        "config.py",
+        "system-prompt.md",
+        "claude/settings.json",
+        "chatgpt/config.toml",
+        "extensions/__init__.py",
+    ):
         assert (installed / ".harness" / "agent-launcher" / relative).read_bytes() == (
             initialized / ".harness" / "agent-launcher" / relative
         ).read_bytes()

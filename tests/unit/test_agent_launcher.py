@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,7 @@ from agent_launcher.cli import (
     initialize,
     main,
     render,
+    render_settings,
 )
 
 
@@ -31,10 +34,19 @@ def write_config(project: Path, body: str) -> Path:
     return path
 
 
+def options(prompt: str | None, settings: dict | None) -> str:
+    arguments = f"system_prompt={prompt!r}"
+    if settings is not None:
+        arguments += f", settings={settings!r}"
+    return f"LaunchOptions({arguments})"
+
+
 def config(
     claude_prompt: str | None = None,
     chatgpt_prompt: str | None = None,
     commands: dict[str, tuple[str, ...]] | None = None,
+    claude_settings: dict | None = None,
+    chatgpt_settings: dict | None = None,
 ) -> str:
     selected = commands or {"claude": ("claude",), "chatgpt": ("codex",)}
     return (
@@ -43,8 +55,8 @@ def config(
         f"COMMANDS = {selected!r}\n"
         "def configure():\n"
         "    return LaunchConfiguration(\n"
-        f"        claude=LaunchOptions(system_prompt={claude_prompt!r}),\n"
-        f"        chatgpt=LaunchOptions(system_prompt={chatgpt_prompt!r}),\n"
+        f"        claude={options(claude_prompt, claude_settings)},\n"
+        f"        chatgpt={options(chatgpt_prompt, chatgpt_settings)},\n"
         "    )\n"
     )
 
@@ -105,8 +117,32 @@ def test_init_preserves_existing_starter(tmp_path):
     existing = tmp_path / ".harness" / "agent-launcher" / "system-prompt.md"
     existing.parent.mkdir(parents=True)
     existing.write_text("mine", encoding="utf-8")
-    assert initialize(tmp_path) == 2
+    assert initialize(tmp_path) == 4
     assert existing.read_text(encoding="utf-8") == "mine"
+
+
+def test_init_creates_inert_launcher_only_settings_starters(tmp_path):
+    assert initialize(tmp_path) == 5
+    root = tmp_path / ".harness" / "agent-launcher"
+    assert json.loads((root / "claude" / "settings.json").read_text(encoding="utf-8")) == {}
+    assert tomllib.loads((root / "chatgpt" / "config.toml").read_text(encoding="utf-8")) == {}
+    assert render_settings(root, provider="claude") == ""
+    assert render_settings(root, provider="chatgpt") == ""
+
+
+def test_initialized_project_loads_the_settings_the_user_writes(tmp_path, monkeypatch):
+    initialize(tmp_path)
+    root = tmp_path / ".harness" / "agent-launcher"
+    (root / "system-prompt.md").write_text("project context\n", encoding="utf-8")
+    (root / "claude" / "settings.json").write_text('{"model": "opus"}', encoding="utf-8")
+    (root / "chatgpt" / "config.toml").write_text(
+        'model = "o3"\n\n[tui]\ntheme = "dark"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert render(provider="claude") == "project context\n"
+    assert render_settings(provider="claude") == '{\n  "model": "opus"\n}\n'
+    assert render_settings(provider="chatgpt") == '-c model="o3"\n-c tui.theme="dark"\n'
 
 
 def test_render_is_provider_specific(tmp_path, monkeypatch, capsys):
@@ -191,6 +227,163 @@ def test_claude_prompt_file_exact_content_lifetime_and_exit_code(tmp_path, monke
     assert observed["argv"][-2:] == ["--model", "opus"]
     assert observed["content"] == prompt
     assert not observed["path"].exists()
+
+
+def test_claude_settings_file_exact_content_lifetime_and_arguments(tmp_path, monkeypatch):
+    settings = {"model": "opus", "env": {"KEY": "vàlue"}, "permissions": {"allow": ["Bash(ls:*)"]}}
+    write_config(tmp_path, config(claude_settings=settings))
+    monkeypatch.chdir(tmp_path)
+    observed = {}
+
+    def run_child(argv):
+        settings_path = Path(argv[argv.index("--settings") + 1])
+        observed.update(
+            argv=argv,
+            path=settings_path,
+            content=json.loads(settings_path.read_text(encoding="utf-8")),
+        )
+        return 11
+
+    monkeypatch.setattr("agent_launcher.cli._run_child", run_child)
+    assert main(["--model", "opus"], provider="claude") == 11
+    assert observed["argv"][0] == "claude"
+    assert observed["argv"][-2:] == ["--model", "opus"]
+    assert observed["content"] == settings
+    assert not observed["path"].exists()
+
+
+def test_chatgpt_settings_become_flattened_config_overrides(tmp_path, monkeypatch):
+    settings = {
+        "model": "gpt-5.6-sol",
+        "sandbox_permissions": ["disk-full-read-access"],
+        "tui": {"theme": "dark", "vim_mode_default": True},
+        "history": {"max_bytes": 1024},
+        "shell_environment_policy": {"inherit": "all"},
+    }
+    write_config(tmp_path, config(chatgpt_settings=settings))
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
+
+    assert main(["exec", "say hello"], provider="chatgpt") == 0
+    assert seen == [
+        "codex",
+        "-c",
+        'model="gpt-5.6-sol"',
+        "-c",
+        'sandbox_permissions=["disk-full-read-access"]',
+        "-c",
+        'tui.theme="dark"',
+        "-c",
+        "tui.vim_mode_default=true",
+        "-c",
+        "history.max_bytes=1024",
+        "-c",
+        'shell_environment_policy.inherit="all"',
+        "exec",
+        "say hello",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("provider", "argument", "flag"),
+    [
+        ("claude", "--settings", "--settings"),
+        ("claude", "--settings=/elsewhere.json", "--settings"),
+        ("chatgpt", "-c", "-c"),
+        ("chatgpt", '-cmodel="o3"', "-c"),
+        ("chatgpt", "--config", "--config"),
+        ("chatgpt", '--config=model="o3"', "--config"),
+    ],
+)
+def test_generated_settings_reject_native_settings_arguments(
+    tmp_path, monkeypatch, provider, argument, flag
+):
+    keyword = {f"{provider}_settings": {"model": "generated"}}
+    path = write_config(tmp_path, config(**keyword))
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ConfigurationError, match=f"{flag} cannot be used") as error:
+        main([argument], provider=provider)
+    assert f"{provider}.settings" in str(error.value)
+    assert str(path) in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        ("claude", '{\n  "model": "opus",\n  "env": {\n    "KEY": "value"\n  }\n}\n'),
+        ("chatgpt", '-c model="o3"\n-c tui.theme="dark"\n'),
+    ],
+)
+def test_render_settings_reports_the_resolved_native_settings(
+    tmp_path, monkeypatch, capsys, provider, expected
+):
+    write_config(
+        tmp_path,
+        config(
+            claude_settings={"model": "opus", "env": {"KEY": "value"}},
+            chatgpt_settings={"model": "o3", "tui": {"theme": "dark"}},
+        ),
+    )
+    monkeypatch.chdir(tmp_path)
+    assert render_settings(provider=provider) == expected
+    assert main(["--hns-render-settings"], provider=provider) == 0
+    assert capsys.readouterr().out == expected
+
+
+@pytest.mark.parametrize(("provider", "_entrypoint", "_executable"), PROVIDERS)
+def test_render_settings_is_empty_without_configured_settings(
+    tmp_path, monkeypatch, provider, _entrypoint, _executable
+):
+    write_config(tmp_path, config(claude_prompt="prompt only", claude_settings={}))
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
+
+    assert render_settings(provider=provider) == ""
+    assert main(["--resume"], provider=provider) == 0
+    assert "--settings" not in seen and "-c" not in seen
+
+
+@pytest.mark.parametrize(
+    ("keyword", "settings", "message"),
+    [
+        ("claude_settings", 3, r"claude\.settings must be a mapping"),
+        ("claude_settings", {"model": ...}, r"claude\.settings is not valid JSON settings"),
+        ("chatgpt_settings", {"": "x"}, r"chatgpt\.settings keys must be non-empty strings"),
+        (
+            "chatgpt_settings",
+            {"history": {"max_bytes": None}},
+            r"chatgpt\.settings cannot express NoneType values as TOML",
+        ),
+    ],
+)
+@pytest.mark.parametrize(("provider", "_entrypoint", "_executable"), PROVIDERS)
+def test_unusable_settings_are_rejected_for_every_entrypoint(
+    tmp_path, monkeypatch, keyword, settings, message, provider, _entrypoint, _executable
+):
+    path = write_config(tmp_path, config(**{keyword: settings}))
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ConfigurationError, match=message) as error:
+        main([], provider=provider)
+    assert str(path) in str(error.value)
+
+
+def test_chatgpt_overrides_quote_keys_and_keep_tables_addressable(tmp_path, monkeypatch):
+    settings = {
+        "mcp_servers": {"my server": {"command": "npx", "args": ["-y", "pkg"]}},
+        "projects": {"/home/me/code": {"trust_level": "trusted"}},
+        "tui": {},
+    }
+    write_config(tmp_path, config(chatgpt_settings=settings))
+    monkeypatch.chdir(tmp_path)
+
+    assert render_settings(provider="chatgpt") == (
+        '-c mcp_servers."my server".command="npx"\n'
+        '-c mcp_servers."my server".args=["-y", "pkg"]\n'
+        '-c projects."/home/me/code".trust_level="trusted"\n'
+        "-c tui={}\n"
+    )
 
 
 @pytest.mark.parametrize(("provider", "entrypoint", "_executable"), PROVIDERS)

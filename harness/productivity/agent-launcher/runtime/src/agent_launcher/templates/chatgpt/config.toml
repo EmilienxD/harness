@@ -1,0 +1,4 @@
+# Codex configuration applied only to sessions started with cxh.
+# Write it exactly as ~/.codex/config.toml; cxh passes every value as a -c
+# override, above your user, project, and profile configuration.
+# Inspect the result with `cxh --hns-render-settings`.
