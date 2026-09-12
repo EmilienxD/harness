@@ -64,6 +64,20 @@ def _load_module(path: Path) -> ModuleType:
     return module
 
 
+def _validate_settings(provider: str, settings: object, path: Path) -> None:
+    if not isinstance(settings, Mapping):
+        raise ConfigurationError(
+            f"{path}: {provider}.settings must be a mapping or None"
+        )
+    for key, value in settings.items():
+        if not isinstance(key, str) or not key:
+            raise ConfigurationError(
+                f"{path}: {provider}.settings keys must be non-empty strings"
+            )
+        if isinstance(value, Mapping):
+            _validate_settings(provider, value, path)
+
+
 def _validate_options(provider: str, options: object, path: Path) -> LaunchOptions:
     if not isinstance(options, LaunchOptions):
         raise ConfigurationError(f"{path}: configure().{provider} must be LaunchOptions")
@@ -71,6 +85,8 @@ def _validate_options(provider: str, options: object, path: Path) -> LaunchOptio
         raise ConfigurationError(
             f"{path}: {provider}.system_prompt must be a string or None"
         )
+    if options.settings is not None:
+        _validate_settings(provider, options.settings, path)
     _adapter(provider).validate_options(options, path)
     return options
 
@@ -128,6 +144,11 @@ def render(start: Path | None = None, *, provider: str = "claude") -> str:
     return _adapter(provider).render(getattr(configuration, provider))
 
 
+def render_settings(start: Path | None = None, *, provider: str = "claude") -> str:
+    path, _commands, configuration = _configured(start)
+    return _adapter(provider).render_settings(getattr(configuration, provider), path)
+
+
 def initialize(project: Path) -> int:
     destination = project / CONFIG_RELATIVE_PATH.parent
     templates = files("agent_launcher").joinpath("templates")
@@ -135,6 +156,8 @@ def initialize(project: Path) -> int:
     for relative in (
         Path("config.py"),
         Path("system-prompt.md"),
+        Path("claude/settings.json"),
+        Path("chatgpt/config.toml"),
         Path("extensions/__init__.py"),
     ):
         target = destination / relative
@@ -193,6 +216,11 @@ def main(argv: Sequence[str] | None = None, *, provider: str = "claude") -> int:
             raise ConfigurationError("--hns-render accepts no arguments")
         sys.stdout.write(render(provider=provider))
         return 0
+    if arguments and arguments[0] == "--hns-render-settings":
+        if len(arguments) != 1:
+            raise ConfigurationError("--hns-render-settings accepts no arguments")
+        sys.stdout.write(render_settings(provider=provider))
+        return 0
     return _launch(arguments, provider)
 
 
@@ -224,4 +252,5 @@ __all__ = [
     "initialize",
     "main",
     "render",
+    "render_settings",
 ]
