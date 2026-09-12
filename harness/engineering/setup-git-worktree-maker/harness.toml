@@ -1,7 +1,7 @@
 name = "setup-git-worktree-maker"
 version = "1.0.2"
 description = "Creates a project-native command for fully initialized Git worktrees"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/setup-git-worktree-maker/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/engineering/setup-git-worktree-maker/SKILL.md"
 
 [platforms.claude]
 status = "supported"

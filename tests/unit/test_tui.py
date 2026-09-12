@@ -22,7 +22,7 @@ def ui_for(*keys):
 def options():
     return (
         MenuOption("audit", "Audits a codebase", group="planning"),
-        MenuOption("commit", "Stages and commits", group="shipping", installed=True),
+        MenuOption("commit", "Stages and commits", group="engineering", installed=True),
         MenuOption("zoom-out", "Maps a codebase area", group="productivity"),
     )
 
@@ -76,7 +76,7 @@ def test_picker_groups_rows_under_category_headings():
     ui.picker("Catalogue", options())
 
     assert "PLANNING" in output.getvalue()
-    assert "SHIPPING" in output.getvalue()
+    assert "ENGINEERING" in output.getvalue()
 
 
 def test_picker_describes_the_focused_row_in_full():

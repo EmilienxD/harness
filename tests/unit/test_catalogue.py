@@ -415,12 +415,12 @@ def test_every_catalogue_manifest_loads():
             "audit", "breakdown-help-wanted-issue", "grill-me", "lavish", "prototype",
             "read-all-adrs", "websearch",
         },
-        "engineering": {"resolving-merge-conflicts"},
+        "engineering": {"commit", "resolving-merge-conflicts", "setup-git-worktree-maker"},
         "building": {"issue-readers", "issue-writers", "tdd"},
-        "shipping": {"commit", "setup-help"},
+        "shipping": {"setup-help"},
         "productivity": {
             "agent-launcher", "caveman", "command-aliases", "handoff", "decisions", "report-gotchas", "subagents", "next-decision",
-            "setup-git-worktree-maker", "text-replacements", "todo-hitl", "writing-for-agents", "stop-overthinking", "zoom-out",
+            "text-replacements", "todo-hitl", "writing-for-agents", "stop-overthinking", "zoom-out",
         },
         "guards": {
             "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",

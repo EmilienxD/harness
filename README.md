@@ -133,7 +133,7 @@ harness/extension/       extension catalogue entries and their internal dependen
 harness/archive/         archived packages excluded from catalogue discovery
 src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
 harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
-harness/productivity/setup-git-worktree-maker/ project-native Git worktree command skill
+harness/engineering/setup-git-worktree-maker/ project-native Git worktree command skill
 harness/planning/lavish/ browser-based HTML artifact and annotation workflow
 tests/unit/              behavioural and install round-trip coverage
 tests/e2e/               reusable real-CLI and loopback-endpoint E2E core
