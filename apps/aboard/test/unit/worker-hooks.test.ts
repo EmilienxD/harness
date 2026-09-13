@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
@@ -17,6 +18,23 @@ import { ClaudeAgentPlatform } from "../../src/claude/platform.js";
 const at = (value: string) => value as IsoTimestamp;
 const timestamp = at("2026-07-30T12:00:00.000Z");
 const parentId = "worker-15" as AgentId;
+
+function git(root: string, ...args: string[]): string {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+function temporaryRepository(): { readonly root: string; readonly startingSha: string; dispose(): void } {
+  const root = mkdtempSync(join(tmpdir(), "aboard-stop-hook-"));
+  git(root, "init");
+  git(root, "config", "user.name", "Aboard Tests");
+  git(root, "config", "user.email", "aboard@example.test");
+  writeFileSync(join(root, "tracked.txt"), "initial\n");
+  git(root, "add", "tracked.txt");
+  git(root, "commit", "-m", "initial");
+  return { root, startingSha: git(root, "rev-parse", "HEAD"), dispose: () => rmSync(root, { recursive: true, force: true }) };
+}
 
 function fleetWithWorker(): FleetRegistry {
   const fleet = new FleetRegistry();
@@ -159,6 +177,79 @@ test("Python Stop hook reports final output for every Aboard session", async () 
     assert.equal(received[3]!.url, "/hooks/stop");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+  }
+});
+
+test("Auto Run implementer Stop reminds a dirty worker to commit or report blockers", () => {
+  const repository = temporaryRepository();
+  try {
+    writeFileSync(join(repository.root, "tracked.txt"), "changed\n");
+    const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+    const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], {
+      cwd: repository.root,
+      input: JSON.stringify({ hook_event_name: "Stop", cwd: repository.root, stop_hook_active: false, last_assistant_message: "Done." }),
+      encoding: "utf8",
+      env: { ...process.env, ABOARD_AGENT_ID: "implementer-1", ABOARD_AGENT_TYPE: "implementer", ABOARD_WORKER_START_SHA: repository.startingSha },
+    });
+    assert.equal(result.status, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      decision: "block",
+      reason: "You have modified files without committing them. Is there a real reason for this? Did you discover any blockers along the way? If so, immediatly answer \"Yes, there is blockers, as described above\". Otherwise if the task is complete: Commit the changes.",
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    repository.dispose();
+  }
+});
+
+test("Auto Run reviewer Stop reminds an unchanged worker to create its approval commit", () => {
+  const repository = temporaryRepository();
+  try {
+    const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+    const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], {
+      cwd: repository.root,
+      input: JSON.stringify({ hook_event_name: "Stop", cwd: repository.root, stop_hook_active: false, last_assistant_message: "The review passed." }),
+      encoding: "utf8",
+      env: { ...process.env, ABOARD_AGENT_ID: "reviewer-1", ABOARD_AGENT_TYPE: "reviewer", ABOARD_WORKER_START_SHA: repository.startingSha },
+    });
+    assert.equal(result.status, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      decision: "block",
+      reason: "You have not modified any files or created a review commit. If the review is complete and approved, create an empty commit; otherwise report the blockers and leave the repository unchanged.",
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    repository.dispose();
+  }
+});
+
+test("Auto Run Stop reminders do not repeat or mistake a clean reviewer commit for missing work", () => {
+  const repository = temporaryRepository();
+  try {
+    const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+    const run = (agentType: "implementer" | "reviewer", stopHookActive: boolean) => spawnSync(
+      "uv",
+      ["run", "--no-project", "python", script, "worker-stop"],
+      {
+        cwd: repository.root,
+        input: JSON.stringify({ hook_event_name: "Stop", cwd: repository.root, stop_hook_active: stopHookActive, last_assistant_message: "Done." }),
+        encoding: "utf8",
+        env: { ...process.env, ABOARD_AGENT_ID: `${agentType}-1`, ABOARD_AGENT_TYPE: agentType, ABOARD_WORKER_START_SHA: repository.startingSha },
+      },
+    );
+
+    writeFileSync(join(repository.root, "tracked.txt"), "changed\n");
+    const continuation = run("implementer", true);
+    assert.equal(continuation.status, 0);
+    assert.equal(continuation.stdout, "");
+
+    git(repository.root, "add", "tracked.txt");
+    git(repository.root, "commit", "-m", "review fixes");
+    const completedReview = run("reviewer", false);
+    assert.equal(completedReview.status, 0);
+    assert.equal(completedReview.stdout, "");
+  } finally {
+    repository.dispose();
   }
 });
 

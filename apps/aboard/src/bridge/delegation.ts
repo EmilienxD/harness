@@ -56,6 +56,8 @@ export interface DelegationLaunchInput {
   readonly isolation?: LaunchIsolation;
   readonly difficulty?: IssueDifficulty;
   readonly executionMode?: ExecutionMode;
+  /** Pinned parent for a worker whose successful turn must add exactly one commit. */
+  readonly completionCommitStartingSha?: string;
   /** A provider-explicit manual launch may bypass the project's default provider. */
   readonly configuration?: ConfiguredLaunch;
 }
@@ -90,6 +92,8 @@ export interface ReopenTarget {
   readonly attended?: boolean;
   /** Reacquires the auto-run write lease before restoring an unattended worker. */
   readonly origin?: LaunchOrigin;
+  /** Pinned parent retained when continuing an Auto Run completion-commit worker. */
+  readonly completionCommitStartingSha?: string;
 }
 
 export interface InteractiveLaunchHandles {
@@ -296,6 +300,7 @@ export class DelegationCoordinator {
         sessionId: target.sessionId,
         agentType: target.type,
         ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
+        ...(target.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: target.completionCommitStartingSha }),
         name: target.terminalName,
         ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
         initialCommand: plan.commandLine,
@@ -364,6 +369,7 @@ export class DelegationCoordinator {
     prompt: string,
     difficulty?: IssueDifficulty,
     signal?: AbortSignal,
+    completionCommitStartingSha?: string,
   ): Promise<AutomatedLaunchOutcome> {
     if (session.autoRunRestricted !== true || !["completed", "failed"].includes(session.lifecycle.status)) {
       throw new DelegationError("unresumable-session", `Agent ${session.identity.agentId} is not an ended auto-run session`);
@@ -386,6 +392,7 @@ export class DelegationCoordinator {
       attended: false,
       resultDelivery: { mode: "tool-result" },
       origin: "auto-run",
+      ...(completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha }),
     });
     const stopWorker = (): void => {
       try { this.options.terminals.kill(launched.terminalId); } catch { /* terminal already settled */ }
@@ -485,6 +492,7 @@ export class DelegationCoordinator {
         sessionId,
         agentType,
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
+        ...(input.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: input.completionCommitStartingSha }),
         name: `aboard: ${input.description}`,
         ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,

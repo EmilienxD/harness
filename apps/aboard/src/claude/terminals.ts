@@ -98,6 +98,7 @@ export interface CreateAboardTerminalRequest {
   /** Harness needs this before the first provider hook can race the launch response. */
   readonly executionMode?: ExecutionMode;
   readonly harnessRequestId?: string;
+  readonly completionCommitStartingSha?: string;
   readonly startupTimeoutMs?: number;
 }
 
@@ -241,6 +242,7 @@ export class TerminalController {
     if (request.attended === true) env.ABOARD_ATTENDED = "1";
     if (request.executionMode !== undefined) env.HARNESS_EXECUTION_MODE = request.executionMode;
     if (request.harnessRequestId !== undefined) env.HARNESS_REQUEST_ID = request.harnessRequestId;
+    if (request.completionCommitStartingSha !== undefined) env.ABOARD_WORKER_START_SHA = request.completionCommitStartingSha;
 
     const creationOptions: TerminalCreationOptions = {
       cwd,

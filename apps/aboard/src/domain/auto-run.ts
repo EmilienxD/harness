@@ -294,8 +294,6 @@ export interface WorkerRepositoryState {
 
 export type WorkerOutcome =
   | { readonly kind: "committed"; readonly sha: string }
-  /** Only `review-this` may finish this way: it found nothing worth fixing. */
-  | { readonly kind: "unchanged" }
   | { readonly kind: "rejected"; readonly reason: string };
 
 /** User acceptance is a clean descendant range on the recorded checkout. */
@@ -322,9 +320,7 @@ export function classifyWorkerResult(role: WorkerRole, state: WorkerRepositorySt
     };
   }
   if (state.headSha === state.startingSha) {
-    return role === "review-this"
-      ? { kind: "unchanged" }
-      : { kind: "rejected", reason: `${role} finished without committing anything on top of ${state.startingSha.slice(0, 8)}` };
+    return { kind: "rejected", reason: `${role} finished without committing anything on top of ${state.startingSha.slice(0, 8)}` };
   }
   if (!state.descendsFromStart) {
     return { kind: "rejected", reason: `${role} moved HEAD off ${state.startingSha.slice(0, 8)} instead of committing on top of it` };
@@ -430,8 +426,8 @@ export const autoRunMessage = {
     `auto-run: started; ${afk + hitl} issue${afk + hitl === 1 ? "" : "s"} queued (${afk} afk, ${hitl} hitl), review ${review ? "on" : "off"}.`,
   implemented: (issue: number, branch: string): string => `auto-run: issue #${issue} addressed on ${branch}.`,
   committed: (issue: number, sha: string, pr: number): string => `auto-run: issue #${issue} committed (${sha}) and opened PR #${pr}.`,
-  reviewed: (issue: number, sha: string | undefined): string =>
-    `auto-run: issue #${issue} reviewed; ${sha === undefined ? "no fixes were needed" : `fixes committed (${sha.slice(0, 8)})`}.`,
+  reviewed: (issue: number, sha: string): string =>
+    `auto-run: issue #${issue} reviewed; review committed (${sha.slice(0, 8)}).`,
   workspace: (path: string): string =>
     `auto-run: working in its own checkout at ${path}; your files stay as they are and nothing this run does touches them.`,
   workspaceKept: (path: string, reason: "kept-by-setting" | "left-for-the-user" | "removal-failed"): string => {

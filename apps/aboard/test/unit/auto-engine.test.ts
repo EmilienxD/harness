@@ -109,6 +109,8 @@ interface HarnessOptions {
   readonly workerCommitCount?: number;
   /** Whether the reviewer finds anything to fix. Defaults to `producesChanges`. */
   readonly reviewerProducesChanges?: boolean;
+  /** Whether the reviewer reaches a completed verdict and creates its required commit. */
+  readonly reviewerCompletes?: boolean;
   /** Called once a hitl pull request has been observed as open; returns its next state. */
   readonly startDirty?: boolean;
   readonly pushFails?: boolean;
@@ -177,6 +179,7 @@ test("single-branch HITL waits for a deliberate commit before publishing and rev
   assert.equal(context.engine.state()?.phase, "await-commit");
   assert.equal(context.createdPullRequests.length, 0);
   assert.equal(context.launches.length, 1);
+  assert.equal(context.launches[0]?.completionCommitStartingSha, undefined, "the HITL implementer must leave its initial edits uncommitted");
   assert.deepEqual(context.closedTerminals, []);
   await context.git.add();
   await context.git.commit("User accepts", "");
@@ -184,6 +187,7 @@ test("single-branch HITL waits for a deliberate commit before publishing and rev
   assert.equal(context.state.cleared, true, context.notifications.join("\n"));
   const review = context.launches.find((launch) => launch.type === "reviewer");
   assert.match(review?.additionalGuideline ?? "", /Review only issue #35's changes in exact range .{40}\.\..{40}/);
+  assert.match(review?.prompt ?? "", /Pin the exact accepted range .{40}\.\..{40} as the fixed review scope\. It is the whole diff to review\./);
   assert.deepEqual(context.closures.map((closure) => closure.issue), [35]);
   assert.equal(context.merges.length, 0, "the cumulative PR is not an issue-acceptance signal");
 });
@@ -491,8 +495,8 @@ function harness(options: HarnessOptions = {}): Harness {
           result: { outcome: "failed", failure: { type: "killed", exitCode: null, lastAssistantMessage: null }, telemetry: telemetry() },
         };
       }
-      const commits = input.type === "reviewer" && options.reviewerProducesChanges !== undefined
-        ? options.reviewerProducesChanges
+      const commits = input.type === "reviewer"
+        ? options.reviewerCompletes !== false
         : options.producesChanges !== false;
       if (input.type === "implementer" && options.hitlUncommitted) dirty = true;
       else if (input.type !== "Explore" && commits) {
@@ -1168,6 +1172,7 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
   assert.doesNotMatch(context.launches[0]?.prompt ?? "", /aboard|auto[ -]?run|automated|automation/i);
   assert.equal(context.launches[1]?.type, "reviewer");
   assert.equal(context.launches[1]?.chrome, undefined);
+  assert.match(context.launches[1]?.prompt ?? "", /Pin the accepted issue changes in this pull request as the fixed review scope\. They are the whole diff to review\./);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
 });
 
@@ -1366,16 +1371,31 @@ test("a merge refused for a reason other than a conflict still stops the whole r
   assert.equal(context.state.cleared, false);
 });
 
-test("a review that finds nothing succeeds without inventing an empty commit", async () => {
+test("a review that finds nothing records an empty completion commit", async () => {
   const context = harness({ settings: { review: true }, reviewerProducesChanges: false });
   await context.engine.start();
   await context.engine.settle();
 
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.match(context.notifications.join("\n"), /issue #34 reviewed; no fixes were needed/);
-  // One push for the implementation; the review added nothing to publish.
-  assert.equal(context.gitCalls.filter((call) => call.startsWith("push issue/34")).length, 1);
+  assert.match(context.launches[1]?.prompt ?? "", /empty commit.*review completed with no findings/);
+  assert.match(context.notifications.join("\n"), /issue #34 reviewed; review committed/);
+  assert.equal(context.gitCalls.filter((call) => call.startsWith("push issue/34")).length, 2);
   assert.equal(context.pullRequests.get(56)?.state, "merged");
+  const landed = [...context.saved].reverse().find((record) => record.progress["34"]?.state === "done")?.progress["34"];
+  assert.ok(landed?.state === "done" && landed.result === "landed" && landed.reviewedSha && landed.implementationSha);
+  assert.equal(context.launches[0]?.completionCommitStartingSha, landed.beforeSha);
+  assert.equal(context.launches[1]?.completionCommitStartingSha, landed.implementationSha);
+  assert.notEqual(landed.reviewedSha, landed.implementationSha);
+});
+
+test("a reviewer that produces no completion commit stops the run", async () => {
+  const context = harness({ settings: { review: true }, reviewerCompletes: false });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.match(context.notifications.join("\n"), /review-this finished without committing/);
+  assert.equal(context.pullRequests.get(56)?.state, "open");
+  assert.equal(context.state.cleared, false);
 });
 
 test("a worker that makes more than one commit stops the run", async () => {
@@ -1396,7 +1416,7 @@ test("review mode launches an AFK reviewer and commits its fixes as a second com
   assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
   // Both workers commit for themselves; aboard creates no commit of its own.
   assert.equal(context.gitCalls.filter((call) => call === "commit").length, 0);
-  assert.match(context.notifications.join("\n"), /issue #34 reviewed; fixes committed \([0-9a-z]{8}\)/);
+  assert.match(context.notifications.join("\n"), /issue #34 reviewed; review committed \([0-9a-z]{8}\)/);
   assert.deepEqual(context.closedTerminals, ["terminal-1", "terminal-2"]);
 });
 
@@ -2181,7 +2201,7 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
   });
 
   for (const reviewerProducesChanges of [false, true]) {
-    test(`${branchMode}: interrupted reviewer adopts only a fix commit when its result was not recorded (fixes=${reviewerProducesChanges})`, async () => {
+    test(`${branchMode}: interrupted reviewer adopts its completion commit when its result was not recorded (fixes=${reviewerProducesChanges})`, async () => {
       let interrupted: AutoRunRecord | undefined;
       const context = harness({ reviewerProducesChanges, settings: { branchMode, review: true },
         interruptBeforeSave: (next) => {
@@ -2197,7 +2217,7 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
       assert.equal((await context.engine.resume()).started, true);
       await context.engine.settle();
       assert.equal(context.state.cleared, true, context.notifications.join("\n"));
-      assert.equal(context.launches.filter((launch) => launch.type === "reviewer").length, reviewerProducesChanges ? 1 : 2);
+      assert.equal(context.launches.filter((launch) => launch.type === "reviewer").length, 1);
     });
   }
 
