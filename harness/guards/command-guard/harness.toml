@@ -1,7 +1,7 @@
 name = "command-guard"
 version = "1.0.1"
 description = "Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/command-guard/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
 status = "supported"

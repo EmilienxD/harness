@@ -1,7 +1,7 @@
 name = "usage-limit-wait"
 version = "1.2.1"
 description = "Blocks the session until an exhausted Claude or ChatGPT subscription usage window resets, instead of failing the turn"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/usage-limit-wait/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
 status = "supported"

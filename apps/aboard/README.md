@@ -1,52 +1,134 @@
-# aboard
+# Aboard
 
-Aboard is a VS Code extension for visible coding-agent sessions. It supports attended Claude Code and ChatGPT (Codex CLI) terminals, tracks their lifecycle in the Fleet and Recent Activity views, and orchestrates Auto Run.
+Aboard is a VS Code extension for visible Claude Code and ChatGPT sessions. It keeps agent work in terminals you can inspect, gives you one place to track active and recent sessions, and runs issue-driven Auto Run workflows without hiding the work from you.
 
-## What Aboard does
+Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
-- Initializes and validates the extension-owned `.abd` scaffold.
-- Launches an empty **Run Agent** interactive TUI with the platform selected in `.harness/launch.json`.
-- Launches a read-only Explore session when Auto Run needs pre-implementation exploration: Claude Code's built-in `Explore` agent, or a top-level Codex session held read-only by its sandbox and approval policy.
-- Tracks Aboard-created sessions and supports resume/reopen with current launch configuration, including attended Codex conversations discovered through supported App Server operations.
-- Runs the complete Auto Run forecast, execution, recovery, validation, Git, and GitHub workflow.
+## At a glance
 
-Aboard tracks Interactive, Explore, Prototype, Web Search, Brainstorm, General, Auto Run implementer, and Auto Run reviewer identities. Execution mode is recorded separately, so an unattended manual child is not treated as an Auto Run worker. Interactive and manual sessions inherit the user's Claude Code or Codex tool settings, including built-in subagents and web search. Auto Run workers disable those tools under extension-owned policy and use a `PreToolUse` guard for Aboard-owned Git and GitHub commands. In worktree mode, a native Codex permission profile also makes the user's original checkout read-only; this requires Codex 0.138.0 or later and fails closed when managed policy disallows the profile.
+```mermaid
+flowchart LR
+    U[You] --> C[Commands and Aboard views]
+
+    subgraph V[VS Code]
+        C --> A[Aboard]
+        A --> T[Visible agent terminals]
+        A --> F[Agent Fleet]
+        A --> R[Recent Activity]
+        A --> Q[Auto Run]
+        B[Authenticated loopback bridge] --> A
+    end
+
+    T --> P{Platform selected in<br/>.harness/launch.json}
+    P --> CL[Claude Code]
+    P --> CG[ChatGPT via Codex CLI]
+    CL -->|Lifecycle events| B
+    CG -->|Lifecycle events| B
+    Q <--> G[Local Git checkout]
+    Q <--> GH[GitHub issues and pull requests]
+```
+
+## Visible sessions
+
+Initialize the project once, then use **Run Agent** to open an empty, attended terminal. The platform, model, and reasoning effort come from `.harness/launch.json`. Aboard reads that file for every new launch, resume, or reopen, so existing sessions keep their configuration while future sessions use your latest choices.
+
+The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
+
+```mermaid
+flowchart TD
+    L[Run Agent or manual delegation] --> S[Starting]
+    S -->|Platform session starts| R[Running in a visible terminal]
+    S -->|Launch fails| F[Failed]
+    R -->|Agent needs interaction| W[Awaiting you]
+    W -->|You continue in the terminal| R
+    R -->|Process exits successfully| C[Completed]
+    R -->|Process or policy failure| F
+    C --> D{Record has useful<br/>session or outcome data?}
+    F --> D
+    D -->|Yes| A[Recent Activity]
+    D -->|No, empty attended launch| Z[Remove from Fleet]
+
+    A --> O{Conversation still available?}
+    O -->|Yes, terminal still open| FT[Focus existing terminal]
+    O -->|Yes, terminal ended| RL[Relaunch current platform<br/>and resume conversation]
+    O -->|No| NR[Keep the activity record;<br/>reopen is unavailable]
+    RL --> S
+```
+
+Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Explore sessions are read-only. Auto Run workers use stricter, extension-owned Git and GitHub restrictions.
 
 ## Auto Run
 
-`/auto` starts Auto Run immediately and `/auto --dry` produces a forecast. The panel offers a review-and-start path. Aboard freezes the issue order and run settings, creates `run/<run-id>`, and supplies issue context and mode-specific guidance through the Harness-installed Address Issue and Review Issue skills. Their user-owned prompt placeholders remain untouched. Workers can use read-only Git commands, `git add`, and `git commit`; Aboard owns branch operations, publication, integration, and GitHub mutations.
+Auto Run turns labelled GitHub issues into a visible, recoverable queue. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
 
-AFK workers must finish successfully with exactly one clean descendant commit. HITL workers leave their initial implementation uncommitted in the visible terminal. Inspect it, test it, continue the conversation, and ask the agent to commit—or commit manually. Auto Run displays “Waiting for commit” until at least one descendant commit exists and all staged, unstaged, and untracked changes are gone. Multiple HITL commits form one accepted range. A changed branch or rewritten history stops the attempt; a failed initial turn never enters the waiting phase.
+```mermaid
+flowchart TD
+    I[Labelled GitHub issues] --> P[Inspect forecast and frozen issue order]
+    P --> S[Create or prepare checkout<br/>and run branch]
+    S --> E{Explore before fresh implementer?}
+    E -->|Yes| X[Read-only Explore session]
+    E -->|No| M{Issue disposition}
+    X --> M
 
-In per-issue mode, Aboard pushes the accepted range, creates an internal issue PR into the run branch, runs the optional reviewer, and automatically merges and cleans up that PR. In single-branch mode, work stays on the run branch and Aboard updates one cumulative PR; review covers only the current issue's recorded SHA range. Reviewer fixes proceed automatically. HITL requires no GitHub approval or manual issue-PR merge.
+    M -->|AFK| AFK[Implementer must succeed with<br/>exactly one clean descendant commit]
+    M -->|HITL| HITL[Implementer leaves changes uncommitted<br/>in its visible terminal]
+    HITL --> U[You inspect, continue, and commit<br/>the accepted clean range]
+    AFK --> B{Branch mode}
+    U --> B
 
-After integration, `pauseAfterHitl` optionally pauses before the next issue; use Resume Auto Run to resume. Once the plan drains, only the final PR from the run branch into the original target may require your merge. `mergeRunPullRequest` enables automatic final merging when safe. Conflicts and unsafe unpublished-target ancestry leave that PR open with a reason.
+    B -->|Per issue| IP[Push issue branch and open<br/>internal PR into run branch]
+    B -->|Single branch| SP[Push run branch and create or update<br/>the cumulative run PR]
+    IP --> RV{Review enabled?}
+    SP --> RV
+    RV -->|Yes| R[Reviewer makes no commit,<br/>or exactly one clean fix commit]
+    RV -->|No| IN[Integrate accepted issue]
+    R --> IN
 
-Repository changes, saving files, focusing the view, and refreshing trigger acceptance checks, with a one-second internal fallback. Stop preserves unfinished recovery state; Discard follows the configured cleanup policy. Version-3 records retain starting, accepted, and reviewed SHAs and journal pending mutations. Older records are unsupported and discardable. Run settings remain frozen, while each new or resumed agent launch reads the current launch configuration.
+    IN -->|Per issue| MP[Automatically merge internal PR<br/>and clean up issue branch]
+    IN -->|Single branch| CP[Update cumulative PR<br/>and close accepted issue]
+    MP --> PA{Pause after this<br/>HITL issue?}
+    CP --> PA
+    PA -->|Yes| RS[Stop at a recoverable checkpoint;<br/>Resume Auto Run to continue]
+    PA -->|No| Q{More issues?}
+    RS --> Q
+    Q -->|Yes| E
+    Q -->|No changes landed| D[Complete without a final PR]
+    Q -->|Accepted work landed| PR[Open or finalize run PR<br/>into original target branch]
+    PR --> AM{Automatic final merge enabled<br/>and safe?}
+    AM -->|Yes| MG[Aboard merges final PR]
+    AM -->|No| Y[Leave final PR open for you]
+```
 
-## Harness boundary
+- **HITL** leaves implementation work in a visible terminal and waits for one or more clean commits that you accept.
+- **AFK** accepts only a successful worker result with exactly one clean descendant commit.
+- Aboard owns branch changes, publication, integration, and GitHub mutations. Workers may inspect, edit, stage, and commit within their assigned checkout.
 
-Harness is the canonical catalogue and installer for skills, user-facing hooks, and the `harness run`, `ask`, `reply`, and `resume` commands. Selecting Aboard in that catalogue installs `issue-readers` plus `auto`; Aboard itself does not package, scaffold, copy, inspect, or transform Harness-owned skill or hook bodies.
+Stopping preserves recoverable state. Resume continues from recorded checkpoints. Discard follows the configured cleanup policy and never removes dirty or moved work it can no longer prove it owns.
 
-Aboard does not provide a Manager role, roadmap/TODO workflow, MCP server, custom agent definitions, `/queue`, or standalone PR review. The dormant queue and standalone review implementations may remain compiled but have no command, panel, menu, hook, or MCP entry point.
+## Configuration
+
+| Location | Purpose |
+| --- | --- |
+| `.harness/launch.json` | Selects Claude Code or ChatGPT, command, model, and reasoning effort. |
+| `.abd/settings.json` | Stores project-level Aboard settings. |
+| VS Code settings | Supplies user and profile defaults under `aboard.*`. |
+
+Non-launch settings resolve from VS Code workspace settings, then `.abd/settings.json`, then user or profile settings and defaults. Auto Run freezes run-specific settings for recovery; it reads launch configuration again whenever it starts or resumes an agent.
+
+Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without overwriting tracked files. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
 
 ## Development
 
+From `apps/aboard/`:
+
 ```powershell
-npm install
+npm ci
 npm run check
 npm test
 npm run test:vscode
 npm run package
 ```
 
-See `AGENTS.md` for the project map and architectural boundaries, and
-[`docs/configuration.md`](docs/configuration.md) for the version-2 launch file.
+Use `npm run test:integration` for unit and VS Code integration tests. `npm run e2e:full` runs the complete disposable real-CLI journey.
 
-## Releasing
-
-Bump the version in `package.json` and `package-lock.json` in a normal pull request. After it merges,
-run the **Release Aboard** workflow with that version. The workflow tests and packages the extension,
-publishes an immutable `aboard-v<version>` GitHub release, then opens a second pull request that bumps
-and updates Harness's catalogue pin from the exact uploaded bytes. Reruns reuse the published asset;
-they never rebuild an existing release name.
+Aboard keeps its npm build and `aboard-v<version>` release history independent from the Python installer. The packaged VSIX includes this README and the extension runtime, never the Harness skill catalogue.

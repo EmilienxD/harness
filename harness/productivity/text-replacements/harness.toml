@@ -1,6 +1,7 @@
 name = "text-replacements"
 version = "1.0.2"
 description = "Add or change always-on AutoHotkey text replacements (Windows only)"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
 [platforms.claude]
 status = "supported"

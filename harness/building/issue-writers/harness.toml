@@ -2,7 +2,7 @@ name = "issue-writers"
 version = "1.0.1"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/issue-writers/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
 [platforms.claude]
 status = "supported"

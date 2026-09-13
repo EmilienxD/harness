@@ -1,7 +1,7 @@
 name = "todo-hitl"
 version = "1.0.0"
 description = "Mark deferred code work for human review and address it deliberately"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/todo-hitl/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
 [platforms.claude]
 status = "supported"

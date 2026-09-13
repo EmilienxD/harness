@@ -1,7 +1,7 @@
 name = "prefer-read-tool"
 version = "1.0.11"
 description = "PostToolUse nudge to prefer the Read tool over shell file-read commands"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/prefer-read-tool/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
 status = "supported"

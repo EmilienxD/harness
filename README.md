@@ -1,87 +1,85 @@
 # Harness
 
-Harness is the canonical catalogue and ephemeral installer for independently selectable agent
-skills, hooks, command-line tools, and optional apps. The `subagents` catalogue package owns
-visible Claude Code and ChatGPT sessions and their durable delegation state.
+Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
-Run the pinned, ephemeral installer:
+The project is built around deliberate control. Most skills run only when you invoke them. Hooks act at narrow, visible lifecycle boundaries, with editable policies where configuration is needed. Aboard keeps delegated and automated work in visible terminals that you can inspect, stop, and resume.
+
+## Installation
+
+Run a pinned revision of the ephemeral installer:
 
 ```bash
 uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness
 ```
 
-With no command, Harness opens the interactive installation menu. The menu reconciles its selection:
-newly selected packages are installed, deselected packages are removed, and mandatory dependencies
-remain transitive selections. If a reconciliation step fails, Harness restores the prior files,
-configuration, receipts, and completed host actions.
+The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes.
 
-The installer uses a compact guided flow: choose Claude Code and/or ChatGPT, choose project or user
-scope, then select catalogue packages. Packages are grouped by category and start selected exactly
-as they are installed for that scope and those providers. Compatibility is called out only when a
-selected provider is unsupported. Type to filter the list; Arrow keys, Page Up/Down, Home, and End
-move; Space toggles an item or category; Left and Right collapse or expand categories; and the
-Select All row selects the complete catalogue or clears only newly selected packages, preserving
-packages that were already installed. Enter confirms a step and Escape or Ctrl+C cancels without
-changing the installation. A summary lists every install, upgrade, removal, and skipped target
-before the final confirmation. A package that supports only one chosen provider is installed only
-there.
-
-## Non-interactive installer CLI
-
-Use the same pinned `uvx` entry point with a command for scripts, CI, and AI agents:
+For scripts and agents, use the non-interactive commands:
 
 ```bash
-# Add packages; preserve every other installed selection
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install caveman tdd
+# Add packages without changing other selections
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install commit issue-writers
 
-# Preview changes, targeting only ChatGPT
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install caveman \
+# Preview a ChatGPT-only install
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install command-guard \
   --platform chatgpt --dry-run --json
 
-# Inspect the catalogue and package metadata
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness list --json
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness info subagents --json
-
-# Upgrade the existing selection, or remove named packages
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness upgrade --json
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness uninstall caveman --json
+# Inspect, upgrade, or remove packages
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness list
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness info subagents
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness upgrade
+uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness uninstall commit
 ```
 
-CLI operations default to project scope in the current directory and target both `claude` and `chatgpt`.
-Use `--scope user` for a user installation, `--root <path>` for another project, and repeat `--platform`
-to select one or more platforms. `install` is additive; use its explicit `--all` to install the complete
-catalogue. `uninstall` removes only the named explicit selections and requires `--all` to remove every
-selection. `upgrade` preserves the selection and reconciles it to the pinned catalogue versions. A
-project root must already exist; `--root` is rejected with `--scope user`.
+Commands default to project scope in the current directory and both platforms. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. Run `harness --help` for the complete CLI.
 
-Every mutating command supports `--dry-run`. Every installer command supports `--json`, which writes
-exactly one schema-versioned JSON object to stdout and never prompts. Exit status is `0` for success or a
-valid no-op, `1` for an operational or target failure, `2` for invalid or ambiguous usage, and `130` for
-an interrupt. Package objects from `list` include `available: true`; `list --installed` also reports
-receipt-owned packages absent from the pinned catalogue with `available: false`, so they remain
-discoverable and uninstallable.
+## Reference
 
-The catalogue exposes `subagents` as one complete workflow alongside Aboard and standalone skills.
-Its hooks and persistent runtime are internal dependencies, not separate catalogue choices. Aboard
-is a verified release artifact, not part of the Python wheel. Its manifest pins the URL, byte size,
-and SHA-256 digest; Harness verifies all three before asking VS Code to install it. For private GitHub
-releases, Harness uses `GH_TOKEN`, then `GITHUB_TOKEN`, then the active `gh auth` login.
+Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The exceptions are hook-backed commands such as `/commit`, whose prompt is intercepted before a model call.
 
-The planning catalogue also includes `lavish`, which turns plans, comparisons, diagrams, reports,
-and other visual responses into browser-based HTML artifacts that users can annotate and return for
-feedback.
-New standalone skills include Productivity's `stop-overthinking`, Planning's `read-all-adrs`, and
-Shipping's `setup-help`, all for Claude Code and ChatGPT.
-Engineering's `resolving-merge-conflicts` helps resolve in-progress Git merge and rebase conflicts.
+**User-invoked** skills run only when you explicitly ask for them. **Model-invoked** skills may also be selected automatically when their description fits the work. Harness strongly favors the first group: you decide when a workflow starts, when a draft is published, and when another agent is launched.
 
-The Aboard extension source and its complete Git history live under [`apps/aboard`](apps/aboard/).
-It remains an independent npm build with `aboard-v<version>` release tags; Harness Python releases
-continue to use `v<version>` tags.
+### User-invoked skills
 
-## Visible sessions
+- **`resolving-merge-conflicts`**: Resolves an in-progress Git merge or rebase by tracing the intent behind each side, preserving both where possible, running the repository's checks, and finishing the operation. It never aborts the merge or invents unrelated behavior.
 
-When `subagents` is selected, its persistent runtime is installed automatically. These session commands
-are separate from the non-interactive installer CLI above:
+- **`setup-git-worktree-maker`**: Creates or updates a repository-native command for making fully initialized Git worktrees. It derives the script, copied local files, setup sequence, command alias, and optional VS Code task from the project, validates the generated command without creating a worktree, and leaves execution to you.
+
+- **`audit`**: Performs a read-only general, security, architecture, quality, performance, reliability, testing, dependency, or privacy audit of a codebase or selected path. Findings include file-and-line evidence, severity, confidence, remediation difficulty, and a recommended order of work; larger scopes can be partitioned across explorer agents.
+
+- **`breakdown-help-wanted-issue`**: Investigates a vague request against the codebase, challenges its scope, and returns a report for your approval. With no supplied request, it can use the oldest open `[AI]-help-wanted` GitHub issue. It does not implement or publish anything.
+
+- **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
+
+- **`read-all-adrs`**: Reads every Markdown ADR under `docs/adr/` from start to finish so the current work is informed by the project's recorded architectural decisions.
+
+- **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis in chat. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
+
+- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Claude Code also gets `copy-message-as-issue` for publishing the latest reviewed response.
+
+- **`issue-readers`**: Installs `address-this` and `review-this`, plus hooks that prepare bounded issue or commit context. Their prompt bodies are intentionally empty, user-owned starter files. Aboard and the visible-subagent workflows use them for implementation and review workers.
+
+- **`commit`**: `/commit <message>` stages the files changed by the current session and commits them without another model call. Add `--dry` to preview or `--ai` to generate a message through a direct Gemini request. Everything except `--ai` is local and needs no API key.
+
+- **`todo-hitl`**: `mark-as-todo-hitl` leaves a focused `TODO(HITL)` for work that needs a human decision; `address-todo-hitl` investigates the highest-priority marker, agrees on a resolution with you, and then implements it.
+
+- **`command-aliases`**: Adds or updates shell aliases in PowerShell, Bash, or Zsh while preserving existing configuration.
+
+- **`text-replacements`**: Adds or updates system-wide AutoHotkey text replacements and reloads the startup script. Windows only.
+
+- **`agent-launcher`**: Installs `cch` and `cxh`, project-configurable wrappers for launching Claude Code and ChatGPT/Codex. A starter `.harness/agent-launcher/` configuration can add a Claude system prompt, provider settings, and standard-library Python extensions; the Claude-only `extend-claude-system-prompt` skill helps maintain and validate that prompt.
+
+- **`decisions`**: Reviews decisions already made during the current conversation and reports only important choices that remain low-confidence, together with the strongest alternative. If no meaningful uncertainty remains, it says so.
+
+- **`next-decision`**: Works through a plan's unresolved choices one at a time. Each round presents the most important ready decision, four viable options, and a recommendation, then waits for your choice before updating the plan and continuing.
+
+- **`stop-overthinking`**: Cuts a stalled discussion down to a practical go/no-go answer, calling out only serious issues and giving concise next steps.
+
+- **`setup-help`**: Guides any installation or configuration one verified step at a time. Every response gives the current action and a short view of what remains, keeping the complete setup checklist synchronized as new prerequisites appear.
+
+- **`subagents`**: Launches separate, visible Claude Code or ChatGPT sessions through `ask-agent` and the Explore, Prototype, Web Search, Brainstorm, Implement, and Review variants. `reply-to-agent` explicitly returns an interactive child's result. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
+
+The `subagents` package also installs persistent session commands. These are separate from the ephemeral installer commands above:
 
 ```bash
 harness run [--provider claude|chatgpt] [initial prompt]
@@ -90,106 +88,60 @@ harness reply
 harness resume <session-id>
 ```
 
-`run` opens an independent visible terminal. Delegation is available only after the user directly
-invokes `ask-agent`, `ask-agent-to-explore`, `ask-agent-to-prototype`,
-`ask-agent-to-websearch`, or `ask-agent-to-brainstorm`. The invocation opens an unpredictable inbox
-under `<original-cwd>/.harness/runtime/`; the parent writes one Markdown request per child and a
-structured file-write hook launches each valid request. Direct `harness ask` calls without that live
-grant are rejected.
+`run` opens an independent visible terminal. Delegation is authorized only by a live invocation of an `ask-agent` skill; direct `harness ask` calls without that grant are rejected. Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults.
 
-Auto children report their next successful Stop automatically. Interactive children report only
-after the user invokes `reply-to-agent`, which arms one successful Stop; an API failure clears the
-authorization and leaves the request pending. SQLite under `~/.harness/` stores grants, requests,
-stable agent numbers, and at-least-once delivery claims.
+### Model-invoked skills
 
-Each request is a direct, non-symlink `*.md` child of the granted inbox:
+- **`tdd`**: Applies behavior-focused test-driven development in vertical red-green slices. It agrees on public test seams first, rejects implementation-coupled or tautological tests, and adds only enough implementation to satisfy one failing test at a time.
 
-```markdown
----
-task: prototype
-provider: chatgpt
-mode: interactive
----
+- **`writing-for-agents`**: Guides the creation of predictable skills and agent instruction files. It treats invocation pointers, information hierarchy, completion criteria, progressive disclosure, leading words, and pruning as concrete controls over agent behavior and document load.
 
-A complete, fresh-context description of the work.
-```
+- **`report-gotchas`**: Near the end of complicated implementation work, records meaningful caveats, failed checks, unfinished work, or required human action in a configured Discord channel. It does nothing when there is nothing noteworthy to report. Configure its webhook with `harness-report-gotchas configure`.
 
-`task` and `mode` are required; `provider` defaults to the parent provider. Explore supports only
-`auto`; prototype and websearch support `interactive` or `auto`; brainstorm supports only
-`interactive`; and general delegation supports either mode. Explore is technically read-only.
+### Hooks
 
-Provider launch settings resolve from `<project>/.harness/launch.json`, then
-`~/.harness/launch.json`, then built-in defaults. A minimal file is:
+Hooks do not need a skill invocation. Select them in the catalogue and restart the target product so it reloads its configuration.
 
-```json
-{
-  "version": 2,
-  "platform": "claude",
-  "command": ["claude"],
-  "stopWaitHours": 24
-}
-```
+| Package | Platforms | What it does |
+| --- | --- | --- |
+| `command-guard` | Claude Code, ChatGPT | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. |
+| `no-new-documents` | Claude Code, ChatGPT | Prevents agents from creating files in configured documentation directories while allowing edits to existing files. |
+| `on-read-reminder` | Claude Code | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
+| `on-edit-reminder` | Claude Code | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
+| `on-edit-block` | Claude Code | Denies a matching edit until the required guidance has been read in the current session. |
+| `prefer-read-tool` | Claude Code | Nudges the agent toward the reviewable Read tool after shell-based file reads. |
+| `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
+| `prefer-fewer-comments` | Claude Code, ChatGPT | Flags newly written comments or docstrings that exceed an editable budget. |
+| `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
+| `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
 
-Configure the native terminal launcher separately in `~/.harness/config.json`, for example
-`{"terminalCommand":["wt.exe","new-tab","--"]}`.
+## Aboard
 
-Without `terminalCommand`, Harness uses a matching initialized Aboard window when available, then
-detects Windows Terminal or a native console on Windows,
-Terminal.app on macOS, and common terminal emulators on Linux. If none is available, it reports the
-complete list it tried.
+Aboard is the optional VS Code extension for visible Claude Code and ChatGPT sessions, fleet tracking, and user-controlled Auto Run workflows. Select `aboard` in Harness to install its verified VSIX and required worker assets.
 
-## Catalogue model
-
-Each package lives under a functional category in `harness/` and has a `harness.toml`. The catalogue
-discovers manifests recursively outside `harness/archive/`, which also lets a package keep private
-workflow dependencies such as `extension/auto` and the ask/reply components under
-`productivity/subagents`. Manifests may declare platform payloads, executable requirements, package
-dependencies with semantic version constraints, host actions, and starter files.
-Dependency-only manifests set `selectable = false`; they remain available to dependency resolution
-but do not appear as direct choices in the installer.
-
-Harness validates the complete dependency graph and all file claims before writing. Cycles,
-incompatible catalogue versions, unsupported targets, missing executables, and cross-package file
-collisions fail the operation. Receipts record versions, explicit/transitive ownership, installed
-file digests, settings fragments, and host actions. Removal is dependent-aware and never deletes a
-file changed since installation.
-
-The Aboard package depends unconditionally on the hidden `auto` package and on `issue-readers`. The
-reader bundle includes
-the intentionally empty `address-this` and `review-this` worker skill placeholders, so initializing
-Aboard installs the implementation and review workflows without also installing issue drafting and
-publishing.
-The Harness-owned `/auto` hook fails closed outside an authenticated Aboard terminal.
-
-## Repository layout
-
-```text
-harness/planning/        planning and discovery workflows
-harness/building/        issue implementation and test-driven development
-harness/shipping/        delivery workflows
-harness/productivity/    delegation and general productivity skills
-harness/guards/          command and tool-use guardrails
-harness/extension/       extension catalogue entries and their internal dependencies
-harness/archive/         archived packages excluded from catalogue discovery
-src/harness_cli/         ephemeral installer, receipts, host actions, and catalogue TUI
-harness/productivity/subagents/ complete ask/reply skills, hooks, and persistent runtime
-harness/engineering/setup-git-worktree-maker/ project-native Git worktree command skill
-harness/planning/lavish/ browser-based HTML artifact and annotation workflow
-tests/unit/              behavioural and install round-trip coverage
-tests/e2e/               reusable real-CLI and loopback-endpoint E2E core
-apps/aboard/             intended monorepo location for the Aboard extension
-```
-
-The recommended repository merge is a history-preserving subtree merge of Aboard into
-`apps/aboard/`, without squashing. Keep Python packaging at the root and Aboard's npm package inside
-that boundary; release automation can then publish the VSIX and update its pinned catalogue metadata
-without coupling the two build systems.
+See the [Aboard README](apps/aboard/README.md) for its visual workflow guide, configuration, and development commands.
 
 ## Development
 
+For the Python installer and catalogue:
+
 ```bash
+uv sync
 uv run pytest
 uv run harness --help
 ```
 
-Reusable end-to-end infrastructure and tool journeys are documented in [`tests/e2e/README.md`](tests/e2e/README.md). Aboard keeps only its repository, extension-host, lifecycle, and scenario adapters under `apps/aboard/test/e2e/`.
+The shared deterministic E2E core uses the real Claude Code or ChatGPT CLI and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
+
+```bash
+cd tests/e2e
+npm install
+npm run check
+npm test
+```
+
+Mirrored official integration references live under `docs/CLAUDE-REFERENCES/` and `docs/CHATGPT-REFERENCES/`. Refresh both sets with:
+
+```bash
+uv run python scripts/update_references.py docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES
+```

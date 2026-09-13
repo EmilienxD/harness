@@ -2,7 +2,7 @@ name = "breakdown-help-wanted-issue"
 version = "1.2.1"
 description = "Explore and clarify a request into a chat report for user validation"
 requires = ["git", "gh"]
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/breakdown-help-wanted-issue/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
 [platforms.claude]
 status = "supported"

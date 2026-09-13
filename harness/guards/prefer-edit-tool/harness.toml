@@ -1,7 +1,7 @@
 name = "prefer-edit-tool"
 version = "1.0.4"
 description = "PostToolUse nudge to prefer the Write/Edit tools over heredocs, redirects, sed -i and inline python for file writes"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/prefer-edit-tool/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
 status = "supported"

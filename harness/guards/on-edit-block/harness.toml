@@ -1,7 +1,7 @@
 name = "on-edit-block"
 version = "1.0.8"
 description = "PreToolUse hook that denies Write/Edit/MultiEdit on files matching gitignore-style patterns until the agent has read the required files"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/on-edit-block/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
 status = "supported"

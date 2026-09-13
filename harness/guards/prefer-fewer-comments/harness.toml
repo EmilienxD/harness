@@ -1,7 +1,7 @@
 name = "prefer-fewer-comments"
 version = "1.0.1"
 description = "PostToolUse hook that reads what a write added and asks for less commentary when a comment, a docstring, or the change as a whole runs over budget"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/prefer-fewer-comments/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
 status = "supported"

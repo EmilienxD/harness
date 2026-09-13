@@ -1,7 +1,7 @@
 name = "no-new-documents"
 version = "1.0.1"
 description = "Cross-platform PreToolUse guard that prevents agents from creating files in configured documentation directories"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/guards/no-new-documents/README.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
 status = "supported"
