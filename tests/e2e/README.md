@@ -36,6 +36,7 @@ npm run e2e:prefer-read-tool
 npm run e2e:report-gotchas
 npm run e2e:usage-limit-wait
 npm run e2e:subagents
+npm run e2e:redirect-subagents
 ```
 
 The `agent-launcher` journey stages the shipped starter configuration and
@@ -109,3 +110,10 @@ provider hooks outside the repository. It launches a parent and delegated child
 through the real Claude Code and Codex CLIs, then proves that the child result
 is explicitly armed with `harness reply`, wakes and continues the parent, and
 uses authenticated loopback inference only.
+
+The `redirect-subagents` journey stages the shipped Claude hook bundle and its
+starter configuration outside the repository, enables the `Explore` self
+backend, and launches a real parent Claude CLI that attempts the native `Agent`
+tool. It proves that the tool is denied, a second real `claude -p` process runs
+against the authenticated loopback endpoint, the parent waits at Stop, and the
+redirected report is delivered exactly once.

@@ -52,7 +52,7 @@ export async function startFakeAnthropicServer(options: {
   readonly readinessPath?: string;
   readonly scenarioCatalogHash: string;
   readonly parseRequest: (value: unknown, inference: boolean) => AnthropicMessagesRequest;
-  readonly transition: (request: AnthropicMessagesRequest, repoRoot: string) => AnthropicScenarioResponse;
+  readonly transition: (request: AnthropicMessagesRequest, repoRoot: string) => AnthropicScenarioResponse | Promise<AnthropicScenarioResponse>;
 }): Promise<FakeAnthropicServer> {
   const authToken = `harness-e2e-${randomBytes(24).toString("hex")}`;
   const sessionSalt = randomBytes(32);
@@ -95,7 +95,7 @@ export async function startFakeAnthropicServer(options: {
       }
 
       inferenceRequests += 1;
-      const scenarioResponse = options.transition(messageRequest, options.resolveRepoRoot ? await options.resolveRepoRoot() : options.repoRoot);
+      const scenarioResponse = await options.transition(messageRequest, options.resolveRepoRoot ? await options.resolveRepoRoot() : options.repoRoot);
       checkpoints.add(scenarioResponse.checkpoint);
       writeMessage(response, messageRequest.model, scenarioResponse, messageRequest.stream);
       observations.push(observation(request, url, raw, messageRequest, sessionSalt, ++sequence, 200, "success", scenarioResponse.scenario, scenarioResponse.checkpoint, null));
