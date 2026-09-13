@@ -1,6 +1,6 @@
 name = "websearch"
-version = "1.1.1"
-description = "Interactive web research workflow placeholder"
+version = "1.2.0"
+description = "Web research with concise answers and a persistent source index"
 
 [platforms.claude]
 status = "supported"
@@ -12,6 +12,17 @@ status = "supported"
 src = "SKILL.md"
 dest = "websearch/SKILL.md"
 root = "skills"
+
+[[files]]
+src = "sources.py"
+dest = "websearch/sources.py"
+root = "skills"
+
+[[files]]
+src = "sources.json"
+dest = "websearch/sources.json"
+root = "skills"
+starter = true
 
 [[files]]
 src = "chatgpt/openai.yaml"
