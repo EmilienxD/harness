@@ -29,6 +29,7 @@ npm run e2e:on-edit-reminder
 npm run e2e:on-read-reminder
 npm run e2e:issue-readers
 npm run e2e:issue-writers
+npm run e2e:breakdown-help-wanted-issue
 npm run e2e:no-new-documents
 npm run e2e:prefer-edit-tool
 npm run e2e:prefer-fewer-comments
@@ -70,6 +71,11 @@ hook with a fake `gh`, launches a real Claude Code or Codex session to write a
 reviewable draft, then resumes that same session to publish it. It proves that
 publication deletes the draft, strips recovery metadata, preserves the title,
 body, and labels, and makes no additional inference request.
+
+The `breakdown-help-wanted-issue` journey stages the shipped skill and fallback
+hook, launches real Claude Code and Codex CLIs with a fake GitHub CLI, and proves
+that a standalone invocation fetches the oldest labeled issue, inspects fixture
+evidence, returns a validation report, and does not mutate GitHub.
 
 The `no-new-documents` journey stages the actual shipped cross-platform hook,
 launches the installed Claude Code and Codex CLIs against authenticated

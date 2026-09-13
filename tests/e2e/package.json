@@ -22,6 +22,8 @@
     "e2e:issue-readers": "npm run e2e:issue-readers:build && node dist/tools/issue-readers/cli.js",
     "e2e:issue-writers:build": "esbuild tools/issue-writers/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/issue-writers/cli.js --sourcemap",
     "e2e:issue-writers": "npm run e2e:issue-writers:build && node dist/tools/issue-writers/cli.js",
+    "e2e:breakdown-help-wanted-issue:build": "esbuild tools/breakdown-help-wanted-issue/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/breakdown-help-wanted-issue/cli.js --sourcemap",
+    "e2e:breakdown-help-wanted-issue": "npm run e2e:breakdown-help-wanted-issue:build && node dist/tools/breakdown-help-wanted-issue/cli.js",
     "e2e:prefer-edit-tool:build": "esbuild tools/prefer-edit-tool/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/prefer-edit-tool/cli.js --sourcemap",
     "e2e:prefer-edit-tool": "npm run e2e:prefer-edit-tool:build && node dist/tools/prefer-edit-tool/cli.js",
     "e2e:prefer-fewer-comments:build": "esbuild tools/prefer-fewer-comments/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/prefer-fewer-comments/cli.js --sourcemap",
