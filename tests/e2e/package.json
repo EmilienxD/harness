@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "check": "tsc --noEmit",
-    "test:build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test",
+    "test:build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test && npm run e2e:subagents:bridge",
     "test": "npm run test:build && node --test dist/test/*.test.js",
     "e2e:on-edit-block:build": "esbuild tools/on-edit-block/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/on-edit-block/cli.js --sourcemap",
     "e2e:on-edit-block": "npm run e2e:on-edit-block:build && node dist/tools/on-edit-block/cli.js",
@@ -29,11 +29,14 @@
     "e2e:prefer-read-tool:build": "esbuild tools/prefer-read-tool/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/prefer-read-tool/cli.js --sourcemap",
     "e2e:prefer-read-tool": "npm run e2e:prefer-read-tool:build && node dist/tools/prefer-read-tool/cli.js",
     "e2e:report-gotchas:build": "esbuild tools/report-gotchas/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/report-gotchas/cli.js --sourcemap",
-    "e2e:report-gotchas": "npm run e2e:report-gotchas:build && node dist/tools/report-gotchas/cli.js"
-    ,"e2e:commit:build": "esbuild tools/commit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/commit/cli.js --sourcemap"
-    ,"e2e:commit": "npm run e2e:commit:build && node dist/tools/commit/cli.js"
-    ,"e2e:usage-limit-wait:build": "esbuild tools/usage-limit-wait/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/usage-limit-wait/cli.js --sourcemap"
-    ,"e2e:usage-limit-wait": "npm run e2e:usage-limit-wait:build && node dist/tools/usage-limit-wait/cli.js"
+    "e2e:report-gotchas": "npm run e2e:report-gotchas:build && node dist/tools/report-gotchas/cli.js",
+    "e2e:commit:build": "esbuild tools/commit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/commit/cli.js --sourcemap",
+    "e2e:commit": "npm run e2e:commit:build && node dist/tools/commit/cli.js",
+    "e2e:usage-limit-wait:build": "esbuild tools/usage-limit-wait/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/usage-limit-wait/cli.js --sourcemap",
+    "e2e:usage-limit-wait": "npm run e2e:usage-limit-wait:build && node dist/tools/usage-limit-wait/cli.js",
+    "e2e:subagents:bridge": "esbuild tools/subagents/cli-bridge.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/subagents/cli-bridge.js",
+    "e2e:subagents:build": "npm run e2e:subagents:bridge && esbuild tools/subagents/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/subagents/cli.js --sourcemap",
+    "e2e:subagents": "npm run e2e:subagents:build && node dist/tools/subagents/cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

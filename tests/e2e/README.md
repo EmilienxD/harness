@@ -35,6 +35,7 @@ npm run e2e:prefer-fewer-comments
 npm run e2e:prefer-read-tool
 npm run e2e:report-gotchas
 npm run e2e:usage-limit-wait
+npm run e2e:subagents
 ```
 
 The `agent-launcher` journey stages the shipped starter configuration and
@@ -102,3 +103,9 @@ installed Claude Code and Codex CLIs through loopback inference, and serves an
 exhausted then restored subscription snapshot from a separate loopback usage
 endpoint. It proves that each turn pauses, re-polls, and continues only after
 the usage JSON reports recovery.
+
+The `subagents` journey stages the complete shipped runtime, ask skill, and
+provider hooks outside the repository. It launches a parent and delegated child
+through the real Claude Code and Codex CLIs, then proves that the child result
+is explicitly armed with `harness reply`, wakes and continues the parent, and
+uses authenticated loopback inference only.
