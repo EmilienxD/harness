@@ -51,3 +51,19 @@ def test_update_reference_set_rejects_an_empty_index(tmp_path):
 
     with pytest.raises(update_references.ReferenceUpdateError, match="no references"):
         update_references.update_reference_set(tmp_path)
+
+
+def test_known_reference_set_does_not_need_a_nested_readme(tmp_path, monkeypatch):
+    reference_root = tmp_path / "CLAUDE-REFERENCES"
+    reference_root.mkdir()
+    monkeypatch.setattr(
+        update_references,
+        "urlopen",
+        lambda request, timeout: Response(f"# {request.full_url}\n".encode()),
+    )
+
+    assert update_references.update_reference_set(reference_root) == 4
+    assert (reference_root / "settings.md").is_file()
+    assert (reference_root / "skills.md").is_file()
+    assert (reference_root / "hooks.md").is_file()
+    assert (reference_root / "tools-reference.md").is_file()

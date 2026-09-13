@@ -34,6 +34,8 @@ jobs:
             throw new Error('package.json and package-lock.json versions must agree');
           }
           NODE
+      - run: npm audit --audit-level=moderate
+      - run: npm run check
       - run: npm test
+      - run: xvfb-run --auto-servernum npm run test:vscode
       - run: npm run package
-

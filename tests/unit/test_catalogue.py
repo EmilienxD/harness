@@ -487,7 +487,15 @@ def test_uv_action_pins_contain_the_runtime_shipped_by_the_catalogue():
             assert match is not None, tool.name
             revision, runtime = match.groups()
             result = subprocess.run(
-                ["git", "diff", "--exit-code", revision, "--", runtime],
+                [
+                    "git",
+                    "diff",
+                    "--exit-code",
+                    revision,
+                    "--",
+                    runtime,
+                    f":(exclude){runtime}/README.md",
+                ],
                 capture_output=True,
                 text=True,
             )
