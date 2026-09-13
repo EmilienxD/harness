@@ -173,7 +173,6 @@ test("a dependency edge that reaches outside the plan fails, because the plan cl
   assert.match(reason(external, observed) ?? "", /#35 depends on #99, which is outside this run/);
 });
 
-// --- pull requests ----------------------------------------------------------
 
 function pullRequest(overrides: Partial<PullRequestObservation> & { readonly number: number }): PullRequestObservation {
   return { state: "open", head: "issue/34-add-retry-backoff", base: SESSION, ...overrides };
@@ -312,7 +311,6 @@ test("the run's own pull request may not be merged or closed by anybody else", (
   assert.match(reason(concluding, closed) ?? "", /run's pull request #60 was closed/);
 });
 
-// --- working tree and workspace ---------------------------------------------
 
 test("uncommitted work leaves a run resumable only on the branch its current issue belongs to", () => {
   const current = working({ state: "current", phase: "implement" });

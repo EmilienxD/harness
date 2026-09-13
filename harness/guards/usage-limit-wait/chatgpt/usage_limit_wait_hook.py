@@ -106,9 +106,7 @@ def _write_json(path: Path, data: Any) -> None:
             pass
 
 
-# --------------------------------------------------------------------------
 # Codex app-server usage reader
-# --------------------------------------------------------------------------
 
 
 def _app_server_messages() -> list[dict[str, Any]]:
@@ -267,9 +265,7 @@ def snapshot_from_app_server(payload: dict[str, Any]) -> dict[str, Any] | None:
     return {"source": "codex-app-server", "windows": windows, "credits": credits}
 
 
-# --------------------------------------------------------------------------
 # cache and decisions
-# --------------------------------------------------------------------------
 
 
 def cache_path() -> Path:
@@ -387,9 +383,7 @@ def wait_for_reset(
     return now() - started, waited_for
 
 
-# --------------------------------------------------------------------------
 # notices and cross-process wait serialization
-# --------------------------------------------------------------------------
 
 
 def assess(snapshot: dict[str, Any] | None, now: float) -> Notice | None:
@@ -580,9 +574,7 @@ def desktop_notification(title: str, body: str) -> bool:
     return result.returncode == 0
 
 
-# --------------------------------------------------------------------------
 # hook entry point
-# --------------------------------------------------------------------------
 
 
 def run(session_id: str = "", now: float | None = None) -> dict[str, str] | None:

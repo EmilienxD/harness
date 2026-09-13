@@ -113,7 +113,6 @@ def make_finished_job(tmp_path, job_id, session_id, text, existing=False):
     return d
 
 
-# --- rs_io: build_cmd -----------------------------------------------------
 
 
 def test_build_cmd_full_entry():
@@ -202,7 +201,6 @@ def test_emit_ascii_safe():
     assert json.loads(raw.decode("ascii")) == payload
 
 
-# --- rs_io: root anchoring and job state ----------------------------------
 
 
 def test_root_anchors_then_walks_up(tmp_path):
@@ -234,7 +232,6 @@ def test_deferred_config_falls_back_to_claude_p(tmp_path):
     assert cfg["_append_prompt"] is False
 
 
-# --- deny hook ------------------------------------------------------------
 
 
 def test_deny_unknown_subagent_passes():
@@ -341,7 +338,6 @@ def test_deny_delivers_pending_report_for_non_redirected_call(tmp_path):
     assert "job done" in reason
 
 
-# --- notify hook -----------------------------------------------------------
 
 
 def test_notify_no_jobs_no_deferred_passes():
@@ -394,7 +390,6 @@ def test_notify_cleanup_removes_old_jobs(tmp_path):
     assert not d.exists()
 
 
-# --- wait hook -------------------------------------------------------------
 
 
 def test_wait_no_jobs_allows_stop():
@@ -459,7 +454,6 @@ def test_wait_stops_polling_once_jobs_are_delivered_elsewhere(tmp_path, monkeypa
     assert time.monotonic() - started < 5  # returned on the poll, not the deadline
 
 
-# --- delivery stays in the main conversation -------------------------------
 
 
 def test_notify_inside_subagent_delivers_nothing(tmp_path):

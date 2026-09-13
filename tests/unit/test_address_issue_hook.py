@@ -106,7 +106,6 @@ def blocked(prompt, cwd, monkeypatch, capsys):
     return capsys.readouterr().err
 
 
-# --- invocation parsing ---------------------------------------------------
 
 
 @pytest.mark.parametrize("prompt, argument", [
@@ -171,7 +170,6 @@ def test_supplied_issue_text_containing_a_reference_triggers_no_lookup(
     assert "literal supplied content" in context
 
 
-# --- clean worktree -------------------------------------------------------
 
 
 @pytest.mark.parametrize("dirty", ["staged", "unstaged", "untracked"])
@@ -202,7 +200,6 @@ def test_ignored_files_do_not_count_as_dirty(tmp_path, monkeypatch, capsys):
     assert "verified clean" in context
 
 
-# --- preloaded context ----------------------------------------------------
 
 
 def test_bare_numbers_preload_full_context_from_the_current_repository(
@@ -337,7 +334,6 @@ def test_total_context_is_bounded_and_drops_are_disclosed(tmp_path, monkeypatch,
     assert f"Omitted for context size: {REPOSITORY}#2" in context
 
 
-# --- failing references ---------------------------------------------------
 
 
 def test_missing_primary_issue_blocks(tmp_path, monkeypatch, capsys):
@@ -379,7 +375,6 @@ def test_dangling_relations_are_skipped(tmp_path, monkeypatch, capsys):
     assert "## Referenced issue" not in context
 
 
-# --- installation ---------------------------------------------------------
 
 
 @pytest.mark.parametrize("platform", ["claude", "chatgpt"])

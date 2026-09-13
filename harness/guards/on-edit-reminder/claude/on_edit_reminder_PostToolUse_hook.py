@@ -83,7 +83,6 @@ class Rule:
         self.files = files            # tuple of required files (empty for negations)
 
 
-# --- rules parsing: identical to harness/on-edit-block --------------------
 
 def compile_pattern(pattern: str) -> re.Pattern[str] | None:
     """Compile one gitignore-style pattern to a regex, or None if unusable.
@@ -194,7 +193,6 @@ def matching_files(rules: list[Rule], rel_path: str) -> list[str]:
     return found
 
 
-# --- paths -----------------------------------------------------------------
 
 def project_root() -> Path:
     """The project being worked on: CLAUDE_PROJECT_DIR, else the cwd."""
@@ -226,7 +224,6 @@ def display_path(path: Path, root: Path) -> str:
         return str(path)
 
 
-# --- transcript scan --------------------------------------------------------
 
 def _iter_tool_use_blocks(obj: object) -> Iterator[dict[str, Any]]:
     """Yield every {"type": "tool_use", "name": ...} dict nested in *obj*.
@@ -305,7 +302,6 @@ def transcript_reads(transcript_path: str, needed: Iterable[str], root: Path) ->
     return found
 
 
-# --- session marker ---------------------------------------------------------
 
 def marker_path(payload: dict[str, Any]) -> Path | None:
     """Per-session marker in the temp dir; None when the session can't be
@@ -365,7 +361,6 @@ def due(reminded: dict[str, float], key: str, now: float, interval: float | None
     return interval is not None and now - last >= interval
 
 
-# --- output -----------------------------------------------------------------
 
 def emit(message: str) -> None:
     print(json.dumps({
