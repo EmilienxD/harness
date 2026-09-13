@@ -19,18 +19,8 @@ Skip the first command when the user already supplied a Context7 ID such as `/or
 
 ## Source index
 
-The skill directory contains a persistent index of useful sources. Before researching, search it for relevant leads:
+The skill directory contains an initially empty Markdown index at `<skill-directory>/sources.md`. Before researching, read it for relevant leads. After every web or Context7 search, add the newly found sources that materially helped the research directly to that file, using any clear Markdown format (for example, `- [Concise title](canonical URL)` or a Context7 identifier).
 
-```text
-python <skill-directory>/sources.py search "<topic>"
-```
-
-After every web or Context7 search, immediately record each newly found source that materially helped the research:
-
-```text
-python <skill-directory>/sources.py add "<concise title>" "<canonical URL or Context7 ID>"
-```
-
-Record only sources likely to help later agents quickly find useful, authoritative information. Prefer official primary sources; omit search-result pages, incidental findings, duplicates, and low-quality sources. If a search produced no useful source, add nothing. The script's update of its sibling `sources.json` is the only permitted file write; never edit that file directly.
+Record only sources likely to help later agents quickly find useful, authoritative information. Prefer official primary sources; omit search-result pages, incidental findings, duplicates, and low-quality sources. If a search produced no useful source, add nothing. Updating `sources.md` is the only permitted file write; never create or modify any other file during this workflow.
 
 Return a complete synthesis that answers the request, cites the supporting sources, distinguishes uncertainty when necessary, and filters out non-essential research findings rather than recounting the search process.

@@ -1,6 +1,6 @@
 name = "websearch"
-version = "1.2.0"
-description = "Web research with concise answers and a persistent source index"
+version = "1.3.0"
+description = "Web research with concise answers and a Markdown source index"
 
 [platforms.claude]
 status = "supported"
@@ -14,13 +14,8 @@ dest = "websearch/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "sources.py"
-dest = "websearch/sources.py"
-root = "skills"
-
-[[files]]
-src = "sources.json"
-dest = "websearch/sources.json"
+src = "sources.md"
+dest = "websearch/sources.md"
 root = "skills"
 starter = true
 
