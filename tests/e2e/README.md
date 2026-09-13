@@ -22,10 +22,16 @@ From this directory:
 npm install
 npm run check
 npm test
+npm run e2e:agent-launcher
 npm run e2e:on-edit-block
 npm run e2e:no-new-documents
 npm run e2e:report-gotchas
 ```
+
+The `agent-launcher` journey stages the shipped starter configuration and
+runtime, launches the real Claude Code and Codex CLIs through the project
+launchers, and verifies the configured model and Claude system prompt in the
+in-memory endpoint requests.
 
 The `on-edit-block` journey stages the actual shipped hook in a temporary project, launches the installed Claude CLI, and proves that the hook denies an edit until its required guide has been supplied, after which the retry succeeds.
 
