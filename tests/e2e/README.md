@@ -25,6 +25,8 @@ npm test
 npm run e2e:on-edit-block
 npm run e2e:on-edit-reminder
 npm run e2e:on-read-reminder
+npm run e2e:issue-readers
+npm run e2e:issue-writers
 npm run e2e:no-new-documents
 npm run e2e:prefer-edit-tool
 npm run e2e:prefer-fewer-comments
@@ -41,6 +43,18 @@ then proves that the real CLI reads the guide and corrects the file.
 The `on-read-reminder` journey stages the shipped Claude hook and proves that a
 matched read returns the mapped required-reading reminder before the real CLI
 reads that guide.
+
+The `issue-readers` journey stages the shipped skills and hooks with a fake
+`gh`, launches a real Claude Code or Codex session to address a fixture issue,
+then resumes that same session to review the resulting commit. It verifies the
+bounded issue and commit context, exact committed bytes, and clean endpoint
+history.
+
+The `issue-writers` journey stages the shipped drafting skills and publishing
+hook with a fake `gh`, launches a real Claude Code or Codex session to write a
+reviewable draft, then resumes that same session to publish it. It proves that
+publication deletes the draft, strips recovery metadata, preserves the title,
+body, and labels, and makes no additional inference request.
 
 The `no-new-documents` journey stages the actual shipped cross-platform hook,
 launches the installed Claude Code and Codex CLIs against authenticated
