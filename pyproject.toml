@@ -35,7 +35,8 @@ packages = ["src/harness_cli"]
 "harness" = "harness_cli/_tools"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/harness_cli", "harness", "tests", "README.md", "pyproject.toml"]
+include = ["src/harness_cli", "harness", "tests", "LICENSE", "README.md", "pyproject.toml"]
+exclude = ["apps/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

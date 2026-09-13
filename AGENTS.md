@@ -16,11 +16,10 @@ operations distinct from the persistent-session commands `run`, `ask`, `reply`, 
   merging, and TUI.
 - `harness/productivity/subagents/`: Complete ask/reply bundle with internal provider hooks and an independently
   packaged persistent Python runtime.
-- `harness/<category>/<tool>/`: installable packages. Start at the tool's `README.md`, or its platform `SKILL.md` when
-  no README exists. The `extension/aboard` package is an exception: it has neither file and is navigated from its
-  local `AGENTS.md`.
-- `apps/aboard/`: independent npm monorepo boundary for the Aboard VS Code extension. Its local
-  `AGENTS.md` is the navigation map for extension work.
+- `harness/<category>/<tool>/`: installable packages. User-facing documentation is centralized in the root
+  `README.md`; inspect a platform `SKILL.md` only when implementation details are needed.
+- `apps/aboard/`: the sole documentation exception, with its own user-facing `README.md` and local `AGENTS.md`
+  navigation map.
 - `tests/unit/`: installer, catalogue, platform, settings, receipt, and session tests.
 - `tests/e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
 - `docs/CLAUDE-REFERENCES/`: mirrored official Claude Code documentation.
@@ -41,7 +40,6 @@ Shared payloads live at the package root; shallow product folders are overlays:
 ```text
 harness/<category>/<tool>/
 ├── harness.toml
-├── README.md
 ├── SKILL.md          # one shared skill, with support files beside it
 ├── <skill>/         # each shared skill when a package contains several
 ├── <shared-hook>.py # one or two simple shared hook payloads
@@ -87,7 +85,7 @@ uv sync
 uv run harness
 uv run harness --help
 uv run pytest
-uv run python scripts/update_references.py
+uv run python scripts/update_references.py docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES
 ```
 
 For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
@@ -103,4 +101,4 @@ For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 ## References
 
 - Use the `writing-for-agents` skill when the user ask for writing/updating a SKILL.md file.
-- See docs/CHATGPT-REFERENCES.md and docs/CLAUDE-REFERENCES.md for up to date ChatGPT or Claude Code official documentation. Complete your search with websearches if you can't find what you are looking for there.
+- See `docs/CHATGPT-REFERENCES/` and `docs/CLAUDE-REFERENCES/` for up-to-date ChatGPT or Claude Code official documentation. Complete your search with web searches if you cannot find what you need there.
