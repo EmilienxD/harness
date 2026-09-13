@@ -14,8 +14,8 @@ dest = "websearch/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "sources.md"
-dest = "websearch/sources.md"
+src = "INDEX.md"
+dest = "websearch/INDEX.md"
 root = "skills"
 starter = true
 

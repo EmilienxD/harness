@@ -33,6 +33,7 @@ npm run e2e:prefer-edit-tool
 npm run e2e:prefer-fewer-comments
 npm run e2e:prefer-read-tool
 npm run e2e:report-gotchas
+npm run e2e:usage-limit-wait
 ```
 
 The `agent-launcher` journey stages the shipped starter configuration and
@@ -89,3 +90,9 @@ The `commit` journey stages the shipped zero-call commit hook beside a real
 Claude checkout, drives an actual edit through the loopback endpoint, then
 invokes `/commit` and verifies the exact commit. The hook submission must not
 produce a second inference request.
+
+The `usage-limit-wait` journey stages each shipped provider hook, drives the
+installed Claude Code and Codex CLIs through loopback inference, and serves an
+exhausted then restored subscription snapshot from a separate loopback usage
+endpoint. It proves that each turn pauses, re-polls, and continues only after
+the usage JSON reports recovery.

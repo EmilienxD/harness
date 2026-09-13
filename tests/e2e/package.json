@@ -30,6 +30,8 @@
     "e2e:report-gotchas": "npm run e2e:report-gotchas:build && node dist/tools/report-gotchas/cli.js"
     ,"e2e:commit:build": "esbuild tools/commit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/commit/cli.js --sourcemap"
     ,"e2e:commit": "npm run e2e:commit:build && node dist/tools/commit/cli.js"
+    ,"e2e:usage-limit-wait:build": "esbuild tools/usage-limit-wait/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/usage-limit-wait/cli.js --sourcemap"
+    ,"e2e:usage-limit-wait": "npm run e2e:usage-limit-wait:build && node dist/tools/usage-limit-wait/cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
