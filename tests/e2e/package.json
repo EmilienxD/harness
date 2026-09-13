@@ -8,6 +8,8 @@
     "test": "npm run test:build && node --test dist/test/*.test.js",
     "e2e:on-edit-block:build": "esbuild tools/on-edit-block/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/on-edit-block/cli.js --sourcemap",
     "e2e:on-edit-block": "npm run e2e:on-edit-block:build && node dist/tools/on-edit-block/cli.js",
+    "e2e:agent-launcher:build": "esbuild tools/agent-launcher/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/agent-launcher/cli.js --sourcemap",
+    "e2e:agent-launcher": "npm run e2e:agent-launcher:build && node dist/tools/agent-launcher/cli.js",
     "e2e:on-edit-reminder:build": "esbuild tools/on-edit-reminder/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/on-edit-reminder/cli.js --sourcemap",
     "e2e:on-edit-reminder": "npm run e2e:on-edit-reminder:build && node dist/tools/on-edit-reminder/cli.js",
     "e2e:on-read-reminder:build": "esbuild tools/on-read-reminder/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/on-read-reminder/cli.js --sourcemap",
