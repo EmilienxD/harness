@@ -4,7 +4,7 @@ description: Compact the current conversation into a handoff document for anothe
 disable-model-invocation: true
 ---
 
-Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save to the temporary directory of the user's OS - not the current workspace.
+Write a handoff, detailed document as a markdown block inline in the chat summarising the current conversation so a fresh agent can continue the work.
 
 Do not duplicate content already captured in other artifacts (specs, plans, ADRs, issues, commits, diffs). Reference them by path or URL instead.
 
