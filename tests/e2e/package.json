@@ -28,6 +28,8 @@
     "e2e:prefer-read-tool": "npm run e2e:prefer-read-tool:build && node dist/tools/prefer-read-tool/cli.js",
     "e2e:report-gotchas:build": "esbuild tools/report-gotchas/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/report-gotchas/cli.js --sourcemap",
     "e2e:report-gotchas": "npm run e2e:report-gotchas:build && node dist/tools/report-gotchas/cli.js"
+    ,"e2e:commit:build": "esbuild tools/commit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/commit/cli.js --sourcemap"
+    ,"e2e:commit": "npm run e2e:commit:build && node dist/tools/commit/cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

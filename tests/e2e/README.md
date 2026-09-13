@@ -84,3 +84,8 @@ to the configured Discord webhook. Configure the webhook with
 `harness-report-gotchas configure` before running it. The default `npm test`
 suite skips these two live cases unless
 `HARNESS_REPORT_GOTCHAS_LIVE_E2E=1` is set.
+
+The `commit` journey stages the shipped zero-call commit hook beside a real
+Claude checkout, drives an actual edit through the loopback endpoint, then
+invokes `/commit` and verifies the exact commit. The hook submission must not
+produce a second inference request.
