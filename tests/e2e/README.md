@@ -24,6 +24,7 @@ npm run check
 npm test
 npm run e2e:agent-launcher
 npm run e2e:on-edit-block
+npm run e2e:command-guard
 npm run e2e:on-edit-reminder
 npm run e2e:on-read-reminder
 npm run e2e:issue-readers
@@ -42,6 +43,11 @@ launchers, and verifies the configured model and Claude system prompt in the
 in-memory endpoint requests.
 
 The `on-edit-block` journey stages the actual shipped hook in a temporary project, launches the installed Claude CLI, and proves that the hook denies an edit until its required guide has been supplied, after which the retry succeeds.
+
+The `command-guard` journey stages the shipped cross-platform hook and starter
+policy, launches the real Claude Code and Codex CLIs through authenticated
+loopback inference endpoints, and proves that a safe command executes while a
+force push and its chained filesystem write are denied.
 
 The `on-edit-reminder` journey stages the shipped Claude hook, lets the first
 edit land, verifies that its additional context requires the mapped guide,
