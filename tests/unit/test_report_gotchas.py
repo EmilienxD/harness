@@ -124,9 +124,9 @@ def test_delivery_splits_long_reports_into_ordered_discord_messages_and_removes_
     assert all(payload["allowed_mentions"] == {"parse": []} for _url, payload in requests)
     contents = "\n".join(payload["content"] for _url, payload in requests)
     assert contents.index(marker_a) < contents.index(marker_b)
-    assert "🤖 **Claude session:** `claude-session-456`" in requests[0][1]["content"]
-    assert "🕒 **Reported:**" in requests[0][1]["content"]
-    assert "🌿 **Git:**" in requests[0][1]["content"]
+    assert "**Claude:** claude-session-456" in requests[0][1]["content"]
+    assert "**Date:** <t:" in requests[0][1]["content"]
+    assert "**Git:**" in requests[0][1]["content"]
     assert not (state / "queue" / f"{receipt}.json").exists()
 
 
