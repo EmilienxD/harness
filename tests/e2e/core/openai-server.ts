@@ -8,6 +8,7 @@ const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
 export interface OpenAiResponsesRequest {
   readonly model: string;
+  readonly instructions?: unknown;
   readonly input: readonly Record<string, unknown>[];
   readonly tools: readonly Record<string, unknown>[];
   readonly codeMode: boolean;
@@ -112,7 +113,15 @@ function parseRequest(value: unknown): OpenAiResponsesRequest {
     sessionId = typeof turn.session_id === "string" ? turn.session_id : null;
     requestKind = typeof turn.request_kind === "string" ? turn.request_kind : null;
   }
-  return { model: body.model, input, tools: [...topLevelTools, ...additionalTools], codeMode: additionalTools.length > 0, sessionId, requestKind };
+  return {
+    model: body.model,
+    ...(body.instructions !== undefined ? { instructions: body.instructions } : {}),
+    input,
+    tools: [...topLevelTools, ...additionalTools],
+    codeMode: additionalTools.length > 0,
+    sessionId,
+    requestKind,
+  };
 }
 
 function writeResponse(response: ServerResponse, model: string, raw: Buffer, output: OpenAiResponseOutput): void {

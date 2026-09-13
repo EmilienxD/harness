@@ -24,8 +24,20 @@ npm run check
 npm test
 npm run e2e:agent-launcher
 npm run e2e:on-edit-block
+npm run e2e:command-guard
+npm run e2e:on-edit-reminder
+npm run e2e:on-read-reminder
+npm run e2e:issue-readers
+npm run e2e:issue-writers
+npm run e2e:breakdown-help-wanted-issue
 npm run e2e:no-new-documents
+npm run e2e:prefer-edit-tool
+npm run e2e:prefer-fewer-comments
+npm run e2e:prefer-read-tool
 npm run e2e:report-gotchas
+npm run e2e:usage-limit-wait
+npm run e2e:subagents
+npm run e2e:redirect-subagents
 ```
 
 The `agent-launcher` journey stages the shipped starter configuration and
@@ -35,11 +47,50 @@ in-memory endpoint requests.
 
 The `on-edit-block` journey stages the actual shipped hook in a temporary project, launches the installed Claude CLI, and proves that the hook denies an edit until its required guide has been supplied, after which the retry succeeds.
 
+The `command-guard` journey stages the shipped cross-platform hook and starter
+policy, launches the real Claude Code and Codex CLIs through authenticated
+loopback inference endpoints, and proves that a safe command executes while a
+force push and its chained filesystem write are denied.
+
+The `on-edit-reminder` journey stages the shipped Claude hook, lets the first
+edit land, verifies that its additional context requires the mapped guide,
+then proves that the real CLI reads the guide and corrects the file.
+
+The `on-read-reminder` journey stages the shipped Claude hook and proves that a
+matched read returns the mapped required-reading reminder before the real CLI
+reads that guide.
+
+The `issue-readers` journey stages the shipped skills and hooks with a fake
+`gh`, launches a real Claude Code or Codex session to address a fixture issue,
+then resumes that same session to review the resulting commit. It verifies the
+bounded issue and commit context, exact committed bytes, and clean endpoint
+history.
+
+The `issue-writers` journey stages the shipped drafting skills and publishing
+hook with a fake `gh`, launches a real Claude Code or Codex session to write a
+reviewable draft, then resumes that same session to publish it. It proves that
+publication deletes the draft, strips recovery metadata, preserves the title,
+body, and labels, and makes no additional inference request.
+
+The `breakdown-help-wanted-issue` journey stages the shipped skill and fallback
+hook, launches real Claude Code and Codex CLIs with a fake GitHub CLI, and proves
+that a standalone invocation fetches the oldest labeled issue, inspects fixture
+evidence, returns a validation report, and does not mutate GitHub.
+
 The `no-new-documents` journey stages the actual shipped cross-platform hook,
 launches the installed Claude Code and Codex CLIs against authenticated
 loopback inference servers, and proves that a new file under a nested `docs/`
 directory is denied while the final response reports the proposed document and
 its rationale.
+
+The `prefer-edit-tool` and `prefer-read-tool` journeys exercise their shipped
+Claude-only hooks through real Bash calls. They prove that the shell operation
+still completes while its result carries the corresponding native-tool nudge.
+
+The `prefer-fewer-comments` journey stages the shipped cross-platform hook and
+uses real Claude Code and Codex CLIs to write an over-budget Python comment. It
+proves the write remains on disk and both providers receive the hook's
+forward-looking comment-budget reminder.
 
 The `report-gotchas` journey is an opt-in live external test. It stages the
 shipped skill and runtime outside the repository, drives both real provider
@@ -48,3 +99,27 @@ to the configured Discord webhook. Configure the webhook with
 `harness-report-gotchas configure` before running it. The default `npm test`
 suite skips these two live cases unless
 `HARNESS_REPORT_GOTCHAS_LIVE_E2E=1` is set.
+
+The `commit` journey stages the shipped zero-call commit hook beside a real
+Claude checkout, drives an actual edit through the loopback endpoint, then
+invokes `/commit` and verifies the exact commit. The hook submission must not
+produce a second inference request.
+
+The `usage-limit-wait` journey stages each shipped provider hook, drives the
+installed Claude Code and Codex CLIs through loopback inference, and serves an
+exhausted then restored subscription snapshot from a separate loopback usage
+endpoint. It proves that each turn pauses, re-polls, and continues only after
+the usage JSON reports recovery.
+
+The `subagents` journey stages the complete shipped runtime, ask skill, and
+provider hooks outside the repository. It launches a parent and delegated child
+through the real Claude Code and Codex CLIs, then proves that the child result
+is explicitly armed with `harness reply`, wakes and continues the parent, and
+uses authenticated loopback inference only.
+
+The `redirect-subagents` journey stages the shipped Claude hook bundle and its
+starter configuration outside the repository, enables the `Explore` self
+backend, and launches a real parent Claude CLI that attempts the native `Agent`
+tool. It proves that the tool is denied, a second real `claude -p` process runs
+against the authenticated loopback endpoint, the parent waits at Stop, and the
+redirected report is delivered exactly once.
