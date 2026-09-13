@@ -301,7 +301,7 @@ export function describeActivity(entry: ActivityEntry): string {
       case "started": return "auto-run started";
       case "resumed": return `auto-run resumed (attempt ${entry.attempt})`;
       case "succeeded": return "auto-run finished";
-      case "cancelled": return "auto-run stopped by you";
+      case "cancelled": return "auto-run stopped by the user";
       case "interrupted": return "auto-run interrupted";
       case "failed": return "auto-run failed";
       case "discarded": return "auto-run discarded";

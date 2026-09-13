@@ -965,7 +965,7 @@ test("an issue that cannot be closed is reported instead of failing work that me
   await context.engine.settle();
 
   assert.equal(context.pullRequests.get(56)?.state, "merged");
-  assert.match(context.notifications.join("\n"), /issue #34 merged but could not be closed .*Close it yourself/);
+  assert.match(context.notifications.join("\n"), /issue #34 merged but could not be closed .*Close it manually/);
   assert.match(context.notifications.join("\n"), /plan drained \(1 issue addressed\)/);
 });
 
@@ -1003,7 +1003,7 @@ test("the run opens one pull request into the user's branch and leaves it for th
   assert.equal(context.pullRequests.get(58)?.state, "open", "the run's own pull request is not merged by default");
   assert.match(context.notifications.join("\n"), /opened PR #58 into feature\/wip with 2 issues/);
   // A pull request nobody is watching for is not progress, so it is escalated.
-  assert.match(context.alerts.at(-1)?.message ?? "", /PR #58 into feature\/wip is yours to merge/);
+  assert.match(context.alerts.at(-1)?.message ?? "", /PR #58 into feature\/wip is the user's to merge/);
 });
 
 test("the run merges its own pull request only when the setting allows it", async () => {
@@ -1328,7 +1328,7 @@ test("a conflicting pull request is reconciled with its base and then merged", a
   assert.match(context.notifications.join("\n"), new RegExp(`conflicted with ${SESSION}; merged ${SESSION} into its branch and pushed`));
   assert.equal(context.pullRequests.get(56)?.state, "merged");
   // The run's own pull request is the only thing left for the user.
-  assert.deepEqual(context.alerts.map((alert) => alert.message.includes("is yours to merge")), [true]);
+  assert.deepEqual(context.alerts.map((alert) => alert.message.includes("is the user's to merge")), [true]);
 });
 
 test("an unresolvable conflict stops the whole run rather than skipping the issue", async () => {

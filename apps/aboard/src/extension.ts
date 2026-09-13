@@ -731,7 +731,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         "Update aboard's project assets?",
         {
           modal: true,
-          detail: "aboard updates the extension-owned configuration and setup scripts under .abd/. Files you have not touched are replaced with this version's copies, and unchanged files this version retired are removed. Assets you edited yourself are kept and listed afterwards rather than overwritten. Running sessions continue unchanged.",
+          detail: "aboard updates the extension-owned configuration and setup scripts under .abd/. Files the user has not touched are replaced with this version's copies, and unchanged files this version retired are removed. Assets edited by the user are kept and listed afterwards rather than overwritten. Running sessions continue unchanged.",
         },
         "Update",
       );

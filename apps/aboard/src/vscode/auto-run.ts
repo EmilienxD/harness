@@ -332,7 +332,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
       return {
         label: "Interrupted auto-run",
         description: `cannot be resumed; ${card.reason}`,
-        tooltip: "This record was written before fixed-plan recovery and carries no plan to validate. Its branches and pull requests are untouched; discard the record when you have finished with them.",
+        tooltip: "This record was written before fixed-plan recovery and carries no plan to validate. Its branches and pull requests are untouched; discard the record when the user has finished with them.",
         icon: "error",
         contextValue: "aboard.autoRun.unsupported",
         collapsible: false,
@@ -398,7 +398,7 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     `Branch mode: ${preview.branchMode ?? "per-issue"}`,
     preview.branchMode === "single-branch" ? "All issues are committed to the session branch; one cumulative pull request is used." : "Each issue uses its own branch and pull request.",
     ...preview.warnings.map((warning) => `Warning: ${warning}`),
-    preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
+    preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in the user's checkout",
     `Fresh Explore context ${preview.exploresBeforeImplement ? "on" : "off"}`,
     `Review ${preview.reviewMode ? "on" : "off"}`,
     preview.permanentPrompt === undefined ? "" : "Configured auto-run note will be included",
@@ -434,7 +434,7 @@ function describeOutcome(record: AutoRunRecord): string {
   const outcome = record.outcome;
   if (outcome === undefined) return "interrupted";
   switch (outcome.kind) {
-    case "cancelled": return "stopped by you";
+    case "cancelled": return "stopped by the user";
     case "interrupted": return "interrupted";
     case "failed": return `failed; ${outcome.reason}`;
   }
@@ -451,7 +451,7 @@ function runTooltip(record: AutoRunRecord, state?: AutoRunState): string {
     state?.dirtyPaths === undefined ? "" : state.dirtyPaths.length === 0 ? "Working tree: clean" : `Uncommitted paths: ${state.dirtyPaths.join(", ")}`,
     progress?.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined ? `Accepted range: ${progress.beforeSha}..${progress.implementationSha}` : "",
     progress?.state === "current" && progress.reviewedSha !== undefined ? `Reviewed through: ${progress.reviewedSha}` : "",
-    record.settings.workspaceRoot === undefined ? "Working in your checkout" : `Working in ${record.settings.workspaceRoot}`,
+    record.settings.workspaceRoot === undefined ? "Working in the user's checkout" : `Working in ${record.settings.workspaceRoot}`,
     `Fresh Explore context ${record.settings.exploreBeforeImplement ? "on" : "off"}`,
     `Review ${record.settings.review ? "on" : "off"}`,
     record.runPullRequest === undefined ? "" : `Run pull request: #${record.runPullRequest}`,

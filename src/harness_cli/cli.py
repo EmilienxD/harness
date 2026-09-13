@@ -186,7 +186,7 @@ def catalogue_menu() -> int:
         scope = ui.select(
             "Installation scope",
             (
-                MenuOption("Project", "Install in current directory (committed with your project)"),
+                MenuOption("Project", "Install in current directory (committed with the project)"),
                 MenuOption("Global", "Install in home directory (available across all projects)"),
             ),
         )

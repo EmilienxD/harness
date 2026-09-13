@@ -39,10 +39,10 @@ enforced trust or permission boundaries.
 
 ## Safe research
 
-Use repositories, accounts, credentials, and machines you own or are explicitly authorized to
+Use repositories, accounts, credentials, and machines the researcher owns or is explicitly authorized to
 test. Do not access other users' data, disrupt shared services, or run destructive tests against the
 Harness E2E fixture without prior coordination. Stop testing and report immediately if you encounter
-data that is not yours.
+data that does not belong to the researcher.
 
 Good-faith research following this policy will not be treated as malicious activity. This statement
 does not authorize testing of third-party products or infrastructure.

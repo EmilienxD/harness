@@ -205,17 +205,17 @@
     "viewsWelcome": [
       {
         "view": "aboard.welcome",
-        "contents": "aboard provides visible terminals for coding-agent sessions, fleet tracking, and Auto Run orchestration.\n\nOne click sets this workspace up: launch configuration, Auto Run setup, and a loopback-only bridge. Your existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
+        "contents": "aboard provides visible terminals for coding-agent sessions, fleet tracking, and Auto Run orchestration.\n\nOne click sets this workspace up: launch configuration, Auto Run setup, and a loopback-only bridge. The existing configuration is preserved.\n[Initialize](command:aboard.initializeProject)",
         "when": "!aboard.scaffoldUpdateRequired"
       },
       {
         "view": "aboard.welcome",
-        "contents": "This project's aboard assets were created by another extension version. Update them before starting or resuming aboard. Files you have edited are preserved and listed for review.\n[Update .abd/](command:aboard.updateProject)",
+        "contents": "This project's aboard assets were created by another extension version. Update them before starting or resuming aboard. Files edited by the user are preserved and listed for review.\n[Update .abd/](command:aboard.updateProject)",
         "when": "aboard.scaffoldUpdateRequired"
       },
       {
         "view": "aboard.recentActivity",
-        "contents": "What aboard's agents and runs did most recently shows up here, including sessions you can reopen."
+        "contents": "What aboard's agents and runs did most recently shows up here, including sessions the user can reopen."
       }
     ],
     "menus": {
@@ -439,7 +439,7 @@
         "aboard.terminals.closeOnSessionEnd": {
           "type": "boolean",
           "default": false,
-          "description": "Close an agent's terminal when its session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
+          "description": "Close an agent's terminal when its session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for the user to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
         },
         "aboard.autoRun.review": {
           "type": "boolean",
@@ -490,7 +490,7 @@
         "aboard.autoRun.mergeRunPullRequest": {
           "type": "boolean",
           "default": false,
-          "description": "Merge the run's own pull request when the run ends. An auto-run addresses each issue on its own branch, merges those into one session branch, and opens a single pull request from it into the branch you were on when the run started. Off by default: that branch is one you are working on, so a conflict there is likely and landing a batch of automated work on it is your decision. When on, aboard attempts the merge once, reconciles a conflict it can resolve, and otherwise leaves the pull request open for you."
+          "description": "Merge the run's own pull request when the run ends. An auto-run addresses each issue on its own branch, merges those into one session branch, and opens a single pull request from it into the branch active when the run started. Off by default: that branch is one the user is working on, so a conflict there is likely and landing a batch of automated work on it is the user's decision. When on, aboard attempts the merge once, reconciles a conflict it can resolve, and otherwise leaves the pull request open for the user."
         },
         "aboard.autoRun.discardBehavior": {
           "type": "string",
@@ -510,7 +510,7 @@
         "aboard.autoRun.worktree.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Give an auto-run a checkout of its own instead of working in your files. The run creates a second checkout beside the project, carries ignored local .claude and .abd configuration into it without replacing tracked files, and leaves your working tree and branch exactly as they are. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
+          "description": "Give an auto-run a checkout of its own instead of working in the user's files. The run creates a second checkout beside the project, carries ignored local .claude and .abd configuration into it without replacing tracked files, and leaves the user's working tree and branch exactly as they are. Off by default: a separate checkout costs a full copy of the tree plus whatever the session-setup script installs into it."
         },
         "aboard.autoRun.worktree.root": {
           "type": "string",
@@ -527,7 +527,7 @@
           "default": 600,
           "minimum": 1,
           "maximum": 86400,
-          "description": "How long .abd/session-setup.ps1 or .abd/session-setup.sh may take in a fresh checkout. Those files ship empty; put your own installation steps in them (copying an .env, npm install, uv sync) and aboard runs the one for this platform once, right after creating the checkout. A failure refuses the run rather than starting agents in a half-installed tree."
+          "description": "How long .abd/session-setup.ps1 or .abd/session-setup.sh may take in a fresh checkout. Those files ship empty; put the user's installation steps in them (copying an .env, npm install, uv sync) and aboard runs the one for this platform once, right after creating the checkout. A failure refuses the run rather than starting agents in a half-installed tree."
         }
       }
     }

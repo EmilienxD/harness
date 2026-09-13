@@ -1,8 +1,8 @@
 # Harness
 
-Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
+Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without requiring an all-or-nothing workflow.
 
-The project is built around deliberate control. Most skills run only when you invoke them. Hooks act at narrow, visible lifecycle boundaries, with editable policies where configuration is needed. Aboard keeps delegated and automated work in visible terminals that you can inspect, stop, and resume.
+The project is built around deliberate control. Most skills run only when the user invokes them. Hooks act at narrow, visible lifecycle boundaries, with editable policies where configuration is needed. Aboard keeps delegated and automated work in visible terminals that the user can inspect, stop, and resume.
 
 ## Installation
 
@@ -12,7 +12,7 @@ Run a pinned revision of the ephemeral installer:
 uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness
 ```
 
-The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes.
+The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages the user wants. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes.
 
 For scripts and agents, use the non-interactive commands:
 
@@ -37,17 +37,21 @@ Commands default to project scope in the current directory and both platforms. U
 
 Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The exceptions are hook-backed commands such as `/commit`, whose prompt is intercepted before a model call.
 
-**User-invoked** skills run only when you explicitly ask for them. **Model-invoked** skills may also be selected automatically when their description fits the work. Harness strongly favors the first group: you decide when a workflow starts, when a draft is published, and when another agent is launched.
+**User-invoked** skills run only when the user explicitly asks for them. **Model-invoked** skills may also be selected automatically when their description fits the work. Harness strongly favors the first group: the user decides when a workflow starts, when a draft is published, and when another agent is launched.
 
 ### User-invoked skills
 
 - **`resolving-merge-conflicts`**: Resolves an in-progress Git merge or rebase by tracing the intent behind each side, preserving both where possible, running the repository's checks, and finishing the operation. It never aborts the merge or invents unrelated behavior.
 
-- **`setup-git-worktree-maker`**: Creates or updates a repository-native command for making fully initialized Git worktrees. It derives the script, copied local files, setup sequence, command alias, and optional VS Code task from the project, validates the generated command without creating a worktree, and leaves execution to you.
+- **`setup-git-worktree-maker`**: Creates or updates a repository-native command for making fully initialized Git worktrees. It derives the script, copied local files, setup sequence, command alias, and optional VS Code task from the project, validates the generated command without creating a worktree, and leaves execution to the user.
 
 - **`audit`**: Performs a read-only general, security, architecture, quality, performance, reliability, testing, dependency, or privacy audit of a codebase or selected path. Findings include file-and-line evidence, severity, confidence, remediation difficulty, and a recommended order of work; larger scopes can be partitioned across explorer agents.
 
-- **`breakdown-help-wanted-issue`**: Investigates a vague request against the codebase, challenges its scope, and returns a report for your approval. With no supplied request, it can use the oldest open `[AI]-help-wanted` GitHub issue. It does not implement or publish anything.
+- **`breakdown-help-wanted-issue`**: Investigates a vague request against the codebase, challenges its scope, and returns a report for the user's approval. With no supplied request, it can use the oldest open `[AI]-help-wanted` GitHub issue. It does not implement or publish anything.
+
+- **`grill-me`**: Interviews the user to stress-test a plan or design before implementation.
+
+- **`lavish`**: Creates reviewable HTML artifacts with the Lavish Editor.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 
@@ -55,13 +59,13 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis in chat. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
 
-- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Claude Code also gets `copy-message-as-issue` for publishing the latest reviewed response.
+- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until the user publishes them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Claude Code also gets `copy-message-as-issue` for publishing the latest reviewed response.
 
 - **`issue-readers`**: Installs `address-this` and `review-this`, plus hooks that prepare bounded issue or commit context. Their prompt bodies are intentionally empty, user-owned starter files. Aboard and the visible-subagent workflows use them for implementation and review workers.
 
 - **`commit`**: `/commit <message>` stages the files changed by the current session and commits them without another model call. Add `--dry` to preview or `--ai` to generate a message through a direct Gemini request. Everything except `--ai` is local and needs no API key.
 
-- **`todo-hitl`**: `mark-as-todo-hitl` leaves a focused `TODO(HITL)` for work that needs a human decision; `address-todo-hitl` investigates the highest-priority marker, agrees on a resolution with you, and then implements it.
+- **`todo-hitl`**: `mark-as-todo-hitl` leaves a focused `TODO(HITL)` for work that needs a human decision; `address-todo-hitl` investigates the highest-priority marker, agrees on a resolution with the user, and then implements it.
 
 - **`command-aliases`**: Adds or updates shell aliases in PowerShell, Bash, or Zsh while preserving existing configuration.
 
@@ -69,9 +73,15 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`agent-launcher`**: Installs `cch` and `cxh`, project-configurable wrappers for launching Claude Code and ChatGPT/Codex. A starter `.harness/agent-launcher/` configuration can add a Claude system prompt, provider settings, and standard-library Python extensions; the Claude-only `extend-claude-system-prompt` skill helps maintain and validate that prompt.
 
+- **`caveman`**: Enables an ultra-compressed communication mode that uses roughly 75% fewer tokens.
+
 - **`decisions`**: Reviews decisions already made during the current conversation and reports only important choices that remain low-confidence, together with the strongest alternative. If no meaningful uncertainty remains, it says so.
 
-- **`next-decision`**: Works through a plan's unresolved choices one at a time. Each round presents the most important ready decision, four viable options, and a recommendation, then waits for your choice before updating the plan and continuing.
+- **`handoff`**: Compacts the conversation into a handoff document for another agent.
+
+- **`handoff-grilling`**: Preserves a `grill-me` conversation in a detailed handoff document.
+
+- **`next-decision`**: Works through a plan's unresolved choices one at a time. Each round presents the most important ready decision, four viable options, and a recommendation, then waits for the user's choice before updating the plan and continuing.
 
 - **`stop-overthinking`**: Cuts a stalled discussion down to a practical go/no-go answer, calling out only serious issues and giving concise next steps.
 
@@ -96,6 +106,8 @@ harness resume <session-id>
 
 - **`writing-for-agents`**: Guides the creation of predictable skills and agent instruction files. It treats invocation pointers, information hierarchy, completion criteria, progressive disclosure, leading words, and pruning as concrete controls over agent behavior and document load.
 
+- **`zoom-out`**: Provides a higher-level map of a selected area of a codebase.
+
 - **`report-gotchas`**: Near the end of complicated implementation work, records meaningful caveats, failed checks, unfinished work, or required human action in a configured Discord channel. It does nothing when there is nothing noteworthy to report. Configure its webhook with `harness-report-gotchas configure`.
 
 ### Hooks
@@ -117,7 +129,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 
 ## Aboard
 
-Aboard is the optional VS Code extension for visible Claude Code and ChatGPT sessions, fleet tracking, and user-controlled Auto Run workflows. Select `aboard` in Harness to install its verified VSIX and required worker assets.
+Aboard is the optional VS Code extension for visible Claude Code and ChatGPT sessions, fleet tracking, and user-controlled Auto Run workflows. Select `aboard` in Harness to install its verified VSIX and required worker assets. The non-selectable `auto` package supplies Aboard's internal `/auto` routing hook and is installed as a dependency rather than chosen directly.
 
 See the [Aboard README](apps/aboard/README.md) for its visual workflow guide, configuration, and development commands.
 

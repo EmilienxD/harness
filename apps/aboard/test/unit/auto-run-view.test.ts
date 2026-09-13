@@ -372,7 +372,7 @@ test("a resumable run names how it ended and how far it got", () => {
   const cancelled = rootItem({ persisted: record({ outcome: { kind: "cancelled" } }), eligibility: { state: "resumable" } });
   assert.equal(cancelled.item.contextValue, "aboard.autoRun.recoverable");
   assert.equal(cancelled.item.icon, "circle-slash");
-  assert.match(cancelled.item.description, /stopped by you · 1\/3 done/);
+  assert.match(cancelled.item.description, /stopped by the user · 1\/3 done/);
 
   const failed = rootItem({ persisted: record({ outcome: { kind: "failed", reason: "push rejected" } }), eligibility: { state: "resumable" } });
   assert.match(failed.item.description, /failed; push rejected/);
@@ -507,7 +507,7 @@ test("the tooltip names where the work goes and what the run froze", () => {
   assert.match(item.tooltip, /Fresh Explore context on/);
 
   const inPlace = rootItem({ persisted: record(), state: state() });
-  assert.match(inPlace.item.tooltip, /Working in your checkout/);
+  assert.match(inPlace.item.tooltip, /Working in the user's checkout/);
 });
 
 test("the pull request an action opens is the current one, or the run's when there is none", () => {

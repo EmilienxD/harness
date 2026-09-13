@@ -115,5 +115,5 @@ function icon(entry: ActivityEntry): string {
 export function clearActivityWarning(store: ActivityDto | undefined): string | undefined {
   const reopenable = (store?.entries ?? []).filter((entry) => entry.kind === "agent" && entry.reopen !== undefined).length;
   if (reopenable === 0) return undefined;
-  return `Clearing recent activity also removes aboard's record of ${reopenable} conversation${reopenable === 1 ? "" : "s"} it could reopen for you. The platform's conversation data stays on disk, but aboard will no longer know which agent it belonged to.`;
+  return `Clearing recent activity also removes aboard's record of ${reopenable} conversation${reopenable === 1 ? "" : "s"} it could reopen for the user. The platform's conversation data stays on disk, but aboard will no longer know which agent it belonged to.`;
 }

@@ -1,6 +1,6 @@
 # Aboard
 
-Aboard is a VS Code extension for visible Claude Code and ChatGPT sessions. It keeps agent work in terminals you can inspect, gives you one place to track active and recent sessions, and runs issue-driven Auto Run workflows without hiding the work from you.
+Aboard is a VS Code extension for visible Claude Code and ChatGPT sessions. It keeps agent work in terminals the user can inspect, gives the user one place to track active and recent sessions, and runs issue-driven Auto Run workflows without hiding the work from the user.
 
 Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
@@ -8,7 +8,7 @@ Install it through the [Harness catalogue](../../README.md#installation) by sele
 
 ```mermaid
 flowchart LR
-    U[You] --> C[Commands and Aboard views]
+    U[The user] --> C[Commands and Aboard views]
 
     subgraph V[VS Code]
         C --> A[Aboard]
@@ -30,7 +30,7 @@ flowchart LR
 
 ## Visible sessions
 
-Initialize the project once, then use **Run Agent** to open an empty, attended terminal. The platform, model, and reasoning effort come from `.harness/launch.json`. Aboard reads that file for every new launch, resume, or reopen, so existing sessions keep their configuration while future sessions use your latest choices.
+Initialize the project once, then use **Run Agent** to open an empty, attended terminal. The platform, model, and reasoning effort come from `.harness/launch.json`. Aboard reads that file for every new launch, resume, or reopen, so existing sessions keep their configuration while future sessions use the user's latest choices.
 
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
@@ -39,8 +39,8 @@ flowchart TD
     L[Run Agent or manual delegation] --> S[Starting]
     S -->|Platform session starts| R[Running in a visible terminal]
     S -->|Launch fails| F[Failed]
-    R -->|Agent needs interaction| W[Awaiting you]
-    W -->|You continue in the terminal| R
+    R -->|Agent needs interaction| W[Awaiting the user]
+    W -->|The user continues in the terminal| R
     R -->|Process exits successfully| C[Completed]
     R -->|Process or policy failure| F
     C --> D{Record has useful<br/>session or outcome data?}
@@ -55,7 +55,7 @@ flowchart TD
     RL --> S
 ```
 
-Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Explore sessions are read-only. Auto Run workers use stricter, extension-owned Git and GitHub restrictions.
+Interactive and manually delegated sessions inherit the user's native Claude Code or ChatGPT settings. Explore sessions are read-only. Auto Run workers use stricter, extension-owned Git and GitHub restrictions.
 
 ## Auto Run
 
@@ -72,7 +72,7 @@ flowchart TD
 
     M -->|AFK| AFK[Implementer must succeed with<br/>exactly one clean descendant commit]
     M -->|HITL| HITL[Implementer leaves changes uncommitted<br/>in its visible terminal]
-    HITL --> U[You inspect, continue, and commit<br/>the accepted clean range]
+    HITL --> U[The user inspects, continues, and commits<br/>the accepted clean range]
     AFK --> B{Branch mode}
     U --> B
 
@@ -96,10 +96,10 @@ flowchart TD
     Q -->|Accepted work landed| PR[Open or finalize run PR<br/>into original target branch]
     PR --> AM{Automatic final merge enabled<br/>and safe?}
     AM -->|Yes| MG[Aboard merges final PR]
-    AM -->|No| Y[Leave final PR open for you]
+    AM -->|No| Y[Leave final PR open for the user]
 ```
 
-- **HITL** leaves implementation work in a visible terminal and waits for one or more clean commits that you accept.
+- **HITL** leaves implementation work in a visible terminal and waits for one or more clean commits that the user accepts.
 - **AFK** accepts only a successful worker result with exactly one clean descendant commit.
 - Aboard owns branch changes, publication, integration, and GitHub mutations. Workers may inspect, edit, stage, and commit within their assigned checkout.
 

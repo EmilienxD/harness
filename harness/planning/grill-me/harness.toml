@@ -1,6 +1,6 @@
 name = "grill-me"
-version = "1.0.4"
-description = "Interviews you to stress-test a plan or design"
+version = "1.0.5"
+description = "Interviews the user to stress-test a plan or design"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/grill-me/SKILL.md"
 
 [platforms.claude]

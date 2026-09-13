@@ -54,20 +54,20 @@ export class ChatGptPolicyProbe {
       if (policy.hooks === false) {
         throw new ChatGptPolicyError(
           "lifecycle-hooks",
-          `Managed Codex policy in ${policy.source} pins [features] hooks = false, so Aboard's lifecycle hooks never run and a ${agentType} session could not report its start or its result. Ask your administrator to allow Codex hooks.`,
+          `Managed Codex policy in ${policy.source} pins [features] hooks = false, so Aboard's lifecycle hooks never run and a ${agentType} session could not report its start or its result. Ask the user's administrator to allow Codex hooks.`,
         );
       }
       if (policy.allowManagedHooksOnly === true) {
         throw new ChatGptPolicyError(
           "lifecycle-hooks",
-          `Managed Codex policy in ${policy.source} sets allow_managed_hooks_only = true, so Codex skips the hooks Aboard generates for a ${agentType} session and its result would never arrive. Ask your administrator to allow session hooks.`,
+          `Managed Codex policy in ${policy.source} sets allow_managed_hooks_only = true, so Codex skips the hooks Aboard generates for a ${agentType} session and its result would never arrive. Ask the user's administrator to allow session hooks.`,
         );
       }
       if (permissionProfile !== undefined) {
         if (policy.allowedPermissionProfiles !== undefined && policy.allowedPermissionProfiles[permissionProfile] !== true) {
           throw new ChatGptPolicyError(
             "permission-profile",
-            `Managed Codex policy in ${policy.source} does not allow the ${permissionProfile} permission profile required to isolate the user's original checkout. Ask your administrator to allow that profile.`,
+            `Managed Codex policy in ${policy.source} does not allow the ${permissionProfile} permission profile required to isolate the user's original checkout. Ask the user's administrator to allow that profile.`,
           );
         }
         if (policy.defaultPermissions !== undefined && policy.defaultPermissions !== permissionProfile) {
@@ -81,7 +81,7 @@ export class ChatGptPolicyProbe {
       if (agentType === "Explore" && permissionProfile === undefined && modes !== undefined && !modes.includes("read-only")) {
         throw new ChatGptPolicyError(
           "read-only-sandbox",
-          `Managed Codex policy in ${policy.source} limits allowed_sandbox_modes to ${modes.join(", ")}, which excludes read-only. A ChatGPT Explore session must run read-only. Ask your administrator to allow the read-only sandbox mode.`,
+            `Managed Codex policy in ${policy.source} limits allowed_sandbox_modes to ${modes.join(", ")}, which excludes read-only. A ChatGPT Explore session must run read-only. Ask the user's administrator to allow the read-only sandbox mode.`,
         );
       }
       const approvals = policy.allowedApprovalPolicies;
@@ -91,7 +91,7 @@ export class ChatGptPolicyProbe {
           : `The ${permissionProfile} permission profile`;
         throw new ChatGptPolicyError(
           "never-approval",
-          `Managed Codex policy in ${policy.source} limits allowed_approval_policies to ${approvals.join(", ")}, which excludes never. ${subject} runs approval_policy="never" so it cannot escalate outside its filesystem boundary. Ask your administrator to allow the never approval policy.`,
+          `Managed Codex policy in ${policy.source} limits allowed_approval_policies to ${approvals.join(", ")}, which excludes never. ${subject} runs approval_policy="never" so it cannot escalate outside its filesystem boundary. Ask the user's administrator to allow the never approval policy.`,
         );
       }
     }

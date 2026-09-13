@@ -160,7 +160,7 @@ export function describeReopenOutcome(outcome: ReopenOutcome): string {
     case "focused":
       return `Focused the running ${outcome.candidate.type} terminal (agent ${outcome.candidate.agentId}).`;
     case "reopened":
-      return `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
+      return `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to the user.`;
     case "unresumable":
       return outcome.reason === "inspection-failed"
         ? `The conversation for agent ${outcome.candidate.agentId} could not be inspected: ${outcome.diagnostic ?? "unknown platform error"}`

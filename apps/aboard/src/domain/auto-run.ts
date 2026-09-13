@@ -227,7 +227,7 @@ export function nextStep(input: ReducerInput): AutoRunStep {
 
 function dirtyReason(issue: PlannedIssue, facts: RepositoryFacts): string {
   const paths = facts.dirtyPaths.slice(0, 10).join(", ");
-  return `issue #${issue.number} has uncommitted changes on ${facts.currentBranch ?? "a detached HEAD"}${paths.length === 0 ? "" : ` (${paths})`}; the workers commit their own work, so the run stops for you to inspect the checkout`;
+  return `issue #${issue.number} has uncommitted changes on ${facts.currentBranch ?? "a detached HEAD"}${paths.length === 0 ? "" : ` (${paths})`}; the workers commit their own work, so the run stops for the user to inspect the checkout`;
 }
 
 type PullRequestOr = { readonly action: "stop"; readonly reason: string } | { readonly action: "found"; readonly number: number };
@@ -429,51 +429,51 @@ export const autoRunMessage = {
   reviewed: (issue: number, sha: string): string =>
     `auto-run: issue #${issue} reviewed; review committed (${sha.slice(0, 8)}).`,
   workspace: (path: string): string =>
-    `auto-run: working in its own checkout at ${path}; your files stay as they are and nothing this run does touches them.`,
+    `auto-run: working in its own checkout at ${path}; the user's files stay as they are and nothing this run does touches them.`,
   workspaceKept: (path: string, reason: "kept-by-setting" | "left-for-the-user" | "removal-failed"): string => {
     const why = reason === "kept-by-setting"
       ? "aboard.autoRun.worktree.keep is on"
       : reason === "removal-failed"
         ? "it could not be removed, usually because a shell is still open in it"
         : "the run left terminals and unfinished work in it";
-    return `auto-run: its checkout is still at ${path} (${why}). Remove it with git worktree remove when you are done with it.`;
+    return `auto-run: its checkout is still at ${path} (${why}). Remove it with git worktree remove when the user is done with it.`;
   },
   setup: (command: string): string => `auto-run: running ${command} in the run's checkout.`,
   session: (branch: string, base: string): string =>
     `auto-run: every issue lands on ${branch}; the run opens one pull request into ${base} when it ends.`,
   baseNotOnRemote: (base: string): string =>
-    `auto-run: ${base} is not on origin, so the run cannot open its pull request against it. Push ${base} before the run ends, or open the pull request yourself afterwards.`,
+    `auto-run: ${base} is not on origin, so the run cannot open its pull request against it. Push ${base} before the run ends, or open the pull request afterwards.`,
   merged: (issue: number, branch: string): string => `auto-run: issue #${issue} merged into ${branch}.`,
   // Said out loud because it is aboard's own doing, and because a reader who
   // knows GitHub's rule would otherwise wonder what closed the issue.
   closed: (issue: number): string =>
     `auto-run: issue #${issue} closed by aboard; a merge outside the default branch does not close its issue.`,
   notClosed: (issue: number, reason: string): string =>
-    `auto-run: issue #${issue} merged but could not be closed (${reason}). Close it yourself: issues that depend on it stay blocked until you do.`,
+    `auto-run: issue #${issue} merged but could not be closed (${reason}). Close it manually: issues that depend on it stay blocked until then.`,
   runOpened: (pr: number, base: string, count: number): string =>
     `auto-run: opened PR #${pr} into ${base} with ${count} issue${count === 1 ? "" : "s"}.`,
   unpublishedTarget: (base: string, count: number): string =>
     `auto-run: ${unpublishedTargetWarning(base, count)}`,
   runWaiting: (pr: number, base: string): string =>
-    `auto-run: PR #${pr} into ${base} is yours to merge (aboard.autoRun.mergeRunPullRequest is off).`,
+    `auto-run: PR #${pr} into ${base} is the user's to merge (aboard.autoRun.mergeRunPullRequest is off).`,
   runMerged: (pr: number, base: string): string =>
     `auto-run: PR #${pr} merged into ${base}. Pull ${base} to get the work.`,
   unsafeRunMerge: (pr: number, base: string, strategy: MergeStrategy): string =>
     `auto-run: PR #${pr} was left open because ${base} still has unpublished commits included in it; ${strategy} would rewrite their ancestry. Push ${base} and resume, or merge the PR with a merge commit.`,
   runParked: (pr: number, base: string, reason: string): string =>
-    `auto-run: PR #${pr} into ${base} needs you (${reason}). The session branch and its pull request are left in place.`,
+    `auto-run: PR #${pr} into ${base} needs user attention (${reason}). The session branch and its pull request are left in place.`,
   runNotOpened: (branch: string, base: string, reason: string): string =>
-    `auto-run: the run's work is committed and pushed on ${branch}, but no pull request into ${base} could be opened (${reason}). Open it yourself when you are ready.`,
+    `auto-run: the run's work is committed and pushed on ${branch}, but no pull request into ${base} could be opened (${reason}). Open it manually when ready.`,
   reconciled: (issue: number, pr: number, base: string): string =>
     `auto-run: issue #${issue} conflicted with ${base}; merged ${base} into its branch and pushed before retrying PR #${pr}.`,
   parked: (issue: number, pr: number, reason: string): string =>
-    `auto-run: issue #${issue} parked; PR #${pr} needs you (${reason}). Its branch, terminals, and pull request are left in place; the run continues with the next issue.`,
+    `auto-run: issue #${issue} parked; PR #${pr} needs user attention (${reason}). Its branch, terminals, and pull request are left in place; the run continues with the next issue.`,
   waiting: (issue: number): string => `Issue #${issue} is ready for review. Commit all accepted changes to continue Auto Run.`,
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
   returnBlocked: (target: string, current: string, paths: readonly string[]): string =>
     `auto-run: stayed on ${current} instead of returning to ${target}; uncommitted work remains in ${paths.length} path(s): ${paths.slice(0, 10).join(", ")}. Resume the run or inspect it there.`,
   complete: (count: number, parked: number): string =>
-    `auto-run: plan drained (${count} issue${count === 1 ? "" : "s"} addressed${parked === 0 ? "" : `, ${parked} left for you`}). Start another run once more work is labelled.`,
+    `auto-run: plan drained (${count} issue${count === 1 ? "" : "s"} addressed${parked === 0 ? "" : `, ${parked} left for the user`}). Start another run once more work is labelled.`,
   returned: (branch: string): string => `auto-run: back on ${branch}.`,
 } as const;

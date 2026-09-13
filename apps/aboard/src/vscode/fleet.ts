@@ -178,7 +178,7 @@ export function renderFleetStatus(
 
 export function saveLeaseWarning(lease: WriteLease): string | undefined {
   const holder = lease.current();
-  return holder === undefined ? undefined : `You saved a file while ${holder.agentId} holds the aboard write lease. Your edit was saved, but concurrent changes may conflict.`;
+  return holder === undefined ? undefined : `The user saved a file while ${holder.agentId} holds the aboard write lease. The edit was saved, but concurrent changes may conflict.`;
 }
 
 /** Emits at most once for each acquisition; a later holder gets its own warning. */
