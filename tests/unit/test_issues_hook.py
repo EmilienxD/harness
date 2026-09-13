@@ -70,7 +70,6 @@ def _dry_publish(tmp_path: Path):
     return report, count, failures
 
 
-# --- extract_labels: the label line grammar -------------------------------
 
 
 def test_both_labels_any_order():
@@ -172,7 +171,6 @@ def test_missing_label_line_means_no_labels():
     assert body.startswith("## What")
 
 
-# --- ensure_labels: create-only, existing labels never re-styled -------------
 
 
 def test_ensure_labels_creates_missing_and_leaves_existing_alone(tmp_path, monkeypatch):
@@ -196,7 +194,6 @@ def test_ensure_labels_creates_missing_and_leaves_existing_alone(tmp_path, monke
     assert len(calls) == len(hook.CANONICAL_LABELS)
 
 
-# --- publish_batch: what a full draft actually does ------------------------
 
 
 def test_draft_without_labels_is_skipped(tmp_path):
@@ -286,7 +283,6 @@ def test_prompt_pattern_matches_with_or_without_dry():
     assert not hook.PROMPT_PATTERN.match("hello /publish-issues")
 
 
-# --- extract_parent: what counts as a link, what stays prose ---------------
 
 
 def test_parent_section_accepts_every_reference_form():
@@ -336,7 +332,6 @@ def test_resolve_parent_direct_and_session_references():
     assert hook.resolve_parent(f"{SID}/0", {}) == (None, True)
 
 
-# --- publishing a sub-issue ------------------------------------------------
 
 
 def _capture_creates(monkeypatch, urls):
@@ -489,7 +484,6 @@ def test_dry_run_previews_the_sub_issue_link(tmp_path):
     assert not (tmp_path / ".issues-gateway" / hook.STATE_NAME).exists()
 
 
-# --- what actually reaches the gh command line -----------------------------
 
 
 def _fake_gh(monkeypatch, calls, help_text="", returncode=0, stdout=""):
@@ -699,7 +693,6 @@ def test_native_state_lock_rejects_overlapping_writer(tmp_path, monkeypatch):
     assert hook.record_published(f"{SID}/0", {"number": "335"}, gateway)
 
 
-# --- oversized bodies and resumable continuation comments -----------------
 
 
 def _rendered_content(payload: str) -> str:
@@ -1208,7 +1201,6 @@ def test_state_migration_preserves_valid_maps_and_drops_bad_inflight(tmp_path):
     assert state["inflight"] == {f"{SID}/1": {"fingerprint": "ok"}}
 
 
-# --- the notice delivered to the agent on the next prompt ------------------
 
 
 def _gateway(tmp_path: Path) -> Path:
@@ -1349,7 +1341,6 @@ def test_flush_notice_reads_legacy_notice_file(tmp_path):
     assert "pending_notice" not in _state(gateway)
 
 
-# --- end-to-end through the hook's stdin/stdout contract -------------------
 
 
 def _run_hook(tmp_path: Path, prompt: str):

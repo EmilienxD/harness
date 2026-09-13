@@ -179,7 +179,6 @@ def test_unhandled_hook_exception_blocks_prompt_with_exit_2(monkeypatch, capsys)
     assert "RuntimeError: thread failure" in stderr
 
 
-# --- files written by shell commands, not by Edit/Write --------------------
 
 
 def _shell_record(command, cwd):

@@ -108,7 +108,6 @@ def _content_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
     return content if isinstance(content, list) else []
 
 
-# ---------------------------------------------------------------------------
 # Files changed by shell commands
 #
 # Claude edits files without the Edit/Write tools more often than it should: a
@@ -123,7 +122,6 @@ def _content_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
 # held in a variable, a glob -- the command is reported as unresolved and the
 # hook widens to staging every change in the repo. Widening is visible and
 # recoverable; dropping a file from the commit is neither.
-# ---------------------------------------------------------------------------
 
 SHELL_TOOLS = {"Bash", "PowerShell"}
 
@@ -681,13 +679,11 @@ def _shorten(text: Any, limit: int = 90) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-# ---------------------------------------------------------------------------
 # AI commit message generation (--ai)
 #
 # One synchronous call to a small Gemini model. Everything below is inert
 # unless --ai is passed. The REST call uses only Python's standard library,
 # so generated messages need an API key but no separately installed package.
-# ---------------------------------------------------------------------------
 
 AI_MODEL_DEFAULT = "gemini-3.5-flash-lite"
 AI_MODEL = os.environ.get("COMMIT_AI_MODEL", AI_MODEL_DEFAULT)
@@ -707,7 +703,6 @@ CONTEXT_BUDGET = 12000
 NEW_FILE_BUDGET = 4000
 LOG_SAMPLE = 15
 
-# --- Per-minute input-token limits -----------------------------------------
 #
 # The free Gemini tier caps tokens *per minute*, not just requests per minute.
 # Request rate is a non-issue here (one call per commit), but the TPM cap is

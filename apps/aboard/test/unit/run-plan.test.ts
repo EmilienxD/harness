@@ -164,7 +164,6 @@ test("a plan freezes the title its branch is named from", () => {
   } satisfies FrozenIssue);
 });
 
-// --- progress ---------------------------------------------------------------
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {

@@ -57,7 +57,6 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const isTerminalOpen = (terminalId: string): boolean =>
     terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open");
 
-  // -- Agent Fleet ------------------------------------------------------------
   const fleetChanges = new EventEmitter<FleetTreeNode | undefined>();
   const fleetModel = new FleetTreeModel(
     fleet,
@@ -86,7 +85,6 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     window.registerTreeDataProvider("aboard.welcome", { getChildren: () => [], getTreeItem: (node: never) => node }),
   );
 
-  // -- Auto Run ---------------------------------------------------------------
   const engine = options.autoRun.engine;
   let autoRunStarting = false;
   const forecast = new AutoRunForecastController(() => renderAutoRun());
@@ -309,7 +307,6 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     }),
   );
 
-  // -- Recent Activity --------------------------------------------------------
   const activityModel = new ActivityTreeModel({
     entries: () => options.activity.entries(),
     isTerminalOpen: (terminalId) => isTerminalOpen(terminalId),
@@ -361,7 +358,6 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     }),
   );
 
-  // -- Shared -----------------------------------------------------------------
   const commandRegistration = registerFleetCommands({
     register: (command, callback) => commands.registerCommand(command, callback),
     confirm: async (message, action) => await window.showWarningMessage(message, { modal: true }, action) === action,

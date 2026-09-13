@@ -54,7 +54,6 @@ def context(result):
     return result["hookSpecificOutput"]["additionalContext"]
 
 
-# --- scanning ---------------------------------------------------------------
 
 def findings_for(path, text):
     family = hook.family_for(path)
@@ -151,7 +150,6 @@ def test_unknown_extension_is_skipped():
     assert hook.family_for("notes.unknownext") is None
 
 
-# --- what a call added ------------------------------------------------------
 
 def test_edit_only_reports_comments_the_edit_added():
     old = "# one\n# two\n# three\n# four\nvalue = 1\n"
@@ -213,7 +211,6 @@ def test_ordinary_shell_command_is_ignored():
     assert not hook.changes({"tool_name": "Bash", "tool_input": {"command": "git status # check"}})
 
 
-# --- end to end -------------------------------------------------------------
 
 def test_hook_emits_context_for_an_over_budget_write():
     code, out = run_hook(write("a.py", "# one\n# two\n# three\nvalue = 1\n"))

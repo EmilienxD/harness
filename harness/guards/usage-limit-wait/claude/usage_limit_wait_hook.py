@@ -121,9 +121,7 @@ class Notice(NamedTuple):
     reset_at: float | None
 
 
-# --------------------------------------------------------------------------
 # configuration
-# --------------------------------------------------------------------------
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get("USAGE_LIMIT_WAIT_" + name, default)
@@ -167,9 +165,7 @@ def claude_dir() -> Path:
     return Path(configured) if configured else Path.home() / ".claude"
 
 
-# --------------------------------------------------------------------------
 # credentials
-# --------------------------------------------------------------------------
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
@@ -217,9 +213,7 @@ def _keychain_token() -> str | None:
     return token if isinstance(token, str) and token else None
 
 
-# --------------------------------------------------------------------------
 # reading usage: the API, then the CLI
-# --------------------------------------------------------------------------
 
 def fetch_usage(token: str) -> dict[str, Any] | None:
     """The raw usage payload, or None on any failure at all."""
@@ -407,9 +401,7 @@ def read_usage(force: bool = False, now: float | None = None) -> dict[str, Any] 
     return snapshot
 
 
-# --------------------------------------------------------------------------
 # cache
-# --------------------------------------------------------------------------
 
 def cache_path() -> Path:
     # Usage is per-account, not per-project, so the cache is global even when
@@ -481,9 +473,7 @@ def _write_json(path: Path, data: Any) -> None:
             pass
 
 
-# --------------------------------------------------------------------------
 # decision
-# --------------------------------------------------------------------------
 
 def evaluate(snapshot: dict[str, Any] | None) -> Verdict:
     """Is the account blocked right now, and when does that end?
@@ -581,9 +571,7 @@ def wait_for_reset(
     return now() - started, waited_for
 
 
-# --------------------------------------------------------------------------
 # telling the user
-# --------------------------------------------------------------------------
 
 def assess(snapshot: dict[str, Any] | None, now: float) -> Notice | None:
     """What the user should be told right now, or None for "nothing".
@@ -762,9 +750,7 @@ def desktop_notification(title: str, body: str) -> bool:
     return result.returncode == 0
 
 
-# --------------------------------------------------------------------------
 # entry point
-# --------------------------------------------------------------------------
 
 def format_duration(seconds: float | int) -> str:
     seconds = int(seconds)

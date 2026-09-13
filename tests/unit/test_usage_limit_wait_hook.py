@@ -86,9 +86,7 @@ class Clock:
         self.now += seconds
 
 
-# --------------------------------------------------------------------------
 # guards
-# --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", hook.API_KEY_ENV)
 def test_api_key_sessions_are_not_ours(monkeypatch, name):
@@ -135,9 +133,7 @@ def test_the_removed_parallel_notifier_entry_is_harmless(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
-# --------------------------------------------------------------------------
 # evaluate
-# --------------------------------------------------------------------------
 
 def test_exhausted_window_blocks_until_its_reset():
     verdict = hook.evaluate(snapshot(("session", 100.0, 5_000.0), ("weekly_all", 21.0, 9_000.0)))
@@ -170,9 +166,7 @@ def test_exhausted_without_an_announced_reset_is_blocked_but_undatable():
     assert verdict.blocked is True and verdict.reset_at is None
 
 
-# --------------------------------------------------------------------------
 # the credits rule
-# --------------------------------------------------------------------------
 
 LIVE = {"enabled": True, "exhausted": False}
 SPENT = {"enabled": True, "exhausted": True}
@@ -200,9 +194,7 @@ def test_a_cli_snapshot_knows_nothing_about_credits(monkeypatch):
     assert hook.evaluate(snapshot(("session", 100.0, 5_000.0), source="cli")).blocked is True
 
 
-# --------------------------------------------------------------------------
 # reading the API payload
-# --------------------------------------------------------------------------
 
 def test_api_payload_is_normalized_from_the_limits_array():
     payload = {
@@ -236,9 +228,7 @@ def test_an_unrecognisable_payload_yields_nothing():
     assert hook.snapshot_from_api({"limits": [{"kind": "session", "percent": None}]}) is None
 
 
-# --------------------------------------------------------------------------
 # the `claude -p /usage` fallback
-# --------------------------------------------------------------------------
 
 def test_cli_output_is_parsed_into_both_windows():
     now = datetime(2026, 8, 15, 12, 0).timestamp()
@@ -325,9 +315,7 @@ def test_read_usage_without_a_token_still_tries_the_cli(monkeypatch):
     assert hook.read_usage(force=True) is None
 
 
-# --------------------------------------------------------------------------
 # cache
-# --------------------------------------------------------------------------
 
 def test_a_fresh_reading_is_served_from_cache(monkeypatch):
     fresh = snapshot(("session", 3.0, 5_000.0))
@@ -368,9 +356,7 @@ def test_a_corrupt_cache_is_ignored():
     assert hook.read_cache(now=1_000.0) is None
 
 
-# --------------------------------------------------------------------------
 # the wait loop
-# --------------------------------------------------------------------------
 
 def test_it_sleeps_until_the_reset_then_returns_when_usage_drops(monkeypatch):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_POLL", "7200")  # no polling in between
@@ -490,9 +476,7 @@ def test_polling_slows_down_on_the_cli_fallback(monkeypatch):
     assert hook.poll_interval(snapshot(("session", 100.0, 1.0), source="cli")) == hook.CLI_MIN_POLL_SECONDS
 
 
-# --------------------------------------------------------------------------
 # notices
-# --------------------------------------------------------------------------
 
 NOW = 1_700_000_000.0
 
@@ -599,9 +583,7 @@ def test_a_corrupt_notice_file_is_ignored(monkeypatch):
     assert notice(monkeypatch, ("session", 94.0, NOW + 3600)) is not None
 
 
-# --------------------------------------------------------------------------
 # desktop notifications
-# --------------------------------------------------------------------------
 
 class Completed:
     returncode = 0
@@ -662,9 +644,7 @@ def test_a_missing_or_broken_notifier_fails_open(monkeypatch):
     assert hook.desktop_notification("title", "body") is False
 
 
-# --------------------------------------------------------------------------
 # output
-# --------------------------------------------------------------------------
 
 def test_a_completed_wait_reports_itself_to_the_user_only(monkeypatch, capsys):
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: snapshot(("session", 100.0, time.time() + 30)))

@@ -60,7 +60,6 @@ PATCH_TOOLS = {"apply_patch"}
 SHELL_TOOLS = {"Bash", "PowerShell", "exec_command", "shell"}
 
 
-# --- comment syntax ---------------------------------------------------------
 
 class Family:
     """How one group of languages spells comments, docs and strings."""
@@ -277,7 +276,6 @@ def blocks(comments: list[Comment]) -> list[Comment]:
     return merged
 
 
-# --- findings ---------------------------------------------------------------
 
 def summarise(text: str) -> str:
     """First words of a comment, for naming it in the reminder."""
@@ -353,7 +351,6 @@ def _line_at(text: str, number: int) -> str:
     return lines[number] if 0 <= number < len(lines) else ""
 
 
-# --- what a tool call added -------------------------------------------------
 
 def added_indices(old: str, new: str) -> set[int]:
     """Line numbers in *new* that *old* didn't have."""
@@ -463,7 +460,6 @@ def changes(event: dict[str, Any]) -> list[tuple[str, str, set[int]]]:
     return []
 
 
-# --- rules ------------------------------------------------------------------
 
 def compile_pattern(pattern: str) -> re.Pattern[str] | None:
     """Compile one gitignore-style pattern to a regex, or None if unusable.
@@ -567,7 +563,6 @@ def rules_sources(root: Path) -> list[Path]:
     return sources
 
 
-# --- paths and session marker -----------------------------------------------
 
 def project_root(event: dict[str, Any]) -> Path:
     root = os.environ.get("CLAUDE_PROJECT_DIR") or event.get("cwd")
@@ -629,7 +624,6 @@ def mark_reminded(marker: Path | None, reminded: dict[str, float], keys: Iterabl
         pass  # best-effort; worst case the same reminder repeats sooner
 
 
-# --- output -----------------------------------------------------------------
 
 def budget_line(limits: dict[str, float]) -> str:
     return (

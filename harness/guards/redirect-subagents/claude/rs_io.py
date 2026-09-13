@@ -255,7 +255,6 @@ def prompt_input(cfg: dict, prompt: str) -> str | None:
 _VALUELESS_FLAGS = {"-p", "--print", "--verbose", "--help", "-h", "--version"}
 
 
-# --- job state -----------------------------------------------------------
 
 
 def jobs_dir() -> Path:
@@ -338,7 +337,6 @@ def deliver_report(job_ids: list[str]) -> str:
     return "\n\n---\n\n".join(chunks)
 
 
-# --- deferred (backend-down) jobs -----------------------------------------
 
 
 def is_deferrable(cfg: dict) -> bool:
