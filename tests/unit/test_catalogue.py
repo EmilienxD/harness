@@ -790,7 +790,7 @@ def test_every_catalogue_manifest_loads():
     expected_categories = {
         "planning": {
             "audit", "breakdown-help-wanted-issue", "grill-me", "lavish", "prototype",
-            "read-all-adrs", "websearch",
+            "read-all-adrs", "websearch", "writing-adrs",
         },
         "engineering": {"commit", "resolving-merge-conflicts", "setup-git-worktree-maker"},
         "building": {"issue-readers", "issue-writers", "tdd"},

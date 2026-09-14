@@ -1,0 +1,7 @@
+interface:
+  display_name: "Writing ADRs"
+  short_description: "Write durable architectural decision records"
+  default_prompt: "Use $writing-adrs to write an architectural decision record for this decision."
+
+policy:
+  allow_implicit_invocation: true
