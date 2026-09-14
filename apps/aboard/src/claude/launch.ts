@@ -12,8 +12,8 @@ import {
 import type { IssueDifficulty } from "../shared/labels.js";
 import {
   describeResolvedPrompt,
-  normalizeGeneratedPrompt,
-  resolvedPromptFromText,
+  promptFileReference,
+  skillInvocation,
   type ResolvedPrompt,
 } from "./prompts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
@@ -203,6 +203,8 @@ interface CommonPlanRequest {
   readonly agentType: AgentType;
   readonly shell: ShellKind;
   readonly attended?: boolean | undefined;
+  /** Trusted ask-agent skill invocation; kept separate from caller-supplied text. */
+  readonly skill?: string | undefined;
   /** True only when Aboard's Auto Run owns and controls this session. */
   readonly autoRunRestricted?: true | undefined;
   readonly model?: string | undefined;
@@ -296,12 +298,10 @@ function chromeArguments(agentType: AgentType, enabled: true | undefined): reado
   return ["--chrome"];
 }
 
-function normalizePrompt(
-  prompt: ResolvedPrompt | string | undefined,
-): ResolvedPrompt | undefined {
+function presentPrompt(prompt: ResolvedPrompt | string | undefined): ResolvedPrompt | string | undefined {
   if (prompt === undefined) return undefined;
-  const resolved = typeof prompt === "string" ? resolvedPromptFromText(prompt) : prompt;
-  return resolved.text.trim().length === 0 ? undefined : normalizeGeneratedPrompt(resolved);
+  const text = typeof prompt === "string" ? prompt : prompt.text;
+  return text.trim().length === 0 ? undefined : prompt;
 }
 
 /** Legacy deterministic root retained for planner fallbacks and migration cleanup. */
@@ -349,7 +349,7 @@ interface PromptPlan {
 }
 
 function planPrompt(
-  prompt: ResolvedPrompt | undefined,
+  prompt: ResolvedPrompt | string | undefined,
   options: {
     readonly agentId: AgentId;
     readonly shell: ShellKind;
@@ -363,7 +363,7 @@ function planPrompt(
 ): PromptPlan {
   if (prompt === undefined) return { delivery: "none", args: [] };
 
-  const text = prompt.text.trim();
+  const text = typeof prompt === "string" ? prompt : prompt.text;
   const inline = options.invocation === undefined ? text : `${options.invocation} ${text}`;
   if (inline.length <= options.threshold && canQuoteArgument(options.shell, inline)) {
     return { delivery: "inline", args: [inline] };
@@ -371,9 +371,10 @@ function planPrompt(
 
   const relativePath = options.spillPath
     ?? spillRelativePath(options.runtimeDirectory, options.agentId, options.stem, options.promptRoot);
-  const reference = `Perform the task described in @${relativePath}.`;
+  const reference = promptFileReference(relativePath);
   const prefix = options.invocation === undefined ? "" : `${options.invocation} `;
-  const withHeadline = `${prefix}${prompt.headline} ${reference}`;
+  const firstLine = text.split(/\r?\n/u, 1)[0] ?? "";
+  const withHeadline = firstLine.trim().length === 0 ? `${prefix}${reference}` : `${prefix}${firstLine} ${reference}`;
   const stub =
     withHeadline.length <= options.threshold && canQuoteArgument(options.shell, withHeadline)
       ? withHeadline
@@ -382,7 +383,7 @@ function planPrompt(
   return {
     delivery: "spilled",
     args: [stub],
-    spill: { agentId: options.agentId, relativePath, contents: `${text}\n` },
+    spill: { agentId: options.agentId, relativePath, contents: text },
   };
 }
 
@@ -526,7 +527,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 
   assertLaunchShape(agentType, configuration);
 
-  const prompt = normalizePrompt(request.prompt);
+  const prompt = presentPrompt(request.prompt);
   if (prompt === undefined && (isAutomatedAgentType(agentType) || configuration.shape === "skill")) {
     // An automated worker with no first message sits at an empty TUI forever.
     // Harness-backed workers also need a first message to invoke their skill;
@@ -539,7 +540,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   const task = prompt !== undefined && (agentType === "implementer" || agentType === "reviewer")
-    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId, request.promptRoot), contents: `${prompt.text.trim()}\n` }
+    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId, request.promptRoot), contents: typeof prompt === "string" ? prompt : prompt.text }
     : undefined;
   const shapeArguments: string[] = [
     "--add-dir", launchRuntimeDirectory,
@@ -580,7 +581,9 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
       stem: "prompt",
       ...(request.promptRoot === undefined ? {} : { promptRoot: request.promptRoot }),
       ...(task === undefined ? {} : { spillPath: task.relativePath }),
-      ...(configuration.shape === "skill" ? { invocation: `/${configuration.skillName}` } : {}),
+      ...(configuration.shape === "skill"
+        ? { invocation: skillInvocation("/", configuration.skillName) }
+        : request.skill === undefined ? {} : { invocation: skillInvocation("/", request.skill) }),
     });
     const args = [...fixedArguments, ...plan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
@@ -650,7 +653,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     ...effortArguments(policy.effort),
     ...chromeArguments(request.agentType, request.chrome),
   ];
-  const prompt = normalizePrompt(request.prompt);
+  const prompt = presentPrompt(request.prompt);
   const planFor = (promptThreshold: number): { readonly promptPlan: PromptPlan; readonly args: string[]; readonly commandLine: string; readonly request?: WrapperRequestFile } => {
     const promptPlan = planPrompt(prompt, {
       agentId: request.agentId,

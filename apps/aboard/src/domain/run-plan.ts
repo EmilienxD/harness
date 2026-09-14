@@ -32,7 +32,6 @@ export interface FrozenRunSettings {
   readonly issueContextDepth: number;
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
-  readonly pauseAfterHitl: boolean;
   readonly worktree: WorktreeSettings;
   readonly workspaceRoot?: string;
   /** Configured note added before any per-run guidance. */
@@ -68,6 +67,13 @@ export type IssueProgress =
       readonly headSha?: string;
       readonly reviewed?: true;
       readonly beforeSha?: string;
+      /** Temporary local checkpoint created only by a HITL implementer when review is enabled. */
+      readonly implementerCommitSha?: string;
+      /** The checkpoint was mixed-reset back to `beforeSha` and its tree is the handoff. */
+      readonly resetCompleted?: true;
+      /** The normal non-committing HITL reviewer turn completed. */
+      readonly hitlReviewCompleted?: true;
+      /** Final accepted implementation commit; never the temporary HITL checkpoint. */
       readonly implementationSha?: string;
       readonly reviewedSha?: string;
       readonly expectedBranch?: string;
@@ -81,6 +87,10 @@ export type IssueProgress =
       /** Whether aboard's best-effort close attempt succeeded. */
       readonly issueClosed: boolean;
       readonly beforeSha?: string;
+      /** Retained as audit evidence; this local checkpoint was never published. */
+      readonly implementerCommitSha?: string;
+      readonly resetCompleted?: true;
+      readonly hitlReviewCompleted?: true;
       readonly implementationSha?: string;
       readonly reviewedSha?: string;
     }
@@ -96,12 +106,8 @@ export type PendingAction =
   | { readonly kind: "close-issue"; readonly issue: number; readonly prNumber: number; readonly comment: string }
   | { readonly kind: "cleanup-issue"; readonly issue: number; readonly branch: string; readonly sha: string }
   | { readonly kind: "create-branch"; readonly branch: string; readonly base: string; readonly baseSha: string }
-  /**
-   * A commit-signaling worker is running on `branch`. Its own commit is the
-   * only movement expected there. The engine records process success before
-   * accepting its repository state; HITL then waits on the implementation range.
-   */
-  | { readonly kind: "worker-commit"; readonly branch: string; readonly parentSha: string; readonly role: "implementer" | "reviewer"; readonly outcome?: "succeeded" | "failed" }
+  | { readonly kind: "worker-turn"; readonly branch: string; readonly parentSha: string; readonly role: "implementer" | "reviewer"; readonly completion: "commit" | "uncommitted"; readonly outcome?: "succeeded" | "failed" }
+  | { readonly kind: "reset-implementation"; readonly branch: string; readonly beforeSha: string; readonly implementerCommitSha: string }
   | { readonly kind: "push"; readonly branch: string; readonly sha: string }
   | { readonly kind: "create-issue-pr"; readonly issue: number; readonly head: string; readonly base: string }
   | { readonly kind: "merge-issue-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string }
@@ -110,7 +116,7 @@ export type PendingAction =
   | { readonly kind: "merge-run-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string };
 
 export interface AutoRunRecord {
-  readonly version: 3;
+  readonly version: 4;
   readonly runId: string;
   readonly startedAt: string;
   readonly updatedAt: string;
@@ -154,10 +160,10 @@ export type RecoveryEligibility =
   | { readonly state: "broken"; readonly reason: string };
 
 /** Approval-oriented records are shown as broken rather than migrated. */
-export const UNSUPPORTED_RECORD_REASON = "run predates commit-driven acceptance; discard this unsupported record";
+export const UNSUPPORTED_RECORD_REASON = "run predates human-acceptance persistence version 4; discard this unsupported record";
 
 export interface UnsupportedAutoRunRecord {
-  readonly version: 1 | 2;
+  readonly version: 1 | 2 | 3;
   readonly runId: string;
   readonly startedAt: string;
 }
@@ -165,7 +171,7 @@ export interface UnsupportedAutoRunRecord {
 export type PersistedAutoRunRecord = AutoRunRecord | UnsupportedAutoRunRecord;
 
 export function isUnsupportedRecord(record: PersistedAutoRunRecord): record is UnsupportedAutoRunRecord {
-  return record.version !== 3;
+  return record.version !== 4;
 }
 
 export function issueProgress(record: AutoRunRecord, issueNumber: number): IssueProgress {

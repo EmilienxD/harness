@@ -67,7 +67,6 @@ export interface AutoRunSettings {
   /** Persistent user-authored note added to every auto-run agent prompt. */
   readonly permanentPrompt: string;
   readonly discardBehavior: DiscardBehavior;
-  readonly pauseAfterHitl: boolean;
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
   readonly worktree: WorktreeSettings;
@@ -110,7 +109,6 @@ export type AutoRunDryRunResult =
       readonly reviewMode: boolean;
       readonly exploresBeforeImplement: boolean;
       readonly branchMode?: AutoRunBranchMode;
-      readonly pauseAfterHitl: boolean;
       /** Persistent configured note that would be added to every auto agent. */
       readonly permanentPrompt?: string;
       /** User-authored guidance that would be appended to every auto agent. */
@@ -138,6 +136,8 @@ export interface RepositoryFacts {
   readonly dirtyPaths: readonly string[];
   readonly hasCommit: boolean;
   readonly awaitingCommit?: boolean;
+  /** A HITL implementation checkpoint is exposed and its reviewer still needs to run or continue. */
+  readonly hitlReviewPending?: boolean;
   readonly implementationSha?: string;
   readonly commitPushed: boolean;
   readonly pullRequest: PullRequestFacts | undefined;
@@ -172,6 +172,7 @@ export interface ReducerInput {
 
 export function nextStep(input: ReducerInput): AutoRunStep {
   const { issue, facts, reviewMode } = input;
+  if (facts.hitlReviewPending) return { action: "implement", issue };
   if ((facts.hasCommit || facts.pullRequest !== undefined) && facts.implementationSha === undefined && !facts.awaitingCommit) return { action: "stop", reason: `issue #${issue.number} has no recorded accepted implementation` };
   if (facts.awaitingCommit) return { action: "await-commit", issue };
   if (facts.issueClosed) return { action: "cleanup", issue };
@@ -290,13 +291,15 @@ export interface WorkerRepositoryState {
   readonly descendsFromStart: boolean;
   /** Commits reachable from `headSha` but not from `startingSha`. */
   readonly newCommitCount: number;
+  /** Whether the sole descendant commit changes the tree at the acceptance boundary. */
+  readonly commitIsNonEmpty?: boolean;
 }
 
 export type WorkerOutcome =
   | { readonly kind: "committed"; readonly sha: string }
-  | { readonly kind: "rejected"; readonly reason: string };
+  | { readonly kind: "rejected"; readonly reason: string; readonly recoverable?: true };
 
-/** User acceptance is a clean descendant range on the recorded checkout. */
+/** User acceptance is exactly one non-empty clean commit on the recorded checkout. */
 export function classifyHitlCommit(
   state: WorkerRepositoryState,
   currentBranch: string | undefined,
@@ -304,8 +307,16 @@ export function classifyHitlCommit(
 ): WorkerOutcome | { readonly kind: "waiting" } {
   if (currentBranch !== expectedBranch) return { kind: "rejected", reason: `the checkout moved to ${currentBranch ?? "a detached HEAD"}; expected ${expectedBranch}` };
   if (!state.descendsFromStart) return { kind: "rejected", reason: "HITL work moved HEAD off the recorded starting commit" };
-  if (state.dirtyPaths.length > 0 || state.headSha === state.startingSha) return { kind: "waiting" };
-  if (state.newCommitCount < 1) return { kind: "rejected", reason: "HITL work contains no descendant commit" };
+  if (state.headSha === state.startingSha) return { kind: "waiting" };
+  if (state.newCommitCount !== 1) return { kind: "rejected", reason: `HITL acceptance must contain exactly one descendant commit; found ${state.newCommitCount}` };
+  if (state.commitIsNonEmpty !== true) return { kind: "rejected", reason: "the HITL acceptance commit is empty relative to the recorded starting commit" };
+  if (state.dirtyPaths.length > 0) {
+    return {
+      kind: "rejected",
+      reason: `the HITL acceptance commit left ${state.dirtyPaths.length} uncommitted path(s); include them by amending the same commit, then Resume Auto Run`,
+      recoverable: true,
+    };
+  }
   return { kind: "committed", sha: state.headSha };
 }
 
@@ -468,7 +479,7 @@ export const autoRunMessage = {
     `auto-run: issue #${issue} conflicted with ${base}; merged ${base} into its branch and pushed before retrying PR #${pr}.`,
   parked: (issue: number, pr: number, reason: string): string =>
     `auto-run: issue #${issue} parked; PR #${pr} needs you (${reason}). Its branch, terminals, and pull request are left in place; the run continues with the next issue.`,
-  waiting: (issue: number): string => `Issue #${issue} is ready for review. Commit all accepted changes to continue Auto Run.`,
+  waiting: (issue: number): string => `Waiting for acceptance commit for issue #${issue}. Create exactly one non-empty commit containing all accepted changes; Auto Run continues automatically when the checkout is clean.`,
   stopped: (issue: number | undefined, reason: string): string =>
     `auto-run: stopped${issue === undefined ? "" : ` at issue #${issue}`} (${reason}). Branch and work left in place.`,
   returnBlocked: (target: string, current: string, paths: readonly string[]): string =>

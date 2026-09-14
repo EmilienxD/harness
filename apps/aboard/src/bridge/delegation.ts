@@ -10,6 +10,7 @@ import {
   type AgentType,
   type ExecutionMode,
   type IsoTimestamp,
+  type PromptAuthority,
   type SessionId,
   type WorkerResult,
 } from "../domain/contracts.js";
@@ -38,6 +39,8 @@ export interface DelegationLaunchInput {
   readonly requestId?: string;
   readonly type: AgentType;
   readonly prompt?: string;
+  /** Trusted skill invocation selected by an ask-agent delegation boundary. */
+  readonly skill?: string;
   /** Persistent configured note, ordered before the per-run guideline. */
   readonly permanentPrompt?: string;
   readonly additionalGuideline?: string;
@@ -49,7 +52,6 @@ export interface DelegationLaunchInput {
   /** Fresh bounded codebase evidence supplied only to an implementer. */
   readonly codebaseContext?: string;
   readonly pullRequest?: number;
-  readonly focus?: string;
   /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */
   readonly chrome?: true;
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
@@ -58,6 +60,8 @@ export interface DelegationLaunchInput {
   readonly executionMode?: ExecutionMode;
   /** Pinned parent for a worker whose successful turn must add exactly one commit. */
   readonly completionCommitStartingSha?: string;
+  /** Immutable implementation range for a reviewer working from an uncommitted HITL handoff. */
+  readonly reviewRange?: string;
   /** A provider-explicit manual launch may bypass the project's default provider. */
   readonly configuration?: ConfiguredLaunch;
 }
@@ -94,6 +98,9 @@ export interface ReopenTarget {
   readonly origin?: LaunchOrigin;
   /** Pinned parent retained when continuing an Auto Run completion-commit worker. */
   readonly completionCommitStartingSha?: string;
+  readonly reviewRange?: string;
+  /** This is the exact automated worker conversation continuing over its preserved edits. */
+  readonly workerContinuation?: true;
 }
 
 export interface InteractiveLaunchHandles {
@@ -107,7 +114,7 @@ export interface DelegationConfigurationSource {
 }
 
 export interface DelegationPromptResolver {
-  resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined>;
+  resolve(input: DelegationLaunchInput, options: { readonly authority: PromptAuthority }): Promise<ResolvedPrompt | undefined>;
 }
 
 export interface DelegationCoordinatorOptions {
@@ -174,7 +181,7 @@ export class DelegationCoordinator {
 
 
   public async runAutomated(input: DelegationLaunchInput, signal?: AbortSignal): Promise<AutomatedLaunchOutcome> {
-    const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run", false);
+    const launched = await this.#launch(input, { mode: "tool-result" }, "auto-run", false, "auto-run", "auto-run");
     const stopWorker = (): void => {
       try { this.options.terminals.kill(launched.terminalId); } catch { /* terminal already settled */ }
     };
@@ -192,11 +199,11 @@ export class DelegationCoordinator {
   }
 
   public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles> {
-    return this.#launch(input, { mode: "none" }, origin, true, "interactive");
+    return this.#launch(input, { mode: "none" }, origin, true, "interactive", origin === "auto-run" ? "auto-run" : "user");
   }
 
   public async launchManual(input: DelegationLaunchInput, mode: "interactive" | "auto"): Promise<InteractiveLaunchHandles> {
-    return this.#launch(input, { mode: "none" }, "user", mode === "interactive", mode);
+    return this.#launch(input, { mode: "none" }, "user", mode === "interactive", mode, "delegation");
   }
 
 
@@ -301,6 +308,8 @@ export class DelegationCoordinator {
         agentType: target.type,
         ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
         ...(target.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: target.completionCommitStartingSha }),
+        ...(target.reviewRange === undefined ? {} : { reviewRange: target.reviewRange }),
+        ...(target.workerContinuation === true ? { workerContinuation: true as const } : {}),
         name: target.terminalName,
         ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
         initialCommand: plan.commandLine,
@@ -370,6 +379,7 @@ export class DelegationCoordinator {
     difficulty?: IssueDifficulty,
     signal?: AbortSignal,
     completionCommitStartingSha?: string,
+    reviewRange?: string,
   ): Promise<AutomatedLaunchOutcome> {
     if (session.autoRunRestricted !== true || !["completed", "failed"].includes(session.lifecycle.status)) {
       throw new DelegationError("unresumable-session", `Agent ${session.identity.agentId} is not an ended auto-run session`);
@@ -393,6 +403,8 @@ export class DelegationCoordinator {
       resultDelivery: { mode: "tool-result" },
       origin: "auto-run",
       ...(completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha }),
+      ...(reviewRange === undefined ? {} : { reviewRange }),
+      workerContinuation: true,
     });
     const stopWorker = (): void => {
       try { this.options.terminals.kill(launched.terminalId); } catch { /* terminal already settled */ }
@@ -437,7 +449,7 @@ export class DelegationCoordinator {
   }
 
 
-  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, executionMode: ExecutionMode = "auto-run"): Promise<{
+  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, executionMode: ExecutionMode, promptAuthority: PromptAuthority): Promise<{
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
     readonly terminalId: AgentSession["terminal"]["terminalId"];
@@ -446,7 +458,7 @@ export class DelegationCoordinator {
     const agentType = input.type;
     const [configured, prompt] = await Promise.all([
       input.configuration === undefined ? this.options.configurations.get(agentType) : Promise.resolve(input.configuration),
-      this.options.prompts.resolve(input, { interactive: attended }),
+      this.options.prompts.resolve(input, { authority: promptAuthority }),
     ]);
     const platform = this.#platform(configured.platform);
     const createdSession = platform.createSession();
@@ -463,6 +475,7 @@ export class DelegationCoordinator {
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
       prompt,
+      ...(input.skill === undefined ? {} : { skill: input.skill }),
       disallowedTools: [
         ...(this.options.disallowedTools ?? []),
         ...(origin === "auto-run" ? AUTO_RUN_DISALLOWED_TOOLS : []),
@@ -493,6 +506,7 @@ export class DelegationCoordinator {
         agentType,
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: input.completionCommitStartingSha }),
+        ...(input.reviewRange === undefined ? {} : { reviewRange: input.reviewRange }),
         name: `aboard: ${input.description}`,
         ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,

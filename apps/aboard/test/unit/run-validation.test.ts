@@ -15,7 +15,7 @@ const SHA = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 3,
+    version: 4,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -26,7 +26,6 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
-      pauseAfterHitl: false,
 
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
@@ -326,6 +325,23 @@ test("uncommitted work leaves a run resumable only on the branch its current iss
 
   // With no current issue there is no branch that could own the work.
   assert.match(reason(record(), { ...observations(), workingTree: { branch: SESSION, dirtyPaths: ["src/a.ts"] } }) ?? "", /not the branch this run is working/);
+});
+
+test("the recorded local HITL checkpoint is a valid pre-reset recovery head", () => {
+  const checkpoint = "b".repeat(40);
+  const current = working({
+    state: "current",
+    phase: "review",
+    beforeSha: "a".repeat(40),
+    implementerCommitSha: checkpoint,
+    expectedBranch: "issue/34-add-retry-backoff",
+  });
+  const observed = withIssueBranch();
+  assert.equal(reason(current, {
+    ...observed,
+    workingTree: { branch: "issue/34-add-retry-backoff", dirtyPaths: [] },
+    branches: observed.branches.map((branch) => branch.name === "issue/34-add-retry-backoff" ? { ...branch, localSha: checkpoint } : branch),
+  }), undefined);
 });
 
 test("the run's own checkout is required only after its creation was checkpointed", () => {

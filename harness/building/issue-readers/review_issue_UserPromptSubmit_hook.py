@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Guard and preload commit metadata for a review-this invocation.
 
-Blocks before model invocation when the worktree is dirty, and injects the
-`HEAD` commit's identity, subject, and changed-file list. The diff is left
-for the reviewing agent to read itself.
+Blocks dirty manual invocations and injects the pinned target's identity and
+changed-file list. Aboard may explicitly supply a dirty HITL review range.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -68,9 +68,10 @@ def parent_sha(cwd: Path) -> str | None:
     return sha if result.returncode == 0 and sha else None
 
 
-def changed_files(cwd: Path) -> list[str]:
+def changed_files(cwd: Path, review_range: str | None = None) -> list[str]:
     """Name and status for every path the commit touched, renames included."""
-    raw = git(["show", "--name-status", "--find-renames", "--format=", "-z", "HEAD"], cwd)
+    arguments = ["show", "--name-status", "--find-renames", "--format=", "-z", "HEAD"] if review_range is None else ["diff", "--name-status", "--find-renames", "-z", review_range]
+    raw = git(arguments, cwd)
     fields = [field for field in raw.split("\0") if field]
     entries: list[str] = []
     index = 0
@@ -89,22 +90,32 @@ def changed_files(cwd: Path) -> list[str]:
 
 
 def build_context(cwd: Path) -> str:
-    require_clean_worktree(cwd)
+    review_range = os.environ.get("ABOARD_REVIEW_RANGE")
+    continuation = os.environ.get("ABOARD_WORKER_CONTINUATION") == "1"
+    if review_range is not None and re.fullmatch(r"[0-9a-fA-F]{40,64}\.\.[0-9a-fA-F]{40,64}", review_range) is None:
+        raise Blocked("review-this received an invalid pinned review range from Aboard.")
+    if review_range is None and not continuation:
+        require_clean_worktree(cwd)
     head = git(["rev-parse", "HEAD"], cwd).strip()
-    subject = git(["log", "-1", "--format=%s", "HEAD"], cwd).strip()
-    parent = parent_sha(cwd)
-    files = changed_files(cwd)
+    subject = git(["log", "-1", "--format=%s", review_range.split("..", 1)[1] if review_range else "HEAD"], cwd).strip()
+    parent = review_range.split("..", 1)[0] if review_range else parent_sha(cwd)
+    files = changed_files(cwd, review_range)
     lines = [
         "Review-this context, prepared by a hook from the local repository.",
         "",
-        "Worktree verified clean by the review-this hook before this "
-        "invocation; every change now present is yours.",
+        (
+            f"Aboard pinned {review_range} as the immutable review scope. Its implementation is intentionally present as uncommitted working-tree changes; do not commit it."
+            if review_range is not None
+            else "Aboard is continuing the exact reviewer conversation over its preserved working tree. Treat every existing change as part of that continuation."
+            if continuation
+            else "Worktree verified clean by the review-this hook before this invocation; every change now present is yours."
+        ),
         "",
         f"- Starting HEAD: {head}",
-        f"- Parent commit: {parent}" if parent else "- Parent commit: none (root commit)",
+        f"- Review range: {review_range}" if review_range else (f"- Parent commit: {parent}" if parent else "- Parent commit: none (root commit)"),
         f"- Subject: {subject}",
         "",
-        "## Files changed by the commit under review",
+        "## Files changed by the pinned implementation" if review_range else "## Files changed by the commit under review",
         "",
     ]
     lines.extend(
@@ -113,8 +124,8 @@ def build_context(cwd: Path) -> str:
     )
     lines.extend([
         "",
-        "The diff is deliberately not included; read it yourself from the "
-        "repository at the commit above.",
+        "The diff is deliberately not included; read the pinned target or "
+        "range yourself from the repository.",
     ])
     return "\n".join(lines)
 

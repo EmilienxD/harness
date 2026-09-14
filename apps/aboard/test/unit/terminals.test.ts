@@ -83,6 +83,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
     agentType: "implementer",
     issueNumbers: [6],
     completionCommitStartingSha: "1234567890abcdef1234567890abcdef12345678",
+    reviewRange: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     initialCommand: "claude --session-id 4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee \"/address-this Address issue 6\"",
   });
 
@@ -98,6 +99,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
     CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: "1000000",
     ABOARD_ISSUE_NUMBERS: "6",
     ABOARD_WORKER_START_SHA: "1234567890abcdef1234567890abcdef12345678",
+    ABOARD_REVIEW_RANGE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   });
   assert.deepEqual(host.created[0]?.terminal.sent, [{
     text: "cd -LiteralPath 'C:\\work\\aboard'",

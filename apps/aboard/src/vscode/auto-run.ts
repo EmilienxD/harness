@@ -3,6 +3,7 @@ import {
   completedCount,
   isUnsupportedRecord,
   issueProgress,
+  UNSUPPORTED_RECORD_REASON,
   type AutoRunRecord,
   type FrozenIssue,
   type IssueProgress,
@@ -102,12 +103,12 @@ export type AutoRunCard =
   | { readonly kind: "checking"; readonly record: AutoRunRecord }
   | { readonly kind: "recoverable"; readonly record: AutoRunRecord }
   | { readonly kind: "broken"; readonly record: AutoRunRecord; readonly reason: string }
-  /** A version-1 record: nothing to continue, only something to forget. */
+  /** An unsupported pre-v4 record: nothing to continue, only something to forget. */
   | { readonly kind: "unsupported"; readonly reason: string };
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
-  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly implementerLive: boolean; readonly workingBranch: string }
+  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly handoff?: { readonly type: "implementer" | "reviewer"; readonly agentId: string }; readonly workingBranch: string }
   | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number; readonly branchMode: "per-issue" | "single-branch" };
 
 export interface AutoRunTreeItem {
@@ -128,15 +129,15 @@ export interface AutoRunViewSources {
   readonly eligibility: () => RecoveryEligibility | undefined;
   /** Live issue titles, for display only; the plan's frozen titles do the work. */
   readonly titles: () => Readonly<Record<string, string>>;
-  /** Whether a live implementer session exists for this issue number. */
-  readonly hasLiveImplementer?: (issueNumber: number) => boolean;
+  /** The live worker conversation currently available as this issue's handoff. */
+  readonly liveHandoff?: (issueNumber: number) => { readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined;
 }
 
 export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
   const persisted = sources.persisted();
   const state = sources.state();
   if (persisted !== undefined && isUnsupportedRecord(persisted)) {
-    return { kind: "unsupported", reason: "run predates fixed-plan recovery" };
+    return { kind: "unsupported", reason: UNSUPPORTED_RECORD_REASON };
   }
   if (state !== undefined && persisted !== undefined) {
     return { kind: state.waiting ? "waiting" : "active", state, record: persisted };
@@ -203,14 +204,17 @@ export class AutoRunTreeModel {
     const record = cardRecord(node.card);
     if (record === undefined) return [];
     const titles = this.sources.titles();
-    return record.plan.map((issue): AutoRunNode => ({
-      kind: "issue",
-      issue,
-      progress: issueProgress(record, issue.number),
-      title: titles[String(issue.number)] ?? issue.title,
-      implementerLive: this.sources.hasLiveImplementer?.(issue.number) ?? false,
-      workingBranch: record.settings.branchMode === "single-branch" ? record.sessionBranch : issue.branch,
-    }));
+    return record.plan.map((issue): AutoRunNode => {
+      const handoff = this.sources.liveHandoff?.(issue.number);
+      return {
+        kind: "issue",
+        issue,
+        progress: issueProgress(record, issue.number),
+        title: titles[String(issue.number)] ?? issue.title,
+        ...(handoff === undefined ? {} : { handoff }),
+        workingBranch: record.settings.branchMode === "single-branch" ? record.sessionBranch : issue.branch,
+      };
+    });
   }
 
   public item(node: AutoRunNode): AutoRunTreeItem {
@@ -294,8 +298,8 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
       const { state, record } = card;
       return {
         label: `Auto-run ${record.runId}`,
-        description: `Waiting for commit · issue #${state.currentIssue ?? "?"}`,
-        tooltip: `${runTooltip(record, state)}\n\nCommit all accepted changes to continue Auto Run.`,
+        description: `Waiting for acceptance commit · issue #${state.currentIssue ?? "?"}`,
+        tooltip: `${runTooltip(record, state)}${waitingHandoff(record, state.currentIssue)}\n\nCreate exactly one non-empty commit containing all accepted changes; Aboard continues automatically once the checkout is clean.`,
         icon: "person",
         contextValue: "aboard.autoRun.waiting",
         collapsible: true,
@@ -332,7 +336,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
       return {
         label: "Interrupted auto-run",
         description: `cannot be resumed; ${card.reason}`,
-        tooltip: "This record was written before fixed-plan recovery and carries no plan to validate. Its branches and pull requests are untouched; discard the record when you have finished with them.",
+        tooltip: "This record predates human-acceptance persistence version 4 and cannot be resumed. Its branches and pull requests are untouched; discard the record when you have finished with them.",
         icon: "error",
         contextValue: "aboard.autoRun.unsupported",
         collapsible: false,
@@ -341,7 +345,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
 }
 
 function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeItem {
-  const { issue, progress, title, implementerLive } = node;
+  const { issue, progress, title, handoff } = node;
   const state = progress.state === "done"
     ? progress.result === "landed" ? `done · PR #${progress.prNumber}` : "done · no changes needed"
     : progress.state === "current" ? `current · ${progress.phase}` : "pending";
@@ -355,15 +359,16 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
       issue.difficulty === undefined ? "Difficulty: unrated" : `Difficulty: ${issue.difficulty}`,
       issue.chrome === true ? "Chrome browser: required by [AI]-chrome" : "",
       `Branch: ${node.workingBranch}`,
+      handoff === undefined ? "" : `Handoff session: ${handoff.type} ${handoff.agentId}`,
       issue.dependsOn.length === 0 ? "" : `Depends on ${issue.dependsOn.map((number) => `#${number}`).join(", ")}`,
     ].filter(Boolean).join("\n"),
     // Row clicks are terminal-only. Pending issues therefore do nothing, while
     // the issue-icon button remains the single way to open GitHub from a row.
-    contextValue: implementerLive
-      ? `aboard.autoRun.issue.${progress.state}.implementer`
+    contextValue: handoff !== undefined
+      ? `aboard.autoRun.issue.${progress.state}.handoff`
       : `aboard.autoRun.issue.${progress.state}`,
     collapsible: false,
-    command: { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [issue.number] },
+    command: { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [issue.number] },
   };
 }
 
@@ -383,8 +388,15 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
     ].filter(Boolean).join("\n"),
     contextValue: "aboard.autoRun.issue.forecast",
     collapsible: false,
-    command: { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [issue.number] },
+    command: { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [issue.number] },
   };
+}
+
+function waitingHandoff(record: AutoRunRecord, issueNumber: number | undefined): string {
+  const worker = record.workerSession;
+  return worker === undefined || worker.issueNumber !== issueNumber || (worker.type !== "implementer" && worker.type !== "reviewer")
+    ? ""
+    : `\n\nHandoff session: ${worker.type} ${worker.agentId} (${worker.sessionId}).`;
 }
 
 function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRunPreview }): string {

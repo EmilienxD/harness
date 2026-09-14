@@ -97,6 +97,7 @@ For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 - Use the `harness-e2e` skill for work under `tests/e2e/` or `apps/aboard/test/e2e/`.
 - Use the `tdd` skill before adding unit or E2E tests.
 - Consult the mirrored official references for product behavior instead of relying on memory.
+- Never assert exact or partial equality against agent prompt strings, because prompt text is not a meaningful contract and checks like the presence of "review" are useless.
 
 ## References
 

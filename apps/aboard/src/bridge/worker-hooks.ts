@@ -1,4 +1,5 @@
 import type { AgentId, IsoTimestamp } from "../domain/contracts.js";
+import { workerContinuationPrompt } from "../claude/prompts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 import type { BridgeRequestHandler } from "./protocol.js";
@@ -25,9 +26,8 @@ export class WorkerHookService {
     if (worker === undefined || worker.issueNumbers === undefined || worker.issueNumbers.length === 0) {
       throw new Error("Compaction re-grounding requires a registered issue-bound worker");
     }
-    const continuation = `Continue addressing ${describeIssueNumbers(worker.issueNumbers)} from where you stopped.`;
     const task = await this.tasks.task(agentId);
-    return task === undefined ? continuation : `${continuation}\n\nReminder: Perform the task described in @${task.path}.\n\n${task.contents.trim()}`;
+    return workerContinuationPrompt(describeIssueNumbers(worker.issueNumbers), task);
   }
 
   private timestamp(): IsoTimestamp {

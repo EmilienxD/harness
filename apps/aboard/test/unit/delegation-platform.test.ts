@@ -3,12 +3,14 @@ import test from "node:test";
 
 import { DelegationCoordinator } from "../../src/bridge/delegation.js";
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
-import { resolvedPromptFromText } from "../../src/claude/prompts.js";
+import type { ResolvedPrompt } from "../../src/claude/prompts.js";
 import { TerminalController, type StartupProofTracker, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../../src/claude/terminals.js";
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
 import type { AgentPlatform, PlatformLaunchRequest } from "../../src/platform/agent-platform.js";
+
+const resolved = (text: string): ResolvedPrompt => ({ text, sources: [] });
 
 class FakeTerminal implements TerminalHandle {
   public readonly sent: string[] = [];
@@ -21,8 +23,10 @@ class FakeTerminal implements TerminalHandle {
 
 class FakeTerminalHost implements TerminalHost {
   public readonly terminals: FakeTerminal[] = [];
-  public createTerminal(_options: TerminalCreationOptions): TerminalHandle {
+  public readonly options: TerminalCreationOptions[] = [];
+  public createTerminal(options: TerminalCreationOptions): TerminalHandle {
     const terminal = new FakeTerminal();
+    this.options.push(options);
     this.terminals.push(terminal);
     return terminal;
   }
@@ -179,7 +183,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
     workspaceRoot: "C:/work", fleet, lease, terminals,
     configurations: { get: async () => ({ platform: "chatgpt", settings: { shape: "explore", declaredCommand: ["codex"] } }) },
     platforms: new Map([["chatgpt", platform]]),
-    prompts: { resolve: async () => resolvedPromptFromText("Report the implementation context for issue #14.") },
+    prompts: { resolve: async () => resolved("Explore the codebase without modifying files.\n\nReport the implementation context for issue #14.") },
     spills: { prepare: async () => undefined, write: async (file) => { delivered.push(file.contents); return file.relativePath; } }, shell: "powershell",
     agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
@@ -189,7 +193,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /--sandbox read-only/u);
   assert.match(command, /approval_policy="never"/u);
-  assert.match(delivered.at(-1) ?? "", /^You are a read-only exploration agent\./u);
+  assert.match(delivered.at(-1) ?? "", /^Explore the codebase without modifying files\./u);
   assert.match(delivered.at(-1) ?? "", /Report the implementation context for issue #14\./u);
   assert.equal(lease.current(), undefined);
 
@@ -229,7 +233,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
       settings: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
     }) },
     platforms: new Map([["chatgpt", platform]]),
-    prompts: { resolve: async () => resolvedPromptFromText("The checked-out branch is for issue #15.") },
+    prompts: { resolve: async () => resolved("The checked-out branch is for issue #15.") },
     spills: { prepare: async () => undefined, write: async (file) => { delivered.push(file.contents); return file.relativePath; } },
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
@@ -258,7 +262,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   assert.match(command, /workspace_roots=/u);
   assert.match(command, /approval_policy="never"/u);
   assert.match(command, /C:\\\\work\/\*\*/u);
-  assert.match(delivered.at(-1) ?? "", /Chrome browser backend/u);
+  assert.equal(command.includes("The checked-out branch is for issue #15."), true);
   assert.equal(lease.current()?.agentId, agentId);
   assert.equal(fleet.get(agentId)?.chromeEnabled, true);
   assert.equal(fleet.get(agentId)?.autoRunRestricted, true);
@@ -300,7 +304,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
-    prompts: { resolve: async () => resolvedPromptFromText("Review pull request #42 for issue #15.") },
+    prompts: { resolve: async () => resolved("Review pull request #42 for issue #15.") },
     spills: { prepare: async () => undefined, write: async () => "unused" },
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
@@ -326,7 +330,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
   assert.equal(lease.current(), undefined);
 });
 
-test("a HITL ChatGPT reviewer opens an attended session that waits for the human decision", async () => {
+test("an explicitly interactive ChatGPT reviewer remains attended", async () => {
   const agentId = "agent-1" as AgentId;
   const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
   const requested: (string | undefined)[] = [];
@@ -353,7 +357,7 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
       };
     } },
     platforms: new Map([["chatgpt", platform]]),
-    prompts: { resolve: async () => resolvedPromptFromText("Review pull request #42 for issue #15.") },
+    prompts: { resolve: async () => resolved("Review pull request #42 for issue #15.") },
     spills: { prepare: async () => undefined, write: async () => "unused" },
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
@@ -370,8 +374,8 @@ test("a HITL ChatGPT reviewer opens an attended session that waits for the human
   assert.equal(session?.attended, true);
   assert.deepEqual(session?.resultDelivery, { mode: "none" });
   assert.equal(session?.lifecycle.status, "running");
-  // The human decision arrives on the pull request; Aboard keeps the lease and
-  // the terminal until then.
+  // Explicitly interactive delegation keeps the lease and terminal until its
+  // caller settles the session.
   assert.equal(lease.current()?.agentId, agentId);
 });
 
@@ -495,7 +499,9 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     resolveWorktreeGitMetadataRoots: async () => ["C:\\work\\.git\\worktrees\\work", "C:\\work\\.git\\objects"],
   });
 
-  const resumed = coordinator.resumeAutomated(fleet.get(agentId)!, "Continue addressing issue #15.");
+  const completionSha = "a".repeat(40);
+  const reviewRange = `${"b".repeat(40)}..${"c".repeat(40)}`;
+  const resumed = coordinator.resumeAutomated(fleet.get(agentId)!, "Continue addressing issue #15.", undefined, undefined, completionSha, reviewRange);
   while (host.terminals.length === 0) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /web_search="disabled"/u);
@@ -503,6 +509,9 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
   assert.match(command, /default_permissions="aboard-worktree"/u);
   assert.match(command, /C:\\\\work\/\*\*/u);
   assert.match(command, /C:\\\\work\\\\\.git\\\\worktrees\\\\work/u);
+  assert.equal(host.options[0]?.env?.ABOARD_WORKER_START_SHA, completionSha);
+  assert.equal(host.options[0]?.env?.ABOARD_REVIEW_RANGE, reviewRange);
+  assert.equal(host.options[0]?.env?.ABOARD_WORKER_CONTINUATION, "1");
 
   coordinator.complete(agentId, {
     outcome: "succeeded",

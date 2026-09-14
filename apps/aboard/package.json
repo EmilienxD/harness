@@ -116,8 +116,8 @@
         "icon": "$(git-pull-request)"
       },
       {
-        "command": "aboard.autoRun.focusImplementer",
-        "title": "Focus Implementer",
+        "command": "aboard.autoRun.focusWorker",
+        "title": "Focus Handoff Session",
         "category": "Aboard",
         "icon": "$(terminal)"
       },
@@ -324,7 +324,7 @@
           "when": "false"
         },
         {
-          "command": "aboard.autoRun.focusImplementer",
+          "command": "aboard.autoRun.focusWorker",
           "when": "false"
         },
         {
@@ -389,8 +389,8 @@
           "group": "inline@2"
         },
         {
-          "command": "aboard.autoRun.focusImplementer",
-          "when": "viewItem =~ /aboard.autoRun.issue.\\w+.implementer/",
+          "command": "aboard.autoRun.focusWorker",
+          "when": "viewItem =~ /aboard.autoRun.issue.\\w+.handoff/",
           "group": "inline@1"
         },
         {
@@ -471,11 +471,6 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Persistent note added near the end of every Auto Run implementer and reviewer prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
-        },
-        "aboard.autoRun.pauseAfterHitl": {
-          "type": "boolean",
-          "default": false,
-          "description": "Pause before launching the next issue after a HITL acceptance commit has been published, reviewed if configured, and integrated. Resume Auto Run starts the next issue."
         },
         "aboard.autoRun.mergeStrategy": {
           "type": "string",

@@ -19,6 +19,7 @@ export const AUTO_RUN_PERMANENT_NOTE = "E2E permanent auto-run guidance.";
 export const AUTO_RUN_NESTED_CONTEXT = "E2E recursively resolved nested issue context.";
 export const AUTO_RUN_EXPLORE_REPORT = "Explore verified deterministic.txt contains the canonical before fixture for this auto-run issue.";
 export const AUTO_RUN_HITL_MARKER = "[E2E:auto-run-hitl]";
+export const AUTO_RUN_HITL_REVIEW_MARKER = "[E2E:auto-run-hitl-review]";
 export const HITL_ACCEPT_PROMPT = "Please commit all accepted changes now. [E2E:accept-hitl]";
 export const AUTO_RUN_FOLLOWUP_MARKER = "[E2E:auto-run-followup]";
 export const BEFORE_CONTENT = "harness e2e fixture: before\n";
@@ -26,8 +27,9 @@ export const AFTER_CONTENT = "harness e2e fixture: after\n";
 /** No completion markup: a worker signals completion by committing. */
 export const FINAL_RESPONSE = "Fixture updated and verified.";
 export const WORKER_COMMIT_COMMAND = 'git add -A; git commit -m "Update deterministic fixture"';
+export const REVIEWER_APPROVAL_COMMIT_COMMAND = 'git commit --allow-empty -m "Approve deterministic fixture"';
 
-export type ScenarioId = "single-file-success" | "auto-run-afk" | "auto-run-hitl" | "auto-run-followup";
+export type ScenarioId = "single-file-success" | "auto-run-afk" | "auto-run-hitl" | "auto-run-hitl-review" | "auto-run-followup";
 
 export const SCENARIO_MANIFEST = {
   schemaVersion: 1,
@@ -63,7 +65,10 @@ export function parseMessagesRequest(value: unknown, inference: boolean): Messag
 export function transition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
   const scenario = selectScenario(request.messages);
   if (scenario === "auto-run-afk") return autoRunAfkTransition(request, repoRoot);
-  if (scenario === "auto-run-hitl") return autoRunSequentialTransition(request, repoRoot, {
+  if (scenario === "auto-run-hitl-review" && messageText(request.messages).includes("Aboard pinned ")) {
+    return autoRunHitlReviewTransition(request, repoRoot, scenario);
+  }
+  if (scenario === "auto-run-hitl" || scenario === "auto-run-hitl-review") return autoRunSequentialTransition(request, repoRoot, {
     scenario, checkpoint: "auto-hitl", readId: "toolu_e2e_auto_hitl_read", editId: "toolu_e2e_auto_hitl_edit",
     before: BEFORE_CONTENT.trimEnd(), after: AFTER_CONTENT.trimEnd(),
   });
@@ -75,7 +80,7 @@ export function transition(request: MessagesRequest, repoRoot: string): Scenario
 }
 
 function autoRunSequentialTransition(request: MessagesRequest, repoRoot: string, input: {
-  readonly scenario: "auto-run-hitl" | "auto-run-followup";
+  readonly scenario: "auto-run-hitl" | "auto-run-hitl-review" | "auto-run-followup";
   readonly checkpoint: "auto-hitl" | "auto-followup";
   readonly readId: string;
   readonly editId: string;
@@ -113,7 +118,8 @@ function autoRunSequentialTransition(request: MessagesRequest, repoRoot: string,
   }
   if (edit.is_error === true) throw new ScenarioMismatch("$.messages", "Edit tool_result reported an error", input.scenario);
   const commit = results.get(commitId);
-  if (input.scenario === "auto-run-hitl" && !messageText(request.messages.filter((message) => message.role === "user")).includes(HITL_ACCEPT_PROMPT)) {
+  const userText = messageText(request.messages.filter((message) => message.role === "user"));
+  if (input.scenario === "auto-run-hitl" && !userText.includes(HITL_ACCEPT_PROMPT)) {
     if (commit) throw new ScenarioMismatch("$.messages", "HITL committed before user acceptance", input.scenario);
     return { scenario: input.scenario, checkpoint: "auto-hitl-handoff", messageId: scenarioStableId(input.scenario, "auto-hitl-handoff"), stopReason: "end_turn", content: [{ type: "text", text: "Implementation is ready for your review; changes are uncommitted." }] };
   }
@@ -137,11 +143,77 @@ function autoRunSequentialTransition(request: MessagesRequest, repoRoot: string,
   };
 }
 
+function autoRunHitlReviewTransition(request: MessagesRequest, repoRoot: string, scenario: "auto-run-hitl-review"): ScenarioResponse {
+  const readId = "toolu_e2e_auto_hitl_review_read";
+  const commitId = "toolu_e2e_auto_hitl_accept_commit";
+  const results = scenarioSequenceResults(request.messages, [
+    { id: readId, name: "Read" },
+    { id: commitId, name: "Bash" },
+  ], scenario);
+  const read = results.get(readId);
+  if (!read) {
+    requireScenarioTool(request, "Read", scenario);
+    return {
+      scenario,
+      checkpoint: "auto-hitl-review-read",
+      messageId: scenarioStableId(scenario, "auto-hitl-review-read"),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: readId, name: "Read", input: { file_path: fixturePath(repoRoot) } }],
+    };
+  }
+  if (read.is_error === true || !contentContains(read.content, AFTER_CONTENT.trimEnd())) {
+    throw new ScenarioMismatch("$.messages", "HITL reviewer did not observe the reset implementation", scenario);
+  }
+  const acceptanceRequested = messageText(request.messages.filter((message) => message.role === "user")).includes(HITL_ACCEPT_PROMPT);
+  const commit = results.get(commitId);
+  if (!acceptanceRequested) {
+    if (commit) throw new ScenarioMismatch("$.messages", "HITL reviewer committed during its automated turn", scenario);
+    return {
+      scenario,
+      checkpoint: "auto-hitl-review-complete",
+      messageId: scenarioStableId(scenario, "auto-hitl-review-complete"),
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "Review complete; no fixes required." }],
+    };
+  }
+  if (!commit) {
+    requireScenarioTool(request, "Bash", scenario);
+    return {
+      scenario,
+      checkpoint: "auto-hitl-accept-commit",
+      messageId: scenarioStableId(scenario, "auto-hitl-accept-commit"),
+      stopReason: "tool_use",
+      content: [{ type: "tool_use", id: commitId, name: "Bash", input: { command: WORKER_COMMIT_COMMAND } }],
+    };
+  }
+  if (commit.is_error === true) throw new ScenarioMismatch("$.messages", "the HITL acceptance commit reported an error", scenario);
+  return {
+    scenario,
+    checkpoint: "auto-hitl-accept-complete",
+    messageId: scenarioStableId(scenario, "auto-hitl-accept-complete"),
+    stopReason: "end_turn",
+    content: [{ type: "text", text: FINAL_RESPONSE }],
+  };
+}
+
 function autoRunAfkTransition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
   const scenario = "auto-run-afk" as const;
   const history = messageText(request.messages);
   if (history.includes("Explore implementation context")) return autoRunExploreTransition(request, repoRoot);
   if (history.includes("Review pull request")) {
+    const commitId = "toolu_e2e_auto_review_commit";
+    const commit = scenarioSequenceResults(request.messages, [{ id: commitId, name: "Bash" }], scenario).get(commitId);
+    if (!commit) {
+      requireScenarioTool(request, "Bash", scenario);
+      return {
+        scenario,
+        checkpoint: "auto-review-commit",
+        messageId: scenarioStableId(scenario, "auto-review-commit"),
+        stopReason: "tool_use",
+        content: [{ type: "tool_use", id: commitId, name: "Bash", input: { command: REVIEWER_APPROVAL_COMMIT_COMMAND } }],
+      };
+    }
+    if (commit.is_error === true) throw new ScenarioMismatch("$.messages", "the reviewer's approval commit reported an error", scenario);
     return {
       scenario,
       checkpoint: "auto-review-complete",
@@ -399,22 +471,23 @@ function selectScenario(messages: readonly Message[]): ScenarioId {
   const text = messageText(messages);
   if (text.includes("Review pull request") && text.includes(AUTO_RUN_PERMANENT_NOTE)) return "auto-run-afk";
   const markers = [
-    ["single-file-success", SCENARIO_MARKER],
-    ["auto-run-afk", AUTO_RUN_AFK_MARKER],
-    ["auto-run-hitl", AUTO_RUN_HITL_MARKER],
-    ["auto-run-followup", AUTO_RUN_FOLLOWUP_MARKER],
+    ["single-file-success", [SCENARIO_MARKER]],
+    ["auto-run-afk", [AUTO_RUN_AFK_MARKER]],
+    ["auto-run-hitl", [AUTO_RUN_HITL_MARKER]],
+    ["auto-run-hitl-review", [AUTO_RUN_HITL_REVIEW_MARKER]],
+    ["auto-run-followup", [AUTO_RUN_FOLLOWUP_MARKER]],
   ] as const;
   const counts = new Map<ScenarioId, number>(markers.map(([id]) => [id, 0]));
   for (const block of flattenBlocks(messages)) {
     if (block.type !== "text") continue;
-    for (const [id, marker] of markers) {
-      if (typeof block.content === "string") counts.set(id, counts.get(id)! + occurrences(block.content, marker));
-      if (typeof block.text === "string") counts.set(id, counts.get(id)! + occurrences(block.text, marker));
+    for (const [id, selectors] of markers) {
+      if (typeof block.content === "string") counts.set(id, counts.get(id)! + selectors.reduce((sum, marker) => sum + occurrences(block.content as string, marker), 0));
+      if (typeof block.text === "string") counts.set(id, counts.get(id)! + selectors.reduce((sum, marker) => sum + occurrences(block.text as string, marker), 0));
     }
   }
   for (const message of messages) {
     if (typeof message.content !== "string") continue;
-    for (const [id, marker] of markers) counts.set(id, counts.get(id)! + occurrences(message.content, marker));
+    for (const [id, selectors] of markers) counts.set(id, counts.get(id)! + selectors.reduce((sum, marker) => sum + occurrences(message.content as string, marker), 0));
   }
   const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
   if (total !== 1) throw new ScenarioMismatch("$.messages", `expected exactly one scenario marker; found ${total}`);

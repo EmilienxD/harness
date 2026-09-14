@@ -94,6 +94,6 @@ test("compaction restores an archived worker task into its activation root", asy
   const restored = await store.task(agentId);
 
   assert.equal(restored?.path, `${promptRoot.replaceAll("\\", "/")}/9/task.md`);
-  assert.equal(restored?.contents, "Address issue #9.\n");
-  assert.equal(await readFile(restored?.path ?? "", "utf8"), "Address issue #9.\n");
+  assert.equal(restored?.contents, "Address issue #9.");
+  assert.equal(await readFile(restored?.path ?? "", "utf8"), "Address issue #9.");
 });

@@ -8,7 +8,7 @@ import { parseMessagesRequest, transition } from "./scenario.js";
 
 export type { FakeAnthropicServer, ServerAssertions, StructuralObservation } from "../../../../tests/e2e/core/anthropic-server.js";
 
-const CATALOG = "single-file-success:v1|auto-run-afk:v1|auto-run-hitl:v1|auto-run-followup:v1";
+const CATALOG = "single-file-success:v1|auto-run-afk:v2|auto-run-hitl:v2|auto-run-hitl-review:v1|auto-run-followup:v1";
 
 export function startFakeAnthropicServer(options: {
   readonly repoRoot: string;

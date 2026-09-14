@@ -128,6 +128,26 @@ test("createBranch, add, and commit leave the branch carrying the issue's commit
   assert.deepEqual(await client.aheadBehind("main", "main"), { ahead: 0, behind: 0 });
 });
 
+test("mixed reset exposes an exact commit tree as an unstaged review handoff", async () => {
+  const root = await repository();
+  const client = new ProcessGitClient(root);
+  const beforeSha = await client.headSha(false);
+  const beforeTreeSha = await client.treeSha(beforeSha);
+  await writeFile(join(root, "README.md"), "implemented\n");
+  await writeFile(join(root, "added.ts"), "export const added = true;\n");
+  await client.add();
+  const implementerCommitSha = await client.commit("checkpoint", "");
+
+  assert.notEqual(await client.treeSha(implementerCommitSha), beforeTreeSha);
+  await client.resetMixed(beforeSha);
+  assert.equal(await client.headSha(false), beforeSha);
+  assert.equal(await client.workingTreeMatchesCommit(implementerCommitSha), true);
+  assert.deepEqual((await client.status()).entries.map((entry) => entry.status).sort(), ["??", "M"]);
+
+  await writeFile(join(root, "unexpected.ts"), "export const unexpected = true;\n");
+  assert.equal(await client.workingTreeMatchesCommit(implementerCommitSha), false);
+});
+
 test("deleteBranch removes only a fully merged local branch", async () => {
   const root = await repository();
   const client = new ProcessGitClient(root);

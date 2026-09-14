@@ -97,6 +97,13 @@ def test_issue_readers_owns_both_worker_skills():
         entry = destinations[f"{name}/SKILL.md"]
         text = entry.source.read_text(encoding="utf-8")
         assert text.split("---", 2)[2].strip()
+        frontmatter, body = text.split("---", 2)[1:]
+        assert "commit" not in next(
+            line for line in frontmatter.splitlines() if line.startswith("description:")
+        ).lower()
+        assert "on success, commit" not in body.lower()
+        assert "successful completion always produces exactly one commit" not in body.lower()
+        assert "allow-empty" not in body.lower()
         assert entry.starter is True
 
     writer_destinations = {

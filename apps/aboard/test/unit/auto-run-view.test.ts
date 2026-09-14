@@ -10,7 +10,7 @@ const SESSION = "run/test";
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 3,
+    version: 4,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -21,7 +21,6 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
-      pauseAfterHitl: false,
 
       worktree: { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 },
     },
@@ -65,7 +64,7 @@ function sources(overrides: {
   readonly persisted?: PersistedAutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
-  readonly hasLiveImplementer?: (issueNumber: number) => boolean;
+  readonly liveHandoff?: (issueNumber: number) => { readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined;
 } = {}): AutoRunViewSources {
   return {
     starting: () => overrides.starting ?? false,
@@ -74,7 +73,7 @@ function sources(overrides: {
     persisted: () => overrides.persisted,
     eligibility: () => overrides.eligibility,
     titles: () => overrides.titles ?? {},
-    ...(overrides.hasLiveImplementer === undefined ? {} : { hasLiveImplementer: overrides.hasLiveImplementer }),
+    ...(overrides.liveHandoff === undefined ? {} : { liveHandoff: overrides.liveHandoff }),
   };
 }
 
@@ -88,7 +87,6 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     emptyReason: undefined,
     reviewMode: false,
     exploresBeforeImplement: false,
-    pauseAfterHitl: false,
     isolatedWorkspace: false,
     keepsWorkspace: false,
     sessionBranch: "run/<run-id>",
@@ -170,7 +168,7 @@ test("the live forecast shows loading feedback, then the planned issues in execu
     "aboard.autoRun.issue.forecast",
     "aboard.autoRun.issue.forecast",
   ]);
-  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [34] });
+  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [34] });
 });
 
 test("a blocked forecast explains why the run cannot start", () => {
@@ -353,11 +351,18 @@ test("a live run outranks any recovery question about its own record", () => {
   assert.equal(item.icon, "sync~spin");
 });
 
-test("a run waiting for the user is its own state, with its own actions", () => {
-  const { item } = rootItem({ persisted: record(), state: state({ waiting: true }) });
+test("a run waiting for the user names the acceptance boundary and handoff session", () => {
+  const waiting = record({ workerSession: {
+    agentId: "reviewer-35" as never,
+    sessionId: "session-review-35" as never,
+    type: "reviewer",
+    issueNumber: 35,
+  } });
+  const { item } = rootItem({ persisted: waiting, state: state({ waiting: true }) });
   assert.equal(item.contextValue, "aboard.autoRun.waiting");
-  assert.match(item.description, /Waiting for commit · issue #35/);
-  assert.match(item.tooltip, /Commit all accepted changes to continue Auto Run/);
+  assert.match(item.description, /Waiting for acceptance commit · issue #35/);
+  assert.match(item.tooltip, /Handoff session: reviewer reviewer-35 \(session-review-35\)/);
+  assert.match(item.tooltip, /continues automatically once the checkout is clean/);
 });
 
 test("Resume is absent while eligibility is still being computed", () => {
@@ -424,10 +429,10 @@ test("a broken run shows the short reason and nothing to resume with", () => {
   assert.match(item.tooltip, /Nothing has been rolled back/);
 });
 
-test("a version-1 record is broken with the one reason it can have, and no plan to show", () => {
+test("a pre-v4 record is broken with the one reason it can have, and no plan to show", () => {
   const { item, model, root } = rootItem({ persisted: { version: 1, runId: "run_old", startedAt: "2026-01-01T00:00:00.000Z" } });
   assert.equal(item.contextValue, "aboard.autoRun.unsupported");
-  assert.match(item.description, /predates fixed-plan recovery/);
+  assert.match(item.description, /predates human-acceptance persistence version 4/);
   assert.equal(item.collapsible, false);
   assert.deepEqual(model.children(root), []);
 });
@@ -447,26 +452,27 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
     "aboard.autoRun.issue.current",
     "aboard.autoRun.issue.pending",
   ]);
-  // Clicking any row asks to focus its implementer. The command is a no-op when
+  // Clicking any row asks to focus its handoff worker. The command is a no-op when
   // that issue has no live session, including while it is still pending.
-  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [34] });
-  assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [36] });
+  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [34] });
+  assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [36] });
 });
 
-test("a row with a live implementer focuses it on click instead of opening the issue", () => {
+test("a row with a live reviewer handoff focuses it on click instead of opening the issue", () => {
   const { model, root } = rootItem({
     persisted: record(),
     state: state(),
-    hasLiveImplementer: (number) => number === 35,
+    liveHandoff: (number) => number === 35 ? { type: "reviewer", agentId: "reviewer-35" } : undefined,
   });
   const rows = model.children(root).map((node) => model.item(node));
-  // The current issue has a live implementer: click focuses the terminal.
-  assert.deepEqual(rows[1]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [35] });
-  assert.equal(rows[1]?.contextValue, "aboard.autoRun.issue.current.implementer");
+  // The current issue has a live reviewer: click focuses the terminal.
+  assert.deepEqual(rows[1]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [35] });
+  assert.equal(rows[1]?.contextValue, "aboard.autoRun.issue.current.handoff");
+  assert.match(rows[1]?.tooltip ?? "", /Handoff session: reviewer reviewer-35/);
   // Done and pending rows use the same terminal-only command; without a live
-  // implementer the command quietly does nothing.
-  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [34] });
-  assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusImplementer", title: "Focus Implementer", arguments: [36] });
+  // handoff the command quietly does nothing.
+  assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [34] });
+  assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [36] });
 });
 
 test("an [AI]-chrome issue says so in its frozen plan row", () => {

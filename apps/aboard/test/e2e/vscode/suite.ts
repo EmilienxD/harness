@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, readFile, readdir, rm } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { commands, extensions, window, workspace, type Terminal } from "vscode";
 
 import { HITL_ACCEPT_PROMPT } from "../scenario.js";
+import { removeDirectoryWithRetries } from "./support.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,14 +31,14 @@ async function diagnostics(): Promise<Diagnostics | undefined> {
   catch { return undefined; }
 }
 
-async function submitHitlAcceptance(terminal: Terminal): Promise<void> {
+async function submitHitlAcceptance(terminal: Terminal, checkpoint: string): Promise<void> {
   terminal.show();
   terminal.sendText(HITL_ACCEPT_PROMPT, false);
   for (let attempt = 0; attempt < 10; attempt += 1) {
     terminal.sendText("\r", false);
     await new Promise((resolve) => setTimeout(resolve, 3000));
     const value = await diagnostics();
-    if (value?.observations.some((item) => item.checkpoint === "auto-hitl-commit")) return;
+    if (value?.observations.some((item) => item.checkpoint === checkpoint)) return;
   }
   throw new Error("HITL terminal did not submit the acceptance instruction");
 }
@@ -100,7 +101,7 @@ export async function run(): Promise<void> {
     assert.equal(completed.upstreamMode, "forbidden");
     const rows = completed.observations.filter((item) => item.scenario === "auto-run-afk" && item.result === "success");
     assert.deepEqual(rows.map((item) => item.checkpoint), [
-      "auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-complete",
+      "auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-commit", "auto-review-complete",
     ]);
     const expectedTool = platform === "chatgpt" ? "exec" : "Read";
     assert.ok(rows.find((item) => item.checkpoint === "auto-afk-read")?.toolNamesOffered.includes(expectedTool));
@@ -142,36 +143,43 @@ export async function run(): Promise<void> {
     const repository = process.env.ABOARD_E2E_REPOSITORY;
     const hitl = Number(process.env.ABOARD_E2E_AUTO_RUN_HITL_ISSUE);
     const followup = Number(process.env.ABOARD_E2E_AUTO_RUN_FOLLOWUP_ISSUE);
-    assert.ok(repository, "single-branch repository is configured");
+    const review = process.env.ABOARD_E2E_AUTO_RUN_REVIEW === "true";
+    assert.ok(repository, "HITL repository is configured");
     assert.ok(Number.isInteger(hitl) && hitl > 0);
-    assert.ok(Number.isInteger(followup) && followup > 0);
+    if (review) assert.equal(Number.isNaN(followup), true);
+    else assert.ok(Number.isInteger(followup) && followup > 0);
     const opened: typeof window.terminals[number][] = [];
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
     await commands.executeCommand("aboard.autoRun.refresh");
     await commands.executeCommand("aboard.startAutoRun");
-    await eventually(() => opened[0], "single-branch auto-run did not launch its first visible terminal");
+    await eventually(() => opened[0], "HITL auto-run did not launch its first visible terminal");
 
+    const handoffCheckpoint = review ? "auto-hitl-review-complete" : "auto-hitl-handoff";
     await eventually(async () => {
       const value = await diagnostics();
-      return value?.observations.some((item) => item.checkpoint === "auto-hitl-handoff") ? value : undefined;
-    }, "single-branch HITL implementer did not complete", 480);
+      return value?.observations.some((item) => item.checkpoint === handoffCheckpoint) ? value : undefined;
+    }, review ? "HITL reviewer did not complete" : "HITL implementer did not complete", 480);
     const worktree = await eventually(async () => {
       const output = (await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })).stdout;
       return worktreeRoots(output).find((path) => path.toLowerCase() !== resolve(root).toLowerCase());
-    }, "single-branch run did not create its isolated checkout");
+    }, "HITL run did not create its isolated checkout");
     assert.notEqual(worktree.toLowerCase(), root.toLowerCase());
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
 
-    assert.ok(window.terminals.includes(opened[0]!), "HITL keeps the same visible terminal");
+    const handoffTerminal = review ? opened[1] : opened[0];
+    assert.ok(handoffTerminal && window.terminals.includes(handoffTerminal), "HITL keeps its handoff terminal visible");
     const dirty = (await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: worktree, encoding: "utf8" })).stdout;
-    assert.match(dirty, /deterministic.txt/);
+    assert.match(dirty, /^ M deterministic\.txt\s*$/u, "the acceptance handoff is wholly unstaged");
+    const rootHead = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })).stdout.trim();
+    const handoffHead = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" })).stdout.trim();
+    assert.equal(handoffHead, rootHead, "the temporary implementer checkpoint is reset before acceptance");
     const beforeAcceptance = (await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--json", "number"], { encoding: "utf8" })).stdout;
     assert.deepEqual(JSON.parse(beforeAcceptance), [], "no PR exists before acceptance");
     // The response server persists the handoff just before Codex redraws its
     // interactive prompt. Give the TUI time to become input-ready so this
     // models a deliberate user follow-up instead of racing task settlement.
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    await submitHitlAcceptance(opened[0]!);
+    await submitHitlAcceptance(handoffTerminal, review ? "auto-hitl-accept-commit" : "auto-hitl-commit");
 
     await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(hitl), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
@@ -180,45 +188,45 @@ export async function run(): Promise<void> {
     const runPullRequest = await eventually(async () => {
       const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--limit", "10", "--json", "number,headRefName,baseRefName,body"], { encoding: "utf8" })).stdout) as { number?: number; headRefName?: string; baseRefName?: string; body?: string }[];
       return rows.find((row) => row.headRefName?.startsWith("run/") && row.baseRefName === "main");
-    }, "single-branch run did not open its cumulative pull request", 480);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    assert.equal((await diagnostics())?.observations.some((item) => item.checkpoint === "auto-followup-read"), false, "pauseAfterHitl must stop before the next issue");
-
-    await eventually(async () => {
-      await commands.executeCommand("aboard.autoRun.refresh");
-      await commands.executeCommand("aboard.resumeAutoRun");
+    }, "HITL run did not open its cumulative pull request", 480);
+    if (!review) await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === "auto-followup-read") ? value : undefined;
-    }, "paused single-branch run did not resume its follow-up", 480);
+    }, "HITL run did not start its follow-up automatically", 480);
+    const finalCheckpoint = review ? "auto-hitl-accept-complete" : "auto-followup-complete";
     const completed = await eventually(async () => {
       const value = await diagnostics();
-      return value?.observations.some((item) => item.checkpoint === "auto-followup-complete") ? value : undefined;
-    }, "single-branch follow-up implementer did not complete", 480);
+      return value?.observations.some((item) => item.checkpoint === finalCheckpoint) ? value : undefined;
+    }, review ? "HITL acceptance conversation did not complete" : "HITL follow-up implementer did not complete", 480);
     const successes = completed.observations.filter((item) => item.scenario !== null && item.result === "success");
-    assert.deepEqual(successes.map((item) => item.checkpoint), [
+    assert.deepEqual(successes.map((item) => item.checkpoint), review ? [
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-hitl-review-read", "auto-hitl-review-complete", "auto-hitl-accept-commit", "auto-hitl-accept-complete",
+    ] : [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff", "auto-hitl-commit", "auto-hitl-complete",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ]);
     assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);
     assert.equal(successes.some((item) => item.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__"))), false);
     assert.equal(successes.every((item) => item.model?.includes(platform === "chatgpt" ? "sol" : "opus") === true), true, `advanced and expert workers use their configured ${platform} routing`);
-    await eventually(async () => {
+    if (!review) await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(followup), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
       return issue.state === "CLOSED" ? issue : undefined;
-    }, "single-branch follow-up issue did not close", 480);
+    }, "HITL follow-up issue did not close", 480);
     const pullRequest = await eventually(async () => {
       const value = JSON.parse((await execFileAsync("gh", ["pr", "view", String(runPullRequest.number), "--repo", repository, "--json", "state,body"], { encoding: "utf8" })).stdout) as { state?: string; body?: string };
-      return new RegExp(`#${hitl}.*#${followup}`, "s").test(value.body ?? "") ? value : undefined;
-    }, "cumulative pull request did not include both accepted issues", 480);
+      const expectedIssues = review ? new RegExp(`#${hitl}`, "s") : new RegExp(`#${hitl}.*#${followup}`, "s");
+      return expectedIssues.test(value.body ?? "") ? value : undefined;
+    }, "cumulative pull request did not include the accepted issues", 480);
     assert.equal(pullRequest.state, "OPEN");
     await eventually(async () => {
       const output = (await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })).stdout;
       return worktreeRoots(output).some((path) => path.toLowerCase() === worktree.toLowerCase()) ? undefined : true;
-    }, "drained single-branch run did not remove its isolated checkout", 480);
+    }, "drained HITL run did not remove its isolated checkout", 480);
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
     const status = (await execFileAsync("git", ["status", "--porcelain=v1", "--branch"], { cwd: root, encoding: "utf8" })).stdout;
     assert.match(status, /^## main\.\.\.origin\/main\s*$/u);
-    assert.ok(opened.length >= 2, "both single-branch implementers launched in visible terminals");
+    assert.ok(opened.length >= 2, review ? "the implementer and reviewer launched in visible terminals" : "both HITL run implementers launched in visible terminals");
     terminalListener.dispose();
     return;
   }
@@ -227,7 +235,7 @@ export async function run(): Promise<void> {
   assert.equal(window.terminals.some((terminal) => terminal.name.startsWith("aboard:")), false);
   await assert.rejects(access(join(root, ".abd", "agents")));
 
-  await rm(join(root, ".abd"), { recursive: true, force: true });
+  await removeDirectoryWithRetries(join(root, ".abd"));
   await eventually(async () => await endpoint(api.commandEndpointDirectory, root) === undefined ? true : undefined, "deleting .abd did not remove the command endpoint");
   await assert.rejects(fetch(`http://127.0.0.1:${published.port}/commands`));
   const finalStatus = (await execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" })).stdout;

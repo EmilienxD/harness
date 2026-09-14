@@ -128,7 +128,7 @@ def guard(payload: dict[str, Any]) -> int:
             if any(matches(pattern, candidate) for candidate in candidates):
                 return deny(
                     f"aboard owns this run's git and GitHub state; {' '.join(segment.split())} is blocked. "
-                    "Leave your work uncommitted in the working tree and use git and gh only for read-only inspection."
+                    "Use git and gh only for allowed inspection, staging, and commit operations. Follow the completion contract injected for this turn."
                 )
     return 0
 

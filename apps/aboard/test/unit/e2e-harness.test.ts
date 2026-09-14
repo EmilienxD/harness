@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { childEnvironment } from "../e2e/smoke.js";
-import { harnessWorktreePaths } from "../e2e/repository.js";
-import { AUTO_RUN_AFK_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE, FINAL_RESPONSE, SCENARIO_MARKER, ScenarioMismatch, parseMessagesRequest, transition, type Message } from "../e2e/scenario.js";
+import { harnessWorktreePaths, repositoryFixtureRoot } from "../e2e/repository.js";
+import { AFTER_CONTENT, AUTO_RUN_AFK_MARKER, AUTO_RUN_HITL_REVIEW_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE, FINAL_RESPONSE, HITL_ACCEPT_PROMPT, SCENARIO_MARKER, ScenarioMismatch, parseMessagesRequest, transition, type Message } from "../e2e/scenario.js";
 import { startFakeAnthropicServer } from "../e2e/server.js";
 import { startFakeOpenAiServer } from "../e2e/codex-server.js";
 
@@ -131,7 +131,11 @@ test("OpenAI emulator drives a real Codex function turn and redacts diagnostics"
 
     const secondBody = {
       ...base,
-      input: [...base.input, call, { type: "function_call_output", call_id: call.call_id, output: "Chunk ID: e2e\nProcess exited with code 0" }],
+      input: [
+        { type: "message", role: "developer", content: [{ type: "input_text", text: "generic continuation context" }] },
+        call,
+        { type: "function_call_output", call_id: call.call_id, output: "Chunk ID: e2e\nProcess exited with code 0" },
+      ],
     };
     const second = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify(secondBody) });
     assert.equal(second.status, 200);
@@ -172,7 +176,7 @@ test("OpenAI emulator drives a real Codex function turn and redacts diagnostics"
   await rm(root, { recursive: true, force: true });
 });
 
-test("OpenAI auto-run accepts a successful commit with a nonfatal Git permission warning", async () => {
+test("OpenAI auto-run preserves its implementer route across history-only continuations", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-codex-auto-run-"));
   const server = await startFakeOpenAiServer({ repoRoot: root });
   const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
@@ -187,23 +191,135 @@ test("OpenAI auto-run accepts a successful commit with a nonfatal Git permission
   };
   let input = [...base.input] as Record<string, unknown>[];
   try {
-    for (const output of [
+    for (const [index, output] of [
       "harness e2e fixture: before\n",
       "",
       JSON.stringify({
         exit_code: 0,
         output: "error: Unable to create 'C:/fixture/.git/packed-refs.lock': Permission denied\n[run/e2e abc1234] Update deterministic fixture\n 1 file changed, 1 insertion(+), 1 deletion(-)",
       }),
-    ]) {
+    ].entries()) {
       const response = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ ...base, input }) });
       assert.equal(response.status, 200);
       const call = (completedResponse(await response.text()).output as Record<string, unknown>[])[0]!;
-      input = [...input, call, { type: "custom_tool_call_output", call_id: call.call_id, output }];
+      const continuation = { type: "message", role: "developer", content: [{ type: "input_text", text: "generic continuation context" }] };
+      input = index === 0
+        ? [base.input[0]!, continuation, call, { type: "custom_tool_call_output", call_id: call.call_id, output }]
+        : [...input, call, { type: "custom_tool_call_output", call_id: call.call_id, output }];
     }
     const complete = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ ...base, input }) });
     assert.equal(complete.status, 200);
     const message = (completedResponse(await complete.text()).output as Record<string, unknown>[])[0]!;
     assert.equal(((message.content as Record<string, unknown>[])[0]!).text, FINAL_RESPONSE);
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenAI AFK reviewer creates an empty completion commit before reporting approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-codex-review-"));
+  const server = await startFakeOpenAiServer({ repoRoot: root });
+  const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
+  const base = {
+    model: "codex-e2e", stream: true, store: false,
+    input: [
+      { type: "additional_tools", tools: [{ type: "custom", name: "exec" }] },
+      { type: "message", role: "user", content: [{ type: "input_text", text: `Review pull request. ${AUTO_RUN_PERMANENT_NOTE}` }] },
+    ],
+  };
+  try {
+    const first = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify(base) });
+    assert.equal(first.status, 200);
+    const call = (completedResponse(await first.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(call.type, "custom_tool_call");
+    assert.match(String(call.input), /git commit --allow-empty -m/u);
+
+    const complete = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...base,
+        input: [
+          { type: "additional_tools", tools: [{ type: "custom", name: "exec" }] },
+          call,
+          { type: "custom_tool_call_output", call_id: call.call_id, output: JSON.stringify({ exit_code: 0, output: "commit created" }) },
+        ],
+      }),
+    });
+    assert.equal(complete.status, 200);
+    const message = (completedResponse(await complete.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(((message.content as Record<string, unknown>[])[0]!).text, "Review complete; no fixes required.");
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenAI emulator resolves a spilled worker task when launch guidance follows its reference", async () => {
+  const root = await mkdtemp(join(tmpdir(), "abd-"));
+  const spillDirectory = join(root, "worker-1");
+  await mkdir(spillDirectory, { recursive: true });
+  const spillPath = join(spillDirectory, "task.md");
+  await writeFile(spillPath, "[E2E:chatgpt-implement] [E2E:address-this-skill-loaded] address it with Chrome.\n", "utf8");
+  const server = await startFakeOpenAiServer({});
+  const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
+  try {
+    const response = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "codex-e2e", stream: true, store: false,
+        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: `Perform the task described in @${spillPath}. Chrome browser backend is available.` }] }],
+        tools: [{ type: "function", name: "exec_command", parameters: { type: "object" } }],
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(((completedResponse(await response.text()).output as Record<string, unknown>[])[0]!).type, "function_call");
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenAI HITL reviewer leaves its automated result uncommitted and commits only after user acceptance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-codex-hitl-review-"));
+  const server = await startFakeOpenAiServer({ repoRoot: root });
+  const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
+  const tools = { type: "additional_tools", tools: [{ type: "custom", name: "exec" }] };
+  const base = {
+    model: "codex-e2e", stream: true, store: false,
+    input: [tools, { type: "message", role: "user", content: [{ type: "input_text", text: `Review ${AUTO_RUN_HITL_REVIEW_MARKER}. [E2E:review-this-skill-loaded] Aboard pinned abc..def as the immutable review scope.` }] }],
+  };
+  try {
+    const first = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify(base) });
+    assert.equal(first.status, 200);
+    const readCall = (completedResponse(await first.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(readCall.type, "custom_tool_call");
+
+    const reviewedInput = [
+      tools,
+      readCall,
+      { type: "custom_tool_call_output", call_id: readCall.call_id, output: JSON.stringify({ exit_code: 0, output: AFTER_CONTENT }) },
+    ];
+    const reviewed = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ ...base, input: reviewedInput }) });
+    assert.equal(reviewed.status, 200);
+    const reviewMessage = (completedResponse(await reviewed.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(reviewMessage.type, "message");
+
+    const acceptInput = [...reviewedInput, reviewMessage, { type: "message", role: "user", content: [{ type: "input_text", text: HITL_ACCEPT_PROMPT }] }];
+    const acceptance = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ ...base, input: acceptInput }) });
+    assert.equal(acceptance.status, 200);
+    const commitCall = (completedResponse(await acceptance.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(commitCall.type, "custom_tool_call");
+    assert.match(String(commitCall.input), /git add -A/u);
+
+    const accepted = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST", headers,
+      body: JSON.stringify({ ...base, input: [...acceptInput, commitCall, { type: "custom_tool_call_output", call_id: commitCall.call_id, output: JSON.stringify({ exit_code: 0, output: "commit created" }) }] }),
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(((completedResponse(await accepted.text()).output as Record<string, unknown>[])[0]!).type, "message");
   } finally {
     await server.close();
     await rm(root, { recursive: true, force: true });
@@ -229,11 +345,20 @@ test("smoke child environment clears paid and alternate provider selectors", () 
 test("reset cleanup accepts only registered worktrees inside the dedicated runtime root", () => {
   const runtimeRoot = "C:\\fixture\\runtime";
   const cloneRoot = `${runtimeRoot}\\repository`;
-  const valid = `${runtimeRoot}\\worktrees\\run_123\\repository`;
-  const output = `worktree ${cloneRoot.replace(/\\/g, "/")}\nHEAD 1\n\nworktree ${valid.replace(/\\/g, "/")}\nHEAD 2\n`;
-  assert.deepEqual(harnessWorktreePaths(output, runtimeRoot, cloneRoot), [valid]);
+  const direct = `${runtimeRoot}\\worktrees\\repository-1`;
+  const nested = `${runtimeRoot}\\worktrees\\run_123\\repository`;
+  const output = `worktree ${cloneRoot.replace(/\\/g, "/")}\nHEAD 1\n\nworktree ${direct.replace(/\\/g, "/")}\nHEAD 2\n\nworktree ${nested.replace(/\\/g, "/")}\nHEAD 3\n`;
+  assert.deepEqual(harnessWorktreePaths(output, runtimeRoot, cloneRoot), [direct, nested]);
   assert.throws(
-    () => harnessWorktreePaths(`${output}\nworktree C:/fixture/unowned/repository\nHEAD 3\n`, runtimeRoot, cloneRoot),
+    () => harnessWorktreePaths(`${output}\nworktree C:/fixture/unowned/repository\nHEAD 4\n`, runtimeRoot, cloneRoot),
     /outside the dedicated harness worktree root/u,
   );
+  assert.throws(
+    () => harnessWorktreePaths(`${output}\nworktree ${runtimeRoot.replace(/\\/g, "/")}/worktrees\nHEAD 4\n`, runtimeRoot, cloneRoot),
+    /outside the dedicated harness worktree root/u,
+  );
+});
+
+test("repository reset resolves the checked-in canonical fixture", async () => {
+  assert.equal(await readFile(join(repositoryFixtureRoot, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
 });

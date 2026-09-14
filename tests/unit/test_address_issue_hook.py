@@ -188,6 +188,20 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
     assert "completely clean Git worktree" in error
 
 
+def test_aboard_continuation_keeps_the_exact_dirty_implementer_handoff(
+    tmp_path, monkeypatch, capsys,
+):
+    root = repository(tmp_path)
+    fake_github(monkeypatch, {(REPOSITORY, 42): issue(42)})
+    (root / "README.md").write_text("continued\n", encoding="utf-8")
+    monkeypatch.setenv("ABOARD_WORKER_CONTINUATION", "1")
+
+    context = run_hook("/address-this 42", root, monkeypatch, capsys)
+
+    assert "continuing the exact worker conversation" in context
+    assert "preserved working tree" in context
+
+
 def test_ignored_files_do_not_count_as_dirty(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
     (root / ".gitignore").write_text("build/\n", encoding="utf-8")

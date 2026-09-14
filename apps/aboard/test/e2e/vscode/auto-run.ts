@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { runTests } from "@vscode/test-electron";
 
 import { loadConfig } from "../config.js";
-import { AUTO_RUN_AFK_MARKER, AUTO_RUN_FOLLOWUP_MARKER, AUTO_RUN_HITL_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE } from "../scenario.js";
+import { AUTO_RUN_AFK_MARKER, AUTO_RUN_FOLLOWUP_MARKER, AUTO_RUN_HITL_MARKER, AUTO_RUN_HITL_REVIEW_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE } from "../scenario.js";
 import { startFakeAnthropicServer } from "../server.js";
 import { childEnvironment, validateClaudeCli } from "../smoke.js";
 import { prepareCodexHome, validateCodexCli } from "../chatgpt.js";
@@ -80,11 +80,11 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
       }, platform);
     }
     const assertions = server.assertions();
-    for (const checkpoint of ["auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-complete"]) {
+    for (const checkpoint of ["auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-commit", "auto-review-complete"]) {
       const expected = platform === "chatgpt" ? `auto-run-afk:${checkpoint}` : checkpoint;
       if (!assertions.checkpoints.includes(expected)) throw new Error(`Auto-run journey did not reach ${checkpoint}`);
     }
-    if (assertions.inferenceRequests !== 7 || assertions.unexpectedRequests !== 0) {
+    if (assertions.inferenceRequests !== 8 || assertions.unexpectedRequests !== 0) {
       throw new Error(`Unexpected ${platform} auto-run inference activity: ${assertions.inferenceRequests} inference requests, ${assertions.unexpectedRequests} rejected requests`);
     }
   } finally {
@@ -202,7 +202,7 @@ async function createIssue(repository: string, title: string, body: string, labe
   return Number(match[1]);
 }
 
-async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "single-branch"): Promise<void> {
+async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "single-branch", review: boolean): Promise<void> {
   const config = loadConfig();
   await resetHarness();
   // Windows' unelevated sandbox provisions every writable Git object path.
@@ -210,15 +210,23 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
   // exercise the permission boundary instead of timing out on stale loose objects.
   await execFileAsync("git", ["gc"], { cwd: config.cloneRoot, encoding: "utf8", windowsHide: true });
   await clearTestAutoRunRecords();
-  const hitl = await createIssue(config.repository, "Accept deterministic single-branch change", `${AUTO_RUN_HITL_MARKER}\n\nChange deterministic.txt from before to after.`, ["[AI]-hitl", "[AI]-advanced-difficulty"]);
-  const followup = await createIssue(config.repository, "Finish deterministic single-branch change", `${AUTO_RUN_FOLLOWUP_MARKER}\n\nChange deterministic.txt from after to complete.`, ["[AI]-afk", "[AI]-expert-difficulty"]);
+  const hitlMarker = review ? AUTO_RUN_HITL_REVIEW_MARKER : AUTO_RUN_HITL_MARKER;
+  const hitl = await createIssue(config.repository, `Accept deterministic ${branchMode} change${review ? " after review" : ""}`, `${hitlMarker}\n\nChange deterministic.txt from before to after.`, ["[AI]-hitl", "[AI]-advanced-difficulty"]);
+  const followup = review
+    ? undefined
+    : await createIssue(config.repository, `Finish deterministic ${branchMode} change`, `${AUTO_RUN_FOLLOWUP_MARKER}\n\nChange deterministic.txt from after to complete.`, ["[AI]-afk", "[AI]-expert-difficulty"]);
   const platformConfigRoot = platform === "claude" ? config.claudeConfigRoot : join(config.runtimeRoot, "codex-config");
+  await rm(platformConfigRoot, { recursive: true, force: true });
+  await mkdir(platformConfigRoot, { recursive: true });
+  if (platform === "claude") {
+    await prepareInteractiveClaudeConfig(platformConfigRoot, [config.cloneRoot, resolve(__dirname, "..", "..", "..")]);
+    await installHarnessWorkerSkills(platformConfigRoot);
+  }
   const server = platform === "claude"
     ? await startFakeAnthropicServer({ repoRoot: config.cloneRoot, resolveRepoRoot: () => isolatedWorktreeRoot(config.cloneRoot), diagnosticsPath: config.diagnosticsPath, readinessPath: config.readinessPath })
     : await startFakeOpenAiServer({ repoRoot: config.cloneRoot, resolveRepoRoot: () => isolatedWorktreeRoot(config.cloneRoot), diagnosticsPath: config.diagnosticsPath });
   let activeConfigRoot = platformConfigRoot;
   if (platform === "chatgpt") {
-    await rm(platformConfigRoot, { recursive: true, force: true });
     activeConfigRoot = await prepareCodexHome(platformConfigRoot, server.baseUrl, [config.cloneRoot]);
     await installHarnessWorkerSkills(join(config.cloneRoot, ".agents"));
   }
@@ -246,7 +254,8 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       ABOARD_E2E_REPOSITORY: config.repository,
       ABOARD_E2E_REPOSITORY_ROOT: config.cloneRoot,
       ABOARD_E2E_AUTO_RUN_HITL_ISSUE: String(hitl),
-      ABOARD_E2E_AUTO_RUN_FOLLOWUP_ISSUE: String(followup),
+      ABOARD_E2E_AUTO_RUN_FOLLOWUP_ISSUE: followup === undefined ? "" : String(followup),
+      ABOARD_E2E_AUTO_RUN_REVIEW: String(review),
       ABOARD_E2E_PLATFORM: platform,
     });
     const executable = await testExecutable();
@@ -260,10 +269,9 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
         "aboard.autoRun.branchMode": branchMode,
-        "aboard.autoRun.review": false,
+        "aboard.autoRun.review": review,
         "aboard.autoRun.exploreBeforeImplement": false,
         "aboard.autoRun.issueContextDepth": 1,
-        "aboard.autoRun.pauseAfterHitl": true,
         "aboard.autoRun.mergeStrategy": "rebase",
         "aboard.autoRun.mergeRunPullRequest": false,
         "aboard.autoRun.discardBehavior": "full-cleanup",
@@ -275,15 +283,20 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       if (phase === "initialize" && platform === "claude") await mkdir(join(config.cloneRoot, ".claude"), { recursive: true });
     }
     const assertions = server.assertions();
-    for (const checkpoint of [
+    const expectedCheckpoints = review ? [
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-hitl-review-read", "auto-hitl-review-complete", "auto-hitl-accept-commit", "auto-hitl-accept-complete",
+    ] : [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff", "auto-hitl-commit", "auto-hitl-complete",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
-    ]) {
-      const scenario = checkpoint.startsWith("auto-hitl-") ? "auto-run-hitl" : "auto-run-followup";
+    ];
+    for (const checkpoint of expectedCheckpoints) {
+      const scenario = checkpoint.startsWith("auto-hitl-") ? review ? "auto-run-hitl-review" : "auto-run-hitl" : "auto-run-followup";
       const expected = platform === "chatgpt" ? `${scenario}:${checkpoint}` : checkpoint;
-      if (!assertions.checkpoints.includes(expected)) throw new Error(`Single-branch auto-run did not reach ${checkpoint}`);
+      if (!assertions.checkpoints.includes(expected)) throw new Error(`HITL auto-run did not reach ${checkpoint}`);
     }
-    if (assertions.inferenceRequests !== 9 || assertions.unexpectedRequests !== 0) throw new Error("Unexpected single-branch inference activity");
+    const expectedRequests = review ? 8 : 9;
+    if (assertions.inferenceRequests !== expectedRequests || assertions.unexpectedRequests !== 0) throw new Error("Unexpected HITL inference activity");
   } finally {
     await server.close();
     await resetHarness();
@@ -305,7 +318,9 @@ void (async () => {
     const selected = process.argv.find((arg) => arg.startsWith("--platform="))?.split("=")[1];
     if (selected !== undefined && selected !== platform) continue;
     if (!process.argv.includes("--hitl")) await runAutoRunJourney(platform);
-    for (const mode of ["per-issue", "single-branch"] as const) await runHitlJourney(platform, mode);
+    for (const mode of ["per-issue", "single-branch"] as const) {
+      for (const review of [false, true]) await runHitlJourney(platform, mode, review);
+    }
   }
 })()
   .catch((error: unknown) => {
