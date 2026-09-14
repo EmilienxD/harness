@@ -1,12 +1,12 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { contains, DEFAULT_REPOSITORY, type HarnessConfig } from "./config.js";
 
 const execFileAsync = promisify(execFile);
-const FIXTURE_ROOT = resolve(__dirname, "..", "..", "e2e", "fixture", "repository");
+export const repositoryFixtureRoot = resolve(__dirname, "..", "..", "test", "e2e", "fixture", "repository");
 const SEED_MESSAGE = "Seed deterministic E2E fixture";
 const FIXED_DATE = "2026-01-01T00:00:00Z";
 const REQUIRED_ACCOUNT = "EmilienxD";
@@ -97,7 +97,7 @@ async function createSeedRepository(runtimeRoot: string): Promise<{ root: string
   const parent = join(runtimeRoot, "seed-work");
   await mkdir(parent, { recursive: true });
   const root = await mkdtemp(join(parent, "seed-"));
-  await cp(FIXTURE_ROOT, root, { recursive: true });
+  await cp(repositoryFixtureRoot, root, { recursive: true });
   await git(root, ["init", "--initial-branch=main"]);
   await git(root, ["config", "core.autocrlf", "false"]);
   await mkdir(join(root, ".git", "harness-empty-hooks"), { recursive: true });
@@ -199,7 +199,7 @@ export function harnessWorktreePaths(output: string, runtimeRoot: string, cloneR
     if (!line.startsWith("worktree ")) continue;
     const candidate = resolve(line.slice("worktree ".length));
     if (candidate.toLowerCase() === clone.toLowerCase()) continue;
-    if (!contains(ownedRoot, candidate) || candidate.toLowerCase() === ownedRoot.toLowerCase() || basename(candidate) !== basename(clone)) {
+    if (!contains(ownedRoot, candidate) || candidate.toLowerCase() === ownedRoot.toLowerCase()) {
       throw new Error(`Refusing reset cleanup for registered worktree outside the dedicated harness worktree root: ${candidate}`);
     }
     paths.push(candidate);

@@ -56,12 +56,13 @@ test("a PR cannot bypass implementation acceptance, even when already merged", (
     facts: facts({ hasCommit: true, pullRequest: { number: 57, state: "merged" } }) }).action, "stop");
 });
 
-test("HITL accepts a clean descendant range and waits for all remaining edits", () => {
-  const state = { startingSha: "a".repeat(40), headSha: "b".repeat(40), dirtyPaths: [], descendsFromStart: true, newCommitCount: 2 };
+test("HITL accepts a clean single descendant commit and rejects invalid movement", () => {
+  const state = { startingSha: "a".repeat(40), headSha: "b".repeat(40), dirtyPaths: [], descendsFromStart: true, newCommitCount: 1, commitIsNonEmpty: true };
   assert.deepEqual(classifyHitlCommit(state, issue.branch, issue.branch), { kind: "committed", sha: state.headSha });
-  assert.deepEqual(classifyHitlCommit({ ...state, dirtyPaths: ["file.ts"] }, issue.branch, issue.branch), { kind: "waiting" });
+  assert.equal(classifyHitlCommit({ ...state, dirtyPaths: ["file.ts"] }, issue.branch, issue.branch).kind, "rejected");
   assert.deepEqual(classifyHitlCommit({ ...state, headSha: state.startingSha, newCommitCount: 0 }, issue.branch, issue.branch), { kind: "waiting" });
   assert.equal(classifyHitlCommit(state, "main", issue.branch).kind, "rejected");
+  assert.match((classifyHitlCommit(state, undefined, issue.branch) as { reason: string }).reason, /detached HEAD/u);
   assert.equal(classifyHitlCommit({ ...state, descendsFromStart: false }, issue.branch, issue.branch).kind, "rejected");
 });
 
@@ -209,6 +210,63 @@ test("rewritten history and extra commits are rejected", () => {
   });
   assert.equal(extra.kind, "rejected");
   assert.match(extra.kind === "rejected" ? extra.reason : "", /created 3 commits/);
+});
+
+test("HITL accepts only one non-empty clean descendant commit", () => {
+  const base = {
+    startingSha: "a".repeat(40),
+    headSha: "b".repeat(40),
+    dirtyPaths: [] as readonly string[],
+    descendsFromStart: true,
+    newCommitCount: 1,
+    commitIsNonEmpty: true,
+  };
+  assert.deepEqual(classifyHitlCommit(base, issue.branch, issue.branch), {
+    kind: "committed",
+    sha: "b".repeat(40),
+  });
+  assert.match(
+    classifyHitlCommit({ ...base, commitIsNonEmpty: false }, issue.branch, issue.branch).kind === "rejected"
+      ? (classifyHitlCommit({ ...base, commitIsNonEmpty: false }, issue.branch, issue.branch) as { reason: string }).reason
+      : "",
+    /empty/u,
+  );
+  assert.match(
+    classifyHitlCommit({ ...base, newCommitCount: 2 }, issue.branch, issue.branch).kind === "rejected"
+      ? (classifyHitlCommit({ ...base, newCommitCount: 2 }, issue.branch, issue.branch) as { reason: string }).reason
+      : "",
+    /exactly one/u,
+  );
+});
+
+test("HITL distinguishes ordinary pre-commit waiting from a dirty partial commit", () => {
+  const startingSha = "a".repeat(40);
+  assert.deepEqual(classifyHitlCommit({
+    startingSha,
+    headSha: startingSha,
+    dirtyPaths: ["src/a.ts"],
+    descendsFromStart: true,
+    newCommitCount: 0,
+  }, issue.branch, issue.branch), { kind: "waiting" });
+
+  const partial = classifyHitlCommit({
+    startingSha,
+    headSha: "b".repeat(40),
+    dirtyPaths: ["src/b.ts"],
+    descendsFromStart: true,
+    newCommitCount: 1,
+    commitIsNonEmpty: true,
+  }, issue.branch, issue.branch);
+  assert.equal(partial.kind, "rejected");
+  assert.equal(partial.kind === "rejected" ? partial.recoverable : undefined, true);
+  assert.match(partial.kind === "rejected" ? partial.reason : "", /amend/u);
+});
+
+test("a pending HITL reviewer re-enters its handoff even while the checkpoint diff is dirty", () => {
+  assert.deepEqual(step("review", { workingTreeDirty: true, dirtyPaths: ["src/a.ts"], hitlReviewPending: true }, {
+    reviewMode: true,
+    issue: { ...issue, disposition: "hitl" },
+  }), { action: "implement", issue: { ...issue, disposition: "hitl" } });
 });
 
 test("the reducer walks the phases in order from a clean start", () => {

@@ -536,13 +536,6 @@ export class GitHubClient implements GitHubPromptSource {
     });
   }
 
-  /** The most recently opened pull request still open, for `review_pr`. */
-  public async findLatestOpenPullRequest(): Promise<number | undefined> {
-    const output = await this.gh.run(["pr", "list", "--state", "open", "--limit", "1", "--json", "number"]);
-    const items = array(json(output, "open pull request lookup"), "open pull request lookup");
-    return items.length === 0 ? undefined : integer(record(items[0], "pull request").number, "pull request.number");
-  }
-
   public async mergePullRequest(number: number, strategy: "squash" | "merge" | "rebase", deleteBranch: boolean): Promise<void> {
     await this.gh.run(["pr", "merge", String(number), `--${strategy}`, ...(deleteBranch ? ["--delete-branch"] : [])]);
   }

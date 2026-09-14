@@ -77,7 +77,7 @@ test("the ChatGPT adapter spills a large initial prompt without losing its conte
   });
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
+  assert.equal(plan.spill?.contents, prompt);
   assert.ok(plan.spill !== undefined);
   assert.match(plan.args.at(-1) ?? "", new RegExp(`@${plan.spill.relativePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
 });
@@ -100,7 +100,7 @@ test("the ChatGPT adapter spills an inline-eligible prompt when the shell comman
   });
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
+  assert.equal(plan.spill?.contents, prompt);
 });
 
 test("the ChatGPT adapter normalizes Codex lifecycle payloads with the runtime session id", () => {
@@ -161,7 +161,7 @@ test("the ChatGPT adapter preflights the complete configured command and the ses
   assert.deepEqual(required, ["Explore"]);
 });
 
-test("a ChatGPT Explore session is a visible top-level Codex session Codex cannot let write", () => {
+test("a ChatGPT Explore session preserves its shared prompt while Codex cannot let it write", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -185,8 +185,7 @@ test("a ChatGPT Explore session is a visible top-level Codex session Codex canno
   assert.equal(plan.args.includes('approval_policy="never"'), true);
   assert.equal(plan.args.includes("--agent"), false);
   assert.equal(plan.args.at(-2), "--");
-  assert.match(plan.spill?.contents ?? "", /^You are a read-only exploration agent\./u);
-  assert.match(plan.spill?.contents ?? "", /Report the implementation context for issue #14\./u);
+  assert.equal(plan.args.at(-1), "Report the implementation context for issue #14.");
 });
 
 test("a ChatGPT Explore session refuses to launch without an exploration task or as another shape", () => {
@@ -216,7 +215,7 @@ test("a ChatGPT Explore session refuses to launch without an exploration task or
   );
 });
 
-test("a spilled ChatGPT Explore task keeps its read-only role in the delivered file", () => {
+test("a spilled ChatGPT Explore task keeps the shared prompt unchanged", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -233,8 +232,7 @@ test("a spilled ChatGPT Explore task keeps its read-only role in the delivered f
   });
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.match(plan.spill?.contents ?? "", /^You are a read-only exploration agent\./u);
-  assert.match(plan.spill?.contents ?? "", /exploration task/u);
+  assert.equal(plan.spill?.contents, "exploration task ".repeat(100));
 });
 
 test("the ChatGPT adapter resumes the exact Codex conversation with current launch policy", () => {
@@ -299,7 +297,7 @@ test("a ChatGPT implementer invokes the installed implement skill with the froze
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, true);
   assert.deepEqual(plan.args.slice(-2), ["--", "$address-this The checked-out branch is for issue #15."]);
-  assert.equal(plan.task?.contents, "The checked-out branch is for issue #15.\n");
+  assert.equal(plan.task?.contents, "The checked-out branch is for issue #15.");
   assert.equal(plan.chromeRequired, undefined);
   assert.deepEqual(plan.args.slice(plan.args.indexOf("--model"), plan.args.indexOf("--model") + 2), ["--model", "gpt-5.6-terra"]);
   assert.equal(plan.args.includes('model_reasoning_effort="high"'), true);
@@ -411,29 +409,29 @@ test("an ordinary ChatGPT launch never mentions browser configuration", () => {
   assert.doesNotMatch(plan.task?.contents ?? "", /chrome/iu);
 });
 
-test("a Chrome-required ChatGPT launch tells the worker to use the Chrome backend and needs it declared", async () => {
+test("a browser-required ChatGPT launch keeps shared browser guidance and needs its backend declared", async () => {
   const required: string[] = [];
   const platform = chatGpt({ browserProbe: { require: async (agentType) => { required.push(agentType); } } });
-  const plan = platform.planLaunch({ ...implementer, prompt: "Address the issue.", chrome: true });
+  const browserPrompt = "Address the issue.\n\nUse the available tools to take screenshots, test, and debug with a real browser.";
+  const plan = platform.planLaunch({ ...implementer, prompt: browserPrompt, chrome: true });
 
   assert.equal(plan.chromeRequired, true);
-  assert.match(plan.args.at(-1) ?? "", /^\$address-this Perform the task described in @/u);
-  assert.match(plan.spill?.contents ?? "", /^This issue requires the Chrome browser backend\./u);
-  assert.match(plan.spill?.contents ?? "", /Address the issue\.\n$/u);
+  assert.match(plan.args.at(-1) ?? "", /^\$address-this /u);
+  assert.equal(plan.task?.contents, browserPrompt);
   await platform.preflight(plan);
   assert.deepEqual(required, ["implementer"]);
 
   const resumed = platform.planSessionResume({ ...implementer, sessionId: actual, prompt: "Continue", chrome: true });
   assert.equal(resumed.chromeRequired, true);
-  assert.match(resumed.spill?.contents ?? "", /Chrome browser backend/u);
+  assert.equal(resumed.args.at(-1), "Continue");
   // The resume message must not replace the frozen task the reground hook restores.
   assert.equal(resumed.task, undefined);
   assert.equal(resumed.args.includes('web_search="disabled"'), true);
   assert.equal(resumed.args.filter((argument) => argument.startsWith("$address-this")).length, 0);
 
   const reopened = platform.planSessionResume({ ...implementer, sessionId: actual, chrome: true });
-  assert.equal(reopened.promptDelivery, "inline");
-  assert.match(reopened.args.at(-1) ?? "", /Chrome browser backend/u);
+  assert.equal(reopened.promptDelivery, "none");
+  assert.ok(reopened.args.at(-1), "reopened args should have content");
   assert.equal(reopened.args.filter((argument) => argument.startsWith("$address-this")).length, 0);
 });
 
@@ -474,7 +472,7 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
   assert.deepEqual(JSON.parse(afk.guard?.contents ?? "{}"), { denySubagents: true, denyCommands: ["git commit*", "gh pr review*"] });
   assert.deepEqual(afk.args.slice(afk.args.indexOf("--model"), afk.args.indexOf("--model") + 2), ["--model", "gpt-5.6-sol"]);
   assert.equal(afk.args.includes('model_reasoning_effort="medium"'), true);
-  assert.equal(afk.task?.contents, "Review pull request #42.\n");
+  assert.equal(afk.task?.contents, "Review pull request #42.");
 
   const hitl = chatGpt().planLaunch({
     ...reviewer,

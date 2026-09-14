@@ -155,8 +155,11 @@ function fakeGit(options: FakeGitOptions = {}): FakeGit {
     remoteBranchSha: async () => undefined,
     aheadBehind: async () => ({ ahead: 0, behind: 0 }),
     isAncestor: async () => true,
+    treeSha: async () => undefined,
     commitDetails: async () => undefined,
     stagedTreeSha: async () => "tree000000000000000000000000000000000000",
+    resetMixed: async () => undefined,
+    workingTreeMatchesCommit: async () => false,
     deleteBranchAt: async () => false,
     deleteRemoteBranchAt: async () => false,
   } satisfies GitClient;

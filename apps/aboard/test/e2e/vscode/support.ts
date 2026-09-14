@@ -1,6 +1,14 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { downloadAndUnzipVSCode } from "@vscode/test-electron";
+
+interface RemoveDirectory {
+  (path: string, options: { readonly recursive: true; readonly force: true; readonly maxRetries: number; readonly retryDelay: number }): Promise<void>;
+}
+
+export async function removeDirectoryWithRetries(path: string, remove: RemoveDirectory = rm): Promise<void> {
+  await remove(path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+}
 
 export async function testExecutable(): Promise<string> {
   const executable = await downloadAndUnzipVSCode("1.130.0");

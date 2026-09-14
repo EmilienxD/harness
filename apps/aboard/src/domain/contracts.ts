@@ -20,6 +20,8 @@ export const AGENT_TYPES = [
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 export type ExecutionMode = "interactive" | "auto" | "auto-run";
+/** Who controls the first message sent to an agent. */
+export type PromptAuthority = "auto-run" | "delegation" | "user";
 
 /** All agent types can be launched by the user or Auto Run */
 export const LAUNCHABLE_AGENT_TYPES = AGENT_TYPES;

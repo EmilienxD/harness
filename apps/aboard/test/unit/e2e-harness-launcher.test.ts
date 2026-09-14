@@ -10,6 +10,18 @@ import {
   parseStreamJson,
   redactProcessError,
 } from "../e2e/smoke.js";
+import { removeDirectoryWithRetries } from "../e2e/vscode/support.js";
+
+test("VS Code E2E cleanup retries transient Windows directory locks", async () => {
+  let observed: { readonly path: string; readonly options: unknown } | undefined;
+  await removeDirectoryWithRetries("C:\\fixture\\.abd", async (path, options) => {
+    observed = { path: String(path), options };
+  });
+  assert.deepEqual(observed, {
+    path: "C:\\fixture\\.abd",
+    options: { recursive: true, force: true, maxRetries: 20, retryDelay: 100 },
+  });
+});
 
 test("E2E configuration rejects malformed repository slugs", () => {
   for (const repository of ["owner", "owner/repo/extra", "https://github.com/owner/repo", "owner repo/name"]) {

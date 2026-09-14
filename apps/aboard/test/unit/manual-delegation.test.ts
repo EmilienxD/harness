@@ -20,7 +20,7 @@ test("manual delegation maps task identity and explicit execution mode", async (
   assert.equal(response.status, 201);
   assert.deepEqual(launches, [{
     requestId: "request-1", type: "Web Search", provider: "chatgpt", executionMode: "auto",
-    prompt: "$websearch\n\nFind primary sources.", cwd: "C:\\work", description: "Web Search",
+    prompt: "Find primary sources.", skill: "websearch", cwd: "C:\\work", description: "Web Search",
   }]);
 });
 
@@ -44,11 +44,11 @@ test("manual issue delegation invokes the reader worker skills", async () => {
   assert.deepEqual(launches, [
     {
       requestId: "request-0", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "$address-this\n\nDo it.", cwd: "C:\\work", description: "Issue Implementation",
+      prompt: "Do it.", skill: "address-this", cwd: "C:\\work", description: "Issue Implementation",
     },
     {
       requestId: "request-1", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "$review-this\n\nDo it.", cwd: "C:\\work", description: "Issue Review",
+      prompt: "Do it.", skill: "review-this", cwd: "C:\\work", description: "Issue Review",
     },
   ]);
 });

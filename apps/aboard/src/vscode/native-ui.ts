@@ -88,12 +88,20 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const engine = options.autoRun.engine;
   let autoRunStarting = false;
   const forecast = new AutoRunForecastController(() => renderAutoRun());
-  const implementerFor = (issueNumber: number): { readonly terminalId: TerminalId } | undefined => {
-    for (const session of fleet.list()) {
-      if (session.identity.type !== "implementer") continue;
+  const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined => {
+    const persisted = engine.persisted();
+    const recorded = persisted?.version === 4 && persisted.workerSession?.issueNumber === issueNumber
+      && (persisted.workerSession.type === "implementer" || persisted.workerSession.type === "reviewer")
+      ? persisted.workerSession
+      : undefined;
+    const sessions = recorded === undefined
+      ? fleet.list()
+      : [fleet.get(recorded.agentId)].filter((session): session is AgentSession => session !== undefined && session.sessionId === recorded.sessionId);
+    for (const session of sessions) {
+      if (session.identity.type !== "implementer" && session.identity.type !== "reviewer") continue;
       if (session.issueNumbers?.includes(issueNumber) !== true) continue;
       if (!isTerminalOpen(session.terminal.terminalId)) continue;
-      return { terminalId: session.terminal.terminalId };
+      return { terminalId: session.terminal.terminalId, type: session.identity.type, agentId: session.identity.agentId };
     }
     return undefined;
   };
@@ -104,7 +112,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     persisted: () => engine.persisted(),
     eligibility: () => engine.eligibility(),
     titles: () => engine.observedTitles(),
-    hasLiveImplementer: (issueNumber) => implementerFor(issueNumber) !== undefined,
+    liveHandoff: (issueNumber) => handoffFor(issueNumber),
   };
   const autoRunModel = new AutoRunTreeModel(autoRunSources);
   const autoRunChanges = new EventEmitter<AutoRunNode | undefined>();
@@ -207,12 +215,12 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     commands.registerCommand("aboard.autoRun.openPullRequest", () => {
       void openNumber(cardPullRequest(autoRunCard(autoRunSources), engine.state()));
     }),
-    commands.registerCommand("aboard.autoRun.focusImplementer", (value: unknown) => {
+    commands.registerCommand("aboard.autoRun.focusWorker", (value: unknown) => {
       const issueNumber = issueNumberOf(value);
       if (issueNumber === undefined) return;
-      const implementer = implementerFor(issueNumber);
-      if (implementer === undefined) return;
-      terminals.show(implementer.terminalId);
+      const handoff = handoffFor(issueNumber);
+      if (handoff === undefined) return;
+      terminals.show(handoff.terminalId);
     }),
     commands.registerCommand("aboard.startAutoRun", async () => {
       if (autoRunStarting) return;
@@ -260,7 +268,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
         return;
       }
       const persisted = engine.persisted();
-      const candidate = persisted?.version === 3 ? continuationSessionFor(persisted, fleet.list()) : undefined;
+      const candidate = persisted?.version === 4 ? continuationSessionFor(persisted, fleet.list()) : undefined;
       const cwd = candidate?.cwd ?? workspace.workspaceFolders?.[0]?.uri.fsPath;
       const canContinue = candidate !== undefined && cwd !== undefined
         ? await options.isResumable(candidate.platform, candidate.sessionId, cwd, candidate.identity.type)

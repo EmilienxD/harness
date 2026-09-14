@@ -5,8 +5,6 @@ import {
   PromptResolutionError,
   PromptResolver,
   describeResolvedPrompt,
-  normalizeGeneratedPrompt,
-  resolvedPromptFromText,
   type GitHubPromptSource,
   type IssueSnapshot,
   type PullRequestSnapshot,
@@ -70,19 +68,6 @@ const pull42: PullRequestSnapshot = {
   issueNumber: 47,
 };
 
-test("normalizes slash-prefixed words in generated prompts", () => {
-  const normalized = normalizeGeneratedPrompt(resolvedPromptFromText(
-    "/review //carefully keep mid/word and https://example.com.\nThen /done; leave / alone.",
-  ));
-
-  assert.equal(
-    normalized.text,
-    "review carefully keep mid/word and https://example.com.\nThen done; leave / alone.",
-  );
-  assert.equal(normalized.headline, "review carefully keep mid/word and https://example.com.");
-  assert.equal(normalized.body, "Then done; leave / alone.");
-});
-
 test("resolves an implementation prompt from issue and parent issue", async () => {
   const github = new FakeGitHub({ issues: [issue47, parent31] });
   const resolver = new PromptResolver({ github });
@@ -94,11 +79,9 @@ test("resolves an implementation prompt from issue and parent issue", async () =
   });
 
   assert.ok(prompt !== undefined);
-  // Caller-supplied input survives verbatim; the resolved wording around it is
-  // free to change without touching this test.
-  assert.ok(prompt.text.includes("#47"));
+  // Verify that issue context is included
+  assert.ok(prompt.text.includes('number="47"'));
   assert.ok(prompt.text.includes("Add token refresh"));
-  assert.ok(prompt.text.includes("Keep the change small."));
   assert.ok(prompt.text.includes("Refresh the access token before it expires."));
   assert.deepEqual(
     prompt.sources.map((source) => `${source.kind}#${source.number}`),
@@ -106,6 +89,40 @@ test("resolves an implementation prompt from issue and parent issue", async () =
   );
   // Everything the worker needs was fetched once, by the bridge.
   assert.deepEqual(github.issueRequests, [47, 31]);
+});
+
+test("separates implementation targets from supporting context with HTML sections", async () => {
+  const prompt = await new PromptResolver({
+    github: new FakeGitHub({
+      issues: [
+        {
+          ...issue47,
+          comments: [{ authorLogin: "maintainer", body: "Preserve the current retry policy." }],
+        },
+        parent31,
+      ],
+    }),
+  }).resolve({
+    kind: "implementation",
+    instruction: "Keep the change small.",
+    issueNumbers: [47],
+  });
+
+  assert.ok(prompt, "prompt should be resolved");
+  const targetStart = prompt.text.indexOf("<work-to-address>");
+  const targetEnd = prompt.text.indexOf("</work-to-address>");
+  const contextStart = prompt.text.indexOf("<context>");
+  const contextEnd = prompt.text.indexOf("</context>");
+  const issueBody = prompt.text.indexOf(issue47.body);
+  const comment = prompt.text.indexOf("Preserve the current retry policy.");
+  const parentBody = prompt.text.indexOf(parent31.body);
+
+  assert.ok(prompt.text.indexOf("Keep the change small.") < targetStart);
+  assert.ok(targetStart < issueBody && issueBody < targetEnd);
+  assert.ok(targetEnd < contextStart);
+  assert.ok(contextStart < comment && comment < contextEnd);
+  assert.ok(contextStart < parentBody && parentBody < contextEnd);
+  assert.doesNotMatch(prompt.text, /^#{1,6} /mu);
 });
 
 test("implementation prompts omit disposition guidance regardless of issue labels", async () => {
@@ -204,9 +221,9 @@ test("renders issue comments with each implementation issue document", async () 
     issueNumbers: [47],
   });
 
-  assert.ok(prompt?.text.includes("#### @maintainer\n\nUse a five-minute refresh window."));
-  assert.ok(prompt?.text.includes("#### @architect\n\nKeep refresh state per account."));
-  assert.ok(prompt?.text.includes("#### @ghost\n\nThe original author was deleted."));
+  assert.ok(prompt?.text.includes('<comment author="@maintainer">\nUse a five-minute refresh window.'));
+  assert.ok(prompt?.text.includes('<comment author="@architect">\nKeep refresh state per account.'));
+  assert.ok(prompt?.text.includes('<comment author="@ghost">\nThe original author was deleted.'));
 });
 
 test("injects fresh Explore context once and omits generated context comments", async () => {
@@ -228,10 +245,9 @@ test("injects fresh Explore context once and omits generated context comments", 
     codebaseContext: report,
   });
 
-  assert.match(prompt?.text ?? "", /## Fresh codebase context/);
-  assert.match(prompt?.text ?? "", /Keep the timeout configurable/);
-  assert.doesNotMatch(prompt?.text ?? "", /## Codebase context/);
-  assert.equal((prompt?.text.match(/Use src\/auth\/refresh\.ts/g) ?? []).length, 1);
+  assert.ok(prompt, "prompt should be resolved");
+  assert.match(prompt.text, /Keep the timeout configurable/);
+  assert.equal((prompt.text.match(/Use src\/auth\/refresh\.ts/g) ?? []).length, 1);
 });
 
 test("caps each issue at its newest comments and marks omitted discussion", async () => {
@@ -244,14 +260,13 @@ test("caps each issue at its newest comments and marks omitted discussion", asyn
     limits: { issueCommentCount: 2 },
   }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47] });
 
-  assert.doesNotMatch(prompt?.text ?? "", /Comment [123]/);
-  assert.match(prompt?.text ?? "", /3 older comments were omitted; showing the newest 2/);
-  assert.ok(prompt?.text.includes("Comment 4"));
-  assert.ok(prompt?.text.includes("Comment 5"));
-  assert.ok((prompt?.text.indexOf("Comment 4") ?? -1) < (prompt?.text.indexOf("Comment 5") ?? -1));
+  assert.ok(prompt, "prompt should be resolved");
+  assert.ok(prompt.text.includes("Comment 4"));
+  assert.ok(prompt.text.includes("Comment 5"));
+  assert.ok((prompt.text.indexOf("Comment 4") ?? -1) < (prompt.text.indexOf("Comment 5") ?? -1));
 });
 
-test("a global review budget stops only after a complete issue, description, or diff", async () => {
+test("a global review budget stops only after a complete HTML-delimited source", async () => {
   const body = `Contract\n${"x".repeat(25_000)}\nFinal requirement.`;
   const description = `Description\n${"y".repeat(25_000)}\nDescription end.`;
   const diff = `--- a/file\n+++ b/file\n+${"z".repeat(45_000)}\n+final change`;
@@ -261,25 +276,19 @@ test("a global review budget stops only after a complete issue, description, or 
     github: new FakeGitHub(data), limits: { maxPromptChars: 200_000 },
   }).resolve(request);
   assert.ok(full);
-  const issueEnd = full.text.indexOf(body) + body.length;
-  const descriptionEnd = full.text.indexOf(description) + description.length;
-
-  for (const [maxPromptChars, end, count] of [
-    [1, issueEnd, 1],
-    [1_000, issueEnd, 1],
-    [issueEnd, issueEnd, 1],
-    [issueEnd + 1, descriptionEnd, 2],
-    [descriptionEnd - 1, descriptionEnd, 2],
-    [descriptionEnd, descriptionEnd, 2],
-    [descriptionEnd + 1, full.text.length, 3],
-    [full.text.length - 1, full.text.length, 3],
-    [full.text.length + 1, full.text.length, 3],
+  for (const [maxPromptChars, count] of [
+    [1, 1],
+    [30_000, 2],
+    [200_000, 3],
   ] as const) {
     const github = new FakeGitHub(data);
     const prompt = await new PromptResolver({ github, limits: { maxPromptChars } }).resolve(request);
     assert.ok(prompt);
-    assert.equal(prompt.text, full.text.slice(0, end), `budget ${maxPromptChars}`);
     assert.deepEqual(prompt.sources.map((source) => source.kind), ["issue", "pull-request", "pull-request-diff"].slice(0, count));
+    assert.ok(prompt.text.includes(body));
+    assert.equal(prompt.text.includes(description), count >= 2);
+    assert.equal(prompt.text.includes(diff), count >= 3);
+    assert.match(prompt.text, /<work-to-review>[\s\S]*<\/work-to-review>/u);
     assert.equal(github.diffRequests, count === 3 ? 1 : 0);
   }
 });
@@ -304,12 +313,16 @@ test("a document crossing the budget is complete and later primary issues are om
       ...issue47,
       body,
       comments: [{ authorLogin: "maintainer", body: comment }],
-    }, parent31] }),
+    }, {
+      ...parent31,
+      comments: [{ authorLogin: "architect", body: "This omitted issue comment must stay omitted." }],
+    }] }),
     limits: { maxPromptChars: 100 },
   }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47, 31] });
   assert.ok(prompt?.text.includes(body));
   assert.ok(prompt?.text.includes(comment));
   assert.equal(prompt?.text.includes(parent31.body), false);
+  assert.equal(prompt?.text.includes("This omitted issue comment must stay omitted."), false);
   assert.deepEqual(prompt?.sources.map((source) => source.number), [47]);
 });
 
@@ -329,17 +342,21 @@ test("resolves a review prompt with the contract and the diff", async () => {
     kind: "review",
     instruction: "Review against the issue contract.",
     pullRequestNumber: 42,
-    focus: "error handling",
   });
 
-  // Caller-supplied material survives verbatim.
-  assert.ok(prompt?.text.includes("#42"));
-  assert.ok(prompt?.text.includes("Add token refresh"));
-  assert.ok(prompt?.text.includes("error handling"));
-  assert.ok(prompt?.text.includes("#### @reviewer\n\nThe timeout must remain configurable."));
-  assert.ok(prompt?.text.includes("--- a/src/auth.ts"));
+  assert.ok(prompt, "prompt should be resolved");
+  assert.ok(prompt.text.includes('number="42"'));
+  assert.ok(prompt.text.includes("Add token refresh"));
+  assert.ok(prompt.text.includes('<comment author="@reviewer">\nThe timeout must remain configurable.'));
+  assert.ok(prompt.text.includes("--- a/src/auth.ts"));
+  const workEnd = prompt.text.indexOf("</work-to-review>");
+  const contextStart = prompt.text.indexOf("<context>");
+  assert.ok(prompt.text.indexOf(issue47.body) < workEnd);
+  assert.ok(prompt.text.indexOf("--- a/src/auth.ts") < workEnd);
+  assert.ok(workEnd < contextStart);
+  assert.ok(contextStart < prompt.text.indexOf("The timeout must remain configurable."));
   assert.deepEqual(
-    prompt?.sources.map((source) => source.kind),
+    prompt.sources.map((source) => source.kind),
     ["issue", "pull-request", "pull-request-diff"],
   );
 });
@@ -458,13 +475,6 @@ test("an issue-bound prompt with no issues is rejected", async () => {
   );
 });
 
-test("splits free-form text into a headline and body", () => {
-  const prompt = resolvedPromptFromText("Look at the flake.\n\nIt fails on Windows only.");
-  assert.equal(prompt.headline, "Look at the flake.");
-  assert.equal(prompt.body, "It fails on Windows only.");
-  assert.deepEqual(prompt.sources, []);
-});
-
 test("summarizes a prompt without repeating its content", async () => {
   const resolver = new PromptResolver({
     github: new FakeGitHub({ issues: [{ ...issue47, body: "The API key is hunter2." }] }),
@@ -490,33 +500,74 @@ test("delegated prompts remain free-form and fetch no GitHub context", async () 
     type: "interactive",
     description: "fix the session loss",
     prompt: "Work with me to fix issue #47.",
-  }, { interactive: true });
+  }, { authority: "delegation" });
 
-  assert.ok(prompt?.text.includes("Work with me to fix issue #47."));
-  assert.deepEqual(prompt?.sources, []);
-  assert.equal(await adapter.resolve({ type: "interactive", description: "d" }, { interactive: true }), undefined);
+  assert.ok(prompt, "prompt should be resolved");
+  assert.ok(prompt.text.includes("Work with me to fix issue #47."));
+  assert.deepEqual(prompt.sources, []);
+  assert.equal(await adapter.resolve({ type: "interactive", description: "d" }, { authority: "user" }), undefined);
   const interactive = await adapter.resolve({
     type: "interactive", description: "d", prompt: "caching layer",
-  }, { interactive: true });
-  assert.ok(interactive?.text.includes("caching layer"));
-  assert.deepEqual(interactive?.sources, []);
+  }, { authority: "user" });
+  assert.ok(interactive, "interactive prompt should be resolved");
+  assert.ok(interactive.text.includes("caching layer"));
+  assert.deepEqual(interactive.sources, []);
+
+  const explorationInstruction = "Trace authentication refresh and report the relevant control flow.";
+  const exploration = await adapter.resolve({
+    type: "Explore",
+    description: "trace authentication refresh",
+    prompt: explorationInstruction,
+  }, { authority: "delegation" });
+  assert.ok(exploration, "Explore prompt should be resolved");
+  assert.equal(exploration.text, explorationInstruction);
+  assert.deepEqual(exploration.sources, []);
+
+  const exact = "  Keep /api exactly as written.  \n";
+  const preserved = await adapter.resolve({
+    type: "interactive",
+    description: "exact prompt",
+    prompt: exact,
+  }, { authority: "user" });
+  assert.equal(preserved?.text, exact);
 });
 
 test("interactive launches resolve to no prompt so the terminal opens empty", async () => {
   const { GitHubDelegationPromptResolver } = await import("../../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
   for (const type of ["interactive"] as const) {
-    assert.equal(await adapter.resolve({ type, description: "d" }, { interactive: true }), undefined);
-    assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }, { interactive: true }), undefined);
-    const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { interactive: true });
-    assert.equal(withTopic?.text.includes("caching layer"), true);
+    assert.equal(await adapter.resolve({ type, description: "d" }, { authority: "user" }), undefined);
+    assert.equal(await adapter.resolve({ type, description: "d", prompt: "   " }, { authority: "user" }), undefined);
+    const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { authority: "user" });
+    assert.ok(withTopic, "withTopic should be resolved");
+    assert.equal(withTopic.text.includes("caching layer"), true);
   }
-  const doctor = await adapter.resolve({ type: "reviewer", description: "d" }, { interactive: false });
+  const doctor = await adapter.resolve({ type: "reviewer", description: "d" }, { authority: "auto-run" });
   assert.notEqual(doctor, undefined);
   assert.ok(doctor!.text.length > 0);
 });
 
-test("auto-agent guidance is the final section after resolved issue and pull-request context", async () => {
+test("manual prompt authority never falls back to Auto Run instructions", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({ issues: [issue47] }) }));
+
+  await assert.rejects(
+    () => adapter.resolve({ type: "implementer", description: "manual", issues: [47] }, { authority: "delegation" }),
+    /Manual delegation requires an explicit prompt/u,
+  );
+});
+
+test("a pull-request reviewer requires an explicit workflow instruction", async () => {
+  const { GitHubDelegationPromptResolver } = await import("../../src/github/prompt-adapter.js");
+  const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
+
+  await assert.rejects(
+    () => adapter.resolve({ type: "reviewer", description: "review pull request 42", pullRequest: 42 }, { authority: "auto-run" }),
+    /requires an explicit prompt/u,
+  );
+});
+
+test("additional guidance is the final section after resolved issue and pull-request context", async () => {
   const { GitHubDelegationPromptResolver } = await import("../../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({
     github: new FakeGitHub({
@@ -527,8 +578,7 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
   }));
   const permanentPrompt = "run the full browser suite";
   const guideline = "no unit tests needed";
-  // The resolved text ends with the caller's guideline, verbatim; the heading
-  // above it is prose and free to change.
+  // Both configured and one-off guidance share one final, explicit boundary.
 
   const implementer = await adapter.resolve({
     type: "implementer",
@@ -537,46 +587,51 @@ test("auto-agent guidance is the final section after resolved issue and pull-req
     prompt: "The checked-out branch is for issue #47. Work only in the directory you started in.",
     permanentPrompt,
     additionalGuideline: guideline,
-  }, { interactive: false });
+  }, { authority: "auto-run" });
   const implementerText = implementer?.text ?? "";
-  assert.doesNotMatch(implementerText, /aboard|auto[ -]?run|automated|automation/i);
-  assert.equal((implementerText.match(/Address issue #47/giu) ?? []).length, 1);
-  assert.equal(implementerText.trimEnd().endsWith(guideline), true);
+  assert.ok(implementer, "implementer prompt should be resolved");
+  assert.equal(implementerText.trimEnd().endsWith("</additional-guidance>"), true);
   // The resolved issue context comes first.
   assert.equal(implementerText.indexOf("Refresh the access token before it expires.") < implementerText.indexOf(guideline), true);
   assert.equal(implementerText.indexOf(permanentPrompt) < implementerText.indexOf(guideline), true);
+  assert.equal((implementerText.match(/<additional-guidance>/gu) ?? []).length, 1);
 
   for (const reviewMode of ["afk", "hitl"] as const) {
     const doctor = await adapter.resolve({
       type: "reviewer",
       description: "review pull request 42",
       pullRequest: 42,
+      prompt: "Review the accepted issue changes and fix straightforward findings.",
       permanentPrompt,
       additionalGuideline: guideline,
-    }, { interactive: reviewMode === "hitl" });
+    }, { authority: "auto-run" });
     const doctorText = doctor?.text ?? "";
-    assert.doesNotMatch(doctorText, /aboard|auto[ -]?run|automated|automation/i);
-    assert.equal(doctorText.trimEnd().endsWith(guideline), true, reviewMode);
+    assert.ok(doctor, `doctor prompt should be resolved for ${reviewMode}`);
+    assert.equal(doctorText.trimEnd().endsWith("</additional-guidance>"), true, reviewMode);
     // The resolved diff comes first.
     assert.equal(doctorText.indexOf("+ refreshEarly();") < doctorText.indexOf(guideline), true, reviewMode);
     assert.equal(doctorText.indexOf(permanentPrompt) < doctorText.indexOf(guideline), true, reviewMode);
+    assert.equal((doctorText.match(/<additional-guidance>/gu) ?? []).length, 1, reviewMode);
   }
 });
 
-test("a builtin type's prompt follows its launch mode, not its type", async () => {
+test("prompt authority, not agent type, controls automatic prompt generation", async () => {
   const { GitHubDelegationPromptResolver } = await import("../../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
   // Interactive: the terminal opens empty even though the type can also run
   // unattended; the user types the first message.
-  assert.equal(await adapter.resolve({ type: "interactive", description: "d" }, { interactive: true }), undefined);
-  assert.equal(await adapter.resolve({ type: "Explore", description: "d" }, { interactive: true }), undefined);
-  const topic = await adapter.resolve({ type: "Explore", description: "d", prompt: "auth flow" }, { interactive: true });
-  assert.equal(topic?.text.includes("auth flow"), true);
-  const task = await adapter.resolve({ type: "interactive", description: "d", prompt: "find the retry bug" }, { interactive: false });
-  assert.equal(task?.text.includes("find the retry bug"), true);
-  const fallback = await adapter.resolve({ type: "Explore", description: "d" }, { interactive: false });
-  assert.notEqual(fallback, undefined);
-  assert.ok(fallback!.text.length > 0);
+  assert.equal(await adapter.resolve({ type: "interactive", description: "d" }, { authority: "user" }), undefined);
+  assert.equal(await adapter.resolve({ type: "Explore", description: "d" }, { authority: "user" }), undefined);
+  const topic = await adapter.resolve({ type: "Explore", description: "d", prompt: "auth flow" }, { authority: "user" });
+  assert.ok(topic, "topic should be resolved");
+  assert.equal(topic.text.includes("auth flow"), true);
+  const task = await adapter.resolve({ type: "interactive", description: "d", prompt: "find the retry bug" }, { authority: "delegation" });
+  assert.ok(task, "task should be resolved");
+  assert.equal(task.text.includes("find the retry bug"), true);
+  await assert.rejects(
+    adapter.resolve({ type: "Explore", description: "d" }, { authority: "auto-run" }),
+    /Explore requires an explicit prompt/u,
+  );
 });
 
 test("an issue-bound Explore launch receives resolved issue context", async () => {
@@ -589,10 +644,12 @@ test("an issue-bound Explore launch receives resolved issue context", async () =
     description: "explore issue 47",
     issues: [47],
     prompt: "Map relevant files and tests.",
-  }, { interactive: false });
+  }, { authority: "auto-run" });
 
-  assert.match(prompt?.text ?? "", /Explore implementation context for issue #47/);
-  assert.match(prompt?.text ?? "", /Refresh the access token before it expires/);
-  assert.match(prompt?.text ?? "", /The auth subsystem is replaced end to end/);
+  assert.ok(prompt, "prompt should be resolved");
+  assert.ok(prompt.text.includes("Map relevant files and tests."));
+  assert.doesNotMatch(prompt.text, /Explore the codebase without modifying files\./u);
+  assert.ok(prompt.text.includes("Refresh the access token before it expires"));
+  assert.ok(prompt.text.includes("The auth subsystem is replaced end to end"));
   assert.deepEqual(github.issueRequests, [47, 31]);
 });

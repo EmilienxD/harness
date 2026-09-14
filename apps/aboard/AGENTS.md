@@ -84,12 +84,11 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.bridge.port` | `4823` | Preferred loopback bridge port. |
 | `aboard.launch.maxInlinePromptChars` | `4000` | Spill longer prompts to one-use temporary files. |
 | `aboard.terminals.closeOnSessionEnd` | `false` | Leave exited session terminals available. |
-| `aboard.autoRun.review` | `false` | Review after implementation. |
+| `aboard.autoRun.review` | `false` | Add the mode-specific automated review turn. |
 | `aboard.autoRun.branchMode` | `per-issue` | Per-issue PRs or one cumulative branch. |
 | `aboard.autoRun.exploreBeforeImplement` | `false` | Run read-only Explore before a fresh worker. |
 | `aboard.autoRun.issueContextDepth` | `1` | Related-issue traversal depth. |
 | `aboard.autoRun.prompt` | `""` | Persistent worker guidance. |
-| `aboard.autoRun.pauseAfterHitl` | `false` | Pause after accepting a HITL issue. |
 | `aboard.autoRun.mergeStrategy` | `squash` | PR merge method. |
 | `aboard.autoRun.mergeRunPullRequest` | `false` | Merge the final run PR when safe. |
 | `aboard.autoRun.discardBehavior` | `record-only` | Record-only, local, or full cleanup. |
@@ -136,23 +135,26 @@ are outside workspaces, permissioned `0600`, and removed on window close.
 
 ## Important Constraints
 
+- Keep all Aboard-owned agent prompt text in `src/claude/prompts.ts` so the complete prompt surface is easy for humans to find and review.
 - Auto Run injects its commit contract and pinned review scope at launch; the user-owned worker skills
   supply reusable implementation and review behavior.
-  AFK requires a successful turn and exactly one clean descendant commit. HITL's successful initial
-  turn leaves edits for interactive review; a clean descendant range of one or more user-accepted
-  commits advances the run. A completed reviewer leaves exactly one clean commit: an ordinary fix commit
-  when it found problems, or an empty commit when the pinned diff was sound. Zero commits means the review
-  did not complete and stops the run.
+  AFK implementers and reviewers require successful turns and exactly one clean descendant commit; an AFK
+  reviewer uses an empty commit when no fixes are needed. HITL without review leaves implementation edits
+  uncommitted. HITL with review creates one clean local implementer checkpoint, mixed-resets it, and gives a
+  non-committing reviewer the immutable checkpoint range. Every HITL path advances only after exactly one
+  non-empty, clean user acceptance commit.
 - Workers receive read-only Git commands plus `git add` and `git commit`; Aboard owns every other
   Auto Run Git and GitHub mutation. Aboard observes acceptance commits and never creates them.
-- HITL waits in `await-commit` on its recorded branch and starting SHA. Both dispositions automatically
-  integrate internal issue PRs after acceptance and configured review. Single-branch runs publish each
-  accepted range directly to the run branch and update the cumulative PR. Only the final run PR into
-  the original target may need manual merging; `mergeRunPullRequest` controls its automatic merge.
-- `pauseAfterHitl` pauses after integration, before the next issue. Resume Auto Run resumes this pause.
-  File and Git changes, view refresh, and window focus wake acceptance observation; an internal timer
-  supplies a one-second fallback. Recovery uses version-3 records; older records remain discardable
-  but cannot resume. Persist mutation intent, then observed postconditions, before clearing the journal.
+- HITL waits in `await-commit` on its recorded branch and `beforeSha`. No commit is ordinary waiting; a dirty
+  partial acceptance commit is a recoverable failure that must be amended before explicit resume. Per-issue
+  runs automatically integrate their internal issue PRs after acceptance. Single-branch runs publish each
+  accepted commit directly to the run branch and update the cumulative PR. Only the final run PR into the
+  original target may need manual merging; `mergeRunPullRequest` controls its automatic merge.
+- File and Git changes, view refresh, and window focus wake acceptance observation; an internal timer
+  supplies a one-second fallback. Recovery uses version-4 records; versions 1–3 remain discardable but cannot
+  resume. Persist mutation intent, then observed postconditions, before clearing the journal. The HITL mixed
+  reset has its own pending action whose postcondition includes an index reset to `beforeSha`, and the
+  temporary implementer checkpoint must never be published.
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.
   Never parse final-response markup or generate/read worker commit messages.
 - Auto Run adds non-removable Git/GitHub restrictions and, for worktrees, original-checkout path

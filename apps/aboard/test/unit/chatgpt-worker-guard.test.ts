@@ -74,6 +74,8 @@ test("the ChatGPT worker guard denies Aboard-owned Git and GitHub mutations", as
     assert.equal(decision.status, 0, command);
     assert.equal(decision.decision, "deny", command);
     assert.match(decision.reason ?? "", /aboard owns this run's git and GitHub state/u);
+    assert.match(decision.reason ?? "", /Follow the completion contract/u);
+    assert.doesNotMatch(decision.reason ?? "", /leave your work uncommitted/iu);
   }
 });
 

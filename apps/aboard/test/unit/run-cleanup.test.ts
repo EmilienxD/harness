@@ -10,7 +10,7 @@ const SHA = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 3,
+    version: 4,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -21,7 +21,6 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
-      pauseAfterHitl: false,
 
       worktree: { enabled: true, root: "", keep: false, setupTimeoutSeconds: 600 },
       workspaceRoot: "C:/checkouts/run_test/repo",

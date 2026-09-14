@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { WriteCapability } from "../domain/capability.js";
 import { isAutoRunWorkerType, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "../claude/shell.js";
+import { promptFileReference, skillInvocation } from "../claude/prompts.js";
 import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../claude/launch.js";
 import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest } from "../platform/agent-platform.js";
 import type { IssueDifficulty } from "../shared/labels.js";
@@ -44,12 +45,6 @@ export interface ChatGptLaunchConfiguration {
   readonly webSearch?: ChatGptWebSearch;
   readonly subagents?: "allowed" | "denied";
 }
-
-export const CHATGPT_EXPLORE_ROLE =
-  "You are a read-only exploration agent. Codex runs this session in a read-only sandbox: do not create, modify, or delete files, and do not run commands that change this repository, its worktree, its git state, or GitHub. Inspect the checkout and end your turn with the requested report as your final message.";
-
-export const CHATGPT_CHROME_INSTRUCTION =
-  "This issue requires the Chrome browser backend. Use the chrome backend of your configured browser tool server to visualize, test, and debug your changes; do not fall back to the in-app browser or another backend.";
 
 const READ_ONLY_POLICY = ["--sandbox", "read-only", "-c", 'approval_policy="never"'] as const;
 
@@ -126,22 +121,21 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     ...(policy.model === undefined ? [] : ["--model", policy.model]),
     ...(policy.effort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(policy.effort)}`]),
   ];
-  const task = typeof request.prompt === "string" ? request.prompt.trim() : request.prompt?.text.trim();
+  const task = typeof request.prompt === "string" ? request.prompt : request.prompt?.text;
   if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "Explore cannot launch without its exploration task");
   if (worker && kind === "start" && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", `${request.agentType} cannot launch without its initial prompt`);
-  const promptParts = [
-    ...(explore ? [CHATGPT_EXPLORE_ROLE] : []),
-    ...(chrome ? [CHATGPT_CHROME_INSTRUCTION] : []),
-    ...(task === undefined || task.length === 0 ? [] : [task]),
-  ];
-  const text = promptParts.length === 0 ? undefined : promptParts.join("\n\n");
+  const text = task === undefined || task.trim().length === 0 ? undefined : task;
   // Only a launch owns the frozen task; a resume message must not replace the
   // archive that regrounds the worker after compaction.
   const archived: RuntimeFile | undefined = worker && kind === "start" && text !== undefined
-    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeRoot, request.agentId, request.promptRoot), contents: `${text}\n` }
+    ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeRoot, request.agentId, request.promptRoot), contents: text }
     : undefined;
   // A resume continues the conversation the skill already governs.
-  const invocation = kind === "start" && configuration.shape === "skill" ? `$${configuration.skillName ?? ""}` : undefined;
+  const invocation = kind !== "start"
+    ? undefined
+    : configuration.shape === "skill"
+      ? skillInvocation("$", configuration.skillName ?? "")
+      : request.skill === undefined ? undefined : skillInvocation("$", request.skill);
   const planFor = (promptThreshold: number): { readonly promptDelivery: PromptDelivery; readonly spill?: RuntimeFile; readonly args: readonly string[]; readonly commandLine: string; readonly wrapperRequest?: RuntimeFile } => {
     let promptDelivery: PromptDelivery = "none";
     let spill: RuntimeFile | undefined;
@@ -156,8 +150,8 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         const relativePath = archived?.relativePath
           ?? `${join(promptSpillRoot(runtimeRoot, request.promptRoot), request.agentId, "prompt.md").replaceAll("\\", "/")}`;
         if (/\s/u.test(relativePath)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${relativePath}`);
-        spill = { agentId: request.agentId, relativePath, contents: `${text}\n` };
-        const reference = `Perform the task described in @${relativePath}.`;
+        spill = { agentId: request.agentId, relativePath, contents: text };
+        const reference = promptFileReference(relativePath);
         promptArgs = ["--", invocation === undefined ? reference : `${invocation} ${reference}`];
       }
     }

@@ -1,6 +1,6 @@
 ---
 name: address-this
-description: Address whatever the user provides and commit on success.
+description: Address whatever the user provides and validate the completed work.
 disable-model-invocation: true
 ---
 
@@ -18,6 +18,4 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
 
 Run the strongest relevant validation available. Account for every acceptance criterion before considering the work complete. Iterate until the evidence supports the result; a plausible patch is not completion.
 
-On success, commit your work to the current branch.
-
-
+Commit only when explicitly asked and only when the work is completely finished.

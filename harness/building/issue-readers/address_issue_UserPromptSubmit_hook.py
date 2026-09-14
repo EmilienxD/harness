@@ -311,11 +311,14 @@ def context_for(documents: list[tuple[str, dict]], omissions: list[str], depth: 
 
 
 def build_context(argument: str, cwd: Path) -> str:
-    require_clean_worktree(cwd)
+    continuation = os.environ.get("ABOARD_WORKER_CONTINUATION") == "1"
+    if not continuation:
+        require_clean_worktree(cwd)
     depth = relation_depth()
-    clean = (
-        "Worktree verified clean by the address-this hook before this "
-        "invocation; every change now present is yours."
+    checkout = (
+        "Aboard is continuing the exact worker conversation over its preserved working tree. Treat every existing change as part of that continuation."
+        if continuation else
+        "Worktree verified clean by the address-this hook before this invocation; every change now present is yours."
     )
     references = strict_references(argument, "")
     if references is None:
@@ -326,11 +329,11 @@ def build_context(argument: str, cwd: Path) -> str:
             "the invocation supplied neither issue references nor issue text. "
             "Ask the user which issue to address."
         )
-        return f"{clean}\nNo GitHub lookup was performed: {supplied}"
+        return f"{checkout}\nNo GitHub lookup was performed: {supplied}"
     repository = current_repository(cwd) if any(not repo for repo, _ in references) else ""
     resolved = [(repo or repository, number) for repo, number in references]
     documents, omissions = collect(resolved, depth, cwd)
-    return f"{clean}\n\n{context_for(documents, omissions, depth)}"
+    return f"{checkout}\n\n{context_for(documents, omissions, depth)}"
 
 
 def main() -> None:

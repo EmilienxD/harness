@@ -63,6 +63,37 @@ test("plans an unmodified interactive session without an initial prompt", () => 
   assert.equal("agentDefinition" in plan, false);
 });
 
+test("a delegated Claude skill preserves its invocation and caller-supplied text", () => {
+  const plan = planLaunch(request({
+    agentType: "Web Search",
+    configuration: { shape: "default" },
+    prompt: "Check /api and report primary sources.",
+    skill: "websearch",
+    attended: true,
+  }));
+
+  assert.equal(plan.args.at(-1), "/websearch Check /api and report primary sources.");
+});
+
+test("user-authored Claude prompts preserve slash-prefixed text", () => {
+  const plan = planLaunch(request({
+    agentType: "interactive",
+    configuration: { shape: "default" },
+    prompt: "Discuss /review and /api without invoking either.",
+    attended: true,
+  }));
+
+  assert.equal(plan.args.at(-1), "Discuss /review and /api without invoking either.");
+});
+
+test("Auto Run Claude prompts preserve slash-prefixed text", () => {
+  const plan = planLaunch(request({
+    prompt: "Address /api without invoking /review.",
+  }));
+
+  assert.equal(plan.args.at(-1), "/address-this Address /api without invoking /review.");
+});
+
 test("plans Explore through Claude Code's builtin agent", () => {
   const configuration: LaunchConfiguration = {
     shape: "builtin",
@@ -96,7 +127,7 @@ for (const [type, invocation] of [
     assert.equal(hasPair(plan.args, "--model", difficultyLaunchPolicy("basic").model), true);
     assert.equal(hasPair(plan.args, "--effort", difficultyLaunchPolicy("basic").effort), true);
     assert.equal(plan.task?.relativePath, taskPromptPath(runtimeRoot, agentId));
-    assert.equal(plan.task?.contents, "Address issue #47.\n");
+    assert.equal(plan.task?.contents, "Address issue #47.");
     assert.equal(plan.writeCapability, "write-capable");
     assert.equal("agentDefinition" in plan, false);
   });
@@ -127,8 +158,8 @@ test("spills long skill prompts and keeps the original task separately", () => {
 
   assert.equal(plan.promptDelivery, "spilled");
   assert.match(plan.args.at(-1) ?? "", /^\/address-this .*@.*\.md/u);
-  assert.equal(plan.spill?.contents, `${prompt.trim()}\n`);
-  assert.equal(plan.task?.contents, `${prompt.trim()}\n`);
+  assert.equal(plan.spill?.contents, prompt);
+  assert.equal(plan.task?.contents, prompt);
   assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/agent-1/task.md");
   assert.equal(plan.task?.relativePath, plan.spill?.relativePath);
 });

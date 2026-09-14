@@ -1,5 +1,8 @@
 
 import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -103,9 +106,15 @@ export interface GitClient {
   aheadBehind(left: string, right: string): Promise<{ readonly ahead: number; readonly behind: number }>;
   /** Whether `ancestor` is reachable from `descendant`. */
   isAncestor(ancestor: string, descendant: string): Promise<boolean>;
+  /** The immutable tree object named by a commit, without reading its message. */
+  treeSha(ref: string): Promise<string | undefined>;
   commitDetails(ref: string): Promise<CommitDetails | undefined>;
   /** The tree represented by the current index, used before creating a commit. */
   stagedTreeSha(): Promise<string>;
+  /** Leaves `ref` checked out in the index while preserving the current files. */
+  resetMixed(ref: string): Promise<void>;
+  /** Compares every non-ignored working-tree path with an immutable commit tree. */
+  workingTreeMatchesCommit(ref: string): Promise<boolean>;
   deleteBranchAt(branch: string, expectedSha: string): Promise<boolean>;
   /** The same guard against `origin/<branch>`, then a delete-push. */
   deleteRemoteBranchAt(branch: string, expectedSha: string): Promise<boolean>;
@@ -230,6 +239,10 @@ export class ProcessGitClient implements GitClient {
     }
   }
 
+  public async treeSha(ref: string): Promise<string | undefined> {
+    return this.tryRun(["rev-parse", `${ref}^{tree}`]);
+  }
+
   public async commitDetails(ref: string): Promise<CommitDetails | undefined> {
     // One field per line, subject last: a commit subject can contain any
     // printable character but never a newline, so nothing needs escaping.
@@ -249,6 +262,25 @@ export class ProcessGitClient implements GitClient {
 
   public async stagedTreeSha(): Promise<string> {
     return this.run(["write-tree"]);
+  }
+
+  public async resetMixed(ref: string): Promise<void> {
+    await this.run(["reset", "--mixed", ref]);
+  }
+
+  public async workingTreeMatchesCommit(ref: string): Promise<boolean> {
+    const treeSha = await this.treeSha(ref);
+    if (treeSha === undefined) return false;
+    const temporary = await mkdtemp(join(tmpdir(), "aboard-review-index-"));
+    const index = join(temporary, "index");
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    try {
+      await this.runWithEnvironment(["read-tree", ref], env);
+      await this.runWithEnvironment(["add", "-A"], env);
+      return await this.runWithEnvironment(["write-tree"], env) === treeSha;
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   }
 
   public async deleteBranchAt(branch: string, expectedSha: string): Promise<boolean> {
@@ -435,6 +467,25 @@ export class ProcessGitClient implements GitClient {
     });
   }
 
+  private async runWithEnvironment(args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync("git", [...args], {
+        cwd: this.cwd,
+        env,
+        encoding: "utf8",
+        windowsHide: true,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      return stdout.trim();
+    } catch (error) {
+      const cause = error as { code?: unknown; stderr?: unknown };
+      throw new GitBoundaryError("command-failed", `git ${args[0] ?? ""} failed`, {
+        exitCode: typeof cause.code === "number" ? cause.code : undefined,
+        stderr: typeof cause.stderr === "string" ? cause.stderr.trim().slice(0, 2_000) : undefined,
+      });
+    }
+  }
+
   /** For probes where a non-zero exit is an answer rather than a failure. */
   private async tryRun(args: readonly string[]): Promise<string | undefined> {
     try {
@@ -501,8 +552,11 @@ export class CachingGitClient implements GitClient {
   public remoteBranchSha(branch: string): ReturnType<GitClient["remoteBranchSha"]> { return this.inner.remoteBranchSha(branch); }
   public aheadBehind(left: string, right: string): ReturnType<GitClient["aheadBehind"]> { return this.inner.aheadBehind(left, right); }
   public isAncestor(ancestor: string, descendant: string): ReturnType<GitClient["isAncestor"]> { return this.inner.isAncestor(ancestor, descendant); }
+  public treeSha(ref: string): ReturnType<GitClient["treeSha"]> { return this.inner.treeSha(ref); }
   public commitDetails(ref: string): ReturnType<GitClient["commitDetails"]> { return this.inner.commitDetails(ref); }
   public stagedTreeSha(): ReturnType<GitClient["stagedTreeSha"]> { return this.inner.stagedTreeSha(); }
+  public resetMixed(ref: string): ReturnType<GitClient["resetMixed"]> { return this.inner.resetMixed(ref); }
+  public workingTreeMatchesCommit(ref: string): ReturnType<GitClient["workingTreeMatchesCommit"]> { return this.inner.workingTreeMatchesCommit(ref); }
   public deleteBranchAt(branch: string, expectedSha: string): ReturnType<GitClient["deleteBranchAt"]> { return this.inner.deleteBranchAt(branch, expectedSha); }
   public deleteRemoteBranchAt(branch: string, expectedSha: string): ReturnType<GitClient["deleteRemoteBranchAt"]> { return this.inner.deleteRemoteBranchAt(branch, expectedSha); }
   public remoteBranchExists(branch: string): ReturnType<GitClient["remoteBranchExists"]> { return this.inner.remoteBranchExists(branch); }

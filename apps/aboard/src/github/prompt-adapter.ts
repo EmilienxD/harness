@@ -1,47 +1,71 @@
 import type { DelegationLaunchInput, DelegationPromptResolver } from "../bridge/delegation.js";
-import { PromptResolver, type ResolvedPrompt } from "../claude/prompts.js";
-import { isInteractiveAgentType } from "../domain/contracts.js";
-
-const PR_DOCTOR_INSTRUCTION =
-  "Review this pull request against its issue contract and follow your role's review and approval workflow. Leave any approved changes uncommitted in the working tree. Do not use git or gh to change the working tree, index, branches, remotes, issues, pull requests, reviews, or repository configuration.";
+import type { PromptAuthority } from "../domain/contracts.js";
+import {
+  appendAutoRunGuidance,
+  DEFAULT_CONTINUATION_INSTRUCTION,
+  DEFAULT_IMPLEMENTATION_INSTRUCTION,
+  DEFAULT_REVIEW_CHANGE_INSTRUCTION,
+  PromptResolver,
+  type ResolvedPrompt,
+} from "../claude/prompts.js";
 
 export class GitHubDelegationPromptResolver implements DelegationPromptResolver {
   public constructor(private readonly prompts: PromptResolver) {}
 
-  public async resolve(input: DelegationLaunchInput, options: { readonly interactive: boolean }): Promise<ResolvedPrompt | undefined> {
+  public async resolve(input: DelegationLaunchInput, options: { readonly authority: PromptAuthority }): Promise<ResolvedPrompt | undefined> {
+    if (options.authority !== "auto-run") {
+      const instruction = input.prompt;
+      if (instruction === undefined || instruction.trim().length === 0) {
+        if (options.authority === "delegation") throw new Error("Manual delegation requires an explicit prompt");
+        return undefined;
+      }
+      return this.prompts.resolve({ kind: "free-form", instruction });
+    }
     if (input.type === "reviewer") {
       if (input.pullRequest === undefined) {
         return appendAutoRunGuidance(
-          await this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Review the supplied change against its contract." }),
+          await this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? DEFAULT_REVIEW_CHANGE_INSTRUCTION }),
           input.permanentPrompt,
           input.additionalGuideline,
         );
       }
+      if (input.prompt === undefined) {
+        throw new Error("A pull-request reviewer requires an explicit prompt");
+      }
       return appendAutoRunGuidance(await this.prompts.resolve({
         kind: "review",
-        instruction: input.prompt ?? PR_DOCTOR_INSTRUCTION,
+        instruction: input.prompt,
         pullRequestNumber: input.pullRequest,
-        ...(input.focus === undefined ? {} : { focus: input.focus }),
       }), input.permanentPrompt, input.additionalGuideline);
     }
-    if (options.interactive || isInteractiveAgentType(input.type)) {
-      const instruction = input.prompt?.trim();
-      if (instruction === undefined || instruction.length === 0) return undefined;
-      return this.prompts.resolve({ kind: "free-form", instruction });
-    }
-    if (input.type === "Explore" && input.issues !== undefined) {
-      return this.prompts.resolve({
-        kind: "exploration",
-        instruction: input.prompt ?? "Explore the issue's implementation context.",
-        issueNumbers: input.issues,
-        ...(input.issueContextDepth === undefined ? {} : { issueContextDepth: input.issueContextDepth }),
-      });
+    if (input.type === "Explore") {
+      const instruction = input.prompt;
+      if (instruction === undefined || instruction.trim().length === 0) {
+        throw new Error("Explore requires an explicit prompt");
+      }
+      if (input.issues === undefined) {
+        return appendAutoRunGuidance(
+          await this.prompts.resolve({ kind: "free-form", instruction }),
+          input.permanentPrompt,
+          input.additionalGuideline,
+        );
+      }
+      return appendAutoRunGuidance(
+        await this.prompts.resolve({
+          kind: "exploration",
+          instruction,
+          issueNumbers: input.issues,
+          ...(input.issueContextDepth === undefined ? {} : { issueContextDepth: input.issueContextDepth }),
+        }),
+        input.permanentPrompt,
+        input.additionalGuideline,
+      );
     }
     if (input.type === "implementer" && input.issues !== undefined) {
       return appendAutoRunGuidance(
         await this.prompts.resolve({
           kind: "implementation",
-          instruction: input.prompt ?? "Address the issue.",
+          instruction: input.prompt ?? DEFAULT_IMPLEMENTATION_INSTRUCTION,
           issueNumbers: input.issues,
           ...(input.codebaseContext === undefined ? {} : { codebaseContext: input.codebaseContext }),
           ...(input.issueContextDepth === undefined ? {} : { issueContextDepth: input.issueContextDepth }),
@@ -50,34 +74,6 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         input.additionalGuideline,
       );
     }
-    return this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? "Continue with the requested task." });
+    return this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? DEFAULT_CONTINUATION_INSTRUCTION });
   }
-}
-
-const ADDITIONAL_GUIDELINE_HEADING = "# Additional User Guideline For this Session";
-const PERMANENT_PROMPT_HEADING = "# User Guidance";
-
-/** Appends configured guidance first and the per-run guidance literally last. */
-function appendAutoRunGuidance(
-  prompt: ResolvedPrompt | undefined,
-  permanentPrompt: string | undefined,
-  additionalGuideline: string | undefined,
-): ResolvedPrompt | undefined {
-  if (prompt === undefined) return undefined;
-  const sections = [
-    guidanceSection(PERMANENT_PROMPT_HEADING, permanentPrompt),
-    guidanceSection(ADDITIONAL_GUIDELINE_HEADING, additionalGuideline),
-  ].filter((section): section is string => section !== undefined);
-  if (sections.length === 0) return prompt;
-  const appended = sections.join("\n\n");
-  return {
-    ...prompt,
-    body: prompt.body.length === 0 ? appended : `${prompt.body}\n\n${appended}`,
-    text: `${prompt.text}\n\n${appended}`,
-  };
-}
-
-function guidanceSection(heading: string, value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed.length === 0 ? undefined : `${heading}\n\n${trimmed}`;
 }

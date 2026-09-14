@@ -24,13 +24,14 @@ const DESCRIPTIONS: Readonly<Record<string, string>> = {
   review: "Issue Review",
 };
 const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
-
 export interface ManualDelegationLaunch {
   readonly requestId: string;
   readonly type: AgentType;
   readonly provider: AgentPlatformId;
   readonly executionMode: Exclude<ExecutionMode, "auto-run">;
   readonly prompt: string;
+  /** Trusted skill selected by the ask-agent workflow, separate from user text. */
+  readonly skill?: string;
   readonly cwd: string;
   readonly description: string;
 }
@@ -56,13 +57,13 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   if (SKILL_INVOCATION.test(value.prompt.trim())) return undefined;
   if (typeof value.cwd !== "string" || value.cwd.trim().length === 0) return undefined;
   const skill = SKILLS[value.task];
-  const prompt = skill === undefined ? value.prompt : `${value.provider === "chatgpt" ? "$" : "/"}${skill}\n\n${value.prompt}`;
   return {
     requestId: value.requestId,
     type: task.type,
     provider: value.provider,
     executionMode: value.mode,
-    prompt,
+    prompt: value.prompt,
+    ...(skill === undefined ? {} : { skill }),
     cwd: value.cwd,
     description: DESCRIPTIONS[value.task] ?? task.type,
   };

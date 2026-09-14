@@ -134,6 +134,38 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
     assert "completely clean Git worktree" in error
 
 
+def test_aboard_pinned_range_allows_the_uncommitted_hitl_handoff(
+    tmp_path, monkeypatch, capsys,
+):
+    root = repository(tmp_path)
+    before = git(root, "rev-parse", "HEAD^").strip()
+    checkpoint = git(root, "rev-parse", "HEAD").strip()
+    git(root, "reset", "--mixed", before)
+    monkeypatch.setenv("ABOARD_REVIEW_RANGE", f"{before}..{checkpoint}")
+
+    context = run_hook("/review-this", root, monkeypatch, capsys)
+
+    assert f"- Review range: {before}..{checkpoint}" in context
+    assert "intentionally present as uncommitted working-tree changes" in context
+    assert "do not commit it" in context
+    assert "- modified: README.md" in context
+    assert "- added: new.py" in context
+    assert "- deleted: old.py" in context
+
+
+def test_aboard_continuation_keeps_the_exact_dirty_reviewer_handoff(
+    tmp_path, monkeypatch, capsys,
+):
+    root = repository(tmp_path)
+    (root / "README.md").write_text("review fix\n", encoding="utf-8")
+    monkeypatch.setenv("ABOARD_WORKER_CONTINUATION", "1")
+
+    context = run_hook("/review-this", root, monkeypatch, capsys)
+
+    assert "continuing the exact reviewer conversation" in context
+    assert "preserved working tree" in context
+
+
 def test_ignored_files_do_not_count_as_dirty(tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
     (root / ".gitignore").write_text("build/\n", encoding="utf-8")

@@ -1,7 +1,8 @@
 /**
- * Auto Run workers signal completion with a commit, so `git add` and `git
- * commit` are deliberately absent here. Everything that could move history,
- * reach a remote, or mutate GitHub stays denied; aboard owns those.
+ * Some Auto Run contracts require a worker commit and every HITL handoff may
+ * later be committed by the user in the same conversation, so `git add` and
+ * `git commit` are deliberately absent here. Everything else that could move
+ * history, reach a remote, or mutate GitHub stays denied; aboard owns those.
  */
 export const AUTO_RUN_DISALLOWED_TOOLS: readonly string[] = [
   "Agent",

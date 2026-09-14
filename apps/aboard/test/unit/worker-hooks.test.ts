@@ -223,6 +223,27 @@ test("Auto Run reviewer Stop reminds an unchanged worker to create its approval 
   }
 });
 
+test("non-committing HITL implementer and reviewer turns receive no Stop commit reminder", () => {
+  const repository = temporaryRepository();
+  try {
+    writeFileSync(join(repository.root, "tracked.txt"), "changed\n");
+    const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
+    for (const agentType of ["implementer", "reviewer"] as const) {
+      const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], {
+        cwd: repository.root,
+        input: JSON.stringify({ hook_event_name: "Stop", cwd: repository.root, stop_hook_active: false, last_assistant_message: "Done." }),
+        encoding: "utf8",
+        env: { ...process.env, ABOARD_AGENT_ID: `${agentType}-1`, ABOARD_AGENT_TYPE: agentType },
+      });
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout, "", agentType);
+      assert.equal(result.stderr, "", agentType);
+    }
+  } finally {
+    repository.dispose();
+  }
+});
+
 test("Auto Run Stop reminders do not repeat or mistake a clean reviewer commit for missing work", () => {
   const repository = temporaryRepository();
   try {

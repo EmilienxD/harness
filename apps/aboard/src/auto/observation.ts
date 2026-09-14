@@ -63,7 +63,7 @@ export async function observeRun(record: AutoRunRecord, sources: RunObservationS
   const pullRequests = gitHubAuthenticated ? await observePullRequests(record, github) : [];
 
   const progress = record.currentIssue === undefined ? undefined : issueProgress(record, record.currentIssue);
-  const startingSha = record.pendingAction?.kind === "worker-commit" ? record.pendingAction.parentSha
+  const startingSha = record.pendingAction?.kind === "worker-turn" ? record.pendingAction.parentSha
     : progress?.state === "current" ? progress.beforeSha : undefined;
   const headSha = repositoryUsable && startingSha !== undefined ? await git.headSha(false) : undefined;
   const descendsFromStart = startingSha !== undefined && headSha !== undefined && (startingSha === headSha || await git.isAncestor(startingSha, headSha));

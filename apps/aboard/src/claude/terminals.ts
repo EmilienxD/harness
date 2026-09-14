@@ -99,6 +99,8 @@ export interface CreateAboardTerminalRequest {
   readonly executionMode?: ExecutionMode;
   readonly harnessRequestId?: string;
   readonly completionCommitStartingSha?: string;
+  readonly reviewRange?: string;
+  readonly workerContinuation?: true;
   readonly startupTimeoutMs?: number;
 }
 
@@ -243,6 +245,8 @@ export class TerminalController {
     if (request.executionMode !== undefined) env.HARNESS_EXECUTION_MODE = request.executionMode;
     if (request.harnessRequestId !== undefined) env.HARNESS_REQUEST_ID = request.harnessRequestId;
     if (request.completionCommitStartingSha !== undefined) env.ABOARD_WORKER_START_SHA = request.completionCommitStartingSha;
+    if (request.reviewRange !== undefined) env.ABOARD_REVIEW_RANGE = request.reviewRange;
+    if (request.workerContinuation === true) env.ABOARD_WORKER_CONTINUATION = "1";
 
     const creationOptions: TerminalCreationOptions = {
       cwd,

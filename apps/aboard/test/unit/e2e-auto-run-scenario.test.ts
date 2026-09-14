@@ -9,6 +9,7 @@ import {
   AUTO_RUN_PERMANENT_NOTE,
   AUTO_RUN_FOLLOWUP_MARKER,
   AUTO_RUN_HITL_MARKER,
+  AUTO_RUN_HITL_REVIEW_MARKER,
   HITL_ACCEPT_PROMPT,
   BEFORE_CONTENT,
   WORKER_COMMIT_COMMAND,
@@ -87,9 +88,17 @@ test("auto-run Explore reads the checkout before returning bounded context", () 
   assert.deepEqual(complete.content, [{ type: "text", text: AUTO_RUN_EXPLORE_REPORT }]);
 });
 
-test("auto-run AFK reviewer completes without changing the accepted diff", () => {
+test("auto-run AFK reviewer creates an empty approval commit when no fixes are needed", () => {
   const initial: Message[] = [{ role: "user", content: `Review pull request. ${AUTO_RUN_PERMANENT_NOTE}` }];
-  const complete = transition(request(initial, ["Read", "Edit"]), root);
+  const commit = transition(request(initial, ["Read", "Edit", "Bash"]), root);
+  assert.equal(commit.checkpoint, "auto-review-commit");
+  assert.equal(commit.content[0]?.name, "Bash");
+  assert.equal((commit.content[0]?.input as { command?: string }).command, 'git commit --allow-empty -m "Approve deterministic fixture"');
+  const complete = transition(request([
+    ...initial,
+    { role: "assistant", content: commit.content },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_e2e_auto_review_commit", content: "commit created", is_error: false }] },
+  ], ["Read", "Edit", "Bash"]), root);
   assert.equal(complete.checkpoint, "auto-review-complete");
   assert.deepEqual(complete.content, [{ type: "text", text: "Review complete; no fixes required." }]);
 });
@@ -119,4 +128,38 @@ test("single-branch HITL and follow-up workers apply sequential edits", () => {
     const complete = transition(request([...afterEdit, { role: "assistant", content: commit.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: `${item.editId}_commit`, content: "1 file changed", is_error: false }] }]), root);
     assert.equal(complete.checkpoint, `${item.checkpoint}-complete`);
   }
+});
+
+test("HITL reviewer inspects the reset implementation without committing, then accepts only on user request", () => {
+  const initial: Message[] = [{
+    role: "user",
+    content: `Review ${AUTO_RUN_HITL_REVIEW_MARKER}. Aboard pinned abc..def as the immutable review scope.`,
+  }];
+  const read = transition(request(initial), root);
+  assert.equal(read.checkpoint, "auto-hitl-review-read");
+  assert.equal(read.content[0]?.name, "Read");
+  const reviewed: Message[] = [
+    ...initial,
+    { role: "assistant", content: read.content },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_e2e_auto_hitl_review_read", content: AFTER_CONTENT, is_error: false }] },
+  ];
+  const complete = transition(request(reviewed), root);
+  assert.equal(complete.checkpoint, "auto-hitl-review-complete");
+  assert.equal(complete.stopReason, "end_turn");
+
+  const acceptance = transition(request([
+    ...reviewed,
+    { role: "assistant", content: complete.content },
+    { role: "user", content: HITL_ACCEPT_PROMPT },
+  ]), root);
+  assert.equal(acceptance.checkpoint, "auto-hitl-accept-commit");
+  assert.equal(acceptance.content[0]?.name, "Bash");
+  const accepted = transition(request([
+    ...reviewed,
+    { role: "assistant", content: complete.content },
+    { role: "user", content: HITL_ACCEPT_PROMPT },
+    { role: "assistant", content: acceptance.content },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_e2e_auto_hitl_accept_commit", content: "commit created", is_error: false }] },
+  ]), root);
+  assert.equal(accepted.checkpoint, "auto-hitl-accept-complete");
 });

@@ -1,6 +1,6 @@
 ---
 name: review-this
-description: Review whatever the user provides, fix clear local problems, and commit on success.
+description: Review a pinned target, fix clear local problems, validate the result, and report blockers.
 disable-model-invocation: true
 ---
 
@@ -21,4 +21,4 @@ If a finding needs a missing product decision or dependency, substantial redesig
 
 Run the strongest relevant validation available. Iterate until the evidence supports every fix; a plausible patch is not completion.
 
-Successful completion always produces exactly one commit on the current branch. Commit fixes normally. If the pinned diff has no actionable problems, create an empty commit (`git commit --allow-empty`) with a concise subject showing that the review completed. A blocker is not successful completion: report it and stop without committing.
+Report blockers precisely and concisely. Commit only when explicitly asked and only when the work is completely finished.
