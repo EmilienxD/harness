@@ -14,7 +14,7 @@ from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
 
 
-HOOK_NAME = "breakdown_help_wanted_issue_UserPromptSubmit_hook.py"
+HOOK_NAME = "breakdown_help_wanted_issue_hook.py"
 HOOK = Path(__file__).resolve().parents[2] / "harness/planning/breakdown-help-wanted-issue" / HOOK_NAME
 spec = importlib.util.spec_from_file_location("breakdown_help_wanted_issue_hook", HOOK)
 hook = importlib.util.module_from_spec(spec)

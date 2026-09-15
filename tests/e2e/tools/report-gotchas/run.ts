@@ -58,7 +58,7 @@ export async function runReportGotchasJourney(platform: Platform): Promise<Repor
       await mkdir(configRoot, { recursive: true });
       await copyFile(skillSource, join(claudeRoot, "skills", "report-gotchas", "SKILL.md"));
       await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
-      await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Bash|PowerShell", hooks: [{ type: "command", command: python, args: ["-m", "report_gotchas.hooks", "claude"], timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
+      await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Bash|PowerShell", hooks: [{ type: "command", command: python, args: ["-m", "report_gotchas.hooks", "--claude"], timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
       server = await startFakeAnthropicServer({
         repoRoot: projectRoot, diagnosticsPath, scenarioCatalogHash, parseRequest: parseAnthropicMessagesRequest,
         transition: (request) => claudeTransition(request, submitCommand),
@@ -88,7 +88,7 @@ export async function runReportGotchasJourney(platform: Platform): Promise<Repor
       await mkdir(dirname(skillPath), { recursive: true });
       await mkdir(codexRoot, { recursive: true });
       await copyFile(skillSource, skillPath);
-      await writeFile(join(codexRoot, "hooks.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `${python} -m report_gotchas.hooks chatgpt`, timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
+      await writeFile(join(codexRoot, "hooks.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `${python} -m report_gotchas.hooks --chatgpt`, timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
       const codexServer = await startFakeOpenAiServer({
         diagnosticsPath, scenarioCatalogHash,
         transition: (request) => codexTransition(request, readCommand(skillPath), submitCommand),

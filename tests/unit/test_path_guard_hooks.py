@@ -12,11 +12,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 HOOK_PATHS = {
     "on-edit-block": ROOT
-    / "harness/guards/on-edit-block/claude/on_edit_block_PreToolUse_hook.py",
+    / "harness/guards/on-edit-block/on_edit_block_hook.py",
     "on-edit-reminder": ROOT
-    / "harness/guards/on-edit-reminder/claude/on_edit_reminder_PostToolUse_hook.py",
+    / "harness/guards/on-edit-reminder/on_edit_reminder_hook.py",
     "on-read-reminder": ROOT
-    / "harness/guards/on-read-reminder/claude/on_read_reminder_PostToolUse_hook.py",
+    / "harness/guards/on-read-reminder/on_read_reminder_hook.py",
 }
 EDIT_GUARDS = ("on-edit-block", "on-edit-reminder")
 

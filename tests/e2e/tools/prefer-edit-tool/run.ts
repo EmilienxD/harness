@@ -24,16 +24,16 @@ export async function runPreferEditToolJourney(): Promise<PreferEditToolJourneyR
   const projectRoot = join(root, "project");
   const claudeRoot = join(projectRoot, ".claude");
   const configRoot = join(root, "claude-config");
-  const hookPath = join(claudeRoot, "hooks", "prefer_edit_tool_PostToolUse_hook.py");
+  const hookPath = join(claudeRoot, "hooks", "prefer_edit_tool_hook.py");
   const diagnosticsPath = join(root, "structural-diagnostics.json");
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   try {
     await mkdir(dirname(hookPath), { recursive: true });
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
-    await copyFile(join(harnessRoot, "harness", "guards", "prefer-edit-tool", "claude", "prefer_edit_tool_PostToolUse_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness", "guards", "prefer-edit-tool", "prefer_edit_tool_hook.py"), hookPath);
     const command = await pythonCommand();
-    const hook = { type: "command", command, args: [hookPath] };
+    const hook = { type: "command", command, args: [hookPath, "--claude"] };
     await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: {
       PostToolUse: [{ matcher: "Bash|PowerShell", hooks: [hook] }],
       PostToolUseFailure: [{ matcher: "Bash|PowerShell", hooks: [hook] }],

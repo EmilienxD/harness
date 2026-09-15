@@ -14,7 +14,7 @@ from harness_cli.receipts import ReceiptStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
-HOOK = ROOT / "harness/guards/command-guard/command_guard_PreToolUse_hook.py"
+HOOK = ROOT / "harness/guards/command-guard/command_guard_hook.py"
 
 
 def run_payload(payload, *, hook_path=HOOK, raw=None) -> tuple[int, dict | None, str]:
@@ -186,13 +186,13 @@ def test_install_registers_native_shell_matchers_and_editable_policy(
 
     product_dir = ".claude" if platform == "claude" else ".codex"
     hook_dir = tmp_path / product_dir / "hooks"
-    assert (hook_dir / "command_guard_PreToolUse_hook.py").is_file()
+    assert (hook_dir / "command_guard_hook.py").is_file()
     assert (hook_dir / "command-guard.rules").is_file()
     config = json.loads((tmp_path / config_path).read_text(encoding="utf-8"))
     group = config["hooks"]["PreToolUse"][0]
     assert group["matcher"] == expected_matcher
     configured_hook = group["hooks"][0]
-    assert "command_guard_PreToolUse_hook.py" in (
+    assert "command_guard_hook.py" in (
         configured_hook.get("command", "") + " ".join(configured_hook.get("args", []))
     )
     rendered_hook = json.dumps(configured_hook)

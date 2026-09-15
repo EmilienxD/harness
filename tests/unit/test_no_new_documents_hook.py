@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HOOK = (
     ROOT
     / "harness/guards/no-new-documents"
-    / "no_new_documents_PreToolUse_hook.py"
+    / "no_new_documents_hook.py"
 )
 
 
@@ -291,7 +291,7 @@ def test_install_registers_both_platforms_and_preserves_editable_configuration(
 
     product = ".claude" if platform == "claude" else ".codex"
     hook_dir = tmp_path / product / "hooks"
-    hook = hook_dir / "no_new_documents_PreToolUse_hook.py"
+    hook = hook_dir / "no_new_documents_hook.py"
     config = hook_dir / "no-new-documents.toml"
     assert hook.is_file()
     assert 'paths = ["docs"]' in config.read_text(encoding="utf-8")
@@ -299,7 +299,7 @@ def test_install_registers_both_platforms_and_preserves_editable_configuration(
     group = settings["hooks"]["PreToolUse"][0]
     assert group["matcher"] == matcher
     rendered = json.dumps(group["hooks"][0])
-    assert "no_new_documents_PreToolUse_hook.py" in rendered
+    assert "no_new_documents_hook.py" in rendered
     if platform == "claude":
         assert "${CLAUDE_PROJECT_DIR}" in rendered
         assert "${CLAUDE_DIR}" not in rendered

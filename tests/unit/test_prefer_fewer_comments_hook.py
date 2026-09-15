@@ -20,7 +20,7 @@ HOOK_DIR = (
 
 sys.path.insert(0, str(HOOK_DIR))
 
-import prefer_fewer_comments_PostToolUse_hook as hook  # noqa: E402
+import prefer_fewer_comments_hook as hook  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

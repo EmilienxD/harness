@@ -14,7 +14,7 @@ export async function runCommitJourney(): Promise<void> {
   const root = await canonicalMkdtemp(join(tmpdir(), "harness-commit-e2e-"));
   const project = join(root, "project");
   const config = join(root, "config");
-  const hook = join(project, ".claude", "hooks", "commit_UserPromptSubmit_hook.py");
+  const hook = join(project, ".claude", "hooks", "commit_hook.py");
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   try {
     const python = await pythonCommand();
@@ -29,7 +29,7 @@ export async function runCommitJourney(): Promise<void> {
 
     const harness = await findHarnessRoot(process.cwd());
     await copyFile(
-      join(harness, "harness", "engineering", "commit", "claude", "commit_UserPromptSubmit_hook.py"),
+      join(harness, "harness", "engineering", "commit", "commit_hook.py"),
       hook,
     );
     await copyFile(
@@ -40,7 +40,7 @@ export async function runCommitJourney(): Promise<void> {
       join(project, ".claude", "settings.json"),
       JSON.stringify({
         hooks: {
-          UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [hook] }] }],
+          UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [hook, "--claude"] }] }],
         },
       }),
     );

@@ -199,14 +199,14 @@ def test_shell_form_hook_dedupes_launcher_flags_quotes_and_install_path():
         "hooks": {"UserPromptSubmit": [group(
             {
                 "type": "command",
-                "command": "uv run --no-project .codex/hooks/issues_ChatGPT_hook.py",
+                "command": "uv run --no-project .codex/hooks/issue_writers_hook.py",
                 "timeout": 300,
             },
             {
                 "type": "command",
                 "command": (
                     'uv run --no-project --no-managed-python '
-                    '"C:/old/project/.codex/hooks/issues_ChatGPT_hook.py"'
+                    '"C:/old/project/.codex/hooks/issue_writers_hook.py"'
                 ),
                 "timeout": 300,
             },
@@ -217,7 +217,7 @@ def test_shell_form_hook_dedupes_launcher_flags_quotes_and_install_path():
             "type": "command",
             "command": (
                 'uv run --no-project --no-managed-python '
-                '"C:/work/project/.codex/hooks/issues_ChatGPT_hook.py"'
+                '"C:/work/project/.codex/hooks/issue_writers_hook.py"'
             ),
             "timeout": 300,
         })]}

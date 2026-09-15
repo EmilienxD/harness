@@ -197,7 +197,7 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
       for (const group of groups) {
         for (const hook of group.hooks) {
           hook.command = python;
-          hook.args = ["-m", "subagents_runtime.hooks", "claude"];
+          hook.args = ["-m", "subagents_runtime.hooks", "--claude"];
         }
       }
     }
@@ -212,7 +212,7 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
   const settings = JSON.parse(await readFile(join(packageRoot, "chatgpt", "hooks.fragment.json"), "utf8")) as HookSettings;
   for (const groups of Object.values(settings.hooks)) {
     for (const group of groups) {
-      for (const hook of group.hooks) hook.command = `${python} -m subagents_runtime.hooks chatgpt`;
+      for (const hook of group.hooks) hook.command = `${python} -m subagents_runtime.hooks --chatgpt`;
     }
   }
   await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");

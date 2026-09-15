@@ -42,8 +42,8 @@ harness/<category>/<tool>/
 ├── harness.toml
 ├── SKILL.md          # one shared skill, with support files beside it
 ├── <skill>/         # each shared skill when a package contains several
-├── <shared-hook>.py # one or two simple shared hook payloads
-├── hooks/            # optional grouping for several related shared hooks
+├── <tool_name>_hook.py  # the package's single hook, shared by every provider
+├── <support>.py     # modules the hook imports, installed beside it
 ├── claude/           # shallow Claude-only files and settings.fragment.json
 └── chatgpt/          # shallow ChatGPT-only files and hooks.fragment.json
 ```
@@ -53,28 +53,6 @@ package stores ChatGPT metadata at `chatgpt/openai.yaml`; a multi-skill package 
 `chatgpt/agents/<skill-name>.yaml`. Manifests map those sources to installed `skills/` and `hooks/`
 destinations explicitly. Preserve real internal project trees such as `runtime/src/`; never mirror
 installation roots inside overlays or restore a `targets/` override directory.
-
-## Important Constraints
-
-- The installer has explicit `claude` and `chatgpt` adapters. Declare target support under
-  `[platforms.<name>]`; keep platform path mapping in the adapters, not installer call sites.
-- `dependencies` contains package dependencies with explicit version constraints. `requires` is only for
-  executables expected on `PATH`.
-- Native settings fragments are merged as written and removed receipt-first without rewriting unrelated
-  entries. Only use keys accepted by the target product's settings schema.
-- Mark user-editable templates with `starter = true`; install them only when absent and never overwrite
-  them later.
-- `${PYTHON}` resolves to `uv run --no-project --no-managed-python` when `uv` is available, otherwise to
-  the first interpreter that passes an execution check.
-- Create a ChatGPT skill variant only for genuine product differences such as tool names, command
-  injection, `$ARGUMENTS`, or reference variants. `disable-model-invocation` alone does not require a
-  split; represent its ChatGPT policy in `agents/openai.yaml`.
-- There is no legacy manifest, scaffold, installation, or receipt compatibility layer.
-- `address-this` and `review-this` are user-owned starter worker skills: their catalogue bodies seed only
-  absent installs and never overwrite user edits. The prototype, websearch, ask-agent, and reply-to-agent
-  workflow prompts are also user-owned.
-- Keep Aboard's npm build and release history independent. Do not flatten it into the Python package,
-  bundle its VSIX in the wheel, or squash its repository history when merging it.
 
 ## Commands
 

@@ -11,8 +11,25 @@ from harness_cli.manifest import SupportStatus, discover
 from report_gotchas.cli import main
 from report_gotchas.config import webhook_url
 from report_gotchas.discord import deliver
-from report_gotchas.hooks import handle
+from report_gotchas.hooks import handle, provider_from_argv
 from report_gotchas.reports import load_draft, load_queued
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["--claude"], "claude"),
+        (["--chatgpt"], "chatgpt"),
+        ([], None),
+        # Anything that is not the flag is not a provider, including the bare
+        # word older settings used to pass.
+        (["claude"], None),
+        (["chatgpt"], None),
+        (["--verbose"], None),
+    ],
+)
+def test_provider_comes_from_the_flag_the_installer_writes(argv, expected) -> None:
+    assert provider_from_argv(argv) == expected
 
 
 def test_submit_accepts_markdown_on_stdin_and_returns_an_opaque_receipt(
@@ -184,7 +201,7 @@ def test_configure_reads_the_webhook_secret_without_echoing_it(
 
 def test_catalogue_exposes_model_invokable_dual_platform_skill_and_runtime() -> None:
     tool = discover()["report-gotchas"]
-    assert tool.version == "1.0.1"
+    assert tool.version == "1.1.0"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert tool.requires == ("git",)

@@ -1,7 +1,8 @@
-"""Tests for the redirect-subagents hooks and their shared io module.
+"""Tests for the redirect-subagents hook and its shared io module.
 
-The hooks run as standalone scripts inside `.claude/hooks/`, so they're
-imported by path like the other harness hook tests. Everything that would
+The hook runs as a standalone script inside `.claude/hooks/`, dispatching on
+the event that fired it, so it's imported by path like the other harness hook
+tests. Everything that would
 touch a real provider (clauder, claude, the network) is stubbed or pointed at
 tmp_path; what is pinned down is the decision logic: what gets redirected or
 deferred, what gets built, and what results look like when they come back.
@@ -16,15 +17,13 @@ import pytest
 
 HOOK_DIR = (
     Path(__file__).resolve().parents[2]
-    / "harness" / "guards" / "redirect-subagents" / "claude"
+    / "harness" / "guards" / "redirect-subagents"
 )
 
 sys.path.insert(0, str(HOOK_DIR))
 
 import rs_io  # noqa: E402
-import redirect_subagents_deny_PreToolUse_hook as deny_hook  # noqa: E402
-import redirect_subagents_notify_PostToolUse_hook as notify_hook  # noqa: E402
-import redirect_subagents_wait_hook as wait_hook  # noqa: E402
+import redirect_subagents_hook as hook  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -40,12 +39,14 @@ def clean_env(monkeypatch, tmp_path):
     return tmp_path
 
 
-def run_hook(module, payload):
-    """Invoke a hook main() with stdin payload, returning (exit_code, parsed stdout)."""
+def run_hook(event, payload):
+    """Fire the hook for one event, returning (exit_code, parsed stdout)."""
     import io
 
     old_stdin, old_stdout, old_argv = sys.stdin, sys.stdout, sys.argv
-    sys.argv = [str(HOOK_DIR / f"{module.__name__}.py")]
+    sys.argv = [str(HOOK_DIR / "redirect_subagents_hook.py"), "--claude"]
+    if payload is not None:
+        payload = {"hook_event_name": event, **payload}
 
     class Cap(io.StringIO):
         @property
@@ -58,7 +59,7 @@ def run_hook(module, payload):
     sys.stdout = cap
     try:
         with pytest.raises(SystemExit) as ei:
-            module.main()
+            hook.main()
         out = cap.getvalue() + cap.buffer.getvalue().decode("utf-8", errors="replace")
         return ei.value.code, json.loads(out) if out.strip() else None
     finally:
@@ -235,7 +236,7 @@ def test_deferred_config_falls_back_to_claude_p(tmp_path):
 
 
 def test_deny_unknown_subagent_passes():
-    code, out = run_hook(deny_hook, {
+    code, out = run_hook("PreToolUse", {
         "tool_name": "Agent",
         "tool_input": {"subagent_type": "Nope", "prompt": "hi"},
         "session_id": "s1",
@@ -244,7 +245,7 @@ def test_deny_unknown_subagent_passes():
 
 
 def test_deny_bad_json_passes():
-    code, out = run_hook(deny_hook, None)
+    code, out = run_hook("PreToolUse", None)
     assert code == 0 and out is None
 
 
@@ -252,7 +253,7 @@ def test_deny_disabled_entry_passes(tmp_path):
     write_project_config(tmp_path, {
         "Explore": {"profile": "p", "model": "m", "effort": "low", "disabled": True}
     })
-    code, out = run_hook(deny_hook, {
+    code, out = run_hook("PreToolUse", {
         "tool_name": "Agent",
         "tool_input": {"subagent_type": "Explore", "prompt": "hi"},
         "session_id": "s1",
@@ -273,9 +274,9 @@ def test_deny_foreground_success(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(rs_io, "clauder_available", lambda: True)
-    monkeypatch.setattr(deny_hook, "clauder_available", lambda: True)
+    monkeypatch.setattr(hook, "clauder_available", lambda: True)
 
-    code, out = run_hook(deny_hook, {
+    code, out = run_hook("PreToolUse", {
         "tool_name": "Agent",
         "tool_input": {"subagent_type": "Explore", "prompt": "hi", "run_in_background": False},
         "session_id": "s1",
@@ -293,7 +294,7 @@ def test_deny_foreground_success(tmp_path, monkeypatch):
 
 def test_background_job_pipes_multiline_stdin(tmp_path):
     prompt = "find and report:\n\n1. first\n2. second"
-    job_id = deny_hook.start_background_job(
+    job_id = hook.start_background_job(
         "Explore",
         [sys.executable, "-c", "import sys; print(sys.stdin.read(), end='')"],
         "s1",
@@ -312,7 +313,7 @@ def test_deny_defers_when_clauder_missing(tmp_path, monkeypatch):
     write_project_config(tmp_path, {"Explore": {"profile": "p", "model": "m", "effort": "low"}})
     monkeypatch.setattr(shutil, "which", lambda _x: None)
 
-    code, out = run_hook(deny_hook, {
+    code, out = run_hook("PreToolUse", {
         "tool_name": "Agent",
         "tool_input": {"subagent_type": "Explore", "prompt": "find it"},
         "session_id": "s1",
@@ -328,7 +329,7 @@ def test_deny_delivers_pending_report_for_non_redirected_call(tmp_path):
     """An intercepted-looking but unconfigured Agent call still hands back
     any finished background job — the report beats the non-interception."""
     make_finished_job(tmp_path, "abc123def456", "s1", "job done")
-    code, out = run_hook(deny_hook, {
+    code, out = run_hook("PreToolUse", {
         "tool_name": "Agent",
         "tool_input": {"subagent_type": "Nope", "prompt": "hi"},
         "session_id": "s1",
@@ -341,13 +342,13 @@ def test_deny_delivers_pending_report_for_non_redirected_call(tmp_path):
 
 
 def test_notify_no_jobs_no_deferred_passes():
-    code, out = run_hook(notify_hook, {"session_id": "nope"})
+    code, out = run_hook("PostToolUse", {"session_id": "nope"})
     assert code == 0 and out is None
 
 
 def test_notify_delivers_finished_job(tmp_path):
     job_dir = make_finished_job(tmp_path, "abc123def456", "s1", "Hi there! 👋")
-    code, out = run_hook(notify_hook, {"session_id": "s1"})
+    code, out = run_hook("PostToolUse", {"session_id": "s1"})
     assert code == 0
     assert out["decision"] == "block"
     assert "Hi there! 👋" in out["reason"]
@@ -368,7 +369,7 @@ def test_notify_runs_deferred_via_fallback(tmp_path, monkeypatch):
     import subprocess as real_subprocess
     monkeypatch.setattr(real_subprocess, "run", fake_run)
 
-    code, out = run_hook(notify_hook, {"session_id": "s1"})
+    code, out = run_hook("PostToolUse", {"session_id": "s1"})
     assert code == 0
     assert out["decision"] == "block"
     assert captured["cmd"] == ["claude", "-p", "--agent", "Explore"]
@@ -386,20 +387,20 @@ def test_notify_cleanup_removes_old_jobs(tmp_path):
     import os
     os.utime(d / "meta.json", (old_mtime, old_mtime))
 
-    notify_hook.cleanup()
+    hook.cleanup()
     assert not d.exists()
 
 
 
 
 def test_wait_no_jobs_allows_stop():
-    code, out = run_hook(wait_hook, {"session_id": "s1"})
+    code, out = run_hook("Stop", {"session_id": "s1"})
     assert code == 0 and out is None
 
 
 def test_wait_delivers_finished_job(tmp_path):
     make_finished_job(tmp_path, "abc123def456", "s1", "result text")
-    code, out = run_hook(wait_hook, {"session_id": "s1"})
+    code, out = run_hook("Stop", {"session_id": "s1"})
     assert code == 0
     assert out["decision"] == "block"
     assert "result text" in out["reason"]
@@ -415,10 +416,10 @@ def test_wait_timeout_allows_stop(tmp_path, monkeypatch):
         "pid": 1, "started_at": time.time(), "finished_at": None,
         "delivered": False, "cmd": ["fake"],
     }), encoding="utf-8")
-    monkeypatch.setattr(wait_hook, "WAIT_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(wait_hook, "POLL_INTERVAL_S", 0.001)
+    monkeypatch.setattr(hook, "WAIT_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(hook, "POLL_INTERVAL_S", 0.001)
 
-    code, out = run_hook(wait_hook, {"session_id": "s1"})
+    code, out = run_hook("Stop", {"session_id": "s1"})
     assert code == 0 and out is None  # stop allowed, nothing claimed
 
 
@@ -433,8 +434,8 @@ def test_wait_stops_polling_once_jobs_are_delivered_elsewhere(tmp_path, monkeypa
         "delivered": False, "cmd": ["fake"],
     }), encoding="utf-8")
 
-    monkeypatch.setattr(wait_hook, "WAIT_TIMEOUT_S", 30)  # never reached
-    monkeypatch.setattr(wait_hook, "POLL_INTERVAL_S", 0)
+    monkeypatch.setattr(hook, "WAIT_TIMEOUT_S", 30)  # never reached
+    monkeypatch.setattr(hook, "POLL_INTERVAL_S", 0)
 
     polls = []
 
@@ -446,10 +447,10 @@ def test_wait_stops_polling_once_jobs_are_delivered_elsewhere(tmp_path, monkeypa
                               existing=True)
             rs_io.deliver_report(rs_io.open_job_ids("s1", done=True))
 
-    monkeypatch.setattr(wait_hook.time, "sleep", finish_then_deliver)
+    monkeypatch.setattr(hook.time, "sleep", finish_then_deliver)
 
     started = time.monotonic()
-    code, out = run_hook(wait_hook, {"session_id": "s1"})
+    code, out = run_hook("Stop", {"session_id": "s1"})
     assert code == 0 and out is None  # nothing left to claim, stop allowed
     assert time.monotonic() - started < 5  # returned on the poll, not the deadline
 
@@ -460,11 +461,11 @@ def test_notify_inside_subagent_delivers_nothing(tmp_path):
     """A PostToolUse firing inside a delegate (agent_id present) must not
     deliver the main session's background reports into the delegate's turn."""
     make_finished_job(tmp_path, "abc123def456", "s1", "main-session result")
-    code, out = run_hook(notify_hook, {"session_id": "s1", "agent_id": "sub-42"})
+    code, out = run_hook("PostToolUse", {"session_id": "s1", "agent_id": "sub-42"})
     assert code == 0 and out is None
 
 
 def test_wait_inside_subagent_allows_stop(tmp_path):
     make_finished_job(tmp_path, "abc123def456", "s1", "main-session result")
-    code, out = run_hook(wait_hook, {"session_id": "s1", "agent_id": "sub-42"})
+    code, out = run_hook("Stop", {"session_id": "s1", "agent_id": "sub-42"})
     assert code == 0 and out is None

@@ -8,12 +8,12 @@ import pytest
 
 HOOK_DIR = (
     Path(__file__).resolve().parents[2]
-    / "harness" / "guards" / "prefer-read-tool" / "claude"
+    / "harness" / "guards" / "prefer-read-tool"
 )
 
 sys.path.insert(0, str(HOOK_DIR))
 
-import prefer_read_tool_PostToolUse_hook as hook  # noqa: E402
+import prefer_read_tool_hook as hook  # noqa: E402
 
 
 def run_hook(payload, raw=None):

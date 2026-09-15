@@ -28,7 +28,7 @@ HOOK = (
 )
 CLAUDE_ADAPTER = (
     Path(__file__).resolve().parents[2]
-    / "harness" / "building" / "issue-writers" / "claude" / "publish_issues_UserPromptSubmit_hook.py"
+    / "harness" / "building" / "issue-writers" / "issue_writers_hook.py"
 )
 
 sys.path.insert(0, str(HOOK.parent))
@@ -1442,7 +1442,7 @@ def _run_hook(tmp_path: Path, prompt: str):
         filter(None, (str(HOOK.parent), env.get("PYTHONPATH", "")))
     )
     return subprocess.run(
-        [sys.executable, str(CLAUDE_ADAPTER)],
+        [sys.executable, str(CLAUDE_ADAPTER), "--claude"],
         input=json.dumps({"prompt": prompt, "session_id": SID}),
         capture_output=True,
         text=True,

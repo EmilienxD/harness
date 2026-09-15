@@ -24,18 +24,18 @@ export async function runOnEditBlockJourney(): Promise<OnEditBlockJourneyResult>
   const configRoot = join(root, "claude-config");
   const projectRoot = join(root, "project");
   const claudeRoot = join(projectRoot, ".claude");
-  const hookPath = join(claudeRoot, "hooks", "on_edit_block_PreToolUse_hook.py");
+  const hookPath = join(claudeRoot, "hooks", "on_edit_block_hook.py");
   const diagnosticsPath = join(root, "structural-diagnostics.json");
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   try {
     await mkdir(dirname(hookPath), { recursive: true });
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
-    await copyFile(join(harnessRoot, "harness", "guards", "on-edit-block", "claude", "on_edit_block_PreToolUse_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness", "guards", "on-edit-block", "on_edit_block_hook.py"), hookPath);
     await writeFile(join(projectRoot, "target.txt"), TARGET_BEFORE, "utf8");
     await writeFile(join(projectRoot, "GUIDE.md"), `${GUIDE_MARKER}\n`, "utf8");
     await writeFile(join(claudeRoot, "on-edit-block.rules"), "target.txt -> GUIDE.md\n", "utf8");
-    await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", command: await pythonCommand(), args: [hookPath] }] }] } }, null, 2)}\n`, "utf8");
+    await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", command: await pythonCommand(), args: [hookPath, "--claude"] }] }] } }, null, 2)}\n`, "utf8");
     await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
 
     server = await startFakeAnthropicServer({ repoRoot: projectRoot, diagnosticsPath, scenarioCatalogHash, parseRequest, transition });

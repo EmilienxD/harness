@@ -16,9 +16,9 @@ from harness_cli.receipts import ReceiptStore
 
 HOOK = (
     Path(__file__).resolve().parents[2]
-    / "harness/building/issue-readers/address_issue_UserPromptSubmit_hook.py"
+    / "harness/building/issue-readers/issue_readers_hook.py"
 )
-spec = importlib.util.spec_from_file_location("address_issue_hook", HOOK)
+spec = importlib.util.spec_from_file_location("issue_readers_hook", HOOK)
 hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
 
@@ -384,8 +384,8 @@ def test_skill_and_hook_install_for_both_products(platform, tmp_path):
     ).reconcile({name})
     skill = target.destination_path("skills", "address-this/SKILL.md")
     assert skill.read_text(encoding="utf-8").split("---", 2)[2].strip()
-    assert target.destination_path("hooks", "address_issue_UserPromptSubmit_hook.py").exists()
-    assert "address_issue_UserPromptSubmit_hook.py" in target.settings_path.read_text(encoding="utf-8")
+    assert target.destination_path("hooks", "issue_readers_hook.py").exists()
+    assert "issue_readers_hook.py" in target.settings_path.read_text(encoding="utf-8")
     assert (
         target.destination_path("skills", "address-this/agents/openai.yaml").exists()
         is (platform == "chatgpt")

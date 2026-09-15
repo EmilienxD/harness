@@ -40,10 +40,10 @@ export async function runUsageLimitWaitJourney(platform: Platform): Promise<Usag
     if (platform === "claude") {
       const configRoot = join(root, "claude-config"); const hookRoot = join(projectRoot, ".claude", "hooks"); const hookPath = join(hookRoot, "usage_limit_wait_hook.py"); const pythonRoot = join(root, "python-fixture");
       await mkdir(hookRoot, { recursive: true }); await mkdir(configRoot, { recursive: true }); await mkdir(pythonRoot, { recursive: true });
-      await copyFile(join(harnessRoot, "harness", "guards", "usage-limit-wait", "claude", "usage_limit_wait_hook.py"), hookPath);
+      await copyFile(join(harnessRoot, "harness", "guards", "usage-limit-wait", "usage_limit_wait_hook.py"), hookPath);
       await writeFile(join(configRoot, ".credentials.json"), `${JSON.stringify({ claudeAiOauth: { accessToken: "e2e-oauth-token" } })}\n`);
       await writeFile(join(configRoot, "settings.json"), "{}\n");
-      await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [hookPath], timeout: 30 }] }] } }, null, 2)}\n`);
+      await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [hookPath, "--claude"], timeout: 30 }] }] } }, null, 2)}\n`);
       await writeFile(join(pythonRoot, "sitecustomize.py"), claudeRedirectFixture());
       inference = await startFakeAnthropicServer({ repoRoot: projectRoot, scenarioCatalogHash, parseRequest: parseAnthropicMessagesRequest, transition: claudeTransition });
       const env = isolatedClaudeEnvironment(toolConfigFreeEnvironment(process.env), {
@@ -60,8 +60,8 @@ export async function runUsageLimitWaitJourney(platform: Platform): Promise<Usag
     } else {
       const hookRoot = join(projectRoot, ".codex", "hooks"); const hookPath = join(hookRoot, "usage_limit_wait_hook.py"); const fakeBin = join(root, "fake-bin");
       await mkdir(hookRoot, { recursive: true }); await mkdir(fakeBin, { recursive: true });
-      await copyFile(join(harnessRoot, "harness", "guards", "usage-limit-wait", "chatgpt", "usage_limit_wait_hook.py"), hookPath);
-      await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: `${python} \"${hookPath}\"`, timeout: 30 }] }] } }, null, 2)}\n`);
+      await copyFile(join(harnessRoot, "harness", "guards", "usage-limit-wait", "usage_limit_wait_hook.py"), hookPath);
+      await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: `${python} \"${hookPath}\" --chatgpt`, timeout: 30 }] }] } }, null, 2)}\n`);
       await writeFile(join(fakeBin, "fake-codex-app-server.py"), codexAppServerFixture());
       if (process.platform === "win32") await writeFile(join(fakeBin, "codex.cmd"), `@\"${python}\" \"%~dp0fake-codex-app-server.py\" %*\r\n`);
       else { const shim = join(fakeBin, "codex"); await writeFile(shim, `#!/bin/sh\nexec \"${python}\" \"$(dirname \"$0\")/fake-codex-app-server.py\" \"$@\"\n`); await chmod(shim, 0o755); }
