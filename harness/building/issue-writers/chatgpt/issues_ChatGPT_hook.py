@@ -55,9 +55,8 @@ def main() -> None:
         return
 
     if PUBLISH_PATTERN.search(prompt):
-        dry = "--dry" in prompt.split()
         session_id = str(payload.get("session_id") or "")
-        result = core.publish_issues(dry, gateway_session_id(session_id))
+        result = core.run_publish_command(prompt, gateway_session_id(session_id))
         json.dump({"decision": "block", "reason": result}, sys.stdout)
         return
 

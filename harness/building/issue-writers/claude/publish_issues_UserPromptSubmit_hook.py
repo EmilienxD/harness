@@ -26,9 +26,8 @@ def main() -> None:
         copy_message_as_issue.handle_save(payload)
 
     if core.PROMPT_PATTERN.match(prompt):
-        dry = "--dry" in prompt.split()
         session_id = str(payload.get("session_id") or "")
-        result = core.publish_issues(dry, session_id)
+        result = core.run_publish_command(prompt, session_id)
         sys.stderr.write("\n\n" + result)
         raise SystemExit(2)
 

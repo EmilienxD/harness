@@ -1,6 +1,6 @@
 ---
 name: publish-issues
-description: Publish all drafted issues from .issues-gateway/ to GitHub through the installed lifecycle hook. Supports --dry to preview without creating issues. Explicit invocation only.
+description: Publish or explicitly clean drafts in .issues-gateway/ through the installed lifecycle hook. Supports --dry, --discard-current, and --gc --older-than <duration>. Explicit invocation only.
 disable-model-invocation: true
 ---
 
