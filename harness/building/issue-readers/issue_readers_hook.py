@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
-"""Guard and preload context for an address-this invocation.
+"""Guard and preload context for address-this and review-this invocations.
 
-Blocks before model invocation when the worktree is dirty or a requested
-primary issue cannot be resolved, and injects bounded GitHub issue context
-when the whole argument is a strict list of issue references.
+One `UserPromptSubmit` hook for both worker skills: each invocation matches at
+most one of them, and everything they share -- the clean-worktree precondition,
+the Git plumbing, the blocked-prompt protocol -- is written once here.
+
+`address-this` blocks when the worktree is dirty or a requested primary issue
+cannot be resolved, and injects bounded GitHub issue context when the whole
+argument is a strict list of issue references.
+
+`review-this` blocks dirty manual invocations and injects the pinned target's
+identity and changed-file list. Aboard may explicitly supply a dirty HITL
+review range.
+
+Both products submit the same payload for this event, so `--claude` and
+`--chatgpt` select nothing here; the flag is accepted so every hook in the
+catalogue is wired the same way.
 """
 
 from __future__ import annotations
@@ -16,9 +28,13 @@ import sys
 from pathlib import Path
 
 
-INVOCATION = re.compile(
+ADDRESS_INVOCATION = re.compile(
     r"(?:[/$]address-this|\[\$address-this\]\([^\r\n]+\))(?=$|\s)"
 )
+REVIEW_INVOCATION = re.compile(
+    r"(?:[/$]review-this|\[\$review-this\]\([^\r\n]+\))(?=$|\s)"
+)
+
 NUMBER = re.compile(r"[1-9][0-9]*")
 ISSUE_URL = re.compile(
     r"https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/issues/([1-9][0-9]*)/?"
@@ -47,42 +63,60 @@ ISSUE_QUERY = (
     "}}}" % MAX_COMMENTS
 )
 
+STATUS_NAMES = {
+    "A": "added", "M": "modified", "D": "deleted",
+    "R": "renamed", "C": "copied", "T": "type changed",
+}
+
 
 class Blocked(Exception):
     """A prerequisite failed; the prompt must not reach the model."""
 
 
-def strip_gateway_markers(text: str) -> str:
-    """Keep legacy publisher metadata out of model-facing issue context."""
-    return GATEWAY_MARKER_LINE.sub("", text).rstrip()
+# shared plumbing
 
-
-def git(arguments: list[str], cwd: Path) -> str:
+def git(arguments: list[str], cwd: Path, skill: str, requirement: str) -> str:
     result = subprocess.run(
         ["git", *arguments], cwd=cwd, capture_output=True, text=True,
         encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise Blocked(
-            "address-this requires a Git repository: "
+            f"{skill} requires {requirement}: "
             f"`git {' '.join(arguments)}` failed. {result.stderr.strip()}"
         )
     return result.stdout
 
 
-def require_clean_worktree(cwd: Path) -> None:
+def require_clean_worktree(cwd: Path, skill: str, git_requirement: str) -> None:
     """Staged, unstaged, and untracked changes all block; ignored files do not."""
-    status = git(["status", "--porcelain", "--untracked-files=all"], cwd)
+    status = git(
+        ["status", "--porcelain", "--untracked-files=all"], cwd, skill, git_requirement
+    )
     entries = [line for line in status.splitlines() if line.strip()]
     if entries:
         listed = "\n".join(entries[:20])
         more = "" if len(entries) <= 20 else f"\n… and {len(entries) - 20} more."
         raise Blocked(
-            "address-this requires a completely clean Git worktree, but the "
+            f"{skill} requires a completely clean Git worktree, but the "
             "checkout has staged, unstaged, or untracked changes:\n"
             f"{listed}{more}\nCommit, discard, or set them aside, then invoke "
-            "address-this again."
+            f"{skill} again."
         )
+
+
+# address-this
+
+ADDRESS_GIT = "a Git repository"
+
+
+def address_git(arguments: list[str], cwd: Path) -> str:
+    return git(arguments, cwd, "address-this", ADDRESS_GIT)
+
+
+def strip_gateway_markers(text: str) -> str:
+    """Keep legacy publisher metadata out of model-facing issue context."""
+    return GATEWAY_MARKER_LINE.sub("", text).rstrip()
 
 
 def relation_depth() -> int:
@@ -103,7 +137,7 @@ def relation_depth() -> int:
 def parse_invocation(prompt: str) -> str | None:
     """Return the invocation's argument text, or None for unrelated prompts."""
     stripped = prompt.strip()
-    match = INVOCATION.match(stripped)
+    match = ADDRESS_INVOCATION.match(stripped)
     if match is None:
         return None
     return stripped[match.end():].strip()
@@ -310,10 +344,10 @@ def context_for(documents: list[tuple[str, dict]], omissions: list[str], depth: 
     return "\n\n".join([header, *sections])
 
 
-def build_context(argument: str, cwd: Path) -> str:
+def build_address_context(argument: str, cwd: Path) -> str:
     continuation = os.environ.get("ABOARD_WORKER_CONTINUATION") == "1"
     if not continuation:
-        require_clean_worktree(cwd)
+        require_clean_worktree(cwd, "address-this", ADDRESS_GIT)
     depth = relation_depth()
     checkout = (
         "Aboard is continuing the exact worker conversation over its preserved working tree. Treat every existing change as part of that continuation."
@@ -336,6 +370,88 @@ def build_context(argument: str, cwd: Path) -> str:
     return f"{checkout}\n\n{context_for(documents, omissions, depth)}"
 
 
+# review-this
+
+REVIEW_GIT = "a Git repository with at least one commit"
+
+
+def review_git(arguments: list[str], cwd: Path) -> str:
+    return git(arguments, cwd, "review-this", REVIEW_GIT)
+
+
+def parent_sha(cwd: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^"],
+        cwd=cwd, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    sha = result.stdout.strip()
+    return sha if result.returncode == 0 and sha else None
+
+
+def changed_files(cwd: Path, review_range: str | None = None) -> list[str]:
+    """Name and status for every path the commit touched, renames included."""
+    arguments = ["show", "--name-status", "--find-renames", "--format=", "-z", "HEAD"] if review_range is None else ["diff", "--name-status", "--find-renames", "-z", review_range]
+    raw = review_git(arguments, cwd)
+    fields = [field for field in raw.split("\0") if field]
+    entries: list[str] = []
+    index = 0
+    while index < len(fields):
+        code = fields[index]
+        letter = code[0]
+        name = STATUS_NAMES.get(letter, code)
+        if letter in {"R", "C"} and index + 2 < len(fields):
+            entries.append(f"{name}: {fields[index + 1]} -> {fields[index + 2]}")
+            index += 3
+            continue
+        if index + 1 < len(fields):
+            entries.append(f"{name}: {fields[index + 1]}")
+        index += 2
+    return entries
+
+
+def build_review_context(cwd: Path) -> str:
+    review_range = os.environ.get("ABOARD_REVIEW_RANGE")
+    continuation = os.environ.get("ABOARD_WORKER_CONTINUATION") == "1"
+    if review_range is not None and re.fullmatch(r"[0-9a-fA-F]{40,64}\.\.[0-9a-fA-F]{40,64}", review_range) is None:
+        raise Blocked("review-this received an invalid pinned review range from Aboard.")
+    if review_range is None and not continuation:
+        require_clean_worktree(cwd, "review-this", REVIEW_GIT)
+    head = review_git(["rev-parse", "HEAD"], cwd).strip()
+    subject = review_git(["log", "-1", "--format=%s", review_range.split("..", 1)[1] if review_range else "HEAD"], cwd).strip()
+    parent = review_range.split("..", 1)[0] if review_range else parent_sha(cwd)
+    files = changed_files(cwd, review_range)
+    lines = [
+        "Review-this context, prepared by a hook from the local repository.",
+        "",
+        (
+            f"Aboard pinned {review_range} as the immutable review scope. Its implementation is intentionally present as uncommitted working-tree changes; do not commit it."
+            if review_range is not None
+            else "Aboard is continuing the exact reviewer conversation over its preserved working tree. Treat every existing change as part of that continuation."
+            if continuation
+            else "Worktree verified clean by the review-this hook before this invocation; every change now present is yours."
+        ),
+        "",
+        f"- Starting HEAD: {head}",
+        f"- Review range: {review_range}" if review_range else (f"- Parent commit: {parent}" if parent else "- Parent commit: none (root commit)"),
+        f"- Subject: {subject}",
+        "",
+        "## Files changed by the pinned implementation" if review_range else "## Files changed by the commit under review",
+        "",
+    ]
+    lines.extend(
+        [f"- {entry}" for entry in files] if files
+        else ["- none (the commit changed no files)"]
+    )
+    lines.extend([
+        "",
+        "The diff is deliberately not included; read the pinned target or "
+        "range yourself from the repository.",
+    ])
+    return "\n".join(lines)
+
+
+# entry point
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -348,17 +464,27 @@ def main() -> None:
     prompt = payload.get("prompt")
     if not isinstance(prompt, str):
         return
-    argument = parse_invocation(prompt)
-    if argument is None:
-        return
+
     cwd = Path(str(payload.get("cwd") or "."))
+    argument = parse_invocation(prompt)
+    review = REVIEW_INVOCATION.match(prompt.strip()) is not None
+    if argument is None and not review:
+        return
+    timeout_message = (
+        "review-this timed out reading the repository." if review
+        else "address-this timed out preparing issue context."
+    )
+
     try:
-        context = build_context(argument, cwd)
+        context = (
+            build_review_context(cwd) if review
+            else build_address_context(argument, cwd)
+        )
     except Blocked as error:
         print(str(error), file=sys.stderr)
         raise SystemExit(2)
     except subprocess.TimeoutExpired:
-        print("address-this timed out preparing issue context.", file=sys.stderr)
+        print(timeout_message, file=sys.stderr)
         raise SystemExit(2)
     json.dump(
         {"hookSpecificOutput": {

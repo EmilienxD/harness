@@ -43,14 +43,14 @@ export async function runBreakdownHelpWantedIssueJourney(platform: IssuePlatform
 }
 
 async function stageTool(platform: IssuePlatform, harnessRoot: string, projectRoot: string, python: string): Promise<void> {
-  const source = join(harnessRoot, "harness", "planning", "breakdown-help-wanted-issue"); const hookName = "breakdown_help_wanted_issue_UserPromptSubmit_hook.py";
+  const source = join(harnessRoot, "harness", "planning", "breakdown-help-wanted-issue"); const hookName = "breakdown_help_wanted_issue_hook.py";
   if (platform === "claude") {
     const root = join(projectRoot, ".claude"); await copyTree(source, join(root, "skills", "breakdown-help-wanted-issue")); await mkdir(join(root, "hooks"), { recursive: true }); await copyFile(join(source, hookName), join(root, "hooks", hookName));
-    await writeFile(join(root, "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [join(root, "hooks", hookName)], timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
+    await writeFile(join(root, "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [join(root, "hooks", hookName), "--claude"], timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
   } else {
     const skill = join(projectRoot, ".agents", "skills", "breakdown-help-wanted-issue"); await copyTree(source, skill); await mkdir(join(skill, "agents"), { recursive: true }); await copyFile(join(source, "chatgpt", "openai.yaml"), join(skill, "agents", "openai.yaml"));
     const hooks = join(projectRoot, ".codex", "hooks"); await mkdir(hooks, { recursive: true }); await copyFile(join(source, hookName), join(hooks, hookName));
-    await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: `${python} \"${join(hooks, hookName)}\"`, timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
+    await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: `${python} \"${join(hooks, hookName)}\" --chatgpt`, timeout: 30 }] }] } }, null, 2)}\n`, "utf8");
   }
 }
 

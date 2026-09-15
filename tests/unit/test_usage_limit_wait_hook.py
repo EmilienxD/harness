@@ -16,7 +16,7 @@ import pytest
 
 HOOK = (
     Path(__file__).resolve().parents[2]
-    / "harness" / "guards" / "usage-limit-wait" / "claude" / "usage_limit_wait_hook.py"
+    / "harness" / "guards" / "usage-limit-wait" / "usage_limit_wait_hook.py"
 )
 
 sys.path.insert(0, str(HOOK.parent))
@@ -106,7 +106,7 @@ def test_subscription_session_passes_the_guards():
     assert hook.third_party_session() is False
 
 
-@pytest.mark.parametrize("mode", [["--notify"], ["--wait"], []])
+@pytest.mark.parametrize("mode", [["--claude"], ["--notify"], ["--wait"], []])
 def test_a_provider_session_is_left_alone(monkeypatch, capsys, mode):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-whatever")
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: pytest.fail("read usage anyway"))
@@ -114,7 +114,7 @@ def test_a_provider_session_is_left_alone(monkeypatch, capsys, mode):
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.parametrize("mode", [["--notify"], ["--wait"], []])
+@pytest.mark.parametrize("mode", [["--claude"], ["--notify"], ["--wait"], []])
 def test_the_kill_switch_stops_both_halves(monkeypatch, capsys, mode):
     monkeypatch.setenv("USAGE_LIMIT_WAIT_DISABLE", "1")
     monkeypatch.setattr(hook, "read_usage", lambda *a, **k: pytest.fail("read usage anyway"))
@@ -298,19 +298,19 @@ def test_cli_fallback_can_be_turned_off(monkeypatch):
 
 def test_read_usage_prefers_the_api_and_falls_back_to_the_cli(monkeypatch):
     monkeypatch.setattr(hook, "access_token", lambda: "token")
-    monkeypatch.setattr(hook, "fetch_usage", lambda token: {"limits": [
+    monkeypatch.setattr(hook, "fetch_claude_usage", lambda token: {"limits": [
         {"kind": "session", "percent": 3, "resets_at": "2026-08-16T01:59:59+00:00"}]})
     monkeypatch.setattr(hook, "read_usage_via_cli", lambda **kwargs: pytest.fail("used the fallback"))
     assert hook.read_usage(force=True)["source"] == "api"
 
-    monkeypatch.setattr(hook, "fetch_usage", lambda token: None)
+    monkeypatch.setattr(hook, "fetch_claude_usage", lambda token: None)
     monkeypatch.setattr(hook, "read_usage_via_cli", lambda **kwargs: hook.snapshot_from_cli(CLI_OUTPUT))
     assert hook.read_usage(force=True)["source"] == "cli"
 
 
 def test_read_usage_without_a_token_still_tries_the_cli(monkeypatch):
     monkeypatch.setattr(hook, "access_token", lambda: None)
-    monkeypatch.setattr(hook, "fetch_usage", lambda token: pytest.fail("called the API without a token"))
+    monkeypatch.setattr(hook, "fetch_claude_usage", lambda token: pytest.fail("called the API without a token"))
     monkeypatch.setattr(hook, "read_usage_via_cli", lambda **kwargs: None)
     assert hook.read_usage(force=True) is None
 

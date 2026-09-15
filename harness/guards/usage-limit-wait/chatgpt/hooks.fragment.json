@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/usage_limit_wait_hook.py\"",
+            "command": "${PYTHON} \"${HOOKS_DIR}/usage_limit_wait_hook.py\" --chatgpt",
             "timeout": 604800,
             "statusMessage": "Checking Codex usage limits — waits here if they are exhausted"
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/usage_limit_wait_hook.py\"",
+            "command": "${PYTHON} \"${HOOKS_DIR}/usage_limit_wait_hook.py\" --chatgpt",
             "timeout": 604800,
             "statusMessage": "Checking Codex usage limits — waits here if they are exhausted"
           }

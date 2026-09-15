@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Native ChatGPT hooks for zero-model-call ``/commit``.
+"""Zero-model-call ``/commit``, for every supported provider.
 
-ChatGPT explicitly treats its transcript as an unstable hook interface.  This
-adapter therefore records file deltas from lifecycle events under ``.git`` and
-uses the existing commit tool's staging and message-generation core only after
-the prompt hook sees ``/commit``.
+The installer passes ``--claude`` or ``--chatgpt``. That selects which section
+below works out *what the agent wrote this turn*, which is the only part the
+two products disagree about:
+
+* Claude Code exposes a stable session transcript, so the prompt hook reads the
+  writes straight out of it.
+* ChatGPT explicitly treats its transcript as an unstable hook interface, so
+  the lifecycle hooks record file deltas under ``.git`` as they happen and the
+  prompt hook replays them.
+
+From there both providers share one path: stage, generate a message if asked,
+commit, and report -- all in ``commit_core``.
 """
 from __future__ import annotations
 
@@ -16,23 +24,177 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import commit_core as core
-except Exception as exc:
+except Exception as exc:  # noqa: BLE001 - a missing core must not reach the model
     details = str(exc).strip() or "(no details)"
     sys.stderr.write(
         "\n\n"
-        "harness commit hook failed in ChatGPT; blocking the prompt so "
-        "it cannot fall back to the model.\n"
+        "harness commit hook could not load commit_core; blocking the prompt "
+        "so it cannot fall back to the model.\n"
         f"{exc.__class__.__name__}: {details}"
     )
     sys.exit(2)
 
 
-core.HOST_CONFIG_DIR = ".codex"
+CLAUDE = "claude"
+CHATGPT = "chatgpt"
 
+# Set by `main` from argv, before anything reads it.
+PROVIDER = CLAUDE
+
+PRODUCT = {CLAUDE: "Claude Code", CHATGPT: "ChatGPT"}
+# How the commit trailer and the staging report name whoever did the writing.
+AUTHOR = {CLAUDE: "Claude", CHATGPT: "ChatGPT"}
+CONFIG_DIR = {CLAUDE: ".claude", CHATGPT: ".codex"}
+
+USAGE = (
+    "Usage: /commit [--dry] [--ai] <message>\n"
+    "  --ai      generate the message from the staged diff "
+    "(makes <message> optional)\n"
+    "            any text after --ai becomes steering guidance\n"
+    "  --dry show what would happen, change nothing"
+)
+
+
+def provider_from_argv(argv: list[str]) -> tuple[str, list[str]]:
+    """Split the provider flag off the command line, keeping the rest."""
+    provider, rest = CLAUDE, []
+    for token in argv:
+        if token in ("--" + CLAUDE, "--" + CHATGPT):
+            provider = token[2:]
+        else:
+            rest.append(token)
+    return provider, rest
+
+
+def set_provider(provider: str) -> None:
+    """Point this process, and the shared core, at one provider."""
+    global PROVIDER
+    PROVIDER = provider
+    core.HOST_CONFIG_DIR = CONFIG_DIR[provider]
+
+
+# the shared commit
+
+def commit(
+    payload: dict[str, Any],
+    repo_root: str,
+    scan: "core.WriteScan | None",
+    transcript: str,
+    flags: "core.Flags",
+    message: str,
+    widened_reason: str,
+    cleanup: Callable[[], None] | None = None,
+) -> None:
+    """Stage what the agent wrote, commit it, and report. Never returns."""
+    session_id = str(payload.get("session_id") or "unknown")
+    author = AUTHOR[PROVIDER]
+
+    if flags.dry:
+        core.finish(
+            core.build_dry_run_report(
+                message, session_id, transcript, repo_root, scan, flags
+            )
+        )
+
+    changed = core.changed_paths(scan)
+    widened = ""
+    if changed:
+        add_result, targets = core.stage_paths(changed, repo_root)
+        if add_result is None:
+            core.finish(
+                f"{author} edited files this session, but none of them still "
+                "exist or are tracked -- nothing to stage."
+            )
+    else:
+        add_result, targets = core.run(["git", "add", "-A"], repo_root), []
+        if scan is not None and scan.unresolved:
+            widened = (
+                f"; staged the whole tree -- {len(scan.unresolved)} "
+                f"{widened_reason}"
+            )
+
+    if add_result.returncode != 0:
+        core.finish(f"git add failed:\n{add_result.stderr}")
+
+    scope = ["--", *targets] if targets and not core.in_merge(repo_root) else []
+    staged = core.run(["git", "diff", "--cached", "--name-only", *scope], repo_root)
+    if not staged.stdout.strip():
+        core.finish("Nothing to commit -- working tree matches HEAD.")
+
+    body = ""
+    if flags.use_ai:
+        try:
+            ai = core.generate_commit_message(
+                repo_root, targets if scope else [], True, transcript, message
+            )
+        except core.AiError as exc:
+            core.finish(
+                f"{exc}\n\n"
+                f"{len(staged.stdout.strip().splitlines())} file(s) are still staged -- "
+                "nothing was committed.\nRerun with an explicit message: /commit <message>"
+            )
+        message, body = ai.subject, ai.body
+
+    commit_args = ["git", "commit", "-m", message]
+    if body:
+        commit_args += ["-m", body]
+    commit_args += ["-m", f"{author}-session: {session_id}", *scope]
+    result = core.run(commit_args, repo_root)
+    if result.returncode != 0:
+        core.finish(f"git commit failed:\n{result.stderr}")
+
+    sha = core.run(["git", "rev-parse", "--short", "HEAD"], repo_root).stdout.strip()
+    count = len(staged.stdout.strip().splitlines())
+    held_back = len(core.staged_elsewhere(targets, repo_root)) if scope else 0
+    suffix = f", {held_back} left staged" if held_back else ""
+    if cleanup is not None:
+        cleanup()
+    core.finish(f"Committed {sha} ({count} file(s){suffix}){widened}: {message}")
+
+
+def parse_invocation(prompt: str) -> "tuple[core.Flags, str] | None":
+    """The flags and message behind a `/commit` prompt, or None for anything else."""
+    match = core.COMMIT_PATTERN.match(prompt.strip())
+    if not match:
+        return None
+    flags, message = core.split_flags(match.group(1) or "")
+    if not message and not flags.use_ai and not flags.dry:
+        core.finish(USAGE)
+    return flags, message
+
+
+# Claude Code: the session transcript is the record of what was written
+
+def claude_main(payload: dict[str, Any]) -> None:
+    cwd = payload.get("cwd", ".")
+    transcript_path = payload.get("transcript_path", "")
+
+    invocation = parse_invocation(payload.get("prompt", ""))
+    if invocation is None:
+        core.allow()
+    flags, message = invocation
+
+    toplevel = core.run(["git", "rev-parse", "--show-toplevel"], cwd)
+    if toplevel.returncode != 0:
+        core.finish("Not a git repository -- nothing to commit.")
+    repo_root = os.path.normpath(toplevel.stdout.strip()) or cwd
+
+    commit(
+        payload,
+        repo_root,
+        core._scan_writes(transcript_path, repo_root),
+        transcript_path,
+        flags,
+        message,
+        "shell write(s) with an unreadable target",
+    )
+
+
+# ChatGPT: lifecycle events record the deltas the transcript cannot
 
 def _repo_root(cwd: str) -> str | None:
     result = core.run(["git", "rev-parse", "--show-toplevel"], cwd)
@@ -200,7 +362,7 @@ def _records(root: Path, category: str) -> list[dict[str, Any]]:
     return sorted(out, key=lambda item: int(item.get("at") or 0))
 
 
-def _scan(root: Path, repo_root: str) -> core.WriteScan | None:
+def _scan(root: Path, repo_root: str) -> "core.WriteScan | None":
     events = _records(root, "events")
     if not events:
         return None
@@ -270,72 +432,20 @@ def _clear_session(root: Path) -> None:
 
 
 def _handle_commit(
-    payload: dict[str, Any], repo_root: str, root: Path, flags: core.Flags, message: str
+    payload: dict[str, Any], repo_root: str, root: Path, flags: "core.Flags", message: str
 ) -> None:
-    session_id = str(payload.get("session_id") or "unknown")
-    scan = _scan(root, repo_root)
     transcript = _synthetic_transcript(root, repo_root)
     try:
-        if flags.dry:
-            core.finish(
-                core.build_dry_run_report(
-                    message, session_id, transcript, repo_root, scan, flags
-                )
-            )
-
-        changed = core.changed_paths(scan)
-        widened = ""
-        if changed:
-            add_result, targets = core.stage_paths(changed, repo_root)
-            if add_result is None:
-                core.finish(
-                    "ChatGPT edited files this session, but none of them still "
-                    "exist or are tracked -- nothing to stage."
-                )
-        else:
-            add_result, targets = core.run(["git", "add", "-A"], repo_root), []
-            if scan is not None and scan.unresolved:
-                widened = (
-                    f"; staged the whole tree -- {len(scan.unresolved)} tool "
-                    "write(s) had no pre-tool snapshot"
-                )
-
-        if add_result.returncode != 0:
-            core.finish(f"git add failed:\n{add_result.stderr}")
-
-        scope = ["--", *targets] if targets and not core.in_merge(repo_root) else []
-        staged = core.run(["git", "diff", "--cached", "--name-only", *scope], repo_root)
-        if not staged.stdout.strip():
-            core.finish("Nothing to commit -- working tree matches HEAD.")
-
-        body = ""
-        if flags.use_ai:
-            try:
-                ai = core.generate_commit_message(
-                    repo_root, targets if scope else [], True, transcript, message
-                )
-            except core.AiError as exc:
-                core.finish(
-                    f"{exc}\n\n"
-                    f"{len(staged.stdout.strip().splitlines())} file(s) are still staged -- "
-                    "nothing was committed.\nRerun with an explicit message: /commit <message>"
-                )
-            message, body = ai.subject, ai.body
-
-        commit_args = ["git", "commit", "-m", message]
-        if body:
-            commit_args += ["-m", body]
-        commit_args += ["-m", f"ChatGPT-session: {session_id}", *scope]
-        result = core.run(commit_args, repo_root)
-        if result.returncode != 0:
-            core.finish(f"git commit failed:\n{result.stderr}")
-
-        sha = core.run(["git", "rev-parse", "--short", "HEAD"], repo_root).stdout.strip()
-        count = len(staged.stdout.strip().splitlines())
-        held_back = len(core.staged_elsewhere(targets, repo_root)) if scope else 0
-        suffix = f", {held_back} left staged" if held_back else ""
-        _clear_session(root)
-        core.finish(f"Committed {sha} ({count} file(s){suffix}){widened}: {message}")
+        commit(
+            payload,
+            repo_root,
+            _scan(root, repo_root),
+            transcript,
+            flags,
+            message,
+            "tool write(s) had no pre-tool snapshot",
+            cleanup=lambda: _clear_session(root),
+        )
     finally:
         try:
             os.unlink(transcript)
@@ -343,29 +453,18 @@ def _handle_commit(
             pass
 
 
-def main() -> None:
-    core._force_utf8_output()
-    payload = json.load(sys.stdin)
+def chatgpt_main(payload: dict[str, Any]) -> None:
     cwd = str(payload.get("cwd") or ".")
     event = payload.get("hook_event_name")
     repo_root = _repo_root(cwd)
 
     if event == "UserPromptSubmit":
-        prompt = str(payload.get("prompt") or "")
-        match = core.COMMIT_PATTERN.match(prompt.strip())
-        if match:
-            flags, message = core.split_flags(match.group(1) or "")
-            if not message and not flags.use_ai and not flags.dry:
-                core.finish(
-                    "Usage: /commit [--dry] [--ai] <message>\n"
-                    "  --ai      generate the message from the staged diff "
-                    "(makes <message> optional)\n"
-                    "            any text after --ai becomes steering guidance"
-                )
+        invocation = parse_invocation(str(payload.get("prompt") or ""))
+        if invocation is not None:
             if repo_root is None:
                 core.finish("Not a git repository -- nothing to commit.")
             root = _session_dir(repo_root, str(payload.get("session_id") or "unknown"))
-            _handle_commit(payload, repo_root, root, flags, message)
+            _handle_commit(payload, repo_root, root, *invocation)
             return
 
         if repo_root is not None:
@@ -383,8 +482,30 @@ def main() -> None:
     core.allow()
 
 
-def entrypoint() -> None:
-    core.guarded_main("ChatGPT", main)
+# entry point
+
+def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    provider, rest = provider_from_argv(argv)
+    set_provider(provider)
+    core._force_utf8_output()
+
+    # Anything left on the command line is the transcript-report debug mode.
+    if rest:
+        core.cli_main(rest)
+        return
+
+    payload = json.load(sys.stdin)
+    if provider == CHATGPT:
+        chatgpt_main(payload)
+    else:
+        claude_main(payload)
+
+
+def entrypoint(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    provider, _ = provider_from_argv(argv)
+    core.guarded_main(PRODUCT[provider], lambda: main(argv))
 
 
 if __name__ == "__main__":

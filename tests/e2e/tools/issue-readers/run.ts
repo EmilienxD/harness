@@ -15,6 +15,7 @@ import { claudeTransition, codexTransition, REVIEW_MARKER, scenarioCatalogHash }
 import { copyTree, createFakeGh, findHarnessRoot, initializeRepository, isolatedCodexEnvironment, parseCodexThreadId, pythonCommand, successfulOpenAiRequests, type IssuePlatform } from "../issues/support.js";
 
 const execFileAsync = promisify(execFile);
+const HOOK = "issue_readers_hook.py";
 
 export interface IssueReadersJourneyResult {
   readonly checkpoints: readonly string[];
@@ -107,10 +108,9 @@ async function stageIssueReaders(platform: IssuePlatform, harnessRoot: string, p
     const hookRoot = join(claudeRoot, "hooks");
     await mkdir(hookRoot, { recursive: true });
     for (const skill of ["address-this", "review-this"]) await copyTree(join(source, skill), join(claudeRoot, "skills", skill));
-    for (const hook of ["address_issue_UserPromptSubmit_hook.py", "review_issue_UserPromptSubmit_hook.py"]) await copyFile(join(source, hook), join(hookRoot, hook));
+    await copyFile(join(source, HOOK), join(hookRoot, HOOK));
     await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [
-      { type: "command", command: python, args: [join(hookRoot, "address_issue_UserPromptSubmit_hook.py")], timeout: 120 },
-      { type: "command", command: python, args: [join(hookRoot, "review_issue_UserPromptSubmit_hook.py")], timeout: 60 },
+      { type: "command", command: python, args: [join(hookRoot, HOOK), "--claude"], timeout: 120 },
     ] }] } }, null, 2)}\n`, "utf8");
   } else {
     const hookRoot = join(projectRoot, ".codex", "hooks");
@@ -119,10 +119,9 @@ async function stageIssueReaders(platform: IssuePlatform, harnessRoot: string, p
       await copyTree(join(source, skill), join(projectRoot, ".agents", "skills", skill));
       await copyTree(join(source, "chatgpt", "agents", `${skill}.yaml`), join(projectRoot, ".agents", "skills", skill, "agents", "openai.yaml"));
     }
-    for (const hook of ["address_issue_UserPromptSubmit_hook.py", "review_issue_UserPromptSubmit_hook.py"]) await copyFile(join(source, hook), join(hookRoot, hook));
+    await copyFile(join(source, HOOK), join(hookRoot, HOOK));
     await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [
-      { type: "command", command: `${python} \"${join(hookRoot, "address_issue_UserPromptSubmit_hook.py")}\"`, timeout: 120 },
-      { type: "command", command: `${python} \"${join(hookRoot, "review_issue_UserPromptSubmit_hook.py")}\"`, timeout: 60 },
+      { type: "command", command: `${python} \"${join(hookRoot, HOOK)}\" --chatgpt`, timeout: 120 },
     ] }] } }, null, 2)}\n`, "utf8");
   }
 }

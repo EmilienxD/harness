@@ -27,6 +27,15 @@ from subagents_runtime.delegation import (
 INVOCATION = re.compile(r"^[/\$](ask-agent(?:-to-(?:explore|prototype|websearch|brainstorm|implement|review))?|reply-to-agent)(?:\s|$)")
 STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
 
+def provider_from_argv(argv: list[str]) -> str | None:
+    """The provider the installer wired this hook into, or None if it didn't say."""
+    for token in argv:
+        if token == "--claude":
+            return "claude"
+        if token == "--chatgpt":
+            return "chatgpt"
+    return None
+
 
 def _context(event: str, text: str) -> dict[str, Any]:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
@@ -182,7 +191,7 @@ def handle(payload: dict[str, Any], provider: str | None = None) -> dict[str, An
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-        provider = sys.argv[1] if len(sys.argv) > 1 else None
+        provider = provider_from_argv(sys.argv[1:])
         output = handle(payload, provider) if isinstance(payload, dict) else None
         if output is not None:
             print(json.dumps(output))

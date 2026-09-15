@@ -14,7 +14,7 @@ Run a pinned revision of the ephemeral installer:
 uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness
 ```
 
-The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes.
+The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall.
 
 For scripts and agents, use the non-interactive commands:
 
@@ -33,7 +33,7 @@ uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness up
 uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness uninstall commit
 ```
 
-Commands default to project scope in the current directory and both platforms. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. Run `harness --help` for the complete CLI.
+Commands default to project scope in the current directory and both platforms. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. `install` and `upgrade` fail rather than replace files Harness does not own; rerun them with `--overwrite` to take those files over. Run `harness --help` for the complete CLI.
 
 ## Reference
 
@@ -57,9 +57,9 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis in chat. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
 
-- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Claude Code also gets `copy-message-as-issue` for publishing the latest reviewed response.
+- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Use `publish-issues --discard-current` to discard the current session's drafts, `publish-issues --gc --dry` to preview abandoned gateway data, or `publish-issues --gc --older-than 30d` to explicitly discard drafts older than a duration. Unknown files and ambiguous publication-recovery records are retained and reported. Claude Code and ChatGPT also get `copy-message-as-issue`, which publishes the latest reviewed response directly without creating a draft or touching `.issues-gateway/`.
 
-- **`issue-readers`**: Installs `address-this` and `review-this`, plus hooks that prepare bounded issue or commit context. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
+- **`issue-readers`**: Installs `address-this` and `review-this`, plus a hook that prepares bounded issue or commit context. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
 
 - **`commit`**: `/commit <message>` stages the files changed by the current session and commits them without another model call. Add `--dry` to preview or `--ai` to generate a message through a direct Gemini request. Everything except `--ai` is local and needs no API key.
 

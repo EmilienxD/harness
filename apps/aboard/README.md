@@ -13,7 +13,9 @@ issues and pull requests. An authenticated loopback bridge carries lifecycle eve
 ## Visible sessions
 
 Initialize the project once, then use **Run Agent** to choose Claude or ChatGPT and open an empty, attended
-terminal. Each provider's command, model, and reasoning effort come from `.harness/launch.json`. Aboard reads
+terminal. The **Run Agent** view above the Fleet lists **Run Claude Code** and **Run Codex**; clicking either
+opens the same session with that provider already chosen. Each provider's command, model, and reasoning
+effort come from `.harness/launch.json`. Aboard reads
 that file for every new launch, resume, or reopen, so existing processes keep their configuration while
 future sessions use your latest choices.
 
@@ -110,7 +112,8 @@ Discard follows the configured cleanup policy and never removes dirty or moved w
 Non-launch settings resolve from VS Code workspace settings, then `.abd/settings.json`, then user or profile settings and defaults. AUTO RUN freezes RUN-specific settings for recovery; it reads launch configuration again whenever it starts or resumes an agent.
 
 The scaffold configures both providers. Claude is only the default for AUTO RUN; **Run Agent** asks for a
-provider explicitly, and reopening follows the provider stored with the session:
+provider explicitly, the **Run Claude Code** and **Run Codex** rows each name one, and reopening follows the
+provider stored with the session:
 
 ```json
 {

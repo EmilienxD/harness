@@ -123,12 +123,9 @@ async function stagePayload(packageRoot: string, projectRoot: string, python: st
   const stateRoot = join(claudeRoot, "harness-redirect-subagents");
   await mkdir(hooksRoot, { recursive: true });
   await mkdir(stateRoot, { recursive: true });
-  for (const name of [
-    "rs_io.py",
-    "redirect_subagents_deny_PreToolUse_hook.py",
-    "redirect_subagents_notify_PostToolUse_hook.py",
-    "redirect_subagents_wait_hook.py",
-  ]) await copyFile(join(sourceRoot, name), join(hooksRoot, name));
+  for (const name of ["rs_io.py", "redirect_subagents_hook.py"]) {
+    await copyFile(join(packageRoot, name), join(hooksRoot, name));
+  }
   await copyFile(join(sourceRoot, "gitignore.template"), join(stateRoot, ".gitignore"));
   await copyFile(join(sourceRoot, "subagents.example.json"), join(stateRoot, "subagents.json"));
   await writeFile(join(stateRoot, "subagents.json"), `${JSON.stringify({

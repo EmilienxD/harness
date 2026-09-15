@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { ProgressLocation, RelativePattern, Uri, commands, env, window, workspace } from "vscode";
+import { ProgressLocation, RelativePattern, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 
 
@@ -75,6 +75,7 @@ const SESSION_LIVENESS_POLL_MS = 5_000;
 import { CachingGitClient, ProcessGitClient, type GitClient } from "./git/client.js";
 import { AboardBranchCleanup, ProcessAboardBranchRepository } from "./git/branch-cleanup.js";
 import { registerBranchCleanupCommand } from "./vscode/branch-cleanup.js";
+import { registerLaunchPanel, type LaunchAction } from "./vscode/launch-panel.js";
 import { AutoRunEngine } from "./auto/engine.js";
 import { closeSettledAutoRunTerminal } from "./auto/terminal-cleanup.js";
 import { WorktreeRunWorkspaces } from "./auto/worktree.js";
@@ -633,22 +634,27 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // Disposed through subscriptions like every other resource; `deactivate` also
   // awaits it so queued writes are flushed on a normal shutdown.
   context.subscriptions.push({ dispose: () => void persistence?.dispose() });
-  const runAgent = async (): Promise<void> => {
+  const providers = {
+    claude: { label: "Claude", description: "Claude Code", provider: "claude" as const },
+    chatgpt: { label: "ChatGPT", description: "Codex CLI", provider: "chatgpt" as const },
+  };
+  const runAgentOn = async (choice: (typeof providers)[keyof typeof providers]): Promise<void> => {
     if (!requireInitialized()) return;
     try {
-      const selected = await window.showQuickPick([
-        { label: "Claude", description: "Claude Code", provider: "claude" as const },
-        { label: "ChatGPT", description: "Codex CLI", provider: "chatgpt" as const },
-      ], { placeHolder: "Choose the provider for this agent" });
-      if (selected === undefined) return;
       await coordinator.launchInteractive({
         type: "interactive",
-        description: `${selected.label} interactive`,
-        configuration: await launchFile.getFor(selected.provider, "interactive"),
+        description: `${choice.label} interactive`,
+        configuration: await launchFile.getFor(choice.provider, "interactive"),
       }, "user");
     } catch (error) {
       void window.showErrorMessage(error instanceof Error ? error.message : "Unable to run agent");
     }
+  };
+  const runAgent = async (): Promise<void> => {
+    if (!requireInitialized()) return;
+    const selected = await window.showQuickPick(Object.values(providers), { placeHolder: "Choose the provider for this agent" });
+    if (selected === undefined) return;
+    await runAgentOn(selected);
   };
   const reconcileStaleSessions = (): void => {
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
@@ -759,6 +765,22 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (confirmed === "Update") await scaffold();
     }),
     commands.registerCommand("aboard.runAgent", runAgent),
+    // The rows above the fleet skip the picker: each one already names its provider.
+    commands.registerCommand("aboard.runClaudeCode", () => runAgentOn(providers.claude)),
+    commands.registerCommand("aboard.runCodex", () => runAgentOn(providers.chatgpt)),
+    registerLaunchPanel({
+      registerTreeDataProvider: (viewId, provider) => window.registerTreeDataProvider<LaunchAction>(viewId, {
+        getChildren: (node) => [...provider.getChildren(node)],
+        getTreeItem: (node) => {
+          const row = provider.getTreeItem(node);
+          const item = new TreeItem(row.label, TreeItemCollapsibleState.None);
+          item.iconPath = new ThemeIcon(row.icon);
+          item.contextValue = row.contextValue;
+          item.command = { ...row.command };
+          return item;
+        },
+      }),
+    }),
     registerBranchCleanupCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, async () => {
         if (!requireInitialized()) return;

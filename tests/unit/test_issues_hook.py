@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import portalocker
@@ -27,7 +28,7 @@ HOOK = (
 )
 CLAUDE_ADAPTER = (
     Path(__file__).resolve().parents[2]
-    / "harness" / "building" / "issue-writers" / "claude" / "publish_issues_UserPromptSubmit_hook.py"
+    / "harness" / "building" / "issue-writers" / "issue_writers_hook.py"
 )
 
 sys.path.insert(0, str(HOOK.parent))
@@ -1229,6 +1230,20 @@ def test_notice_accumulates_across_runs_and_is_delivered_once(tmp_path):
     assert "pending_notice" not in _state(gateway)
 
 
+def test_notice_storage_is_capped_and_tracks_omitted_entries(tmp_path):
+    gateway = _gateway(tmp_path)
+    hook.queue_notice(
+        [{"number": str(n), "title": f"Issue {n}", "labels": []} for n in range(75)],
+        0,
+        gateway,
+    )
+
+    pending = _state(gateway)["pending_notice"]
+    assert len(pending["created"]) == hook.MAX_NOTICE_ENTRIES
+    assert pending["omitted"] == 25
+    assert "and 25 more" in hook.flush_notice(gateway)
+
+
 def test_nothing_published_queues_nothing(tmp_path):
     gateway = _gateway(tmp_path)
     hook.queue_notice([], 0, gateway)
@@ -1247,6 +1262,51 @@ def test_corrupt_state_degrades_to_empty(tmp_path):
     gateway = tmp_path / ".issues-gateway"
     gateway.mkdir()
     (gateway / hook.STATE_NAME).write_text("[]", encoding="utf-8")
+    assert hook.seed_from_state(gateway) == {}
+
+
+def test_empty_state_file_is_removed_but_lock_is_retained(tmp_path):
+    gateway = _gateway(tmp_path)
+    hook.queue_notice([{"number": "42", "title": "T", "labels": []}], 0, gateway)
+    assert hook.flush_notice(gateway)
+    assert not (gateway / hook.STATE_NAME).exists()
+    assert (gateway / hook.LOCK_NAME).exists()
+
+
+def test_legacy_state_is_migrated_once_and_temp_is_purged(tmp_path):
+    gateway = _gateway(tmp_path)
+    batch = gateway / "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    batch.mkdir()
+    (batch / "issue-0.md").write_text(
+        f"# Child\n\n> mode:afk\n\nBlocked by {SID}/0\n", encoding="utf-8"
+    )
+    hook._write_json_dict(gateway / hook.LEGACY_LEDGER_NAME, {f"{SID}/0": {"number": "42"}})
+    hook._write_json_dict(
+        gateway / hook.LEGACY_NOTICE_NAME,
+        {"created": [{"number": "42", "title": "T", "labels": []}], "failed": 0},
+    )
+    (gateway / ".state.tmp").write_text("leftover", encoding="utf-8")
+
+    hook.maintain_gateway(gateway)
+
+    assert hook.seed_from_state(gateway) == {f"{SID}/0": "42"}
+    assert not (gateway / hook.LEGACY_LEDGER_NAME).exists()
+    assert not (gateway / hook.LEGACY_NOTICE_NAME).exists()
+    assert not (gateway / ".state.tmp").exists()
+
+
+def test_published_entries_are_pruned_after_no_draft_references_them(tmp_path):
+    gateway = _gateway(tmp_path)
+    other = gateway / "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    other.mkdir()
+    (other / "issue-0.md").write_text(f"# Child\n\n> mode:afk\n\nBlocked by {SID}/0\n")
+    hook.record_published(f"{SID}/0", {"number": "42"}, gateway)
+
+    hook.prune_published(gateway)
+    assert f"{SID}/0" in hook.seed_from_state(gateway)
+
+    (other / "issue-0.md").write_text("# Child\n\n> mode:afk\n\nBlocked by #42\n")
+    hook.prune_published(gateway)
     assert hook.seed_from_state(gateway) == {}
 
 
@@ -1304,6 +1364,39 @@ def test_record_published_warns_instead_of_clobbering_locked_state(tmp_path):
     assert hook.seed_from_state(gateway) == {}
 
 
+def test_publication_uses_one_reusable_gateway_lock(tmp_path):
+    batch = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n").parent
+    with hook.publication_lock(batch) as acquired:
+        assert acquired
+    assert (batch.parent / hook.PUBLISH_LOCK_NAME).exists()
+    assert list(batch.parent.glob(".publish-*.lock")) == []
+
+
+def test_discard_current_requires_explicit_command_and_keeps_stray_files(tmp_path, monkeypatch):
+    draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
+    stray = draft.parent / "notes.txt"
+    stray.write_text("mine", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = hook.run_publish_command("/publish-issues --discard-current", SID)
+
+    assert "Discarded 1 draft" in result
+    assert not draft.exists()
+    assert stray.exists()
+
+
+def test_gc_dry_reports_old_drafts_without_deleting_them(tmp_path, monkeypatch):
+    draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
+    old = time.time() - 3 * 86400
+    os.utime(draft, (old, old))
+    monkeypatch.chdir(tmp_path)
+
+    result = hook.run_publish_command("/publish-issues --gc --dry --older-than 2d", SID)
+
+    assert "Would discard old draft" in result
+    assert draft.exists()
+
+
 def test_publish_under_state_contention_keeps_draft_without_creating(tmp_path, monkeypatch):
     created = _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
@@ -1318,7 +1411,7 @@ def test_publish_under_state_contention_keeps_draft_without_creating(tmp_path, m
     assert (count, failures) == (0, 1)
     assert (batch / "issue-0.md").exists()
     assert created == []
-    assert any("could not reserve shared state" in line for line in report)
+    assert any("Another publisher" in line for line in report)
 
 
 def test_notice_stays_under_the_additional_context_cap(tmp_path):
@@ -1349,7 +1442,7 @@ def _run_hook(tmp_path: Path, prompt: str):
         filter(None, (str(HOOK.parent), env.get("PYTHONPATH", "")))
     )
     return subprocess.run(
-        [sys.executable, str(CLAUDE_ADAPTER)],
+        [sys.executable, str(CLAUDE_ADAPTER), "--claude"],
         input=json.dumps({"prompt": prompt, "session_id": SID}),
         capture_output=True,
         text=True,
@@ -1441,11 +1534,17 @@ def test_successful_publish_removes_empty_session_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(hook, "ensure_labels", lambda dry: [])
     _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
+    (draft.parent.parent / ".gitignore").write_text("*\n", encoding="utf-8")
 
     result = hook.publish_issues(False, SID)
 
     assert "Published 1 issue(s) successfully" in result
     assert not draft.parent.exists()
+    assert hook.flush_notice()
+    assert {path.name for path in draft.parent.parent.iterdir()} == {
+        ".gitignore",
+        hook.LOCK_NAME,
+    }
 
 
 def test_publish_only_creates_issues_from_the_current_session(tmp_path, monkeypatch):

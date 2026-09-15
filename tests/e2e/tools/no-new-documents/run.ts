@@ -32,9 +32,9 @@ export async function runNoNewDocumentsJourney(platform: Platform): Promise<NoNe
     const harnessRoot = await findHarnessRoot(process.cwd());
     const python = await pythonCommand();
     const hookRoot = join(projectRoot, platform === "claude" ? ".claude" : ".codex", "hooks");
-    const hookPath = join(hookRoot, "no_new_documents_PreToolUse_hook.py");
+    const hookPath = join(hookRoot, "no_new_documents_hook.py");
     await mkdir(hookRoot, { recursive: true });
-    await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "no_new_documents_PreToolUse_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "no_new_documents_hook.py"), hookPath);
     await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "no-new-documents.toml"), join(hookRoot, "no-new-documents.toml"));
 
     let finalText: string;
@@ -42,7 +42,7 @@ export async function runNoNewDocumentsJourney(platform: Platform): Promise<NoNe
       const configRoot = join(root, "claude-config");
       await mkdir(configRoot, { recursive: true });
       await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
-      await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Write|Bash|PowerShell", hooks: [{ type: "command", command: python, args: [hookPath] }] }] } }, null, 2)}\n`, "utf8");
+      await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Write|Bash|PowerShell", hooks: [{ type: "command", command: python, args: [hookPath, "--claude"] }] }] } }, null, 2)}\n`, "utf8");
       server = await startFakeAnthropicServer({ repoRoot: projectRoot, diagnosticsPath, scenarioCatalogHash, parseRequest: parseAnthropicMessagesRequest, transition: claudeTransition });
       const env = isolatedClaudeEnvironment(process.env, {
         ANTHROPIC_BASE_URL: server.baseUrl, ANTHROPIC_AUTH_TOKEN: server.authToken,
@@ -59,7 +59,7 @@ export async function runNoNewDocumentsJourney(platform: Platform): Promise<NoNe
       const events = parseStreamJson(result.stdout);
       finalText = findFinalText(events, result.stdout);
     } else {
-      await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash|apply_patch", hooks: [{ type: "command", command: `${python} \"${hookPath}\"` }] }] } }, null, 2)}\n`, "utf8");
+      await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash|apply_patch", hooks: [{ type: "command", command: `${python} \"${hookPath}\" --chatgpt` }] }] } }, null, 2)}\n`, "utf8");
       const codexServer = await startFakeOpenAiServer({ diagnosticsPath, scenarioCatalogHash, transition: codexTransition });
       server = codexServer;
       const codexHome = await prepareCodexHome({ root, baseUrl: codexServer.baseUrl, trustedProjects: [projectRoot], extraConfig: ["[features]", "hooks = true"] });

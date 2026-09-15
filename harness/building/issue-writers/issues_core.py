@@ -84,10 +84,12 @@ Design notes:
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import hashlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -109,6 +111,9 @@ with contextlib.suppress(ImportError):
 
 GATEWAY_DIR = Path(".issues-gateway")
 GH_DEADLINE: ContextVar[float | None] = ContextVar("issues_gh_deadline", default=None)
+PUBLICATION_STATE_LOCKED: ContextVar[Path | None] = ContextVar(
+    "issues_publication_state_locked", default=None
+)
 
 
 def run_gh(args, **kwargs):
@@ -130,17 +135,23 @@ STATE_NAME = ".state.json"
 # never replaced or renamed, so a lock on it always names the same file,
 # unlike the state file itself.
 LOCK_NAME = ".state.lock"
+PUBLISH_LOCK_NAME = LOCK_NAME
 
 
 @contextlib.contextmanager
 def file_lock(lock_path: Path):
     """Try an OS file lock that is released even if the process is killed."""
-    with lock_path.open("a+b") as lock:
-        if lock.tell() == 0:
-            lock.write(b"\0")
-            lock.flush()
-        lock.seek(0)
+    try:
+        lock = lock_path.open("a+b", buffering=0)
+    except OSError:
+        yield False
+        return
+    with lock:
         try:
+            if lock.tell() == 0:
+                lock.write(b"\0")
+                lock.flush()
+            lock.seek(0)
             if sys.platform == "win32":
                 msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
             else:
@@ -158,8 +169,17 @@ def file_lock(lock_path: Path):
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+@contextlib.contextmanager
 def publication_lock(batch_dir: Path):
-    return file_lock(batch_dir.parent / f".publish-{batch_dir.name}.lock")
+    """Serialize gateway mutations on the one stable, reusable lock file."""
+    lock_path = (batch_dir.parent / LOCK_NAME).resolve()
+    with file_lock(lock_path) as acquired:
+        token = PUBLICATION_STATE_LOCKED.set(lock_path) if acquired else None
+        try:
+            yield acquired
+        finally:
+            if token is not None:
+                PUBLICATION_STATE_LOCKED.reset(token)
 
 # Legacy files from versions before the state file was consolidated. They are
 # read as migration inputs only.
@@ -220,6 +240,8 @@ FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
 def prepare_drafting_context(root: Path, session_id: str) -> str:
     """Prepare one draft batch and return the values skills must use."""
     gateway = root / GATEWAY_DIR
+    gateway.mkdir(parents=True, exist_ok=True)
+    maintain_gateway(gateway)
     batch = gateway / session_id
     batch.mkdir(parents=True, exist_ok=True)
     ignore = gateway / ".gitignore"
@@ -358,22 +380,46 @@ def _locked_state(gateway_dir: Path = GATEWAY_DIR):
     if not gateway_dir.is_dir():
         yield path, {}
         return
+    if PUBLICATION_STATE_LOCKED.get() == (gateway_dir / LOCK_NAME).resolve():
+        state = _read_state(gateway_dir)
+        _migrate_generated_state(gateway_dir, path, state)
+        yield path, state
+        return
     if "portalocker" not in sys.modules:
         with file_lock(gateway_dir / LOCK_NAME) as acquired:
-            yield (path, _read_state(gateway_dir)) if acquired else (None, {})
+            if not acquired:
+                yield None, {}
+            else:
+                state = _read_state(gateway_dir)
+                _migrate_generated_state(gateway_dir, path, state)
+                yield path, state
         return
     lock_path = gateway_dir / LOCK_NAME
     lock = portalocker.Lock(str(lock_path), mode="a", timeout=10, fail_when_locked=True)
     try:
         lock_path.touch(exist_ok=True)
-        lock.acquire()
+        acquired_lock = lock.acquire()
+        if lock_path.stat().st_size == 0:
+            acquired_lock.write("\0")
+            acquired_lock.flush()
     except (portalocker.exceptions.LockException, OSError):
         yield None, {}
         return
     try:
-        yield path, _read_state(gateway_dir)
+        state = _read_state(gateway_dir)
+        _migrate_generated_state(gateway_dir, path, state)
+        yield path, state
     finally:
         lock.release()
+
+
+def _migrate_generated_state(gateway_dir: Path, path: Path, state: dict) -> None:
+    legacy = [gateway_dir / LEGACY_LEDGER_NAME, gateway_dir / LEGACY_NOTICE_NAME]
+    if any(item.exists() for item in legacy):
+        _write_state(path, state)
+        for item in legacy:
+            item.unlink(missing_ok=True)
+    (gateway_dir / ".state.tmp").unlink(missing_ok=True)
 
 
 def _read_state(gateway_dir: Path = GATEWAY_DIR) -> dict:
@@ -423,7 +469,68 @@ def _write_state(path: Path, state: dict) -> None:
             for key, value in inflight.items()
             if isinstance(key, str) and isinstance(value, dict)
         }
-    _write_json_dict(path, cleaned)
+    if cleaned:
+        _write_json_dict(path, cleaned)
+    else:
+        path.unlink(missing_ok=True)
+        path.with_name(path.stem + ".tmp").unlink(missing_ok=True)
+
+
+def _draft_reference_keys(gateway_dir: Path) -> set[str]:
+    """Return gateway keys still mentioned by user-authored Markdown drafts."""
+    referenced: set[str] = set()
+    for draft in gateway_dir.glob("*/issue-*.md"):
+        try:
+            text = draft.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        referenced.update(f"{match.group(1)}/{match.group(2)}" for match in REF_PATTERN.finditer(text))
+    return referenced
+
+
+def prune_published(gateway_dir: Path = GATEWAY_DIR) -> None:
+    """Drop resolver entries once neither drafts nor recovery state need them."""
+    referenced = _draft_reference_keys(gateway_dir)
+    with _locked_state(gateway_dir) as (path, state):
+        if path is None:
+            return
+        published = state.get("published")
+        inflight = state.get("inflight")
+        protected = set(inflight) if isinstance(inflight, dict) else set()
+        if isinstance(published, dict):
+            state["published"] = {
+                key: value
+                for key, value in published.items()
+                if key in referenced or key in protected
+            }
+        try:
+            _write_state(path, state)
+        except OSError:
+            pass
+
+
+def maintain_gateway(gateway_dir: Path = GATEWAY_DIR) -> None:
+    """Migrate generated legacy state and remove safe crash leftovers."""
+    if not gateway_dir.is_dir():
+        return
+    with _locked_state(gateway_dir) as (path, state):
+        if path is None:
+            return
+        legacy_present = any(
+            (gateway_dir / name).exists()
+            for name in (LEGACY_LEDGER_NAME, LEGACY_NOTICE_NAME)
+        )
+        if legacy_present:
+            try:
+                _write_state(path, state)
+            except OSError:
+                return
+            for name in (LEGACY_LEDGER_NAME, LEGACY_NOTICE_NAME):
+                (gateway_dir / name).unlink(missing_ok=True)
+        (gateway_dir / ".state.tmp").unlink(missing_ok=True)
+    prune_published(gateway_dir)
+    for batch in (path for path in gateway_dir.iterdir() if path.is_dir()):
+        delete_empty_batch_dir(batch)
 
 
 def record_published(key: str, entry: dict, gateway_dir: Path = GATEWAY_DIR) -> bool:
@@ -482,7 +589,7 @@ def queue_notice(created: list[dict], failed: int, gateway_dir: Path = GATEWAY_D
     """
     if not created and not failed:
         return
-    pending = {"created": [], "failed": 0}
+    pending = {"created": [], "failed": 0, "omitted": 0}
     with _locked_state(gateway_dir) as (path, state):
         if path is None:
             return
@@ -492,8 +599,13 @@ def queue_notice(created: list[dict], failed: int, gateway_dir: Path = GATEWAY_D
                 pending["created"] = existing["created"]
             if isinstance(existing.get("failed"), int):
                 pending["failed"] = existing["failed"]
-        pending["created"].extend(created)
+            if isinstance(existing.get("omitted"), int):
+                pending["omitted"] = existing["omitted"]
+        available = max(0, MAX_NOTICE_ENTRIES - len(pending["created"]))
+        pending["created"].extend(created[:available])
+        pending["omitted"] += max(0, len(created) - available)
         pending["failed"] += failed
+        pending["queued_at"] = datetime.now(timezone.utc).isoformat()
         state["pending_notice"] = pending
         try:
             _write_state(path, state)
@@ -501,7 +613,7 @@ def queue_notice(created: list[dict], failed: int, gateway_dir: Path = GATEWAY_D
             pass
 
 
-def format_notice(created: list[dict], failed: int) -> str:
+def format_notice(created: list[dict], failed: int, omitted: int = 0) -> str:
     """The text injected into the agent's context on the next prompt."""
     lines = [
         "/publish-issues ran just before this message. It is a hook, so it "
@@ -514,7 +626,7 @@ def format_notice(created: list[dict], failed: int) -> str:
             labels = ", ".join(entry.get("labels") or []) or "no labels"
             title = entry.get("title") or "(untitled)"
             lines.append(f"- #{entry.get('number')} \"{title}\" [{labels}]")
-        remaining = len(created) - MAX_NOTICE_ENTRIES
+        remaining = max(0, len(created) - MAX_NOTICE_ENTRIES) + omitted
         if remaining > 0:
             lines.append(f"- ... and {remaining} more")
     if failed:
@@ -557,9 +669,13 @@ def flush_notice(gateway_dir: Path = GATEWAY_DIR) -> str | None:
     created = created if isinstance(created, list) else []
     failed = pending.get("failed")
     failed = failed if isinstance(failed, int) else 0
-    if not created and not failed:
+    omitted = pending.get("omitted")
+    omitted = omitted if isinstance(omitted, int) else 0
+    if not created and not failed and not omitted:
         return None
-    return format_notice(created, failed)
+    notice = format_notice(created, failed, omitted)
+    prune_published(gateway_dir)
+    return notice
 
 
 def ensure_labels(dry: bool) -> list[str]:
@@ -1718,6 +1834,142 @@ def _publish_batch(
     return published, len(failed_entries)
 
 
+def parse_duration(value: str) -> float:
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([smhdw])", value.strip().lower())
+    if not match:
+        raise ValueError("duration must use s, m, h, d, or w (for example 30d)")
+    unit = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[match.group(2)]
+    return float(match.group(1)) * unit
+
+
+def discard_current(session_id: str, gateway_dir: Path = GATEWAY_DIR) -> str:
+    if not SESSION_ID_PATTERN.fullmatch(session_id):
+        return "Invalid or missing issues session id. Nothing was discarded."
+    batch = gateway_dir / session_id
+    drafts = gather_draft_files(batch) if batch.is_dir() else []
+    for draft in drafts:
+        draft.unlink()
+    delete_empty_batch_dir(batch)
+    prune_published(gateway_dir)
+    return f"Discarded {len(drafts)} draft(s) from the current session."
+
+
+def _entry_age(entry: dict, now: float) -> float | None:
+    value = entry.get("started_at")
+    if not isinstance(value, str):
+        return None
+    try:
+        return now - datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def reconcile_old_inflight(gateway_dir: Path, older_than: float, report: list[str]) -> None:
+    """Inspect old reservations remotely; ambiguous outcomes are always retained."""
+    now = time.time()
+    with _locked_state(gateway_dir) as (path, state):
+        if path is None:
+            report.append("Could not lock recovery state; no recovery records changed.")
+            return
+        inflight = state.get("inflight")
+        if not isinstance(inflight, dict):
+            return
+        for key, entry in list(inflight.items()):
+            age = _entry_age(entry, now)
+            if age is None or age < older_than:
+                continue
+            if entry.get("issue_url"):
+                report.append(f"Retained unresolved recovery record {key}: {entry['issue_url']}")
+                continue
+            digest = entry.get("content_sha256")
+            repository = entry.get("repository")
+            started = entry.get("started_at")
+            part_count = entry.get("part_count")
+            if not all((digest, repository, started, part_count)):
+                report.append(f"Retained recovery record {key}: insufficient data for reconciliation")
+                continue
+            found, remote = gh_find_reserved_issue(
+                str(repository), str(started), part_marker(key, str(digest), 1, int(part_count))
+            )
+            if found and isinstance(remote, dict):
+                entry["issue_url"] = remote.get("url")
+                entry["issue_number"] = remote.get("number")
+                report.append(f"Reconciled {key} to {remote.get('url')}; retained for completion")
+            elif not found:
+                report.append(f"Retained recovery record {key}: remote inspection failed: {remote}")
+            elif entry.get("creation_attempted"):
+                report.append(f"Retained recovery record {key}: prior create outcome cannot be proven")
+            else:
+                del inflight[key]
+                report.append(f"Removed unused recovery reservation {key}")
+        state["inflight"] = inflight
+        _write_state(path, state)
+
+
+def garbage_collect(
+    *, dry: bool, older_than: float, gateway_dir: Path = GATEWAY_DIR
+) -> str:
+    if not gateway_dir.is_dir():
+        return "No .issues-gateway/ folder found. Nothing to clean."
+    report = ["Gateway cleanup preview" if dry else "Cleaning issues gateway", ""]
+    cutoff = time.time() - older_than
+    with publication_lock(gateway_dir / "gc") as acquired:
+        if not acquired:
+            return "Another publisher is using the issues gateway. Retry cleanup later."
+        if not dry:
+            maintain_gateway(gateway_dir)
+            reconcile_old_inflight(gateway_dir, older_than, report)
+            for old_lock in gateway_dir.glob(".publish-*.lock"):
+                old_lock.unlink(missing_ok=True)
+        for batch in (path for path in gateway_dir.iterdir() if path.is_dir()):
+            for draft in gather_draft_files(batch):
+                if draft.stat().st_mtime <= cutoff:
+                    if dry:
+                        report.append(f"Would discard old draft: {draft.relative_to(gateway_dir)}")
+                    else:
+                        draft.unlink()
+                        report.append(f"Discarded old draft: {draft.relative_to(gateway_dir)}")
+            unknown = [path for path in batch.iterdir() if path.is_file() and not FILENAME_PATTERN.match(path.name)]
+            for path in unknown:
+                report.append(f"Retained unknown file: {path.relative_to(gateway_dir)}")
+            if not dry:
+                delete_empty_batch_dir(batch)
+        if not dry:
+            prune_published(gateway_dir)
+    if len(report) == 2:
+        report.append("Nothing eligible for cleanup.")
+    return "\n".join(report)
+
+
+def run_publish_command(prompt: str, session_id: str) -> str:
+    """Parse and execute the hook's user-facing publish maintenance interface."""
+    try:
+        tokens = shlex.split(prompt)
+    except ValueError as exc:
+        return f"Invalid publish command: {exc}"
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    parser.add_argument("--dry", action="store_true")
+    parser.add_argument("--discard-current", action="store_true")
+    parser.add_argument("--gc", action="store_true")
+    parser.add_argument("--older-than", default="30d")
+    try:
+        options, extras = parser.parse_known_args(tokens[1:])
+        if extras:
+            raise ValueError(f"unknown option: {' '.join(extras)}")
+        age = parse_duration(options.older_than)
+    except (argparse.ArgumentError, ValueError) as exc:
+        return f"Invalid publish command: {exc}"
+    if options.discard_current:
+        if options.gc or options.dry or "--older-than" in tokens:
+            return "Invalid publish command: --discard-current cannot be combined with cleanup options."
+        return discard_current(session_id)
+    if options.gc:
+        return garbage_collect(dry=options.dry, older_than=age)
+    if "--older-than" in tokens:
+        return "Invalid publish command: --older-than requires --gc."
+    return publish_issues(options.dry, session_id)
+
+
 def publish_issues(dry: bool, session_id: str) -> str:
     """Publish drafts belonging to the current agent session only."""
     if not GATEWAY_DIR.is_dir():
@@ -1725,6 +1977,9 @@ def publish_issues(dry: bool, session_id: str) -> str:
             "No .issues-gateway/ folder found. Run /draft-issue, /draft-issues, "
             "or /draft-audit-issues first."
         )
+
+    if not dry:
+        maintain_gateway(GATEWAY_DIR)
 
     if not SESSION_ID_PATTERN.fullmatch(session_id):
         return "Invalid or missing issues session id. Nothing was published."
@@ -1768,6 +2023,7 @@ def publish_issues(dry: bool, session_id: str) -> str:
 
     if not dry:
         queue_notice(created, total_failed)
+        prune_published(GATEWAY_DIR)
 
     if dry:
         report.append(

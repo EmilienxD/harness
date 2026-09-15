@@ -24,7 +24,7 @@ export async function runOnEditReminderJourney(): Promise<OnEditReminderJourneyR
   const projectRoot = join(root, "project");
   const claudeRoot = join(projectRoot, ".claude");
   const configRoot = join(root, "claude-config");
-  const hookPath = join(claudeRoot, "hooks", "on_edit_reminder_PostToolUse_hook.py");
+  const hookPath = join(claudeRoot, "hooks", "on_edit_reminder_hook.py");
   const diagnosticsPath = join(root, "structural-diagnostics.json");
   const sessionId = randomUUID();
   const markerPath = join(tmpdir(), `claude_on_edit_reminder_${sessionId}.marker`);
@@ -33,11 +33,11 @@ export async function runOnEditReminderJourney(): Promise<OnEditReminderJourneyR
     await mkdir(dirname(hookPath), { recursive: true });
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
-    await copyFile(join(harnessRoot, "harness", "guards", "on-edit-reminder", "claude", "on_edit_reminder_PostToolUse_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness", "guards", "on-edit-reminder", "on_edit_reminder_hook.py"), hookPath);
     await writeFile(join(projectRoot, "target.txt"), TARGET_BEFORE, "utf8");
     await writeFile(join(projectRoot, "GUIDE.md"), "E2E GUIDE: the value must be compliant.\n", "utf8");
     await writeFile(join(claudeRoot, "on-edit-reminder.rules"), "target.txt -> GUIDE.md\n", "utf8");
-    await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", command: await pythonCommand(), args: [hookPath] }] }] } }, null, 2)}\n`, "utf8");
+    await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", command: await pythonCommand(), args: [hookPath, "--claude"] }] }] } }, null, 2)}\n`, "utf8");
     await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
 
     server = await startFakeAnthropicServer({ repoRoot: projectRoot, diagnosticsPath, scenarioCatalogHash, parseRequest, transition });

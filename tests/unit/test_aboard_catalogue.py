@@ -22,7 +22,7 @@ def install(name, tmp_path, platform="claude"):
 @pytest.mark.parametrize("platform", ["claude", "chatgpt"])
 def test_auto_hook_blocks_standalone_invocation(tmp_path, platform):
     target = install("auto", tmp_path, platform)
-    script = target.install_root / "hooks/auto.py"
+    script = target.install_root / "hooks/auto_hook.py"
     environment = os.environ.copy()
     for name in ("ABOARD_BRIDGE_PORT", "ABOARD_BRIDGE_TOKEN", "ABOARD_SESSION_ID"):
         environment.pop(name, None)
@@ -46,12 +46,12 @@ def test_auto_installs_one_shared_skill_body_for_both_platforms(tmp_path):
     assert chatgpt_skill == claude_skill
     hooks = json.loads(chatgpt.settings_path.read_text(encoding="utf-8"))
     command = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
-    assert ".codex/hooks/auto.py" in command
+    assert ".codex/hooks/auto_hook.py" in command
 
 
 def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeypatch):
     target = install("auto", tmp_path, "chatgpt")
-    script = target.install_root / "hooks" / "auto.py"
+    script = target.install_root / "hooks" / "auto_hook.py"
     spec = importlib.util.spec_from_file_location("auto_chatgpt_hook_test", script)
     assert spec is not None and spec.loader is not None
     hook = importlib.util.module_from_spec(spec)

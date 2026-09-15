@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
 """
-Claude Code hook that sleeps through a subscription usage-limit reset.
+Hook that sleeps through a subscription usage-limit reset.
 
-Registered on two events -- `UserPromptSubmit` (before the turn's first model
-request) and `PostToolBatch` (once per batch, immediately before the next
-model request). Both are the last moment before Claude Code talks to the API,
-which is the only useful place to stall.
+The installer passes `--claude` or `--chatgpt`, which selects the provider
+section below: how usage is read, where state lives, and what the user is
+called. Everything after the reading -- caching, the verdict, the wait, the
+notices -- is the same on both.
 
-Claude Code does not render a hook's output until every hook on the event has
+Registered on the events that immediately precede a model request, which is
+the only useful place to stall: `UserPromptSubmit` and `PostToolBatch` on
+Claude Code, `UserPromptSubmit` and `PostToolUse` on ChatGPT.
+
+Neither product renders a hook's output until every hook on the event has
 finished. The process therefore sends a platform-native desktop notification
-itself immediately before sleeping; returning `systemMessage` or
-`terminalSequence` there would leave the announcement buffered until the wait
-was already over.
+itself immediately before sleeping; returning `systemMessage` there would
+leave the announcement buffered until the wait was already over.
 
 The waiter blocks -- literally `time.sleep` -- until the window resets,
 re-polling along the way so an early reset, a cancelled subscription, or a ban
 ends the wait promptly. The session then continues on its own instead of dying
 with "limit reached".
 
-Everything fails open. The hook is only meaningful for a Claude subscription,
-so any sign of another credential path (API key, bearer gateway, Bedrock,
-Vertex, Foundry), a missing OAuth token, or an initially unreadable usage
-response means exit 0 immediately and let Claude Code handle its own errors.
-Once a confirmed wait has begun, a transient read failure is not mistaken for
-a reset: the last announced reset remains authoritative until it arrives. It
-never blocks a tool call, never writes to the model's context, and never waits
-longer than `USAGE_LIMIT_WAIT_MAX_WAIT` (7 days: a reset further out than that
-means there is no subscription behind this session).
+Everything fails open. The hook is only meaningful for a subscription, so any
+sign of another credential path (API key, bearer gateway, Bedrock, Vertex,
+Foundry), a missing token, or an initially unreadable usage response means
+exit 0 immediately and let the product handle its own errors. Once a confirmed
+wait has begun, a transient read failure is not mistaken for a reset: the last
+announced reset remains authoritative until it arrives. It never blocks a tool
+call, never writes to the model's context, and never waits longer than
+`USAGE_LIMIT_WAIT_MAX_WAIT` (7 days: a reset further out than that means there
+is no subscription behind this session).
 
 Configuration is environment-only; see the README for the full table.
 """
@@ -34,32 +37,30 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, Iterator, NamedTuple
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
-USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CLAUDE = "claude"
+CHATGPT = "chatgpt"
 
-# Verified against a live subscription session. `anthropic-beta` is what makes
-# the endpoint accept an OAuth bearer token instead of an API key.
-USAGE_HEADERS = {
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "User-Agent": "claude-cli/2.1.233 (external, cli)",
-    "anthropic-beta": "oauth-2025-04-20",
-}
+# Set from argv by `main`; every provider-specific branch reads it.
+PROVIDER = CLAUDE
 
-# Environment variables that each mean "this session is not billed to a Claude
-# subscription". A subscription session sets none of them.
-API_KEY_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
-PROVIDER_ENV = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+# What the user calls the thing that is out of usage, and what the desktop
+# notification claims to be.
+PRODUCT = {CLAUDE: "Claude", CHATGPT: "Codex"}
+NOTIFIER = {CLAUDE: "Claude Code", CHATGPT: "Codex"}
 
 FALSEY = ("", "0", "false", "no", "off")
 
@@ -79,8 +80,8 @@ CLI_MIN_POLL_SECONDS = 300.0
 RELAXED_PERCENT = 90.0
 ALERT_CACHE_TTL = 30.0
 
-# An exhausted reading stays briefly reusable so simultaneous Claude Code
-# sessions do not all hit the usage endpoint at once.
+# An exhausted reading stays briefly reusable so simultaneous sessions do not
+# all hit the usage endpoint at once.
 BLOCKED_CACHE_TTL = 15.0
 
 # A notice older than this is forgotten, so the throttle file cannot grow
@@ -96,7 +97,8 @@ DEFAULTS = {
     "NOTIFY_EVERY": 600.0,
 }
 
-# `kind` values as the API spells them, mapped to what a human calls the window.
+# `kind` values as each provider spells them, mapped to what a human calls the
+# window. Claude reports all four; ChatGPT only ever reports the first two.
 WINDOW_LABELS = {
     "session": "5-hour",
     "weekly_all": "weekly",
@@ -123,6 +125,16 @@ class Notice(NamedTuple):
 
 # configuration
 
+def provider_from_argv(argv: list[str]) -> str:
+    """The provider the installer wired this hook into."""
+    for token in argv:
+        if token == "--" + CHATGPT:
+            return CHATGPT
+        if token == "--" + CLAUDE:
+            return CLAUDE
+    return CLAUDE
+
+
 def _env(name: str, default: str = "") -> str:
     return os.environ.get("USAGE_LIMIT_WAIT_" + name, default)
 
@@ -148,25 +160,6 @@ def _ignored_kinds() -> set[str]:
     return {part.strip().lower() for part in _env("IGNORE").split(",") if part.strip()}
 
 
-def third_party_session() -> bool:
-    """True when this session is billed to anything other than a subscription.
-
-    An API key or auth token counts whenever it is set to a non-empty value;
-    the provider switches are read as booleans, so `CLAUDE_CODE_USE_VERTEX=0`
-    is correctly read as "not on Vertex".
-    """
-    if any(os.environ.get(name, "").strip() for name in API_KEY_ENV):
-        return True
-    return any(os.environ.get(name, "").strip().lower() not in FALSEY for name in PROVIDER_ENV)
-
-
-def claude_dir() -> Path:
-    configured = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-    return Path(configured) if configured else Path.home() / ".claude"
-
-
-# credentials
-
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         with open(path, "r", encoding="utf-8") as handle:
@@ -174,6 +167,71 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _write_json(path: Path, data: Any) -> None:
+    temporary = path.with_suffix(".tmp.%d" % os.getpid())
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(temporary, path)
+    except (OSError, ValueError):
+        # This is bookkeeping. Losing it costs a request or a repeated notice,
+        # never a session.
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+
+# where each provider keeps its state
+
+def claude_dir() -> Path:
+    configured = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    return Path(configured) if configured else Path.home() / ".claude"
+
+
+def codex_dir() -> Path:
+    configured = os.environ.get("CODEX_HOME")
+    return Path(configured).expanduser() if configured else Path.home() / ".codex"
+
+
+def config_dir() -> Path:
+    return codex_dir() if PROVIDER == CHATGPT else claude_dir()
+
+
+# Claude: credentials, then the usage endpoint, then the CLI
+
+# Environment variables that each mean "this session is not billed to a Claude
+# subscription". A subscription session sets none of them.
+API_KEY_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+PROVIDER_ENV = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+
+# Verified against a live subscription session. `anthropic-beta` is what makes
+# the endpoint accept an OAuth bearer token instead of an API key.
+USAGE_HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "User-Agent": "claude-cli/2.1.233 (external, cli)",
+    "anthropic-beta": "oauth-2025-04-20",
+}
+
+
+def third_party_session() -> bool:
+    """True when this session is billed to anything other than a subscription.
+
+    An API key or auth token counts whenever it is set to a non-empty value;
+    the provider switches are read as booleans, so `CLAUDE_CODE_USE_VERTEX=0`
+    is correctly read as "not on Vertex". ChatGPT has no equivalent: Codex owns
+    its own credentials and the reader below simply fails to read anything.
+    """
+    if PROVIDER != CLAUDE:
+        return False
+    if any(os.environ.get(name, "").strip() for name in API_KEY_ENV):
+        return True
+    return any(os.environ.get(name, "").strip().lower() not in FALSEY for name in PROVIDER_ENV)
 
 
 def access_token() -> str | None:
@@ -213,9 +271,7 @@ def _keychain_token() -> str | None:
     return token if isinstance(token, str) and token else None
 
 
-# reading usage: the API, then the CLI
-
-def fetch_usage(token: str) -> dict[str, Any] | None:
+def fetch_claude_usage(token: str) -> dict[str, Any] | None:
     """The raw usage payload, or None on any failure at all."""
     headers = dict(USAGE_HEADERS, Authorization="Bearer " + token)
     try:
@@ -376,37 +432,194 @@ def read_usage_via_cli(now: float | None = None) -> dict[str, Any] | None:
     return snapshot_from_cli(result.stdout, now=now)
 
 
-def read_usage(force: bool = False, now: float | None = None) -> dict[str, Any] | None:
-    """The current snapshot, from cache when it is fresh enough.
-
-    Returns None when usage can't be read at all, which the caller treats as
-    "not our business" rather than as an error.
-    """
-    now = time.time() if now is None else now
-    if not force:
-        cached = read_cache(now)
-        if cached is not None:
-            return cached.get("snapshot")
-
+def read_claude_snapshot(now: float) -> dict[str, Any] | None:
     token = access_token()
     snapshot = None
     if token:
-        payload = fetch_usage(token)
+        payload = fetch_claude_usage(token)
         if payload is not None:
             snapshot = snapshot_from_api(payload)
     if snapshot is None:
         snapshot = read_usage_via_cli(now=now)
-
-    write_cache(snapshot, now)
     return snapshot
+
+
+# ChatGPT: usage through Codex's local app-server
+#
+# Reading through the app-server protocol leaves Codex responsible for
+# credential storage, token refresh, workspace selection, and the private
+# ChatGPT endpoint. The hook never reads or redeems reset tickets.
+
+APP_SERVER_TIMEOUT = 20.0
+
+
+def _app_server_messages() -> list[dict[str, Any]]:
+    return [
+        {
+            "method": "initialize",
+            "id": 1,
+            "params": {"clientInfo": {"name": "usage-limit-wait", "version": "1.2.0"}},
+        },
+        {"method": "notifications/initialized"},
+        {
+            "method": "account/rateLimits/read",
+            "id": 2,
+            "params": {
+                "supportsLunaReserve": False,
+                "excludeResetCreditDetails": True,
+            },
+        },
+    ]
+
+
+def _send_message(process: "subprocess.Popen[str]", message: dict[str, Any]) -> None:
+    if process.stdin is None:
+        raise OSError("Codex app-server stdin is unavailable")
+    process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+    process.stdin.flush()
+
+
+def _read_response(
+    lines: "queue.Queue[str | None]", request_id: int, deadline: float
+) -> dict[str, Any] | None:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            line = lines.get(timeout=remaining)
+        except queue.Empty:
+            return None
+        if line is None:
+            return None
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(message, dict) or message.get("id") != request_id:
+            continue
+        value = message.get("result")
+        return value if isinstance(value, dict) else None
+
+
+def fetch_chatgpt_usage() -> dict[str, Any] | None:
+    """Read rate limits through Codex without handling its credentials here."""
+    executable = shutil.which("codex")
+    if not executable:
+        return None
+    child_env = dict(os.environ, USAGE_LIMIT_WAIT_DISABLE="1")
+    process = None
+    try:
+        process = subprocess.Popen(
+            [executable, "app-server", "--stdio"],
+            text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=child_env,
+        )
+        lines: "queue.Queue[str | None]" = queue.Queue()
+
+        def read_stdout() -> None:
+            assert process is not None and process.stdout is not None
+            try:
+                for line in process.stdout:
+                    lines.put(line)
+            finally:
+                lines.put(None)
+
+        threading.Thread(target=read_stdout, daemon=True).start()
+        messages = _app_server_messages()
+        deadline = time.monotonic() + APP_SERVER_TIMEOUT
+        _send_message(process, messages[0])
+        if _read_response(lines, 1, deadline) is None:
+            return None
+        _send_message(process, messages[1])
+        _send_message(process, messages[2])
+        return _read_response(lines, 2, deadline)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    finally:
+        if process is not None:
+            try:
+                if process.stdin is not None:
+                    process.stdin.close()
+                process.terminate()
+                process.wait(timeout=2)
+            except (OSError, subprocess.SubprocessError):
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+
+
+def _bounded_percent(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if 0 <= number <= 100 else None
+
+
+def _epoch(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def snapshot_from_app_server(payload: dict[str, Any]) -> dict[str, Any] | None:
+    limits = payload.get("rateLimits")
+    if not isinstance(limits, dict):
+        return None
+    windows = []
+    for field, kind in (("primary", "session"), ("secondary", "weekly_all")):
+        raw = limits.get(field)
+        if not isinstance(raw, dict):
+            continue
+        percent = _bounded_percent(raw.get("usedPercent"))
+        if percent is None:
+            continue
+        windows.append({
+            "kind": kind,
+            "percent": percent,
+            "resets_at": _epoch(raw.get("resetsAt")),
+        })
+    if not windows:
+        return None
+
+    raw_credits = limits.get("credits")
+    credits = None
+    if isinstance(raw_credits, dict):
+        unlimited = raw_credits.get("unlimited") is True
+        has_credits = raw_credits.get("hasCredits") is True
+        try:
+            positive_balance = float(raw_credits.get("balance") or 0) > 0
+        except (TypeError, ValueError):
+            positive_balance = False
+        credits = {
+            "enabled": unlimited or has_credits or positive_balance,
+            "exhausted": not (unlimited or positive_balance),
+        }
+    return {"source": "codex-app-server", "windows": windows, "credits": credits}
+
+
+def read_chatgpt_snapshot(now: float) -> dict[str, Any] | None:
+    payload = fetch_chatgpt_usage()
+    return snapshot_from_app_server(payload) if payload is not None else None
 
 
 # cache
 
 def cache_path() -> Path:
     # Usage is per-account, not per-project, so the cache is global even when
-    # the hook itself was installed into one project's .claude/.
-    return claude_dir() / ".usage-limit-wait.cache.json"
+    # the hook itself was installed into one project's config directory.
+    return config_dir() / ".usage-limit-wait.cache.json"
 
 
 def cache_ttl(snapshot: dict[str, Any] | None) -> float:
@@ -458,19 +671,25 @@ def write_cache(snapshot: dict[str, Any] | None, now: float) -> None:
     _write_json(cache_path(), {"fetched_at": now, "snapshot": snapshot})
 
 
-def _write_json(path: Path, data: Any) -> None:
-    temporary = path.with_suffix(".tmp.%d" % os.getpid())
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(temporary, path)
-    except (OSError, ValueError):
-        # This is bookkeeping. Losing it costs a request or a repeated notice,
-        # never a session.
-        try:
-            temporary.unlink()
-        except OSError:
-            pass
+def read_usage(force: bool = False, now: float | None = None) -> dict[str, Any] | None:
+    """The current snapshot, from cache when it is fresh enough.
+
+    Returns None when usage can't be read at all, which the caller treats as
+    "not our business" rather than as an error.
+    """
+    now = time.time() if now is None else now
+    if not force:
+        cached = read_cache(now)
+        if cached is not None:
+            return cached.get("snapshot")
+
+    if PROVIDER == CHATGPT:
+        snapshot = read_chatgpt_snapshot(now)
+    else:
+        snapshot = read_claude_snapshot(now)
+
+    write_cache(snapshot, now)
+    return snapshot
 
 
 # decision
@@ -490,7 +709,7 @@ def evaluate(snapshot: dict[str, Any] | None) -> Verdict:
         credits = snapshot.get("credits")
         if isinstance(credits, dict) and credits.get("enabled") and not credits.get("exhausted"):
             # The user would rather pay than wait, and there is something to
-            # pay with: Claude Code keeps working on pay-as-you-go credits.
+            # pay with: the session keeps working on credits.
             return Verdict(False, None, None)
 
     threshold = _number("THRESHOLD")
@@ -548,18 +767,17 @@ def wait_for_reset(
         remaining = deadline - now()
         if remaining <= 0:
             break
-        # Sleep to the announced reset, but never past one poll: Anthropic
-        # hands out early resets, and a subscription can end mid-wait. The
-        # floor keeps an already-past reset from spinning on the network.
+        # Sleep to the announced reset, but never past one poll: providers hand
+        # out early resets, and a subscription can end mid-wait. The floor keeps
+        # an already-past reset from spinning on the network.
         until_reset = max(verdict.reset_at + GRACE_SECONDS - now(), MIN_SLEEP_SECONDS)
         sleep(min(until_reset, poll_interval(snapshot), remaining))
         refreshed = refresh()
         if refreshed is None:
-            # An exhausted account can make both the usage endpoint and the
-            # `claude -p /usage` fallback temporarily unreadable. Absence of a
-            # reading is not evidence that usage dropped. Keep the last valid
-            # verdict until the reset it announced, then fail open if it still
-            # cannot be verified.
+            # An exhausted account can make the usage reader temporarily
+            # unreadable. Absence of a reading is not evidence that usage
+            # dropped. Keep the last valid verdict until the reset it
+            # announced, then fail open if it still cannot be verified.
             if now() < verdict.reset_at + GRACE_SECONDS:
                 continue
             break
@@ -569,6 +787,42 @@ def wait_for_reset(
             waited_for = verdict.kind
 
     return now() - started, waited_for
+
+
+@contextmanager
+def exclusive_wait_lock() -> Iterator[None]:
+    """Serialize parallel ChatGPT PostToolUse waiters; OS locks vanish on exit."""
+    path = config_dir() / ".usage-limit-wait.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            deadline = time.monotonic() + _number("MAX_WAIT")
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise
+                    time.sleep(min(1.0, remaining))
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 # telling the user
@@ -615,44 +869,46 @@ def _clock(epoch: float) -> str:
 
 def notice_text(notice: Notice, now: float) -> str:
     """The one line the user sees, in their own terms: window, wall, clock."""
+    product = PRODUCT[PROVIDER]
     kind_label = WINDOW_LABELS.get(notice.kind, notice.kind) if notice.kind else "usage"
     window = "%s window is %d%% used" % (kind_label, round(notice.percent))
     if notice.state == "warn":
         if notice.reset_at is None:
-            return "Claude usage: the %s. The session will pause here by itself if it runs out." % window
+            return "%s usage: the %s. The session will pause here by itself if it runs out." % (product, window)
         return (
-            "Claude usage: the %s and resets at %s, in %s. The session will pause "
-            "here by itself if it runs out." % (window, _clock(notice.reset_at),
+            "%s usage: the %s and resets at %s, in %s. The session will pause "
+            "here by itself if it runs out." % (product, window, _clock(notice.reset_at),
                                                 format_duration(notice.reset_at - now))
         )
     if notice.state == "waiting":
         if notice.reset_at is None:
-            return "Claude usage limit reached: the %s. Pausing until reset. Esc interrupts the wait." % window
+            return "%s usage limit reached: the %s. Pausing until reset. Esc interrupts the wait." % (product, window)
         return (
-            "Claude usage limit reached: the %s. Pausing until %s, about %s, then "
+            "%s usage limit reached: the %s. Pausing until %s, about %s, then "
             "carrying on by itself. Esc interrupts the wait."
-            % (window, _clock(notice.reset_at), format_duration(notice.reset_at - now))
+            % (product, window, _clock(notice.reset_at), format_duration(notice.reset_at - now))
         )
     if notice.state == "credits":
+        credits = "pay-as-you-go credits" if PROVIDER == CLAUDE else "usage credits"
         return (
-            "Claude usage limit reached: the %s. Not pausing -- USAGE_LIMIT_WAIT_USE_CREDITS "
-            "is set, so this session keeps going on pay-as-you-go credits." % window
+            "%s usage limit reached: the %s. Not pausing -- USAGE_LIMIT_WAIT_USE_CREDITS "
+            "is set, so this session keeps going on %s." % (product, window, credits)
         )
     if notice.state == "too-far":
         reset_duration = format_duration(notice.reset_at - now) if notice.reset_at is not None else "a long time"
         return (
-            "Claude usage limit reached: the %s and does not reset for %s, which is longer "
+            "%s usage limit reached: the %s and does not reset for %s, which is longer "
             "than USAGE_LIMIT_WAIT_MAX_WAIT. Not pausing."
-            % (window, reset_duration)
+            % (product, window, reset_duration)
         )
     return (
-        "Claude usage limit reached: the %s, and no reset time came back with it. "
-        "Not pausing." % window
+        "%s usage limit reached: the %s, and no reset time came back with it. "
+        "Not pausing." % (product, window)
     )
 
 
 def notices_path() -> Path:
-    return claude_dir() / ".usage-limit-wait.notices.json"
+    return config_dir() / ".usage-limit-wait.notices.json"
 
 
 def announce_once(key: str, session_id: str, now: float, interval: float) -> bool:
@@ -680,9 +936,9 @@ def announce_once(key: str, session_id: str, now: float, interval: float) -> boo
 
 
 def desktop_notification(title: str, body: str) -> bool:
-    """Ask the host OS to show a notification, independently of Claude Code.
+    """Ask the host OS to show a notification, independently of the product.
 
-    This call must finish before the wait starts: Claude Code buffers hook
+    This call must finish before the wait starts: both products buffer hook
     output until the process exits, but an OS notification is an immediate
     side effect. Every backend is best-effort and bounded so a broken desktop
     notifier can never hold up the session.
@@ -736,7 +992,7 @@ def desktop_notification(title: str, body: str) -> bool:
     else:
         executable = shutil.which("notify-send")
         if executable:
-            command = [executable, "--app-name=Claude Code", title, body]
+            command = [executable, "--app-name=" + NOTIFIER[PROVIDER], title, body]
 
     if command is None:
         return False
@@ -777,17 +1033,28 @@ def run(session_id: str = "", now: float | None = None) -> dict[str, str] | None
             return None
         return {"systemMessage": notice_text(notice, now)}
 
-    desktop_notification(
-        "Claude Code paused",
-        notice_text(notice, now),
-    )
-    waited, kind = wait_for_reset(snapshot)
+    notifier = NOTIFIER[PROVIDER]
+    if PROVIDER == CHATGPT:
+        # ChatGPT fires this hook once per parallel tool call, so the waiters
+        # queue behind one lock and re-check before committing to a wait.
+        with exclusive_wait_lock():
+            snapshot = read_usage(force=True)
+            current = time.time()
+            notice = assess(snapshot, current)
+            if notice is None or notice.state != "waiting":
+                return None
+            desktop_notification(notifier + " paused", notice_text(notice, current))
+            waited, kind = wait_for_reset(snapshot)
+    else:
+        desktop_notification(notifier + " paused", notice_text(notice, now))
+        waited, kind = wait_for_reset(snapshot)
+
     if waited < 1:
         return None
     label = WINDOW_LABELS.get(kind, kind) if kind else "usage"
     duration = format_duration(waited)
     desktop_notification(
-        "Claude Code resumed", "Waited %s for the %s limit to reset" % (duration, label),
+        notifier + " resumed", "Waited %s for the %s limit to reset" % (duration, label),
     )
     return {
         "systemMessage": "usage-limit-wait: waited %s for the %s limit to reset."
@@ -809,7 +1076,9 @@ def hook_input() -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global PROVIDER
     argv = sys.argv[1:] if argv is None else argv
+    PROVIDER = provider_from_argv(argv)
     event = hook_input()
     try:
         if _on("DISABLE") or third_party_session():

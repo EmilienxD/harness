@@ -52,13 +52,13 @@ def test_subagents_hooks_invoke_the_installed_runtime_for_both_provider_schemas(
     assert common | {"Interrupt"} <= set(chatgpt)
     assert "StopFailure" not in chatgpt
     assert all(
-        hook["command"] == "harness-subagents-hook" and hook["args"] == ["claude"]
+        hook["command"] == "harness-subagents-hook" and hook["args"] == ["--claude"]
         for groups in claude.values()
         for group in groups
         for hook in group["hooks"]
     )
     assert all(
-        hook["command"] == "harness-subagents-hook chatgpt"
+        hook["command"] == "harness-subagents-hook --chatgpt"
         for groups in chatgpt.values()
         for group in groups
         for hook in group["hooks"]
@@ -88,8 +88,7 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
     assert target.destination_path("skills", "grill-me/SKILL.md").exists()
     assert target.destination_path("skills", "address-this/SKILL.md").exists()
     assert target.destination_path("skills", "review-this/SKILL.md").exists()
-    assert target.destination_path("hooks", "address_issue_UserPromptSubmit_hook.py").exists()
-    assert target.destination_path("hooks", "review_issue_UserPromptSubmit_hook.py").exists()
+    assert target.destination_path("hooks", "issue_readers_hook.py").exists()
     assert not target.destination_path("hooks", "delegation_hook.py").exists()
     assert ".harness/runtime/" in target.gitignore_path.read_text(encoding="utf-8")
 

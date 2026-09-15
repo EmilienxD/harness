@@ -1,5 +1,5 @@
 name = "auto"
-version = "1.1.1"
+version = "1.2.0"
 description = "Routes /auto and /auto --dry to an active Aboard session"
 selectable = false
 
@@ -12,8 +12,8 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "auto.py"
-dest = "auto.py"
+src = "auto_hook.py"
+dest = "auto_hook.py"
 root = "hooks"
 executable = true
 

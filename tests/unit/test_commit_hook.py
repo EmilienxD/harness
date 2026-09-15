@@ -25,15 +25,11 @@ HOOK = (
     Path(__file__).resolve().parents[2]
     / "harness" / "engineering" / "commit" / "commit_core.py"
 )
-CLAUDE_ADAPTER = (
-    Path(__file__).resolve().parents[2]
-    / "harness" / "engineering" / "commit" / "claude" / "commit_UserPromptSubmit_hook.py"
-)
-
 sys.path.insert(0, str(HOOK.parent))
 import commit_core as hook  # noqa: E402
-sys.path.insert(0, str(CLAUDE_ADAPTER.parent))
-import commit_UserPromptSubmit_hook as claude_adapter  # noqa: E402
+import commit_hook as claude_adapter  # noqa: E402
+
+claude_adapter.set_provider("claude")
 
 
 def _git(repo, *args):
@@ -167,11 +163,11 @@ def test_unhandled_hook_exception_blocks_prompt_with_exit_2(monkeypatch, capsys)
     monkeypatch.setattr(
         claude_adapter,
         "main",
-        lambda: (_ for _ in ()).throw(RuntimeError("thread failure")),
+        lambda *_: (_ for _ in ()).throw(RuntimeError("thread failure")),
     )
 
     with pytest.raises(SystemExit) as stopped:
-        claude_adapter.entrypoint()
+        claude_adapter.entrypoint(["--claude"])
 
     assert stopped.value.code == 2
     stderr = capsys.readouterr().err

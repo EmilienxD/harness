@@ -1,4 +1,4 @@
-"""Behavioral tests for the ChatGPT/Codex usage-limit-wait hook."""
+"""Behavioral tests for the usage-limit-wait hook's ChatGPT/Codex section."""
 
 import importlib.util
 import io
@@ -16,7 +16,6 @@ HOOK = (
     / "harness"
     / "guards"
     / "usage-limit-wait"
-    / "chatgpt"
     / "usage_limit_wait_hook.py"
 )
 
@@ -33,6 +32,7 @@ def clean_env(monkeypatch, tmp_path):
         if name.startswith("USAGE_LIMIT_WAIT_"):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setattr(hook, "PROVIDER", hook.CHATGPT)
 
 
 def test_hook_warns_from_codex_app_server_usage(monkeypatch, capsys):
@@ -90,7 +90,7 @@ def test_hook_warns_from_codex_app_server_usage(monkeypatch, capsys):
     monkeypatch.setattr(hook.sys, "stdin", io.StringIO(json.dumps({"session_id": "session-1"})))
     monkeypatch.setattr(hook.time, "time", lambda: 1_799_996_400.0)
 
-    assert hook.main([]) == 0
+    assert hook.main(["--chatgpt"]) == 0
 
     output = json.loads(capsys.readouterr().out)
     assert output["systemMessage"].startswith("Codex usage: the 5-hour window is 95% used")
@@ -114,7 +114,7 @@ def test_catalogue_installs_the_hook_at_both_codex_request_boundaries():
     assert "matcher" not in hooks["PostToolUse"][0]
     assert all(
         handler["command"]
-        == '${PYTHON} "${HOOKS_DIR}/usage_limit_wait_hook.py"'
+        == '${PYTHON} "${HOOKS_DIR}/usage_limit_wait_hook.py" --chatgpt'
         and handler["timeout"] == 604800
         for groups in hooks.values()
         for group in groups
@@ -173,5 +173,5 @@ def test_app_server_failure_fails_open(monkeypatch, capsys):
     monkeypatch.setattr(hook.shutil, "which", lambda name: None)
     monkeypatch.setattr(hook.sys, "stdin", io.StringIO(json.dumps({"session_id": "session-1"})))
 
-    assert hook.main([]) == 0
+    assert hook.main(["--chatgpt"]) == 0
     assert capsys.readouterr().out == ""

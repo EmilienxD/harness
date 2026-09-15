@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/commit_ChatGPT_hook.py\"",
+            "command": "${PYTHON} \"${HOOKS_DIR}/commit_hook.py\" --chatgpt",
             "timeout": 120
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/commit_ChatGPT_hook.py\"",
+            "command": "${PYTHON} \"${HOOKS_DIR}/commit_hook.py\" --chatgpt",
             "timeout": 120
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/commit_ChatGPT_hook.py\"",
+            "command": "${PYTHON} \"${HOOKS_DIR}/commit_hook.py\" --chatgpt",
             "timeout": 120
           }
         ]

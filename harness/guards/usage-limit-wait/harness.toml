@@ -1,5 +1,5 @@
 name = "usage-limit-wait"
-version = "1.2.1"
+version = "1.3.0"
 description = "Blocks the session until an exhausted Claude or ChatGPT subscription usage window resets, instead of failing the turn"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -12,14 +12,7 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "claude/usage_limit_wait_hook.py"
-dest = "hooks/usage_limit_wait_hook.py"
-platforms = ["claude"]
-executable = true
-
-[[files]]
-src = "chatgpt/usage_limit_wait_hook.py"
+src = "usage_limit_wait_hook.py"
 dest = "usage_limit_wait_hook.py"
 root = "hooks"
-platforms = ["chatgpt"]
 executable = true

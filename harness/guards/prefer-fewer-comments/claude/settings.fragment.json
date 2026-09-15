@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/prefer_fewer_comments_PostToolUse_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/prefer_fewer_comments_hook.py", "--claude"]
           }
         ]
       }

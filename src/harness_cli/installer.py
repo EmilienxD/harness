@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 from copy import deepcopy
 from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,16 @@ from harness_cli.receipts import ReceiptStore
 
 class InstallError(Exception):
     pass
+
+
+class UnownedFileError(InstallError):
+    """Installing would replace existing files no receipt accounts for."""
+
+    def __init__(self, paths: Sequence[Path]):
+        self.paths = tuple(paths)
+        listed = ", ".join(str(path) for path in self.paths)
+        noun = "file" if len(self.paths) == 1 else "files"
+        super().__init__(f"refusing to overwrite unowned {noun} {listed}")
 
 
 def sha256(path: Path) -> str:
@@ -366,17 +377,16 @@ class CatalogueInstaller:
         )
         return paths
 
-    def reconcile(
-        self,
-        requested_names: set[str],
-        *,
-        _transaction: _LocalTransaction | None = None,
-        _host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
-        _persist: bool = True,
-        _deferred_cleanup: list[PreparedAction] | None = None,
-    ) -> list[Change]:
-        resolved, changes = self.plan(requested_names)
-        desired = {item.tool.name: item for item in resolved}
+    def conflicts(self, requested_names: set[str]) -> list[Path]:
+        """List existing files an install would replace without owning them."""
+
+        resolved, _ = self.plan(requested_names)
+        return self._audit_destinations(resolved, set())
+
+    def _audit_destinations(self, resolved: list[ResolvedPackage], approved: set[str]) -> list[Path]:
+        """Reject unsafe destinations and report the unowned files left to decide."""
+
+        desired = {item.tool.name for item in resolved}
         packages = self.installation["packages"]
         claimed: dict[str, str] = {}
         current_installation = self.installation
@@ -386,6 +396,7 @@ class CatalogueInstaller:
                     continue
                 for file in receipt.get("files", []):
                     claimed[_canonical_path(file["path"])] = owner
+        unowned: list[Path] = []
         for item in resolved:
             for payload in self._payloads(item.tool):
                 path = str(self.target.destination_path(payload.root, payload.dest).resolve())
@@ -418,8 +429,30 @@ class CatalogueInstaller:
                         and not payload.starter
                     ):
                         raise InstallError(f"refusing to overwrite modified file {destination}")
-                elif sha256(destination) != sha256(payload.source) and not payload.starter:
-                    raise InstallError(f"refusing to overwrite unowned file {destination}")
+                elif (
+                    sha256(destination) != sha256(payload.source)
+                    and not payload.starter
+                    and path_key not in approved
+                ):
+                    unowned.append(destination)
+        return unowned
+
+    def reconcile(
+        self,
+        requested_names: set[str],
+        *,
+        overwrite: Iterable[Path] = (),
+        _transaction: _LocalTransaction | None = None,
+        _host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
+        _persist: bool = True,
+        _deferred_cleanup: list[PreparedAction] | None = None,
+    ) -> list[Change]:
+        resolved, changes = self.plan(requested_names)
+        approved = {_canonical_path(path) for path in overwrite}
+        desired = {item.tool.name: item for item in resolved}
+        packages = self.installation["packages"]
+        if unowned := self._audit_destinations(resolved, approved):
+            raise UnownedFileError(unowned)
 
         prepared: dict[str, list[PreparedAction]] = {}
         rollback_prepared: dict[str, list[PreparedAction]] = {}
@@ -486,9 +519,10 @@ class CatalogueInstaller:
                         prepared.get(item.tool.name, []),
                         host_undo,
                         rollback_prepared.get(item.tool.name, []) if replacing else [],
+                        approved,
                     )
                 elif repair:
-                    self._install(item, [], host_undo, [])
+                    self._install(item, [], host_undo, [], approved)
                 else:
                     current["explicit"] = item.explicit
                     current["dependencies"] = [dependency.name for dependency in item.tool.dependencies]
@@ -552,6 +586,7 @@ class CatalogueInstaller:
         prepared: list[PreparedAction],
         host_undo: list[tuple[str, HostAction | PreparedAction]],
         previous_actions: list[PreparedAction],
+        approved: set[str],
     ) -> None:
         tool = item.tool
         files: list[dict[str, Any]] = []
@@ -582,8 +617,12 @@ class CatalogueInstaller:
                     "owned": bool(prior and prior.get("owned")),
                 })
                 continue
-            if destination.exists() and sha256(destination) != sha256(payload.source):
-                raise InstallError(f"refusing to overwrite unowned file {destination}")
+            if (
+                destination.exists()
+                and sha256(destination) != sha256(payload.source)
+                and _canonical_path(destination) not in approved
+            ):
+                raise UnownedFileError([destination])
             destination.parent.mkdir(parents=True, exist_ok=True)
             _copy_atomic(payload.source, destination)
             if payload.executable:
@@ -714,6 +753,8 @@ class CatalogueInstaller:
 
 def reconcile_targets(
     requests: list[tuple[CatalogueInstaller, set[str]]],
+    *,
+    overwrite: Iterable[Path] = (),
 ) -> list[list[Change]]:
     """Reconcile several targets as one local and host-level transaction."""
     if not requests:
@@ -737,6 +778,7 @@ def reconcile_targets(
         changes = [
             installer.reconcile(
                 requested,
+                overwrite=overwrite,
                 _transaction=transaction,
                 _host_undo=host_undo,
                 _persist=False,

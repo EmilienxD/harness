@@ -10,7 +10,14 @@ import pytest
 from harness_cli.catalogue import CatalogueError, resolve_dependencies
 from harness_cli import cli
 from harness_cli.cli import build_parser
-from harness_cli.installer import CatalogueInstaller, Change, InstallError, Target, reconcile_targets
+from harness_cli.installer import (
+    CatalogueInstaller,
+    Change,
+    InstallError,
+    Target,
+    UnownedFileError,
+    reconcile_targets,
+)
 from harness_cli.host_actions import HostActionError, PreparedAction, prepare
 from harness_cli.manifest import HostAction, ManifestError, discover, load_tool
 from harness_cli.platforms import Platform
@@ -44,7 +51,9 @@ def wire_menu(monkeypatch, tools, ui_factory, installer_factory, installed=()):
     monkeypatch.setattr(
         cli,
         "reconcile_targets",
-        lambda requests: [installer.reconcile(requested) for installer, requested in requests],
+        lambda requests, overwrite=(): [
+            installer.reconcile(requested, overwrite=overwrite) for installer, requested in requests
+        ],
     )
     monkeypatch.setattr(cli.ReceiptStore, "load", lambda: object())
     monkeypatch.setattr(
@@ -146,7 +155,10 @@ def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monke
         def plan(self, requested):
             return [], [cli.Change("install", name, "selected") for name in requested]
 
-        def reconcile(self, requested):
+        def conflicts(self, requested):
+            return []
+
+        def reconcile(self, requested, overwrite=()):
             reconciled[self.target.platform] = requested
 
     wire_menu(monkeypatch, [aboard, auto], FakeUI, FakeInstaller)
@@ -174,6 +186,92 @@ def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monke
         Platform.CLAUDE: {"aboard"},
         Platform.CHATGPT: {"aboard"},
     }
+
+
+class ConflictMenuUI:
+    """Answer every prompt affirmatively and record the review screens."""
+
+    answer = True
+
+    def __init__(self, read_key):
+        pass
+
+    def intro(self, label):
+        pass
+
+    def multiselect(self, title, options, selected=None, **settings):
+        return {0, 1} if title == "Select providers" else {0}
+
+    def select(self, title, options, default=0):
+        return 0
+
+    def note(self, title, lines):
+        self.events.append(("note", title, tuple(lines)))
+
+    def confirm(self, title, default=True):
+        self.events.append(("confirm", title))
+        return self.answer if title != "Proceed with changes?" else True
+
+    def progress(self, active, complete, action):
+        return action()
+
+    def outro(self, message):
+        self.events.append(("outro", message))
+
+    def cancelled(self, message):
+        self.events.append(("cancelled", message))
+
+
+def wire_conflict_menu(monkeypatch, conflicts, answer):
+    events = []
+    reconciled = {}
+
+    class FakeUI(ConflictMenuUI):
+        pass
+
+    FakeUI.events = events
+    FakeUI.answer = answer
+
+    class FakeInstaller:
+        def __init__(self, available, target, store):
+            self.target = target
+
+        def plan(self, requested):
+            return [], [cli.Change("install", name, "selected") for name in requested]
+
+        def conflicts(self, requested):
+            return list(conflicts)
+
+        def reconcile(self, requested, overwrite=()):
+            reconciled[self.target.platform] = set(overwrite)
+
+    wire_menu(monkeypatch, [discover()["aboard"]], FakeUI, FakeInstaller)
+    return events, reconciled
+
+
+def test_menu_asks_before_overwriting_files_harness_does_not_own(monkeypatch, tmp_path):
+    existing = tmp_path / ".claude" / "skills" / "aboard" / "SKILL.md"
+    events, reconciled = wire_conflict_menu(monkeypatch, [existing], answer=True)
+
+    assert cli.catalogue_menu() == 0
+    assert [event[:2] for event in events] == [
+        ("note", "Installation Summary"),
+        ("confirm", "Proceed with changes?"),
+        ("note", "Existing files"),
+        ("confirm", "Overwrite these files?"),
+        ("outro", "Done!  Review installed packages before use."),
+    ]
+    assert str(existing) in "\n".join(events[2][2])
+    assert reconciled == {Platform.CLAUDE: {existing}, Platform.CHATGPT: {existing}}
+
+
+def test_menu_abandons_the_installation_when_the_overwrite_is_refused(monkeypatch, tmp_path):
+    existing = tmp_path / ".claude" / "skills" / "aboard" / "SKILL.md"
+    events, reconciled = wire_conflict_menu(monkeypatch, [existing], answer=False)
+
+    assert cli.catalogue_menu() == 0
+    assert events[-1] == ("cancelled", "Installation cancelled.  No changes made.")
+    assert reconciled == {}
 
 
 def test_already_installed_packages_start_selected(monkeypatch):
@@ -649,6 +747,70 @@ def test_multi_target_reconciliation_rolls_every_target_back(tmp_path):
     assert not (project / ".claude" / "payload.txt").exists()
     assert conflicting.read_text() == "user-owned"
     assert not store.path.exists()
+
+
+def dual_platform_package(tmp_path):
+    root = tmp_path / "dual"
+    root.mkdir()
+    (root / "payload").write_text("catalogue")
+    (root / "harness.toml").write_text(
+        'name="dual"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        '[platforms.chatgpt]\nstatus="supported"\n'
+        '[[files]]\nsrc="payload"\ndest="payload.txt"\n'
+    )
+    return load_tool(root)
+
+
+def test_multi_target_reconciliation_overwrites_every_approved_file(tmp_path):
+    tool = dual_platform_package(tmp_path)
+    project = tmp_path / "project"
+    conflicting = project / ".codex" / "payload.txt"
+    conflicting.parent.mkdir(parents=True)
+    conflicting.write_text("user-owned")
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    claude = CatalogueInstaller({tool.name: tool}, Target.for_project(project, "claude"), store)
+    chatgpt = CatalogueInstaller({tool.name: tool}, Target.for_project(project, "chatgpt"), store)
+
+    reconcile_targets([(claude, {tool.name}), (chatgpt, {tool.name})], overwrite={conflicting})
+
+    assert conflicting.read_text() == "catalogue"
+    assert (project / ".claude" / "payload.txt").read_text() == "catalogue"
+
+
+def test_unowned_destination_is_reported_with_the_paths_it_would_overwrite(tmp_path):
+    tool = transactional_package(tmp_path, "conflicting")
+    project = tmp_path / "project"
+    existing = project / ".claude" / "conflicting.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("written by hand")
+    target = Target.for_project(project)
+    selected = manager({tool.name: tool}, target, tmp_path)
+
+    with pytest.raises(UnownedFileError) as error:
+        selected.reconcile({tool.name})
+
+    assert error.value.paths == (existing.resolve(),)
+    assert existing.read_text() == "written by hand"
+    assert selected.installation["packages"] == {}
+
+
+def test_approved_overwrite_installs_the_payload_and_takes_ownership(tmp_path):
+    tool = transactional_package(tmp_path, "conflicting")
+    project = tmp_path / "project"
+    existing = project / ".claude" / "conflicting.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("written by hand")
+    target = Target.for_project(project)
+    selected = manager({tool.name: tool}, target, tmp_path)
+
+    selected.reconcile({tool.name}, overwrite={existing})
+
+    assert existing.read_text() == "conflicting"
+
+    selected.reconcile(set())
+
+    assert not existing.exists()
 
 
 def test_failed_host_action_rolls_back_local_installation(monkeypatch, tmp_path):
