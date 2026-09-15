@@ -41,6 +41,30 @@ def _github_token() -> str | None:
     return discovered if result.returncode == 0 and discovered else None
 
 
+def _vscode_executable() -> str | None:
+    return next(
+        (found for name in ("code", "code-insiders", "codium") if (found := shutil.which(name))),
+        None,
+    )
+
+
+_listings: dict[tuple[str, ...], list[str] | None] = {}
+
+
+def forget_host_products() -> None:
+    """Drop the cached inventories after something changes them."""
+    _listings.clear()
+
+
+def _listing(command: list[str]) -> list[str] | None:
+    """Return a host inventory once per process; listing one is slow."""
+    key = tuple(command)
+    if key not in _listings:
+        result = subprocess.run(command, capture_output=True, text=True)
+        _listings[key] = result.stdout.splitlines() if result.returncode == 0 else None
+    return _listings[key]
+
+
 def _download_request(url: str) -> urllib.request.Request:
     """Build a release download request, authenticating private GitHub assets."""
     match = re.fullmatch(
@@ -140,16 +164,14 @@ def apply(prepared: PreparedAction) -> None:
             _required_string(action, "package"),
         ]
     else:
-        executable = next(
-            (found for name in ("code", "code-insiders", "codium") if (found := shutil.which(name))),
-            None,
-        )
+        executable = _vscode_executable()
         if not executable:
             raise HostActionError("no supported VS Code command found (tried code, code-insiders, codium)")
         if prepared.artifact is None:
             raise HostActionError("VSIX action was not prepared")
         command = [executable, "--install-extension", str(prepared.artifact), "--force"]
     result = subprocess.run(command, capture_output=True, text=True)
+    forget_host_products()
     if result.returncode:
         detail = (result.stderr or result.stdout).strip()
         raise HostActionError(detail or f"host action failed with exit code {result.returncode}")
@@ -161,24 +183,19 @@ def is_installed(action: HostAction) -> bool:
         uv = shutil.which("uv")
         if not uv:
             return False
-        result = subprocess.run([uv, "tool", "list"], capture_output=True, text=True)
+        lines = _listing([uv, "tool", "list"])
         package = _required_string(action, "package").lower()
-        return result.returncode == 0 and any(
+        return lines is not None and any(
             line and not line[0].isspace() and line.split()[0].lower() == package
-            for line in result.stdout.splitlines()
+            for line in lines
         )
     if action.type == "vscode-extension":
-        executable = next(
-            (found for name in ("code", "code-insiders", "codium") if (found := shutil.which(name))),
-            None,
-        )
+        executable = _vscode_executable()
         if not executable:
             return False
-        result = subprocess.run([executable, "--list-extensions"], capture_output=True, text=True)
+        lines = _listing([executable, "--list-extensions"])
         extension_id = _required_string(action, "extension_id").lower()
-        return result.returncode == 0 and extension_id in {
-            line.strip().lower() for line in result.stdout.splitlines()
-        }
+        return lines is not None and extension_id in {line.strip().lower() for line in lines}
     raise HostActionError(f"unsupported host action {action.type}")
 
 
@@ -189,16 +206,16 @@ def uninstall(action: HostAction) -> None:
             raise HostActionError("removing a Python host tool requires uv on PATH")
         command = [uv, "tool", "uninstall", _required_string(action, "package")]
     elif action.type == "vscode-extension":
-        executable = next(
-            (found for name in ("code", "code-insiders", "codium") if (found := shutil.which(name))),
-            None,
-        )
+        executable = _vscode_executable()
         if not executable:
             raise HostActionError("no supported VS Code command found (tried code, code-insiders, codium)")
         command = [executable, "--uninstall-extension", _required_string(action, "extension_id")]
     else:
         raise HostActionError(f"unsupported host action {action.type}")
+    if not is_installed(action):
+        return
     result = subprocess.run(command, capture_output=True, text=True)
+    forget_host_products()
     if result.returncode:
         detail = (result.stderr or result.stdout).strip()
         raise HostActionError(detail or f"host uninstall failed with exit code {result.returncode}")

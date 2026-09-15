@@ -18,7 +18,13 @@ from harness_cli.installer import (
     UnownedFileError,
     reconcile_targets,
 )
-from harness_cli.host_actions import HostActionError, PreparedAction, prepare
+from harness_cli.host_actions import (
+    HostActionError,
+    PreparedAction,
+    is_installed,
+    prepare,
+    uninstall,
+)
 from harness_cli.manifest import HostAction, ManifestError, discover, load_tool
 from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore
@@ -1041,3 +1047,126 @@ def test_private_github_vsix_uses_the_logged_in_gh_credential(monkeypatch):
         assert len(requests) == 2
     finally:
         prepared.cleanup()
+
+
+def test_uninstalling_a_host_product_that_is_already_gone_succeeds(monkeypatch):
+    commands = []
+
+    def run(command, capture_output, text):
+        commands.append(command)
+        if command[1] == "--list-extensions":
+            return subprocess.CompletedProcess(command, 0, "other.extension\n", "")
+        return subprocess.CompletedProcess(command, 1, "", "Extension 'example.app' is not installed.")
+
+    monkeypatch.setattr(
+        "harness_cli.host_actions.shutil.which",
+        lambda name: "/bin/code" if name == "code" else None,
+    )
+    monkeypatch.setattr("harness_cli.host_actions.subprocess.run", run)
+
+    uninstall(HostAction("vscode-extension", {"extension_id": "example.app"}))
+
+    assert all("--uninstall-extension" not in command for command in commands)
+
+
+def test_removal_survives_a_receipt_artifact_that_no_longer_downloads(monkeypatch, tmp_path):
+    tool = transactional_package(tmp_path, "pinned", action=True)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({tool.name: tool}, target, tmp_path)
+    removed = []
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: False)
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", lambda prepared: None)
+    monkeypatch.setattr("harness_cli.installer.uninstall_host_action", removed.append)
+    selected.reconcile({tool.name})
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: (_ for _ in ()).throw(HostActionError("HTTP Error 404: Not Found")),
+    )
+
+    assert selected.reconcile(set()) == [Change("remove", tool.name)]
+    assert removed == [tool.actions[0]]
+    assert selected.installation["packages"] == {}
+    assert not (target.install_root / "pinned.txt").exists()
+
+
+def test_reconcile_repairs_a_host_product_that_vanished_at_the_same_version(monkeypatch, tmp_path):
+    tool = transactional_package(tmp_path, "hosted", action=True)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({tool.name: tool}, target, tmp_path)
+    applied = []
+    host = {"present": False}
+
+    def apply(prepared):
+        applied.append(prepared.action)
+        host["present"] = True
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: host["present"])
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", apply)
+    monkeypatch.setattr("harness_cli.installer.uninstall_host_action", lambda action: None)
+    selected.reconcile({tool.name})
+    applied.clear()
+
+    assert selected.plan({tool.name})[1] == []
+
+    host["present"] = False
+
+    _resolved, changes = selected.plan({tool.name})
+    selected.reconcile({tool.name})
+
+    assert changes == [Change("update", tool.name, "missing host product")]
+    assert applied == [tool.actions[0]]
+    assert host["present"] is True
+
+
+def test_repeated_host_product_checks_reuse_one_listing(monkeypatch):
+    listings = []
+    installed = {"example.app"}
+
+    def run(command, capture_output, text):
+        if command[1] == "--list-extensions":
+            listings.append(command)
+            return subprocess.CompletedProcess(command, 0, "".join(f"{name}\n" for name in installed), "")
+        installed.discard(command[2])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(
+        "harness_cli.host_actions.shutil.which",
+        lambda name: "/bin/code" if name == "code" else None,
+    )
+    monkeypatch.setattr("harness_cli.host_actions.subprocess.run", run)
+    action = HostAction("vscode-extension", {"extension_id": "example.app"})
+
+    assert is_installed(action)
+    assert is_installed(action)
+    assert len(listings) == 1
+
+    uninstall(action)
+
+    assert not is_installed(action)
+    assert len(listings) == 2
+
+
+def test_repair_applies_to_each_package_that_lost_files(tmp_path):
+    alpha = transactional_package(tmp_path, "alpha")
+    zulu = transactional_package(tmp_path, "zulu")
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({alpha.name: alpha, zulu.name: zulu}, target, tmp_path)
+    selected.reconcile({alpha.name, zulu.name})
+    lost = target.install_root / "alpha.txt"
+    lost.unlink()
+
+    _resolved, changes = selected.plan({alpha.name, zulu.name})
+    selected.reconcile({alpha.name, zulu.name})
+
+    assert changes == [Change("update", alpha.name, "missing installed files")]
+    assert lost.is_file()

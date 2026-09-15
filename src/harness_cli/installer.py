@@ -192,6 +192,22 @@ def _prepare_actions(actions: list[HostAction]) -> list[PreparedAction]:
         raise
 
 
+def _prepare_rollback_actions(actions: list[HostAction]) -> list[PreparedAction | None]:
+    """Fetch undo artifacts for receipt actions without demanding success.
+
+    A receipt pins the artifact that was installed earlier, and a pinned release
+    can be withdrawn.  Being unable to restore that artifact narrows the undo we
+    can offer; it must never stop a removal or an upgrade from proceeding.
+    """
+    prepared: list[PreparedAction | None] = []
+    for action in actions:
+        try:
+            prepared.append(prepare_host_action(action))
+        except (OSError, HostActionError):
+            prepared.append(None)
+    return prepared
+
+
 @dataclass(frozen=True)
 class Change:
     action: str
@@ -360,7 +376,14 @@ class CatalogueInstaller:
                 for record in receipt.get("files", [])
             ):
                 changes.append(Change("update", item.tool.name, "missing installed files"))
+            elif self._missing_host_actions(item.tool):
+                changes.append(Change("update", item.tool.name, "missing host product"))
         return resolved, changes
+
+    @staticmethod
+    def _missing_host_actions(tool: Tool) -> list[HostAction]:
+        """List host products a receipt claims but the machine no longer has."""
+        return [action for action in tool.actions if not host_action_is_installed(action)]
 
     def _local_paths(self, resolved: list[ResolvedPackage]) -> set[Path]:
         packages = self.installation["packages"]
@@ -455,7 +478,7 @@ class CatalogueInstaller:
             raise UnownedFileError(unowned)
 
         prepared: dict[str, list[PreparedAction]] = {}
-        rollback_prepared: dict[str, list[PreparedAction]] = {}
+        rollback_prepared: dict[str, list[PreparedAction | None]] = {}
         host_undo = _host_undo if _host_undo is not None else []
         owns_transaction = _transaction is None
         transaction = _transaction
@@ -475,16 +498,18 @@ class CatalogueInstaller:
             )
             if missing_requirements:
                 raise InstallError("missing required executable(s): " + ", ".join(missing_requirements))
+            repairs: set[str] = set()
             for item in resolved:
                 current = packages.get(item.tool.name)
-                repair = (
-                    current is not None
-                    and current.get("version") == item.tool.version
-                    and any(
+                if current is not None and current.get("version") == item.tool.version:
+                    missing_files = any(
                         record.get("owned") and not Path(record["path"]).is_file()
                         for record in current.get("files", [])
                     )
-                )
+                    missing_actions = self._missing_host_actions(item.tool)
+                    if missing_files or missing_actions:
+                        repairs.add(item.tool.name)
+                        prepared[item.tool.name] = _prepare_actions(missing_actions)
                 if current is None or current.get("version") != item.tool.version:
                     shared_host_owner = current is None and self._owned_in_another_installation(item.tool.name)
                     if current is None and not shared_host_owner:
@@ -498,12 +523,12 @@ class CatalogueInstaller:
                         [] if shared_host_owner else _prepare_actions(list(item.tool.actions))
                     )
                     if current is not None and current.get("version") != item.tool.version:
-                        rollback_prepared[item.tool.name] = _prepare_actions(
+                        rollback_prepared[item.tool.name] = _prepare_rollback_actions(
                             [self._receipt_action(raw) for raw in current.get("actions", [])]
                         )
             for name in self._removal_order(packages, set(desired)):
                 if not self._owned_in_another_installation(name):
-                    rollback_prepared[name] = _prepare_actions(
+                    rollback_prepared[name] = _prepare_rollback_actions(
                         [self._receipt_action(raw) for raw in packages[name].get("actions", [])]
                     )
             for name in self._removal_order(packages, set(desired)):
@@ -521,8 +546,8 @@ class CatalogueInstaller:
                         rollback_prepared.get(item.tool.name, []) if replacing else [],
                         approved,
                     )
-                elif repair:
-                    self._install(item, [], host_undo, [], approved)
+                elif item.tool.name in repairs:
+                    self._install(item, prepared.get(item.tool.name, []), host_undo, [], approved)
                 else:
                     current["explicit"] = item.explicit
                     current["dependencies"] = [dependency.name for dependency in item.tool.dependencies]
@@ -547,6 +572,7 @@ class CatalogueInstaller:
                 action
                 for group in [*prepared.values(), *rollback_prepared.values()]
                 for action in group
+                if action is not None
             ]
             if _deferred_cleanup is None:
                 for action in actions:
@@ -585,7 +611,7 @@ class CatalogueInstaller:
         item: ResolvedPackage,
         prepared: list[PreparedAction],
         host_undo: list[tuple[str, HostAction | PreparedAction]],
-        previous_actions: list[PreparedAction],
+        previous_actions: list[PreparedAction | None],
         approved: set[str],
     ) -> None:
         tool = item.tool
@@ -659,11 +685,12 @@ class CatalogueInstaller:
                 os.replace(temporary, self.target.gitignore_path)
             finally:
                 temporary.unlink(missing_ok=True)
-        restore_previous = bool(previous_actions)
+        restorable = [previous for previous in previous_actions if previous is not None]
+        restore_previous = bool(restorable)
         for action in prepared:
             apply_host_action(action)
             if restore_previous:
-                host_undo.extend(("apply", previous) for previous in reversed(previous_actions))
+                host_undo.extend(("apply", previous) for previous in reversed(restorable))
                 restore_previous = False
             host_undo.append(("uninstall", action.action))
         self.installation["packages"][tool.name] = {
@@ -681,7 +708,7 @@ class CatalogueInstaller:
         name: str,
         remove_actions: bool = True,
         host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
-        rollback_actions: list[PreparedAction] | None = None,
+        rollback_actions: list[PreparedAction | None] | None = None,
     ) -> None:
         receipt = self.installation["packages"].get(name)
         if receipt is None:
@@ -690,8 +717,9 @@ class CatalogueInstaller:
             old_actions = rollback_actions or []
             for index, raw in reversed(list(enumerate(receipt.get("actions", [])))):
                 uninstall_host_action(self._receipt_action(raw))
-                if host_undo is not None:
-                    host_undo.append(("apply", old_actions[index]))
+                restore = old_actions[index] if index < len(old_actions) else None
+                if host_undo is not None and restore is not None:
+                    host_undo.append(("apply", restore))
         for record in receipt.get("files", []):
             path = Path(record["path"])
             if (
