@@ -1,8 +1,9 @@
 import { isAbsolute, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { containsPath } from "../../../../tests/e2e/core/path.js";
 
 export const DEFAULT_REPOSITORY = "EmilienxD/harness-e2e";
-export const DEFAULT_RUNTIME_ROOT = "C:\\Users\\emb\\dev\\harness-e2e-runtime";
+export const DEFAULT_RUNTIME_ROOT = join(tmpdir(), "aboard-e2e-runtime");
 
 export interface HarnessConfig {
   readonly repository: string;

@@ -112,10 +112,10 @@ async function configureNativeCommands(path: string): Promise<void> {
   const claude = spawnableCommand("claude", []);
   const codex = spawnableCommand("codex", []);
   const original = await readFile(path, "utf8");
-  const configured = original
-    .replace('    "claude": ("claude",),', `    "claude": ${pythonTuple([claude.file, ...claude.args])},`)
-    .replace('    "chatgpt": ("codex",),', `    "chatgpt": ${pythonTuple([codex.file, ...codex.args])},`);
-  if (configured === original) throw new Error("agent-launcher starter command shape changed");
+  const configured = `${original.trimEnd()}\n\nCOMMANDS = {\n` +
+    `    "claude": ${pythonTuple([claude.file, ...claude.args])},\n` +
+    `    "chatgpt": ${pythonTuple([codex.file, ...codex.args])},\n` +
+    "}\n";
   await writeFile(path, configured, "utf8");
 }
 

@@ -31,6 +31,24 @@ test("Windows npm commands preserve exact argv without cmd.exe", { skip: process
   }
 });
 
+test("Windows npm commands launch a directly shimmed native executable", { skip: process.platform !== "win32" }, () => {
+  const root = mkdtempSync(join(tmpdir(), "harness-native-npm-shim-"));
+  const bin = join(root, "node_modules", ".bin");
+  const native = join(root, "node_modules", "@example", "native-cli", "bin", "native-cli.exe");
+  const shim = join(bin, "native-cli.cmd");
+  const args = ["--flag", "value with spaces & punctuation"];
+  try {
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(join(root, "node_modules", "@example", "native-cli", "bin"), { recursive: true });
+    writeFileSync(native, "not executed");
+    writeFileSync(shim, '@ECHO off\r\n"%dp0%\\..\\@example\\native-cli\\bin\\native-cli.exe" %*\r\n');
+
+    assert.deepEqual(spawnableCommand(shim, args), { file: native, args });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Windows launcher falls through an unknown shim to a native executable", { skip: process.platform !== "win32" }, () => {
   const root = mkdtempSync(join(tmpdir(), "harness-native-fallback-"));
   const shimDirectory = join(root, "shim");
