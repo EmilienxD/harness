@@ -1,5 +1,5 @@
 name = "aboard"
-version = "0.0.2"
+version = "0.0.3"
 description = "Aboard VS Code integration for visible agents and Auto Run"
 docs = "https://github.com/EmilienxD/harness/blob/main/apps/aboard/README.md"
 dependencies = ["auto>=1.0.0,<2.0.0", "issue-readers>=1.0.0,<2.0.0"]
@@ -12,7 +12,7 @@ status = "supported"
 
 [[actions]]
 type = "vscode-extension"
-url = "https://github.com/EmilienxD/harness/releases/download/aboard-v0.1.1/aboard-0.1.1.vsix"
-size = 403682
-sha256 = "48de5ce8489dcc35e07afa723c3dfd1a62747d8dafd46236b92f2c8ddedb126e"
+url = "https://github.com/EmilienxD/harness/releases/download/aboard-v0.1.2/aboard-0.1.2.vsix"
+size = 418277
+sha256 = "77e87a0c29352029a5f1002312cd8816240e25f539561c13be7a7a7fb7e8ffad"
 extension_id = "aboard.aboard"
