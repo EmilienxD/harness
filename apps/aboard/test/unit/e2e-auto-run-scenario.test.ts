@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -18,7 +20,7 @@ import {
   type Message,
 } from "../e2e/scenario.js";
 
-const root = "C:\\fixture";
+const root = join(tmpdir(), "fixture");
 
 function request(messages: readonly Message[], tools: readonly string[] = ["Read", "Edit", "Bash"]) {
   return parseMessagesRequest({
@@ -48,7 +50,7 @@ test("auto-run AFK implementer reads, edits, and reports a valid completion", ()
     id: "toolu_e2e_auto_afk_edit",
     name: "Edit",
     input: {
-      file_path: "C:\\fixture\\deterministic.txt",
+      file_path: join(root, "deterministic.txt"),
       old_string: BEFORE_CONTENT.trimEnd(),
       new_string: AFTER_CONTENT.trimEnd(),
       replace_all: false,

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { AFTER_CONTENT, BEFORE_CONTENT, SCENARIO_MARKER, ScenarioMismatch, parseMessagesRequest, transition, type Message } from "../e2e/scenario.js";
 
-const root = "C:\\fixture";
+const root = join(tmpdir(), "fixture");
 
 function request(messages: readonly Message[], tools: readonly string[] = ["Read", "Edit"]) {
   return parseMessagesRequest({
@@ -106,7 +108,7 @@ test("Read result requires the fixture marker and accepts text-block-array conte
 
 test("fixture tool paths remain inside the resolved repository root", () => {
   const read = transition(request(initial()), root).content[0] as { input: { file_path: string } };
-  assert.equal(read.input.file_path, "C:\\fixture\\deterministic.txt");
+  assert.equal(read.input.file_path, join(root, "deterministic.txt"));
   const edit = transition(request(afterRead()), root).content[0] as { input: { old_string: string; new_string: string } };
   assert.equal(edit.input.old_string, BEFORE_CONTENT.trimEnd());
   assert.equal(edit.input.new_string, AFTER_CONTENT.trimEnd());

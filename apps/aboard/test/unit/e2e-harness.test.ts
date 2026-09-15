@@ -343,18 +343,19 @@ test("smoke child environment clears paid and alternate provider selectors", () 
 });
 
 test("reset cleanup accepts only registered worktrees inside the dedicated runtime root", () => {
-  const runtimeRoot = "C:\\fixture\\runtime";
-  const cloneRoot = `${runtimeRoot}\\repository`;
-  const direct = `${runtimeRoot}\\worktrees\\repository-1`;
-  const nested = `${runtimeRoot}\\worktrees\\run_123\\repository`;
+  const runtimeRoot = join(tmpdir(), "fixture", "runtime");
+  const cloneRoot = join(runtimeRoot, "repository");
+  const direct = join(runtimeRoot, "worktrees", "repository-1");
+  const nested = join(runtimeRoot, "worktrees", "run_123", "repository");
+  const unowned = join(tmpdir(), "fixture", "unowned", "repository");
   const output = `worktree ${cloneRoot.replace(/\\/g, "/")}\nHEAD 1\n\nworktree ${direct.replace(/\\/g, "/")}\nHEAD 2\n\nworktree ${nested.replace(/\\/g, "/")}\nHEAD 3\n`;
   assert.deepEqual(harnessWorktreePaths(output, runtimeRoot, cloneRoot), [direct, nested]);
   assert.throws(
-    () => harnessWorktreePaths(`${output}\nworktree C:/fixture/unowned/repository\nHEAD 4\n`, runtimeRoot, cloneRoot),
+    () => harnessWorktreePaths(`${output}\nworktree ${unowned.replace(/\\/g, "/")}\nHEAD 4\n`, runtimeRoot, cloneRoot),
     /outside the dedicated harness worktree root/u,
   );
   assert.throws(
-    () => harnessWorktreePaths(`${output}\nworktree ${runtimeRoot.replace(/\\/g, "/")}/worktrees\nHEAD 4\n`, runtimeRoot, cloneRoot),
+    () => harnessWorktreePaths(`${output}\nworktree ${join(runtimeRoot, "worktrees").replace(/\\/g, "/")}\nHEAD 4\n`, runtimeRoot, cloneRoot),
     /outside the dedicated harness worktree root/u,
   );
 });
