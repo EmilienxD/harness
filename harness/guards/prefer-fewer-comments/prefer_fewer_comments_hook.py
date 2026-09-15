@@ -9,7 +9,7 @@ leaves the write alone and returns `additionalContext` asking for less
 commentary from here on.
 
 Budgets live in DEFAULT_LIMITS, overridable per project in
-`prefer-fewer-comments.rules`. Docstrings get a larger budget than comments
+`prefer-fewer-comments.toml`. Docstrings get a larger budget than comments
 and a file header a larger one still: a contract and a module's purpose have
 nowhere else to live, while an explanation of the code does.
 
@@ -27,10 +27,11 @@ import re
 import sys
 import tempfile
 import time
+import tomllib
 from pathlib import Path
 from typing import Any, Iterable
 
-RULES_NAME = "prefer-fewer-comments.rules"
+RULES_NAME = "prefer-fewer-comments.toml"
 
 # Hook output strings are capped by both hosts; stay well under the limit.
 MESSAGE_LIMIT = 4000
@@ -510,29 +511,37 @@ def compile_pattern(pattern: str) -> re.Pattern[str] | None:
     return re.compile("^(?:[^/]+/)*" + body + "$")
 
 
-SETTING = re.compile(r"^(?P<key>[a-z-]+)\s*=\s*(?P<value>[0-9]*\.?[0-9]+)$")
-
-
 def parse_rules(path: Path) -> tuple[dict[str, float], list[tuple[bool, re.Pattern[str]]]]:
-    """(limit overrides, exemption patterns) from one rules file."""
+    """Return limit overrides and ordered exemption rules from TOML."""
     limits: dict[str, float] = {}
     patterns: list[tuple[bool, re.Pattern[str]]] = []
     try:
-        text = path.read_text(encoding="utf-8-sig")
-    except OSError:
+        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        if data.get("version") != 1 or set(data) - {"version", "limits", "rules"}:
+            raise ValueError
+        raw_limits = data.get("limits", {})
+        if not isinstance(raw_limits, dict):
+            raise ValueError
+        for key, value in raw_limits.items():
+            internal = key.replace("_", "-")
+            if internal not in DEFAULT_LIMITS or not isinstance(value, (int, float)):
+                raise ValueError
+            limits[internal] = float(value)
+        for entry in data.get("rules", []):
+            if not isinstance(entry, dict) or set(entry) != {"patterns", "exempt"}:
+                raise ValueError
+            raw_patterns, is_exempt = entry["patterns"], entry["exempt"]
+            if (not isinstance(raw_patterns, list) or not raw_patterns or
+                    not all(isinstance(item, str) and item for item in raw_patterns) or
+                    not isinstance(is_exempt, bool)):
+                raise ValueError
+            for raw in raw_patterns:
+                compiled = compile_pattern(raw)
+                if compiled is None:
+                    raise ValueError
+                patterns.append((not is_exempt, compiled))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError, TypeError):
         return limits, patterns
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        setting = SETTING.match(line)
-        if setting and setting.group("key") in DEFAULT_LIMITS:
-            limits[setting.group("key")] = float(setting.group("value"))
-            continue
-        negated = line.startswith("!")
-        compiled = compile_pattern(line[1:] if negated else line)
-        if compiled is not None:
-            patterns.append((negated, compiled))
     return limits, patterns
 
 
@@ -546,11 +555,14 @@ def exempt(patterns: list[tuple[bool, re.Pattern[str]]], path: str) -> bool:
 
 
 def rules_sources(root: Path) -> list[Path]:
-    """Global rules (next to the installed hook) first, then project rules."""
+    """Bundled defaults, then shared user and project rules."""
     sources: list[Path] = []
     seen: set[Path] = set()
-    candidates = [Path(__file__).resolve().parent.parent / RULES_NAME]
-    candidates += [root / directory / RULES_NAME for directory in (".claude", ".codex")]
+    candidates = [
+        Path(__file__).with_name(RULES_NAME),
+        Path.home() / ".harness" / "guards" / RULES_NAME,
+        root / ".harness" / "guards" / RULES_NAME,
+    ]
     for candidate in candidates:
         try:
             key = candidate.resolve()

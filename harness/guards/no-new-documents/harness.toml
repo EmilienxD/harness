@@ -1,5 +1,5 @@
 name = "no-new-documents"
-version = "1.2.0"
+version = "2.1.0"
 description = "Cross-platform PreToolUse guard that prevents agents from creating files in configured documentation directories"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -19,5 +19,6 @@ executable = true
 
 [[files]]
 src = "no-new-documents.toml"
-dest = "no-new-documents.toml"
+dest = ".harness/guards/no-new-documents.toml"
+root = "workspace"
 starter = true

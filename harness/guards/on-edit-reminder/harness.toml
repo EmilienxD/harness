@@ -1,5 +1,5 @@
 name = "on-edit-reminder"
-version = "1.1.0"
+version = "2.1.0"
 description = "PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -14,9 +14,10 @@ root = "hooks"
 platforms = ["claude"]
 executable = true
 
-# Starter rules file: all comments, edited into real rules per project. A
-# `--user` install puts it at ~/.claude/ where the hook reads global rules.
+# Provider-neutral starter policy shared by every installed provider.
 [[files]]
-src = "claude/on-edit-reminder.rules"
-dest = "on-edit-reminder.rules"
+src = "on-edit-reminder.toml"
+dest = ".harness/guards/on-edit-reminder.toml"
+root = "workspace"
 platforms = ["claude"]
+starter = true

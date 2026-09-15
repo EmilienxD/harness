@@ -187,8 +187,8 @@ def test_install_registers_native_shell_matchers_and_editable_policy(
     product_dir = ".claude" if platform == "claude" else ".codex"
     hook_dir = tmp_path / product_dir / "hooks"
     assert (hook_dir / "command_guard_hook.py").is_file()
-    assert (tmp_path / product_dir / "command-guard.rules").is_file()
-    assert not (hook_dir / "command-guard.rules").exists()
+    assert (tmp_path / ".harness/guards/command-guard.toml").is_file()
+    assert not (hook_dir / "command-guard.toml").exists()
     config = json.loads((tmp_path / config_path).read_text(encoding="utf-8"))
     group = config["hooks"]["PreToolUse"][0]
     assert group["matcher"] == expected_matcher
@@ -226,7 +226,7 @@ def test_missing_or_invalid_policy_fails_closed(tmp_path, policy_contents):
     hook = tmp_path / HOOK.name
     shutil.copy2(HOOK, hook)
     if policy_contents is not None:
-        hook.with_name("command-guard.rules").write_text(
+        hook.with_name("command-guard.toml").write_text(
             policy_contents, encoding="utf-8"
         )
 
@@ -246,9 +246,48 @@ def test_reinstall_preserves_user_policy_edits(tmp_path):
     receipts = ReceiptStore.load(tmp_path / "receipts.json")
     installer = CatalogueInstaller({tool.name: tool}, target, receipts)
     installer.reconcile({tool.name})
-    policy = tmp_path / ".claude/command-guard.rules"
+    policy = tmp_path / ".harness/guards/command-guard.toml"
     policy.write_text("custom-user-policy\n", encoding="utf-8")
 
     installer.reconcile({tool.name})
 
     assert policy.read_text(encoding="utf-8") == "custom-user-policy\n"
+
+
+def test_project_toml_adds_rules_after_the_installed_policy(tmp_path):
+    project_config = tmp_path / ".harness/guards/command-guard.toml"
+    project_config.parent.mkdir(parents=True)
+    project_config.write_text(
+        'version=1\n[[rules]]\nreason="project policy"\npatterns=["forbidden-local-command"]\n',
+        encoding="utf-8",
+    )
+
+    code, output, stderr = run_payload({
+        "cwd": str(tmp_path),
+        "tool_input": {"command": "forbidden-local-command"},
+    })
+
+    assert (code, stderr) == (0, "")
+    assert output["hookSpecificOutput"]["permissionDecisionReason"].endswith("project policy.")
+
+
+def test_shared_policy_survives_until_both_provider_installations_are_removed(tmp_path):
+    tool = discover()["command-guard"]
+    receipts = ReceiptStore.load(tmp_path / "receipts.json")
+    claude = CatalogueInstaller(
+        {tool.name: tool}, Target.for_project(tmp_path, "claude"), receipts
+    )
+    chatgpt = CatalogueInstaller(
+        {tool.name: tool}, Target.for_project(tmp_path, "chatgpt"), receipts
+    )
+    policy = tmp_path / ".harness/guards/command-guard.toml"
+
+    claude.reconcile({tool.name})
+    chatgpt.reconcile({tool.name})
+    claude.reconcile(set())
+
+    assert policy.is_file()
+
+    chatgpt.reconcile(set())
+
+    assert not policy.exists()

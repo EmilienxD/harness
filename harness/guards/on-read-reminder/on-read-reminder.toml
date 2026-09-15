@@ -1,0 +1,9 @@
+version = 1
+
+# [[rules]]
+# patterns = ["server/**/models/**", "**/*.sql"]
+# require = ["docs/GLOSSARY.md"]
+
+# [[rules]]
+# patterns = ["vendor/**"]
+# exclude = true

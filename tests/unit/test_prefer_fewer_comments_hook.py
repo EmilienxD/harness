@@ -228,9 +228,10 @@ def test_repeat_within_the_interval_is_throttled():
 
 
 def test_rules_file_overrides_the_budget_and_exempts_paths(tmp_path):
-    (tmp_path / ".claude").mkdir()
-    (tmp_path / ".claude" / hook.RULES_NAME).write_text(
-        "max-comment-lines = 5\ndocs/\n", encoding="utf-8"
+    (tmp_path / ".harness" / "guards").mkdir(parents=True)
+    (tmp_path / ".harness" / "guards" / hook.RULES_NAME).write_text(
+        'version=1\n[limits]\nmax_comment_lines=5\n[[rules]]\npatterns=["docs/"]\nexempt=true\n',
+        encoding="utf-8",
     )
     body = "# one\n# two\n# three\n# four\nvalue = 1\n"
     assert run_hook(write("a.py", body, cwd=str(tmp_path)))[1] is None

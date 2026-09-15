@@ -4,21 +4,13 @@ Claude Code PostToolUse hook: on-read-reminder.
 
 Fires after a Read call, and after Bash commands that read files through
 cat/more/less/head/tail/type. When the path being read matches a
-gitignore-style pattern from an `on-read-reminder.rules` file, the hook
+gitignore-style pattern from an `on-read-reminder.toml` file, the hook
 reminds the agent -- via additionalContext -- to read the file(s) the rule
 maps to (a glossary, conventions doc, ...) before going further.
 
-Rules file format (the shipped sample has the full description):
-
-    # comment
-    server/**/models/**  -> docs/GLOSSARY.md            one file
-    **/migrations/**     -> docs/DB.md, docs/STYLE.md   several files
-    !server/legacy/**                                   never remind
-
-Two locations are read, in order (later rules can override earlier ones):
-the hooks install directory (so a `--user` install can hold global rules),
-then `$CLAUDE_PROJECT_DIR/.claude/` (project rules win). For a project
-install both are the same file.
+Its TOML schema is shared with the sibling path guards. User rules load from
+`~/.harness/guards/`, then project rules from `.harness/guards/`; later rules
+can override earlier ones.
 
 It never blocks: PostToolUse runs after the tool call already happened, so
 the hook only adds context and always exits 0.
@@ -29,10 +21,11 @@ import json
 import os
 import re
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
-RULES_NAME = "on-read-reminder.rules"
+RULES_NAME = "on-read-reminder.toml"
 
 # Shell commands whose presence means "the agent is reading a file".
 # `type` covers Windows' cmd, the others the usual Unix suspects.
@@ -103,41 +96,33 @@ def compile_pattern(pattern: str) -> re.Pattern[str] | None:
 
 
 def parse_rules(path: Path) -> tuple[list[Rule], list[int]]:
-    """Parse a rules file into (rules, invalid_line_numbers)."""
+    """Parse TOML into ordered path rules and configuration error lines."""
     rules: list[Rule] = []
-    invalid: list[int] = []
     try:
-        # utf-8-sig: tolerate a BOM left by Windows editors
-        text = path.read_text(encoding="utf-8-sig")
-    except OSError:
-        return rules, invalid
-    for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        # gitignore-style escape of a literal leading # or !
-        escaped = line.startswith("\\#") or line.startswith("\\!")
-        if escaped:
-            line = line[1:]
-        if not escaped and line.startswith("!"):
-            pattern = line[1:].strip()
-            compiled = compile_pattern(pattern) if pattern and "->" not in pattern else None
-        elif "->" in line:
-            pattern, _, targets = line.partition("->")
-            files = tuple(
-                f.strip().replace("\\", "/") for f in targets.split(",") if f.strip()
-            )
-            compiled = compile_pattern(pattern) if files else None
-            if compiled is not None:
-                rules.append(Rule(False, compiled, files))
-                continue
-        else:
-            compiled = None
-        if compiled is not None:
-            rules.append(Rule(True, compiled, ()))
-        else:
-            invalid.append(number)
-    return rules, invalid
+        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        if data.get("version") != 1 or set(data) - {"version", "rules"}:
+            raise ValueError
+        for entry in data.get("rules", []):
+            if not isinstance(entry, dict) or set(entry) - {"patterns", "require", "exclude"}:
+                raise ValueError
+            patterns, files = entry.get("patterns"), entry.get("require", [])
+            excluded = entry.get("exclude", False)
+            if (not isinstance(patterns, list) or not patterns or
+                    not all(isinstance(item, str) and item for item in patterns) or
+                    not isinstance(files, list) or
+                    not all(isinstance(item, str) and item for item in files) or
+                    not isinstance(excluded, bool) or (excluded and files) or
+                    (not excluded and not files)):
+                raise ValueError
+            normalised = tuple(item.replace("\\", "/") for item in files)
+            for pattern in patterns:
+                compiled = compile_pattern(pattern)
+                if compiled is None:
+                    raise ValueError
+                rules.append(Rule(excluded, compiled, normalised))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError, TypeError):
+        return [], [1]
+    return rules, []
 
 
 def project_root() -> Path:
@@ -147,12 +132,7 @@ def project_root() -> Path:
 
 
 def normalise(path_text: str, root: Path) -> str | None:
-    """Project-relative, forward-slash form of *path_text*.
-
-    Returns None for absolute paths outside the project: rules are written
-    against project paths, so matching things like site-packages reads
-    would only produce noise.
-    """
+    """Return a project-relative, forward-slash path."""
     if Path(path_text).is_absolute():
         try:
             return Path(path_text).resolve().relative_to(root.resolve()).as_posix()
@@ -234,13 +214,14 @@ def main() -> int:
 
     root = project_root()
 
-    # Global rules first (the file next to the hook, in the install's
-    # .claude/), then project rules, so project rules have the last word.
-    # For a project install both resolve to the same file; load it once.
+    # Bundled defaults, then shared user and project rules.
     sources: list[Path] = []
     seen_paths: set[Path] = set()
-    hook_adjacent = Path(__file__).resolve().parent.parent / RULES_NAME
-    for candidate in (hook_adjacent, root / ".claude" / RULES_NAME):
+    for candidate in (
+        Path(__file__).with_name(RULES_NAME),
+        Path.home() / ".harness" / "guards" / RULES_NAME,
+        root / ".harness" / "guards" / RULES_NAME,
+    ):
         try:
             key = candidate.resolve()
         except OSError:
@@ -260,7 +241,7 @@ def main() -> int:
             extra = f" (+{len(bad_lines) - 3} more)" if len(bad_lines) > 3 else ""
             invalid.append(
                 f"`{display_path(source, root)}` line(s) {shown}{extra} don't match the "
-                f"'<pattern> -> <file>' or '!<pattern>' format and were ignored"
+                "the TOML rule schema and were ignored"
             )
 
     triggers: list[str] = []

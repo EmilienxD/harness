@@ -28,12 +28,13 @@ export async function runOnReadReminderJourney(): Promise<OnReadReminderJourneyR
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   try {
     await mkdir(dirname(hookPath), { recursive: true });
+    await mkdir(join(projectRoot, ".harness", "guards"), { recursive: true });
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
     await copyFile(join(harnessRoot, "harness", "guards", "on-read-reminder", "on_read_reminder_hook.py"), hookPath);
     await writeFile(join(projectRoot, "trigger.txt"), TRIGGER_CONTENT, "utf8");
     await writeFile(join(projectRoot, "GUIDE.md"), `${REQUIRED_MARKER}\n`, "utf8");
-    await writeFile(join(claudeRoot, "on-read-reminder.rules"), "trigger.txt -> GUIDE.md\n", "utf8");
+    await writeFile(join(projectRoot, ".harness", "guards", "on-read-reminder.toml"), 'version=1\n[[rules]]\npatterns=["trigger.txt"]\nrequire=["GUIDE.md"]\n', "utf8");
     await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Read|Bash", hooks: [{ type: "command", command: await pythonCommand(), args: [hookPath, "--claude"] }] }] } }, null, 2)}\n`, "utf8");
     await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
 

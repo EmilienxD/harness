@@ -1,0 +1,11 @@
+version = 1
+
+# Ordered rules map gitignore-style path patterns to files that must be read.
+# [[rules]]
+# patterns = ["server/**/models/**", "**/*.sql"]
+# require = ["docs/coding-standards/PYTHON-PREFERENCES.md"]
+
+# A matching exclusion clears requirements accumulated by earlier rules.
+# [[rules]]
+# patterns = ["vendor/**"]
+# exclude = true

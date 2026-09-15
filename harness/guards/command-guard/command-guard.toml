@@ -1,0 +1,131 @@
+version = 1
+
+[[rules]]
+reason = "rm aimed at root, a whole home folder, or the whole Users tree"
+patterns = [
+  "(^|[;\u0026|[:space:]])rm[[:space:]]+((-[a-zA-Z]+|--[a-z-]+)[[:space:]]+)*[\"\u0027]?/[\"\u0027]?[[:space:]]*($|[;\u0026|])",
+  "(^|[;\u0026|[:space:]])rm[[:space:]]+((-[a-zA-Z]+|--[a-z-]+)[[:space:]]+)*[\"\u0027]?/\\*",
+  "(^|[;\u0026|[:space:]])rm[[:space:]]+((-[a-zA-Z]+|--[a-z-]+)[[:space:]]+)*[\"\u0027]?(~|\\$HOME|\\$\\{HOME\\})/?[\"\u0027]?[[:space:]]*($|[;\u0026|])",
+  "(^|[;\u0026|[:space:]])rm[[:space:]]+((-[a-zA-Z]+|--[a-z-]+)[[:space:]]+)*[\"\u0027]?(~|\\$HOME|\\$\\{HOME\\})/\\*",
+  "(^|[;\u0026|[:space:]])rm[[:space:]]+((-[a-zA-Z]+|--[a-z-]+)[[:space:]]+)*[\"\u0027]?/Users(/[^/[:space:]\"\u0027]+)?/?[\"\u0027]?[[:space:]]*($|[;\u0026|])",
+  "--no-preserve-root",
+]
+
+[[rules]]
+reason = "raw-disk writes, formatting, or erasure"
+patterns = [
+  "(^|[;\u0026|[:space:]])dd[[:space:]][^;\u0026|]*of=[\"\u0027]?/dev/",
+  "\u003e[[:space:]]*/dev/(r?disk|sd[a-z]|nvme)",
+  "(^|[;\u0026|[:space:]])mkfs(\\.[A-Za-z0-9]+)?([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])diskutil[[:space:]]+(erase[A-Za-z]*|partitionDisk|zeroDisk|secureErase|apfs[[:space:]]+(delete|erase)[A-Za-z]*)",
+]
+
+[[rules]]
+reason = "deletion with administrator privileges"
+patterns = [
+  "(^|[;\u0026|[:space:]])sudo[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*rm([[:space:]]|$)",
+]
+
+[[rules]]
+reason = "a shell fork bomb"
+patterns = [
+  ":\\(\\)[[:space:]]*\\{[[:space:]]*:[[:space:]]*\\|[[:space:]]*:[[:space:]]*\u0026[[:space:]]*\\}[[:space:]]*;[[:space:]]*:",
+]
+
+[[rules]]
+reason = "network content piped directly into a shell"
+patterns = [
+  "(^|[;\u0026|[:space:]])(curl|wget)[[:space:]][^;\u0026|]*\\|[[:space:]]*(sudo[[:space:]]+)?(ba|z|da)?sh([[:space:]]|$)",
+]
+
+[[rules]]
+reason = "forced remote Git history rewrite"
+patterns = [
+  "(^|[;\u0026|[:space:]])git[[:space:]]+push[^;\u0026|]*[[:space:]](-f([[:space:]]|$)|--force([=[:space:]]|$))",
+  "(^|[;\u0026|[:space:]])git[[:space:]]+push[^;\u0026|]*[[:space:]]\\+[A-Za-z0-9._/-]",
+]
+
+[[rules]]
+reason = "remote Git branch or tag deletion"
+patterns = [
+  "(^|[;\u0026|[:space:]])git[[:space:]]+push[^;\u0026|]*[[:space:]](--delete|-d)([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])git[[:space:]]+push[^;\u0026|]*[[:space:]]:[A-Za-z0-9._/-]",
+]
+
+[[rules]]
+reason = "system-wide permission or ownership destruction"
+patterns = [
+  "(^|[;\u0026|[:space:]])chmod[[:space:]][^;\u0026|]*777[[:space:]]+[\"\u0027]?/[\"\u0027]?[[:space:]]*($|[;\u0026|])",
+  "(^|[;\u0026|[:space:]])chown[[:space:]]+-R[^;\u0026|]*[[:space:]]+/[\"\u0027]?[[:space:]]*($|[;\u0026|])",
+]
+
+[[rules]]
+reason = "destruction of Git's reflog safety net"
+patterns = [
+  "(^|[;\u0026|[:space:]])git[[:space:]]+reflog[[:space:]]+expire[^;\u0026|]*--expire(-unreachable)?(=|[[:space:]]+)now",
+  "(^|[;\u0026|[:space:]])git[[:space:]]+gc[^;\u0026|]*--prune(=|[[:space:]]+)(now|all)",
+]
+
+[[rules]]
+reason = "irreversible or account-level GitHub CLI operations and token output"
+patterns = [
+  "(^|[;\u0026|[:space:]])gh[[:space:]]+repo[[:space:]]+delete([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])gh[[:space:]]+release[[:space:]]+delete([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])gh[[:space:]]+(secret|ssh-key|gpg-key)[[:space:]]+delete([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])gh[[:space:]]+api[[:space:]][^;\u0026|]*(-X|--method)(=|[[:space:]]+)(DELETE|delete)",
+  "(^|[;\u0026|[:space:]])gh[[:space:]]+repo[[:space:]]+edit[^;\u0026|]*--visibility(=|[[:space:]]+)public",
+  "(^|[;\u0026|[:space:]])gh[[:space:]]+auth[[:space:]]+token([[:space:]]|$)",
+]
+
+[[rules]]
+reason = "password managers, secret keys, or operating-system keychains"
+patterns = [
+  "(^|[;\u0026|[:space:]])(bw|bws|lpass|keepassxc-cli|rbw|nordpass)([[:space:]]|$)",
+  "(^|[;\u0026|])[[:space:]]*pass[[:space:]]+[^[:space:]]",
+  "(^|[;\u0026|[:space:]])op[[:space:]]+(read|run|inject|item|document|vault|connect|service-account|events-api|signin)([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])security[[:space:]]+((-[a-zA-Z]+|--[a-z-]+)[[:space:]]+)*(find-generic-password|find-internet-password|dump-keychain)([[:space:]]|$)",
+  "(1Password|Bitwarden|NordPass|KeePassXC)\\.app",
+  "(~|\\$HOME|\\$\\{HOME\\}|/Users/[^/[:space:]\"\u0027]+)/\\.password-store",
+  "(^|[;\u0026|[:space:]])open[[:space:]]+-a[[:space:]]+[\"\u0027]?(1[Pp]assword|[Bb]itwarden|[Nn]ord[Pp]ass|[Kk]ee[Pp]ass)",
+  "(^|[;\u0026|[:space:]])brew[[:space:]]+(uninstall|remove|rm)[^;\u0026|]*[[:space:]][\"\u0027]?(1password|bitwarden|nordpass|keepassxc|lastpass)",
+  "--export-secret-(keys?|subkeys)([[:space:]=]|$)",
+]
+
+[[rules]]
+reason = "PowerShell or Windows deletion aimed at a drive, profile, or Users tree"
+patterns = [
+  "(^|[;\u0026|[:space:]])(Remove-Item|del|erase|rd|ri|rm|rmdir)([[:space:]]|$)[^;\u0026|]*[\"\u0027]?[A-Za-z]:\\\\(\\*)?[\"\u0027]?[[:space:]]*($|[;\u0026|])",
+  "(^|[;\u0026|[:space:]])(Remove-Item|del|erase|rd|ri|rm|rmdir)([[:space:]]|$)[^;\u0026|]*(\\$env:(HOME|USERPROFILE|HOMEDRIVE)|%USERPROFILE%)[\\\\/]?[\"\u0027]?([[:space:]]|$|[;\u0026|])",
+  "(^|[;\u0026|[:space:]])(Remove-Item|del|erase|rd|ri|rm|rmdir)([[:space:]]|$)[^;\u0026|]*[\"\u0027]?[A-Za-z]:\\\\Users(\\\\\\*)?[\"\u0027]?([[:space:]]|$|[;\u0026|])",
+  "(^|[;\u0026|[:space:]])(Remove-Item|del|erase|rd|ri|rm|rmdir)([[:space:]]|$)[^;\u0026|]*[\"\u0027]?\\\\\\\\[^\\\\[:space:]]+\\\\[^\\\\[:space:]]+\\\\\\*[\"\u0027]?([[:space:]]|$|[;\u0026|])",
+]
+
+[[rules]]
+reason = "Windows disk formatting, initialization, or erasure"
+patterns = [
+  "(^|[;\u0026|[:space:]])(Format-Volume|Clear-Disk|Initialize-Disk)([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])diskpart([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])format(\\.com)?[[:space:]]+[A-Za-z]:([[:space:]]|$)",
+]
+
+[[rules]]
+reason = "network content piped directly into PowerShell evaluation"
+patterns = [
+  "(^|[;\u0026|[:space:]])(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)[[:space:]][^;\u0026|]*\\|[[:space:]]*(Invoke-Expression|iex)([[:space:]]|$)",
+]
+
+[[rules]]
+reason = "recursive Windows ownership or ACL changes at a drive root"
+patterns = [
+  "(^|[;\u0026|[:space:]])icacls[[:space:]]+[\"\u0027]?[A-Za-z]:\\\\[\"\u0027]?[^;\u0026|]*/(T|reset)([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])takeown[[:space:]][^;\u0026|]*/F[[:space:]]+[\"\u0027]?[A-Za-z]:\\\\[\"\u0027]?[^;\u0026|]*/R([[:space:]]|$)",
+]
+
+[[rules]]
+reason = "Windows credential stores and PowerShell secret vaults"
+patterns = [
+  "(^|[;\u0026|[:space:]])((Get|Set|Remove)-Secret(Info)?|Get-StoredCredential|Register-SecretVault|Unregister-SecretVault)([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])(cmdkey|vaultcmd)([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])(1Password|Bitwarden|NordPass|KeePassXC)(\\.exe)([[:space:]]|$)",
+  "(^|[;\u0026|[:space:]])(secret-tool|kwallet-query)([[:space:]]|$)",
+]

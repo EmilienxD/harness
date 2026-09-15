@@ -42,9 +42,9 @@ def run_hook(name: str, payload: object, project: Path) -> tuple[int, dict | Non
 
 
 def configure(project: Path, name: str, rules: str, files: dict[str, str] | None = None) -> None:
-    claude_dir = project / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-    (claude_dir / f"{name}.rules").write_text(rules, encoding="utf-8")
+    guards_dir = project / ".harness" / "guards"
+    guards_dir.mkdir(parents=True, exist_ok=True)
+    (guards_dir / f"{name}.toml").write_text(rules, encoding="utf-8")
     for relative, content in (files or {}).items():
         destination = project / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -71,18 +71,18 @@ def test_non_object_json_input_is_ignored(name, payload, tmp_path):
 @pytest.mark.parametrize(
     ("rules", "path", "matches"),
     [
-        ("service/**/models/*.py -> docs/guide.md\n", "service/models/user.py", True),
-        ("service/**/models/*.py -> docs/guide.md\n", "service/api/models/user.py", True),
-        ("service/**/models/*.py -> docs/guide.md\n", "other/service/models/user.py", False),
-        ("*.py -> docs/guide.md\n", "deeply/nested/user.py", True),
-        ("docs/ -> docs/guide.md\n", "docs/reference/api.md", True),
-        ("config?.toml -> docs/guide.md\n", "config12.toml", False),
+        ('version=1\n[[rules]]\npatterns=["service/**/models/*.py"]\nrequire=["docs/guide.md"]\n', "service/models/user.py", True),
+        ('version=1\n[[rules]]\npatterns=["service/**/models/*.py"]\nrequire=["docs/guide.md"]\n', "service/api/models/user.py", True),
+        ('version=1\n[[rules]]\npatterns=["service/**/models/*.py"]\nrequire=["docs/guide.md"]\n', "other/service/models/user.py", False),
+        ('version=1\n[[rules]]\npatterns=["*.py"]\nrequire=["docs/guide.md"]\n', "deeply/nested/user.py", True),
+        ('version=1\n[[rules]]\npatterns=["docs/"]\nrequire=["docs/guide.md"]\n', "docs/reference/api.md", True),
+        ('version=1\n[[rules]]\npatterns=["config?.toml"]\nrequire=["docs/guide.md"]\n', "config12.toml", False),
         (
-            "*.py -> docs/guide.md\n!legacy/**\nlegacy/special.py -> docs/guide.md\n",
+            'version=1\n[[rules]]\npatterns=["*.py"]\nrequire=["docs/guide.md"]\n[[rules]]\npatterns=["legacy/**"]\nexclude=true\n[[rules]]\npatterns=["legacy/special.py"]\nrequire=["docs/guide.md"]\n',
             "legacy/special.py",
             True,
         ),
-        ("*.py -> docs/guide.md\n!legacy/**\n", "legacy/old.py", False),
+        ('version=1\n[[rules]]\npatterns=["*.py"]\nrequire=["docs/guide.md"]\n[[rules]]\npatterns=["legacy/**"]\nexclude=true\n', "legacy/old.py", False),
     ],
 )
 def test_shared_rules_language_has_the_same_observable_matches(
@@ -102,9 +102,9 @@ def test_rule_order_can_clear_and_then_add_requirements_again(name, tmp_path):
         tmp_path,
         name,
         (
-            "*.py -> docs/base.md, docs\\shared.md\n"
-            "!legacy/**\n"
-            "legacy/special.py -> docs/special.md\n"
+            'version=1\n[[rules]]\npatterns=["*.py"]\nrequire=["docs/base.md", "docs/shared.md"]\n'
+            '[[rules]]\npatterns=["legacy/**"]\nexclude=true\n'
+            '[[rules]]\npatterns=["legacy/special.py"]\nrequire=["docs/special.md"]\n'
         ),
         {
             "docs/base.md": "base\n",
@@ -122,8 +122,8 @@ def test_rule_order_can_clear_and_then_add_requirements_again(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", HOOK_PATHS)
-def test_invalid_rules_report_bounded_line_numbers_instead_of_crashing(name, tmp_path):
-    configure(tmp_path, name, "invalid\n" * 5)
+def test_invalid_toml_is_reported_instead_of_crashing(name, tmp_path):
+    configure(tmp_path, name, "version = [\n")
 
     code, output, stderr = run_hook(name, path_event(name, "src/app.py"), tmp_path)
 
@@ -153,7 +153,7 @@ def test_edit_guards_recognize_prior_reads_in_nested_transcript_entries(
     configure(
         tmp_path,
         name,
-        "src/** -> docs/team guide.md\n",
+        'version=1\n[[rules]]\npatterns=["src/**"]\nrequire=["docs/team guide.md"]\n',
         {"docs/team guide.md": "Team rules.\n"},
     )
     transcript = tmp_path / "transcript.jsonl"
@@ -176,7 +176,7 @@ def test_edit_guards_do_not_treat_an_arbitrary_command_as_a_read(name, tmp_path)
     configure(
         tmp_path,
         name,
-        "src/** -> docs/guide.md\n",
+        'version=1\n[[rules]]\npatterns=["src/**"]\nrequire=["docs/guide.md"]\n',
         {"docs/guide.md": "Team rules.\n"},
     )
     transcript = tmp_path / "transcript.jsonl"
@@ -207,7 +207,7 @@ def test_on_edit_block_denies_once_with_the_guide_then_allows_retry(tmp_path):
     configure(
         tmp_path,
         name,
-        "src/** -> docs/guide.md\n",
+        'version=1\n[[rules]]\npatterns=["src/**"]\nrequire=["docs/guide.md"]\n',
         {"docs/guide.md": "Use the domain vocabulary.\n"},
     )
     event = path_event(name, "src/app.py", session_id="block-once")
@@ -225,7 +225,7 @@ def test_on_edit_reminder_throttles_an_unread_guide_within_a_burst(tmp_path):
     configure(
         tmp_path,
         name,
-        "src/** -> docs/guide.md\n",
+        'version=1\n[[rules]]\npatterns=["src/**"]\nrequire=["docs/guide.md"]\n',
         {"docs/guide.md": "Use the domain vocabulary.\n"},
     )
     event = path_event(name, "src/app.py", session_id="remind-once")
@@ -240,7 +240,7 @@ def test_on_edit_reminder_throttles_an_unread_guide_within_a_burst(tmp_path):
 
 @pytest.mark.parametrize("name", HOOK_PATHS)
 def test_missing_required_files_are_reported_without_blocking(name, tmp_path):
-    configure(tmp_path, name, "src/** -> docs/missing.md\n")
+    configure(tmp_path, name, 'version=1\n[[rules]]\npatterns=["src/**"]\nrequire=["docs/missing.md"]\n')
 
     code, output, stderr = run_hook(name, path_event(name, "src/app.py"), tmp_path)
 
@@ -255,7 +255,7 @@ def test_on_read_reminder_collects_paths_from_one_shell_read(tmp_path):
     configure(
         tmp_path,
         name,
-        "src/*.py -> docs/source.md\ntests/*.py -> docs/tests.md\n",
+        'version=1\n[[rules]]\npatterns=["src/*.py"]\nrequire=["docs/source.md"]\n[[rules]]\npatterns=["tests/*.py"]\nrequire=["docs/tests.md"]\n',
         {"docs/source.md": "source\n", "docs/tests.md": "tests\n"},
     )
     event = {

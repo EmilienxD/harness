@@ -736,7 +736,7 @@ class CatalogueInstaller:
                     "path": str(destination.resolve()),
                     "digest": sha256(destination),
                     "starter": True,
-                    "owned": False,
+                    "owned": self._file_owned_in_another_installation(str(destination)),
                 })
                 continue
             if destination.exists() and sha256(destination) == sha256(payload.source):
@@ -752,7 +752,10 @@ class CatalogueInstaller:
                     "path": str(destination.resolve()),
                     "digest": sha256(destination),
                     "starter": payload.starter,
-                    "owned": bool(prior and prior.get("owned")),
+                    "owned": bool(
+                        (prior and prior.get("owned"))
+                        or self._file_owned_in_another_installation(str(destination))
+                    ),
                 })
                 continue
             if (
