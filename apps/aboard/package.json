@@ -43,6 +43,18 @@
         "category": "Aboard"
       },
       {
+        "command": "aboard.runClaudeCode",
+        "title": "Run Claude Code",
+        "category": "Aboard",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aboard.runCodex",
+        "title": "Run Codex",
+        "category": "Aboard",
+        "icon": "$(play)"
+      },
+      {
         "command": "aboard.initializeProject",
         "title": "Initialize Project",
         "category": "Aboard"
@@ -193,19 +205,28 @@
           "when": "!aboard.initialized"
         },
         {
+          "id": "aboard.launch",
+          "name": "Run Agent",
+          "when": "aboard.initialized",
+          "initialSize": 1
+        },
+        {
           "id": "aboard.fleet",
           "name": "Agent Fleet",
-          "when": "aboard.initialized"
+          "when": "aboard.initialized",
+          "initialSize": 4
         },
         {
           "id": "aboard.autoRun",
           "name": "Auto Run",
-          "when": "aboard.initialized"
+          "when": "aboard.initialized",
+          "initialSize": 4
         },
         {
           "id": "aboard.recentActivity",
           "name": "Recent Activity",
-          "when": "aboard.initialized"
+          "when": "aboard.initialized",
+          "initialSize": 4
         }
       ]
     },
@@ -268,6 +289,14 @@
         },
         {
           "command": "aboard.runAgent",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.runClaudeCode",
+          "when": "aboard.initialized"
+        },
+        {
+          "command": "aboard.runCodex",
           "when": "aboard.initialized"
         },
         {
@@ -352,6 +381,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "aboard.runClaudeCode",
+          "when": "viewItem == aboard.launch.claude",
+          "group": "inline@1"
+        },
+        {
+          "command": "aboard.runCodex",
+          "when": "viewItem == aboard.launch.codex",
+          "group": "inline@1"
+        },
         {
           "command": "aboard.focusAgent",
           "when": "viewItem == aboard.agent.active"

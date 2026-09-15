@@ -30,7 +30,8 @@ points.
 - `src/runtime/`: admission, persistence, activity recording, layout, counters, and lock markers.
 - `src/scaffold/`: `.abd/` initialization, updates, and scaffold ownership.
 - `src/git/` and `src/github/`: the only owners of Auto Run Git and GitHub mutation.
-- `src/vscode/`: tree views, commands, native UI, terminals, reviews, and activity presentation.
+- `src/vscode/`: tree views, the Run Agent launcher, commands, native UI, terminals, reviews, and activity
+  presentation.
 - `assets/scaffold/`: project files installed into `.abd/`.
 - `assets/runtime/`: extension-owned runtime assets.
 - `test/unit/`: bundled Node unit tests and VS Code integration suite.
@@ -54,7 +55,8 @@ endpoint are closed. Mutable runtime state belongs in VS Code storage, not the w
 `.harness/launch.json` version 3 is the launch authority and is re-read for every new launch, resume, and
 reopen. `providers.claude` and `providers.chatgpt` are equal, independently validated configurations;
 neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
-while `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
+the Run Agent view above the fleet offers one row per provider that launches the same interactive session
+without the prompt, and `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
 provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
 configuration. Profiles select model and effort independently and may use `inherit`; Auto Run workers may
 use `by-difficulty`. Platform-specific values must be validated before a terminal is created.
