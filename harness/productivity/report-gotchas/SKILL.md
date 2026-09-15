@@ -1,48 +1,33 @@
 ---
 name: report-gotchas
-description: Report noteworthy post-implementation handoff gotchas to the user's Discord history. Use near the end of complicated implementation work when the handoff has any gotchas, caveats, unverified work, unrelated errors, bugs, failed tests, unfinished work, or required human action; skip when none exist.
+description: Report noteworthy post-implementation gotchas to the user. Use when a task is complete but gotchas, caveats, unverified work, unrelated errors, bugs, failed tests, or incomplete work still require the user's attention.
 allowed-tools: Bash(harness-report-gotchas submit *) PowerShell(harness-report-gotchas submit *)
 ---
 
 # Report Gotchas
 
-Before the final response, audit the completed work for every category below. When every category is empty, finish normally without submitting a report. When any category is nonempty, submit one compact Markdown report in a single shell-tool call.
+After completing an ambiguous task, if there are remaining gotchas, caveats, unverified work, unrelated errors, bugs, failed tests, or incomplete work, notify the user by submitting a Markdown gotcha report.
 
-Start with a short bold line identifying the task or result. Include only nonempty sections, preserving concrete file names, commands, errors, and next actions:
+Never report a gotcha already reported during the session. Finish normally without submitting a report if there are no new gotchas to report.
 
-- `⚠️ Gotchas`
-- `🪨 Caveats`
-- `🔍 Unverified work`
-- `🧯 Unrelated errors`
-- `🐛 Bugs`
-- `🧪 Failed tests`
-- `🚧 Unfinished work`
-- `🙋 Human action required`
-
-Keep credentials, tokens, webhook URLs, and other secrets out of the report. The runtime adds the session ID, time, working directory, and local Git status; omit those from the Markdown.
-
-On POSIX shells, submit through a quoted heredoc:
+Run this command once per gotcha:
 
 ```bash
 harness-report-gotchas submit <<'HARNESS_GOTCHAS'
 **Short task or result**
 
-## ⚠️ Gotchas
+## Caveats
 
-- Concrete detail and its consequence.
+- This notification describes a concrete caveat and its consequence.
 HARNESS_GOTCHAS
 ```
 
-On PowerShell, submit through a literal here-string:
+Prefer a quoted heredoc (or a literal here-string if your shell uses PowerShell). Run multiple parallel shell tool calls if you have multiple gotchas to report.
 
-```powershell
-@'
-**Short task or result**
+Start with a short, one-line, bold title that clearly identifies the task or result. Be concise and concrete so the user can understand it quickly.
 
-## ⚠️ Gotchas
+Keep secrets out of the report. The system adds the session ID, time, working directory, and local Git status; omit those from the report.
 
-- Concrete detail and its consequence.
-'@ | harness-report-gotchas submit
-```
+Treat a `HARNESS_REPORT_GOTCHAS_RECEIPT` response as a successful submission. If submission fails, preserve the same information in the final response and state that Discord reporting failed.
 
-Use the shell form native to the current environment. Treat a `HARNESS_REPORT_GOTCHAS_RECEIPT` response as successful submission. If submission fails, preserve the same information in the final response and state that Discord reporting failed.
+After reporting something, do not describe it again in your end-of-turn message; tell the user you reported some gotchas and give the titles you used to identify them.

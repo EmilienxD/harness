@@ -47,6 +47,22 @@ def test_submit_accepts_markdown_on_stdin_and_returns_an_opaque_receipt(
     assert load_draft(match.group(1)).message == markdown
 
 
+def test_submit_decodes_redirected_stdin_as_utf8_when_the_shell_locale_is_legacy(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("HARNESS_REPORT_GOTCHAS_STATE_DIR", str(tmp_path))
+    markdown = "## Gotchas\n\nUnicode survives: ⚠️ 🐛\n"
+    stdin = io.TextIOWrapper(
+        io.BytesIO(markdown.encode("utf-8")), encoding="cp1252", errors="surrogateescape"
+    )
+    monkeypatch.setattr("sys.stdin", stdin)
+
+    assert main(["submit"]) == 0
+
+    receipt = capsys.readouterr().out.strip().rsplit(":", 1)[1]
+    assert load_draft(receipt).message == markdown
+
+
 def test_post_tool_hook_binds_receipt_to_session_and_local_git_state(
     tmp_path, monkeypatch, capsys
 ) -> None:
@@ -201,7 +217,7 @@ def test_configure_reads_the_webhook_secret_without_echoing_it(
 
 def test_catalogue_exposes_model_invokable_dual_platform_skill_and_runtime() -> None:
     tool = discover()["report-gotchas"]
-    assert tool.version == "1.1.0"
+    assert tool.version == "1.1.1"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert tool.requires == ("git",)

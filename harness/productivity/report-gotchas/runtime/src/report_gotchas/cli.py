@@ -61,6 +61,8 @@ def _retry() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="strict")
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
