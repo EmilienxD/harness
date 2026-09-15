@@ -20,6 +20,7 @@ from harness_cli import gitignore, settings_merge
 from harness_cli.catalogue import CatalogueError, ResolvedPackage, resolve_dependencies
 from harness_cli.host_actions import HostActionError, PreparedAction, apply as apply_host_action
 from harness_cli.host_actions import prepare as prepare_host_action
+from harness_cli.host_actions import describe as describe_host_action
 from harness_cli.host_actions import is_installed as host_action_is_installed
 from harness_cli.host_actions import uninstall as uninstall_host_action
 from harness_cli.manifest import ExpandedFile, HostAction, SupportStatus, Tool
@@ -39,6 +40,16 @@ class UnownedFileError(InstallError):
         listed = ", ".join(str(path) for path in self.paths)
         noun = "file" if len(self.paths) == 1 else "files"
         super().__init__(f"refusing to overwrite unowned {noun} {listed}")
+
+
+class UnownedHostProductError(InstallError):
+    """Installing would take over host products no receipt accounts for."""
+
+    def __init__(self, products: Sequence[str]):
+        self.products = tuple(products)
+        listed = ", ".join(self.products)
+        noun = "product" if len(self.products) == 1 else "products"
+        super().__init__(f"refusing to take over unowned host {noun} {listed}")
 
 
 def sha256(path: Path) -> str:
@@ -406,6 +417,39 @@ class CatalogueInstaller:
         resolved, _ = self.plan(requested_names)
         return self._audit_destinations(resolved, set())
 
+    def unowned_host_products(self, requested_names: set[str]) -> dict[str, list[str]]:
+        """Map each package to host products present that no receipt claims."""
+
+        resolved, _ = self.plan(requested_names)
+        return self._audit_host_products(resolved, set())
+
+    def _audit_host_products(
+        self, resolved: list[ResolvedPackage], adopted: set[str]
+    ) -> dict[str, list[str]]:
+        """Report host products an install would take over without owning.
+
+        Only a package this installation has no receipt for can surprise us.
+        A product another installation already owns is shared on purpose, and
+        an upgrade keeps managing what its own receipt installed.
+        """
+        packages = self.installation["packages"]
+        found: dict[str, list[str]] = {}
+        for item in resolved:
+            if (
+                item.tool.name in adopted
+                or packages.get(item.tool.name) is not None
+                or self._owned_in_another_installation(item.tool.name)
+            ):
+                continue
+            present = [
+                describe_host_action(action)
+                for action in item.tool.actions
+                if host_action_is_installed(action)
+            ]
+            if present:
+                found[item.tool.name] = present
+        return found
+
     def _audit_destinations(self, resolved: list[ResolvedPackage], approved: set[str]) -> list[Path]:
         """Reject unsafe destinations and report the unowned files left to decide."""
 
@@ -465,6 +509,7 @@ class CatalogueInstaller:
         requested_names: set[str],
         *,
         overwrite: Iterable[Path] = (),
+        adopt: Iterable[str] = (),
         _transaction: _LocalTransaction | None = None,
         _host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
         _persist: bool = True,
@@ -476,6 +521,10 @@ class CatalogueInstaller:
         packages = self.installation["packages"]
         if unowned := self._audit_destinations(resolved, approved):
             raise UnownedFileError(unowned)
+        if products := self._audit_host_products(resolved, set(adopt)):
+            raise UnownedHostProductError(
+                [f"{text} ({name})" for name, texts in products.items() for text in texts]
+            )
 
         prepared: dict[str, list[PreparedAction]] = {}
         rollback_prepared: dict[str, list[PreparedAction | None]] = {}
@@ -512,13 +561,6 @@ class CatalogueInstaller:
                         prepared[item.tool.name] = _prepare_actions(missing_actions)
                 if current is None or current.get("version") != item.tool.version:
                     shared_host_owner = current is None and self._owned_in_another_installation(item.tool.name)
-                    if current is None and not shared_host_owner:
-                        present = [action.type for action in item.tool.actions if host_action_is_installed(action)]
-                        if present:
-                            raise InstallError(
-                                f"{item.tool.name} host product already exists but is not owned by Harness "
-                                f"({', '.join(present)})"
-                            )
                     prepared[item.tool.name] = (
                         [] if shared_host_owner else _prepare_actions(list(item.tool.actions))
                     )
@@ -785,6 +827,7 @@ def reconcile_targets(
     requests: list[tuple[CatalogueInstaller, set[str]]],
     *,
     overwrite: Iterable[Path] = (),
+    adopt: Iterable[str] = (),
 ) -> list[list[Change]]:
     """Reconcile several targets as one local and host-level transaction."""
     if not requests:
@@ -809,6 +852,7 @@ def reconcile_targets(
             installer.reconcile(
                 requested,
                 overwrite=overwrite,
+                adopt=adopt,
                 _transaction=transaction,
                 _host_undo=host_undo,
                 _persist=False,
