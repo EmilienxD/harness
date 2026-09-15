@@ -141,9 +141,3 @@ npm install
 npm run check
 npm test
 ```
-
-Mirrored official integration references live under `docs/CLAUDE-REFERENCES/` and `docs/CHATGPT-REFERENCES/`. Refresh both sets with:
-
-```bash
-uv run python scripts/update_references.py docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES
-```
