@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_deny_PreToolUse_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_hook.py", "--claude"]
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_notify_PostToolUse_hook.py"],
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_hook.py", "--claude"],
             "statusMessage": "Checking redirected background subagents"
           }
         ]
@@ -30,7 +30,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_wait_hook.py"],
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_hook.py", "--claude"],
             "timeout": 600,
             "statusMessage": "Waiting for redirected background subagents"
           }
@@ -43,7 +43,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_wait_hook.py"],
+            "args": ["${CLAUDE_DIR}/hooks/redirect_subagents_hook.py", "--claude"],
             "timeout": 600,
             "statusMessage": "Waiting for redirected background subagents"
           }

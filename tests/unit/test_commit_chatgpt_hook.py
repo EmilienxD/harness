@@ -1,4 +1,4 @@
-"""Regression tests for the native ChatGPT commit hook adapter."""
+"""Regression tests for the commit hook's native ChatGPT section."""
 import importlib.util
 import json
 import subprocess
@@ -14,7 +14,7 @@ from harness_cli.receipts import ReceiptStore
 
 ROOT = Path(__file__).resolve().parents[2]
 CORE = ROOT / "harness/engineering/commit/commit_core.py"
-ADAPTER = ROOT / "harness/engineering/commit/chatgpt/commit_ChatGPT_hook.py"
+ADAPTER = ROOT / "harness/engineering/commit/commit_hook.py"
 
 core_spec = importlib.util.spec_from_file_location("commit_core", CORE)
 core = importlib.util.module_from_spec(core_spec)
@@ -22,10 +22,18 @@ sys.modules["commit_core"] = core
 assert core_spec.loader is not None
 core_spec.loader.exec_module(core)
 
-adapter_spec = importlib.util.spec_from_file_location("commit_ChatGPT_hook", ADAPTER)
+adapter_spec = importlib.util.spec_from_file_location("commit_hook_chatgpt", ADAPTER)
 adapter = importlib.util.module_from_spec(adapter_spec)
 assert adapter_spec.loader is not None
 adapter_spec.loader.exec_module(adapter)
+
+
+@pytest.fixture(autouse=True)
+def chatgpt_provider():
+    """Every test here runs the hook as the ChatGPT fragment invokes it."""
+    adapter.set_provider("chatgpt")
+    yield
+    adapter.set_provider("claude")
 
 
 def _git(repo, *args):
@@ -54,7 +62,7 @@ def test_chatgpt_install_uses_native_hooks_and_skill_roots(tmp_path):
     CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
 
     assert (tmp_path / ".codex/hooks/commit_core.py").is_file()
-    assert (tmp_path / ".codex/hooks/commit_ChatGPT_hook.py").is_file()
+    assert (tmp_path / ".codex/hooks/commit_hook.py").is_file()
     assert (tmp_path / ".agents/skills/commit/SKILL.md").is_file()
     assert (tmp_path / ".agents/skills/commit/agents/openai.yaml").is_file()
     assert not (tmp_path / ".claude").exists()
@@ -64,7 +72,8 @@ def test_chatgpt_install_uses_native_hooks_and_skill_roots(tmp_path):
     assert hooks["PreToolUse"][0]["matcher"] == "Bash|apply_patch"
     for groups in hooks.values():
         command = groups[0]["hooks"][0]["command"]
-        assert "commit_ChatGPT_hook.py" in command
+        assert "commit_hook.py" in command
+        assert "--chatgpt" in command
         assert "${" not in command
 
 
@@ -130,11 +139,11 @@ def test_chatgpt_unhandled_hook_exception_blocks_with_exit_2(monkeypatch, capsys
     monkeypatch.setattr(
         adapter,
         "main",
-        lambda: (_ for _ in ()).throw(RuntimeError("adapter failure")),
+        lambda *_: (_ for _ in ()).throw(RuntimeError("adapter failure")),
     )
 
     with pytest.raises(SystemExit) as stopped:
-        adapter.entrypoint()
+        adapter.entrypoint(["--chatgpt"])
 
     assert stopped.value.code == 2
     stderr = capsys.readouterr().err

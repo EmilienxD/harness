@@ -1,5 +1,5 @@
 name = "command-guard"
-version = "1.0.1"
+version = "1.1.0"
 description = "Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -12,8 +12,8 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "command_guard_PreToolUse_hook.py"
-dest = "command_guard_PreToolUse_hook.py"
+src = "command_guard_hook.py"
+dest = "command_guard_hook.py"
 root = "hooks"
 executable = true
 

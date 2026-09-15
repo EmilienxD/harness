@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "harness-report-gotchas-hook chatgpt",
+            "command": "harness-report-gotchas-hook --chatgpt",
             "timeout": 30
           }
         ]

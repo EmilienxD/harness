@@ -33,9 +33,9 @@ export async function runCommandGuardJourney(platform: Platform): Promise<Comman
     const harnessRoot = await findHarnessRoot(process.cwd());
     const python = await pythonCommand();
     const hookRoot = join(projectRoot, platform === "claude" ? ".claude" : ".codex", "hooks");
-    const hookPath = join(hookRoot, "command_guard_PreToolUse_hook.py");
+    const hookPath = join(hookRoot, "command_guard_hook.py");
     await mkdir(hookRoot, { recursive: true });
-    await copyFile(join(harnessRoot, "harness", "guards", "command-guard", "command_guard_PreToolUse_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness", "guards", "command-guard", "command_guard_hook.py"), hookPath);
     await copyFile(join(harnessRoot, "harness", "guards", "command-guard", "command-guard.rules"), join(hookRoot, "command-guard.rules"));
 
     let finalText: string;
@@ -44,7 +44,7 @@ export async function runCommandGuardJourney(platform: Platform): Promise<Comman
       await mkdir(configRoot, { recursive: true });
       await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
       await mkdir(join(projectRoot, ".claude"), { recursive: true });
-      await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash|PowerShell", hooks: [{ type: "command", command: python, args: [hookPath] }] }] } }, null, 2)}\n`, "utf8");
+      await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash|PowerShell", hooks: [{ type: "command", command: python, args: [hookPath, "--claude"] }] }] } }, null, 2)}\n`, "utf8");
       server = await startFakeAnthropicServer({ repoRoot: projectRoot, diagnosticsPath, scenarioCatalogHash, parseRequest: parseAnthropicMessagesRequest, transition: claudeTransition });
       const env = isolatedClaudeEnvironment(process.env, { ANTHROPIC_BASE_URL: server.baseUrl, ANTHROPIC_AUTH_TOKEN: server.authToken, CLAUDE_CONFIG_DIR: configRoot, CLAUDE_PROJECT_DIR: projectRoot, CLAUDE_CODE_PROJECT_DIR_NAME: "harness-command-guard-e2e", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", CLAUDE_CODE_MAX_RETRIES: "0", DISABLE_UPDATES: "1", DISABLE_AUTOUPDATER: "1", NO_PROXY: "127.0.0.1,localhost" });
       const result = await runClaude(["-p", "--output-format", "stream-json", "--verbose", "--tools", "Bash", "--allowedTools", "Bash", "--permission-mode", "acceptEdits", "--permission-prompts", "none", MARKER], projectRoot, env);
@@ -52,7 +52,7 @@ export async function runCommandGuardJourney(platform: Platform): Promise<Comman
       if (result.code !== 0) throw new Error(`Claude Code exited ${result.code}: ${redactProcessError(result.stderr)}`);
       finalText = findFinalText(parseStreamJson(result.stdout), result.stdout);
     } else {
-      await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `${python} \"${hookPath}\"` }] }] } }, null, 2)}\n`, "utf8");
+      await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `${python} \"${hookPath}\" --chatgpt` }] }] } }, null, 2)}\n`, "utf8");
       const codexServer = await startFakeOpenAiServer({ diagnosticsPath, scenarioCatalogHash, transition: codexTransition });
       server = codexServer;
       const codexHome = await prepareCodexHome({ root, baseUrl: codexServer.baseUrl, trustedProjects: [projectRoot], extraConfig: ["[features]", "hooks = true"] });

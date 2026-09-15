@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py"],
+            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py", "--claude"],
             "timeout": 604800,
             "statusMessage": "Checking Claude usage limits — waits here if they are exhausted"
           }
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py"],
+            "args": ["${CLAUDE_DIR}/hooks/usage_limit_wait_hook.py", "--claude"],
             "timeout": 604800,
             "statusMessage": "Checking Claude usage limits — waits here if they are exhausted"
           }

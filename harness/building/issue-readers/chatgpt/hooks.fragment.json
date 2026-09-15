@@ -5,13 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/address_issue_UserPromptSubmit_hook.py\"",
+            "command": "${PYTHON} \"${HOOKS_DIR}/issue_readers_hook.py\" --chatgpt",
             "timeout": 120
-          },
-          {
-            "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/review_issue_UserPromptSubmit_hook.py\"",
-            "timeout": 60
           }
         ]
       }

@@ -16,6 +16,15 @@ from report_gotchas.config import webhook_url
 
 RECEIPT = re.compile(r"HARNESS_REPORT_GOTCHAS_RECEIPT:([0-9a-f]{32})")
 
+def provider_from_argv(argv: list[str]) -> str | None:
+    """The provider the installer wired this hook into, or None if it didn't say."""
+    for token in argv:
+        if token == "--claude":
+            return "claude"
+        if token == "--chatgpt":
+            return "chatgpt"
+    return None
+
 
 def _strings(value: Any):
     if isinstance(value, str):
@@ -89,7 +98,7 @@ def handle(
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-        provider = sys.argv[1] if len(sys.argv) > 1 else "claude"
+        provider = provider_from_argv(sys.argv[1:]) or "claude"
         output = handle(payload, provider)
         if output is not None:
             print(json.dumps(output))

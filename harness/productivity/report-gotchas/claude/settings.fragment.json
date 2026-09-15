@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "harness-report-gotchas-hook",
-            "args": ["claude"],
+            "args": ["--claude"],
             "timeout": 30
           }
         ]

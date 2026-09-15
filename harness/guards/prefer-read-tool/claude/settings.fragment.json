@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/prefer_read_tool_PostToolUse_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/prefer_read_tool_hook.py", "--claude"]
           }
         ]
       }

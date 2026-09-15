@@ -57,7 +57,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Claude Code also gets `copy-message-as-issue` for publishing the latest reviewed response.
 
-- **`issue-readers`**: Installs `address-this` and `review-this`, plus hooks that prepare bounded issue or commit context. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
+- **`issue-readers`**: Installs `address-this` and `review-this`, plus a hook that prepares bounded issue or commit context. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
 
 - **`commit`**: `/commit <message>` stages the files changed by the current session and commits them without another model call. Add `--dry` to preview or `--ai` to generate a message through a direct Gemini request. Everything except `--ai` is local and needs no API key.
 

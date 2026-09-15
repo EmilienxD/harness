@@ -1,5 +1,5 @@
 name = "on-edit-reminder"
-version = "1.0.4"
+version = "1.1.0"
 description = "PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -8,8 +8,9 @@ status = "supported"
 fragment = "claude/settings.fragment.json"
 
 [[files]]
-src = "claude/on_edit_reminder_PostToolUse_hook.py"
-dest = "hooks/on_edit_reminder_PostToolUse_hook.py"
+src = "on_edit_reminder_hook.py"
+dest = "on_edit_reminder_hook.py"
+root = "hooks"
 platforms = ["claude"]
 executable = true
 

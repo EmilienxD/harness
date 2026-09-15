@@ -1,4 +1,4 @@
-"""Regression tests for the native ChatGPT issues hook adapter."""
+"""Regression tests for the issues hook's native ChatGPT section."""
 
 import importlib.util
 import io
@@ -14,7 +14,7 @@ from harness_cli.receipts import ReceiptStore
 
 ROOT = Path(__file__).resolve().parents[2]
 CORE = ROOT / "harness/building/issue-writers/issues_core.py"
-ADAPTER = ROOT / "harness/building/issue-writers/chatgpt/issues_ChatGPT_hook.py"
+ADAPTER = ROOT / "harness/building/issue-writers/issue_writers_hook.py"
 
 core_spec = importlib.util.spec_from_file_location("issues_core", CORE)
 core = importlib.util.module_from_spec(core_spec)
@@ -22,7 +22,7 @@ sys.modules["issues_core"] = core
 assert core_spec.loader is not None
 core_spec.loader.exec_module(core)
 
-adapter_spec = importlib.util.spec_from_file_location("issues_ChatGPT_hook", ADAPTER)
+adapter_spec = importlib.util.spec_from_file_location("issue_writers_hook", ADAPTER)
 adapter = importlib.util.module_from_spec(adapter_spec)
 assert adapter_spec.loader is not None
 adapter_spec.loader.exec_module(adapter)
@@ -30,7 +30,7 @@ adapter_spec.loader.exec_module(adapter)
 
 def _run(payload, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
-    adapter.main()
+    adapter.main(["--chatgpt"])
     output = capsys.readouterr().out
     return json.loads(output) if output else None
 
@@ -41,7 +41,7 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
     CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
 
     assert (tmp_path / ".codex/hooks/issues_core.py").is_file()
-    assert (tmp_path / ".codex/hooks/issues_ChatGPT_hook.py").is_file()
+    assert (tmp_path / ".codex/hooks/issue_writers_hook.py").is_file()
     for name in (
         "draft-audit-issues",
         "draft-issue",
@@ -57,7 +57,8 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
 
     hooks = json.loads((tmp_path / ".codex/hooks.json").read_text(encoding="utf-8"))
     commands = [hook["command"] for hook in hooks["hooks"]["UserPromptSubmit"][0]["hooks"]]
-    assert any("issues_ChatGPT_hook.py" in command for command in commands)
+    assert any("issue_writers_hook.py" in command for command in commands)
+    assert any("--chatgpt" in command for command in commands)
     assert all("${" not in command for command in commands)
 
 
@@ -132,7 +133,7 @@ def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
         ),
     )
 
-    adapter.main()
+    adapter.main(["--chatgpt"])
 
     response = json.loads(capsys.readouterr().out)
     assert response["decision"] == "block"
@@ -166,7 +167,7 @@ def test_chatgpt_publish_is_scoped_to_the_current_session(
         ),
     )
 
-    adapter.main()
+    adapter.main(["--chatgpt"])
 
     response = json.loads(capsys.readouterr().out)
     assert response["decision"] == "block"

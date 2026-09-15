@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "1.0.1"
+version = "1.1.0"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -13,29 +13,23 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "claude/copy_message_as_issue.py"
-dest = "copy_message_as_issue.py"
-root = "hooks"
-executable = true
-platforms = ["claude"]
-
-[[files]]
-src = "copy-message-as-issue"
-dest = "copy-message-as-issue"
-root = "skills"
-platforms = ["claude"]
-
-[[files]]
 src = "issues_core.py"
 dest = "issues_core.py"
 root = "hooks"
 executable = true
 
 [[files]]
-src = "claude/publish_issues_UserPromptSubmit_hook.py"
-dest = "publish_issues_UserPromptSubmit_hook.py"
+src = "issue_writers_hook.py"
+dest = "issue_writers_hook.py"
 root = "hooks"
 executable = true
+
+# Claude Code alone caches each turn's final message, which is what this skill
+# publishes; ChatGPT exposes no equivalent lifecycle event.
+[[files]]
+src = "copy-message-as-issue"
+dest = "copy-message-as-issue"
+root = "skills"
 platforms = ["claude"]
 
 [[files]]
@@ -69,16 +63,11 @@ dest = "to-spec-draft-issue"
 root = "skills"
 
 [[files]]
-src = "chatgpt/issues_ChatGPT_hook.py"
-dest = "issues_ChatGPT_hook.py"
-root = "hooks"
-executable = true
-platforms = ["chatgpt"]
-[[files]]
 src = "chatgpt/agents/draft-issue.yaml"
 dest = "draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
+
 [[files]]
 src = "chatgpt/agents/draft-issues.yaml"
 dest = "draft-issues/agents/openai.yaml"
@@ -108,4 +97,3 @@ src = "chatgpt/agents/to-spec-draft-issue.yaml"
 dest = "to-spec-draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
-

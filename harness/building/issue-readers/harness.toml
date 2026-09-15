@@ -1,5 +1,5 @@
 name = "issue-readers"
-version = "1.0.6"
+version = "1.1.0"
 description = "Prepare issue and commit context for implementation and review workers"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -25,14 +25,8 @@ root = "skills"
 starter = true
 
 [[files]]
-src = "address_issue_UserPromptSubmit_hook.py"
-dest = "address_issue_UserPromptSubmit_hook.py"
-root = "hooks"
-executable = true
-
-[[files]]
-src = "review_issue_UserPromptSubmit_hook.py"
-dest = "review_issue_UserPromptSubmit_hook.py"
+src = "issue_readers_hook.py"
+dest = "issue_readers_hook.py"
 root = "hooks"
 executable = true
 

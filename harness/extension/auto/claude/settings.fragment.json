@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${HOOKS_DIR}/auto.py"],
+            "args": ["${HOOKS_DIR}/auto_hook.py", "--claude"],
             "timeout": 120
           }
         ]

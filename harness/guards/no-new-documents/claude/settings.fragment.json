@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/no_new_documents_PreToolUse_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/no_new_documents_hook.py", "--claude"]
           }
         ]
       }

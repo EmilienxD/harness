@@ -1,5 +1,5 @@
 name = "redirect-subagents"
-version = "1.2.6"
+version = "1.3.1"
 description = "Redirect Claude Code's built-in Agent tool subagents to alternate providers, avoiding Claude subscription usage"
 requires = []
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
@@ -9,32 +9,22 @@ status = "supported"
 fragment = "claude/settings.fragment.json"
 
 [[files]]
-src = "claude/rs_io.py"
-dest = "hooks/rs_io.py"
+src = "rs_io.py"
+dest = "rs_io.py"
+root = "hooks"
 platforms = ["claude"]
 
 [[files]]
-src = "claude/redirect_subagents_deny_PreToolUse_hook.py"
-dest = "hooks/redirect_subagents_deny_PreToolUse_hook.py"
-platforms = ["claude"]
-executable = true
-
-[[files]]
-src = "claude/redirect_subagents_notify_PostToolUse_hook.py"
-dest = "hooks/redirect_subagents_notify_PostToolUse_hook.py"
-platforms = ["claude"]
-executable = true
-
-[[files]]
-src = "claude/redirect_subagents_wait_hook.py"
-dest = "hooks/redirect_subagents_wait_hook.py"
+src = "redirect_subagents_hook.py"
+dest = "redirect_subagents_hook.py"
+root = "hooks"
 platforms = ["claude"]
 executable = true
 
 # Example subagent config, installed as
 # .claude/harness-redirect-subagents/subagents.json.
 # `starter` means: copied when absent, never overwritten afterwards — the
-# hooks read this file after the user edits it into real entries.
+# hook reads this file after the user edits it into real entries.
 [[files]]
 src = "claude/subagents.example.json"
 dest = "harness-redirect-subagents/subagents.json"

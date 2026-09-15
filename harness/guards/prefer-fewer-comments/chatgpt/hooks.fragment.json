@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/prefer_fewer_comments_PostToolUse_hook.py\"",
+            "command": "${PYTHON} \"${HOOKS_DIR}/prefer_fewer_comments_hook.py\" --chatgpt",
             "timeout": 30
           }
         ]

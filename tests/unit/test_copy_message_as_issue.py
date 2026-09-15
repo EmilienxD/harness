@@ -9,12 +9,10 @@ import time
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SHARED = ROOT / "harness/building/issue-writers"
-CLAUDE = ROOT / "harness/building/issue-writers/claude"
-sys.path.insert(0, str(SHARED))
-sys.path.insert(0, str(CLAUDE))
+TOOL = ROOT / "harness/building/issue-writers"
+sys.path.insert(0, str(TOOL))
 import issues_core as core
-import copy_message_as_issue as hook
+import issue_writers_hook as hook
 
 SID = "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55"
 
@@ -146,32 +144,33 @@ def test_publication_lock_prevents_overlap(payload, remote):
     assert remote == []
 
 
-def run_adapter(payload, filename):
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join((str(SHARED), str(CLAUDE)))}
-    return subprocess.run([sys.executable, str(CLAUDE / filename)],
+def run_adapter(payload):
+    """The installed hook, as the Claude Code settings fragment invokes it."""
+    env = {**os.environ, "PYTHONPATH": str(TOOL)}
+    return subprocess.run([sys.executable, str(TOOL / "issue_writers_hook.py"), "--claude"],
                           input=json.dumps(payload), text=True, capture_output=True, env=env)
 
 
 @pytest.mark.parametrize("event", ["SessionStart", "StopFailure"])
 def test_lifecycle_invalidates_cache(payload, event):
     hook.capture(payload)
-    result = run_adapter({**payload, "hook_event_name": event}, "copy_message_as_issue.py")
+    result = run_adapter({**payload, "hook_event_name": event})
     assert result.returncode == 0 and not result.stdout
     assert not hook.cache_path(payload).exists()
 
 
 def test_prompt_dispatch_blocks_save_and_invalidates_on_regular_prompt(payload):
-    result = run_adapter(payload, "publish_issues_UserPromptSubmit_hook.py")
+    result = run_adapter(payload)
     assert result.returncode == 2 and "No completed response" in result.stderr
     assert not result.stdout
     hook.capture(payload)
-    result = run_adapter({**payload, "prompt": "Continue"}, "publish_issues_UserPromptSubmit_hook.py")
+    result = run_adapter({**payload, "prompt": "Continue"})
     assert result.returncode == 0
     assert not hook.cache_path(payload).exists()
 
 
 def test_stop_adapter_captures_without_model_output(payload):
-    result = run_adapter({**payload, "hook_event_name": "Stop"}, "copy_message_as_issue.py")
+    result = run_adapter({**payload, "hook_event_name": "Stop"})
     assert result.returncode == 0 and not result.stdout
     assert json.loads(hook.cache_path(payload).read_text())["body"] == payload["last_assistant_message"]
 

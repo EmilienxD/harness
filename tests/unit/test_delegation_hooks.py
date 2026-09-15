@@ -8,6 +8,23 @@ import pytest
 from subagents_runtime import hooks, sessions
 
 
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["--claude"], "claude"),
+        (["--chatgpt"], "chatgpt"),
+        ([], None),
+        # Anything that is not the flag is not a provider, including the bare
+        # word older settings used to pass.
+        (["claude"], None),
+        (["chatgpt"], None),
+        (["--verbose"], None),
+    ],
+)
+def test_provider_comes_from_the_flag_the_installer_writes(argv, expected) -> None:
+    assert hooks.provider_from_argv(argv) == expected
+
+
 def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)

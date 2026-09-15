@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/on_read_reminder_PostToolUse_hook.py"]
+            "args": ["${CLAUDE_DIR}/hooks/on_read_reminder_hook.py", "--claude"]
           }
         ]
       }

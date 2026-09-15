@@ -1,5 +1,5 @@
 name = "no-new-documents"
-version = "1.0.1"
+version = "1.1.0"
 description = "Cross-platform PreToolUse guard that prevents agents from creating files in configured documentation directories"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -12,8 +12,8 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "no_new_documents_PreToolUse_hook.py"
-dest = "no_new_documents_PreToolUse_hook.py"
+src = "no_new_documents_hook.py"
+dest = "no_new_documents_hook.py"
 root = "hooks"
 executable = true
 
