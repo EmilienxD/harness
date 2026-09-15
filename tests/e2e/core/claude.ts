@@ -22,9 +22,11 @@ export interface CapturedProcess {
 }
 
 export async function validateClaudeCli(): Promise<void> {
-  const versionOutput = (await execCaptured("claude", ["--version"])).trim();
+  const versionCommand = spawnableCommand("claude", ["--version"]);
+  const versionOutput = (await execCaptured(versionCommand.file, versionCommand.args)).trim();
   parseClaudeVersion(versionOutput);
-  const help = await execCaptured("claude", ["--help"]);
+  const helpCommand = spawnableCommand("claude", ["--help"]);
+  const help = await execCaptured(helpCommand.file, helpCommand.args);
   const missing = missingClaudeHelpStructures(help);
   if (missing.length > 0) throw new Error(`Claude Code protocol mismatch; missing required help structures: ${missing.join(", ")}`);
 }

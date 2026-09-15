@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { contains, loadConfig } from "../e2e/config.js";
 import {
@@ -30,7 +31,7 @@ test("E2E configuration rejects malformed repository slugs", () => {
 });
 
 test("E2E configuration keeps every generated path outside the aboard checkout", () => {
-  const config = loadConfig({ ABOARD_E2E_ROOT: "C:\\harness-e2e-independent" });
+  const config = loadConfig({ ABOARD_E2E_ROOT: join(tmpdir(), "harness-e2e-independent") });
   const checkout = resolve(__dirname, "..", "..");
   for (const path of [config.runtimeRoot, config.cloneRoot, config.claudeConfigRoot, config.diagnosticsPath, config.ownershipPath, config.readinessPath]) {
     assert.equal(contains(checkout, path), false, path);

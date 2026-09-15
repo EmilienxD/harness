@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { isolatedClaudeEnvironment, parseStreamJson, redactProcessError, runClaude, validateClaudeCli } from "../../core/claude.js";
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
+import { canonicalMkdtemp } from "../../core/temp.js";
 import { GUIDE_MARKER, MARKER, parseRequest, scenarioCatalogHash, TARGET_AFTER, TARGET_BEFORE, transition } from "./scenario.js";
 
 const execFileAsync = promisify(execFile);
@@ -19,7 +20,7 @@ export interface OnEditBlockJourneyResult {
 
 export async function runOnEditBlockJourney(): Promise<OnEditBlockJourneyResult> {
   await validateClaudeCli();
-  const root = await mkdtemp(join(tmpdir(), "harness-on-edit-block-e2e-"));
+  const root = await canonicalMkdtemp(join(tmpdir(), "harness-on-edit-block-e2e-"));
   const configRoot = join(root, "claude-config");
   const projectRoot = join(root, "project");
   const claudeRoot = join(projectRoot, ".claude");

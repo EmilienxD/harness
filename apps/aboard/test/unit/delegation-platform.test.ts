@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { DelegationCoordinator, type DelegationConfigurationSource } from "../../src/bridge/delegation.js";
@@ -468,6 +470,9 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
   });
   const host = new FakeTerminalHost();
   const fleet = new FleetRegistry();
+  const workspaceRoot = join(tmpdir(), "aboard-workspace");
+  const worktreeRoot = join(tmpdir(), "aboard-worktree");
+  const metadataRoots = [join(workspaceRoot, ".git", "worktrees", "work"), join(workspaceRoot, ".git", "objects")];
   fleet.register({
     platform: "chatgpt",
     identity: { agentId, type: "implementer" },
@@ -478,7 +483,7 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     resultDelivery: { mode: "tool-result" },
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
     issueNumbers: [15],
-    cwd: "C:\\checkouts\\run-1\\work",
+    cwd: worktreeRoot,
     autoRunRestricted: true,
   }, at);
   fleet.transition(agentId, { status: "running", startedAt: at }, at);
@@ -492,11 +497,11 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
   const terminals = new TerminalController({
     host,
     shell: "powershell",
-    environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:\\work" }),
+    environment: () => ({ port: 4823, token: "token", workspaceRoot }),
     terminalIdFactory: () => "new-terminal" as TerminalId,
   });
   const coordinator = new DelegationCoordinator({
-    workspaceRoot: "C:\\work",
+    workspaceRoot,
     fleet,
     lease: new WriteLease(),
     terminals,
@@ -509,7 +514,7 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     spills: { prepare: async () => undefined, write: async () => "unused" },
     shell: "powershell",
     agentIdFactory: () => "unused" as AgentId,
-    resolveWorktreeGitMetadataRoots: async () => ["C:\\work\\.git\\worktrees\\work", "C:\\work\\.git\\objects"],
+    resolveWorktreeGitMetadataRoots: async () => metadataRoots,
   });
 
   const completionSha = "a".repeat(40);
@@ -520,8 +525,9 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
   assert.match(command, /web_search="disabled"/u);
   assert.match(command, /features\.multi_agent=false/u);
   assert.match(command, /default_permissions="aboard-worktree"/u);
-  assert.match(command, /C:\\\\work\/\*\*/u);
-  assert.match(command, /C:\\\\work\\\\\.git\\\\worktrees\\\\work/u);
+  const readOnlyRoot = process.platform === "win32" ? `${workspaceRoot.replaceAll("/", "\\")}/**` : `${workspaceRoot}/**`;
+  assert.ok(command.includes(`${JSON.stringify(readOnlyRoot)}="read"`));
+  assert.ok(command.includes(`${JSON.stringify(metadataRoots[0])}=true`));
   assert.equal(host.options[0]?.env?.ABOARD_WORKER_START_SHA, completionSha);
   assert.equal(host.options[0]?.env?.ABOARD_REVIEW_RANGE, reviewRange);
   assert.equal(host.options[0]?.env?.ABOARD_WORKER_CONTINUATION, "1");

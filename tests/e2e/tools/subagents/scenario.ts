@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 
 import { E2eProtocolError, isRecord, type AnthropicMessagesRequest, type AnthropicScenarioResponse } from "../../core/anthropic-protocol.js";
@@ -130,7 +130,12 @@ function codexChild(request: OpenAiResponsesRequest): OpenAiScenarioResponse {
 function requireInbox(text: string, repoRoot: string, provider: "claude" | "codex"): string {
   const match = /Delegation inbox opened\. Write one Markdown file per child directly under:\s*\r?\n([^\r\n]+)\r?\n/u.exec(text);
   const inbox = match?.[1]?.trim();
-  if (inbox !== undefined && isAbsolute(inbox) && containsPath(repoRoot, inbox)) return inbox;
+  if (inbox !== undefined && isAbsolute(inbox)) {
+    try {
+      const canonicalInbox = realpathSync(inbox);
+      if (containsPath(realpathSync(repoRoot), canonicalInbox)) return canonicalInbox;
+    } catch { /* the inbox must exist before the model can write its request */ }
+  }
   if (provider === "claude") throw new E2eProtocolError("$.messages", "missing a contained delegation inbox", "subagents");
   throw new OpenAiProtocolError("$.input", "missing a contained delegation inbox", "subagents");
 }

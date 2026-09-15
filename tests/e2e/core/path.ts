@@ -1,9 +1,14 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { delimiter, dirname, isAbsolute, join, normalize, relative, resolve, win32 } from "node:path";
+
+const WINDOWS_ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\)/u;
 
 export function containsPath(parent: string, candidate: string): boolean {
-  const rel = relative(normalize(parent), normalize(candidate));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  const paths = WINDOWS_ABSOLUTE_PATH.test(parent) || WINDOWS_ABSOLUTE_PATH.test(candidate)
+    ? win32
+    : { isAbsolute, normalize, relative };
+  const rel = paths.relative(paths.normalize(parent), paths.normalize(candidate));
+  return rel === "" || (!rel.startsWith("..") && !paths.isAbsolute(rel));
 }
 
 /**
@@ -13,7 +18,20 @@ export function containsPath(parent: string, candidate: string): boolean {
  * Falls back to the bare name so a missing CLI still fails at spawn.
  */
 export function resolveExecutable(command: string): string {
-  if (process.platform !== "win32") return command;
+  if (isAbsolute(command) || dirname(command) !== ".") return command;
+  if (process.platform !== "win32") {
+    for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+      if (directory.length === 0) continue;
+      const candidate = join(directory, command);
+      try {
+        if (statSync(candidate).isFile()) {
+          accessSync(candidate, constants.X_OK);
+          return candidate;
+        }
+      } catch { /* keep searching */ }
+    }
+    return command;
+  }
   const suffixes = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((suffix) => suffix.length > 0);
   for (const directory of (process.env.PATH ?? "").split(delimiter)) {
     if (directory.length === 0) continue;
@@ -49,14 +67,20 @@ function npmShimCommand(file: string, args: readonly string[]): SpawnableCommand
     if (statSync(file).size > 65_536) return undefined;
     const contents = readFileSync(file, "utf8");
     const match = /&\s+"%_prog%"\s+"%dp0%\\([^"\r\n]+\.js)"\s+%\*\s*$/imu.exec(contents);
-    if (match?.[1] === undefined) return undefined;
     const root = realpathSync(dirname(file));
-    const entry = realpathSync(resolve(root, ...match[1].split("\\")));
-    if (!containsPath(root, entry) || !statSync(entry).isFile()) return undefined;
-    const localNode = join(root, "node.exe");
-    const node = existsSync(localNode) ? localNode : resolveExecutable("node");
-    if (/\.(?:cmd|bat)$/iu.test(node)) return undefined;
-    return { file: node, args: [entry, ...args] };
+    if (match?.[1] !== undefined) {
+      const entry = realpathSync(resolve(root, ...match[1].split("\\")));
+      if (!containsPath(root, entry) || !statSync(entry).isFile()) return undefined;
+      const localNode = join(root, "node.exe");
+      const node = existsSync(localNode) ? localNode : resolveExecutable("node");
+      if (/\.(?:cmd|bat)$/iu.test(node)) return undefined;
+      return { file: node, args: [entry, ...args] };
+    }
+    const nativeMatch = /^"%dp0%\\([^"\r\n]+\.exe)"\s+%\*\s*$/imu.exec(contents);
+    if (nativeMatch?.[1] === undefined) return undefined;
+    const native = realpathSync(resolve(root, ...nativeMatch[1].split("\\")));
+    if (!statSync(native).isFile()) return undefined;
+    return { file: native, args };
   } catch {
     return undefined;
   }

@@ -1,12 +1,14 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { parseAnthropicMessagesRequest } from "../../core/anthropic-protocol.js";
+import { canonicalMkdtemp } from "../../core/temp.js";
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
+import { spawnableCommand } from "../../core/path.js";
 import {
   findFinalText,
   isolatedClaudeEnvironment,
@@ -37,7 +39,7 @@ export interface RedirectSubagentsJourneyResult {
 
 export async function runRedirectSubagentsJourney(): Promise<RedirectSubagentsJourneyResult> {
   await validateClaudeCli();
-  const root = await mkdtemp(join(tmpdir(), "harness-redirect-subagents-e2e-"));
+  const root = await canonicalMkdtemp(join(tmpdir(), "harness-redirect-subagents-e2e-"));
   const projectRoot = join(root, "project");
   const home = join(root, "home");
   const configRoot = join(home, ".claude");
@@ -47,7 +49,7 @@ export async function runRedirectSubagentsJourney(): Promise<RedirectSubagentsJo
     const harnessRoot = await findHarnessRoot(process.cwd());
     const packageRoot = join(harnessRoot, "harness", "guards", "redirect-subagents");
     const python = await pythonCommand();
-    await stagePayload(packageRoot, projectRoot, python);
+    await stagePayload(packageRoot, projectRoot, python, spawnableCommand("claude", []).file);
     await mkdir(configRoot, { recursive: true });
     await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
     await writeFile(join(home, ".claude.json"), `${JSON.stringify({
@@ -114,7 +116,7 @@ export async function runRedirectSubagentsJourney(): Promise<RedirectSubagentsJo
   }
 }
 
-async function stagePayload(packageRoot: string, projectRoot: string, python: string): Promise<void> {
+async function stagePayload(packageRoot: string, projectRoot: string, python: string, claude: string): Promise<void> {
   const sourceRoot = join(packageRoot, "claude");
   const claudeRoot = join(projectRoot, ".claude");
   const hooksRoot = join(claudeRoot, "hooks");
@@ -129,7 +131,12 @@ async function stagePayload(packageRoot: string, projectRoot: string, python: st
   ]) await copyFile(join(sourceRoot, name), join(hooksRoot, name));
   await copyFile(join(sourceRoot, "gitignore.template"), join(stateRoot, ".gitignore"));
   await copyFile(join(sourceRoot, "subagents.example.json"), join(stateRoot, "subagents.json"));
-  await writeFile(join(stateRoot, "subagents.json"), `${JSON.stringify({ Explore: "auto" }, null, 2)}\n`, "utf8");
+  await writeFile(join(stateRoot, "subagents.json"), `${JSON.stringify({
+    Explore: {
+      command: `${claude};-p;--model;auto;--agent;{agent};{prompt}`,
+      _append_prompt: false,
+    },
+  }, null, 2)}\n`, "utf8");
 
   const fragment = JSON.parse(await readFile(join(sourceRoot, "settings.fragment.json"), "utf8")) as unknown;
   const rendered = replaceTokens(fragment, python, claudeRoot);
