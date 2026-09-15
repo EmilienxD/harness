@@ -463,6 +463,28 @@ def test_signals_are_forwarded_for_each_provider(tmp_path, monkeypatch, provider
     assert sent == [signal.SIGTERM]
 
 
+def test_unsupported_child_signal_does_not_crash_launcher(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    installed = {}
+
+    def install_handler(sig, handler):
+        previous = installed.get(sig, signal.SIG_DFL)
+        installed[sig] = handler
+        return previous
+
+    class Child:
+        def send_signal(self, sig):
+            raise ValueError(f"Unsupported signal: {sig}")
+
+        def wait(self):
+            installed[signal.SIGINT](signal.SIGINT, None)
+            return 0
+
+    monkeypatch.setattr("agent_launcher.cli.signal.signal", install_handler)
+    monkeypatch.setattr("agent_launcher.cli.subprocess.Popen", lambda _argv: Child())
+    assert main([], provider="claude") == 0
+
+
 @pytest.mark.parametrize(("function", "label"), [(claude_entrypoint, "cch"), (chatgpt_entrypoint, "cxh")])
 def test_entrypoints_label_configuration_failures(tmp_path, monkeypatch, capsys, function, label):
     write_config(tmp_path, config().replace("CONFIG_VERSION = 1", "CONFIG_VERSION = 2"))

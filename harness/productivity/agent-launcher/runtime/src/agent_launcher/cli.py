@@ -176,7 +176,7 @@ def _run_child(argv: list[str]) -> int:
     def forward(signum, _frame):
         try:
             child.send_signal(signum)
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     for name in ("SIGINT", "SIGTERM"):
