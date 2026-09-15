@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import { isolatedClaudeEnvironment, redactProcessError, runClaude, validateClaudeCli } from "../../core/claude.js";
+import { canonicalMkdtemp } from "../../core/temp.js";
 import { prepareCodexHome, redactCodexProcessError, runCodex, validateCodexCli } from "../../core/codex.js";
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
 import { parseAnthropicMessagesRequest } from "../../core/anthropic-protocol.js";
@@ -22,7 +23,7 @@ export interface IssueWritersJourneyResult {
 
 export async function runIssueWritersJourney(platform: IssuePlatform): Promise<IssueWritersJourneyResult> {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
-  const root = await mkdtemp(join(tmpdir(), `harness-issue-writers-${platform}-e2e-`));
+  const root = await canonicalMkdtemp(join(tmpdir(), `harness-issue-writers-${platform}-e2e-`));
   const projectRoot = join(root, "project");
   const diagnosticsPath = join(root, "structural-diagnostics.json");
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | Awaited<ReturnType<typeof startFakeOpenAiServer>> | undefined;

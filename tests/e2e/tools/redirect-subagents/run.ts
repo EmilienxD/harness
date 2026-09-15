@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { parseAnthropicMessagesRequest } from "../../core/anthropic-protocol.js";
+import { canonicalMkdtemp } from "../../core/temp.js";
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
 import {
   findFinalText,
@@ -37,7 +38,7 @@ export interface RedirectSubagentsJourneyResult {
 
 export async function runRedirectSubagentsJourney(): Promise<RedirectSubagentsJourneyResult> {
   await validateClaudeCli();
-  const root = await mkdtemp(join(tmpdir(), "harness-redirect-subagents-e2e-"));
+  const root = await canonicalMkdtemp(join(tmpdir(), "harness-redirect-subagents-e2e-"));
   const projectRoot = join(root, "project");
   const home = join(root, "home");
   const configRoot = join(home, ".claude");

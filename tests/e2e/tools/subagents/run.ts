@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +10,7 @@ import { isolatedClaudeEnvironment, validateClaudeCli } from "../../core/claude.
 import { prepareCodexHome, validateCodexCli } from "../../core/codex.js";
 import { startFakeOpenAiServer } from "../../core/openai-server.js";
 import { spawnableCommand } from "../../core/path.js";
+import { canonicalMkdtemp } from "../../core/temp.js";
 import {
   CHILD_REPLY,
   PARENT_MARKER,
@@ -39,7 +40,7 @@ export interface SubagentsJourneyResult {
 
 export async function runSubagentsJourney(platform: Platform): Promise<SubagentsJourneyResult> {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
-  const root = await mkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
+  const root = await canonicalMkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
   const projectRoot = join(root, "project");
   const stateRoot = join(root, "state");
   const cliStatusRoot = join(root, "cli-status");
@@ -53,7 +54,7 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
     await cp(join(packageRoot, "runtime", "src"), runtimeSource, { recursive: true });
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
-    await stagePayload(platform, packageRoot, projectRoot);
+    await stagePayload(platform, packageRoot, projectRoot, python);
     await initializeRepository(projectRoot);
 
     const bridge = join(harnessRoot, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js");
@@ -180,11 +181,24 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
   }
 }
 
-async function stagePayload(platform: Platform, packageRoot: string, projectRoot: string): Promise<void> {
+interface HookSettings {
+  readonly hooks: Record<string, Array<{ readonly hooks: Array<{ command: string; args?: string[] }> }>>;
+}
+
+async function stagePayload(platform: Platform, packageRoot: string, projectRoot: string, python: string): Promise<void> {
   if (platform === "claude") {
     await cp(join(packageRoot, "ask-agent"), join(projectRoot, ".claude", "skills", "ask-agent"), { recursive: true });
     await mkdir(join(projectRoot, ".claude"), { recursive: true });
-    await cp(join(packageRoot, "claude", "settings.fragment.json"), join(projectRoot, ".claude", "settings.json"));
+    const settings = JSON.parse(await readFile(join(packageRoot, "claude", "settings.fragment.json"), "utf8")) as HookSettings;
+    for (const groups of Object.values(settings.hooks)) {
+      for (const group of groups) {
+        for (const hook of group.hooks) {
+          hook.command = python;
+          hook.args = ["-m", "subagents_runtime.hooks", "claude"];
+        }
+      }
+    }
+    await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
     return;
   }
   const skillRoot = join(projectRoot, ".agents", "skills", "ask-agent");
@@ -192,7 +206,13 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
   await mkdir(join(skillRoot, "agents"), { recursive: true });
   await cp(join(packageRoot, "chatgpt", "agents", "ask-agent.yaml"), join(skillRoot, "agents", "openai.yaml"));
   await mkdir(join(projectRoot, ".codex"), { recursive: true });
-  await cp(join(packageRoot, "chatgpt", "hooks.fragment.json"), join(projectRoot, ".codex", "hooks.json"));
+  const settings = JSON.parse(await readFile(join(packageRoot, "chatgpt", "hooks.fragment.json"), "utf8")) as HookSettings;
+  for (const groups of Object.values(settings.hooks)) {
+    for (const group of groups) {
+      for (const hook of group.hooks) hook.command = `${python} -m subagents_runtime.hooks chatgpt`;
+    }
+  }
+  await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
 
 async function createRuntimeShim(root: string, python: string): Promise<string> {

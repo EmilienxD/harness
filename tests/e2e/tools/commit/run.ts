@@ -1,16 +1,17 @@
 import { execFile, spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isolatedClaudeEnvironment, runClaude, validateClaudeCli } from "../../core/claude.js";
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
+import { canonicalMkdtemp } from "../../core/temp.js";
 import { BEFORE, AFTER, MARKER, parseRequest, scenarioCatalogHash, transition } from "./scenario.js";
 const exec = promisify(execFile);
 
 export async function runCommitJourney(): Promise<void> {
   await validateClaudeCli();
-  const root = await mkdtemp(join(tmpdir(), "harness-commit-e2e-"));
+  const root = await canonicalMkdtemp(join(tmpdir(), "harness-commit-e2e-"));
   const project = join(root, "project");
   const config = join(root, "config");
   const hook = join(project, ".claude", "hooks", "commit_UserPromptSubmit_hook.py");

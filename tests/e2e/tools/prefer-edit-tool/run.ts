@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
+import { canonicalMkdtemp } from "../../core/temp.js";
 import { isolatedClaudeEnvironment, parseStreamJson, redactProcessError, runClaude, validateClaudeCli } from "../../core/claude.js";
 import { MARKER, parseRequest, scenarioCatalogHash, TARGET_CONTENT, transition } from "./scenario.js";
 
@@ -19,7 +20,7 @@ export interface PreferEditToolJourneyResult {
 
 export async function runPreferEditToolJourney(): Promise<PreferEditToolJourneyResult> {
   await validateClaudeCli();
-  const root = await mkdtemp(join(tmpdir(), "harness-prefer-edit-tool-e2e-"));
+  const root = await canonicalMkdtemp(join(tmpdir(), "harness-prefer-edit-tool-e2e-"));
   const projectRoot = join(root, "project");
   const claudeRoot = join(projectRoot, ".claude");
   const configRoot = join(root, "claude-config");
