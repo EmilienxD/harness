@@ -418,9 +418,10 @@ class TerminalUI:
 
         while True:
             visible = _matching(options, query)
-            entries = _select_entries(options, visible, select_groups, collapsed)
+            grouped = select_groups and not query
+            entries = _select_entries(options, visible, grouped, collapsed)
             navigable: list[tuple[str, object]] = []
-            if select_all and options:
+            if select_all and options and not query:
                 navigable.append(("all", tuple(range(len(options)))))
             navigable.extend(entries)
             cursor = min(cursor, max(0, len(navigable) - 1))
@@ -470,14 +471,12 @@ class TerminalUI:
                 cursor = 0
             elif key == END:
                 cursor = max(0, len(navigable) - 1)
-            elif key == LEFT and focused:
+            elif key == LEFT and focused and grouped:
                 group = _entry_group(options, focused)
                 if group:
                     collapsed.add(group)
-                    cursor = _group_cursor(
-                        options, _matching(options, query), select_all, collapsed, group
-                    )
-            elif key == RIGHT and focused and focused[0] == "group":
+                    cursor = _group_cursor(options, visible, select_all, collapsed, group)
+            elif key == RIGHT and focused and grouped and focused[0] == "group":
                 group = _entry_group(options, focused)
                 if group in collapsed:
                     collapsed.discard(group)
@@ -572,12 +571,10 @@ class TerminalUI:
                 group_indices = (
                     list(group_entry[1]) if group_entry else []  # type: ignore[arg-type]
                 )
-                branch = (
-                    "└─"
-                    if group_indices and indices[0] == group_indices[-1]
-                    else "├─"
-                )
-                tree = self._paint(branch, self.DIM) + " " if option.group else ""
+                tree = ""
+                if group_indices:
+                    branch = "└─" if indices[0] == group_indices[-1] else "├─"
+                    tree = self._paint(branch, self.DIM) + " "
                 label = tree + self._fit(option.label, max(1, width - 6))
                 hints = [
                     value

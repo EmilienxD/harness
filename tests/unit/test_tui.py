@@ -10,6 +10,7 @@ from harness_cli.tui import (
     END,
     ENTER,
     ESCAPE,
+    LEFT,
     RIGHT,
     SPACE,
     Line,
@@ -24,6 +25,20 @@ def ui_for(*keys):
     pending = iter(keys)
     output = io.StringIO()
     return TerminalUI(lambda: next(pending), output, color=False), output
+
+
+def recording_ui_for(*keys):
+    """Return a UI plus the list of frames it writes, newest last."""
+
+    frames = []
+
+    class Output(io.StringIO):
+        def write(self, value):
+            frames.append(value)
+            return super().write(value)
+
+    pending = iter(keys)
+    return TerminalUI(lambda: next(pending), Output(), color=False), frames
 
 
 def options():
@@ -329,6 +344,52 @@ def test_group_expand_key_does_not_move_focus_from_a_package():
     )
 
     assert selected == {0}
+
+
+def test_multiselect_hides_category_rows_while_a_search_filters_the_list():
+    ui, frames = recording_ui_for("z", ESCAPE)
+
+    ui.multiselect(
+        "Select packages",
+        options(),
+        select_all=True,
+        select_groups=True,
+    )
+
+    assert "▾ Planning" in frames[0]
+    assert "▾ Productivity" not in frames[1]
+    assert "zoom-out" in frames[1]
+    assert "├─" not in frames[1]
+    assert "└─" not in frames[1]
+
+
+def test_multiselect_filtering_never_selects_packages_hidden_by_the_search():
+    ui, frames = recording_ui_for("z", SPACE, ENTER)
+
+    selected = ui.multiselect(
+        "Select packages",
+        options(),
+        select_all=True,
+        select_groups=True,
+    )
+
+    assert selected == {2}
+    assert "Select All" in frames[0]
+    assert "Select All" not in frames[1]
+
+
+def test_multiselect_search_reaches_packages_inside_a_collapsed_category():
+    ui, frames = recording_ui_for(DOWN, LEFT, "z", ESCAPE)
+
+    ui.multiselect(
+        "Select packages",
+        (MenuOption("zoom-out", "Maps a codebase area", group="productivity"),),
+        select_all=True,
+        select_groups=True,
+    )
+
+    assert "zoom-out" not in frames[2]
+    assert "zoom-out" in frames[3]
 
 
 def test_multiselect_can_hide_search_for_a_short_provider_list():
