@@ -208,7 +208,7 @@
           "id": "aboard.launch",
           "name": "Run Agent",
           "when": "aboard.initialized",
-          "initialSize": 1
+          "initialSize": 0.3
         },
         {
           "id": "aboard.fleet",

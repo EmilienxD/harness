@@ -43,6 +43,20 @@ def test_every_chatgpt_ask_skill_is_user_only() -> None:
         assert "allow_implicit_invocation: false" in metadata.read_text(encoding="utf-8")
 
 
+def test_implementation_launcher_includes_model_instructions() -> None:
+    source = discover()["subagents"].root / "ask-agent-to-implement" / "SKILL.md"
+    _opening, _frontmatter, body = source.read_text(encoding="utf-8").split("---", 2)
+
+    assert body.strip()
+
+
+def test_review_launcher_includes_model_instructions() -> None:
+    source = discover()["subagents"].root / "ask-agent-to-review" / "SKILL.md"
+    _opening, _frontmatter, body = source.read_text(encoding="utf-8").split("---", 2)
+
+    assert body.strip()
+
+
 def test_subagents_hooks_invoke_the_installed_runtime_for_both_provider_schemas() -> None:
     tool = discover()["subagents"]
     claude = tool.fragment_for("claude")["hooks"]
