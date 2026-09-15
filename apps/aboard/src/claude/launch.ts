@@ -1,6 +1,7 @@
 
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
+  agentLabel,
   isAutomatedAgentType,
   isNamedBuiltinAgentType,
   type AgentId,
@@ -436,6 +437,8 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   const fixedArguments = [
     "--session-id",
     request.sessionId,
+    "--name",
+    agentLabel({ agentId: request.agentId, type: agentType }),
     ...shapeArguments,
 
     ...toolListArguments("--disallowedTools", denyRules([

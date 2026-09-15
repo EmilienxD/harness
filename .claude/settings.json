@@ -6,7 +6,7 @@
           {
             "type": "command",
             "timeout": 120,
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "command": "uv",
             "args": [
               "run",
               "--no-project",
@@ -17,7 +17,7 @@
           {
             "type": "command",
             "timeout": 60,
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "command": "uv",
             "args": [
               "run",
               "--no-project",
@@ -28,7 +28,7 @@
           {
             "type": "command",
             "timeout": 300,
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "command": "uv",
             "args": [
               "run",
               "--no-project",
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "command": "uv",
             "args": [
               "run",
               "--no-project",
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "command": "uv",
             "args": [
               "run",
               "--no-project",
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE",
+            "command": "uv",
             "args": [
               "run",
               "--no-project",

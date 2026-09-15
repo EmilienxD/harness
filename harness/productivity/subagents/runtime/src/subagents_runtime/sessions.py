@@ -448,7 +448,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     }.get(request.task)
     prompt = request.prompt if skill is None else f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{request.prompt}"
     if request.provider == "claude":
-        command.extend(["--session-id", child_id])
+        command.extend(["--session-id", child_id, "--name", f"Agent {agent_number} ({request.task})"])
         if request.task == "explore":
             command.extend(["--agent", "Explore"])
     elif request.task == "explore":

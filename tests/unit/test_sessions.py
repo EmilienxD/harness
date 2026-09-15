@@ -84,6 +84,16 @@ def test_native_provider_adapter_injects_the_requested_skill_and_exact_cwd(task,
     assert cwd == tmp_path.resolve()
 
 
+def test_native_claude_launch_names_the_session_after_its_agent_number(tmp_path, monkeypatch):
+    launches = []
+    configured(tmp_path, monkeypatch, launches)
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: None)
+    request = type("Request", (), {"task": "explore", "provider": "claude", "mode": "auto", "prompt": "Look."})()
+    sessions.launch_delegated(request, "request", 3, tmp_path)
+    argv = launches[0][0]
+    assert argv[argv.index("--name") + 1] == "Agent 3 (explore)"
+
+
 def test_scoped_aboard_launch_refreshes_endpoint_after_unauthorized_response(tmp_path, monkeypatch):
     endpoints = iter([
         ("127.0.0.1", 4823, "expired"),
