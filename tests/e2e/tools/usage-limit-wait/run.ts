@@ -17,6 +17,16 @@ const execFileAsync = promisify(execFile);
 type Platform = "claude" | "chatgpt";
 export interface UsageLimitWaitJourneyResult { readonly checkpoints: readonly string[]; readonly finalText: string; readonly unexpectedRequests: number; readonly usageRequests: number; }
 
+// The hook reads its whole configuration from USAGE_LIMIT_WAIT_*, so an
+// inherited setting -- a raised threshold, an ignored window, DISABLE -- would
+// silently decide this journey's verdict. Drop them all and let each overlay
+// below state the only ones the journey depends on.
+function toolConfigFreeEnvironment(parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...parent };
+  for (const name of Object.keys(env)) if (name.startsWith("USAGE_LIMIT_WAIT_")) delete env[name];
+  return env;
+}
+
 export async function runUsageLimitWaitJourney(platform: Platform): Promise<UsageLimitWaitJourneyResult> {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await mkdtemp(join(tmpdir(), `harness-usage-limit-wait-${platform}-e2e-`));
@@ -36,7 +46,7 @@ export async function runUsageLimitWaitJourney(platform: Platform): Promise<Usag
       await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [hookPath], timeout: 30 }] }] } }, null, 2)}\n`);
       await writeFile(join(pythonRoot, "sitecustomize.py"), claudeRedirectFixture());
       inference = await startFakeAnthropicServer({ repoRoot: projectRoot, scenarioCatalogHash, parseRequest: parseAnthropicMessagesRequest, transition: claudeTransition });
-      const env = isolatedClaudeEnvironment(process.env, {
+      const env = isolatedClaudeEnvironment(toolConfigFreeEnvironment(process.env), {
         ANTHROPIC_BASE_URL: inference.baseUrl, ANTHROPIC_AUTH_TOKEN: inference.authToken, CLAUDE_CONFIG_DIR: configRoot, CLAUDE_PROJECT_DIR: projectRoot,
         CLAUDE_CODE_PROJECT_DIR_NAME: "harness-usage-limit-wait-e2e", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", CLAUDE_CODE_MAX_RETRIES: "0",
         DISABLE_UPDATES: "1", DISABLE_AUTOUPDATER: "1", NO_PROXY: "127.0.0.1,localhost", PYTHONPATH: pythonRoot,
@@ -58,7 +68,7 @@ export async function runUsageLimitWaitJourney(platform: Platform): Promise<Usag
       const codexInference = await startFakeOpenAiServer({ scenarioCatalogHash, transition: codexTransition }); inference = codexInference;
       const codexHome = await prepareCodexHome({ root, baseUrl: codexInference.baseUrl, trustedProjects: [projectRoot], extraConfig: ["[features]", "hooks = true"] });
       const outputPath = join(root, "codex-final.txt");
-      const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: codexHome, HARNESS_E2E_OPENAI_KEY: codexInference.authToken, NO_PROXY: "127.0.0.1,localhost", PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`, HARNESS_E2E_USAGE_URL: `${usage.baseUrl}/codex-usage`, HARNESS_E2E_USAGE_TOKEN: usage.token, USAGE_LIMIT_WAIT_POLL: "0", USAGE_LIMIT_WAIT_OS_NOTIFICATION: "0", TMP: isolatedTemp, TEMP: isolatedTemp, TMPDIR: isolatedTemp };
+      const env: NodeJS.ProcessEnv = { ...toolConfigFreeEnvironment(process.env), CODEX_HOME: codexHome, HARNESS_E2E_OPENAI_KEY: codexInference.authToken, NO_PROXY: "127.0.0.1,localhost", PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`, HARNESS_E2E_USAGE_URL: `${usage.baseUrl}/codex-usage`, HARNESS_E2E_USAGE_TOKEN: usage.token, USAGE_LIMIT_WAIT_POLL: "0", USAGE_LIMIT_WAIT_OS_NOTIFICATION: "0", TMP: isolatedTemp, TEMP: isolatedTemp, TMPDIR: isolatedTemp };
       for (const key of ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"]) delete env[key];
       const result = await runCodex(["exec", "--json", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "--sandbox", "danger-full-access", "--output-last-message", outputPath, MARKER], projectRoot, env, 45_000);
       if (result.timedOut) throw new Error("Codex timed out during usage-limit-wait E2E");
