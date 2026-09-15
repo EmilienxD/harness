@@ -158,6 +158,16 @@ def _review_lines(
     return lines
 
 
+def _overwrite_lines(paths: list[Path]) -> list[str]:
+    return [
+        "  These files already exist and were not installed by Harness.",
+        "  Answering Yes replaces their contents with the catalogue version,",
+        "  and a later uninstall removes them.",
+        "",
+        *(f"    {path}" for path in paths),
+    ]
+
+
 def catalogue_menu() -> int:
     if not sys.stdin.isatty():
         raise InstallError("the catalogue is interactive; run `harness` in a terminal")
@@ -241,6 +251,19 @@ def catalogue_menu() -> int:
             _cancel(ui)
             return 0
 
+        overwrite = sorted(
+            {
+                path
+                for installer in installers
+                for path in installer.conflicts(requests[installer.target.platform])
+            }
+        )
+        if overwrite:
+            ui.note("Existing files", _overwrite_lines(overwrite))
+            if ui.confirm("Overwrite these files?", default=False) is not True:
+                _cancel(ui)
+                return 0
+
         def apply_changes() -> None:
             with installation_lock():
                 locked_store = ReceiptStore.load()
@@ -262,7 +285,8 @@ def catalogue_menu() -> int:
                     [
                         (installer, requests[installer.target.platform])
                         for installer in locked_installers
-                    ]
+                    ],
+                    overwrite=overwrite,
                 )
 
         ui.progress("Applying catalogue changes", "Catalogue updated", apply_changes)
@@ -294,6 +318,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install.add_argument("--root", type=Path, help="project root (default: current directory)")
     install.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
+    install.add_argument(
+        "--overwrite", action="store_true",
+        help="replace existing destination files Harness does not own",
+    )
     install.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     install.set_defaults(operation="install")
     uninstall = commands.add_parser(
@@ -328,6 +356,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upgrade.add_argument("--root", type=Path, help="project root (default: current directory)")
     upgrade.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
+    upgrade.add_argument(
+        "--overwrite", action="store_true",
+        help="replace existing destination files Harness does not own",
+    )
     upgrade.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     upgrade.set_defaults(operation="upgrade")
     list_parser = commands.add_parser("list", help="list catalogue packages and installation state")

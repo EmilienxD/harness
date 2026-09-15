@@ -362,6 +362,25 @@ def test_multi_platform_failure_leaves_every_target_unchanged(tmp_path, monkeypa
     assert not (state / "receipts.json").exists()
 
 
+def test_overwrite_flag_replaces_files_harness_does_not_own(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    conflicting = tmp_path / ".claude" / "skills" / "caveman" / "SKILL.md"
+    conflicting.parent.mkdir(parents=True)
+    conflicting.write_text("user-owned", encoding="utf-8")
+    arguments = ["install", "caveman", "--root", str(tmp_path), "--platform", "claude", "--json"]
+
+    assert main(arguments) == 1
+
+    error = json.loads(capsys.readouterr().out)["results"][0]["error"]
+    assert "unowned file" in error
+    assert "--overwrite" in error
+
+    assert main([*arguments, "--overwrite"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+    assert conflicting.read_text(encoding="utf-8") != "user-owned"
+
+
 def test_invalid_nested_receipt_is_reported_as_an_operation_error(tmp_path, monkeypatch, capsys):
     state = tmp_path / "state"
     state.mkdir()

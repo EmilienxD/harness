@@ -11,6 +11,7 @@ from harness_cli.installer import (
     Change,
     InstallError,
     Target,
+    UnownedFileError,
     installed_packages,
     reconcile_targets,
 )
@@ -76,11 +77,30 @@ def _emit(payload: dict, as_json: bool) -> None:
             print("  already up to date")
 
 
-def _apply(planned: list[tuple[CatalogueInstaller, set[str], dict]], dry_run: bool) -> bool:
+def _apply(
+    planned: list[tuple[CatalogueInstaller, set[str], dict]],
+    dry_run: bool,
+    overwrite: bool = False,
+) -> bool:
     if dry_run:
         return True
     try:
-        reconcile_targets([(installer, selected) for installer, selected, _ in planned])
+        approved = (
+            [path for installer, selected, _ in planned for path in installer.conflicts(selected)]
+            if overwrite
+            else []
+        )
+        reconcile_targets(
+            [(installer, selected) for installer, selected, _ in planned],
+            overwrite=approved,
+        )
+    except UnownedFileError as exc:
+        replace = "it" if len(exc.paths) == 1 else "them"
+        message = f"{exc}; rerun with --overwrite to replace {replace}"
+        for _, _, result in planned:
+            result["status"] = "failed"
+            result["error"] = message
+        return False
     except (InstallError, ManifestError, ValueError) as exc:
         for _, _, result in planned:
             result["status"] = "failed"
@@ -148,7 +168,7 @@ def run_install(args: Namespace) -> int:
     ):
         raise InstallError("none of the requested packages support the selected platforms")
 
-    ok = _apply(planned, args.dry_run)
+    ok = _apply(planned, args.dry_run, args.overwrite)
 
     results = [result for _, _, result in planned]
     payload = {
@@ -255,7 +275,7 @@ def run_upgrade(args: Namespace) -> int:
         }
         planned.append((installer, selected, result))
 
-    ok = _apply(planned, args.dry_run)
+    ok = _apply(planned, args.dry_run, args.overwrite)
 
     results = [result for _, _, result in planned]
     payload = {
