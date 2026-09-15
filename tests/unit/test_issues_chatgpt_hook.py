@@ -98,7 +98,11 @@ def test_chatgpt_copies_the_latest_response_without_using_the_gateway(
         capsys,
     ) == {}
     result = _run(
-        {**base, "hook_event_name": "UserPromptSubmit", "prompt": "$copy-message-as-issue"},
+        {
+            **base,
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "Please use $copy-message-as-issue for that response",
+        },
         monkeypatch,
         capsys,
     )
@@ -196,7 +200,7 @@ def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
                 {
                     "session_id": "thr_oversized",
                     "cwd": str(tmp_path),
-                    "prompt": "$publish-issues --dry",
+                    "prompt": "Please run $publish-issues --dry",
                 }
             )
         ),

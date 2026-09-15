@@ -74,7 +74,7 @@ def blocked(prompt, cwd, monkeypatch, capsys):
 @pytest.mark.parametrize("prompt", [
     "Review the last commit",
     "/reviewer",
-    "Explain what /review-this does",
+    "Explain what `/review-this` does",
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
     assert run_hook(prompt, repository(tmp_path), monkeypatch, capsys) is None
@@ -82,6 +82,7 @@ def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
 
 @pytest.mark.parametrize("prompt", [
     "/review-this",
+    "Please use /review-this for this commit",
     " $review-this focus on error paths\n",
     "[$review-this](C:/p/.agents/skills/review-this/SKILL.md)",
 ])

@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "1.2.0"
+version = "1.2.1"
 description = "Draft, publish, and directly copy responses to GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"

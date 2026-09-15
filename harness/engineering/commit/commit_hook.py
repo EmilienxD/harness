@@ -158,7 +158,7 @@ def commit(
 
 def parse_invocation(prompt: str) -> "tuple[core.Flags, str] | None":
     """The flags and message behind a `/commit` prompt, or None for anything else."""
-    match = core.COMMIT_PATTERN.match(prompt.strip())
+    match = core.COMMIT_PATTERN.search(prompt)
     if not match:
         return None
     flags, message = core.split_flags(match.group(1) or "")

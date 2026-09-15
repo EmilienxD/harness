@@ -129,10 +129,10 @@ def test_sweep_expires_abandoned_cache_from_an_inactive_workspace(
     assert not abandoned.exists()
 
 
-def test_missing_cache_and_arguments_do_not_publish(payload, remote):
+def test_missing_cache_and_malformed_invocation_do_not_publish(payload, remote):
     assert "No completed response" in hook.save(payload)
     hook.capture(payload)
-    assert "Usage:" in hook.save({**payload, "prompt": "/copy-message-as-issue extra"})
+    assert "Usage:" in hook.save({**payload, "prompt": "use/copy-message-as-issue"})
     assert remote == []
 
 

@@ -16,7 +16,7 @@ import yaml
 
 
 PROVIDERS = frozenset({"claude", "chatgpt"})
-SKILL_INVOCATION = re.compile(r"^[/\$][A-Za-z0-9_-]+(?:\s|$)")
+SKILL_INVOCATION = re.compile(r"(?<!\S)[/\$][A-Za-z0-9_-]+(?=\s|$)")
 
 
 class RequestFileError(ValueError):
@@ -143,7 +143,7 @@ def parse_request_file(
     prompt = "\n".join(lines[closing + 1 :]).strip()
     if not prompt:
         raise RequestFileError("request body must be nonempty")
-    if SKILL_INVOCATION.match(prompt):
+    if SKILL_INVOCATION.search(prompt):
         raise RequestFileError("request body must be a plain prompt, not a skill invocation")
     return DelegationRequest(canonical_path, task, provider, mode, prompt)
 

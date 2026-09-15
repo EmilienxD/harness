@@ -25,11 +25,15 @@ def test_provider_comes_from_the_flag_the_installer_writes(argv, expected) -> No
     assert hooks.provider_from_argv(argv) == expected
 
 
-def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+def configured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str = "claude",
+) -> str:
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider: ["claude"])
-    return sessions.launch(cwd=tmp_path, provider="claude")
+    return sessions.launch(cwd=tmp_path, provider=provider)
 
 
 def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,6 +91,34 @@ def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp
         connection.close()
 
 
+@pytest.mark.parametrize(
+    "provider, prompt, expected_skill",
+    [
+        ("claude", "Please use /ask-agent-to-review for this change", "ask-agent-to-review"),
+        ("chatgpt", "Please use $ask-agent-to-implement for this change", "ask-agent-to-implement"),
+    ],
+)
+def test_ask_skill_invocation_after_prose_opens_its_grant(
+    provider: str,
+    prompt: str,
+    expected_skill: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+
+    output = hooks.handle({
+        "session_id": f"existing-{provider}-session",
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": prompt,
+        "cwd": str(tmp_path),
+    }, provider=provider)
+
+    assert output is not None
+    with sqlite3.connect(tmp_path / "state" / "sessions.sqlite3") as connection:
+        assert connection.execute("SELECT skill FROM grants").fetchone() == (expected_skill,)
+
+
 def test_shell_created_request_is_inert_but_exact_structured_write_launches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
     output = hooks.handle({
@@ -115,10 +147,10 @@ def test_shell_created_request_is_inert_but_exact_structured_write_launches(tmp_
 
 
 def test_codex_apply_patch_alias_can_launch_multiple_exact_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    parent = configured(tmp_path, monkeypatch)
+    parent = configured(tmp_path, monkeypatch, provider="chatgpt")
     output = hooks.handle({
         "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "$ask-agent", "cwd": str(tmp_path),
-    })
+    }, provider="chatgpt")
     assert output is not None
     inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
     paths = [inbox / "one.md", inbox / "two.md"]
@@ -131,7 +163,7 @@ def test_codex_apply_patch_alias_can_launch_multiple_exact_files(tmp_path: Path,
     hooks.handle({
         "session_id": parent, "hook_event_name": "PostToolUse",
         "tool_name": "apply_patch", "tool_input": {"patch": patch},
-    })
+    }, provider="chatgpt")
 
     assert launched == ["Task 1.", "Task 2."]
 

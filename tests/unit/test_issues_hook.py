@@ -277,11 +277,11 @@ def test_dry_run_reports_each_draft_with_labels(tmp_path):
 
 
 def test_prompt_pattern_matches_with_or_without_dry():
-    assert hook.PROMPT_PATTERN.match("/publish-issues")
-    assert hook.PROMPT_PATTERN.match("/publish-issue")
-    assert hook.PROMPT_PATTERN.match("/publish-issues --dry")
-    assert not hook.PROMPT_PATTERN.match("/publish-issuesx")
-    assert not hook.PROMPT_PATTERN.match("hello /publish-issues")
+    assert hook.PROMPT_PATTERN.search("/publish-issues")
+    assert hook.PROMPT_PATTERN.search("/publish-issue")
+    assert hook.PROMPT_PATTERN.search("/publish-issues --dry")
+    assert not hook.PROMPT_PATTERN.search("/publish-issuesx")
+    assert hook.PROMPT_PATTERN.search("hello /publish-issues")
 
 
 
@@ -1616,7 +1616,7 @@ def test_publish_prompt_only_includes_the_current_session(tmp_path):
         "# Other session\n\n> mode:afk\n\nbody\n", encoding="utf-8"
     )
 
-    result = _run_hook(tmp_path, "/publish-issues --dry")
+    result = _run_hook(tmp_path, "Please run /publish-issues --dry")
 
     assert result.returncode == 2
     assert "Dry run complete: 1 issue(s) ready to publish" in result.stderr

@@ -24,7 +24,11 @@ from subagents_runtime.delegation import (
 )
 
 
-INVOCATION = re.compile(r"^[/\$](ask-agent(?:-to-(?:explore|prototype|websearch|brainstorm|implement|review))?|reply-to-agent)(?:\s|$)")
+SKILL_NAME = r"(ask-agent(?:-to-(?:explore|prototype|websearch|brainstorm|implement|review))?|reply-to-agent)"
+INVOCATIONS = {
+    "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
+    "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),
+}
 STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
 
 def provider_from_argv(argv: list[str]) -> str | None:
@@ -115,7 +119,8 @@ def handle(payload: dict[str, Any], provider: str | None = None) -> dict[str, An
         clear_reply_authorization(session_id)
         delivery = claim_parent_delivery(session_id, event)
         prompt = payload.get("prompt")
-        match = INVOCATION.match(prompt.strip()) if isinstance(prompt, str) else None
+        pattern = INVOCATIONS[selected_provider]
+        match = pattern.search(prompt) if isinstance(prompt, str) else None
         if match:
             skill = match.group(1)
             if skill == "reply-to-agent":

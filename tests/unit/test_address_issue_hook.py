@@ -110,6 +110,7 @@ def blocked(prompt, cwd, monkeypatch, capsys):
 
 @pytest.mark.parametrize("prompt, argument", [
     ("/address-this 42", "42"),
+    ("Please handle this with /address-this 42", "42"),
     (" $address-this 42, 51 \n", "42, 51"),
     ("[$address-this](C:/p/.agents/skills/address-this/SKILL.md) 42", "42"),
     ("/address-this", ""),
@@ -122,7 +123,7 @@ def test_invocation_argument_is_everything_after_the_reference(prompt, argument)
 @pytest.mark.parametrize("prompt", [
     "Please address issue #42",
     "/address-thiss 42",
-    "Explain what /address-this does",
+    "Explain what `/address-this` does",
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
     fake_github(monkeypatch, {})

@@ -95,6 +95,7 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
         ("request.md", "---\ntask: prototype\nmode: auto\n---\nbody", "does not authorize task"),
         ("request.md", "---\ntask: general\nmode: invalid\n---\nbody", "does not authorize mode"),
         ("request.md", "---\ntask: general\nmode: auto\n---\n$prototype do something else", "plain prompt"),
+        ("request.md", "---\ntask: general\nmode: auto\n---\nPlease use $prototype for this", "plain prompt"),
         ("request.md", "task: general\nmode: auto\nbody", "frontmatter"),
     ],
 )

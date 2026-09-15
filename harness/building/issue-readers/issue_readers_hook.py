@@ -29,10 +29,10 @@ from pathlib import Path
 
 
 ADDRESS_INVOCATION = re.compile(
-    r"(?:[/$]address-this|\[\$address-this\]\([^\r\n]+\))(?=$|\s)"
+    r"(?<!\S)(?:[/$]address-this|\[\$address-this\]\([^\r\n]+\))(?=$|\s)"
 )
 REVIEW_INVOCATION = re.compile(
-    r"(?:[/$]review-this|\[\$review-this\]\([^\r\n]+\))(?=$|\s)"
+    r"(?<!\S)(?:[/$]review-this|\[\$review-this\]\([^\r\n]+\))(?=$|\s)"
 )
 
 NUMBER = re.compile(r"[1-9][0-9]*")
@@ -136,11 +136,10 @@ def relation_depth() -> int:
 
 def parse_invocation(prompt: str) -> str | None:
     """Return the invocation's argument text, or None for unrelated prompts."""
-    stripped = prompt.strip()
-    match = ADDRESS_INVOCATION.match(stripped)
+    match = ADDRESS_INVOCATION.search(prompt)
     if match is None:
         return None
-    return stripped[match.end():].strip()
+    return prompt[match.end():].strip()
 
 
 def strict_references(argument: str, default_repository: str) -> list[tuple[str, int]] | None:
@@ -467,7 +466,7 @@ def main() -> None:
 
     cwd = Path(str(payload.get("cwd") or "."))
     argument = parse_invocation(prompt)
-    review = REVIEW_INVOCATION.match(prompt.strip()) is not None
+    review = REVIEW_INVOCATION.search(prompt) is not None
     if argument is None and not review:
         return
     timeout_message = (

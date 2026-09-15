@@ -32,6 +32,15 @@ import commit_hook as claude_adapter  # noqa: E402
 claude_adapter.set_provider("claude")
 
 
+def test_commit_invocation_after_prose_is_parsed() -> None:
+    flags, message = claude_adapter.parse_invocation(
+        "Please use /commit --dry keep the parser fix"
+    )
+
+    assert flags.dry is True
+    assert message == "keep the parser fix"
+
+
 def _git(repo, *args):
     return subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True, check=True

@@ -25,7 +25,7 @@ import urllib.request
 from collections.abc import Iterator, Sequence
 from typing import Any, NamedTuple
 
-COMMIT_PATTERN = re.compile(r"^/commit(?:\s+(.*))?$", re.DOTALL)
+COMMIT_PATTERN = re.compile(r"(?<!\S)/commit(?:\s+(.*))?$", re.DOTALL)
 
 # Leading flags accepted before the commit message.
 DRY_FLAGS = {"--dry", "-n"}
@@ -1144,7 +1144,7 @@ def collect_session_context(transcript_path: str, repo_root: str, budget: int = 
                 if not text:
                     continue
 
-                prior = COMMIT_PATTERN.match(text)
+                prior = COMMIT_PATTERN.search(text)
                 if prior:
                     flags, msg = split_flags(prior.group(1) or "")
                     if not flags.dry:

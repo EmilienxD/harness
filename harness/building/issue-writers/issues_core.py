@@ -201,10 +201,11 @@ ISSUE_MARKER_PATTERN = re.compile(
     r"part:(?P<part>\d+)/(?P<total>\d+) -->"
 )
 
-# "/publish-issue", "/publish-issues", and their "--dry" variants match.
-PROMPT_PATTERN = re.compile(r"^/publish-issues?(?:\s|$)")
+# Provider skill invocations may appear at the start of a prompt or after
+# whitespace in a longer user message.
+PROMPT_PATTERN = re.compile(r"(?<!\S)[$@/]publish-issues?(?=\s|$)")
 DRAFT_PATTERN = re.compile(
-    r"(?<![\w-])[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
+    r"(?<!\S)[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
 )
 
 # A batch directory name: a Claude Code session id (a UUID).
@@ -1943,8 +1944,11 @@ def garbage_collect(
 
 def run_publish_command(prompt: str, session_id: str) -> str:
     """Parse and execute the hook's user-facing publish maintenance interface."""
+    invocation = PROMPT_PATTERN.search(prompt)
+    if invocation is None:
+        return "Invalid publish command: invocation not found"
     try:
-        tokens = shlex.split(prompt)
+        tokens = shlex.split(prompt[invocation.start():])
     except ValueError as exc:
         return f"Invalid publish command: {exc}"
     parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)

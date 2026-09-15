@@ -13,7 +13,7 @@ import tempfile
 import time
 
 
-PROMPT_PATTERN = re.compile(r"^/copy-message-as-issue(?:\s|$)")
+PROMPT_PATTERN = re.compile(r"(?<!\S)[$@/]copy-message-as-issue(?=\s|$)")
 CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
@@ -172,7 +172,7 @@ def gh_create_issue(title: str, body: str) -> tuple[bool, str]:
 
 def save(payload: dict) -> str:
     prompt = str(payload.get("prompt") or "").strip()
-    if prompt not in {"/copy-message-as-issue", "$copy-message-as-issue", "@copy-message-as-issue"}:
+    if PROMPT_PATTERN.search(prompt) is None:
         return "Usage: copy-message-as-issue (no arguments)."
     path = cache_path(payload)
     cached = _read_json_dict(path)

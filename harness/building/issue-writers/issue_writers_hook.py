@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import uuid
 from pathlib import Path
@@ -27,10 +26,6 @@ import issues_core as core
 
 CLAUDE = "claude"
 CHATGPT = "chatgpt"
-
-COPY_PATTERN = re.compile(r"(?<![\w-])[$@/]copy-message-as-issue(?=\s|$)")
-PUBLISH_PATTERN = re.compile(r"(?<![\w-])[$@/]publish-issues?(?=\s|$)")
-
 
 def provider_from_argv(argv: list[str]) -> str:
     """The provider the installer wired this hook into."""
@@ -74,7 +69,7 @@ def claude_prompt(payload: dict) -> None:
     prompt = payload.get("prompt", "").strip()
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
 
-    if COPY_PATTERN.match(prompt):
+    if copy_hook.PROMPT_PATTERN.search(prompt):
         try:
             if payload.get("cwd"):
                 os.chdir(payload["cwd"])
@@ -83,7 +78,7 @@ def claude_prompt(payload: dict) -> None:
             raise SystemExit(2)
         copy_hook.handle_save(payload)
 
-    if core.PROMPT_PATTERN.match(prompt):
+    if core.PROMPT_PATTERN.search(prompt):
         session_id = str(payload.get("session_id") or "")
         result = core.run_publish_command(prompt, session_id)
         sys.stderr.write("\n\n" + result)
@@ -136,12 +131,12 @@ def chatgpt_prompt(payload: dict) -> None:
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
     os.chdir(cwd)
 
-    if COPY_PATTERN.search(prompt):
+    if copy_hook.PROMPT_PATTERN.search(prompt):
         result = copy_hook.save(payload)
         json.dump({"decision": "block", "reason": result}, sys.stdout)
         return
 
-    if PUBLISH_PATTERN.search(prompt):
+    if core.PROMPT_PATTERN.search(prompt):
         session_id = str(payload.get("session_id") or "")
         result = core.run_publish_command(prompt, gateway_session_id(session_id))
         json.dump({"decision": "block", "reason": result}, sys.stdout)
