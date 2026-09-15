@@ -1170,3 +1170,49 @@ def test_repair_applies_to_each_package_that_lost_files(tmp_path):
 
     assert changes == [Change("update", alpha.name, "missing installed files")]
     assert lost.is_file()
+
+
+def test_review_lists_additions_before_removals_and_flags_removals(tmp_path):
+    lines = cli._review_lines(
+        [],
+        set(),
+        [Target.for_project(tmp_path, Platform.CLAUDE), Target.for_project(tmp_path, Platform.CHATGPT)],
+        {
+            Platform.CLAUDE: [Change("remove", "issue-writers"), Change("install", "commit")],
+            Platform.CHATGPT: [Change("remove", "issue-writers")],
+        },
+    )
+    marked = [line for line in lines if line.startswith("    +") or line.startswith("    -")]
+
+    assert marked == [
+        "    + install (1)  commit",
+        "    - remove  (1)  issue-writers",
+        "    - remove  (1)  issue-writers",
+    ]
+    assert [line.tone for line in marked] == ["success", "danger", "danger"]
+
+
+def test_removing_the_last_hook_leaves_an_empty_codex_config(tmp_path):
+    root = tmp_path / "hooked"
+    root.mkdir()
+    (root / "payload").write_text("hook")
+    (root / "fragment.json").write_text(
+        '{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": "run"}]}]}}'
+    )
+    (root / "harness.toml").write_text(
+        'name="hooked"\nversion="1.0.0"\ndescription="x"\n'
+        '[platforms.chatgpt]\nstatus="supported"\nfragment="fragment.json"\n'
+        '[[files]]\nsrc="payload"\ndest="hooked.txt"\n'
+    )
+    tool = load_tool(root)
+    target = Target.for_project(tmp_path / "project", Platform.CHATGPT)
+    selected = manager({tool.name: tool}, target, tmp_path)
+    selected.reconcile({tool.name})
+
+    assert target.settings_path.name == "hooks.json"
+    assert target.read_settings()["hooks"]["UserPromptSubmit"]
+
+    selected.reconcile(set())
+
+    assert target.settings_path.is_file()
+    assert target.read_settings() == {}

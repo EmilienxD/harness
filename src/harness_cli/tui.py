@@ -47,6 +47,22 @@ _CSI_NUMBERS = {"1": HOME, "4": END, "5": PAGE_UP, "6": PAGE_DOWN, "7": HOME, "8
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
+class Line(str):
+    """A note line that names its meaning rather than its colour.
+
+    Callers describe intent — a removal is ``danger`` — and leave the palette
+    to the UI.  Subclassing ``str`` keeps plain lines and toned ones
+    interchangeable everywhere a sequence of lines is accepted.
+    """
+
+    tone: str
+
+    def __new__(cls, text: str, tone: str = "") -> "Line":
+        line = super().__new__(cls, text)
+        line.tone = tone
+        return line
+
+
 @dataclass(frozen=True)
 class MenuOption:
     """One selectable row.
@@ -192,6 +208,12 @@ class TerminalUI:
     CYAN = "\x1b[36m"
     RED = "\x1b[31m"
     STRIKE = "\x1b[9m"
+    _TONES = {
+        "danger": (RED,),
+        "success": (GREEN,),
+        "accent": (CYAN,),
+        "muted": (DIM,),
+    }
 
     def __init__(
         self,
@@ -297,16 +319,16 @@ class TerminalUI:
 
     def note(self, title: str, lines: Sequence[str]) -> None:
         width, _ = self._size()
-        content = [line.replace("—", ":") for line in lines]
         rendered = [
             self._paint("◇", self.GREEN)
             + "  "
             + self._paint(title, self.BOLD),
             self._paint("│", self.DIM),
         ]
-        for line in content:
-            for wrapped in textwrap.wrap(line, max(1, width - 4)) or [""]:
-                rendered.append(self._paint("│", self.DIM) + "  " + wrapped)
+        for line in lines:
+            codes = self._TONES.get(getattr(line, "tone", ""), ())
+            for wrapped in textwrap.wrap(line.replace("—", ":"), max(1, width - 4)) or [""]:
+                rendered.append(self._paint("│", self.DIM) + "  " + self._paint(wrapped, *codes))
         rendered.append(self._paint("│", self.DIM))
         self._write_prompt(rendered)
 
