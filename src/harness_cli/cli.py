@@ -190,7 +190,8 @@ def _overwrite_lines(paths: list[Path]) -> list[str]:
     return [
         "  These files already exist and were not installed by Harness.",
         "  Answering Yes replaces their contents with the catalogue version,",
-        "  and a later uninstall removes them.",
+        "  and a later uninstall removes them.  Answering No leaves them as",
+        "  they are and installs everything else.",
         "",
         *(f"    {path}" for path in paths),
     ]
@@ -293,18 +294,22 @@ def catalogue_menu() -> int:
             _cancel(ui)
             return 0
 
-        overwrite = sorted(
+        conflicting = sorted(
             {
                 path
                 for installer in installers
                 for path in installer.conflicts(requests[installer.target.platform])
             }
         )
-        if overwrite:
-            ui.note("Existing files", _overwrite_lines(overwrite))
-            if ui.confirm("Overwrite these files?", default=False) is not True:
+        overwrite: list[Path] = []
+        skip: list[Path] = []
+        if conflicting:
+            ui.note("Existing files", _overwrite_lines(conflicting))
+            answer = ui.confirm("Overwrite these files?", default=False)
+            if answer is None:
                 _cancel(ui)
                 return 0
+            overwrite, skip = (conflicting, []) if answer else ([], conflicting)
 
         products: dict[str, set[str]] = {}
         for installer in installers:
@@ -341,6 +346,7 @@ def catalogue_menu() -> int:
                         for installer in locked_installers
                     ],
                     overwrite=overwrite,
+                    skip=skip,
                     adopt=adopt,
                 )
 

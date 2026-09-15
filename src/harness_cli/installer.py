@@ -415,7 +415,7 @@ class CatalogueInstaller:
         """List existing files an install would replace without owning them."""
 
         resolved, _ = self.plan(requested_names)
-        return self._audit_destinations(resolved, set())
+        return self._audit_destinations(resolved, set(), set())
 
     def unowned_host_products(self, requested_names: set[str]) -> dict[str, list[str]]:
         """Map each package to host products present that no receipt claims."""
@@ -450,7 +450,9 @@ class CatalogueInstaller:
                 found[item.tool.name] = present
         return found
 
-    def _audit_destinations(self, resolved: list[ResolvedPackage], approved: set[str]) -> list[Path]:
+    def _audit_destinations(
+        self, resolved: list[ResolvedPackage], approved: set[str], declined: set[str]
+    ) -> list[Path]:
         """Reject unsafe destinations and report the unowned files left to decide."""
 
         desired = {item.tool.name for item in resolved}
@@ -480,7 +482,7 @@ class CatalogueInstaller:
                     (record for record in receipt.get("files", []) if _canonical_path(record["path"]) == path_key),
                     None,
                 ) if receipt else None
-                if owned is not None:
+                if owned is not None and not owned.get("skipped"):
                     if (
                         receipt.get("version") != item.tool.version
                         and sha256(destination) != owned.get("digest")
@@ -500,6 +502,7 @@ class CatalogueInstaller:
                     sha256(destination) != sha256(payload.source)
                     and not payload.starter
                     and path_key not in approved
+                    and path_key not in declined
                 ):
                     unowned.append(destination)
         return unowned
@@ -509,6 +512,7 @@ class CatalogueInstaller:
         requested_names: set[str],
         *,
         overwrite: Iterable[Path] = (),
+        skip: Iterable[Path] = (),
         adopt: Iterable[str] = (),
         _transaction: _LocalTransaction | None = None,
         _host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
@@ -517,9 +521,10 @@ class CatalogueInstaller:
     ) -> list[Change]:
         resolved, changes = self.plan(requested_names)
         approved = {_canonical_path(path) for path in overwrite}
+        declined = {_canonical_path(path) for path in skip} - approved
         desired = {item.tool.name: item for item in resolved}
         packages = self.installation["packages"]
-        if unowned := self._audit_destinations(resolved, approved):
+        if unowned := self._audit_destinations(resolved, approved, declined):
             raise UnownedFileError(unowned)
         if products := self._audit_host_products(resolved, set(adopt)):
             raise UnownedHostProductError(
@@ -587,9 +592,12 @@ class CatalogueInstaller:
                         host_undo,
                         rollback_prepared.get(item.tool.name, []) if replacing else [],
                         approved,
+                        declined,
                     )
                 elif item.tool.name in repairs:
-                    self._install(item, prepared.get(item.tool.name, []), host_undo, [], approved)
+                    self._install(
+                        item, prepared.get(item.tool.name, []), host_undo, [], approved, declined
+                    )
                 else:
                     current["explicit"] = item.explicit
                     current["dependencies"] = [dependency.name for dependency in item.tool.dependencies]
@@ -655,12 +663,26 @@ class CatalogueInstaller:
         host_undo: list[tuple[str, HostAction | PreparedAction]],
         previous_actions: list[PreparedAction | None],
         approved: set[str],
+        declined: set[str],
     ) -> None:
         tool = item.tool
         files: list[dict[str, Any]] = []
         prior_receipt = self.installation["packages"].get(tool.name)
         for payload in self._payloads(tool):
             destination = self.target.destination_path(payload.root, payload.dest)
+            if (
+                destination.exists()
+                and _canonical_path(destination) in declined
+                and sha256(destination) != sha256(payload.source)
+            ):
+                files.append({
+                    "path": str(destination.resolve()),
+                    "digest": sha256(destination),
+                    "starter": payload.starter,
+                    "skipped": True,
+                    "owned": False,
+                })
+                continue
             if destination.exists() and payload.starter:
                 files.append({
                     "path": str(destination.resolve()),
@@ -827,6 +849,7 @@ def reconcile_targets(
     requests: list[tuple[CatalogueInstaller, set[str]]],
     *,
     overwrite: Iterable[Path] = (),
+    skip: Iterable[Path] = (),
     adopt: Iterable[str] = (),
 ) -> list[list[Change]]:
     """Reconcile several targets as one local and host-level transaction."""
@@ -852,6 +875,7 @@ def reconcile_targets(
             installer.reconcile(
                 requested,
                 overwrite=overwrite,
+                skip=skip,
                 adopt=adopt,
                 _transaction=transaction,
                 _host_undo=host_undo,

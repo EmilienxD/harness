@@ -58,8 +58,8 @@ def wire_menu(monkeypatch, tools, ui_factory, installer_factory, installed=()):
     monkeypatch.setattr(
         cli,
         "reconcile_targets",
-        lambda requests, overwrite=(), adopt=(): [
-            installer.reconcile(requested, overwrite=overwrite, adopt=adopt)
+        lambda requests, overwrite=(), skip=(), adopt=(): [
+            installer.reconcile(requested, overwrite=overwrite, skip=skip, adopt=adopt)
             for installer, requested in requests
         ],
     )
@@ -169,7 +169,7 @@ def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monke
         def unowned_host_products(self, requested):
             return {}
 
-        def reconcile(self, requested, overwrite=(), adopt=()):
+        def reconcile(self, requested, overwrite=(), skip=(), adopt=()):
             reconciled[self.target.platform] = requested
 
     wire_menu(monkeypatch, [aboard, auto], FakeUI, FakeInstaller)
@@ -256,8 +256,8 @@ def wire_conflict_menu(monkeypatch, conflicts, answer):
         def unowned_host_products(self, requested):
             return {}
 
-        def reconcile(self, requested, overwrite=(), adopt=()):
-            reconciled[self.target.platform] = set(overwrite)
+        def reconcile(self, requested, overwrite=(), skip=(), adopt=()):
+            reconciled[self.target.platform] = (set(overwrite), set(skip))
 
     wire_menu(monkeypatch, [discover()["aboard"]], FakeUI, FakeInstaller)
     return events, reconciled
@@ -276,12 +276,27 @@ def test_menu_asks_before_overwriting_files_harness_does_not_own(monkeypatch, tm
         ("outro", "Done!  Review installed packages before use."),
     ]
     assert str(existing) in "\n".join(events[2][2])
-    assert reconciled == {Platform.CLAUDE: {existing}, Platform.CHATGPT: {existing}}
+    assert reconciled == {
+        Platform.CLAUDE: ({existing}, set()),
+        Platform.CHATGPT: ({existing}, set()),
+    }
 
 
-def test_menu_abandons_the_installation_when_the_overwrite_is_refused(monkeypatch, tmp_path):
+def test_menu_skips_the_refused_files_and_installs_everything_else(monkeypatch, tmp_path):
     existing = tmp_path / ".claude" / "skills" / "aboard" / "SKILL.md"
     events, reconciled = wire_conflict_menu(monkeypatch, [existing], answer=False)
+
+    assert cli.catalogue_menu() == 0
+    assert events[-1] == ("outro", "Done!  Review installed packages before use.")
+    assert reconciled == {
+        Platform.CLAUDE: (set(), {existing}),
+        Platform.CHATGPT: (set(), {existing}),
+    }
+
+
+def test_menu_abandons_the_installation_when_the_overwrite_prompt_is_cancelled(monkeypatch, tmp_path):
+    existing = tmp_path / ".claude" / "skills" / "aboard" / "SKILL.md"
+    events, reconciled = wire_conflict_menu(monkeypatch, [existing], answer=None)
 
     assert cli.catalogue_menu() == 0
     assert events[-1] == ("cancelled", "Installation cancelled.  No changes made.")
@@ -827,6 +842,71 @@ def test_approved_overwrite_installs_the_payload_and_takes_ownership(tmp_path):
     assert not existing.exists()
 
 
+def two_file_package(tmp_path, version="1.0.0"):
+    root = tmp_path / "pair"
+    root.mkdir(exist_ok=True)
+    (root / "first").write_text("catalogue first")
+    (root / "second").write_text("catalogue second")
+    (root / "harness.toml").write_text(
+        f'name="pair"\nversion="{version}"\ndescription="x"\n'
+        '[platforms.claude]\nstatus="supported"\n'
+        '[[files]]\nsrc="first"\ndest="first.txt"\n'
+        '[[files]]\nsrc="second"\ndest="second.txt"\n'
+    )
+    return load_tool(root)
+
+
+def test_skipped_conflict_keeps_the_existing_file_and_installs_the_rest(tmp_path):
+    tool = two_file_package(tmp_path)
+    project = tmp_path / "project"
+    existing = project / ".claude" / "first.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("written by hand")
+    selected = manager({tool.name: tool}, Target.for_project(project), tmp_path)
+
+    selected.reconcile({tool.name}, skip={existing})
+
+    assert existing.read_text() == "written by hand"
+    assert (project / ".claude" / "second.txt").read_text() == "catalogue second"
+    assert selected.installation["packages"]["pair"]["version"] == "1.0.0"
+
+
+def test_uninstall_leaves_a_skipped_file_where_it_found_it(tmp_path):
+    tool = two_file_package(tmp_path)
+    project = tmp_path / "project"
+    existing = project / ".claude" / "first.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("written by hand")
+    selected = manager({tool.name: tool}, Target.for_project(project), tmp_path)
+    selected.reconcile({tool.name}, skip={existing})
+
+    selected.reconcile(set())
+
+    assert existing.read_text() == "written by hand"
+    assert not (project / ".claude" / "second.txt").exists()
+
+
+def test_upgrade_offers_a_skipped_file_again_and_can_replace_it(tmp_path):
+    tool = two_file_package(tmp_path)
+    project = tmp_path / "project"
+    existing = project / ".claude" / "first.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("written by hand")
+    selected = manager({tool.name: tool}, Target.for_project(project), tmp_path)
+    selected.reconcile({tool.name}, skip={existing})
+
+    upgraded = two_file_package(tmp_path, version="2.0.0")
+    later = CatalogueInstaller({upgraded.name: upgraded}, Target.for_project(project), selected.store)
+
+    assert later.conflicts({upgraded.name}) == [existing.resolve()]
+    with pytest.raises(UnownedFileError):
+        later.reconcile({upgraded.name})
+
+    later.reconcile({upgraded.name}, overwrite={existing})
+
+    assert existing.read_text() == "catalogue first"
+
+
 def test_failed_host_action_rolls_back_local_installation(monkeypatch, tmp_path):
     tool = transactional_package(tmp_path, "failing", action=True)
     project = tmp_path / "project"
@@ -1299,7 +1379,7 @@ def wire_adoption_menu(monkeypatch, products, answer):
         def unowned_host_products(self, requested):
             return dict(products)
 
-        def reconcile(self, requested, overwrite=(), adopt=()):
+        def reconcile(self, requested, overwrite=(), skip=(), adopt=()):
             reconciled[self.target.platform] = set(adopt)
 
     wire_menu(monkeypatch, [discover()["aboard"]], FakeUI, FakeInstaller)
