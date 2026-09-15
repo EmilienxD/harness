@@ -174,7 +174,8 @@ test("wrapper consumes a request file and runs its exact argv", () => {
     assert.equal(result.status, 6);
     assert.equal(existsSync(request), false, "launch argv is removed once consumed");
     assert.equal(existsSync(lock), false);
-    assert.equal(uv([WRAPPER, lock, "--request", request]).status, 2, "the visible command cannot be replayed");
+    const replayed = uv([WRAPPER, lock, "--request", request]);
+    assert.equal(replayed.status, 2, "the visible command cannot be replayed");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

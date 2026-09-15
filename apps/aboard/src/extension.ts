@@ -260,12 +260,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     [claudePlatform.id, claudePlatform],
     [chatGptPlatform.id, chatGptPlatform],
   ]);
-  // Conversation discovery belongs to the session's runtime, not today's launch
-  // selection. In particular, editing launch.json must not make an existing
-  // process disappear from Recent Activity when it ends. launch.json is read
-  // only for the runtime a platform needs to answer the question at all - a
-  // renamed or wrapped executable - and only while it still selects that
-  // platform; an unreadable file leaves the platform on its own default.
+
   const sessionIsResumable = async (platformId: AgentSession["platform"], sessionId: SessionId, cwd: string, type?: AgentSession["identity"]["type"]): Promise<boolean> => {
     const platform = platforms.get(platformId);
     if (platform === undefined) return false;
