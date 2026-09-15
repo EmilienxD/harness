@@ -8,10 +8,10 @@ The project is built around deliberate control. Most skills run only when you in
 
 ## Installation
 
-Run a pinned revision of the ephemeral installer:
+Run the latest version of the ephemeral installer:
 
 ```bash
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness
+uvx --from "git+https://github.com/EmilienxD/harness" harness
 ```
 
 The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall. A machine-level product a package installs — a `uv` tool or a VS Code extension — gets the same treatment: if one is already present and no Harness receipt accounts for it, the installer names it and asks whether to take ownership, which replaces it with the pinned version and removes it again on uninstall.
@@ -20,17 +20,17 @@ For scripts and agents, use the non-interactive commands:
 
 ```bash
 # Add packages without changing other selections
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install commit issue-writers
+uvx --from "git+https://github.com/EmilienxD/harness" harness install commit issue-writers
 
 # Preview a ChatGPT-only install
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness install command-guard \
+uvx --from "git+https://github.com/EmilienxD/harness" harness install command-guard \
   --platform chatgpt --dry-run --json
 
 # Inspect, upgrade, or remove packages
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness list
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness info subagents
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness upgrade
-uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness uninstall commit
+uvx --from "git+https://github.com/EmilienxD/harness" harness list
+uvx --from "git+https://github.com/EmilienxD/harness" harness info subagents
+uvx --from "git+https://github.com/EmilienxD/harness" harness upgrade
+uvx --from "git+https://github.com/EmilienxD/harness" harness uninstall commit
 ```
 
 Commands default to project scope in the current directory and both platforms. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. `install` and `upgrade` fail rather than replace files Harness does not own; rerun them with `--overwrite` to take those files over, and with `--adopt` to take over host products installed outside Harness. Run `harness --help` for the complete CLI.
