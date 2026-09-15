@@ -106,14 +106,13 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
 
 async function stageIssueWriters(platform: IssuePlatform, harnessRoot: string, projectRoot: string, python: string): Promise<void> {
   const source = join(harnessRoot, "harness", "building", "issue-writers");
-  const skills = ["draft-issue", "draft-issues", "draft-audit-issues", "publish-issues", "to-spec", "to-spec-draft-issue"];
+  const skills = ["copy-message-as-issue", "draft-issue", "draft-issues", "draft-audit-issues", "publish-issues", "to-spec", "to-spec-draft-issue"];
   if (platform === "claude") {
     const claudeRoot = join(projectRoot, ".claude");
     const hookRoot = join(claudeRoot, "hooks");
     await mkdir(hookRoot, { recursive: true });
     for (const skill of skills) await copyTree(join(source, skill), join(claudeRoot, "skills", skill));
-    await copyTree(join(source, "copy-message-as-issue"), join(claudeRoot, "skills", "copy-message-as-issue"));
-    for (const file of ["issues_core.py", "claude/publish_issues_UserPromptSubmit_hook.py", "claude/copy_message_as_issue.py"]) {
+    for (const file of ["issues_core.py", "claude/publish_issues_UserPromptSubmit_hook.py", "copy_message_as_issue.py"]) {
       await copyFile(join(source, file), join(hookRoot, file.split("/").at(-1)!));
     }
     await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{
@@ -128,6 +127,7 @@ async function stageIssueWriters(platform: IssuePlatform, harnessRoot: string, p
       await copyFile(join(source, "chatgpt", "agents", `${skill}.yaml`), join(projectRoot, ".agents", "skills", skill, "agents", "openai.yaml"));
     }
     await copyFile(join(source, "issues_core.py"), join(hookRoot, "issues_core.py"));
+    await copyFile(join(source, "copy_message_as_issue.py"), join(hookRoot, "copy_message_as_issue.py"));
     await copyFile(join(source, "chatgpt", "issues_ChatGPT_hook.py"), join(hookRoot, "issues_ChatGPT_hook.py"));
     await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{
       type: "command", command: `${python} \"${join(hookRoot, "issues_ChatGPT_hook.py")}\"`, timeout: 300,

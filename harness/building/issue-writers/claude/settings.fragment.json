@@ -9,6 +9,9 @@
     "SessionStart": [
       {"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/copy_message_as_issue.py"]}]}
     ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/copy_message_as_issue.py"]}]}
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

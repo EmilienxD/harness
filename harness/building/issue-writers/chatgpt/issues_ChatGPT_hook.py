@@ -10,9 +10,11 @@ import sys
 import uuid
 from pathlib import Path
 
+import copy_message_as_issue
 import issues_core as core
 
 PUBLISH_PATTERN = re.compile(r"(?<![\w-])[$@/]publish-issues?(?=\s|$)")
+COPY_PATTERN = re.compile(r"(?<![\w-])[$@/]copy-message-as-issue(?=\s|$)")
 
 
 def gateway_session_id(session_id: str) -> str:
@@ -35,8 +37,22 @@ def _additional_context(text: str) -> None:
 def main() -> None:
     payload = json.load(sys.stdin)
     prompt = str(payload.get("prompt") or "").strip()
+    event = payload.get("hook_event_name")
+    if event == "Stop":
+        copy_message_as_issue.capture(payload)
+        json.dump({}, sys.stdout)
+        return
+    if event in {"SessionStart", "SessionEnd", "Interrupt"}:
+        copy_message_as_issue.invalidate(payload)
+        return
+
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
     os.chdir(cwd)
+
+    if COPY_PATTERN.search(prompt):
+        result = copy_message_as_issue.save(payload)
+        json.dump({"decision": "block", "reason": result}, sys.stdout)
+        return
 
     if PUBLISH_PATTERN.search(prompt):
         dry = "--dry" in prompt.split()
@@ -44,6 +60,11 @@ def main() -> None:
         result = core.publish_issues(dry, gateway_session_id(session_id))
         json.dump({"decision": "block", "reason": result}, sys.stdout)
         return
+
+    try:
+        copy_message_as_issue.invalidate(payload)
+    except (OSError, ValueError):
+        pass
 
     contexts: list[str] = []
     try:

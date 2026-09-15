@@ -55,7 +55,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis in chat. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
 
-- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Claude Code also gets `copy-message-as-issue` for publishing the latest reviewed response.
+- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Claude Code and ChatGPT also get `copy-message-as-issue`, which publishes the latest reviewed response directly without creating a draft or touching `.issues-gateway/`.
 
 - **`issue-readers`**: Installs `address-this` and `review-this`, plus hooks that prepare bounded issue or commit context. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
 
