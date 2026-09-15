@@ -112,3 +112,10 @@ def test_issue_readers_owns_both_worker_skills():
     }
     assert "address-this/SKILL.md" not in writer_destinations
     assert "review-this/SKILL.md" not in writer_destinations
+
+
+def test_aboard_couples_auto_but_shares_issue_readers():
+    dependencies = {dependency.name: dependency for dependency in discover()["aboard"].dependencies}
+
+    assert dependencies["auto"].lifecycle == "coupled"
+    assert dependencies["issue-readers"].lifecycle == "shared"

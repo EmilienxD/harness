@@ -15,6 +15,15 @@ import portalocker
 
 
 SCHEMA_VERSION = 1
+OWNERSHIP_STATES = {"selected", "dependency", "retained"}
+
+
+def package_ownership(receipt: dict[str, Any]) -> str:
+    """Read current ownership, including receipts written before ownership states existed."""
+    ownership = receipt.get("ownership")
+    if ownership in OWNERSHIP_STATES:
+        return ownership
+    return "selected" if receipt.get("explicit") is True else "dependency"
 
 
 def receipt_path() -> Path:
@@ -69,6 +78,8 @@ class ReceiptStore:
                 if not isinstance(name, str) or not isinstance(receipt, dict):
                     raise ValueError(f"invalid Harness receipt store at {selected}")
                 if not isinstance(receipt.get("version"), str):
+                    raise ValueError(f"invalid Harness receipt store at {selected}")
+                if "ownership" in receipt and receipt["ownership"] not in OWNERSHIP_STATES:
                     raise ValueError(f"invalid Harness receipt store at {selected}")
                 files = receipt.get("files", [])
                 if not isinstance(files, list) or any(

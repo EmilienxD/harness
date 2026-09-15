@@ -70,6 +70,7 @@ class PackageDependency:
 
     name: str
     constraint: str = ""
+    lifecycle: str = "shared"
 
 
 @dataclass(frozen=True)
@@ -203,8 +204,17 @@ def _parse_dependencies(data: dict, manifest_path: Path) -> tuple[PackageDepende
                 raise ManifestError(f"{manifest_path}: invalid dependency '{entry}'")
             result.append(PackageDependency(match.group(1), match.group(2).strip()))
         elif isinstance(entry, dict) and isinstance(entry.get("name"), str):
+            lifecycle = entry.get("lifecycle", "shared")
+            if lifecycle not in {"shared", "coupled"}:
+                raise ManifestError(
+                    f"{manifest_path}: dependency lifecycle must be 'shared' or 'coupled'"
+                )
             result.append(
-                PackageDependency(entry["name"].strip(), str(entry.get("version", "")).strip())
+                PackageDependency(
+                    entry["name"].strip(),
+                    str(entry.get("version", "")).strip(),
+                    lifecycle,
+                )
             )
         else:
             raise ManifestError(f"{manifest_path}: invalid dependency entry {entry!r}")

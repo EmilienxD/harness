@@ -420,6 +420,46 @@ def test_dependencies_install_transitively_and_receipts_track_ownership(tmp_path
     assert "review-this" not in receipts
 
 
+def test_uninstall_removes_coupled_dependencies_and_retains_shared_dependencies(tmp_path):
+    def package(name, dependencies=""):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "payload").write_text(name)
+        (root / "harness.toml").write_text(
+            f'name="{name}"\nversion="1.0.0"\ndescription="x"\n'
+            f"{dependencies}"
+            '[platforms.claude]\nstatus="supported"\n'
+            f'[[files]]\nsrc="payload"\ndest="{name}"\n'
+        )
+        return load_tool(root)
+
+    leaf = package("leaf")
+    shared = package("shared", 'dependencies=[{name="leaf"}]\n')
+    coupled = package("coupled")
+    parent = package(
+        "parent",
+        'dependencies=[{name="shared"}, {name="coupled", lifecycle="coupled"}]\n',
+    )
+    tools = {tool.name: tool for tool in (parent, shared, coupled, leaf)}
+    selected = manager(tools, Target.for_project(tmp_path / "project"), tmp_path)
+    selected.reconcile({"parent"})
+    selected.installation["packages"]["parent"].pop("coupledDependencies")
+
+    assert selected.reconcile(set()) == [
+        Change("retain", "shared"),
+        Change("remove", "parent"),
+        Change("remove", "coupled"),
+    ]
+    assert set(selected.installation["packages"]) == {"shared", "leaf"}
+    assert selected.installation["packages"]["shared"]["ownership"] == "retained"
+    assert selected.installation["packages"]["leaf"]["ownership"] == "dependency"
+
+    assert selected.reconcile({"shared"}) == []
+    assert selected.reconcile(set()) == [Change("retain", "leaf"), Change("remove", "shared")]
+    assert selected.reconcile(set()) == [Change("remove", "leaf")]
+    assert selected.installation["packages"] == {}
+
+
 def test_dependency_cycle_is_rejected(tmp_path):
     def package(name, dependency):
         root = tmp_path / name
@@ -1198,6 +1238,17 @@ def test_review_lists_additions_before_removals_and_flags_removals(tmp_path):
         "    - remove  (1)  issue-writers",
     ]
     assert [line.tone for line in marked] == ["success", "danger", "danger"]
+
+
+def test_review_lists_retained_packages_without_explanatory_suffix(tmp_path):
+    lines = cli._review_lines(
+        [],
+        set(),
+        [Target.for_project(tmp_path, Platform.CLAUDE)],
+        {Platform.CLAUDE: [Change("retain", "issue-readers")]},
+    )
+
+    assert "    = retain (1)  issue-readers" in lines
 
 
 def test_removing_the_last_hook_leaves_an_empty_codex_config(tmp_path):

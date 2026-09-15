@@ -11,7 +11,7 @@ import stat
 import subprocess
 import tempfile
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
@@ -25,7 +25,7 @@ from harness_cli.host_actions import is_installed as host_action_is_installed
 from harness_cli.host_actions import uninstall as uninstall_host_action
 from harness_cli.manifest import ExpandedFile, HostAction, SupportStatus, Tool
 from harness_cli.platforms import Platform, PlatformAdapter, get_adapter
-from harness_cli.receipts import ReceiptStore
+from harness_cli.receipts import ReceiptStore, package_ownership
 
 
 class InstallError(Exception):
@@ -287,7 +287,7 @@ class _LocalTransaction:
 
 
 class CatalogueInstaller:
-    """Reconcile one target to a set of explicitly selected packages."""
+    """Reconcile one target to a set of selected or retained root packages."""
 
     def __init__(self, available: dict[str, Tool], target: Target, store: ReceiptStore | None = None):
         self.available = available
@@ -303,7 +303,11 @@ class CatalogueInstaller:
         return tool.expand(self.target.platform, scope)
 
     def explicit_packages(self) -> set[str]:
-        return {name for name, receipt in self.installation["packages"].items() if receipt.get("explicit") is True}
+        return {
+            name
+            for name, receipt in self.installation["packages"].items()
+            if package_ownership(receipt) in {"selected", "retained"}
+        }
 
     def _owned_in_another_installation(self, name: str) -> bool:
         current = self.installation
@@ -368,21 +372,80 @@ class CatalogueInstaller:
         except CatalogueError as exc:
             raise InstallError(str(exc)) from exc
         desired = {item.tool.name: item for item in resolved}
+        current = self.installation["packages"]
+        self._validate_receipt_paths(current)
+        retained = {
+            name
+            for name in requested_names
+            if name in current and package_ownership(current[name]) == "retained"
+        }
+        newly_retained: set[str] = set()
+        removal_candidates = self._removal_order(current, set(desired))
+
+        def is_coupled(parent: str, dependency: str) -> bool:
+            recorded = current[parent].get("coupledDependencies")
+            if isinstance(recorded, list):
+                return dependency in recorded
+            tool = self.available.get(parent)
+            return bool(
+                tool
+                and any(
+                    item.name == dependency and item.lifecycle == "coupled"
+                    for item in tool.dependencies
+                )
+            )
+
+        for name in removal_candidates:
+            receipt = current[name]
+            if name in desired or package_ownership(receipt) != "dependency" or name not in self.available:
+                continue
+            parents = [
+                parent
+                for parent, parent_receipt in current.items()
+                if name in parent_receipt.get("dependencies", [])
+            ]
+            if not parents or any(not is_coupled(parent, name) for parent in parents):
+                newly_retained.add(name)
+                retained.add(name)
+            if name in newly_retained:
+                resolved = resolve_dependencies(
+                    [self.available[name] for name in sorted(requested_names | retained)],
+                    self.available,
+                )
+                desired = {item.tool.name: item for item in resolved}
+        resolved = [
+            replace(
+                item,
+                ownership=(
+                    "retained"
+                    if item.tool.name in retained
+                    else "selected"
+                    if item.tool.name in requested_names
+                    else "dependency"
+                ),
+            )
+            for item in resolved
+        ]
+        desired = {item.tool.name: item for item in resolved}
         for item in resolved:
             support = item.tool.support_for(self.target.platform)
             if support.status is not SupportStatus.SUPPORTED:
-                raise InstallError(f"{item.tool.name} is {support.status.value} for {self.target.adapter.product_name}")
-        current = self.installation["packages"]
-        self._validate_receipt_paths(current)
-        changes = [Change("remove", name) for name in self._removal_order(current, set(desired))]
+                raise InstallError(
+                    f"{item.tool.name} is {support.status.value} for {self.target.adapter.product_name}"
+                )
+        changes = [Change("retain", name) for name in sorted(newly_retained)]
+        changes.extend(Change("remove", name) for name in self._removal_order(current, set(desired)))
         for item in resolved:
             receipt = current.get(item.tool.name)
             if receipt is None:
                 changes.append(Change("install", item.tool.name, "selected" if item.explicit else "dependency"))
             elif receipt.get("version") != item.tool.version:
                 changes.append(Change("upgrade", item.tool.name, f"{receipt.get('version')} -> {item.tool.version}"))
-            elif bool(receipt.get("explicit")) != item.explicit:
-                changes.append(Change("ownership", item.tool.name, "explicit" if item.explicit else "transitive"))
+            elif (
+                package_ownership(receipt) != item.ownership
+                and item.tool.name not in newly_retained
+            ):
+                changes.append(Change("ownership", item.tool.name, item.ownership))
             elif any(
                 record.get("owned") and not Path(record["path"]).is_file()
                 for record in receipt.get("files", [])
@@ -592,8 +655,14 @@ class CatalogueInstaller:
                 elif item.tool.name in repairs:
                     self._install(item, prepared.get(item.tool.name, []), host_undo, [], approved)
                 else:
-                    current["explicit"] = item.explicit
+                    current.pop("explicit", None)
+                    current["ownership"] = item.ownership
                     current["dependencies"] = [dependency.name for dependency in item.tool.dependencies]
+                    current["coupledDependencies"] = [
+                        dependency.name
+                        for dependency in item.tool.dependencies
+                        if dependency.lifecycle == "coupled"
+                    ]
             if _persist:
                 if self.installation["packages"]:
                     self.store.save()
@@ -738,8 +807,13 @@ class CatalogueInstaller:
             host_undo.append(("uninstall", action.action))
         self.installation["packages"][tool.name] = {
             "version": tool.version,
-            "explicit": item.explicit,
+            "ownership": item.ownership,
             "dependencies": [dependency.name for dependency in tool.dependencies],
+            "coupledDependencies": [
+                dependency.name
+                for dependency in tool.dependencies
+                if dependency.lifecycle == "coupled"
+            ],
             "files": files,
             "fragment": fragment,
             "gitignoreBlock": block if patterns else None,

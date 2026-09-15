@@ -18,7 +18,7 @@ from harness_cli.installer import (
 )
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform
-from harness_cli.receipts import ReceiptStore, installation_lock
+from harness_cli.receipts import ReceiptStore, installation_lock, package_ownership
 
 
 SCHEMA_VERSION = 1
@@ -150,17 +150,17 @@ def run_install(args: Namespace) -> int:
     planned: list[tuple[CatalogueInstaller, set[str], dict]] = []
 
     for target in targets:
-        explicit = {
+        roots = {
             name
             for name, receipt in installed_packages(target, store).items()
-            if receipt.get("explicit") is True
+            if package_ownership(receipt) in {"selected", "retained"}
         }
         compatible_requested = {
             name
             for name in requested
             if available[name].support_for(target.platform).status is SupportStatus.SUPPORTED
         }
-        selected = explicit | compatible_requested
+        selected = roots | compatible_requested
         skipped = [
             {
                 "package": name,
@@ -230,15 +230,15 @@ def run_uninstall(args: Namespace) -> int:
         raise InstallError("unknown catalogue package(s): " + ", ".join(missing))
     planned: list[tuple[CatalogueInstaller, set[str], dict]] = []
     for target in targets:
-        explicit = {
+        roots = {
             name
             for name, receipt in receipts[target.platform].items()
-            if receipt.get("explicit") is True
+            if package_ownership(receipt) in {"selected", "retained"}
         }
-        selected = set() if args.all else explicit - requested
+        selected = set() if args.all else roots - requested
         skipped = [
-            {"package": name, "reason": "not installed explicitly"}
-            for name in sorted(requested - explicit)
+            {"package": name, "reason": "not installed as a selection"}
+            for name in sorted(requested - roots)
         ]
         installer = CatalogueInstaller(available, target, store)
         _, changes = installer.plan(selected)
@@ -276,12 +276,12 @@ def run_upgrade(args: Namespace) -> int:
     store = ReceiptStore.load()
     planned: list[tuple[CatalogueInstaller, set[str], dict]] = []
     for target in targets:
-        explicit = {
+        roots = {
             name
             for name, receipt in installed_packages(target, store).items()
-            if receipt.get("explicit") is True
+            if package_ownership(receipt) in {"selected", "retained"}
         }
-        selected = explicit
+        selected = roots
         skipped = []
         installer = CatalogueInstaller(available, target, store)
         _, changes = installer.plan(selected)
@@ -346,7 +346,7 @@ def run_list(args: Namespace) -> int:
             {
                 "platform": platform.value,
                 "version": receipt["version"],
-                "ownership": "explicit" if receipt.get("explicit") else "transitive",
+                "ownership": package_ownership(receipt),
             }
             for platform in platforms
             if (receipt := receipts[platform].get(tool.name)) is not None
@@ -383,7 +383,7 @@ def run_list(args: Namespace) -> int:
                     {
                         "platform": platform.value,
                         "version": receipt["version"],
-                        "ownership": "explicit" if receipt.get("explicit") else "transitive",
+                        "ownership": package_ownership(receipt),
                     }
                     for platform in platforms
                     if (receipt := receipts[platform].get(name)) is not None
@@ -436,7 +436,11 @@ def run_info(args: Namespace) -> int:
                 "selectable": tool.selectable,
                 "platforms": _support(tool, PLATFORMS),
                 "dependencies": [
-                    {"name": dependency.name, "constraint": dependency.constraint}
+                    {
+                        "name": dependency.name,
+                        "constraint": dependency.constraint,
+                        "lifecycle": dependency.lifecycle,
+                    }
                     for dependency in tool.dependencies
                 ],
                 "requires": list(tool.requires),

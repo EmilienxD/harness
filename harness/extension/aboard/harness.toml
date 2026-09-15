@@ -1,8 +1,11 @@
 name = "aboard"
-version = "0.0.3"
+version = "0.0.4"
 description = "Aboard VS Code integration for visible agents and Auto Run"
 docs = "https://github.com/EmilienxD/harness/blob/main/apps/aboard/README.md"
-dependencies = ["auto>=1.0.0,<2.0.0", "issue-readers>=1.0.0,<2.0.0"]
+dependencies = [
+  { name = "auto", version = ">=1.0.0,<2.0.0", lifecycle = "coupled" },
+  { name = "issue-readers", version = ">=1.0.0,<2.0.0" },
+]
 
 [platforms.claude]
 status = "supported"

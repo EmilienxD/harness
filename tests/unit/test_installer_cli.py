@@ -70,7 +70,7 @@ def test_list_json_reports_installed_catalogue_packages(tmp_path, monkeypatch, c
             "docs": "https://github.com/EmilienxD/harness/blob/main/harness/productivity/caveman/SKILL.md",
             "support": {"claude": {"status": "supported"}},
             "installed": [
-                {"platform": "claude", "version": "1.0.4", "ownership": "explicit"}
+                {"platform": "claude", "version": "1.0.4", "ownership": "selected"}
             ],
         }
     ]
@@ -104,7 +104,7 @@ def test_list_installed_surfaces_packages_missing_from_the_pinned_catalogue(
         "name": "retired-caveman",
         "available": False,
         "installed": [
-            {"platform": "claude", "version": "1.0.4", "ownership": "explicit"}
+            {"platform": "claude", "version": "1.0.4", "ownership": "selected"}
         ],
     }
 
@@ -126,10 +126,10 @@ def test_info_json_exposes_dependency_and_platform_contract(capsys):
         "chatgpt": {"status": "supported"},
     }
     assert package["dependencies"] == [
-        {"name": "prototype", "constraint": ">=1.1.0,<2.0.0"},
-        {"name": "websearch", "constraint": ">=1.1.0,<2.0.0"},
-        {"name": "grill-me", "constraint": ">=1.0.3,<2.0.0"},
-        {"name": "issue-readers", "constraint": ">=1.0.0,<2.0.0"},
+        {"name": "prototype", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "shared"},
+        {"name": "websearch", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "shared"},
+        {"name": "grill-me", "constraint": ">=1.0.3,<2.0.0", "lifecycle": "shared"},
+        {"name": "issue-readers", "constraint": ">=1.0.0,<2.0.0", "lifecycle": "shared"},
     ]
     assert package["actions"] == ["uv-tool"]
 
@@ -153,6 +153,28 @@ def test_uninstall_removes_only_named_explicit_packages(tmp_path, monkeypatch, c
     ]
     assert not (tmp_path / ".claude/skills/caveman/SKILL.md").exists()
     assert (tmp_path / ".claude/skills/stop-overthinking/SKILL.md").is_file()
+
+
+def test_retained_package_survives_upgrade_and_can_be_uninstalled(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    state = tmp_path / "state"
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
+    assert main(["install", "caveman", "--platform", "claude", "--json"]) == 0
+    capsys.readouterr()
+    receipts_path = state / "receipts.json"
+    receipts = json.loads(receipts_path.read_text(encoding="utf-8"))
+    installation = next(iter(receipts["installations"].values()))
+    installation["packages"]["caveman"]["ownership"] = "retained"
+    receipts_path.write_text(json.dumps(receipts), encoding="utf-8")
+
+    assert main(["upgrade", "--platform", "claude", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["summary"]["changes"] == 0
+    assert main(["uninstall", "caveman", "--platform", "claude", "--json"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["results"][0]["changes"] == [
+        {"action": "remove", "package": "caveman", "reason": ""}
+    ]
 
 
 def test_upgrade_reconciles_existing_selection_to_current_catalogue(tmp_path, monkeypatch, capsys):

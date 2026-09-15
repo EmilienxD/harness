@@ -19,7 +19,7 @@ from harness_cli.installer import (
 from harness_cli.installer_cli import UsageError, run as run_installer_command
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform, get_adapter
-from harness_cli.receipts import ReceiptStore, installation_lock
+from harness_cli.receipts import ReceiptStore, installation_lock, package_ownership
 from harness_cli.tui import Line, MenuOption, TerminalUI, terminal_keys
 
 
@@ -98,12 +98,12 @@ def _targets(scope: int, platforms: tuple[Platform, ...]) -> list[Target]:
     return [Target.for_user(platform) for platform in platforms]
 
 
-def _explicit_packages(targets: list[Target], store: ReceiptStore) -> set[str]:
+def _root_packages(targets: list[Target], store: ReceiptStore) -> set[str]:
     return {
         name
         for target in targets
         for name, receipt in installed_packages(target, store).items()
-        if receipt.get("explicit")
+        if package_ownership(receipt) in {"selected", "retained"}
     }
 
 
@@ -123,6 +123,7 @@ _ACTION_MARKS = {
     "upgrade": "↑ upgrade",
     "update": "~ update",
     "ownership": "~ ownership",
+    "retain": "= retain",
     "remove": "- remove",
 }
 _ACTION_TONES = {
@@ -130,6 +131,7 @@ _ACTION_TONES = {
     "upgrade": "accent",
     "update": "accent",
     "ownership": "muted",
+    "retain": "muted",
     "remove": "danger",
 }
 
@@ -247,7 +249,7 @@ def catalogue_menu() -> int:
             return 0
 
         targets = _targets(scope, platforms)
-        installed = _explicit_packages(targets, store)
+        installed = _root_packages(targets, store)
         package_selection = ui.multiselect(
             "Select packages",
             _tool_options(tools, installed, platforms),
@@ -385,10 +387,10 @@ def build_parser() -> argparse.ArgumentParser:
     install.set_defaults(operation="install")
     uninstall = commands.add_parser(
         "uninstall", aliases=["remove"], help="remove named packages",
-        description="Remove named explicit selections, or every selection with --all.",
+        description="Remove named selections, or every selection with --all.",
     )
     uninstall.add_argument("packages", nargs="*", metavar="PACKAGE")
-    uninstall.add_argument("--all", action="store_true", help="remove every explicit package")
+    uninstall.add_argument("--all", action="store_true", help="remove every selected or retained package")
     uninstall.add_argument(
         "--platform", action="append", choices=[item.value for item in PLATFORMS],
         help="target platform; repeat to select several (default: both)",

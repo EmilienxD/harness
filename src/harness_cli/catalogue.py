@@ -53,7 +53,11 @@ def satisfies(version: str, constraint: str) -> bool:
 @dataclass(frozen=True)
 class ResolvedPackage:
     tool: Tool
-    explicit: bool
+    ownership: str
+
+    @property
+    def explicit(self) -> bool:
+        return self.ownership == "selected"
 
 
 def resolve_dependencies(requested: list[Tool], available: dict[str, Tool]) -> list[ResolvedPackage]:
@@ -84,7 +88,7 @@ def resolve_dependencies(requested: list[Tool], available: dict[str, Tool]) -> l
             visit(target)
         visiting.pop()
         visited.add(tool.name)
-        result.append(ResolvedPackage(tool, tool.name in explicit))
+        result.append(ResolvedPackage(tool, "selected" if tool.name in explicit else "dependency"))
 
     for package in requested:
         visit(package)
