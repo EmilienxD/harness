@@ -42,7 +42,7 @@ def staged_hook(tmp_path: Path, config: str | None = None) -> Path:
     hook.parent.mkdir()
     hook.write_bytes(HOOK.read_bytes())
     source_config = HOOK.parent / "no-new-documents.toml"
-    (hook.parent / source_config.name).write_text(
+    (hook.parent.parent / source_config.name).write_text(
         config if config is not None else source_config.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
@@ -292,8 +292,9 @@ def test_install_registers_both_platforms_and_preserves_editable_configuration(
     product = ".claude" if platform == "claude" else ".codex"
     hook_dir = tmp_path / product / "hooks"
     hook = hook_dir / "no_new_documents_hook.py"
-    config = hook_dir / "no-new-documents.toml"
+    config = tmp_path / product / "no-new-documents.toml"
     assert hook.is_file()
+    assert not (hook_dir / "no-new-documents.toml").exists()
     assert 'paths = ["docs"]' in config.read_text(encoding="utf-8")
     settings = json.loads((tmp_path / settings_path).read_text(encoding="utf-8"))
     group = settings["hooks"]["PreToolUse"][0]

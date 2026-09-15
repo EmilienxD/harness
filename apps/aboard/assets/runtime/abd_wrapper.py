@@ -129,6 +129,13 @@ def main() -> int:
             ):
                 return 2
             command: list[str] = loaded_command
+        except FileNotFoundError:
+            print(
+                "This agent command can only be run once. Resume it from the Recent Activity section, "
+                "or create a new agent from the Run Agent section.",
+                file=sys.stderr,
+            )
+            return 2
         except (OSError, json.JSONDecodeError):
             return 2
         finally:

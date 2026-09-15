@@ -5,7 +5,7 @@ import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
 
@@ -157,6 +157,13 @@ test("only nonzero proven-session exits are classified as process failures", () 
   );
 });
 
+test("a clean exit before lifecycle startup is a user-ended launch, not a launch failure", () => {
+  assert.equal(sessionLaunchFailure({ exitCode: 0 }), undefined);
+  assert.equal(sessionLaunchFailure({ exitCode: 23 }), "exited with code 23 before starting a session");
+  assert.equal(sessionLaunchFailure({ exitCode: 0, error: "wrapper failed" }), "could not be started (wrapper failed)");
+  assert.equal(sessionLaunchFailure(undefined), "exited with code unknown before starting a session");
+});
+
 test("wrapper consumes a request file and runs its exact argv", () => {
   const root = mkdtempSync(join(tmpdir(), "aboard-wrapper-"));
   const lock = join(root, "a.lock");
@@ -167,7 +174,8 @@ test("wrapper consumes a request file and runs its exact argv", () => {
     assert.equal(result.status, 6);
     assert.equal(existsSync(request), false, "launch argv is removed once consumed");
     assert.equal(existsSync(lock), false);
-    assert.equal(uv([WRAPPER, lock, "--request", request]).status, 2, "the visible command cannot be replayed");
+    const replayed = uv([WRAPPER, lock, "--request", request]);
+    assert.equal(replayed.status, 2, "the visible command cannot be replayed");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

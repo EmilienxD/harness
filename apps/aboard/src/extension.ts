@@ -54,10 +54,11 @@ import { GitWorkingTreeInspector, WorkerLifecycleReconciler, reportsResult } fro
 import {
   SessionLifecycleService,
   SessionProcessMonitor,
+  SessionStartCancelledError,
   SessionStartupProofs,
   type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
-import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./platform/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
@@ -259,12 +260,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     [claudePlatform.id, claudePlatform],
     [chatGptPlatform.id, chatGptPlatform],
   ]);
-  // Conversation discovery belongs to the session's runtime, not today's launch
-  // selection. In particular, editing launch.json must not make an existing
-  // process disappear from Recent Activity when it ends. launch.json is read
-  // only for the runtime a platform needs to answer the question at all - a
-  // renamed or wrapped executable - and only while it still selects that
-  // platform; an unreadable file leaves the platform on its own default.
+
   const sessionIsResumable = async (platformId: AgentSession["platform"], sessionId: SessionId, cwd: string, type?: AgentSession["identity"]["type"]): Promise<boolean> => {
     const platform = platforms.get(platformId);
     if (platform === undefined) return false;
@@ -367,10 +363,21 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }
     terminals.release(terminalId);
   };
-  const reportFailedLaunch = (agentId: AgentId, sessionId: SessionId, exit: SessionExitRecord | undefined): void => {
-    const cause = exit?.error !== undefined
-      ? `could not be started (${exit.error})`
-      : `exited with code ${exit?.exitCode ?? "unknown"} before starting a session`;
+  const settlePreSessionExit = (agentId: AgentId, sessionId: SessionId, exit: SessionExitRecord | undefined): void => {
+    const cause = sessionLaunchFailure(exit);
+    if (cause === undefined) {
+      sessionProofs.cancel(agentId);
+      const at = new Date().toISOString() as IsoTimestamp;
+      const ended = fleet.get(agentId);
+      if (ended !== undefined) {
+        lease.releaseForTerminalOutcome(agentId, at, "agent exited before entering a conversation");
+        void rememberEndedSession(ended, at);
+        fleet.remove(agentId, at);
+      }
+      releaseAbandonedTerminal(agentId);
+      output.appendLine(`Agent ${agentId} exited cleanly before starting a session`);
+      return;
+    }
     output.appendLine(`Launch failed for agent ${agentId} (session ${sessionId}): the configured agent command ${cause}. The terminal holds the error.`);
     // The launch is settled; the proof's timeout must not fire later and kill a
     // terminal whose error message is the whole point of keeping it.
@@ -396,7 +403,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const exit = takeSessionExitRecord(observation.lockFile);
       void runtimeFiles.remove?.(observation.agentId).catch(() => undefined);
       if (observation.phase === "launching") {
-        reportFailedLaunch(observation.agentId, observation.sessionId, exit);
+        settlePreSessionExit(observation.agentId, observation.sessionId, exit);
         return;
       }
       const session = fleet.get(observation.agentId);
@@ -647,6 +654,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         configuration: await launchFile.getFor(choice.provider, "interactive"),
       }, "user");
     } catch (error) {
+      if (error instanceof SessionStartCancelledError) return;
       void window.showErrorMessage(error instanceof Error ? error.message : "Unable to run agent");
     }
   };
