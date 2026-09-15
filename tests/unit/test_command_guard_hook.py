@@ -187,7 +187,8 @@ def test_install_registers_native_shell_matchers_and_editable_policy(
     product_dir = ".claude" if platform == "claude" else ".codex"
     hook_dir = tmp_path / product_dir / "hooks"
     assert (hook_dir / "command_guard_hook.py").is_file()
-    assert (hook_dir / "command-guard.rules").is_file()
+    assert (tmp_path / product_dir / "command-guard.rules").is_file()
+    assert not (hook_dir / "command-guard.rules").exists()
     config = json.loads((tmp_path / config_path).read_text(encoding="utf-8"))
     group = config["hooks"]["PreToolUse"][0]
     assert group["matcher"] == expected_matcher
@@ -245,7 +246,7 @@ def test_reinstall_preserves_user_policy_edits(tmp_path):
     receipts = ReceiptStore.load(tmp_path / "receipts.json")
     installer = CatalogueInstaller({tool.name: tool}, target, receipts)
     installer.reconcile({tool.name})
-    policy = tmp_path / ".claude/hooks/command-guard.rules"
+    policy = tmp_path / ".claude/command-guard.rules"
     policy.write_text("custom-user-policy\n", encoding="utf-8")
 
     installer.reconcile({tool.name})

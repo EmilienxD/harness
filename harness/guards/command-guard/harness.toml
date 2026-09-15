@@ -1,5 +1,5 @@
 name = "command-guard"
-version = "1.1.0"
+version = "1.2.0"
 description = "Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -20,5 +20,4 @@ executable = true
 [[files]]
 src = "command-guard.rules"
 dest = "command-guard.rules"
-root = "hooks"
 starter = true

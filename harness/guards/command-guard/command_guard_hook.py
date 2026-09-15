@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deny shell commands matched by the adjacent command-guard policy file."""
+"""Deny shell commands matched by the command-guard policy file."""
 
 from __future__ import annotations
 
@@ -9,7 +9,17 @@ import sys
 from pathlib import Path
 
 
-POLICY_PATH = Path(__file__).with_name("command-guard.rules")
+RULES_NAME = "command-guard.rules"
+
+
+def _policy_path() -> Path:
+    """Find the policy in the platform directory, with legacy fallback."""
+    installed = Path(__file__).resolve().parent.parent / RULES_NAME
+    if installed.is_file():
+        return installed
+    return Path(__file__).with_name(RULES_NAME)
+
+
 POSIX_CLASSES = {
     "[:space:]": r"\s",
 }
@@ -24,7 +34,7 @@ def _python_pattern(pattern: str) -> str:
 def _rules() -> list[tuple[re.Pattern[str], str]]:
     rules: list[tuple[re.Pattern[str], str]] = []
     reason = "a configured dangerous-command rule"
-    for raw_line in POLICY_PATH.read_text(encoding="utf-8").splitlines():
+    for raw_line in _policy_path().read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if line.startswith("# ") and re.match(r"# \d+[a-z]?\.", line):
             reason = line.split(".", 1)[1].strip()
