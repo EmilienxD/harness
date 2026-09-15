@@ -1,3 +1,5 @@
+![Harness Banner](assets/harness_banner.png)
+
 # Harness
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
