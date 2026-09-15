@@ -439,6 +439,16 @@ def test_process_inherits_streams_and_propagates_exit_code(tmp_path, provider, _
     assert result.stderr == "err:hello"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows command shim behavior")
+def test_chatgpt_launch_resolves_cmd_shim_from_path(tmp_path, monkeypatch):
+    shim = tmp_path / "codex.cmd"
+    shim.write_text("@exit /b 23\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+
+    assert main([], provider="chatgpt") == 23
+
+
 @pytest.mark.parametrize(("provider", "_entrypoint", "_executable"), PROVIDERS)
 def test_signals_are_forwarded_for_each_provider(tmp_path, monkeypatch, provider, _entrypoint, _executable):
     monkeypatch.chdir(tmp_path)

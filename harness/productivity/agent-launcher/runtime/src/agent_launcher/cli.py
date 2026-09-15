@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import shutil
 import signal
 import subprocess
 import sys
@@ -170,7 +171,8 @@ def initialize(project: Path) -> int:
 
 
 def _run_child(argv: list[str]) -> int:
-    child = subprocess.Popen(argv)
+    executable = shutil.which(argv[0]) or argv[0]
+    child = subprocess.Popen([executable, *argv[1:]])
     previous: dict[signal.Signals, object] = {}
 
     def forward(signum, _frame):
