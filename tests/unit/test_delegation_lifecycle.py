@@ -22,7 +22,7 @@ def setup_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["claude"])
     parent = sessions.launch(provider="claude", cwd=tmp_path)
-    grant = open_grant(parent, "ask-agent", original_cwd=tmp_path)
+    grant = open_grant(parent, "work-with-agent", original_cwd=tmp_path)
     request_file = grant.inbox / "request.md"
     request_file.write_text(f"---\ntask: general\nmode: {mode}\n---\n\nDo the work.\n", encoding="utf-8")
     [result] = process_grant(grant.id, launch=lambda _request, _request_id, _number, _cwd: "child")
@@ -130,15 +130,15 @@ def test_unattended_children_cannot_open_delegation_grants_but_interactive_child
 ) -> None:
     _parent, _request, auto_child = setup_request(tmp_path, monkeypatch, mode="auto")
     with pytest.raises(sessions.SessionError, match="cannot delegate"):
-        open_grant(auto_child, "ask-agent", original_cwd=tmp_path)
+        open_grant(auto_child, "work-with-agent", original_cwd=tmp_path)
 
     auto_run_child = "auto-run-child"
     sessions._register(auto_run_child, tmp_path, "claude", "auto-run")
     with pytest.raises(sessions.SessionError, match="cannot delegate"):
-        open_grant(auto_run_child, "ask-agent", original_cwd=tmp_path)
+        open_grant(auto_run_child, "work-with-agent", original_cwd=tmp_path)
 
     _parent, _request, interactive_child = setup_request(tmp_path / "interactive", monkeypatch, mode="interactive")
-    grant = open_grant(interactive_child, "ask-agent", original_cwd=tmp_path / "interactive")
+    grant = open_grant(interactive_child, "work-with-agent", original_cwd=tmp_path / "interactive")
     assert grant.parent_session_id == interactive_child
 
 

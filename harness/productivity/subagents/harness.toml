@@ -1,5 +1,5 @@
 name = "subagents"
-version = "1.2.2"
+version = "1.2.4"
 description = "Visible subagent delegation with task-specific workflows"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 dependencies = ["prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0", "issue-readers>=1.0.0,<2.0.0"]
@@ -14,38 +14,38 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "ask-agent"
-dest = "ask-agent"
+src = "work-with-agent"
+dest = "work-with-agent"
 root = "skills"
 
 [[files]]
-src = "ask-agent-to-explore"
-dest = "ask-agent-to-explore"
+src = "explore-with-agent"
+dest = "explore-with-agent"
 root = "skills"
 
 [[files]]
-src = "ask-agent-to-prototype"
-dest = "ask-agent-to-prototype"
+src = "prototype-with-agent"
+dest = "prototype-with-agent"
 root = "skills"
 
 [[files]]
-src = "ask-agent-to-websearch"
-dest = "ask-agent-to-websearch"
+src = "websearch-with-agent"
+dest = "websearch-with-agent"
 root = "skills"
 
 [[files]]
-src = "ask-agent-to-brainstorm"
-dest = "ask-agent-to-brainstorm"
+src = "brainstorm-with-agent"
+dest = "brainstorm-with-agent"
 root = "skills"
 
 [[files]]
-src = "ask-agent-to-implement"
-dest = "ask-agent-to-implement"
+src = "address-with-agent"
+dest = "address-with-agent"
 root = "skills"
 
 [[files]]
-src = "ask-agent-to-review"
-dest = "ask-agent-to-review"
+src = "review-with-agent"
+dest = "review-with-agent"
 root = "skills"
 
 [[files]]
@@ -54,44 +54,44 @@ dest = "reply-to-agent"
 root = "skills"
 
 [[files]]
-src = "chatgpt/agents/ask-agent.yaml"
-dest = "ask-agent/agents/openai.yaml"
+src = "chatgpt/agents/work-with-agent.yaml"
+dest = "work-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/ask-agent-to-explore.yaml"
-dest = "ask-agent-to-explore/agents/openai.yaml"
+src = "chatgpt/agents/explore-with-agent.yaml"
+dest = "explore-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/ask-agent-to-prototype.yaml"
-dest = "ask-agent-to-prototype/agents/openai.yaml"
+src = "chatgpt/agents/prototype-with-agent.yaml"
+dest = "prototype-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/ask-agent-to-websearch.yaml"
-dest = "ask-agent-to-websearch/agents/openai.yaml"
+src = "chatgpt/agents/websearch-with-agent.yaml"
+dest = "websearch-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/ask-agent-to-brainstorm.yaml"
-dest = "ask-agent-to-brainstorm/agents/openai.yaml"
+src = "chatgpt/agents/brainstorm-with-agent.yaml"
+dest = "brainstorm-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/ask-agent-to-implement.yaml"
-dest = "ask-agent-to-implement/agents/openai.yaml"
+src = "chatgpt/agents/address-with-agent.yaml"
+dest = "address-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/ask-agent-to-review.yaml"
-dest = "ask-agent-to-review/agents/openai.yaml"
+src = "chatgpt/agents/review-with-agent.yaml"
+dest = "review-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 

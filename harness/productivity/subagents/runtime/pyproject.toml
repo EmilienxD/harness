@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness-subagents-runtime"
-version = "1.2.1"
+version = "1.2.3"
 description = "Persistent runtime for Harness visible-subagent workflows"
 requires-python = ">=3.11"
 license = { text = "MIT" }

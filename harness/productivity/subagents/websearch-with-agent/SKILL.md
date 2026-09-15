@@ -1,10 +1,10 @@
 ---
-name: ask-agent-to-websearch
+name: websearch-with-agent
 description: Launch a visible agent to research the web and report sourced findings. Use when the user wants a separate agent to investigate current or externally documented information.
 disable-model-invocation: true
 ---
 
-# Ask an Agent to Web Search
+# Web Search with an Agent
 
 The user wants to launch one or more agents to research the web. Launch each agent by creating one Markdown file at the inbox path provided by the hook. Writing a file there automatically launches that agent. If the preceding hook did not provide an inbox path, alert the user immediately and stop; do not attempt to launch an agent another way.
 

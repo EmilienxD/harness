@@ -1,10 +1,10 @@
 ---
-name: ask-agent-to-brainstorm
+name: brainstorm-with-agent
 description: Launch a visible interactive agent to brainstorm a plan or design with the user. Use when the user wants a separate agent to question, clarify, or stress-test their thinking.
 disable-model-invocation: true
 ---
 
-# Ask an Agent to Brainstorm
+# Brainstorm with an Agent
 
 The user wants to launch one or more agents to brainstorm. Launch each agent by creating one Markdown file at the inbox path provided by the hook. Writing a file there automatically launches that agent. If the preceding hook did not provide an inbox path, alert the user immediately and stop; do not attempt to launch an agent another way.
 

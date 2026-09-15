@@ -49,9 +49,9 @@ def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, mon
 
 
 @pytest.mark.parametrize("launcher", [
-    "ask-agent-to-prototype",
-    "ask-agent-to-implement",
-    "ask-agent-to-review",
+    "prototype-with-agent",
+    "address-with-agent",
+    "review-with-agent",
 ])
 def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
     launcher: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -80,7 +80,7 @@ def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     output = hooks.handle({
         "session_id": "existing-codex-session", "hook_event_name": "UserPromptSubmit",
-        "prompt": "$ask-agent", "cwd": str(tmp_path),
+        "prompt": "$work-with-agent", "cwd": str(tmp_path),
     }, provider="chatgpt")
 
     assert output is not None
@@ -94,8 +94,8 @@ def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp
 @pytest.mark.parametrize(
     "provider, prompt, expected_skill",
     [
-        ("claude", "Please use /ask-agent-to-review for this change", "ask-agent-to-review"),
-        ("chatgpt", "Please use $ask-agent-to-implement for this change", "ask-agent-to-implement"),
+        ("claude", "Please use /review-with-agent for this change", "review-with-agent"),
+        ("chatgpt", "Please use $address-with-agent for this change", "address-with-agent"),
     ],
 )
 def test_ask_skill_invocation_after_prose_opens_its_grant(
@@ -123,7 +123,7 @@ def test_shell_created_request_is_inert_but_exact_structured_write_launches(tmp_
     parent = configured(tmp_path, monkeypatch)
     output = hooks.handle({
         "session_id": parent, "hook_event_name": "UserPromptSubmit",
-        "prompt": "/ask-agent", "cwd": str(tmp_path),
+        "prompt": "/work-with-agent", "cwd": str(tmp_path),
     })
     assert output is not None
     inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
@@ -149,7 +149,7 @@ def test_shell_created_request_is_inert_but_exact_structured_write_launches(tmp_
 def test_codex_apply_patch_alias_can_launch_multiple_exact_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch, provider="chatgpt")
     output = hooks.handle({
-        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "$ask-agent", "cwd": str(tmp_path),
+        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "$work-with-agent", "cwd": str(tmp_path),
     }, provider="chatgpt")
     assert output is not None
     inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
@@ -172,7 +172,7 @@ def test_structured_request_launch_keeps_the_original_parent_cwd(tmp_path: Path,
     project = tmp_path / "project"
     parent = configured(project, monkeypatch)
     output = hooks.handle({
-        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/ask-agent", "cwd": str(project),
+        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(project),
     })
     assert output is not None
     inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
@@ -196,7 +196,7 @@ def test_structured_request_launch_keeps_the_original_parent_cwd(tmp_path: Path,
 def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
     output = hooks.handle({
-        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/ask-agent", "cwd": str(tmp_path),
+        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path),
     })
     assert output is not None
     inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
@@ -225,7 +225,7 @@ def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypa
 
 def test_clarification_stop_keeps_an_unused_grant_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
-    output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/ask-agent", "cwd": str(tmp_path)})
+    output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path)})
     assert output is not None
     inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
 
@@ -235,7 +235,7 @@ def test_clarification_stop_keeps_an_unused_grant_open(tmp_path: Path, monkeypat
 
 def test_used_grant_closes_on_parent_stop_and_session_end_cleans_unused_grants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
-    output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/ask-agent", "cwd": str(tmp_path)})
+    output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path)})
     assert output is not None
     inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
     request = inbox / "child.md"
@@ -247,7 +247,7 @@ def test_used_grant_closes_on_parent_stop_and_session_end_cleans_unused_grants(t
     hooks.handle({"session_id": parent, "hook_event_name": "Stop", "cwd": str(tmp_path), "last_assistant_message": "waiting"})
     assert not inbox.exists()
 
-    second = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/ask-agent", "cwd": str(tmp_path)})
+    second = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path)})
     assert second is not None
     with sqlite3.connect(tmp_path / "state" / "sessions.sqlite3") as connection:
         unused = Path(connection.execute(
@@ -268,7 +268,7 @@ def test_grant_uses_the_registered_session_cwd_after_parent_changes_directory(tm
     output = hooks.handle({
         "session_id": parent,
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "/ask-agent",
+        "prompt": "/work-with-agent",
         "cwd": str(later),
     })
 

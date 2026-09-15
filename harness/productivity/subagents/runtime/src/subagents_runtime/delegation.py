@@ -30,13 +30,13 @@ class GrantPolicy:
 
 
 GRANT_POLICIES = {
-    "ask-agent-to-explore": GrantPolicy("explore", frozenset({"auto"})),
-    "ask-agent-to-prototype": GrantPolicy("prototype", frozenset({"interactive", "auto"})),
-    "ask-agent-to-websearch": GrantPolicy("websearch", frozenset({"interactive", "auto"})),
-    "ask-agent-to-brainstorm": GrantPolicy("brainstorm", frozenset({"interactive"})),
-    "ask-agent-to-implement": GrantPolicy("implement", frozenset({"interactive", "auto"})),
-    "ask-agent-to-review": GrantPolicy("review", frozenset({"interactive", "auto"})),
-    "ask-agent": GrantPolicy("general", frozenset({"interactive", "auto"})),
+    "explore-with-agent": GrantPolicy("explore", frozenset({"auto"})),
+    "prototype-with-agent": GrantPolicy("prototype", frozenset({"interactive", "auto"})),
+    "websearch-with-agent": GrantPolicy("websearch", frozenset({"interactive", "auto"})),
+    "brainstorm-with-agent": GrantPolicy("brainstorm", frozenset({"interactive"})),
+    "address-with-agent": GrantPolicy("implement", frozenset({"interactive", "auto"})),
+    "review-with-agent": GrantPolicy("review", frozenset({"interactive", "auto"})),
+    "work-with-agent": GrantPolicy("general", frozenset({"interactive", "auto"})),
 }
 
 

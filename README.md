@@ -79,7 +79,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`setup-help`**: Guides any installation or configuration one verified step at a time. Every response gives the current action and a short view of what remains, keeping the complete setup checklist synchronized as new prerequisites appear.
 
-- **`subagents`**: Launches separate, visible Claude Code or ChatGPT sessions through `ask-agent` and the Explore, Prototype, Web Search, Brainstorm, Implement, and Review variants. `reply-to-agent` explicitly returns an interactive child's result. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
+- **`subagents`**: Launches separate, visible Claude Code or ChatGPT sessions through `work-with-agent` and the Explore, Prototype, Web Search, Brainstorm, Address, and Review variants. `reply-to-agent` explicitly returns an interactive child's result. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
 
 The `subagents` package also installs persistent session commands. These are separate from the ephemeral installer commands above:
 
@@ -90,7 +90,7 @@ harness reply
 harness resume <session-id>
 ```
 
-`run` opens an independent visible terminal. Delegation is authorized only by a live invocation of an `ask-agent` skill; direct `harness ask` calls without that grant are rejected. Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults. Version 3 configures both `providers.claude` and `providers.chatgpt`; `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
+`run` opens an independent visible terminal. Delegation is authorized only by a live invocation of a `*-with-agent` skill; direct `harness ask` calls without that grant are rejected. Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults. Version 3 configures both `providers.claude` and `providers.chatgpt`; `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
 
 ### Model-invoked skills
 

@@ -160,7 +160,7 @@ def configured_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 def test_live_grant_processes_three_siblings_independently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured_parent(tmp_path, monkeypatch)
-    grant = open_grant(parent, "ask-agent", original_cwd=tmp_path / "project")
+    grant = open_grant(parent, "work-with-agent", original_cwd=tmp_path / "project")
     write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\n---\n\nOne")
     write_request(grant.inbox, "bad.md", "---\ntask: prototype\nmode: auto\n---\n\nBad")
     write_request(grant.inbox, "two.md", "---\ntask: general\nmode: interactive\n---\n\nTwo")
@@ -190,19 +190,19 @@ def test_ask_requires_a_live_grant(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 def test_grant_policy_is_the_exact_authorization_table() -> None:
     assert GRANT_POLICIES == {
-        "ask-agent-to-explore": GrantPolicy("explore", frozenset({"auto"})),
-        "ask-agent-to-prototype": GrantPolicy("prototype", frozenset({"interactive", "auto"})),
-        "ask-agent-to-websearch": GrantPolicy("websearch", frozenset({"interactive", "auto"})),
-        "ask-agent-to-brainstorm": GrantPolicy("brainstorm", frozenset({"interactive"})),
-        "ask-agent-to-implement": GrantPolicy("implement", frozenset({"interactive", "auto"})),
-        "ask-agent-to-review": GrantPolicy("review", frozenset({"interactive", "auto"})),
-        "ask-agent": GrantPolicy("general", frozenset({"interactive", "auto"})),
+        "explore-with-agent": GrantPolicy("explore", frozenset({"auto"})),
+        "prototype-with-agent": GrantPolicy("prototype", frozenset({"interactive", "auto"})),
+        "websearch-with-agent": GrantPolicy("websearch", frozenset({"interactive", "auto"})),
+        "brainstorm-with-agent": GrantPolicy("brainstorm", frozenset({"interactive"})),
+        "address-with-agent": GrantPolicy("implement", frozenset({"interactive", "auto"})),
+        "review-with-agent": GrantPolicy("review", frozenset({"interactive", "auto"})),
+        "work-with-agent": GrantPolicy("general", frozenset({"interactive", "auto"})),
     }
 
 
 def test_uncertain_launch_is_reserved_before_the_external_call_and_never_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured_parent(tmp_path, monkeypatch)
-    grant = open_grant(parent, "ask-agent", original_cwd=tmp_path / "project")
+    grant = open_grant(parent, "work-with-agent", original_cwd=tmp_path / "project")
     request = write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\n---\n\nOne")
 
     class SimulatedProcessDeath(BaseException):

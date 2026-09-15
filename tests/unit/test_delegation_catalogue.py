@@ -14,9 +14,9 @@ def test_catalogue_exposes_one_subagents_bundle_and_standalone_companion_skills(
     tools = discover()
     assert {"subagents", "prototype", "websearch", "grill-me", "issue-readers"} <= tools.keys()
     assert {
-        "ask-agent", "ask-agent-to-explore", "ask-agent-to-prototype",
-        "ask-agent-to-websearch", "ask-agent-to-brainstorm",
-        "ask-agent-to-implement", "ask-agent-to-review", "reply-to-agent",
+        "work-with-agent", "explore-with-agent", "prototype-with-agent",
+        "websearch-with-agent", "brainstorm-with-agent",
+        "address-with-agent", "review-with-agent", "reply-to-agent",
         "communication-hooks", "harness-cli",
     }.isdisjoint(tools)
     for name in ("subagents", "prototype", "websearch", "grill-me", "issue-readers"):
@@ -29,29 +29,29 @@ def test_subagents_bundle_depends_on_the_standalone_companion_skills() -> None:
     assert names(tools["subagents"]) == {"prototype", "websearch", "grill-me", "issue-readers"}
 
 
-def test_every_chatgpt_ask_skill_is_user_only() -> None:
+def test_every_chatgpt_delegation_skill_is_user_only() -> None:
     destinations = {
         entry.dest: entry.source
         for entry in discover()["subagents"].expand("chatgpt")
     }
     for name in (
-        "ask-agent", "ask-agent-to-explore", "ask-agent-to-prototype",
-        "ask-agent-to-websearch", "ask-agent-to-brainstorm",
-        "ask-agent-to-implement", "ask-agent-to-review", "reply-to-agent",
+        "work-with-agent", "explore-with-agent", "prototype-with-agent",
+        "websearch-with-agent", "brainstorm-with-agent",
+        "address-with-agent", "review-with-agent", "reply-to-agent",
     ):
         metadata = destinations[f"{name}/agents/openai.yaml"]
         assert "allow_implicit_invocation: false" in metadata.read_text(encoding="utf-8")
 
 
-def test_implementation_launcher_includes_model_instructions() -> None:
-    source = discover()["subagents"].root / "ask-agent-to-implement" / "SKILL.md"
+def test_address_launcher_includes_model_instructions() -> None:
+    source = discover()["subagents"].root / "address-with-agent" / "SKILL.md"
     _opening, _frontmatter, body = source.read_text(encoding="utf-8").split("---", 2)
 
     assert body.strip()
 
 
 def test_review_launcher_includes_model_instructions() -> None:
-    source = discover()["subagents"].root / "ask-agent-to-review" / "SKILL.md"
+    source = discover()["subagents"].root / "review-with-agent" / "SKILL.md"
     _opening, _frontmatter, body = source.read_text(encoding="utf-8").split("---", 2)
 
     assert body.strip()
@@ -92,10 +92,10 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
     monkeypatch.setattr("harness_cli.installer.uninstall_host_action", lambda _action: None)
 
     installer.reconcile({"subagents"})
-    assert target.destination_path("skills", "ask-agent/SKILL.md").exists()
-    assert target.destination_path("skills", "ask-agent-to-prototype/SKILL.md").exists()
-    assert target.destination_path("skills", "ask-agent-to-implement/SKILL.md").exists()
-    assert target.destination_path("skills", "ask-agent-to-review/SKILL.md").exists()
+    assert target.destination_path("skills", "work-with-agent/SKILL.md").exists()
+    assert target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()
+    assert target.destination_path("skills", "address-with-agent/SKILL.md").exists()
+    assert target.destination_path("skills", "review-with-agent/SKILL.md").exists()
     assert target.destination_path("skills", "reply-to-agent/SKILL.md").exists()
     assert target.destination_path("skills", "prototype/SKILL.md").exists()
     assert target.destination_path("skills", "websearch/SKILL.md").exists()
@@ -107,9 +107,9 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
     assert ".harness/runtime/" in target.gitignore_path.read_text(encoding="utf-8")
 
     installer.reconcile(set())
-    assert not target.destination_path("skills", "ask-agent-to-prototype/SKILL.md").exists()
-    assert not target.destination_path("skills", "ask-agent-to-implement/SKILL.md").exists()
-    assert not target.destination_path("skills", "ask-agent-to-review/SKILL.md").exists()
+    assert not target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()
+    assert not target.destination_path("skills", "address-with-agent/SKILL.md").exists()
+    assert not target.destination_path("skills", "review-with-agent/SKILL.md").exists()
     assert not target.destination_path("skills", "reply-to-agent/SKILL.md").exists()
     assert not target.destination_path("hooks", "delegation_hook.py").exists()
     assert ".harness/runtime/" not in target.gitignore_path.read_text(encoding="utf-8") if target.gitignore_path.exists() else True

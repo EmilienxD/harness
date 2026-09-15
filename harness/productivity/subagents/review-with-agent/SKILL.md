@@ -1,10 +1,10 @@
 ---
-name: ask-agent-to-review
+name: review-with-agent
 description: Launch a visible agent to review a pinned change through the review-this workflow.
 disable-model-invocation: true
 ---
 
-# Ask an Agent to Review
+# Review with an Agent
 
 The user wants to launch one or more agents to review a change. Launch each agent by creating one Markdown file at the inbox path provided by the hook. Writing a file there automatically launches that agent. If the preceding hook did not provide an inbox path, alert the user immediately and stop; do not attempt to launch an agent another way.
 

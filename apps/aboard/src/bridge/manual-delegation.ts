@@ -30,7 +30,7 @@ export interface ManualDelegationLaunch {
   readonly provider: AgentPlatformId;
   readonly executionMode: Exclude<ExecutionMode, "auto-run">;
   readonly prompt: string;
-  /** Trusted skill selected by the ask-agent workflow, separate from user text. */
+  /** Trusted skill selected by the work-with-agent workflow, separate from user text. */
   readonly skill?: string;
   readonly cwd: string;
   readonly description: string;

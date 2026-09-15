@@ -38,7 +38,7 @@ export interface DelegationLaunchInput {
   readonly requestId?: string;
   readonly type: AgentType;
   readonly prompt?: string;
-  /** Trusted skill invocation selected by an ask-agent delegation boundary. */
+  /** Trusted skill invocation selected by a work-with-agent delegation boundary. */
   readonly skill?: string;
   /** Persistent configured note, ordered before the per-run guideline. */
   readonly permanentPrompt?: string;

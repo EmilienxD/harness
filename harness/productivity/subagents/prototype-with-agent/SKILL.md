@@ -1,10 +1,10 @@
 ---
-name: ask-agent-to-prototype
+name: prototype-with-agent
 description: Launch a visible agent to build a focused prototype. Use when the user wants a separate agent to test an idea through a disposable implementation.
 disable-model-invocation: true
 ---
 
-# Ask an Agent to Prototype
+# Prototype with an Agent
 
 The user wants to launch one or more agents to prototype. Launch each agent by creating one Markdown file at the inbox path provided by the hook. Writing a file there automatically launches that agent. If the preceding hook did not provide an inbox path, alert the user immediately and stop; do not attempt to launch an agent another way.
 

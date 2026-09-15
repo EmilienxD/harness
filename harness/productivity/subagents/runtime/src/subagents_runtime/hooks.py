@@ -24,7 +24,7 @@ from subagents_runtime.delegation import (
 )
 
 
-SKILL_NAME = r"(ask-agent(?:-to-(?:explore|prototype|websearch|brainstorm|implement|review))?|reply-to-agent)"
+SKILL_NAME = r"((?:work|explore|prototype|websearch|brainstorm|address|review)-with-agent|reply-to-agent)"
 INVOCATIONS = {
     "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
     "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),

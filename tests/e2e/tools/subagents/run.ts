@@ -146,7 +146,7 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
       environment = isolatedCodexEnvironment(commonEnvironment, codexHome, codexServer.authToken);
     }
 
-    const prompt = `${platform === "claude" ? "/" : "$"}ask-agent ${PARENT_MARKER} Delegate the deterministic inspection to one interactive child.`;
+    const prompt = `${platform === "claude" ? "/" : "$"}work-with-agent ${PARENT_MARKER} Delegate the deterministic inspection to one interactive child.`;
     const launch = await execFileAsync(python, [
       "-c", "from subagents_runtime.cli import main; raise SystemExit(main())",
       "run", "--provider", platform, prompt,
@@ -190,7 +190,7 @@ interface HookSettings {
 
 async function stagePayload(platform: Platform, packageRoot: string, projectRoot: string, python: string): Promise<void> {
   if (platform === "claude") {
-    await cp(join(packageRoot, "ask-agent"), join(projectRoot, ".claude", "skills", "ask-agent"), { recursive: true });
+    await cp(join(packageRoot, "work-with-agent"), join(projectRoot, ".claude", "skills", "work-with-agent"), { recursive: true });
     await mkdir(join(projectRoot, ".claude"), { recursive: true });
     const settings = JSON.parse(await readFile(join(packageRoot, "claude", "settings.fragment.json"), "utf8")) as HookSettings;
     for (const groups of Object.values(settings.hooks)) {
@@ -204,10 +204,10 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
     await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
     return;
   }
-  const skillRoot = join(projectRoot, ".agents", "skills", "ask-agent");
-  await cp(join(packageRoot, "ask-agent"), skillRoot, { recursive: true });
+  const skillRoot = join(projectRoot, ".agents", "skills", "work-with-agent");
+  await cp(join(packageRoot, "work-with-agent"), skillRoot, { recursive: true });
   await mkdir(join(skillRoot, "agents"), { recursive: true });
-  await cp(join(packageRoot, "chatgpt", "agents", "ask-agent.yaml"), join(skillRoot, "agents", "openai.yaml"));
+  await cp(join(packageRoot, "chatgpt", "agents", "work-with-agent.yaml"), join(skillRoot, "agents", "openai.yaml"));
   await mkdir(join(projectRoot, ".codex"), { recursive: true });
   const settings = JSON.parse(await readFile(join(packageRoot, "chatgpt", "hooks.fragment.json"), "utf8")) as HookSettings;
   for (const groups of Object.values(settings.hooks)) {
