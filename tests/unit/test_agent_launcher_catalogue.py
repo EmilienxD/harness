@@ -115,21 +115,19 @@ def test_modified_shared_starter_survives_upgrade_and_uninstall(tmp_path, monkey
     assert config.read_text(encoding="utf-8") == "# user configuration\n"
 
 
-def test_unmodified_shared_starter_has_the_same_uninstall_policy_for_both_platforms(
-    tmp_path, monkeypatch
-):
+def test_uninstalling_both_platforms_removes_shared_starter_directory(tmp_path, monkeypatch):
     store = ReceiptStore.load(tmp_path / "receipts.json")
     project = tmp_path / "project"
     claude = installer(Target.for_project(project, "claude"), store, monkeypatch)
     chatgpt = installer(Target.for_project(project, "chatgpt"), store, monkeypatch)
     claude.reconcile({"agent-launcher"})
     chatgpt.reconcile({"agent-launcher"})
-    config = project / ".harness" / "agent-launcher" / "config.py"
+    root = project / ".harness" / "agent-launcher"
 
     claude.reconcile(set())
     chatgpt.reconcile(set())
 
-    assert config.is_file()
+    assert not root.exists()
 
 
 def test_installer_and_both_entrypoints_use_identical_starters(tmp_path, monkeypatch):

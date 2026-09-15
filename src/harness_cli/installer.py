@@ -318,7 +318,8 @@ class CatalogueInstaller:
         return any(
             installation is not current
             and any(
-                _canonical_path(record["path"]) == canonical
+                record.get("owned")
+                and _canonical_path(record["path"]) == canonical
                 for receipt in installation.get("packages", {}).values()
                 for record in receipt.get("files", [])
             )
