@@ -3,16 +3,12 @@
 Claude Code PreToolUse hook: on-edit-block.
 
 Fires before Write/Edit/MultiEdit. When the file being edited matches a
-gitignore-style pattern from an `on-edit-block.rules` file, the hook denies
+gitignore-style pattern from an `on-edit-block.toml` file, the hook denies
 the edit until the agent has read the file(s) the rule maps to (a style
 guide, conventions doc, ...) that session.
 
-Rules file -- same format as the sibling on-read-reminder tool:
-
-    # comment
-    server/**/models/**   -> docs/PYTHON-GUIDE.md            one file
-    **/migrations/**      -> docs/DB.md, docs/STYLE.md       several files
-    !server/legacy/**                                        never require
+Its TOML schema is shared with the sibling path guards: ordered `[[rules]]`
+contain `patterns` and either `require` or `exclude = true`.
 
 How a required file counts as "read":
 - a Read (or a Bash cat/more/less/head/tail/type) of it appears earlier in
@@ -24,9 +20,8 @@ How a required file counts as "read":
 Denials are returned as PreToolUse JSON with permissionDecision "deny";
 malformed input and non-matching tools/paths always exit 0 silently.
 
-Two rules locations are read, in order (later rules can override earlier
-ones): the hooks install directory (so a `--user` install can hold global
-rules), then `$CLAUDE_PROJECT_DIR/.claude/` (project rules win).
+User rules load from `~/.harness/guards/`, then project rules from
+`.harness/guards/`; later rules can override earlier ones.
 """
 from __future__ import annotations
 
@@ -35,11 +30,12 @@ import os
 import re
 import sys
 import tempfile
+import tomllib
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-RULES_NAME = "on-edit-block.rules"
+RULES_NAME = "on-edit-block.toml"
 
 # Hook output strings are capped by Claude Code; stay under the limit.
 MESSAGE_LIMIT = 10000
@@ -118,41 +114,33 @@ def compile_pattern(pattern: str) -> re.Pattern[str] | None:
 
 
 def parse_rules(path: Path) -> tuple[list[Rule], list[int]]:
-    """Parse a rules file into (rules, invalid_line_numbers)."""
+    """Parse TOML into ordered path rules and configuration error lines."""
     rules: list[Rule] = []
-    invalid: list[int] = []
     try:
-        # utf-8-sig: tolerate a BOM left by Windows editors
-        text = path.read_text(encoding="utf-8-sig")
-    except OSError:
-        return rules, invalid
-    for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        # gitignore-style escape of a literal leading # or !
-        escaped = line.startswith("\\#") or line.startswith("\\!")
-        if escaped:
-            line = line[1:]
-        if not escaped and line.startswith("!"):
-            pattern = line[1:].strip()
-            compiled = compile_pattern(pattern) if pattern and "->" not in pattern else None
-        elif "->" in line:
-            pattern, _, targets = line.partition("->")
-            files = tuple(
-                f.strip().replace("\\", "/") for f in targets.split(",") if f.strip()
-            )
-            compiled = compile_pattern(pattern) if files else None
-            if compiled is not None:
-                rules.append(Rule(False, compiled, files))
-                continue
-        else:
-            compiled = None
-        if compiled is not None:
-            rules.append(Rule(True, compiled, ()))
-        else:
-            invalid.append(number)
-    return rules, invalid
+        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        if data.get("version") != 1 or set(data) - {"version", "rules"}:
+            raise ValueError
+        for entry in data.get("rules", []):
+            if not isinstance(entry, dict) or set(entry) - {"patterns", "require", "exclude"}:
+                raise ValueError
+            patterns, files = entry.get("patterns"), entry.get("require", [])
+            excluded = entry.get("exclude", False)
+            if (not isinstance(patterns, list) or not patterns or
+                    not all(isinstance(item, str) and item for item in patterns) or
+                    not isinstance(files, list) or
+                    not all(isinstance(item, str) and item for item in files) or
+                    not isinstance(excluded, bool) or (excluded and files) or
+                    (not excluded and not files)):
+                raise ValueError
+            normalised = tuple(item.replace("\\", "/") for item in files)
+            for pattern in patterns:
+                compiled = compile_pattern(pattern)
+                if compiled is None:
+                    raise ValueError
+                rules.append(Rule(excluded, compiled, normalised))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError, TypeError):
+        return [], [1]
+    return rules, []
 
 
 def matching_files(rules: list[Rule], rel_path: str) -> list[str]:
@@ -372,12 +360,13 @@ def main() -> int:
     if rel_path is None:
         return 0
 
-    # Global rules first (next to the hook, in the install's .claude/), then
-    # project rules, so project rules have the last word. For a project
-    # install both resolve to the same file; load it once.
+    # Bundled defaults, then shared user and project rules.
     sources, seen_paths = [], set()
-    hook_adjacent = Path(__file__).resolve().parent.parent / RULES_NAME
-    for candidate in (hook_adjacent, root / ".claude" / RULES_NAME):
+    for candidate in (
+        Path(__file__).with_name(RULES_NAME),
+        Path.home() / ".harness" / "guards" / RULES_NAME,
+        root / ".harness" / "guards" / RULES_NAME,
+    ):
         try:
             key = candidate.resolve()
         except OSError:
@@ -396,7 +385,7 @@ def main() -> int:
             extra = f" (+{len(bad_lines) - 3} more)" if len(bad_lines) > 3 else ""
             notes.append(
                 f"`{display_path(source, root)}` line(s) {shown}{extra} don't match the "
-                f"'<pattern> -> <file>' or '!<pattern>' format and were ignored."
+                "the TOML rule schema and were ignored."
             )
 
     required = matching_files(all_rules, rel_path)

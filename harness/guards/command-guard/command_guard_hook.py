@@ -4,20 +4,31 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 
-RULES_NAME = "command-guard.rules"
+CONFIG_NAME = "command-guard.toml"
 
 
-def _policy_path() -> Path:
-    """Find the policy in the platform directory, with legacy fallback."""
-    installed = Path(__file__).resolve().parent.parent / RULES_NAME
-    if installed.is_file():
-        return installed
-    return Path(__file__).with_name(RULES_NAME)
+def _config_sources(root: Path) -> list[Path]:
+    """Bundled defaults, then shared user and project configuration."""
+    candidates = [
+        Path(__file__).with_name(CONFIG_NAME),
+        Path.home() / ".harness" / "guards" / CONFIG_NAME,
+        root / ".harness" / "guards" / CONFIG_NAME,
+    ]
+    sources: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        key = candidate.resolve()
+        if key not in seen and candidate.is_file():
+            seen.add(key)
+            sources.append(candidate)
+    return sources
 
 
 POSIX_CLASSES = {
@@ -31,17 +42,27 @@ def _python_pattern(pattern: str) -> str:
     return pattern
 
 
-def _rules() -> list[tuple[re.Pattern[str], str]]:
+def _rules(root: Path) -> list[tuple[re.Pattern[str], str]]:
     rules: list[tuple[re.Pattern[str], str]] = []
-    reason = "a configured dangerous-command rule"
-    for raw_line in _policy_path().read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if line.startswith("# ") and re.match(r"# \d+[a-z]?\.", line):
-            reason = line.split(".", 1)[1].strip()
-            continue
-        if not line or line.startswith("#"):
-            continue
-        rules.append((re.compile(_python_pattern(line), re.IGNORECASE), reason))
+    sources = _config_sources(root)
+    if not sources:
+        raise ValueError("command-guard configuration is missing")
+    for source in sources:
+        data = tomllib.loads(source.read_text(encoding="utf-8-sig"))
+        if data.get("version") != 1 or set(data) != {"version", "rules"}:
+            raise ValueError("invalid command-guard configuration")
+        entries = data["rules"]
+        if not isinstance(entries, list) or not entries:
+            raise ValueError("command-guard requires rules")
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"reason", "patterns"}:
+                raise ValueError("invalid command-guard rule")
+            reason, patterns = entry["reason"], entry["patterns"]
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError("invalid command-guard reason")
+            if not isinstance(patterns, list) or not patterns or not all(isinstance(p, str) and p for p in patterns):
+                raise ValueError("invalid command-guard patterns")
+            rules.extend((re.compile(_python_pattern(pattern), re.IGNORECASE), reason.strip()) for pattern in patterns)
     return rules
 
 
@@ -70,11 +91,13 @@ def main() -> int:
         return 0
 
     try:
-        rules = _rules()
-    except (OSError, UnicodeError, re.error):
+        configured_root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd")
+        root = Path(configured_root).resolve() if isinstance(configured_root, str) and configured_root else Path.cwd().resolve()
+        rules = _rules(root)
+    except (OSError, UnicodeError, re.error, tomllib.TOMLDecodeError, ValueError, KeyError):
         _deny(
             "Command blocked because the command-guard policy could not be "
-            "loaded safely. Repair or restore command-guard.rules."
+            "loaded safely. Repair or restore command-guard.toml."
         )
         return 0
 

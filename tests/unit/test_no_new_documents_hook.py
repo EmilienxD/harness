@@ -42,7 +42,9 @@ def staged_hook(tmp_path: Path, config: str | None = None) -> Path:
     hook.parent.mkdir()
     hook.write_bytes(HOOK.read_bytes())
     source_config = HOOK.parent / "no-new-documents.toml"
-    (hook.parent.parent / source_config.name).write_text(
+    shared_config = tmp_path / ".harness" / "guards" / source_config.name
+    shared_config.parent.mkdir(parents=True)
+    shared_config.write_text(
         config if config is not None else source_config.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
@@ -223,8 +225,8 @@ def test_other_explicit_shell_creation_forms_are_denied(tmp_path, tool, command,
     assert path in output["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-def test_configurable_depth_can_limit_nested_docs_matching(tmp_path):
-    hook = staged_hook(tmp_path, 'paths = ["docs"]\nmax_depth = 0\n')
+def test_root_anchored_pattern_can_limit_nested_docs_matching(tmp_path):
+    hook = staged_hook(tmp_path, 'version = 1\nprotected = ["docs/**"]\n')
     code, output, stderr = run_hook(
         {
             "hook_event_name": "PreToolUse",
@@ -254,7 +256,7 @@ def test_configurable_depth_can_limit_nested_docs_matching(tmp_path):
 
 
 def test_configuration_accepts_multiple_protected_paths(tmp_path):
-    hook = staged_hook(tmp_path, 'paths = ["docs", "project-notes"]\nmax_depth = -1\n')
+    hook = staged_hook(tmp_path, 'version = 1\nprotected = ["**/docs/**", "**/project-notes/**"]\n')
     code, output, stderr = run_hook(
         {
             "hook_event_name": "PreToolUse",
@@ -268,6 +270,25 @@ def test_configuration_accepts_multiple_protected_paths(tmp_path):
     assert code == 0
     assert stderr == ""
     assert output is not None
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_project_toml_adds_protected_patterns_after_installed_config(tmp_path):
+    config = tmp_path / ".harness/guards/no-new-documents.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text('version=1\nprotected=["notes/**"]\n', encoding="utf-8")
+
+    code, output, stderr = run_hook(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "apply_patch",
+            "cwd": str(tmp_path),
+            "tool_input": {"command": "*** Add File: notes/new.md\n+new"},
+        },
+        tmp_path,
+    )
+
+    assert (code, stderr) == (0, "")
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
@@ -292,10 +313,10 @@ def test_install_registers_both_platforms_and_preserves_editable_configuration(
     product = ".claude" if platform == "claude" else ".codex"
     hook_dir = tmp_path / product / "hooks"
     hook = hook_dir / "no_new_documents_hook.py"
-    config = tmp_path / product / "no-new-documents.toml"
+    config = tmp_path / ".harness/guards/no-new-documents.toml"
     assert hook.is_file()
     assert not (hook_dir / "no-new-documents.toml").exists()
-    assert 'paths = ["docs"]' in config.read_text(encoding="utf-8")
+    assert 'protected = ["**/docs/**"]' in config.read_text(encoding="utf-8")
     settings = json.loads((tmp_path / settings_path).read_text(encoding="utf-8"))
     group = settings["hooks"]["PreToolUse"][0]
     assert group["matcher"] == matcher
@@ -307,6 +328,7 @@ def test_install_registers_both_platforms_and_preserves_editable_configuration(
     else:
         assert "${" not in rendered
 
-    config.write_text('paths = ["docs", "notes"]\nmax_depth = 2\n', encoding="utf-8")
+    custom = 'version = 1\nprotected = ["docs/**", "notes/**"]\n'
+    config.write_text(custom, encoding="utf-8")
     installer.reconcile({tool.name})
-    assert config.read_text(encoding="utf-8") == 'paths = ["docs", "notes"]\nmax_depth = 2\n'
+    assert config.read_text(encoding="utf-8") == custom

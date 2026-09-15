@@ -119,6 +119,43 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
 
+#### Guard configuration
+
+Editable Guard policies are provider-neutral TOML files in `.harness/guards/`. Every file starts with `version = 1`. User-level rules from `~/.harness/guards/` load first and project rules append afterward; `.claude/` and `.codex/` contain only native hook registration and executables.
+
+The read/edit guards share one ordered rule schema and gitignore-style path patterns (`*`, `?`, and `**`):
+
+```toml
+version = 1
+
+[[rules]]
+patterns = ["server/**/models/**", "**/*.sql"]
+require = ["docs/CONVENTIONS.md"]
+
+[[rules]]
+patterns = ["vendor/**"]
+exclude = true
+```
+
+`no-new-documents.toml` uses the same path vocabulary:
+
+```toml
+version = 1
+protected = ["**/docs/**", "project-notes/**"]
+```
+
+In `command-guard.toml`, each rule explicitly groups a reason with regular expressions. TOML literal strings are convenient for expressions containing backslashes:
+
+```toml
+version = 1
+
+[[rules]]
+reason = "network content piped directly into a shell"
+patterns = ['''(curl|wget).*\|\s*(ba|z)?sh''']
+```
+
+`prefer-fewer-comments.toml` keeps numeric settings under `[limits]` and uses ordered `[[rules]]` with `exempt = true` or `false` for path exemptions. The installed starter files contain editable examples for every field.
+
 ## Aboard
 
 Aboard is the optional VS Code extension for visible Claude Code and ChatGPT sessions, fleet tracking, and user-controlled Auto Run workflows. Select `aboard` in Harness to install its verified VSIX and required worker assets.

@@ -1,0 +1,19 @@
+version = 1
+
+# All settings are optional; omitted values use the built-in defaults.
+# [limits]
+# max_comment_lines = 2
+# max_comment_chars = 240
+# max_doc_lines = 5
+# max_doc_chars = 600
+# max_comment_ratio = 0.30
+# min_lines_for_ratio = 20
+
+# [[rules]]
+# patterns = ["docs/**", "**/*.md", "examples/**", "vendor/**"]
+# exempt = true
+
+# Later rules win, so this puts a maintained fork back under the budget.
+# [[rules]]
+# patterns = ["vendor/our-fork/**"]
+# exempt = false

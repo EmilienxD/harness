@@ -1,0 +1,9 @@
+version = 1
+
+# [[rules]]
+# patterns = ["server/**/models/**", "**/*.sql"]
+# require = ["docs/coding-standards/PYTHON-PREFERENCES.md"]
+
+# [[rules]]
+# patterns = ["vendor/**"]
+# exclude = true

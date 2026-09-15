@@ -20,7 +20,7 @@ export function transition(request: AnthropicMessagesRequest, repoRoot: string):
   const trigger = resultFor(request, READ_TRIGGER_ID);
   const required = resultFor(request, READ_REQUIRED_ID);
   if (trigger === undefined) return readResponse("read-trigger", READ_TRIGGER_ID, join(repoRoot, "trigger.txt"));
-  if (trigger.is_error === true || !allText.includes(TRIGGER_CONTENT.trimEnd()) || !allText.includes("on-read-reminder.rules") || !allText.includes("GUIDE.md")) {
+  if (trigger.is_error === true || !allText.includes(TRIGGER_CONTENT.trimEnd()) || !allText.includes("on-read-reminder.toml") || !allText.includes("GUIDE.md")) {
     throw new E2eProtocolError("$.messages", "matched read did not carry the required-file reminder", "on-read-reminder");
   }
   if (required === undefined) return readResponse("read-required", READ_REQUIRED_ID, join(repoRoot, "GUIDE.md"));

@@ -35,8 +35,9 @@ export async function runCommandGuardJourney(platform: Platform): Promise<Comman
     const hookRoot = join(projectRoot, platform === "claude" ? ".claude" : ".codex", "hooks");
     const hookPath = join(hookRoot, "command_guard_hook.py");
     await mkdir(hookRoot, { recursive: true });
+    await mkdir(join(projectRoot, ".harness", "guards"), { recursive: true });
     await copyFile(join(harnessRoot, "harness", "guards", "command-guard", "command_guard_hook.py"), hookPath);
-    await copyFile(join(harnessRoot, "harness", "guards", "command-guard", "command-guard.rules"), join(dirname(hookRoot), "command-guard.rules"));
+    await copyFile(join(harnessRoot, "harness", "guards", "command-guard", "command-guard.toml"), join(projectRoot, ".harness", "guards", "command-guard.toml"));
 
     let finalText: string;
     if (platform === "claude") {

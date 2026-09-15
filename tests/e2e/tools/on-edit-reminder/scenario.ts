@@ -39,7 +39,7 @@ export function transition(request: AnthropicMessagesRequest, repoRoot: string):
     throw new E2eProtocolError("$.messages", "target Read did not return the baseline", "on-edit-reminder");
   }
   if (firstEdit === undefined) return editResponse("edit-landed", FIRST_EDIT_ID, repoRoot, TARGET_BEFORE, TARGET_AFTER_FIRST_EDIT);
-  if (firstEdit.is_error === true || !allText.includes("on-edit-reminder.rules") || !allText.includes("GUIDE.md") || !allText.includes("Read")) {
+  if (firstEdit.is_error === true || !allText.includes("on-edit-reminder.toml") || !allText.includes("GUIDE.md") || !allText.includes("Read")) {
     throw new E2eProtocolError("$.messages", "landed edit did not carry the required-reading reminder", "on-edit-reminder");
   }
   if (guideRead === undefined) return toolResponse("read-guide", READ_GUIDE_ID, "Read", { file_path: join(repoRoot, "GUIDE.md") });

@@ -31,12 +31,13 @@ export async function runOnEditReminderJourney(): Promise<OnEditReminderJourneyR
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   try {
     await mkdir(dirname(hookPath), { recursive: true });
+    await mkdir(join(projectRoot, ".harness", "guards"), { recursive: true });
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
     await copyFile(join(harnessRoot, "harness", "guards", "on-edit-reminder", "on_edit_reminder_hook.py"), hookPath);
     await writeFile(join(projectRoot, "target.txt"), TARGET_BEFORE, "utf8");
     await writeFile(join(projectRoot, "GUIDE.md"), "E2E GUIDE: the value must be compliant.\n", "utf8");
-    await writeFile(join(claudeRoot, "on-edit-reminder.rules"), "target.txt -> GUIDE.md\n", "utf8");
+    await writeFile(join(projectRoot, ".harness", "guards", "on-edit-reminder.toml"), 'version=1\n[[rules]]\npatterns=["target.txt"]\nrequire=["GUIDE.md"]\n', "utf8");
     await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", command: await pythonCommand(), args: [hookPath, "--claude"] }] }] } }, null, 2)}\n`, "utf8");
     await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
 

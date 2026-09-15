@@ -1,5 +1,5 @@
 name = "prefer-fewer-comments"
-version = "1.1.0"
+version = "2.1.0"
 description = "PostToolUse hook that reads what a write added and asks for less commentary when a comment, a docstring, or the change as a whole runs over budget"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -19,8 +19,9 @@ executable = true
 
 # Budgets and exemptions. All comments as shipped, so the hook runs on its
 # defaults until the user edits it; `starter` keeps those edits across
-# upgrades. A `--user` install puts it where the hook reads global rules.
+# upgrades. The workspace root makes this policy shared by every provider.
 [[files]]
-src = "prefer-fewer-comments.rules"
-dest = "prefer-fewer-comments.rules"
+src = "prefer-fewer-comments.toml"
+dest = ".harness/guards/prefer-fewer-comments.toml"
+root = "workspace"
 starter = true
