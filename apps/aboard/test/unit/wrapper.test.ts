@@ -5,7 +5,7 @@ import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
 
@@ -155,6 +155,13 @@ test("only nonzero proven-session exits are classified as process failures", () 
     sessionExitFailure({ exitCode: 127, error: "runtime missing" }),
     "the configured agent command could not be started (runtime missing)",
   );
+});
+
+test("a clean exit before lifecycle startup is a user-ended launch, not a launch failure", () => {
+  assert.equal(sessionLaunchFailure({ exitCode: 0 }), undefined);
+  assert.equal(sessionLaunchFailure({ exitCode: 23 }), "exited with code 23 before starting a session");
+  assert.equal(sessionLaunchFailure({ exitCode: 0, error: "wrapper failed" }), "could not be started (wrapper failed)");
+  assert.equal(sessionLaunchFailure(undefined), "exited with code unknown before starting a session");
 });
 
 test("wrapper consumes a request file and runs its exact argv", () => {

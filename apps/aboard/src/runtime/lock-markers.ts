@@ -34,6 +34,13 @@ export function sessionExitFailure(exit: SessionExitRecord | undefined): string 
   return undefined;
 }
 
+/** Failure evidence for a process that ended before its first lifecycle start. */
+export function sessionLaunchFailure(exit: SessionExitRecord | undefined): string | undefined {
+  if (exit?.error !== undefined) return `could not be started (${exit.error})`;
+  if (exit?.exitCode === 0) return undefined;
+  return `exited with code ${exit?.exitCode ?? "unknown"} before starting a session`;
+}
+
 export function takeSessionExitRecord(lockFile: string): SessionExitRecord | undefined {
   const path = `${lockFile.replace(/\.lock$/, "")}.exit`;
   let raw: string;
