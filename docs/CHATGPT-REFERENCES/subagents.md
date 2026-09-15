@@ -162,16 +162,16 @@ reasoning effort. To balance intelligence, speed, and price for each task,
 request a specific model or reasoning effort in your prompt,
 configure `[agents]` defaults in `config.toml`, or set `model` and
 `model_reasoning_effort` directly in the custom agent file.
-For example, use `gpt-5.6-terra` for fast scans or a higher-effort `gpt-5.6-sol` configuration for more demanding reasoning.
+For example, use `gpt-5.6-terra` for fast scans or a higher-effort `gpt-5.6` configuration for more demanding reasoning.
 
 For most tasks in Codex, start with 
-  `gpt-5.6-sol`. Use 
+  `gpt-5.6`. Use 
   `gpt-5.6-terra` when you want
   a faster, lower-cost option for lighter subagent work.
 
 ### Model choice
 
-- **`gpt-5.6-sol`**: Start here for demanding agents. It's strongest for ambiguous, multi-step work that needs planning, tool use, validation, and follow-through across a larger context.
+- **`gpt-5.6`**: Start here for demanding agents. It's strongest for ambiguous, multi-step work that needs planning, tool use, validation, and follow-through across a larger context.
 - **`gpt-5.6-terra`**: Use for agents that favor speed and efficiency over depth, such as exploration, read-heavy scans, large-file review, or processing supporting documents. It works well for parallel workers that return distilled results to the main agent.
 - **`gpt-5.6-luna`**: Use for fast, narrowly scoped agents handling clear, repeatable, or high-volume work.
 
