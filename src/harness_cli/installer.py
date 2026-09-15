@@ -763,11 +763,13 @@ class CatalogueInstaller:
             if not fragment:
                 fragment = None
         if isinstance(fragment, dict) and fragment and self.target.settings_path.is_file():
-            after = self.target.adapter.unmerge_config(self.target.read_settings(), fragment)
-            if after:
-                _write_json(self.target.settings_path, after)
-            else:
-                self.target.settings_path.unlink(missing_ok=True)
+            # Leave the configuration file behind even once it holds nothing:
+            # an empty config reads as "no hooks configured", where a vanished
+            # one reads as a file the installer had no business deleting.
+            _write_json(
+                self.target.settings_path,
+                self.target.adapter.unmerge_config(self.target.read_settings(), fragment),
+            )
         block = receipt.get("gitignoreBlock")
         if isinstance(block, str) and self.target.gitignore_path.is_file():
             if self.target.gitignore_path.is_symlink():

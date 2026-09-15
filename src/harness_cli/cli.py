@@ -20,7 +20,7 @@ from harness_cli.installer_cli import UsageError, run as run_installer_command
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform, get_adapter
 from harness_cli.receipts import ReceiptStore, installation_lock
-from harness_cli.tui import MenuOption, TerminalUI, terminal_keys
+from harness_cli.tui import Line, MenuOption, TerminalUI, terminal_keys
 
 
 PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
@@ -116,13 +116,39 @@ def _skip_line(tool: Tool, platform: Platform) -> str:
     return f"    ○ {tool.name}: skipped for {product}.{reason}"
 
 
+# Additions first and removals last, so the summary reads as what a target
+# gains before what it loses.
 _ACTION_MARKS = {
     "install": "+ install",
     "upgrade": "↑ upgrade",
-    "remove": "- remove",
     "update": "~ update",
     "ownership": "~ ownership",
+    "remove": "- remove",
 }
+_ACTION_TONES = {
+    "install": "success",
+    "upgrade": "accent",
+    "update": "accent",
+    "ownership": "muted",
+    "remove": "danger",
+}
+
+
+def _group_changes(changes: list[Change]) -> dict[str, tuple[str, list[str]]]:
+    """Collect one target's changes into marked rows, additions first."""
+    ranked = sorted(
+        changes,
+        key=lambda change: list(_ACTION_MARKS).index(change.action)
+        if change.action in _ACTION_MARKS
+        else len(_ACTION_MARKS),
+    )
+    grouped: dict[str, tuple[str, list[str]]] = {}
+    for change in ranked:
+        mark = _ACTION_MARKS.get(change.action, f"~ {change.action}")
+        grouped.setdefault(mark, (_ACTION_TONES.get(change.action, ""), []))[1].append(
+            change.package
+        )
+    return grouped
 
 
 def _review_lines(
@@ -134,18 +160,20 @@ def _review_lines(
     scope = "Global" if targets[0].is_user else "Project"
     platforms = ", ".join(target.adapter.product_name for target in targets)
     lines = [f"  Install to  {scope}", f"  Platforms   {platforms}", ""]
-    for target in targets:
+    grouped_by_target = [
+        _group_changes(changes_by_platform[target.platform]) for target in targets
+    ]
+    column = max(
+        (len(mark) for grouped in grouped_by_target for mark in grouped),
+        default=0,
+    )
+    for target, grouped in zip(targets, grouped_by_target):
         lines.append(f"  {target.adapter.product_name}")
-        changes = changes_by_platform[target.platform]
-        if not changes:
-            lines.append("    ✓ Already up to date")
-        grouped: dict[str, list[str]] = {}
-        for change in changes:
-            grouped.setdefault(_ACTION_MARKS.get(change.action, f"~ {change.action}"), []).append(
-                change.package
-            )
-        for mark, packages in grouped.items():
-            lines.append(f"    {mark} ({len(packages)})  {', '.join(sorted(packages))}")
+        if not grouped:
+            lines.append(Line("    ✓ Already up to date", "success"))
+        for mark, (tone, packages) in grouped.items():
+            listed = ", ".join(sorted(packages))
+            lines.append(Line(f"    {mark:<{column}} ({len(packages)})  {listed}", tone))
     skips = [
         _skip_line(tool, target.platform)
         for target in targets

@@ -12,6 +12,7 @@ from harness_cli.tui import (
     ESCAPE,
     RIGHT,
     SPACE,
+    Line,
     MenuOption,
     TerminalUI,
     Toggle,
@@ -396,3 +397,14 @@ def test_cancelled_prompt_only_colors_the_status_markers_and_final_message_red()
         f"{TerminalUI.RED}■{TerminalUI.RESET}  "
         f"{TerminalUI.RED}Installation cancelled.  No changes made.{TerminalUI.RESET}"
     ) in rendered
+
+
+def test_note_paints_a_danger_line_red_and_leaves_plain_lines_alone():
+    output = io.StringIO()
+    ui = TerminalUI(lambda: ENTER, output, color=True)
+
+    ui.note("Installation Summary", ["  Claude Code", Line("    - remove (1)  issues", "danger")])
+
+    rendered = output.getvalue()
+    assert f"{TerminalUI.RED}    - remove (1)  issues{TerminalUI.RESET}" in rendered
+    assert f"{TerminalUI.RED}  Claude Code" not in rendered
