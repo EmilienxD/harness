@@ -26,4 +26,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-report-gotchas-runtime"
-source = "git+https://github.com/EmilienxD/harness@703c95a2b2dfd83139db129e419748bc54986b6b#subdirectory=harness/productivity/report-gotchas/runtime"
+source = "git+https://github.com/EmilienxD/harness@8f74bcddd93dc38b3e4b3921dd1ce2902e9a3bf0#subdirectory=harness/productivity/report-gotchas/runtime"
