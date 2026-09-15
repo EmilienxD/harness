@@ -12,7 +12,17 @@ from pathlib import Path
 from typing import Any
 
 
-CONFIG_PATH = Path(__file__).resolve().parent / "no-new-documents.toml"
+CONFIG_NAME = "no-new-documents.toml"
+
+
+def _config_path() -> Path:
+    """Find the config in the platform directory, with legacy fallback."""
+    installed = Path(__file__).resolve().parent.parent / CONFIG_NAME
+    if installed.is_file():
+        return installed
+    return Path(__file__).with_name(CONFIG_NAME)
+
+
 ADD_FILE = re.compile(r"^\*\*\* Add File: (.+)$", re.MULTILINE)
 REDIRECTION = re.compile(
     r"(?:^|\s)(?:\d?>{1,2})\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s;&|]+))"
@@ -38,7 +48,7 @@ CWD_CHANGE = re.compile(r"(?:^|[;&|]\s*)(?:cd|chdir|Set-Location|Push-Location)\
 
 
 def _configuration() -> tuple[tuple[tuple[str, ...], ...], int]:
-    data = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    data = tomllib.loads(_config_path().read_text(encoding="utf-8"))
     raw_paths = data.get("paths")
     max_depth = data.get("max_depth", -1)
     if (
