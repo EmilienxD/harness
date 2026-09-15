@@ -1,4 +1,4 @@
-import type { AgentId, AgentSession, IsoTimestamp, TerminalId, WorkerFailureType } from "../domain/contracts.js";
+import { agentLabel, type AgentId, type AgentSession, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import type { AutoRunState } from "../auto/engine.js";
@@ -53,7 +53,7 @@ export class FleetTreeModel {
       node.leaseHolder ? "lease holder" : "",
     ].filter(Boolean);
     return {
-      label: `${agentLabel(session)}${goal}`,
+      label: `${agentLabel(session.identity)}${goal}`,
       description: markers.join(" · "),
       tooltip: agentTooltip(session, node.leaseHolder),
       icon: agentIcon(session),
@@ -112,7 +112,6 @@ export function isLiveSession(session: AgentSession): boolean {
 
 
 function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "agent" }> { return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "agent"; }
-function agentLabel(session: AgentSession): string { return `aboard-${session.identity.type}-${session.identity.agentId}`; }
 // Telemetry is deliberately absent from the tree: the counters are not wired to a
 // reliable source yet, and a wrong number is worse than no number.
 function agentTooltip(session: AgentSession, leaseHolder: boolean): string {

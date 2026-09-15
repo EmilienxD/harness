@@ -70,6 +70,11 @@ export interface AgentIdentity {
   readonly type: AgentType;
 }
 
+/** The label users see for an agent in the fleet tree and its Claude session title. */
+export function agentLabel(identity: AgentIdentity): string {
+  return `aboard-${identity.type}-${identity.agentId}`;
+}
+
 export interface TerminalReference {
   readonly terminalId: TerminalId;
   readonly name: string;

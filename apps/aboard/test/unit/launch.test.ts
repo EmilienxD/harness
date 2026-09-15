@@ -161,6 +161,12 @@ test("spills long skill prompts and keeps the original task separately", () => {
   assert.equal(plan.task?.relativePath, plan.spill?.relativePath);
 });
 
+test("names the Claude session after its fleet agent label", () => {
+  const plan = planLaunch(request({ agentId: "7" as AgentId, agentType: "reviewer", configuration: workerConfiguration("reviewer") }));
+
+  assert.equal(hasPair(plan.args, "--name", "aboard-reviewer-7"), true);
+});
+
 test("uses a wrapper request to keep child argv out of terminal input", () => {
   const wrapper: SessionWrapperLayout = {
     script: "C:\\extension\\session_wrapper.py",

@@ -5,17 +5,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE run --no-project --no-managed-python \".codex/hooks/address_issue_UserPromptSubmit_hook.py\"",
+            "command": "uv run --no-project --no-managed-python \".codex/hooks/address_issue_UserPromptSubmit_hook.py\"",
             "timeout": 120
           },
           {
             "type": "command",
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE run --no-project --no-managed-python \".codex/hooks/review_issue_UserPromptSubmit_hook.py\"",
+            "command": "uv run --no-project --no-managed-python \".codex/hooks/review_issue_UserPromptSubmit_hook.py\"",
             "timeout": 60
           },
           {
             "type": "command",
-            "command": "C:\\Users\\emb\\.local\\bin\\uv.EXE run --no-project --no-managed-python \".codex/hooks/issues_ChatGPT_hook.py\"",
+            "command": "uv run --no-project --no-managed-python \".codex/hooks/issues_ChatGPT_hook.py\"",
             "timeout": 300
           }
         ]
