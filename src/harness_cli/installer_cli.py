@@ -12,6 +12,7 @@ from harness_cli.installer import (
     InstallError,
     Target,
     UnownedFileError,
+    UnownedHostProductError,
     installed_packages,
     reconcile_targets,
 )
@@ -81,6 +82,7 @@ def _apply(
     planned: list[tuple[CatalogueInstaller, set[str], dict]],
     dry_run: bool,
     overwrite: bool = False,
+    adopt: bool = False,
 ) -> bool:
     if dry_run:
         return True
@@ -90,13 +92,30 @@ def _apply(
             if overwrite
             else []
         )
+        adopted = (
+            {
+                name
+                for installer, selected, _ in planned
+                for name in installer.unowned_host_products(selected)
+            }
+            if adopt
+            else set()
+        )
         reconcile_targets(
             [(installer, selected) for installer, selected, _ in planned],
             overwrite=approved,
+            adopt=adopted,
         )
     except UnownedFileError as exc:
         replace = "it" if len(exc.paths) == 1 else "them"
         message = f"{exc}; rerun with --overwrite to replace {replace}"
+        for _, _, result in planned:
+            result["status"] = "failed"
+            result["error"] = message
+        return False
+    except UnownedHostProductError as exc:
+        take = "it" if len(exc.products) == 1 else "them"
+        message = f"{exc}; rerun with --adopt to take ownership of {take}"
         for _, _, result in planned:
             result["status"] = "failed"
             result["error"] = message
@@ -168,7 +187,7 @@ def run_install(args: Namespace) -> int:
     ):
         raise InstallError("none of the requested packages support the selected platforms")
 
-    ok = _apply(planned, args.dry_run, args.overwrite)
+    ok = _apply(planned, args.dry_run, args.overwrite, args.adopt)
 
     results = [result for _, _, result in planned]
     payload = {
@@ -275,7 +294,7 @@ def run_upgrade(args: Namespace) -> int:
         }
         planned.append((installer, selected, result))
 
-    ok = _apply(planned, args.dry_run, args.overwrite)
+    ok = _apply(planned, args.dry_run, args.overwrite, args.adopt)
 
     results = [result for _, _, result in planned]
     payload = {

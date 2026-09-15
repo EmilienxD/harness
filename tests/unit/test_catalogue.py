@@ -16,6 +16,7 @@ from harness_cli.installer import (
     InstallError,
     Target,
     UnownedFileError,
+    UnownedHostProductError,
     reconcile_targets,
 )
 from harness_cli.host_actions import (
@@ -57,8 +58,9 @@ def wire_menu(monkeypatch, tools, ui_factory, installer_factory, installed=()):
     monkeypatch.setattr(
         cli,
         "reconcile_targets",
-        lambda requests, overwrite=(): [
-            installer.reconcile(requested, overwrite=overwrite) for installer, requested in requests
+        lambda requests, overwrite=(), adopt=(): [
+            installer.reconcile(requested, overwrite=overwrite, adopt=adopt)
+            for installer, requested in requests
         ],
     )
     monkeypatch.setattr(cli.ReceiptStore, "load", lambda: object())
@@ -164,7 +166,10 @@ def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monke
         def conflicts(self, requested):
             return []
 
-        def reconcile(self, requested, overwrite=()):
+        def unowned_host_products(self, requested):
+            return {}
+
+        def reconcile(self, requested, overwrite=(), adopt=()):
             reconciled[self.target.platform] = requested
 
     wire_menu(monkeypatch, [aboard, auto], FakeUI, FakeInstaller)
@@ -248,7 +253,10 @@ def wire_conflict_menu(monkeypatch, conflicts, answer):
         def conflicts(self, requested):
             return list(conflicts)
 
-        def reconcile(self, requested, overwrite=()):
+        def unowned_host_products(self, requested):
+            return {}
+
+        def reconcile(self, requested, overwrite=(), adopt=()):
             reconciled[self.target.platform] = set(overwrite)
 
     wire_menu(monkeypatch, [discover()["aboard"]], FakeUI, FakeInstaller)
@@ -1216,3 +1224,110 @@ def test_removing_the_last_hook_leaves_an_empty_codex_config(tmp_path):
 
     assert target.settings_path.is_file()
     assert target.read_settings() == {}
+
+
+def test_unowned_host_products_are_reported_together_and_by_name(monkeypatch, tmp_path):
+    alpha = transactional_package(tmp_path, "alpha", action=True)
+    zulu = transactional_package(tmp_path, "zulu", action=True)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({alpha.name: alpha, zulu.name: zulu}, target, tmp_path)
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: True)
+
+    assert selected.unowned_host_products({alpha.name, zulu.name}) == {
+        "alpha": ["uv tool alpha-test"],
+        "zulu": ["uv tool zulu-test"],
+    }
+
+    with pytest.raises(UnownedHostProductError) as error:
+        selected.reconcile({alpha.name, zulu.name})
+
+    assert error.value.products == (
+        "uv tool alpha-test (alpha)",
+        "uv tool zulu-test (zulu)",
+    )
+    assert selected.installation["packages"] == {}
+    assert not (target.install_root / "alpha.txt").exists()
+
+
+def test_adopting_an_unowned_host_product_takes_ownership_of_it(monkeypatch, tmp_path):
+    tool = transactional_package(tmp_path, "adopted", action=True)
+    target = Target.for_project(tmp_path / "project")
+    selected = manager({tool.name: tool}, target, tmp_path)
+    applied = []
+    removed = []
+
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: True)
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", lambda prepared: applied.append(prepared.action))
+    monkeypatch.setattr("harness_cli.installer.uninstall_host_action", removed.append)
+
+    selected.reconcile({tool.name}, adopt={tool.name})
+
+    assert applied == [tool.actions[0]]
+    assert selected.installation["packages"][tool.name]["actions"] == [
+        {"type": "uv-tool", **tool.actions[0].data}
+    ]
+
+    selected.reconcile(set())
+
+    assert removed == [tool.actions[0]]
+
+
+def wire_adoption_menu(monkeypatch, products, answer):
+    events = []
+    reconciled = {}
+
+    class FakeUI(ConflictMenuUI):
+        pass
+
+    FakeUI.events = events
+    FakeUI.answer = answer
+
+    class FakeInstaller:
+        def __init__(self, available, target, store):
+            self.target = target
+
+        def plan(self, requested):
+            return [], [cli.Change("install", name, "selected") for name in requested]
+
+        def conflicts(self, requested):
+            return []
+
+        def unowned_host_products(self, requested):
+            return dict(products)
+
+        def reconcile(self, requested, overwrite=(), adopt=()):
+            reconciled[self.target.platform] = set(adopt)
+
+    wire_menu(monkeypatch, [discover()["aboard"]], FakeUI, FakeInstaller)
+    return events, reconciled
+
+
+def test_menu_asks_before_taking_over_host_products_harness_does_not_own(monkeypatch):
+    events, reconciled = wire_adoption_menu(
+        monkeypatch, {"subagents": ["uv tool harness-subagents-runtime"]}, answer=True
+    )
+
+    assert cli.catalogue_menu() == 0
+    assert [event[:2] for event in events] == [
+        ("note", "Installation Summary"),
+        ("confirm", "Proceed with changes?"),
+        ("note", "Existing host products"),
+        ("confirm", "Take ownership of these?"),
+        ("outro", "Done!  Review installed packages before use."),
+    ]
+    assert "uv tool harness-subagents-runtime  (subagents)" in "\n".join(events[2][2])
+    assert reconciled == {Platform.CLAUDE: {"subagents"}, Platform.CHATGPT: {"subagents"}}
+
+
+def test_menu_abandons_the_installation_when_adoption_is_refused(monkeypatch):
+    events, reconciled = wire_adoption_menu(
+        monkeypatch, {"subagents": ["uv tool harness-subagents-runtime"]}, answer=False
+    )
+
+    assert cli.catalogue_menu() == 0
+    assert events[-1] == ("cancelled", "Installation cancelled.  No changes made.")
+    assert reconciled == {}

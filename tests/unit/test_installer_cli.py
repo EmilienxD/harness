@@ -1,6 +1,7 @@
 import json
 
 from harness_cli.cli import main
+from harness_cli.host_actions import PreparedAction
 
 
 def test_install_is_non_interactive_and_emits_one_json_result(tmp_path, monkeypatch, capsys):
@@ -393,3 +394,32 @@ def test_invalid_nested_receipt_is_reported_as_an_operation_error(tmp_path, monk
     assert main(["list", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"]["type"] == "operation"
+
+
+def test_adopt_flag_takes_over_a_host_product_harness_does_not_own(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    applied = []
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: True)
+    monkeypatch.setattr(
+        "harness_cli.installer.prepare_host_action",
+        lambda action: PreparedAction(action),
+    )
+    monkeypatch.setattr(
+        "harness_cli.installer.apply_host_action",
+        lambda prepared: applied.append(prepared.action),
+    )
+    arguments = [
+        "install", "report-gotchas", "--root", str(tmp_path), "--platform", "claude", "--json",
+    ]
+
+    assert main(arguments) == 1
+
+    error = json.loads(capsys.readouterr().out)["results"][0]["error"]
+    assert "uv tool harness-report-gotchas-runtime (report-gotchas)" in error
+    assert "--adopt" in error
+    assert applied == []
+
+    assert main([*arguments, "--adopt"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+    assert [action.data["package"] for action in applied] == ["harness-report-gotchas-runtime"]

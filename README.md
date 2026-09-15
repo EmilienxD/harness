@@ -14,7 +14,7 @@ Run a pinned revision of the ephemeral installer:
 uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness
 ```
 
-The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall.
+The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall. A machine-level product a package installs — a `uv` tool or a VS Code extension — gets the same treatment: if one is already present and no Harness receipt accounts for it, the installer names it and asks whether to take ownership, which replaces it with the pinned version and removes it again on uninstall.
 
 For scripts and agents, use the non-interactive commands:
 
@@ -33,7 +33,7 @@ uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness up
 uvx --from "git+https://github.com/EmilienxD/harness@<commit-or-tag>" harness uninstall commit
 ```
 
-Commands default to project scope in the current directory and both platforms. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. `install` and `upgrade` fail rather than replace files Harness does not own; rerun them with `--overwrite` to take those files over. Run `harness --help` for the complete CLI.
+Commands default to project scope in the current directory and both platforms. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. `install` and `upgrade` fail rather than replace files Harness does not own; rerun them with `--overwrite` to take those files over, and with `--adopt` to take over host products installed outside Harness. Run `harness --help` for the complete CLI.
 
 ## Reference
 

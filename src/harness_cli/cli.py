@@ -196,6 +196,20 @@ def _overwrite_lines(paths: list[Path]) -> list[str]:
     ]
 
 
+def _adoption_lines(products: dict[str, set[str]]) -> list[str]:
+    return [
+        "  These machine-level products are already installed and no Harness",
+        "  receipt accounts for them.  Answering Yes replaces each with the",
+        "  version this catalogue pins, and a later uninstall removes it.",
+        "",
+        *(
+            f"    {described}  ({name})"
+            for name in sorted(products)
+            for described in sorted(products[name])
+        ),
+    ]
+
+
 def catalogue_menu() -> int:
     if not sys.stdin.isatty():
         raise InstallError("the catalogue is interactive; run `harness` in a terminal")
@@ -292,6 +306,18 @@ def catalogue_menu() -> int:
                 _cancel(ui)
                 return 0
 
+        products: dict[str, set[str]] = {}
+        for installer in installers:
+            found = installer.unowned_host_products(requests[installer.target.platform])
+            for name, described in found.items():
+                products.setdefault(name, set()).update(described)
+        if products:
+            ui.note("Existing host products", _adoption_lines(products))
+            if ui.confirm("Take ownership of these?", default=False) is not True:
+                _cancel(ui)
+                return 0
+        adopt = set(products)
+
         def apply_changes() -> None:
             with installation_lock():
                 locked_store = ReceiptStore.load()
@@ -315,6 +341,7 @@ def catalogue_menu() -> int:
                         for installer in locked_installers
                     ],
                     overwrite=overwrite,
+                    adopt=adopt,
                 )
 
         ui.progress("Applying catalogue changes", "Catalogue updated", apply_changes)
@@ -349,6 +376,10 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument(
         "--overwrite", action="store_true",
         help="replace existing destination files Harness does not own",
+    )
+    install.add_argument(
+        "--adopt", action="store_true",
+        help="take ownership of host products already installed outside Harness",
     )
     install.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     install.set_defaults(operation="install")
@@ -387,6 +418,10 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument(
         "--overwrite", action="store_true",
         help="replace existing destination files Harness does not own",
+    )
+    upgrade.add_argument(
+        "--adopt", action="store_true",
+        help="take ownership of host products already installed outside Harness",
     )
     upgrade.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     upgrade.set_defaults(operation="upgrade")

@@ -177,6 +177,15 @@ def apply(prepared: PreparedAction) -> None:
         raise HostActionError(detail or f"host action failed with exit code {result.returncode}")
 
 
+def describe(action: HostAction) -> str:
+    """Name the machine-level product an action manages, for error text."""
+    if action.type == "uv-tool":
+        return f"uv tool {_required_string(action, 'package')}"
+    if action.type == "vscode-extension":
+        return f"VS Code extension {_required_string(action, 'extension_id')}"
+    raise HostActionError(f"unsupported host action {action.type}")
+
+
 def is_installed(action: HostAction) -> bool:
     """Return whether an unowned host product is already present."""
     if action.type == "uv-tool":
