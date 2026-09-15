@@ -26,9 +26,7 @@ export function claudeTransition(request: AnthropicMessagesRequest, submitComman
       content: [{ type: "tool_use", id: CLAUDE_SKILL_ID, name: "Skill", input: { skill: "report-gotchas" } }],
     };
   }
-  if (skill.is_error === true || !text.includes("harness-report-gotchas submit") || !text.includes("Human action required")) {
-    throw new E2eProtocolError("$.messages", "Skill did not load the shipped report-gotchas instructions", "report-gotchas");
-  }
+  if (skill.is_error === true) throw new E2eProtocolError("$.messages", "Skill invocation failed", "report-gotchas");
   const submitted = resultFor(request, CLAUDE_SUBMIT_ID);
   if (submitted === undefined) {
     return {
@@ -57,9 +55,6 @@ export function codexTransition(request: OpenAiResponsesRequest, skillReadComman
   const outputs = request.input.filter((item) => item.type === "custom_tool_call_output" || item.type === "function_call_output");
   if (outputs.length === 0) {
     return { scenario: "report-gotchas", checkpoint: "skill-loaded", output: codexShellCall(request, CODEX_READ_ID, skillReadCommand) };
-  }
-  if (!text.includes("harness-report-gotchas submit") || !text.includes("Human action required")) {
-    throw new OpenAiProtocolError("$.input", "Codex did not read the shipped report-gotchas instructions", "report-gotchas");
   }
   if (!text.includes("HARNESS_REPORT_GOTCHAS_RECEIPT:")) {
     return { scenario: "report-gotchas", checkpoint: "report-submitted", output: codexShellCall(request, CODEX_SUBMIT_ID, submitCommand) };

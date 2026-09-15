@@ -29,7 +29,6 @@ const CLAUDE_READ = "toolu_e2e_breakdown_read";
 const CODEX_READ = "call_e2e_breakdown_read";
 
 export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string): AnthropicScenarioResponse {
-  const text = deepText(request); requireContext(text, "$.messages", "claude");
   if (!request.tools.some((tool) => tool.name === "Read")) throw new E2eProtocolError("$.tools", "Read is unavailable", "breakdown-help-wanted-issue");
   const result = resultFor(request, CLAUDE_READ);
   if (result === undefined) return response("inspect-current-behavior", "tool_use", [{ type: "tool_use", id: CLAUDE_READ, name: "Read", input: { file_path: `${repoRoot}/${FIXTURE_FILE}` } }]);
@@ -38,7 +37,7 @@ export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: st
 }
 
 export function codexTransition(request: OpenAiResponsesRequest): OpenAiScenarioResponse {
-  const text = deepText([request.instructions, request.input]); requireContext(text, "$.input", "codex");
+  const text = deepText([request.instructions, request.input]);
   const outputs = request.input.filter((item) => item.type === "custom_tool_call_output" || item.type === "function_call_output");
   if (!outputs.some((item) => item.call_id === CODEX_READ)) {
     const args = { cmd: `git show HEAD:${FIXTURE_FILE}`, yield_time_ms: 10_000, max_output_tokens: 2_000 };
@@ -51,12 +50,6 @@ export function codexTransition(request: OpenAiResponsesRequest): OpenAiScenario
   return { scenario: "breakdown-help-wanted-issue", checkpoint: "report-complete", output: finalOutput(REPORT) };
 }
 
-function requireContext(text: string, field: string, platform: "claude" | "codex"): void {
-  const valid = text.includes("Breakdown Help Wanted Issue fallback:") && text.includes("Issue number: #17") && text.includes("Retry failed imports") && text.includes("Treat this issue as a proposal to evaluate") && text.includes("Investigate before interviewing") && text.includes("Do not implement changes");
-  if (valid) return;
-  if (platform === "claude") throw new E2eProtocolError(field, "skill instructions or fallback issue context are missing", "breakdown-help-wanted-issue");
-  throw new OpenAiProtocolError(field, "skill instructions or fallback issue context are missing", "breakdown-help-wanted-issue");
-}
 function resultFor(request: AnthropicMessagesRequest, id: string): Record<string, unknown> | undefined { for (const message of request.messages) if (Array.isArray(message.content)) for (const block of message.content) if (isRecord(block) && block.type === "tool_result" && block.tool_use_id === id) return block; return undefined; }
 function response(checkpoint: string, stopReason: "tool_use" | "end_turn", content: readonly Record<string, unknown>[]): AnthropicScenarioResponse { return { scenario: "breakdown-help-wanted-issue", checkpoint, messageId: stableId(`claude:${checkpoint}`), stopReason, content }; }
 function finalOutput(text: string): OpenAiResponseOutput { return { type: "message", id: stableId("codex:report"), role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] }; }

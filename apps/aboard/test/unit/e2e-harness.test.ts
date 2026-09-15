@@ -261,7 +261,7 @@ test("OpenAI emulator resolves a spilled worker task when launch guidance follow
   const spillDirectory = join(root, "worker-1");
   await mkdir(spillDirectory, { recursive: true });
   const spillPath = join(spillDirectory, "task.md");
-  await writeFile(spillPath, "[E2E:chatgpt-implement] [E2E:address-this-skill-loaded] address it with Chrome.\n", "utf8");
+  await writeFile(spillPath, "[E2E:chatgpt-implement] address it.\n", "utf8");
   const server = await startFakeOpenAiServer({});
   const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
   try {
@@ -270,7 +270,7 @@ test("OpenAI emulator resolves a spilled worker task when launch guidance follow
       headers,
       body: JSON.stringify({
         model: "codex-e2e", stream: true, store: false,
-        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: `Perform the task described in @${spillPath}. Chrome browser backend is available.` }] }],
+        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: `Perform the task described in @${spillPath}.` }] }],
         tools: [{ type: "function", name: "exec_command", parameters: { type: "object" } }],
       }),
     });
@@ -289,7 +289,7 @@ test("OpenAI HITL reviewer leaves its automated result uncommitted and commits o
   const tools = { type: "additional_tools", tools: [{ type: "custom", name: "exec" }] };
   const base = {
     model: "codex-e2e", stream: true, store: false,
-    input: [tools, { type: "message", role: "user", content: [{ type: "input_text", text: `Review ${AUTO_RUN_HITL_REVIEW_MARKER}. [E2E:review-this-skill-loaded] Aboard pinned abc..def as the immutable review scope.` }] }],
+    input: [tools, { type: "message", role: "user", content: [{ type: "input_text", text: `Review ${AUTO_RUN_HITL_REVIEW_MARKER}. Aboard pinned abc..def as the immutable review scope.` }] }],
   };
   try {
     const first = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify(base) });

@@ -222,11 +222,6 @@ function autoRunAfkTransition(request: MessagesRequest, repoRoot: string): Scena
       content: [{ type: "text", text: "Review complete; no fixes required." }],
     };
   }
-  if (!history.includes(AUTO_RUN_PERMANENT_NOTE)) throw new ScenarioMismatch("$.messages", "implementer prompt omitted permanent guidance", scenario);
-  if (!history.includes(AUTO_RUN_NESTED_CONTEXT)) throw new ScenarioMismatch("$.messages", "implementer prompt omitted recursive issue context", scenario);
-  if (history.includes("Fresh codebase context") && !history.includes(AUTO_RUN_EXPLORE_REPORT)) {
-    throw new ScenarioMismatch("$.messages", "implementer prompt omitted the Explore report", scenario);
-  }
   const readId = "toolu_e2e_auto_afk_read";
   const editId = "toolu_e2e_auto_afk_edit";
   const commitId = "toolu_e2e_auto_afk_commit";

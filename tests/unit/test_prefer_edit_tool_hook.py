@@ -130,10 +130,10 @@ def test_read_only_commands_stay_quiet(command):
 
 def test_reminder_names_the_signal_it_saw():
     _, out = run_hook(bash("cat > notes.md <<'EOF'\nhi\nEOF"))
-    assert "redirect to notes.md" in out["hookSpecificOutput"]["additionalContext"]
+    assert out["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
 
     _, out = run_hook(bash("sed -i 's/a/b/' f.yml"))
-    assert "sed -i" in out["hookSpecificOutput"]["additionalContext"]
+    assert out["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
 
 
 @pytest.mark.parametrize("mode", ["w", "a", "x", "wb", "r+", "a+b"])

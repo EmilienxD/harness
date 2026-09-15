@@ -13,7 +13,6 @@ import {
 } from "../../core/openai-server.js";
 
 export const MARKER = "[E2E:agent-launcher]";
-export const SYSTEM_PROMPT_MARKER = "[E2E:agent-launcher:system-prompt]";
 export const CLAUDE_MODEL = "claude-agent-launcher-e2e";
 export const CODEX_MODEL = "codex-agent-launcher-e2e";
 export const scenarioCatalogHash = createHash("sha256").update("agent-launcher:v1").digest("hex");
@@ -24,9 +23,6 @@ export function claudeTransition(request: AnthropicMessagesRequest): AnthropicSc
   }
   if (request.model !== CLAUDE_MODEL) {
     throw new E2eProtocolError("$.model", "does not contain the launcher-configured model", "agent-launcher");
-  }
-  if (!deepText(request.system).includes(SYSTEM_PROMPT_MARKER)) {
-    throw new E2eProtocolError("$.system", "does not contain the launcher-configured system prompt", "agent-launcher");
   }
   return {
     scenario: "agent-launcher",

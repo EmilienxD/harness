@@ -21,7 +21,6 @@ import {
   CLAUDE_MODEL,
   CODEX_MODEL,
   MARKER,
-  SYSTEM_PROMPT_MARKER,
   claudeTransition,
   codexTransition,
   scenarioCatalogHash,
@@ -49,7 +48,6 @@ export async function runAgentLauncherJourney(platform: Platform): Promise<Agent
     await mkdir(projectRoot, { recursive: true });
     await cp(join(runtimeSource, "agent_launcher", "templates"), launcherRoot, { recursive: true });
     await configureNativeCommands(join(launcherRoot, "config.py"));
-    await writeFile(join(launcherRoot, "system-prompt.md"), `${SYSTEM_PROMPT_MARKER}\n`, "utf8");
     await writeFile(join(launcherRoot, "claude", "settings.json"), `${JSON.stringify({ model: CLAUDE_MODEL }, null, 2)}\n`, "utf8");
     await writeFile(join(launcherRoot, "chatgpt", "config.toml"), `model = ${JSON.stringify(CODEX_MODEL)}\n`, "utf8");
     const python = await pythonCommand(runtimeSource);

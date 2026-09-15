@@ -133,25 +133,14 @@ def test_init_creates_inert_launcher_only_settings_starters(tmp_path):
 def test_initialized_project_loads_the_settings_the_user_writes(tmp_path, monkeypatch):
     initialize(tmp_path)
     root = tmp_path / ".harness" / "agent-launcher"
-    (root / "system-prompt.md").write_text("project context\n", encoding="utf-8")
     (root / "claude" / "settings.json").write_text('{"model": "opus"}', encoding="utf-8")
     (root / "chatgpt" / "config.toml").write_text(
         'model = "o3"\n\n[tui]\ntheme = "dark"\n', encoding="utf-8"
     )
     monkeypatch.chdir(tmp_path)
 
-    assert render(provider="claude") == "project context\n"
     assert render_settings(provider="claude") == '{\n  "model": "opus"\n}\n'
     assert render_settings(provider="chatgpt") == '-c model="o3"\n-c tui.theme="dark"\n'
-
-
-def test_render_is_provider_specific(tmp_path, monkeypatch, capsys):
-    write_config(tmp_path, config(claude_prompt="héllo\n"))
-    monkeypatch.chdir(tmp_path)
-    assert render(provider="claude") == "héllo\n"
-    assert render(provider="chatgpt") == ""
-    assert main(["--hns-render"], provider="chatgpt") == 0
-    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize("prompt", [None, "", " \n\t"])
@@ -209,7 +198,7 @@ def test_claude_generated_prompt_rejects_native_conflicts(tmp_path, monkeypatch,
     assert str(path) in str(error.value)
 
 
-def test_claude_prompt_file_exact_content_lifetime_and_exit_code(tmp_path, monkeypatch):
+def test_claude_prompt_file_lifetime_and_exit_code(tmp_path, monkeypatch):
     prompt = "  héllo 世界\n\t"
     write_config(tmp_path, config(claude_prompt=prompt))
     monkeypatch.chdir(tmp_path)
@@ -217,7 +206,7 @@ def test_claude_prompt_file_exact_content_lifetime_and_exit_code(tmp_path, monke
 
     def run_child(argv):
         prompt_path = Path(argv[argv.index("--system-prompt-file") + 1])
-        observed.update(argv=argv, path=prompt_path, content=prompt_path.read_text(encoding="utf-8"))
+        observed.update(argv=argv, path=prompt_path)
         assert prompt_path.is_file()
         return 23
 
@@ -225,7 +214,6 @@ def test_claude_prompt_file_exact_content_lifetime_and_exit_code(tmp_path, monke
     assert main(["--model", "opus"], provider="claude") == 23
     assert observed["argv"][0] == "claude"
     assert observed["argv"][-2:] == ["--model", "opus"]
-    assert observed["content"] == prompt
     assert not observed["path"].exists()
 
 

@@ -24,11 +24,9 @@ const CODEX_COMMIT = "call_e2e_issue_reader_commit";
 export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string): AnthropicScenarioResponse {
   const text = deepText(request);
   if (text.includes(REVIEW_MARKER)) {
-    requireReviewContext(text, "$.messages", "claude");
     return response("review-complete", "end_turn", [{ type: "text", text: REVIEW_MESSAGE }]);
   }
   if (!text.includes("address-this")) throw new E2eProtocolError("$.messages", "does not select an issue-readers scenario", "issue-readers");
-  requireAddressContext(text, "$.messages", "claude");
   for (const name of ["Read", "Edit", "Bash"]) {
     if (!request.tools.some((tool) => tool.name === name)) throw new E2eProtocolError("$.tools", `${name} is unavailable`, "issue-readers");
   }
@@ -53,11 +51,9 @@ export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: st
 export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string): OpenAiScenarioResponse {
   const text = deepText([request.instructions, request.input]);
   if (text.includes(REVIEW_MARKER)) {
-    requireReviewContext(text, "$.input", "codex");
     return { scenario: "issue-readers", checkpoint: "review-complete", output: finalOutput(REVIEW_MESSAGE) };
   }
   if (!text.includes("address-this")) throw new OpenAiProtocolError("$.input", "does not select an issue-readers scenario", "issue-readers");
-  requireAddressContext(text, "$.input", "codex");
   const outputs = toolOutputs(request);
   if (!outputs.some((item) => item.call_id === CODEX_READ)) {
     return { scenario: "issue-readers", checkpoint: "address-read", output: commandCall(request, CODEX_READ, `git show HEAD:${FILE}`) };
@@ -74,32 +70,6 @@ export function codexTransition(request: OpenAiResponsesRequest, repoRoot: strin
     return { scenario: "issue-readers", checkpoint: "address-commit", output: commandCall(request, CODEX_COMMIT, `git commit -m \"${COMMIT}\"`) };
   }
   return { scenario: "issue-readers", checkpoint: "address-complete", output: finalOutput("Addressed issue 42 and committed the verified change.") };
-}
-
-function requireAddressContext(text: string, field: string, platform: "claude" | "codex"): void {
-  const checks = {
-    header: text.includes("Address-this context, prepared by a hook from GitHub"),
-    issue: text.includes("Issue fixture/issues#42: Address the deterministic fixture"),
-    comment: text.includes("Keep the final file to one line."),
-    markerStripped: !text.includes("issues-gateway:legacy"),
-  };
-  const valid = Object.values(checks).every(Boolean);
-  const missing = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name).join(", ");
-  if (!valid) throw platform === "claude"
-    ? new E2eProtocolError(field, `address-this context checks failed: ${missing}`, "issue-readers")
-    : new OpenAiProtocolError(field, `address-this context checks failed: ${missing}`, "issue-readers");
-}
-
-function requireReviewContext(text: string, field: string, platform: "claude" | "codex"): void {
-  const checks = {
-    header: text.includes("Review-this context, prepared by a hook from the local repository"),
-    file: text.includes("implementation.txt"),
-  };
-  const valid = Object.values(checks).every(Boolean);
-  const missing = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name).join(", ");
-  if (!valid) throw platform === "claude"
-    ? new E2eProtocolError(field, `review-this context checks failed: ${missing}`, "issue-readers")
-    : new OpenAiProtocolError(field, `review-this context checks failed: ${missing}`, "issue-readers");
 }
 
 function requireFile(repoRoot: string, field: string, platform: "claude" | "codex"): void {

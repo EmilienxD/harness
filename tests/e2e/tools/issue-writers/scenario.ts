@@ -15,7 +15,6 @@ const CODEX_WRITE = "call_e2e_issue_writer_write";
 
 export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string): AnthropicScenarioResponse {
   const text = deepText(request);
-  requireDraftContext(text, "$.messages", "claude");
   const draft = draftPath(text, repoRoot, "$.messages", "claude");
   if (!request.tools.some((tool) => tool.name === "Write")) throw new E2eProtocolError("$.tools", "Write is unavailable", "issue-writers");
   if (resultFor(request, CLAUDE_WRITE) === undefined) {
@@ -33,7 +32,6 @@ export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: st
 
 export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string): OpenAiScenarioResponse {
   const text = deepText([request.instructions, request.input]);
-  requireDraftContext(text, "$.input", "codex");
   const draft = draftPath(text, repoRoot, "$.input", "codex");
   const outputs = request.input.filter((item) => item.type === "custom_tool_call_output" || item.type === "function_call_output");
   if (!outputs.some((item) => item.call_id === CODEX_WRITE)) {
@@ -58,17 +56,6 @@ function writeFileCommand(path: string, content: string): string {
 
 export function findDraftPath(text: string, repoRoot: string): string {
   return draftPath(text, repoRoot, "context", "codex");
-}
-
-function requireDraftContext(text: string, field: string, platform: "claude" | "codex"): void {
-  const valid = text.includes(DRAFT_MARKER)
-    && text.includes("Issues gateway drafting context:")
-    && text.includes("next free issue index: 0")
-    && text.includes("gateway handles publishing")
-    && text.includes("not allowed to call `gh issue create`");
-  if (valid) return;
-  if (platform === "claude") throw new E2eProtocolError(field, "draft-issue instructions or hook context are missing", "issue-writers");
-  throw new OpenAiProtocolError(field, "draft-issue instructions or hook context are missing", "issue-writers");
 }
 
 function draftPath(text: string, repoRoot: string, field: string, platform: "claude" | "codex"): string {

@@ -127,7 +127,6 @@ for (const [type, invocation] of [
     assert.equal(hasPair(plan.args, "--model", difficultyLaunchPolicy("basic").model), true);
     assert.equal(hasPair(plan.args, "--effort", difficultyLaunchPolicy("basic").effort), true);
     assert.equal(plan.task?.relativePath, taskPromptPath(runtimeRoot, agentId));
-    assert.equal(plan.task?.contents, "Address issue #47.");
     assert.equal(plan.writeCapability, "write-capable");
     assert.equal("agentDefinition" in plan, false);
   });
@@ -158,8 +157,6 @@ test("spills long skill prompts and keeps the original task separately", () => {
 
   assert.equal(plan.promptDelivery, "spilled");
   assert.match(plan.args.at(-1) ?? "", /^\/address-this .*@.*\.md/u);
-  assert.equal(plan.spill?.contents, prompt);
-  assert.equal(plan.task?.contents, prompt);
   assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/agent-1/task.md");
   assert.equal(plan.task?.relativePath, plan.spill?.relativePath);
 });

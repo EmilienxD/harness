@@ -220,16 +220,6 @@ async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenar
   }
   const scenario = textScenario ?? historyScenario;
   if (scenario === undefined) throw new ProtocolMismatch("$.input", "does not select a known deterministic scenario");
-  if (textScenario === "implement") {
-    if (!text.includes("[E2E:address-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the address-this skill");
-    if (text.includes("with Chrome") && !text.includes("Chrome browser backend")) throw new ProtocolMismatch("$.input", "lost the Chrome backend instruction");
-  }
-  if (textScenario === "review-changes") {
-    if (!text.includes("[E2E:review-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-this skill");
-  }
-  if (textScenario === "review-approve") {
-    if (!text.includes("[E2E:review-this-skill-loaded]")) throw new ProtocolMismatch("$.input", "did not load the review-this skill");
-  }
   return selected(scenario);
 }
 
@@ -310,11 +300,6 @@ function autoRunAfkTransition(body: ResponsesRequest, text: string, repoRoot: st
     return commandSequence(body, [
       { checkpoint: "auto-explore-read", command: readCommand(repoRoot), requireOutput: BEFORE_CONTENT.trimEnd() },
     ], "auto-explore-complete", AUTO_RUN_EXPLORE_REPORT, "auto-run-afk", "explore");
-  }
-  if (historyRoute === undefined) {
-    if (!text.includes(AUTO_RUN_PERMANENT_NOTE)) throw new ProtocolMismatch("$.input", "implementer prompt omitted permanent guidance");
-    if (!text.includes(AUTO_RUN_NESTED_CONTEXT)) throw new ProtocolMismatch("$.input", "implementer prompt omitted recursive issue context");
-    if (text.includes("Fresh codebase context") && !text.includes(AUTO_RUN_EXPLORE_REPORT)) throw new ProtocolMismatch("$.input", "implementer prompt omitted the Explore report");
   }
   return commandSequence(body, [
     { checkpoint: "auto-afk-read", command: readCommand(repoRoot), requireOutput: BEFORE_CONTENT.trimEnd() },

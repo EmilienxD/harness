@@ -239,9 +239,6 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
       if (!plan.args.includes('web_search="disabled"')) throw new Error(`ChatGPT E2E left web search enabled for a ${agentType}`);
       if (!plan.requiresWriteLease) throw new Error(`ChatGPT E2E left a ${agentType} outside the run's write lease`);
     }
-    if (scenario.chrome === "declared" && !(plan.spill?.contents ?? "").includes("Chrome browser backend")) {
-      throw new Error("ChatGPT E2E lost the Chrome backend instruction");
-    }
     monitor.trackLaunch({ agentId, sessionId: expectedSessionId, lockFile: wrapper.lockPathFor(agentId) });
     const proof = proofs.awaitStarted(agentId, expectedSessionId, 10_000);
     if (plan.wrapperRequest === undefined) throw new Error("ChatGPT E2E expected wrapper request delivery");

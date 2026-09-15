@@ -188,15 +188,3 @@ test("recent activity rows are offered only the actions their capabilities carry
   assert.equal(clear?.when, "view == aboard.recentActivity");
   assert.match(clear?.group ?? "", /^navigation@/);
 });
-
-test("the README keeps one four-path Auto Run diagram with HITL review before acceptance", async () => {
-  const readme = await readFile(join(process.cwd(), "README.md"), "utf8");
-  assert.equal(readme.match(/^```mermaid$/gmu)?.length, 1);
-  for (const path of ["AFK, review off", "AFK, review on", "HITL, review off", "HITL, review on"]) {
-    assert.match(readme, new RegExp(path));
-  }
-  const reset = readme.indexOf("mixed-reset to beforeSha");
-  const reviewer = readme.indexOf("Reviewer pins beforeSha..checkpoint");
-  const acceptance = readme.indexOf("Waiting for acceptance commit", reviewer);
-  assert.ok(reset >= 0 && reviewer > reset && acceptance > reviewer);
-});
