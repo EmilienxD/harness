@@ -4,9 +4,11 @@ description: Copy Claude's latest completed message into a GitHub issue titled R
 disable-model-invocation: true
 ---
 
-**ERROR: `/copy-message-as-issue` was not intercepted by its hook. Report the failure and stop.**
+**ERROR: Do not create an issue. `/copy-message-as-issue` is broken — report that to the user and stop.**
 
-Do not create an issue or emulate the hook. It publishes the cached final response and
-tracks retries to avoid duplicates. Tell the user to reinstall the issue-writers pack with
-rerun `uvx --from git+https://github.com/EmilienxD/harness@v0.2.0 harness` and reselect `issue-writers`,
-then finish a Claude response before invoking `/copy-message-as-issue` again.
+The copy-message-as-issue invocation is handled entirely by hooks and should have been intercepted before reaching you.
+
+Do not try fixing it or finding a workaround; tell the user to check that the installed hook is enabled and trusted, or to reinstall it with `uvx --from git+https://github.com/EmilienxD/harness harness` and reselect `issue-writers` in the catalogue.
+
+If that does not fix it, ask them to report the problem at
+https://github.com/EmilienxD/harness/issues.
