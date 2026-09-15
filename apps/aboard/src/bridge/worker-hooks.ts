@@ -1,5 +1,5 @@
 import type { AgentId, IsoTimestamp } from "../domain/contracts.js";
-import { workerContinuationPrompt } from "../claude/prompts.js";
+import { workerContinuationPrompt } from "../platform/prompts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 import type { BridgeRequestHandler } from "./protocol.js";

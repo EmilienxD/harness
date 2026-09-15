@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor, type GhExecutor } from "../../src/github/client.js";
-import { PromptResolutionError, PromptResolver } from "../../src/claude/prompts.js";
+import { PromptResolutionError, PromptResolver } from "../../src/platform/prompts.js";
 
 class FixtureGh implements GhExecutor {
   private readonly mutableCalls: string[][] = [];

@@ -1,9 +1,10 @@
 import type {
   LaunchPlan,
-  LaunchPlanRequest,
+  PlatformLaunchRequest,
+  PlatformResumeRequest,
   RuntimeFile,
-  SessionResumePlanRequest,
-} from "../claude/launch.js";
+} from "./launch.js";
+import type { LaunchRestrictions } from "../domain/capability.js";
 import { AGENT_PLATFORM_IDS, type AgentPlatformId, type SessionId } from "../domain/contracts.js";
 import type { LifecycleObservation, PlatformLifecycleKind } from "./lifecycle.js";
 
@@ -35,8 +36,7 @@ export interface AgentPlatformCapabilities {
 }
 
 export type PlatformLaunchPlan = LaunchPlan & { readonly platform: AgentPlatformId };
-export type PlatformLaunchRequest = Omit<LaunchPlanRequest, "configuration"> & { readonly configuration: unknown };
-export type PlatformResumeRequest = Omit<SessionResumePlanRequest, "configuration"> & { readonly configuration: unknown };
+export type { PlatformLaunchRequest, PlatformResumeRequest } from "./launch.js";
 
 /** Provider boundary used by shared orchestration. */
 export interface AgentPlatform {
@@ -47,6 +47,11 @@ export interface AgentPlatform {
   /** Returns the canonical id, or undefined when the observation is stale. */
   bindSession(current: PlatformSessionIdentity, observed: SessionId): SessionId | undefined;
   normalizeLifecycle(kind: PlatformLifecycleKind, payload: unknown): LifecycleObservation;
+  /**
+   * Throws when this provider's native rules cannot express these restrictions.
+   * Orchestration calls it before creating anything a failed run would leave behind.
+   */
+  requireEnforceableRestrictions(restrictions: LaunchRestrictions): void;
   planLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan;
   planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan;
   preflight(plan: PlatformLaunchPlan): Promise<void>;
@@ -62,12 +67,9 @@ export interface PromptSpillStore {
 
 export type {
   EffortLevel,
-  LaunchConfiguration,
   LaunchPlan,
-  LaunchPlanRequest,
-  SessionResumePlanRequest,
   SessionWrapperLayout,
-} from "../claude/launch.js";
-export type { ResolvedPrompt } from "../claude/prompts.js";
-export type { ShellKind } from "../claude/shell.js";
-export type { TerminalController } from "../claude/terminals.js";
+} from "./launch.js";
+export type { ResolvedPrompt } from "../platform/prompts.js";
+export type { ShellKind } from "../platform/shell.js";
+export type { TerminalController } from "../platform/terminals.js";

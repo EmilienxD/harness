@@ -12,10 +12,10 @@ import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
 import { createDelegationRoutes } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
-import { TerminalController } from "./claude/terminals.js";
+import { TerminalController } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
 import { createVsCodeTerminalHost } from "./vscode/terminals.js";
-import { spawnCommandRunner } from "./claude/preflight.js";
+import { spawnCommandRunner } from "./platform/preflight.js";
 import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
 import type { AgentPlatform, AgentPlatformId } from "./platform/agent-platform.js";
@@ -42,7 +42,7 @@ import { ActivityRecorder } from "./runtime/activity-recorder.js";
 import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from "./domain/activity.js";
 import { completedCount, isUnsupportedRecord } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
-import { ReopenCoordinator, describeReopenOutcome } from "./claude/reopen.js";
+import { ReopenCoordinator, describeReopenOutcome } from "./platform/reopen.js";
 import { registerReopenCommand } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
@@ -59,13 +59,13 @@ import {
 } from "./bridge/session-lifecycle.js";
 import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
-import { PromptResolver } from "./claude/prompts.js";
+import { PromptResolver } from "./platform/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
-import { FileSystemPromptSpillStore, createPromptSpillRoot } from "./claude/spill.js";
+import { FileSystemPromptSpillStore, createPromptSpillRoot } from "./platform/spill.js";
 import { readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
+import type { AgentId, AgentSession, AgentType, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 
 
 /** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the agent CLI boot. */
@@ -110,14 +110,17 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 
 
 function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigurationSource): DelegationConfigurationSource {
-  return { get: async (type) => {
-    const configured = await source.get(type);
+  const requireSkills = async (configured: Awaited<ReturnType<FileLaunchConfigurationSource["get"]>>, type: AgentType) => {
     if (type === "implementer" || type === "reviewer") {
       if (configured.platform === "claude") await requireHarnessWorkerSkills(workspaceRoot);
       else await requireChatGptWorkerSkills(workspaceRoot);
     }
     return configured;
-  } };
+  };
+  return {
+    get: async (type) => requireSkills(await source.get(type), type),
+    getFor: async (platform, type) => requireSkills(await source.getFor(platform, type), type),
+  };
 }
 
 /** Exposed so the VS Code integration suite can locate command discovery. */
@@ -461,6 +464,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       settings: () => currentConfiguration.autoRun.worktree,
       notify: (message) => output.appendLine(message),
       log: (message) => output.appendLine(message),
+      // Auto Run's own provider has to enforce the boundary, so it is the one
+      // asked whether the project path is representable at all.
+      requireEnforceableIsolation: async (protectedPaths) => {
+        const provider = (await launchFile.load()).value.autoRunProvider;
+        platforms.get(provider)?.requireEnforceableRestrictions({ protectedPaths });
+      },
     }),
     github,
     launcher: coordinator,
@@ -539,7 +548,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           prompt: request.prompt,
           ...(request.skill === undefined ? {} : { skill: request.skill }),
           description: request.description,
-          isolation: { cwd: request.cwd, denyTools: [], writableRoots: [] },
+          isolation: { cwd: request.cwd, protectedPaths: [], writableRoots: [] },
           executionMode: request.executionMode,
           configuration: configured,
         }, request.executionMode);
@@ -627,7 +636,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const runAgent = async (): Promise<void> => {
     if (!requireInitialized()) return;
     try {
-      await coordinator.launchInteractive({ type: "interactive", description: "Interactive" }, "user");
+      const selected = await window.showQuickPick([
+        { label: "Claude", description: "Claude Code", provider: "claude" as const },
+        { label: "ChatGPT", description: "Codex CLI", provider: "chatgpt" as const },
+      ], { placeHolder: "Choose the provider for this agent" });
+      if (selected === undefined) return;
+      await coordinator.launchInteractive({
+        type: "interactive",
+        description: `${selected.label} interactive`,
+        configuration: await launchFile.getFor(selected.provider, "interactive"),
+      }, "user");
     } catch (error) {
       void window.showErrorMessage(error instanceof Error ? error.message : "Unable to run agent");
     }
@@ -707,6 +725,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   );
   const scaffold = async () => {
     try {
+      // Only set when Claude Code is installed; its workers are the ones a
+      // disabled auto-compact would cut off mid-run.
       const autoCompactEnabled = workspace.getConfiguration("claudeCode").get<boolean>("autoCompact");
       const first = await readScaffoldState(workspaceRoot, expectedScaffoldRevision) === "uninitialized";
       const report = await scaffoldProject({

@@ -287,7 +287,7 @@ test("a ChatGPT implementer invokes the installed implement skill with the froze
     ...implementer,
     prompt: "The checked-out branch is for issue #15.",
     difficulty: "basic",
-    disallowedTools: ["Bash(git commit*)", "Bash(gh pr create*)", "Agent", "WebSearch"],
+    restrictions: { deniedCommands: ["git commit*", "gh pr create*"], denySubagents: true, denyWeb: true },
   });
 
   assert.equal(plan.agentType, "implementer");
@@ -319,7 +319,7 @@ test("a ChatGPT implementer cannot spawn subagents, search the web, or mutate Ab
     ...implementer,
     autoRunRestricted: true,
     prompt: "Address the issue.",
-    disallowedTools: ["Bash(git commit*)", "Bash(gh pr merge*)", "Bash(git commit*)", "Read(//C:/project/**)"],
+    restrictions: { denySubagents: true, denyWeb: true, deniedCommands: ["git commit*", "gh pr merge*", "git commit*"], protectedPaths: ["C:/project"] },
   });
 
   assert.equal(plan.args.includes('web_search="disabled"'), true);
@@ -341,7 +341,7 @@ test("an isolated ChatGPT worker requires a Codex version with permission profil
   const plan = platform.planLaunch({
     ...implementer,
     prompt: "Address the issue.",
-    disallowedTools: ["Read(//C:/project/**)", "Edit(//C:/project/**)"],
+    restrictions: { protectedPaths: ["C:/project"] },
   });
 
   await assert.rejects(platform.preflight(plan), /Codex 0\.138\.0 or later.*permission profile/u);
@@ -351,17 +351,30 @@ test("an isolated ChatGPT worker denies writes to the original checkout without 
   const plan = chatGpt().planLaunch({
     ...implementer,
     prompt: "Address the issue.",
-    disallowedTools: ["Read(//C:/project/**)", "Edit(//C:/project/**)"],
+    restrictions: { protectedPaths: ["C:/project"] },
     writableRoots: ["C:\\project\\.git\\worktrees\\work", "C:\\project\\.git\\objects"],
   });
   const profile = plan.args.find((argument) => argument.startsWith("permissions.aboard-worktree=")) ?? "";
 
+  // Codex takes native separators inside the path but needs the portable `/**`
+  // suffix for a read subtree, and a POSIX checkout must keep its own separators.
   assert.ok(profile.includes(`${JSON.stringify("C:\\project/**")}="read"`));
   for (const metadata of ["C:\\project\\.git\\worktrees\\work", "C:\\project\\.git\\objects"]) {
     assert.ok(profile.includes(`${JSON.stringify(metadata)}=true`), metadata);
   }
   assert.ok(profile.includes(`":workspace_roots"={"."="write"}`));
   assert.doesNotMatch(profile, /="deny"/u);
+});
+
+test("a POSIX checkout keeps its own separators in the ChatGPT read subtree", () => {
+  const plan = chatGpt().planLaunch({
+    ...implementer,
+    prompt: "Address the issue.",
+    restrictions: { protectedPaths: ["/home/dev/project/"] },
+  });
+  const profile = plan.args.find((argument) => argument.startsWith("permissions.aboard-worktree=")) ?? "";
+
+  assert.ok(profile.includes(`${JSON.stringify("/home/dev/project/**")}="read"`), profile);
 });
 
 test("a manual ChatGPT implementer can inherit or explicitly configure native tool settings", () => {
@@ -388,6 +401,7 @@ test("Auto Run overrides permissive ChatGPT worker tool settings", () => {
     autoRunRestricted: true,
     configuration: { ...implementer.configuration, webSearch: "live", subagents: "allowed" },
     prompt: "Address the issue.",
+    restrictions: { denyWeb: true, denySubagents: true },
   });
 
   assert.equal(plan.args.includes('web_search="disabled"'), true);
@@ -447,7 +461,7 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
     shell: "powershell",
     runtimeDirectory: "C:/aboard/runtime",
     difficulty: "advanced",
-    disallowedTools: ["Bash(git commit*)", "Bash(gh pr review*)"],
+    restrictions: { deniedCommands: ["git commit*", "gh pr review*"] },
   } as const;
   const settings = { declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" } as const;
 
@@ -486,7 +500,7 @@ test("a resumed ChatGPT reviewer keeps its restrictions and does not re-invoke i
     runtimeDirectory: "C:/aboard/runtime",
     prompt: "Continue",
     difficulty: "expert",
-    disallowedTools: ["Bash(gh pr merge*)"],
+    restrictions: { deniedCommands: ["gh pr merge*"] },
   });
 
   assert.deepEqual(resumed.args.slice(0, 2), ["resume", actual]);

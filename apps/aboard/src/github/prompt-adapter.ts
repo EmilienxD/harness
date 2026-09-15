@@ -7,7 +7,7 @@ import {
   DEFAULT_REVIEW_CHANGE_INSTRUCTION,
   PromptResolver,
   type ResolvedPrompt,
-} from "../claude/prompts.js";
+} from "../platform/prompts.js";
 
 export class GitHubDelegationPromptResolver implements DelegationPromptResolver {
   public constructor(private readonly prompts: PromptResolver) {}

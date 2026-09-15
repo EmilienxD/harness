@@ -61,7 +61,7 @@ import {
   autoRunReviewerPrompt,
   autoRunReviewGuideline,
   requireExploreReport,
-} from "../claude/prompts.js";
+} from "../platform/prompts.js";
 
 export interface PullRequestObservation {
   readonly number: number;
@@ -285,7 +285,7 @@ export class AutoRunEngine {
   #isolation(): { readonly isolation?: LaunchIsolation } {
     const workspace = this.#workspace;
     if (workspace === undefined || !workspace.isolated) return {};
-    return { isolation: { cwd: workspace.root, denyTools: workspace.denyTools, writableRoots: workspace.writableRoots } };
+    return { isolation: { cwd: workspace.root, protectedPaths: workspace.protectedPaths, writableRoots: workspace.writableRoots } };
   }
 
   public async refresh(): Promise<RecoveryEligibility | undefined> {

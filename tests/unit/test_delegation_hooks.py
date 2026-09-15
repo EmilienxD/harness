@@ -11,8 +11,20 @@ from subagents_runtime import hooks, sessions
 def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)
-    monkeypatch.setattr(sessions, "_command_from_config", lambda _config: ["claude"])
-    return sessions.launch(cwd=tmp_path)
+    monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider: ["claude"])
+    return sessions.launch(cwd=tmp_path, provider="claude")
+
+
+def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    launch = tmp_path / ".harness" / "launch.json"
+    launch.parent.mkdir()
+    launch.write_text(
+        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{}},"session":{"stopWaitHours":1.5}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+
+    assert hooks._stop_wait_seconds(tmp_path) == 5400
 
 
 @pytest.mark.parametrize("launcher", [

@@ -16,8 +16,13 @@ export interface PlatformLaunchFile {
   configuration(type: AgentType): ConfiguredLaunch;
 }
 
+export interface LaunchFile {
+  readonly autoRunProvider: AgentPlatformId;
+  configurationFor(platform: AgentPlatformId, type: AgentType): ConfiguredLaunch;
+}
+
 export interface ParsedLaunchFile {
-  readonly value: PlatformLaunchFile;
+  readonly value: LaunchFile;
   readonly diagnostics: readonly LaunchFileDiagnostic[];
 }
 
@@ -26,10 +31,39 @@ function object(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function platform(value: unknown): AgentPlatformId {
-  if (value === undefined) throw new LaunchFileError('launch.json platform is required; set it to "claude" or "chatgpt"');
-  if (value !== "claude" && value !== "chatgpt") throw new LaunchFileError(`launch.json platform must be "claude" or "chatgpt"; received ${JSON.stringify(value)}`);
+/** Both providers are configured independently, so neither may be left out. */
+function providerSection(value: unknown, name: AgentPlatformId): Record<string, unknown> {
+  if (value === undefined) throw new LaunchFileError(`launch.json providers.${name} is required; configure every provider, using {} to accept its defaults`);
+  return object(value, `launch.json providers.${name}`);
+}
+
+function platform(value: unknown, path: string): AgentPlatformId {
+  if (value === undefined) throw new LaunchFileError(`${path} is required; set it to "claude" or "chatgpt"`);
+  if (value !== "claude" && value !== "chatgpt") throw new LaunchFileError(`${path} must be "claude" or "chatgpt"; received ${JSON.stringify(value)}`);
   return value;
+}
+
+function sessionSettings(value: unknown): { readonly unknownFields: readonly string[] } {
+  if (value === undefined) return { unknownFields: [] };
+  const session = object(value, "launch.json session");
+  const stopWaitHours = session.stopWaitHours;
+  if (stopWaitHours !== undefined && (typeof stopWaitHours !== "number" || !Number.isFinite(stopWaitHours) || stopWaitHours < 0)) {
+    throw new LaunchFileError("launch.json session.stopWaitHours must be a non-negative finite number");
+  }
+  return { unknownFields: Object.keys(session).filter((field) => field !== "stopWaitHours") };
+}
+
+class ConfiguredLaunchFile implements LaunchFile {
+  public constructor(
+    public readonly autoRunProvider: AgentPlatformId,
+    private readonly providers: ReadonlyMap<AgentPlatformId, PlatformLaunchFile>,
+  ) {}
+
+  public configurationFor(platform: AgentPlatformId, type: AgentType): ConfiguredLaunch {
+    const configured = this.providers.get(platform);
+    if (configured === undefined) throw new LaunchFileError(`launch.json has no configuration for provider ${platform}`);
+    return configured.configuration(type);
+  }
 }
 
 export function parseLaunchFile(text: string): ParsedLaunchFile {
@@ -37,21 +71,35 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   try { parsed = JSON.parse(text) as unknown; }
   catch (error) { throw new LaunchFileError(`launch.json contains invalid JSON: ${error instanceof Error ? error.message : "parse error"}`); }
   const root = object(parsed, "launch.json");
-  if (root.version !== 2) throw new LaunchFileError("launch.json version must be 2");
-  if (root.stopWaitHours !== undefined && (
-    typeof root.stopWaitHours !== "number" || !Number.isFinite(root.stopWaitHours) || root.stopWaitHours < 0
-  )) throw new LaunchFileError("launch.json stopWaitHours must be a non-negative finite number");
-  const selectedPlatform = platform(root.platform);
-  const parsedPlatform = (() => {
-    switch (selectedPlatform) {
-      case "claude": return parseClaudeLaunchFile(root);
-      case "chatgpt": return parseChatGptLaunchFile(root);
-    }
-  })();
-  const diagnostics = parsedPlatform.unknownFields.length === 0
+  // Version 2 selected one global platform and configured only it. There is no
+  // compatibility layer, so it is rejected with the shape that replaces it.
+  if (root.version !== 3) {
+    throw new LaunchFileError(
+      `launch.json version must be 3: {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}}; received ${JSON.stringify(root.version)}`,
+    );
+  }
+  const autoRun = object(root.autoRun, "launch.json autoRun");
+  const autoRunProvider = platform(autoRun.provider, "launch.json autoRun.provider");
+  const providerValues = object(root.providers, "launch.json providers");
+  const session = sessionSettings(root.session);
+  const claude = parseClaudeLaunchFile(providerSection(providerValues.claude, "claude"));
+  const chatgpt = parseChatGptLaunchFile(providerSection(providerValues.chatgpt, "chatgpt"));
+  const unknownFields = [
+    ...Object.keys(root).filter((field) => !["version", "autoRun", "providers", "session"].includes(field)),
+    ...Object.keys(autoRun).filter((field) => field !== "provider").map((field) => `autoRun.${field}`),
+    ...Object.keys(providerValues).filter((field) => field !== "claude" && field !== "chatgpt").map((field) => `providers.${field}`),
+    ...session.unknownFields.map((field) => `session.${field}`),
+    ...claude.unknownFields.map((field) => `providers.claude.${field}`),
+    ...chatgpt.unknownFields.map((field) => `providers.chatgpt.${field}`),
+  ];
+  const value = new ConfiguredLaunchFile(autoRunProvider, new Map([
+    ["claude", claude.value],
+    ["chatgpt", chatgpt.value],
+  ]));
+  const diagnostics = unknownFields.length === 0
     ? []
-    : [{ severity: "warning" as const, message: `launch.json ignores unsupported fields: ${parsedPlatform.unknownFields.join(", ")}` }];
-  return { value: parsedPlatform.value, diagnostics };
+    : [{ severity: "warning" as const, message: `launch.json ignores unsupported fields: ${unknownFields.join(", ")}` }];
+  return { value, diagnostics };
 }
 
 export async function readLaunchFile(path: string): Promise<ParsedLaunchFile> {
@@ -74,7 +122,7 @@ export interface LaunchConfigurationPaths {
 }
 
 export function defaultLaunchFile(platform: AgentPlatformId = "claude"): ParsedLaunchFile {
-  return parseLaunchFile(JSON.stringify({ version: 2, platform }));
+  return parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: platform }, providers: { claude: {}, chatgpt: {} } }));
 }
 
 export class FileLaunchConfigurationSource implements DelegationConfigurationSource {
@@ -93,10 +141,12 @@ export class FileLaunchConfigurationSource implements DelegationConfigurationSou
     }
     return this.#paths.defaults === undefined ? defaultLaunchFile() : parseLaunchFile(this.#paths.defaults);
   }
-  public async get(type: AgentType): Promise<ConfiguredLaunch> { return (await this.load()).value.configuration(type); }
+  public async get(type: AgentType): Promise<ConfiguredLaunch> {
+    const value = (await this.load()).value;
+    return value.configurationFor(value.autoRunProvider, type);
+  }
 
   public async getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch> {
-    const selected = await this.load();
-    return (selected.value.platform === platform ? selected : defaultLaunchFile(platform)).value.configuration(type);
+    return (await this.load()).value.configurationFor(platform, type);
   }
 }

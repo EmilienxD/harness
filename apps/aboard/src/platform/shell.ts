@@ -66,3 +66,4 @@ export function buildCommandLine(
   const parts = shell === "powershell" ? ["&", ...quoted] : quoted;
   return parts.join(" ");
 }
+

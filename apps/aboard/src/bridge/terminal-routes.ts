@@ -5,7 +5,7 @@ import {
   type CreateAboardTerminalRequest,
   type TerminalController,
   type TerminalKey,
-} from "../claude/terminals.js";
+} from "../platform/terminals.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

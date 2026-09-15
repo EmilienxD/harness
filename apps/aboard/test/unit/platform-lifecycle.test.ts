@@ -42,6 +42,7 @@ test("platform lifecycle ingress binds a discovered id before shared services ob
     createSession: () => ({ sessionId: original, binding: "provisional" }),
     bindSession: (current, observed) => current.binding === "provisional" ? observed : current.sessionId === observed ? observed : undefined,
     normalizeLifecycle: (_kind, payload) => ({ type: "start", agentId, sessionId: (payload as { actual: SessionId }).actual }),
+    requireEnforceableRestrictions: () => undefined,
     planLaunch: () => { throw new Error("not used"); }, planSessionResume: () => { throw new Error("not used"); },
     preflight: async () => undefined, isResumable: async () => false,
   };

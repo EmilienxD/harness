@@ -4,7 +4,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 interface Manifest {
+  files: readonly string[];
   contributes: {
+    jsonValidation: readonly { fileMatch: string; url: string }[];
     commands: readonly { command: string; title?: string; category?: string; icon?: string }[];
     menus: {
       commandPalette?: readonly { command: string; when?: string }[];
@@ -75,6 +77,12 @@ test("Agent Fleet exposes Run Agent and one shared reopen action", async () => {
     contributes.commands.filter((entry) => ["aboard.runAgent", "aboard.reopenSession"].includes(entry.command)).map((entry) => entry.title),
     ["Run Agent", "Reopen a Session"],
   );
+});
+
+test("the launch file has editor validation for the version 3 provider schema", async () => {
+  const { contributes, files } = await manifest();
+  assert.deepEqual(contributes.jsonValidation, [{ fileMatch: "**/.harness/launch.json", url: "./assets/launch.schema.json" }]);
+  assert.ok(files.includes("assets/launch.schema.json"), "the registered schema must ship in the VSIX");
 });
 
 test("every action rendered inline in a panel has an icon", async () => {

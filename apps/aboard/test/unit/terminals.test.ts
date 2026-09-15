@@ -8,7 +8,7 @@ import {
   type TerminalHandle,
   type TerminalHost,
   type TerminalLifecycleEvent,
-} from "../../src/claude/terminals.js";
+} from "../../src/platform/terminals.js";
 import type { AgentId, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { createTerminalRoutes } from "../../src/bridge/terminal-routes.js";
 import type { AuthenticatedBridgeRequest } from "../../src/bridge/protocol.js";
@@ -96,7 +96,6 @@ test("creates one real-terminal record with the complete aboard environment", ()
     ABOARD_SESSION_ID: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
     ABOARD_AGENT_TYPE: "implementer",
     ABOARD_WORKSPACE_ROOT: "C:\\work\\aboard",
-    CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: "1000000",
     ABOARD_ISSUE_NUMBERS: "6",
     ABOARD_WORKER_START_SHA: "1234567890abcdef1234567890abcdef12345678",
     ABOARD_REVIEW_RANGE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

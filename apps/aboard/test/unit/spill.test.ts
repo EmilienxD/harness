@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
 
-import { FileSystemPromptSpillStore, PromptSpillPathError, createPromptSpillRoot } from "../../src/claude/spill.js";
-import { planLaunch, promptSpillRoot, taskPromptPath } from "../../src/claude/launch.js";
+import { FileSystemPromptSpillStore, PromptSpillPathError, createPromptSpillRoot } from "../../src/platform/spill.js";
+import { planLaunch } from "../../src/claude/launch.js";
+import { promptSpillRoot, taskPromptPath } from "../../src/platform/launch.js";
 import type { AgentId, SessionId } from "../../src/domain/contracts.js";
 
 test("an activation owns a short isolated prompt root", async (t) => {

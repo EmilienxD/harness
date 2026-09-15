@@ -630,7 +630,7 @@ function harness(options: HarnessOptions = {}): Harness {
     prepare: async () => ({
       root: isolatedRoot,
       git: trace(git, workspaceGitCalls),
-      denyTools: [`Read(//C:/work/aboard/**)`],
+      protectedPaths: ["C:/work/aboard"],
       writableRoots: ["C:/work/aboard/.git/worktrees/session"],
       isolated: true,
       keepAfterDrain: false,
@@ -1643,7 +1643,7 @@ test("a run with its own checkout works there, launches there, and never moves t
   assert.ok(context.launches.length > 0);
   for (const launch of context.launches) {
     assert.equal(launch.isolation?.cwd, context.isolatedRoot);
-    assert.deepEqual(launch.isolation?.denyTools, ["Read(//C:/work/aboard/**)"]);
+    assert.deepEqual(launch.isolation?.protectedPaths, ["C:/work/aboard"]);
   }
   assert.deepEqual(context.released, ["drained"], "a drained run's checkout has nothing left in it for the user");
 });

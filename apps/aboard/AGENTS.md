@@ -18,8 +18,10 @@ points.
 - `src/configuration.ts`: VS Code and `.abd/settings.json` setting resolution.
 - `src/domain/`: platform-neutral fleet, leases, run plans, Auto Run state, cleanup, contracts, and
   validation. Put product rules here before adapters.
-- `src/platform/`: shared agent-platform contracts, launch configuration, and lifecycle abstractions.
-- `src/claude/`: Claude Code launch, preflight, lifecycle, sessions, skills, prompts, and terminals.
+- `src/platform/`: shared agent-platform contracts, launch configuration, launch/runtime primitives,
+  prompts, terminals, preflight execution, session reopen, and lifecycle abstractions.
+- `src/claude/`: Claude Code configuration parsing, launch planning, preflight policy, lifecycle, sessions,
+  and skills.
 - `src/chatgpt/`: Codex launch, managed-policy checks, lifecycle, sessions, skills, and browser backend
   detection.
 - `src/auto/`: Auto Run engine, observation, permissions, worktrees, and terminal cleanup.
@@ -49,11 +51,13 @@ points.
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.harness/launch.json` version 2 is the launch authority and is re-read for every new launch, resume, and reopen.
-Existing processes retain their configuration. `platform` is explicit (`claude` or `chatgpt`) and is never
-inferred from the wrapper-friendly `command` array. Profiles select model and effort independently and may
-use `inherit`; Auto Run workers may use `by-difficulty`. Platform-specific values must be validated before
-a terminal is created.
+`.harness/launch.json` version 3 is the launch authority and is re-read for every new launch, resume, and
+reopen. `providers.claude` and `providers.chatgpt` are equal, independently validated configurations;
+neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
+while `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
+provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
+configuration. Profiles select model and effort independently and may use `inherit`; Auto Run workers may
+use `by-difficulty`. Platform-specific values must be validated before a terminal is created.
 
 Difficulty routing:
 
@@ -135,7 +139,8 @@ are outside workspaces, permissioned `0600`, and removed on window close.
 
 ## Important Constraints
 
-- Keep all Aboard-owned agent prompt text in `src/claude/prompts.ts` so the complete prompt surface is easy for humans to find and review.
+- Keep all Aboard-owned agent prompt text in `src/platform/prompts.ts` so the complete, provider-neutral
+  prompt surface is easy for humans to find and review.
 - Auto Run injects its commit contract and pinned review scope at launch; the user-owned worker skills
   supply reusable implementation and review behavior.
   AFK implementers and reviewers require successful turns and exactly one clean descendant commit; an AFK
@@ -158,7 +163,10 @@ are outside workspaces, permissioned `0600`, and removed on window close.
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.
   Never parse final-response markup or generate/read worker commit messages.
 - Auto Run adds non-removable Git/GitHub restrictions and, for worktrees, original-checkout path
-  restrictions through each platform's native enforcement.
+  restrictions. Shared orchestration passes provider-neutral `LaunchRestrictions`; each adapter encodes
+  them natively and answers `requireEnforceableRestrictions` for what it cannot express. Worktree mode
+  asks the Auto Run provider that question before creating a checkout, because an interrupted run leaves
+  its checkout behind.
 - Keep TypeScript strict, preserve Windows path behavior, and place cross-platform rules in `domain/` or
   `platform/` rather than duplicating them in adapters.
 

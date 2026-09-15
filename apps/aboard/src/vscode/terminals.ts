@@ -1,6 +1,6 @@
 import { window } from "vscode";
 
-import type { TerminalHost } from "../claude/terminals.js";
+import type { TerminalHost } from "../platform/terminals.js";
 
 export function createVsCodeTerminalHost(): TerminalHost {
   return {

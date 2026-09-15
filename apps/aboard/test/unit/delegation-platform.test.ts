@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DelegationCoordinator } from "../../src/bridge/delegation.js";
+import { DelegationCoordinator, type DelegationConfigurationSource } from "../../src/bridge/delegation.js";
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
-import type { ResolvedPrompt } from "../../src/claude/prompts.js";
-import { TerminalController, type StartupProofTracker, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../../src/claude/terminals.js";
+import type { ResolvedPrompt } from "../../src/platform/prompts.js";
+import { TerminalController, type StartupProofTracker, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../../src/platform/terminals.js";
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
-import type { AgentPlatform, PlatformLaunchRequest } from "../../src/platform/agent-platform.js";
+import type { AgentPlatform, ConfiguredLaunch, PlatformLaunchRequest } from "../../src/platform/agent-platform.js";
 
 const resolved = (text: string): ResolvedPrompt => ({ text, sources: [] });
+
+function configurationSource(get: (type: import("../../src/domain/contracts.js").AgentType) => Promise<ConfiguredLaunch>): DelegationConfigurationSource {
+  return { get, getFor: async (_platform, type) => get(type) };
+}
 
 class FakeTerminal implements TerminalHandle {
   public readonly sent: string[] = [];
@@ -55,6 +59,7 @@ test("shared delegation asks the selected platform for an executable launch plan
     },
     bindSession: (current, observed) => current.sessionId === observed ? observed : undefined,
     normalizeLifecycle: () => { throw new Error("not used"); },
+    requireEnforceableRestrictions: () => undefined,
     planLaunch: (request) => {
       planned.push(request);
       return {
@@ -91,7 +96,7 @@ test("shared delegation asks the selected platform for an executable launch plan
     fleet,
     lease: new WriteLease(),
     terminals,
-    configurations: { get: async () => ({ platform: "claude", settings: opaqueSettings }) },
+    configurations: configurationSource(async () => ({ platform: "claude", settings: opaqueSettings })),
     platforms: new Map([["claude", platform]]),
     prompts: { resolve: async () => undefined },
     spills: { prepare: async () => undefined, write: async () => "unused" },
@@ -129,6 +134,7 @@ test("shared delegation does not report a runtime-assigned session until its act
     createSession: () => ({ sessionId: provisional, binding: "provisional" }),
     bindSession: (current, observed) => current.binding === "provisional" ? observed : current.sessionId === observed ? observed : undefined,
     normalizeLifecycle: () => { throw new Error("not used"); },
+    requireEnforceableRestrictions: () => undefined,
     planLaunch: (request) => ({
       platform: "chatgpt", kind: "start", agentId: request.agentId, sessionId: request.sessionId, agentType: request.agentType,
       shell: request.shell, command: ["codex"], args: [], commandLine: "codex", writeCapability: "write-capable",
@@ -144,7 +150,7 @@ test("shared delegation does not report a runtime-assigned session until its act
   });
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:\\work", fleet, lease: new WriteLease(), terminals,
-    configurations: { get: async () => ({ platform: "chatgpt", settings: { shape: "default" } }) },
+    configurations: configurationSource(async () => ({ platform: "chatgpt", settings: { shape: "default" } })),
     platforms: new Map([["chatgpt", platform]]), prompts: { resolve: async () => undefined },
     spills: { prepare: async () => undefined, write: async () => "unused" }, shell: "powershell",
     agentIdFactory: () => "agent-1" as AgentId, startupTimeoutMs: 60_000,
@@ -181,7 +187,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
   const lease = new WriteLease();
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:/work", fleet, lease, terminals,
-    configurations: { get: async () => ({ platform: "chatgpt", settings: { shape: "explore", declaredCommand: ["codex"] } }) },
+    configurations: configurationSource(async () => ({ platform: "chatgpt", settings: { shape: "explore", declaredCommand: ["codex"] } })),
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => resolved("Explore the codebase without modifying files.\n\nReport the implementation context for issue #14.") },
     spills: { prepare: async () => undefined, write: async (file) => { delivered.push(file.contents); return file.relativePath; } }, shell: "powershell",
@@ -228,10 +234,10 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   const lease = new WriteLease();
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:/work", fleet, lease, terminals,
-    configurations: { get: async () => ({
+    configurations: configurationSource(async () => ({
       platform: "chatgpt",
       settings: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
-    }) },
+    })),
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => resolved("The checked-out branch is for issue #15.") },
     spills: { prepare: async () => undefined, write: async (file) => { delivered.push(file.contents); return file.relativePath; } },
@@ -246,7 +252,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
     chrome: true,
     isolation: {
       cwd: "C:\\checkouts\\run-1\\work",
-      denyTools: ["Read(//C:/work/**)", "Edit(//C:/work/**)"],
+      protectedPaths: ["C:/work"],
       writableRoots: ["C:\\work\\.git\\worktrees\\work", "C:\\work\\.git\\objects"],
     },
   });
@@ -296,13 +302,13 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
   const lease = new WriteLease();
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:/work", fleet, lease, terminals,
-    configurations: { get: async (type) => {
+    configurations: configurationSource(async (type) => {
       requested.push(type);
       return {
         platform: "chatgpt",
         settings: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
       };
-    } },
+    }),
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => resolved("Review pull request #42 for issue #15.") },
     spills: { prepare: async () => undefined, write: async () => "unused" },
@@ -349,13 +355,13 @@ test("an explicitly interactive ChatGPT reviewer remains attended", async () => 
   const lease = new WriteLease();
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:/work", fleet, lease, terminals,
-    configurations: { get: async (type) => {
+    configurations: configurationSource(async (type) => {
       requested.push(type);
       return {
         platform: "chatgpt",
         settings: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "live", subagents: "allowed" },
       };
-    } },
+    }),
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => resolved("Review pull request #42 for issue #15.") },
     spills: { prepare: async () => undefined, write: async () => "unused" },
@@ -379,7 +385,7 @@ test("an explicitly interactive ChatGPT reviewer remains attended", async () => 
   assert.equal(lease.current()?.agentId, agentId);
 });
 
-test("a ChatGPT reopen preserves identity and ownership while waiting for resume startup proof", async () => {
+test("a ChatGPT reopen uses ChatGPT configuration even when Claude is the Auto Run default", async () => {
   const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
   const agentId = "agent-1" as AgentId;
   let resolveProof: ((value: unknown) => void) | undefined;
@@ -394,6 +400,7 @@ test("a ChatGPT reopen preserves identity and ownership while waiting for resume
     createSession: () => ({ sessionId, binding: "provisional" }),
     bindSession: (current, observed) => current.sessionId === observed ? observed : undefined,
     normalizeLifecycle: () => { throw new Error("not used"); },
+    requireEnforceableRestrictions: () => undefined,
     planLaunch: () => { throw new Error("not used"); },
     planSessionResume: (request) => ({
       platform: "chatgpt", kind: "resume", agentId: request.agentId, sessionId: request.sessionId, agentType: request.agentType,
@@ -421,7 +428,13 @@ test("a ChatGPT reopen preserves identity and ownership while waiting for resume
   });
   const coordinator = new DelegationCoordinator({
     workspaceRoot: "C:/work", fleet, lease, terminals,
-    configurations: { get: async () => ({ platform: "chatgpt", settings: { shape: "default" } }) },
+    configurations: {
+      get: async () => ({ platform: "claude", settings: { shape: "default" } }),
+      getFor: async (provider) => {
+        assert.equal(provider, "chatgpt");
+        return { platform: "chatgpt", settings: { shape: "default", declaredCommand: ["configured-codex"] } };
+      },
+    },
     platforms: new Map([["chatgpt", platform]]), prompts: { resolve: async () => undefined },
     spills: { prepare: async () => undefined, write: async () => "unused" }, shell: "powershell",
     agentIdFactory: () => "unused" as AgentId, startupTimeoutMs: 60_000,
@@ -487,10 +500,10 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     fleet,
     lease: new WriteLease(),
     terminals,
-    configurations: { get: async () => ({
+    configurations: configurationSource(async () => ({
       platform: "chatgpt",
       settings: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"], webSearch: "live", subagents: "allowed" },
-    }) },
+    })),
     platforms: new Map([["chatgpt", platform]]),
     prompts: { resolve: async () => undefined },
     spills: { prepare: async () => undefined, write: async () => "unused" },

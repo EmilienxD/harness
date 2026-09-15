@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { CommandRunner } from "../claude/preflight.js";
+import type { CommandRunner } from "../platform/preflight.js";
 import type { SessionId } from "../domain/contracts.js";
 import type { AgentPlatform, AgentPlatformCapabilities, PlatformLaunchPlan, PlatformLaunchRequest, PlatformLifecycleAssets, PlatformResumeRequest, PlatformSessionIdentity } from "../platform/agent-platform.js";
 import type { LifecycleObservation, PlatformLifecycleKind } from "../platform/lifecycle.js";
@@ -36,6 +36,9 @@ export class ChatGptAgentPlatform implements AgentPlatform {
   public createSession(): PlatformSessionIdentity { return { sessionId: (this.options.sessionIdFactory ?? (() => randomUUID() as SessionId))(), binding: "provisional" }; }
   public bindSession(current: PlatformSessionIdentity, observed: SessionId): SessionId | undefined { return current.binding === "provisional" ? observed : current.sessionId === observed ? observed : undefined; }
   public normalizeLifecycle(kind: PlatformLifecycleKind, payload: unknown): LifecycleObservation { return normalizeChatGptLifecycle(kind, payload); }
+
+  /** Codex takes structured config values, so every neutral restriction is representable. */
+  public requireEnforceableRestrictions(): void {}
   public planLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan { return planChatGptLaunch(request); }
   public planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan { return planChatGptSessionResume(request); }
   public async preflight(plan: PlatformLaunchPlan): Promise<void> {

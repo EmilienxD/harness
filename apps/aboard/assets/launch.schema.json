@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aboard.dev/schemas/launch-v3.json",
+  "title": "Aboard launch configuration",
+  "description": "Version 3 configures Claude and ChatGPT independently; autoRun.provider selects only the Auto Run default. Aboard ignores fields it does not recognize and reports them as warnings in Output -> aboard, so unknown properties are accepted here too.",
+  "type": "object",
+  "required": ["version", "autoRun", "providers"],
+  "properties": {
+    "version": { "const": 3 },
+    "autoRun": {
+      "type": "object",
+      "required": ["provider"],
+      "properties": {
+        "provider": { "enum": ["claude", "chatgpt"] }
+      }
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "stopWaitHours": { "type": "number", "minimum": 0 }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "required": ["claude", "chatgpt"],
+      "properties": {
+        "claude": { "$ref": "#/$defs/claudeProvider" },
+        "chatgpt": { "$ref": "#/$defs/chatgptProvider" }
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "claudeInteractiveProfile": {
+      "type": "object",
+      "properties": {
+        "model": { "enum": ["inherit", "haiku", "sonnet", "opus"] },
+        "effort": { "enum": ["inherit", "low", "medium", "high", "xhigh", "max"] },
+        "deniedTools": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "claudeExploreProfile": {
+      "type": "object",
+      "properties": {
+        "model": { "enum": ["inherit", "haiku", "sonnet", "opus"] },
+        "effort": { "enum": ["inherit", "low", "medium", "high", "xhigh", "max"] }
+      }
+    },
+    "claudeWorkerProfile": {
+      "type": "object",
+      "properties": {
+        "model": { "enum": ["by-difficulty", "haiku", "sonnet", "opus"] },
+        "effort": { "enum": ["by-difficulty", "low", "medium", "high", "xhigh", "max"] },
+        "deniedTools": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "chatgptSessionProfile": {
+      "type": "object",
+      "properties": {
+        "model": { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus", "by-difficulty"] } },
+        "effort": { "enum": ["inherit", "minimal", "low", "medium", "high", "xhigh"] }
+      }
+    },
+    "chatgptWorkerProfile": {
+      "type": "object",
+      "properties": {
+        "model": { "anyOf": [{ "const": "by-difficulty" }, { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus"] } }] },
+        "effort": { "enum": ["inherit", "by-difficulty", "minimal", "low", "medium", "high", "xhigh"] },
+        "webSearch": { "enum": ["disabled", "cached", "indexed", "live"] },
+        "subagents": { "enum": ["allowed", "denied"] }
+      }
+    },
+    "claudeProvider": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "interactive": { "$ref": "#/$defs/claudeInteractiveProfile" },
+        "explore": { "$ref": "#/$defs/claudeExploreProfile" },
+        "implementer": { "$ref": "#/$defs/claudeWorkerProfile" },
+        "reviewer": { "$ref": "#/$defs/claudeWorkerProfile" }
+      }
+    },
+    "chatgptProvider": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "interactive": { "$ref": "#/$defs/chatgptSessionProfile" },
+        "explore": { "$ref": "#/$defs/chatgptSessionProfile" },
+        "implementer": { "$ref": "#/$defs/chatgptWorkerProfile" },
+        "reviewer": { "$ref": "#/$defs/chatgptWorkerProfile" }
+      }
+    }
+  }
+}

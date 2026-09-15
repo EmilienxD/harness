@@ -74,10 +74,13 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
       terminalCommand: [process.execPath, bridge, "--spawn"],
     }, null, 2)}\n`, "utf8");
     await writeFile(join(projectRoot, ".harness", "launch.json"), `${JSON.stringify({
-      version: 2,
-      platform,
-      command: [providerCommand.file, ...providerCommand.args],
-      stopWaitHours: 0.025,
+      version: 3,
+      autoRun: { provider: "claude" },
+      providers: {
+        claude: platform === "claude" ? { command: [providerCommand.file, ...providerCommand.args] } : {},
+        chatgpt: platform === "chatgpt" ? { command: [providerCommand.file, ...providerCommand.args] } : {},
+      },
+      session: { stopWaitHours: 0.025 },
     }, null, 2)}\n`, "utf8");
 
     const commonEnvironment: NodeJS.ProcessEnv = {

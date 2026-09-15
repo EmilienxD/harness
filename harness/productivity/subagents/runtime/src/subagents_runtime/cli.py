@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"harness subagents {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
     run_parser = commands.add_parser("run", help="open an independent visible agent session")
-    run_parser.add_argument("--provider", choices=("claude", "chatgpt"), default="claude")
+    run_parser.add_argument("--provider", choices=("claude", "chatgpt"), required=True)
     run_parser.add_argument("prompt", nargs="*")
     run_parser.set_defaults(func=cmd_run)
     ask_parser = commands.add_parser("ask", help="process a task-bound request inbox")

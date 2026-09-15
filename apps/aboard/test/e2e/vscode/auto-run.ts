@@ -95,16 +95,14 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
 
 async function commitInitializedScaffold(root: string, settings: Readonly<Record<string, unknown>>, platform: E2ePlatform): Promise<void> {
   const launchPath = join(root, ".harness", "launch.json");
-  const launch = JSON.parse(await readFile(launchPath, "utf8")) as Record<string, unknown>;
-  if (platform === "claude") launch.command = [
-    "claude",
-    "--permission-mode", "acceptEdits",
-    "--allowedTools", "Bash(git add*),Bash(git commit*)",
-  ];
-  else {
-    for (const key of Object.keys(launch)) delete launch[key];
-    Object.assign(launch, { version: 2, platform: "chatgpt", command: ["codex"] });
-  }
+  const launch = JSON.parse(await readFile(launchPath, "utf8")) as {
+    autoRun: { provider: E2ePlatform };
+    providers: Record<E2ePlatform, { command: string[] }>;
+  };
+  launch.autoRun.provider = platform;
+  launch.providers[platform].command = platform === "claude" ? [
+    "claude", "--permission-mode", "acceptEdits", "--allowedTools", "Bash(git add*),Bash(git commit*)",
+  ] : ["codex"];
   await writeFile(launchPath, `${JSON.stringify(launch, null, 2)}\n`, "utf8");
   const settingsPath = join(root, ".vscode", "settings.json");
   await mkdir(join(root, ".vscode"), { recursive: true });

@@ -1,6 +1,6 @@
 import type { Disposable } from "vscode";
 
-import { describeReopenOutcome, type ReopenCoordinator, type ReopenOption } from "../claude/reopen.js";
+import { describeReopenOutcome, type ReopenCoordinator, type ReopenOption } from "../platform/reopen.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 
 export interface ReopenQuickPickItem {

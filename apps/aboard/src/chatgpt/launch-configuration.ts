@@ -1,15 +1,17 @@
-import { BY_DIFFICULTY } from "../claude/launch.js";
+import { BY_DIFFICULTY } from "../platform/launch.js";
 import { isAutoRunWorkerType, type AgentType } from "../domain/contracts.js";
 import type { ConfiguredLaunch } from "../platform/agent-platform.js";
 import { LaunchFileError, type PlatformLaunchFile } from "../platform/launch-configuration.js";
 import { CHATGPT_EFFORTS, CHATGPT_WEB_SEARCH_MODES, type ChatGptEffort, type ChatGptLaunchConfiguration, type ChatGptWebSearch } from "./launch.js";
 
 const PROFILE_NAMES = ["interactive", "explore", "implementer", "reviewer"] as const;
-const ROOT_FIELDS = new Set(["version", "platform", "command", "stopWaitHours", ...PROFILE_NAMES]);
+const ROOT_FIELDS = new Set(["command", ...PROFILE_NAMES]);
 const PROFILE_FIELDS = new Set(["model", "effort", "webSearch", "subagents"]);
 const WORKER_FIELDS = new Set(["webSearch", "subagents"]);
 const CLAUDE_MODELS = new Set(["haiku", "sonnet", "opus"]);
 const SUBAGENT_MODES = ["allowed", "denied"] as const;
+/** Both providers are configured side by side, so every message names its own. */
+const PATH = "launch.json providers.chatgpt";
 
 type ProfileName = (typeof PROFILE_NAMES)[number];
 type Model = string | typeof BY_DIFFICULTY;
@@ -40,10 +42,10 @@ export function parseChatGptLaunchFile(root: Record<string, unknown>): { readonl
   const command = parseCommand(root.command);
   const profiles = {} as Record<ProfileName, Profile>;
   for (const name of PROFILE_NAMES) {
-    const input = root[name] === undefined ? {} : object(root[name], `launch.json ${name}`);
+    const input = root[name] === undefined ? {} : object(root[name], `${PATH}.${name}`);
     unknown.push(...Object.keys(input).filter((field) => !PROFILE_FIELDS.has(field)).map((field) => `${name}.${field}`));
     for (const field of WORKER_FIELDS) {
-      if (!isWorkerProfile(name) && input[field] !== undefined) throw new LaunchFileError(`launch.json ${name}.${field} is only supported for the implementer and reviewer profiles`);
+      if (!isWorkerProfile(name) && input[field] !== undefined) throw new LaunchFileError(`${PATH}.${name}.${field} is only supported for the implementer and reviewer profiles`);
     }
     const fallback = DEFAULT_PROFILES[name];
     profiles[name] = {
@@ -92,7 +94,7 @@ function object(value: unknown, path: string): Record<string, unknown> {
 
 function parseCommand(value: unknown): readonly string[] {
   if (value === undefined) return ["codex"];
-  if (!Array.isArray(value) || value.length === 0 || !value.every((token) => typeof token === "string" && token.trim().length > 0)) throw new LaunchFileError("launch.json command must be a non-empty array of non-empty strings");
+  if (!Array.isArray(value) || value.length === 0 || !value.every((token) => typeof token === "string" && token.trim().length > 0)) throw new LaunchFileError(`${PATH}.command must be a non-empty array of non-empty strings`);
   return value;
 }
 
@@ -100,11 +102,11 @@ function parseModel(value: unknown, profile: ProfileName, fallback: Model | unde
   if (value === undefined) return fallback;
   if (value === "inherit") return undefined;
   if (value === BY_DIFFICULTY) {
-    if (!isWorkerProfile(profile)) throw new LaunchFileError(`launch.json ${profile}.model must be inherit or a Codex model slug`);
+    if (!isWorkerProfile(profile)) throw new LaunchFileError(`${PATH}.${profile}.model must be inherit or a Codex model slug`);
     return BY_DIFFICULTY;
   }
-  if (typeof value !== "string" || value.trim().length === 0) throw new LaunchFileError(`launch.json ${profile}.model must be inherit${isWorkerProfile(profile) ? `, ${BY_DIFFICULTY},` : ""} or a non-empty string`);
-  if (CLAUDE_MODELS.has(value)) throw new LaunchFileError(`launch.json ${profile}.model is not valid for platform chatgpt; received Claude model ${JSON.stringify(value)}`);
+  if (typeof value !== "string" || value.trim().length === 0) throw new LaunchFileError(`${PATH}.${profile}.model must be inherit${isWorkerProfile(profile) ? `, ${BY_DIFFICULTY},` : ""} or a non-empty string`);
+  if (CLAUDE_MODELS.has(value)) throw new LaunchFileError(`${PATH}.${profile}.model is not valid for platform chatgpt; received Claude model ${JSON.stringify(value)}`);
   return value;
 }
 
@@ -112,12 +114,12 @@ function parseEffort(value: unknown, profile: ProfileName, fallback: Effort | un
   if (value === undefined) return fallback;
   if (value === "inherit") return undefined;
   const allowed = isWorkerProfile(profile) ? [BY_DIFFICULTY, ...CHATGPT_EFFORTS] : [...CHATGPT_EFFORTS];
-  if (typeof value !== "string" || !allowed.includes(value)) throw new LaunchFileError(`launch.json ${profile}.effort is not valid for platform chatgpt; expected inherit or ${allowed.join(", ")}`);
+  if (typeof value !== "string" || !allowed.includes(value)) throw new LaunchFileError(`${PATH}.${profile}.effort is not valid for platform chatgpt; expected inherit or ${allowed.join(", ")}`);
   return value as Effort;
 }
 
 function parseChoice<T extends string>(value: unknown, allowed: readonly T[], profile: ProfileName, field: string, fallback: T | undefined): T | undefined {
   if (value === undefined) return fallback;
-  if (typeof value !== "string" || !allowed.includes(value as T)) throw new LaunchFileError(`launch.json ${profile}.${field} is not valid for platform chatgpt; expected ${allowed.join(", ")}`);
+  if (typeof value !== "string" || !allowed.includes(value as T)) throw new LaunchFileError(`${PATH}.${profile}.${field} is not valid for platform chatgpt; expected ${allowed.join(", ")}`);
   return value as T;
 }

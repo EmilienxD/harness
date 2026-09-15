@@ -5,6 +5,7 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 export interface ScaffoldOptions {
   readonly projectRoot: string;
   readonly assetRoot: string;
+  /** Absent unless Claude Code itself is installed and has an explicit setting. */
   readonly autoCompactEnabled?: boolean;
 }
 

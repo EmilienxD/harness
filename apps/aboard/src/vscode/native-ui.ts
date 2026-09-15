@@ -2,7 +2,7 @@ import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibl
 
 import type { AgentSession, TerminalId } from "../domain/contracts.js";
 
-import type { TerminalController } from "../claude/terminals.js";
+import type { TerminalController } from "../platform/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { WriteLease } from "../domain/lease.js";
 import { FleetNotifications, FleetTreeModel, LeaseSaveWarnings, registerFleetCommands, renderFleetStatus, type FleetTreeNode } from "./fleet.js";

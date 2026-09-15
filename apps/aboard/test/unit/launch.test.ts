@@ -2,18 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BY_DIFFICULTY,
-  LaunchPlanError,
   difficultyLaunchPolicy,
   launchWriteCapability,
   planLaunch,
   planSessionResume,
-  promptSpillRoot,
-  taskPromptPath,
   type LaunchConfiguration,
   type LaunchPlanRequest,
-  type SessionWrapperLayout,
 } from "../../src/claude/launch.js";
+import {
+  BY_DIFFICULTY,
+  LaunchPlanError,
+  promptSpillRoot,
+  taskPromptPath,
+  type SessionWrapperLayout,
+} from "../../src/platform/launch.js";
 import type { AgentId, AgentType, SessionId } from "../../src/domain/contracts.js";
 
 const agentId = "agent-1" as AgentId;
@@ -56,6 +58,7 @@ test("plans an unmodified interactive session without an initial prompt", () => 
   }));
 
   assert.equal(plan.promptDelivery, "none");
+  assert.deepEqual(plan.providerEnvironment, { CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: "1000000" });
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, false);
   assert.equal(plan.args.includes("--agent"), false);
@@ -142,12 +145,21 @@ test("requires a first prompt for skill launches", () => {
 test("preserves immutable and isolation deny rules without MCP allowlisting", () => {
   const plan = planLaunch(request({
     configuration: { ...workerConfiguration("implementer"), deniedTools: ["Agent", "WebSearch", "WebFetch"] },
-    disallowedTools: ["Bash(git push*)", "Bash(git push*)", "WebFetch"],
+    restrictions: { deniedCommands: ["git push*", "git push*"], denyWeb: true },
   }));
 
   assert.equal(hasPair(plan.args, "--disallowedTools", "Agent,WebSearch,WebFetch,Bash(git push*)"), true);
   assert.equal(plan.args.includes("--allowedTools"), false);
   assert.equal(plan.args.includes("--mcp-config"), false);
+});
+
+test("Claude rejects protected paths its comma-delimited deny flag cannot encode", () => {
+  assert.throws(
+    () => planLaunch(request({ restrictions: { protectedPaths: ["C:\\projects\\with,comma"] } })),
+    (error: unknown) => error instanceof LaunchPlanError
+      && error.code === "invalid-tool-rule"
+      && /Claude.*comma/u.test(error.message),
+  );
 });
 
 test("spills long skill prompts and keeps the original task separately", () => {
@@ -187,7 +199,7 @@ test("resume restores policy and restrictions without re-expanding a skill", () 
     configuration: workerConfiguration("reviewer"),
     runtimeDirectory: runtimeRoot,
     prompt: "Continue",
-    disallowedTools: ["Bash(git push*)"],
+    restrictions: { deniedCommands: ["git push*"] },
     difficulty: "advanced",
   });
 

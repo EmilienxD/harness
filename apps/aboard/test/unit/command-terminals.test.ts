@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { TerminalCreationOptions, TerminalHandle, TerminalHost } from "../../src/claude/terminals.js";
+import type { TerminalCreationOptions, TerminalHandle, TerminalHost } from "../../src/platform/terminals.js";
 import {
   CommandTerminalService,
   createCommandRoutes,

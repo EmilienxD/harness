@@ -1,6 +1,6 @@
 import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
 import { dirname } from "node:path";
-import type { WriteCapability } from "../domain/capability.js";
+import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
 
   isNonRestorablePersistedAgentType,
@@ -23,14 +23,13 @@ import {
   type SessionObservation,
   type WriteLeaseHolder,
 } from "../domain/lease.js";
-import { AUTO_RUN_DISALLOWED_TOOLS } from "../auto/permissions.js";
-import { isolationDenyRules, worktreeGitMetadataRoots } from "../auto/worktree.js";
+import { AUTO_RUN_RESTRICTIONS } from "../auto/permissions.js";
+import { isolationProtectedPaths, worktreeGitMetadataRoots } from "../auto/worktree.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
 export interface LaunchIsolation {
   readonly cwd: string;
-  /** Permission deny rules added to this launch's `--disallowedTools`. */
-  readonly denyTools: readonly string[];
+  readonly protectedPaths: readonly string[];
   readonly writableRoots: readonly string[];
 }
 
@@ -110,7 +109,10 @@ export interface InteractiveLaunchHandles {
 }
 
 export interface DelegationConfigurationSource {
+  /** Resolves the provider selected for a new Auto Run. */
   get(type: AgentType): Promise<ConfiguredLaunch>;
+  /** Resolves one explicit or session-owned provider without consulting the Auto Run default. */
+  getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch>;
 }
 
 export interface DelegationPromptResolver {
@@ -137,8 +139,8 @@ export interface DelegationCoordinatorOptions {
   readonly spills: PromptSpillStore;
 
   readonly shell: ShellKind;
-  /** Infrastructure-level denials applied to every delegated launch and resume. */
-  readonly disallowedTools?: readonly string[];
+  /** Infrastructure-level restrictions applied to every delegated launch and resume. */
+  readonly restrictions?: LaunchRestrictions;
   readonly command?: () => readonly string[] | undefined;
   readonly effort?: () => EffortLevel | undefined;
   readonly agentIdFactory: () => AgentId;
@@ -161,6 +163,15 @@ export class DelegationError extends Error {
 
 function leaseReason(origin: LaunchOrigin): string {
   return origin === "auto-run" ? "auto-run launched agent" : "user launched agent";
+}
+
+function mergeRestrictions(...values: readonly (LaunchRestrictions | undefined)[]): LaunchRestrictions {
+  return {
+    ...(values.some((value) => value?.denySubagents === true) ? { denySubagents: true as const } : {}),
+    ...(values.some((value) => value?.denyWeb === true) ? { denyWeb: true as const } : {}),
+    deniedCommands: [...new Set(values.flatMap((value) => value?.deniedCommands ?? []))],
+    protectedPaths: [...new Set(values.flatMap((value) => value?.protectedPaths ?? []))],
+  };
 }
 
 const EMPTY_TELEMETRY: AgentTelemetry = {
@@ -236,10 +247,7 @@ export class DelegationCoordinator {
   }
 
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
-    const configured = await this.options.configurations.get(target.type);
-    if (configured.platform !== target.platform) {
-      throw new DelegationError("unresumable-session", `Session ${target.sessionId} belongs to ${target.platform}, but launch.json selects ${configured.platform}`);
-    }
+    const configured = await this.options.configurations.getFor(target.platform, target.type);
     const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
@@ -262,13 +270,13 @@ export class DelegationCoordinator {
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
       ...(target.prompt === undefined ? {} : { prompt: target.prompt }),
       maxInlinePromptChars: this.options.maxInlinePromptChars,
-      disallowedTools: [
-        ...(this.options.disallowedTools ?? []),
-        ...(target.autoRunRestricted === true ? AUTO_RUN_DISALLOWED_TOOLS : []),
-        ...(target.autoRunRestricted === true && target.cwd !== undefined
-          ? isolationDenyRules(this.options.workspaceRoot)
-          : []),
-      ],
+      restrictions: mergeRestrictions(
+        this.options.restrictions,
+        target.autoRunRestricted === true ? AUTO_RUN_RESTRICTIONS : undefined,
+        target.autoRunRestricted === true && target.cwd !== undefined
+          ? { protectedPaths: isolationProtectedPaths(this.options.workspaceRoot) }
+          : undefined,
+      ),
       writableRoots,
       ...this.#effort(),
       ...this.#command(),
@@ -316,6 +324,7 @@ export class DelegationCoordinator {
         attended,
         ...(target.focus === undefined ? {} : { focus: target.focus }),
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+        ...(plan.providerEnvironment === undefined ? {} : { providerEnvironment: plan.providerEnvironment }),
       });
       terminalStarted = true;
       startedTerminalId = terminal.terminalId;
@@ -476,11 +485,11 @@ export class DelegationCoordinator {
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
       prompt,
       ...(input.skill === undefined ? {} : { skill: input.skill }),
-      disallowedTools: [
-        ...(this.options.disallowedTools ?? []),
-        ...(origin === "auto-run" ? AUTO_RUN_DISALLOWED_TOOLS : []),
-        ...(input.isolation?.denyTools ?? []),
-      ],
+      restrictions: mergeRestrictions(
+        this.options.restrictions,
+        origin === "auto-run" ? AUTO_RUN_RESTRICTIONS : undefined,
+        input.isolation === undefined ? undefined : { protectedPaths: input.isolation.protectedPaths },
+      ),
       writableRoots: input.isolation?.writableRoots ?? [],
       ...this.#command(),
       ...this.#effort(),
@@ -516,6 +525,7 @@ export class DelegationCoordinator {
         // A failed launch prints to the terminal and exits before any hook; the
         // platform's start observation is the only trustworthy proof the session is up.
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+        ...(plan.providerEnvironment === undefined ? {} : { providerEnvironment: plan.providerEnvironment }),
       }, (createdTerminal) => {
         this.options.fleet.register({
           platform: platform.id,

@@ -195,7 +195,7 @@ def _config() -> dict[str, Any]:
 
 
 def launch_configuration(cwd: Path) -> dict[str, Any]:
-    """Resolve the version-2 project, global, then built-in launch configuration."""
+    """Resolve the version-3 project, global, then built-in launch configuration."""
     project = cwd.resolve() / ".harness" / "launch.json"
     global_path = state_dir() / "launch.json"
     for path in (project, global_path):
@@ -205,18 +205,37 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise SessionError(f"invalid Harness launch configuration {path}: {exc}") from exc
-        if not isinstance(value, dict) or value.get("version") != 2:
-            raise SessionError(f"Harness launch configuration {path} must be a version-2 JSON object")
-        stop_wait = value.get("stopWaitHours")
+        if not isinstance(value, dict) or value.get("version") != 3:
+            raise SessionError(f"Harness launch configuration {path} must be a version-3 JSON object")
+        auto_run = value.get("autoRun")
+        providers = value.get("providers")
+        if (
+            not isinstance(auto_run, dict)
+            or auto_run.get("provider") not in {"claude", "chatgpt"}
+            or not isinstance(providers, dict)
+            or not isinstance(providers.get("claude"), dict)
+            or not isinstance(providers.get("chatgpt"), dict)
+        ):
+            raise SessionError(
+                f"Harness launch configuration {path} must configure autoRun.provider and both providers.claude and providers.chatgpt"
+            )
+        session = value.get("session", {})
+        if not isinstance(session, dict):
+            raise SessionError(f"Harness launch configuration {path} session must be a JSON object")
+        stop_wait = session.get("stopWaitHours")
         if stop_wait is not None and (
             isinstance(stop_wait, bool)
             or not isinstance(stop_wait, (int, float))
             or not math.isfinite(stop_wait)
             or stop_wait < 0
         ):
-            raise SessionError(f"Harness launch configuration {path} stopWaitHours must be a non-negative finite number")
+            raise SessionError(f"Harness launch configuration {path} session.stopWaitHours must be a non-negative finite number")
         return value
-    return {"version": 2, "platform": "claude"}
+    return {
+        "version": 3,
+        "autoRun": {"provider": "claude"},
+        "providers": {"claude": {}, "chatgpt": {}},
+    }
 
 
 def _split_command(value: str) -> list[str]:
@@ -243,10 +262,11 @@ def _command(value: object, setting: str) -> list[str]:
     return list(command)
 
 
-def _command_from_config(config: dict[str, Any], provider: str = "claude") -> list[str]:
-    setting = "chatgptCommand" if provider == "chatgpt" else "claudeCommand"
-    selected = config.get("command") if config.get("platform") == provider else None
-    command = selected if selected is not None else config.get(setting, ["codex"] if provider == "chatgpt" else ["claude"])
+def _command_from_config(config: dict[str, Any], provider: str) -> list[str]:
+    setting = f"providers.{provider}.command"
+    providers = config.get("providers", {})
+    provider_config = providers.get(provider, {}) if isinstance(providers, dict) else {}
+    command = provider_config.get("command", ["codex"] if provider == "chatgpt" else ["claude"])
     command = _command(command, setting)
     executable = Path(command[0]).expanduser()
     if shutil.which(command[0]) is None and not executable.is_file():
@@ -255,9 +275,7 @@ def _command_from_config(config: dict[str, Any], provider: str = "claude") -> li
 
 
 def _provider_command(config: dict[str, Any], provider: str) -> list[str]:
-    # Keep the established Claude seam one-argument-compatible for wrappers
-    # and tests; only the new ChatGPT branch needs the selector.
-    return _command_from_config(config) if provider == "claude" else _command_from_config(config, provider)
+    return _command_from_config(config, provider)
 
 
 def _harness_environment(environment: dict[str, str]) -> dict[str, str]:
@@ -329,7 +347,7 @@ def _visible_terminal(argv: list[str], environment: dict[str, str], cwd: Path) -
 def _register(
     session_id: str,
     cwd: Path,
-    provider: str = "claude",
+    provider: str,
     execution_mode: str = "interactive",
 ) -> None:
     with _connect() as connection:
@@ -385,7 +403,7 @@ def launch(
     prompt: str | None = None,
     cwd: Path | None = None,
     *,
-    provider: str = "claude",
+    provider: str,
 ) -> str:
     session_id = str(uuid.uuid4())
     selected_cwd = (cwd or Path.cwd()).resolve()

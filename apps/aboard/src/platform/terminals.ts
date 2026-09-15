@@ -30,9 +30,6 @@ export const TERMINAL_KEYS = [
   "ctrl-l",
 ] as const;
 
-/** High finite guard only for Claude Code's own consecutive Stop continuations. */
-export const ABOARD_STOP_HOOK_BLOCK_CAP = "1000000";
-
 export type TerminalKey = (typeof TERMINAL_KEYS)[number];
 
 const KEY_SEQUENCES: Readonly<Record<TerminalKey, string>> = {
@@ -102,6 +99,7 @@ export interface CreateAboardTerminalRequest {
   readonly reviewRange?: string;
   readonly workerContinuation?: true;
   readonly startupTimeoutMs?: number;
+  readonly providerEnvironment?: Readonly<Record<string, string>>;
 }
 
 export type TerminalLifecycleEvent =
@@ -235,7 +233,7 @@ export class TerminalController {
       ABOARD_SESSION_ID: request.sessionId,
       ABOARD_AGENT_TYPE: request.agentType,
       ABOARD_WORKSPACE_ROOT: cwd,
-      CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: ABOARD_STOP_HOOK_BLOCK_CAP,
+      ...(request.providerEnvironment ?? {}),
     };
     if (environment.runtimeRoot !== undefined) env.ABOARD_RUNTIME_ROOT = environment.runtimeRoot;
     if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
@@ -307,7 +305,7 @@ export class TerminalController {
 
     if (isUserFacing(request)) handle.show(false);
     // VS Code receives cwd too; this visible belt-and-braces cd prevents a
-    // shell that starts elsewhere from launching Claude against another tree.
+    // shell that starts elsewhere from launching an agent against another tree.
     handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
 
@@ -382,7 +380,7 @@ export class TerminalController {
   }
 
   // These methods are intentionally takeover-specific. Automated prompt delivery
-  // belongs in Claude launch/resume arguments, never in terminal input.
+  // belongs in provider launch/resume arguments, never in terminal input.
   public sendUserTakeoverText(terminalId: TerminalId, text: string, addNewLine = true): void {
     this.#requireOpenHandle(terminalId).sendText(text, addNewLine);
   }

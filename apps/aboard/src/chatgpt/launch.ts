@@ -3,9 +3,9 @@ import { join } from "node:path";
 
 import type { WriteCapability } from "../domain/capability.js";
 import { isAutoRunWorkerType, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
-import { buildCommandLine, canQuoteArgument, type ShellKind } from "../claude/shell.js";
-import { promptFileReference, skillInvocation } from "../claude/prompts.js";
-import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../claude/launch.js";
+import { buildCommandLine, canQuoteArgument, type ShellKind } from "../platform/shell.js";
+import { promptFileReference, skillInvocation } from "../platform/prompts.js";
+import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../platform/launch.js";
 import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest } from "../platform/agent-platform.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
@@ -53,8 +53,6 @@ const WORKTREE_PERMISSION_PROFILE = "aboard-worktree";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
-const BASH_RULE = /^Bash\((.+)\)$/u;
-const FILE_RULE = /^(Read|Edit)\((.+)\)$/u;
 
 export function planChatGptLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan {
   return planChatGptSession(request, "start");
@@ -90,9 +88,9 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     "-c",
     `hooks.${event}=[${entries.join(",")}]`,
   ];
-  const subagentsDenied = autoRunRestricted || configuration.subagents === "denied";
-  const denyCommands = autoRunRestricted ? commandDenyPatterns(request.disallowedTools) : [];
-  const readOnlyFiles = fileWriteRestrictionPatterns(request.disallowedTools);
+  const subagentsDenied = request.restrictions?.denySubagents === true || configuration.subagents === "denied";
+  const denyCommands = [...new Set(request.restrictions?.deniedCommands ?? [])];
+  const readOnlyFiles = [...new Set(request.restrictions?.protectedPaths ?? [])];
   const guard: RuntimeFile | undefined = autoRunRestricted
     ? {
         agentId: request.agentId,
@@ -109,7 +107,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     "-c", "features.hooks=true",
     ...(explore && readOnlyFiles.length === 0 ? READ_ONLY_POLICY : []),
     ...permissionProfile,
-    ...(autoRunRestricted
+    ...(request.restrictions?.denyWeb === true
       ? ["-c", 'web_search="disabled"']
       : configuration.webSearch === undefined ? [] : ["-c", `web_search=${JSON.stringify(configuration.webSearch)}`]),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
@@ -235,34 +233,18 @@ function launchPolicy(
   return { model, effort };
 }
 
-/** Codex has no tool-rule syntax, so Aboard's Bash denials become guard-hook command patterns. */
-export function commandDenyPatterns(rules: readonly string[] | undefined): readonly string[] {
-  const patterns = (rules ?? []).flatMap((rule) => {
-    const match = BASH_RULE.exec(rule.trim());
-    return match === null ? [] : [match[1]!.trim()];
-  });
-  return [...new Set(patterns.filter((pattern) => pattern.length > 0))];
+/**
+ * Codex accepts native Windows separators inside the absolute path, but its
+ * portable read-subtree form specifically requires a trailing `/**`. A path
+ * without a drive letter is POSIX and keeps its own separators throughout.
+ */
+function readSubtreeGlob(path: string): string {
+  const root = path.replace(/[\\/]+$/u, "");
+  return `${/^[A-Za-z]:[\\/]/u.test(root) ? root.replaceAll("/", "\\") : root.replaceAll("\\", "/")}/**`;
 }
 
-/** Convert Claude-style Edit denials into Codex read-only path rules. */
-export function fileWriteRestrictionPatterns(rules: readonly string[] | undefined): readonly string[] {
-  const patterns = (rules ?? []).flatMap((rule) => {
-    const match = FILE_RULE.exec(rule.trim());
-    if (match === null || match[1] !== "Edit") return [];
-    const raw = (match[2] ?? "").trim().replace(/^\/\//u, "");
-    if (raw.length === 0) return [];
-    if (!/^[A-Za-z]:\//u.test(raw)) return [raw];
-    // Codex accepts native Windows separators for the absolute path, but its
-    // portable read-subtree form specifically requires a trailing `/**`.
-    return [raw.endsWith("/**")
-      ? `${raw.slice(0, -3).replaceAll("/", "\\")}/**`
-      : raw.replaceAll("/", "\\")];
-  });
-  return [...new Set(patterns)];
-}
-
-function permissionProfileArguments(patterns: readonly string[], readOnly: boolean, writableRoots: readonly string[]): readonly string[] {
-  const readRules = patterns.map((pattern) => `${JSON.stringify(pattern)}="read"`).join(",");
+function permissionProfileArguments(paths: readonly string[], readOnly: boolean, writableRoots: readonly string[]): readonly string[] {
+  const readRules = paths.map((path) => `${JSON.stringify(readSubtreeGlob(path))}="read"`).join(",");
   const profile = writableRoots.length === 0
     ? `{extends=${JSON.stringify(readOnly ? ":read-only" : ":workspace")},filesystem={${readRules}}}`
     : `{workspace_roots={${writableRoots.map((root) => `${JSON.stringify(root)}=true`).join(",")}},filesystem={":root"="read",":workspace_roots"={"."="write"},":tmpdir"="write",":slash_tmp"="write",${readRules}}}`;

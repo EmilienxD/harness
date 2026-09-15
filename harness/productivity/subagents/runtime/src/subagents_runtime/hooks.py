@@ -79,7 +79,8 @@ def _grant_for_path(session_id: str, path: Path) -> str | None:
 def _stop_wait_seconds(cwd: Path) -> float:
     try:
         value = sessions.launch_configuration(cwd)
-        hours = value.get("stopWaitHours", 24) if isinstance(value, dict) else 24
+        session = value.get("session", {}) if isinstance(value, dict) else {}
+        hours = session.get("stopWaitHours", 24) if isinstance(session, dict) else 24
         return max(0.0, float(hours) * 3600)
     except (sessions.SessionError, ValueError, TypeError):
         return 24 * 3600

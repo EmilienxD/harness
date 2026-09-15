@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import type { SessionId } from "../domain/contracts.js";
-import { buildCommandLine } from "../claude/shell.js";
+import { buildCommandLine } from "../platform/shell.js";
 import { DEFAULT_CHATGPT_COMMAND } from "./launch.js";
 
 export interface ChatGptAppServerRequest {

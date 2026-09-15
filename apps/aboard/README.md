@@ -12,12 +12,15 @@ issues and pull requests. An authenticated loopback bridge carries lifecycle eve
 
 ## Visible sessions
 
-Initialize the project once, then use **Run Agent** to open an empty, attended terminal. The platform, model, and reasoning effort come from `.harness/launch.json`. Aboard reads that file for every new launch, resume, or reopen, so existing sessions keep their configuration while future sessions use your latest choices.
+Initialize the project once, then use **Run Agent** to choose Claude or ChatGPT and open an empty, attended
+terminal. Each provider's command, model, and reasoning effort come from `.harness/launch.json`. Aboard reads
+that file for every new launch, resume, or reopen, so existing processes keep their configuration while
+future sessions use your latest choices.
 
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
-Focusing a live session reveals its existing terminal. Reopening an ended session instead asks the selected
-platform to resume the recorded conversation with the latest launch configuration; if that conversation is
+Focusing a live session reveals its existing terminal. Reopening an ended session asks that session's
+recorded provider to resume the conversation with its latest launch configuration; if that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
 Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Exploration sessions are read-only. AUTO RUN workers use stricter, extension-owned Git and GitHub restrictions.
@@ -100,11 +103,25 @@ Discard follows the configured cleanup policy and never removes dirty or moved w
 
 | Location | Purpose |
 | --- | --- |
-| `.harness/launch.json` | Selects Claude Code or ChatGPT, command, model, and reasoning effort. |
+| `.harness/launch.json` | Configures Claude and ChatGPT equally; `autoRun.provider` selects the Auto Run default. |
 | `.abd/settings.json` | Stores project-level Aboard settings. |
 | VS Code settings | Supplies user and profile defaults under `aboard.*`. |
 
 Non-launch settings resolve from VS Code workspace settings, then `.abd/settings.json`, then user or profile settings and defaults. AUTO RUN freezes RUN-specific settings for recovery; it reads launch configuration again whenever it starts or resumes an agent.
+
+The scaffold configures both providers. Claude is only the default for AUTO RUN; **Run Agent** asks for a
+provider explicitly, and reopening follows the provider stored with the session:
+
+```json
+{
+  "version": 3,
+  "autoRun": { "provider": "claude" },
+  "providers": {
+    "claude": { "command": ["claude"] },
+    "chatgpt": { "command": ["codex"] }
+  }
+}
+```
 
 Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without overwriting tracked files. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
 

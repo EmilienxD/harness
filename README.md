@@ -82,13 +82,13 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 The `subagents` package also installs persistent session commands. These are separate from the ephemeral installer commands above:
 
 ```bash
-harness run [--provider claude|chatgpt] [initial prompt]
+harness run --provider claude|chatgpt [initial prompt]
 harness ask <grant-id>
 harness reply
 harness resume <session-id>
 ```
 
-`run` opens an independent visible terminal. Delegation is authorized only by a live invocation of an `ask-agent` skill; direct `harness ask` calls without that grant are rejected. Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults.
+`run` opens an independent visible terminal. Delegation is authorized only by a live invocation of an `ask-agent` skill; direct `harness ask` calls without that grant are rejected. Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults. Version 3 configures both `providers.claude` and `providers.chatgpt`; `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
 
 ### Model-invoked skills
 

@@ -121,7 +121,7 @@ export interface RunWorkspace {
   readonly root: string;
   /** git bound to `root`. Every phase's side effects go through it. */
   readonly git: GitClient;
-  readonly denyTools: readonly string[];
+  readonly protectedPaths: readonly string[];
   /** Git metadata roots a sandboxed worker needs for its allowed add/commit. */
   readonly writableRoots: readonly string[];
   /** Whether `root` is a checkout this run created and may remove. */
@@ -203,14 +203,8 @@ export function samePath(left: string, right: string): boolean {
   return normalize(left) === normalize(right);
 }
 
-export function isolationDenyRules(projectRoot: string): readonly string[] {
-  const path = resolve(projectRoot).replaceAll("\\", "/").replace(/\/+$/u, "");
-  if (path.length === 0 || path.includes(",")) {
-    throw new RunWorkspaceError(
-      `Aboard cannot isolate the run from the project path ${path || projectRoot}: commas are not supported in Claude tool-deny rules. Move the project to a path without a comma before using worktree mode.`,
-    );
-  }
-  return [`Read(//${path}/**)`, `Edit(//${path}/**)`];
+export function isolationProtectedPaths(projectRoot: string): readonly string[] {
+  return [resolve(projectRoot)];
 }
 
 export async function worktreeGitMetadataRoots(worktreeRoot: string, projectRoot: string): Promise<readonly string[]> {
@@ -314,6 +308,12 @@ export interface WorktreeRunWorkspaceOptions {
   readonly overlayProjectConfiguration?: (request: ProjectConfigurationOverlayRequest) => Promise<void>;
   readonly resolveGitMetadataRoots?: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
   readonly directories?: RunWorkspaceDirectories;
+  /**
+   * Asks the provider this run will launch whether it can natively fence workers
+   * out of these paths. An unrepresentable path must fail closed before the
+   * checkout exists, because an interrupted run leaves its checkout behind.
+   */
+  readonly requireEnforceableIsolation?: (protectedPaths: readonly string[]) => Promise<void> | void;
 }
 
 /** The filesystem operations the provider performs, injectable for tests. */
@@ -351,6 +351,18 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     return this.options.settings().enabled;
   }
 
+  async #requireEnforceableIsolation(protectedPaths: readonly string[]): Promise<void> {
+    const require = this.options.requireEnforceableIsolation;
+    if (require === undefined) return;
+    try {
+      await require(protectedPaths);
+    } catch (error) {
+      throw new RunWorkspaceError(
+        `Aboard cannot isolate this run from ${protectedPaths.join(", ")}: ${error instanceof Error ? error.message : "the agent platform rejected the restriction"}`,
+      );
+    }
+  }
+
   public nextRoot(worktree: WorktreeSettings): string {
     return runWorkspacePath({ workspaceRoot: this.options.workspaceRoot, root: worktree.root });
   }
@@ -361,15 +373,14 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
       return {
         root: this.options.workspaceRoot,
         git: this.options.git,
-        denyTools: [],
+        protectedPaths: [],
         writableRoots: [],
         isolated: false,
         keepAfterDrain: false,
       };
     }
-    // Validate the native isolation rule before creating a checkout. An
-    // unrepresentable path must fail closed without leaving run artifacts.
-    const denyTools = isolationDenyRules(this.options.workspaceRoot);
+    const protectedPaths = isolationProtectedPaths(this.options.workspaceRoot);
+    await this.#requireEnforceableIsolation(protectedPaths);
     const path = request.checkoutRoot ?? runWorkspacePath({
       workspaceRoot: this.options.workspaceRoot,
       root: settings.root,
@@ -393,7 +404,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     return {
       root: path,
       git: this.options.gitFor(path),
-      denyTools,
+      protectedPaths,
       writableRoots: await this.#resolveGitMetadataRoots(path, this.options.workspaceRoot),
       isolated: true,
       keepAfterDrain: settings.keep,

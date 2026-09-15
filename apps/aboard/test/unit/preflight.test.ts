@@ -4,9 +4,8 @@ import test from "node:test";
 import {
   ClaudeCommandProbe,
   ClaudePreflightError,
-  spawnCommandRunner,
-  type CommandExecution,
 } from "../../src/claude/preflight.js";
+import { spawnCommandRunner, type CommandExecution } from "../../src/platform/preflight.js";
 
 function probe(outcomes: readonly (CommandExecution | Error)[]) {
   const calls: Array<{ program: string; args: readonly string[] }> = [];

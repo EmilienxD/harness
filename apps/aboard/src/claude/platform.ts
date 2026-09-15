@@ -1,6 +1,8 @@
-import { ClaudeCommandProbe, type CommandRunner } from "./preflight.js";
+import { ClaudeCommandProbe } from "./preflight.js";
+import type { CommandRunner } from "../platform/preflight.js";
 import { randomUUID } from "node:crypto";
-import { planLaunch, planSessionResume, type LaunchPlanRequest, type SessionResumePlanRequest } from "./launch.js";
+import { planLaunch, planSessionResume, restrictionRules, type LaunchPlanRequest, type SessionResumePlanRequest } from "./launch.js";
+import type { LaunchRestrictions } from "../domain/capability.js";
 import { sessionIsResumable } from "./sessions.js";
 import type { AgentPlatform, AgentPlatformCapabilities, PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest, PlatformSessionIdentity, PlatformLifecycleAssets } from "../platform/agent-platform.js";
 import type { SessionId } from "../domain/contracts.js";
@@ -49,6 +51,11 @@ export class ClaudeAgentPlatform implements AgentPlatform {
 
   public normalizeLifecycle(kind: PlatformLifecycleKind, payload: unknown): LifecycleObservation {
     return normalizeClaudeLifecycle(kind, payload);
+  }
+
+  /** The deny rules are the enforcement, so building them is the whole check. */
+  public requireEnforceableRestrictions(restrictions: LaunchRestrictions): void {
+    restrictionRules(restrictions);
   }
 
   public planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan {

@@ -9,6 +9,7 @@ const root = process.cwd();
 const required = [
   "dist/extension.js",
   "assets/aboard.svg",
+  "assets/launch.schema.json",
   "assets/runtime/abd_hook.py",
   "assets/runtime/abd-hooks.json",
   "assets/runtime/abd_wrapper.py",

@@ -1,12 +1,10 @@
 
-import type { WriteCapability } from "../domain/capability.js";
+import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
   isAutomatedAgentType,
-  isAutoRunWorkerType,
   isNamedBuiltinAgentType,
   type AgentId,
   type AgentType,
-  type SessionId,
 } from "../domain/contracts.js";
 
 import type { IssueDifficulty } from "../shared/labels.js";
@@ -15,40 +13,35 @@ import {
   promptFileReference,
   skillInvocation,
   type ResolvedPrompt,
-} from "./prompts.js";
-import { buildCommandLine, canQuoteArgument, type ShellKind } from "./shell.js";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { createHash, randomBytes } from "node:crypto";
+} from "../platform/prompts.js";
+import { buildCommandLine, canQuoteArgument, type ShellKind } from "../platform/shell.js";
+import { resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import {
+  BY_DIFFICULTY,
+  DEFAULT_MAX_INLINE_PROMPT_CHARS,
+  DEFAULT_RUNTIME_DIRECTORY,
+  EFFORT_LEVELS,
+  MAX_COMMAND_LINE_CHARS,
+  LaunchPlanError,
+  isEffortLevel,
+  promptSpillRoot,
+  requiresWriteLease,
+  taskPromptPath,
+  type DeclaredEffort,
+  type EffortLevel,
+  type LaunchPlan,
+  type LaunchPlanErrorCode,
+  type PlatformLaunchRequest,
+  type PlatformResumeRequest,
+  type PromptDelivery,
+  type PromptSpillFile,
+  type SessionWrapperLayout,
+  type WrapperRequestFile,
+} from "../platform/launch.js";
 
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
-/** Planner-only fallback; production supplies VS Code's workspace storage root. */
-export const DEFAULT_RUNTIME_DIRECTORY = join(tmpdir(), "abd-runtime");
-/** `aboard.launch.maxInlinePromptChars`; conservative, below every known ceiling. */
-export const DEFAULT_MAX_INLINE_PROMPT_CHARS = 4000;
-
-export const MAX_COMMAND_LINE_CHARS: Readonly<Record<ShellKind, number>> = {
-  cmd: 8_000,
-  powershell: 24_000,
-  "git-bash": 24_000,
-};
-
-
-export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
-
-export type EffortLevel = (typeof EFFORT_LEVELS)[number];
-
-const EFFORT_LEVEL_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
-
-export function isEffortLevel(value: unknown): value is EffortLevel {
-  return typeof value === "string" && EFFORT_LEVEL_SET.has(value);
-}
-
-export const BY_DIFFICULTY = "by-difficulty";
-export type ByDifficulty = typeof BY_DIFFICULTY;
-
-/** A definition's `effort:`, which may defer to the issue's difficulty. */
-export type DeclaredEffort = EffortLevel | ByDifficulty;
+const CLAUDE_ENVIRONMENT = { CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: "1000000" } as const;
 
 export interface DifficultyLaunchPolicy {
   readonly model: string;
@@ -109,30 +102,6 @@ export type LaunchConfiguration =
   /** Claude Code's unmodified default interactive session. */
   | (LaunchConfigurationBase & { readonly shape: "default" });
 
-export type LaunchPlanErrorCode =
-  | "invalid-tool-rule"
-  | "invalid-model"
-  | "invalid-effort"
-  | "invalid-frontmatter"
-  | "invalid-session-id"
-  | "unsafe-agent-id"
-  | "unsafe-spill-path"
-  | "invalid-threshold"
-  | "invalid-command"
-
-  | "command-line-too-long"
-  | "missing-prompt"
-  | "shape-not-allowed";
-
-export class LaunchPlanError extends Error {
-  public constructor(
-    public readonly code: LaunchPlanErrorCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
 const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -146,106 +115,25 @@ export function launchWriteCapability(
   return configuration.shape === "default" ? "write-capable" : "read-only";
 }
 
-export function requiresWriteLease(
-  agentType: AgentType,
-  capability: WriteCapability,
-): boolean {
-  return isAutoRunWorkerType(agentType) && capability === "write-capable";
-}
+export type LaunchPlanRequest = Omit<PlatformLaunchRequest, "configuration"> & { readonly configuration: LaunchConfiguration };
+export type SessionResumePlanRequest = Omit<PlatformResumeRequest, "configuration"> & { readonly configuration: LaunchConfiguration };
 
-/** A file the plan needs on disk before its command line can run. */
-export interface RuntimeFile {
-  readonly agentId: AgentId;
-  /** Absolute path, with POSIX separators in generated plans. */
-  readonly relativePath: string;
-  readonly contents: string;
-}
-
-/** The path is the exact text after `@`, so it carries no whitespace. */
-export type PromptSpillFile = RuntimeFile;
-
-
-/** Exact child argv consumed by the wrapper before it starts Claude. */
-export type WrapperRequestFile = RuntimeFile;
-
-export type PromptDelivery = "none" | "inline" | "spilled";
-
-export interface LaunchPlan {
-  readonly kind: "start" | "resume";
-  readonly agentId: AgentId;
-  readonly sessionId: SessionId;
-  readonly agentType: AgentType;
-  readonly shell: ShellKind;
-  readonly command: readonly string[];
-  readonly args: readonly string[];
-  readonly commandLine: string;
-  readonly writeCapability: WriteCapability;
-  readonly requiresWriteLease: boolean;
-  readonly promptDelivery: PromptDelivery;
-  readonly spill?: PromptSpillFile;
-  /** Original worker task, preserved independently of resume messages. */
-  readonly task?: PromptSpillFile;
-  /** The launch needs the platform's Chrome browser capability before it may start. */
-  readonly chromeRequired?: true;
-  /** Worker restrictions a platform enforces through its own lifecycle hook. */
-  readonly guard?: RuntimeFile;
-  /** Native permission profile required before this launch may create a terminal. */
-  readonly permissionProfile?: string;
-
-  readonly wrapperRequest?: WrapperRequestFile;
-  /** Per-launch directory selected with `--settings` and `--add-dir`. */
-  readonly runtimeDirectory: string;
-}
-
-interface CommonPlanRequest {
-  readonly agentId: AgentId;
-  readonly sessionId: SessionId;
-  readonly agentType: AgentType;
-  readonly shell: ShellKind;
-  readonly attended?: boolean | undefined;
-  /** Trusted ask-agent skill invocation; kept separate from caller-supplied text. */
-  readonly skill?: string | undefined;
-  /** True only when Aboard's Auto Run owns and controls this session. */
-  readonly autoRunRestricted?: true | undefined;
-  readonly model?: string | undefined;
-  readonly effort?: EffortLevel | undefined;
-  readonly difficulty?: IssueDifficulty | undefined;
-  readonly command?: readonly string[] | undefined;
-
-  /** Set only for an auto-run implementer whose frozen issue has `[AI]-chrome`. */
-  readonly chrome?: true | undefined;
-  readonly maxInlinePromptChars?: number | undefined;
-  /** Absolute root in VS Code's workspace storage. */
-  readonly runtimeDirectory?: string | undefined;
-  /** Activation-owned temporary root for prompt files referenced with `@`. */
-  readonly promptRoot?: string | undefined;
-  readonly wrapper?: SessionWrapperLayout | undefined;
-  /** Additional native sandbox roots required by a provider-specific worker. */
-  readonly writableRoots?: readonly string[] | undefined;
-}
-
-export interface SessionWrapperLayout {
-  /** Absolute path of the scaffolded wrapper script. */
-  readonly script: string;
-  /** Per-agent marker path the wrapper owns (`lockFile` in the request). */
-  lockPathFor(agentId: AgentId): string;
-  /** Fresh capability embedded in exactly one wrapper request path. */
-  mintLaunchCode(): string;
-}
-
-export interface LaunchPlanRequest extends CommonPlanRequest {
-  readonly configuration: LaunchConfiguration;
-  /** Required for automated types, optional for interactive ones (5.3, 5.4). */
-  readonly prompt?: ResolvedPrompt | string | undefined;
-  readonly disallowedTools?: readonly string[] | undefined;
-}
-
-
-export interface SessionResumePlanRequest extends CommonPlanRequest {
-  readonly configuration: LaunchConfiguration;
-  /** Optional first message for a continuation; ordinary reopen leaves this absent. */
-  readonly prompt?: ResolvedPrompt | string | undefined;
-  readonly disallowedTools?: readonly string[] | undefined;
+export function restrictionRules(restrictions: LaunchRestrictions | undefined): readonly string[] {
+  return [
+    ...(restrictions?.denySubagents === true ? ["Agent"] : []),
+    ...(restrictions?.denyWeb === true ? ["WebSearch", "WebFetch"] : []),
+    ...(restrictions?.deniedCommands ?? []).map((pattern) => `Bash(${pattern})`),
+    ...(restrictions?.protectedPaths ?? []).flatMap((path) => {
+      const portable = resolve(path).replaceAll("\\", "/").replace(/\/+$/u, "");
+      if (portable.includes(",")) {
+        throw new LaunchPlanError(
+          "invalid-tool-rule",
+          `Claude cannot encode a protected path containing a comma in --disallowedTools: ${portable}`,
+        );
+      }
+      return [`Read(//${portable}/**)`, `Edit(//${portable}/**)`];
+    }),
+  ];
 }
 
 function assertFlagValue(
@@ -302,19 +190,6 @@ function presentPrompt(prompt: ResolvedPrompt | string | undefined): ResolvedPro
   if (prompt === undefined) return undefined;
   const text = typeof prompt === "string" ? prompt : prompt.text;
   return text.trim().length === 0 ? undefined : prompt;
-}
-
-/** Legacy deterministic root retained for planner fallbacks and migration cleanup. */
-export function promptSpillRoot(runtimeDirectory: string, promptRoot?: string): string {
-  if (promptRoot !== undefined) return promptRoot;
-  const identity = createHash("sha256").update(resolve(runtimeDirectory)).digest("hex");
-  return join(tmpdir(), "abd-prompts", identity);
-}
-
-export function taskPromptPath(runtimeDirectory: string, agentId: AgentId, promptRoot?: string): string {
-  const path = `${promptSpillRoot(runtimeDirectory, promptRoot).replaceAll("\\", "/")}/${agentId}/task.md`;
-  if (/\s/.test(path)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${path}`);
-  return path;
 }
 
 function spillRelativePath(runtimeDirectory: string, agentId: AgentId, stem: string, promptRoot?: string): string {
@@ -398,7 +273,7 @@ function effectiveCommand(
 }
 
 function commonPreconditions(
-  request: CommonPlanRequest,
+  request: PlatformLaunchRequest,
   configuration: LaunchConfiguration,
 ): {
   readonly command: readonly string[];
@@ -565,7 +440,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
 
     ...toolListArguments("--disallowedTools", denyRules([
       ...(configuration.deniedTools ?? []),
-      ...(request.disallowedTools ?? []),
+      ...restrictionRules(request.restrictions),
     ])),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
@@ -620,6 +495,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     requiresWriteLease: requiresWriteLease(agentType, capability),
     promptDelivery: promptPlan.delivery,
     runtimeDirectory: launchRuntimeDirectory,
+    providerEnvironment: CLAUDE_ENVIRONMENT,
     ...(promptPlan.spill === undefined ? {} : { spill: promptPlan.spill }),
     ...(task === undefined ? {} : { task }),
 
@@ -647,7 +523,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
 
     ...toolListArguments("--disallowedTools", denyRules([
       ...(configuration.deniedTools ?? []),
-      ...(request.disallowedTools ?? []),
+      ...restrictionRules(request.restrictions),
     ])),
     ...modelArguments(policy.model),
     ...effortArguments(policy.effort),
@@ -695,6 +571,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
     requiresWriteLease: requiresWriteLease(request.agentType, capability),
     promptDelivery: built.promptPlan.delivery,
     runtimeDirectory: launchRuntimeDirectory,
+    providerEnvironment: CLAUDE_ENVIRONMENT,
     ...(built.promptPlan.spill === undefined ? {} : { spill: built.promptPlan.spill }),
 
     ...(built.request === undefined ? {} : { wrapperRequest: built.request }),

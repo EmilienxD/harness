@@ -12,13 +12,13 @@ from subagents_runtime.cli import build_parser
 def configured(tmp_path, monkeypatch, launches):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda argv, environment, cwd: launches.append((argv, environment, cwd)))
-    monkeypatch.setattr(sessions, "_command_from_config", lambda _config: ["claude"])
+    monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider: ["claude"])
 
 
 def test_resume_uses_registered_provider_session(tmp_path, monkeypatch):
     launches = []
     configured(tmp_path, monkeypatch, launches)
-    session_id = sessions.launch()
+    session_id = sessions.launch(provider="claude")
     sessions.resume(session_id)
     assert launches[-1][0] == ["claude", "--resume", session_id]
     assert launches[-1][1]["HARNESS_SESSION_ID"] == session_id
@@ -108,8 +108,12 @@ def test_scoped_aboard_launch_refreshes_endpoint_after_unauthorized_response(tmp
     ]
 
 
-def test_cli_ask_accepts_only_a_grant_and_reply_accepts_no_message():
+def test_cli_requires_an_explicit_run_provider_and_keeps_other_commands_narrow():
     parser = build_parser()
+    assert parser.parse_args(["run", "--provider", "claude"]).provider == "claude"
+    assert parser.parse_args(["run", "--provider", "chatgpt"]).provider == "chatgpt"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run"])
     assert parser.parse_args(["ask", "grant-123"]).grant_id == "grant-123"
     assert parser.parse_args(["reply"]).command == "reply"
     with pytest.raises(SystemExit):
@@ -155,16 +159,45 @@ def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_pat
     monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
     monkeypatch.setattr(sessions.shutil, "which", lambda command: command)
 
-    assert sessions.launch_configuration(project) == {"version": 2, "platform": "claude"}
+    assert sessions.launch_configuration(project) == {
+        "version": 3,
+        "autoRun": {"provider": "claude"},
+        "providers": {"claude": {}, "chatgpt": {}},
+    }
     state.mkdir()
     (state / "launch.json").write_text(
-        '{"version":2,"platform":"chatgpt","command":["global-codex"]}', encoding="utf-8"
+        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{"command":["global-codex"]}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["global-codex"]
 
     (project / ".harness").mkdir()
     (project / ".harness" / "launch.json").write_text(
-        '{"version":2,"platform":"claude","command":["project-claude"]}', encoding="utf-8"
+        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{"command":["project-claude"]},"chatgpt":{}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "claude") == ["project-claude"]
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["codex"]
+
+
+def test_launch_configuration_validates_v3_provider_and_session_shapes(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    launch = project / ".harness" / "launch.json"
+    launch.parent.mkdir(parents=True)
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+
+    for value in (
+        {"version": 2, "platform": "claude"},
+        {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}}},
+        {"version": 3, "autoRun": {"provider": "codex"}, "providers": {"claude": {}, "chatgpt": {}}},
+        {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}, "session": {"stopWaitHours": -1}},
+    ):
+        launch.write_text(json.dumps(value), encoding="utf-8")
+        with pytest.raises(sessions.SessionError):
+            sessions.launch_configuration(project)
+
+    launch.write_text(json.dumps({
+        "version": 3,
+        "autoRun": {"provider": "claude"},
+        "providers": {"claude": {}, "chatgpt": {}},
+        "session": {"stopWaitHours": 1.5},
+    }), encoding="utf-8")
+    assert sessions.launch_configuration(project)["session"]["stopWaitHours"] == 1.5

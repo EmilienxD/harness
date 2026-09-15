@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_INLINE_PROMPT_CHARS } from "./claude/launch.js";
+import { DEFAULT_MAX_INLINE_PROMPT_CHARS } from "./platform/launch.js";
 import { DEFAULT_BRIDGE_PORT } from "./bridge/server.js";
 
 import { AUTO_RUN_BRANCH_MODES, DEFAULT_ISSUE_CONTEXT_DEPTH, DISCARD_BEHAVIORS, MAX_ISSUE_CONTEXT_DEPTH, MERGE_STRATEGIES, type AutoRunSettings, type AutoRunBranchMode, type DiscardBehavior, type MergeStrategy } from "./domain/auto-run.js";

@@ -1,5 +1,5 @@
 import { ProcessGitClient, isWorkingTreeClean, type GitClient } from "../git/client.js";
-import type { TerminalLifecycleEvent } from "../claude/terminals.js";
+import type { TerminalLifecycleEvent } from "../platform/terminals.js";
 import {
   type AgentId,
   type AgentSession,

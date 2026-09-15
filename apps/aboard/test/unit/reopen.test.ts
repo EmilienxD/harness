@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ReopenCoordinator, describeReopenOutcome } from "../../src/claude/reopen.js";
+import { ReopenCoordinator, describeReopenOutcome } from "../../src/platform/reopen.js";
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 

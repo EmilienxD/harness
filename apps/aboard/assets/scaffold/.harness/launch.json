@@ -1,21 +1,46 @@
 {
-  "version": 2,
-  "platform": "claude",
-  "command": ["claude"],
-  "interactive": {
-    "model": "inherit",
-    "effort": "inherit"
+  "version": 3,
+  "autoRun": {
+    "provider": "claude"
   },
-  "explore": {
-    "model": "haiku",
-    "effort": "low"
-  },
-  "implementer": {
-    "model": "by-difficulty",
-    "effort": "by-difficulty"
-  },
-  "reviewer": {
-    "model": "by-difficulty",
-    "effort": "by-difficulty"
+  "providers": {
+    "claude": {
+      "command": ["claude"],
+      "interactive": {
+        "model": "inherit",
+        "effort": "inherit"
+      },
+      "explore": {
+        "model": "haiku",
+        "effort": "low"
+      },
+      "implementer": {
+        "model": "by-difficulty",
+        "effort": "by-difficulty"
+      },
+      "reviewer": {
+        "model": "by-difficulty",
+        "effort": "by-difficulty"
+      }
+    },
+    "chatgpt": {
+      "command": ["codex"],
+      "interactive": {
+        "model": "inherit",
+        "effort": "inherit"
+      },
+      "explore": {
+        "model": "inherit",
+        "effort": "inherit"
+      },
+      "implementer": {
+        "model": "by-difficulty",
+        "effort": "by-difficulty"
+      },
+      "reviewer": {
+        "model": "by-difficulty",
+        "effort": "by-difficulty"
+      }
+    }
   }
 }

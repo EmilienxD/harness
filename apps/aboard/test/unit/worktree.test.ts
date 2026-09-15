@@ -8,7 +8,7 @@ import {
   RunWorkspaceError,
   WorktreeRunWorkspaces,
   hasSetupCommands,
-  isolationDenyRules,
+  isolationProtectedPaths,
   overlayProjectConfiguration,
   runWorkspacePath,
   samePath,
@@ -59,14 +59,9 @@ test("a configured root is honoured, and one inside the project is refused", () 
   }
 });
 
-test("isolation deny rules fence the file tools out of the user's checkout", () => {
-  // `//absolute` is the spelling Read and Edit rules use, with the separators a
-  // rule can carry rather than Windows' own.
-  const absolute = PROJECT.replaceAll("\\", "/");
-  assert.deepEqual(isolationDenyRules(PROJECT), [`Read(//${absolute}/**)`, `Edit(//${absolute}/**)`]);
-  // The rules travel as one comma-separated `--disallowedTools` value, so a rule
-  // containing a comma would arrive split in half and deny something else.
-  assert.throws(() => isolationDenyRules(resolve("a,b")), /cannot isolate.*comma/iu);
+test("isolation expresses the protected checkout as provider-neutral paths", () => {
+  assert.deepEqual(isolationProtectedPaths(PROJECT), [PROJECT]);
+  assert.deepEqual(isolationProtectedPaths(resolve("a,b")), [resolve("a,b")]);
 });
 
 test("an untouched setup file asks for nothing", () => {
@@ -184,6 +179,7 @@ function fixture(options: {
   readonly setupFile?: string;
   readonly setupFails?: boolean | "once";
   readonly existingDirectories?: readonly string[];
+  readonly requireEnforceableIsolation?: (protectedPaths: readonly string[]) => void;
 } = {}): Fixture {
   const git = fakeGit(options.git);
   const notifications: string[] = [];
@@ -209,6 +205,7 @@ function fixture(options: {
     readSetupFile: async () => options.setupFile,
     overlayProjectConfiguration: async (request) => { overlays.push(request.worktreeRoot); },
     resolveGitMetadataRoots: async (worktreeRoot) => [join(worktreeRoot, ".git-metadata")],
+    ...(options.requireEnforceableIsolation === undefined ? {} : { requireEnforceableIsolation: options.requireEnforceableIsolation }),
     setup: {
       run: async (request) => {
         setups.push(request);
@@ -226,15 +223,31 @@ test("worktree mode off leaves the run in the user's own checkout", async () => 
   const workspace = await provider.prepare(REQUEST);
   assert.equal(workspace.isolated, false);
   assert.equal(workspace.root, PROJECT);
-  assert.deepEqual(workspace.denyTools, [], "an in-place run has nothing to fence itself out of");
+  assert.deepEqual(workspace.protectedPaths, [], "an in-place run has nothing to fence itself out of");
   assert.deepEqual(git.calls, [], "no checkout is created, and git is not asked about one");
 });
 
-test("an unsupported project path refuses worktree mode before creating anything", async () => {
-  const context = fixture({ workspaceRoot: resolve("C:/work/aboard,unsafe") });
+test("a provider that cannot fence the project refuses worktree mode before creating anything", async () => {
+  // Claude carries its deny rules in one comma-separated --disallowedTools
+  // value, so a project path with a comma cannot be represented. An interrupted
+  // run leaves its checkout behind, so this has to fail before one exists.
+  const context = fixture({
+    workspaceRoot: resolve("C:/work/aboard,unsafe"),
+    requireEnforceableIsolation: () => { throw new Error("Claude cannot encode a protected path containing a comma"); },
+  });
+
   await assert.rejects(context.provider.prepare(REQUEST), /cannot isolate.*comma/iu);
   assert.deepEqual(context.git.calls, []);
   assert.deepEqual(context.created, []);
+});
+
+test("a provider that accepts the project path prepares the checkout as usual", async () => {
+  const seen: (readonly string[])[] = [];
+  const context = fixture({ requireEnforceableIsolation: (protectedPaths) => { seen.push(protectedPaths); } });
+
+  const workspace = await context.provider.prepare(REQUEST);
+  assert.equal(workspace.isolated, true);
+  assert.deepEqual(seen, [isolationProtectedPaths(PROJECT)]);
 });
 
 test("preparing a checkout creates it from the local base and installs into it", async () => {
@@ -243,7 +256,7 @@ test("preparing a checkout creates it from the local base and installs into it",
   const path = runWorkspacePath({ workspaceRoot: PROJECT });
   assert.equal(workspace.root, path);
   assert.equal(workspace.isolated, true);
-  assert.deepEqual(workspace.denyTools, isolationDenyRules(PROJECT));
+  assert.deepEqual(workspace.protectedPaths, isolationProtectedPaths(PROJECT));
   assert.deepEqual(workspace.writableRoots, [join(path, ".git-metadata")]);
   assert.ok(git.calls.includes(`addWorktree ${path} run/test main`), git.calls.join(", "));
   // The setup command runs in the new checkout, from the project's own copy of

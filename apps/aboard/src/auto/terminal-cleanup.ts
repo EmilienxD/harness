@@ -1,4 +1,4 @@
-import type { TerminalSnapshot } from "../claude/terminals.js";
+import type { TerminalSnapshot } from "../platform/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { IsoTimestamp, TerminalId } from "../domain/contracts.js";
 

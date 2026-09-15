@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { closeSettledAutoRunTerminal } from "../../src/auto/terminal-cleanup.js";
-import type { TerminalSnapshot } from "../../src/claude/terminals.js";
+import type { TerminalSnapshot } from "../../src/platform/terminals.js";
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 

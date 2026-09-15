@@ -8,7 +8,7 @@ import {
   type GitHubPromptSource,
   type IssueSnapshot,
   type PullRequestSnapshot,
-} from "../../src/claude/prompts.js";
+} from "../../src/platform/prompts.js";
 import { issueDifficulty, issueDisposition } from "../../src/shared/labels.js";
 
 interface FakeData {

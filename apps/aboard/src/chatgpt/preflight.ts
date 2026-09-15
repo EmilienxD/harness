@@ -1,5 +1,5 @@
 import { DEFAULT_CHATGPT_COMMAND } from "./launch.js";
-import type { CommandRunner, PreflightResult } from "../claude/preflight.js";
+import type { CommandRunner, PreflightResult } from "../platform/preflight.js";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 15_000;
 

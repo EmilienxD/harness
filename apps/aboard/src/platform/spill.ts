@@ -143,3 +143,4 @@ function replaceHookScript(value: unknown, script: string): unknown {
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replaceHookScript(entry, script)]));
 }
+

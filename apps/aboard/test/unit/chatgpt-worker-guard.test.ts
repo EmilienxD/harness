@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
-import { FileSystemPromptSpillStore } from "../../src/claude/spill.js";
+import { FileSystemPromptSpillStore } from "../../src/platform/spill.js";
 import type { AgentId, SessionId } from "../../src/domain/contracts.js";
 
 const agentId = "implementer-1" as AgentId;
@@ -31,7 +31,7 @@ async function prepared(context: { after(callback: () => Promise<void>): void })
     configuration: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"] },
     prompt: "Address issue #15.",
     runtimeDirectory: root.replaceAll("\\", "/"),
-    disallowedTools: ["Bash(git commit*)", "Bash(git push*)", "Bash(git checkout*)", "Bash(git -*)", "Bash(gh pr merge*)", "Agent"],
+    restrictions: { denySubagents: true, deniedCommands: ["git commit*", "git push*", "git checkout*", "git -*", "gh pr merge*"] },
   });
   const store = new FileSystemPromptSpillStore(root, root, new Map([["chatgpt", platform.lifecycleAssets]]));
   await store.prepare(plan);

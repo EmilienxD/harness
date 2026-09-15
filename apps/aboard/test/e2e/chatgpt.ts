@@ -12,9 +12,9 @@ import {
 import { createPlatformLifecycleRoutes } from "../../src/bridge/platform-lifecycle.js";
 import { startBridge } from "../../src/bridge/server.js";
 import { SessionLifecycleService, SessionProcessMonitor, SessionStartupProofs, type ProcessEndedObservation } from "../../src/bridge/session-lifecycle.js";
-import { FileSystemPromptSpillStore } from "../../src/claude/spill.js";
-import { spawnCommandRunner } from "../../src/claude/preflight.js";
-import { AUTO_RUN_DISALLOWED_TOOLS } from "../../src/auto/permissions.js";
+import { FileSystemPromptSpillStore } from "../../src/platform/spill.js";
+import { spawnCommandRunner } from "../../src/platform/preflight.js";
+import { AUTO_RUN_RESTRICTIONS } from "../../src/auto/permissions.js";
 import { ChatGptBrowserProbe } from "../../src/chatgpt/browser.js";
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
 import { ChatGptSessionProbe } from "../../src/chatgpt/sessions.js";
@@ -217,7 +217,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
       agentId, sessionId: PROVISIONAL, agentType, shell: process.platform === "win32" ? "powershell" : "git-bash",
       configuration: scenarioConfiguration(scenario, CODEX_COMMAND), prompt,
       runtimeDirectory: runtimeRoot, maxInlinePromptChars: expectedExit === 0 ? 4000 : 20, wrapper,
-      ...(worker ? { autoRunRestricted: true as const, disallowedTools: AUTO_RUN_DISALLOWED_TOOLS } : {}),
+      ...(worker ? { autoRunRestricted: true as const, restrictions: AUTO_RUN_RESTRICTIONS } : {}),
       ...(scenario.chrome === "declared" ? { chrome: true as const } : {}),
     } as const;
     const plan = resume === undefined

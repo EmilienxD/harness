@@ -6,7 +6,7 @@ import type {
   IssueCommentSnapshot,
   IssueSnapshot,
   PullRequestSnapshot,
-} from "../claude/prompts.js";
+} from "../platform/prompts.js";
 import type { CandidateIssue } from "../domain/auto-run.js";
 import { referencedIssueNumbers } from "../shared/issues.js";
 

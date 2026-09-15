@@ -1,5 +1,5 @@
 
-import type { TerminalHandle, TerminalHost } from "../claude/terminals.js";
+import type { TerminalHandle, TerminalHost } from "../platform/terminals.js";
 import { protocolError, type BridgeRequestHandler, type BridgeResponse } from "./protocol.js";
 
 export type CommandTerminalId = string & { readonly __brand: "CommandTerminalId" };
