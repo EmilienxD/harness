@@ -341,18 +341,11 @@ def prepare_drafting_context(root: Path, session_id: str) -> str:
         if match and match["session"] == session_id:
             indexes.append(int(match["index"]))
     next_index = max(indexes, default=-1) + 1
-    template = (DRAFTS_DIR / draft_name(session_id, "{i}")).as_posix()
+    template = (DRAFTS_DIR / draft_name(session_id, next_index)).as_posix()
     return (
-        "Issue drafting context:\n"
-        f"- issues session id: {session_id}\n"
-        f"- draft file path: {template}\n"
-        f"- next free issue index: {next_index}\n"
-        "Replace {i} with the index of the draft you are writing, counting up "
-        "from the next free index. Use these exact values wherever the skill "
-        "asks for its session id, draft path, or starting issue index. The "
-        f"directory already exists. If you need a fresh index later, list "
-        f"{DRAFTS_DIR.as_posix()}/ again before writing so you do not "
-        "overwrite a draft."
+        f"Draft file path: {template}\n"
+        "Increments the index by 1 gives you the next issue file path, counting up "
+        "from this draft index. Use these exact values to create drafts."
     )
 
 

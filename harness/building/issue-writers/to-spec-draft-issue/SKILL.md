@@ -33,13 +33,11 @@ If the feature is too unclear to write a useful spec, say what is missing instea
 
 ### 2. Write 1 file
 
-Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
-<next-free-issue-index>
+Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
 
-Do not spend time checking whether the folder exists or what it already contains — just write the file.
+Do not spend time checking whether the folder exists or what it already contains — just trust the hook and write the file.
 
-Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels and must contain nothing else:
-
+Use the template bellow:
 <spec-template>
 # {Spec title}
 

@@ -55,10 +55,13 @@ State the issue count and confirm that it equals the included finding count. Ask
 
 ## 4. Write one file per finding
 
-Create `.issues-gateway/<issues-session-id>/issue-{i}.md`, beginning with `<next-free-issue-index>`. Number consecutive files in audit finding order unless real dependencies require blockers first. Write all files together. Do not inspect the gateway directory; the hook prepared it and selected the first free index.
+Write one draft file per finding at the file paths instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
 
-Use this template, omitting optional sections that do not apply:
+Index them in the order you plan to publish them (blockers before what they block, high impact first).
 
+Do not spend time checking whether the folder exists or what it already contains — just trust the hook and write all files in parallel.
+
+Use the template bellow, omitting optional sections that do not apply:
 <issue-template>
 # {Finding title}
 

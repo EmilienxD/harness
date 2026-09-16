@@ -8,9 +8,7 @@ metadata:
 disable-model-invocation: true
 ---
 
-Use what the user provided alongside the invocation as this skill's input. A provider-specific hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
-
-Turn a plan, spec or conversation into a single GitHub **issue**.
+Turn a plan, spec or conversation into a single GitHub issue.
 
 This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
 
@@ -46,13 +44,11 @@ If the user asks for extra labels, verify them before writing the file: run `gh 
 
 ### 2. Write one file
 
-Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
-<next-free-issue-index>
+Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
 
-Do not spend time checking whether the folder exists or what it already contains — just write the file.
+Do not spend time checking whether the folder exists or what it already contains — just trust the hook and write the file.
 
-Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels and must contain nothing else:
-
+Use the template bellow:
 <issue-template>
 # {Issue title}
 

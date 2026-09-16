@@ -70,12 +70,13 @@ Iterate until the user approves the breakdown. Stop after presenting or revising
 
 ### 5. Write one file per issue
 
-For each approved issue, create `.issues-gateway/<issues-session-id>/issue-{i}.md` where `{i}` is the issue number starting at:
-<next-free-issue-index>
-in the order you plan to publish them (blockers before what they block). Do not spend time checking whether the folder exists or what it already contains — just write all files together.
+Write one draft file per finding at the file paths instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
 
-Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels, defined during mapping, and must contain nothing else:
+Index them in the order you plan to publish them (blockers before what they block).
 
+Do not spend time checking whether the folder exists or what it already contains — just trust the hook and write all files in parallel.
+
+Use the template:
 <issue-template>
 # {Issue title}
 
