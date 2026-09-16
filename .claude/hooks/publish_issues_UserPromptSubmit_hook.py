@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 import issues_core as core
-import copy_message_as_issue
 
 
 def main() -> None:
@@ -16,26 +14,12 @@ def main() -> None:
     prompt = payload.get("prompt", "").strip()
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
 
-    if copy_message_as_issue.PROMPT_PATTERN.match(prompt):
-        try:
-            if payload.get("cwd"):
-                os.chdir(payload["cwd"])
-        except OSError as exc:
-            sys.stderr.write(f"Save failed: {exc}\n")
-            raise SystemExit(2)
-        copy_message_as_issue.handle_save(payload)
-
     if core.PROMPT_PATTERN.match(prompt):
         dry = "--dry" in prompt.split()
         session_id = str(payload.get("session_id") or "")
         result = core.publish_issues(dry, session_id)
         sys.stderr.write("\n\n" + result)
         raise SystemExit(2)
-
-    try:
-        copy_message_as_issue.invalidate(payload)
-    except (OSError, ValueError):
-        pass
 
     contexts: list[str] = []
     try:
