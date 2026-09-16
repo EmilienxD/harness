@@ -8,7 +8,7 @@ metadata:
 disable-model-invocation: true
 ---
 
-Research the user's query and answer it directly in chat. Except for the source index described below, this is a strictly read-only workflow: do not create, edit, or write files anywhere.
+Research the user's query and answer it directly in the end turn message. Except for the source index described below, this is a strictly read-only workflow: do not create, edit, or write files anywhere.
 
 Prefer any tool the user requests. Otherwise search in this order, moving to the next source only when the earlier one is unavailable or insufficient:
 

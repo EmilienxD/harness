@@ -1,6 +1,6 @@
 ---
 name: to-spec
-description: Synthesize the current conversation into a specification in chat. Use when the user wants a spec without another interview or an issue draft.
+description: Synthesize the current conversation into a specification. Use when the user wants a spec without another interview or an issue draft.
 argument-hint: "[reference or focus]"
 license: MIT
 metadata:
@@ -18,7 +18,7 @@ Use any details provided alongside the invocation as additional input.
 
 2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
 
-3. Write the spec using the template below. **Default: write the spec directly in the chat.** Do not write it to a file, and do not create a GitHub issue, unless the user explicitly asked for one of those in this invocation.
+3. Write the spec using the template below. **Default: write the spec directly in the end turn message.** Do not write it to a file, and do not create a GitHub issue, unless the user explicitly asked for one of those in this invocation.
 
 <spec-template>
 

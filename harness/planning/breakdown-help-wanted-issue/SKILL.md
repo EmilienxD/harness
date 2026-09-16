@@ -8,7 +8,7 @@ metadata:
 disable-model-invocation: true
 ---
 
-Turn the user's idea into a request they can confidently approve, revise, or abandon. Your deliverable is a report in chat. Do not implement changes, write issue drafts, or modify GitHub issues or labels.
+Turn the user's idea into a request they can confidently approve, revise, or abandon. Your deliverable is a report in the end turn message. Do not implement changes, write issue drafts, or modify GitHub issues or labels.
 
 ## Establish the request
 
@@ -34,7 +34,7 @@ Stop interviewing once the problem, intended behavior, scope boundaries, and suc
 
 ## Present the report
 
-Once the user approved, write a self-contained report in chat, sized to the request. Include:
+Once the user approved, write a self-contained report in the end turn message, sized to the request. Include:
 
 - **Request and purpose:** the problem, who encounters it, and the desired outcome; link the source issue when applicable.
 - **Current behavior and evidence:** the relevant codebase findings and their implications.

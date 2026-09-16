@@ -55,7 +55,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`read-all-adrs`**: Reads every Markdown ADR under `docs/adr/` from start to finish so the current work is informed by the project's recorded architectural decisions.
 
-- **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis in chat. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
+- **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
 
 - **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Use `publish-issues --discard-current` to discard the current session's drafts, `publish-issues --gc --dry` to preview abandoned gateway data, or `publish-issues --gc --older-than 30d` to explicitly discard drafts older than a duration. Unknown files and ambiguous publication-recovery records are retained and reported.
 
