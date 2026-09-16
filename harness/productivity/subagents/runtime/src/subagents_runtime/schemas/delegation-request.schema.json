@@ -5,13 +5,71 @@
   "description": "The YAML frontmatter of a request file. The prompt is the nonempty Markdown body that follows the frontmatter, not a frontmatter key.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["task", "mode"],
   "properties": {
-    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "implement", "review", "general"]},
+    "task": {
+      "enum": [
+        "explore",
+        "prototype",
+        "websearch",
+        "brainstorm",
+        "implement",
+        "review",
+        "general"
+      ]
+    },
     "provider": {
       "description": "Defaults to the parent session's provider when omitted.",
-      "enum": ["claude", "chatgpt"]
+      "enum": [
+        "claude",
+        "chatgpt"
+      ]
     },
-    "mode": {"enum": ["interactive", "auto"]}
-  }
+    "mode": {
+      "enum": [
+        "interactive",
+        "auto"
+      ]
+    },
+    "resume": {
+      "type": "string",
+      "pattern": "^agent-[1-9][0-9]*$"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "task",
+        "mode"
+      ],
+      "not": {
+        "required": [
+          "resume"
+        ]
+      }
+    },
+    {
+      "required": [
+        "resume"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "task"
+            ]
+          },
+          {
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "required": [
+              "provider"
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

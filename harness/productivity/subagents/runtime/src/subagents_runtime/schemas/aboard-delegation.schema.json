@@ -3,13 +3,71 @@
   "$id": "https://harness.local/schemas/aboard-delegation.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["requestId", "task", "provider", "mode", "prompt", "cwd"],
+  "required": [
+    "requestId",
+    "task",
+    "provider",
+    "mode",
+    "prompt",
+    "cwd"
+  ],
   "properties": {
-    "requestId": {"type": "string", "minLength": 1},
-    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "implement", "review", "general"]},
-    "provider": {"enum": ["claude", "chatgpt"]},
-    "mode": {"enum": ["interactive", "auto"]},
-    "prompt": {"type": "string", "minLength": 1},
-    "cwd": {"type": "string", "minLength": 1}
+    "requestId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "enum": [
+        "explore",
+        "prototype",
+        "websearch",
+        "brainstorm",
+        "implement",
+        "review",
+        "general"
+      ]
+    },
+    "provider": {
+      "enum": [
+        "claude",
+        "chatgpt"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "interactive",
+        "auto"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "harnessSessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "harnessStateDirectory": {"type": "string", "minLength": 1},
+    "harnessRuntimePath": {"type": "string", "minLength": 1},
+    "executionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parentSessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resumeAgentId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resumeSessionId": {
+      "type": "string",
+      "minLength": 1
+    }
   }
 }
