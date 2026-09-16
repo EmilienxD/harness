@@ -24,17 +24,21 @@
               "--no-managed-python",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/review_issue_UserPromptSubmit_hook.py"
             ]
-          },
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
           {
             "type": "command",
-            "timeout": 300,
-            "command": "uv",
+            "command": "harness-report-gotchas-hook",
             "args": [
-              "run",
-              "--no-project",
-              "--no-managed-python",
-              "${CLAUDE_PROJECT_DIR}/.claude/hooks/publish_issues_UserPromptSubmit_hook.py"
-            ]
+              "--claude"
+            ],
+            "timeout": 30
           }
         ]
       }
