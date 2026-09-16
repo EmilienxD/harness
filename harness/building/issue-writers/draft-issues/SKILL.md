@@ -16,9 +16,9 @@ This skill is part of an issue publishing system that uses a gateway for publish
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body.
+Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body, plus any relevant reference in that body.
 
-(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for pre-factoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
 ### 2. Propose the breakdown
 
@@ -65,7 +65,7 @@ Iterate until the user approves the breakdown. Stop after presenting or revising
 
 ### 4. Write one file per issue
 
-Write one draft file per finding at the file paths instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
+Write one draft file per finding at the file paths instructed by the hook. If no hook gave you that info, stop immediately and alert the user about the bug instead of finding a workaround.
 
 Index them in the order you plan to publish them (blockers before what they block).
 

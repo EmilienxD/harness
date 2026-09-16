@@ -16,9 +16,9 @@ This skill is part of an issue publishing system that uses a gateway for publish
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body. Use the project's domain glossary vocabulary throughout the spec if available.
+Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body, plus any relevant reference in that body. Use the project's domain glossary vocabulary throughout the spec if available.
 
-(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for pre-factoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
 ### 2. Pin down the spec
 
@@ -28,11 +28,11 @@ If the feature is too unclear to write a useful spec, say what is missing instea
 
 ### 3. Write 1 file
 
-Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
+Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediately and alert the user about the bug instead of finding a workaround.
 
 Do not spend time checking whether the folder exists or what it already contains — just trust the hook and write the file.
 
-Use the template bellow:
+Use the template below:
 <spec-template>
 # {Spec title}
 

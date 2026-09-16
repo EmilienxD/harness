@@ -8,8 +8,7 @@ metadata:
 disable-model-invocation: true
 ---
 
-Find the `TODO(HITL)` comments in the current codebase and select the one that appears most important from
-its impact, risk, and ability to unblock other work. Use repository evidence only: read the selected
+Find the `TODO(HITL)` comments in the current codebase and select the one that appears most important based on its impact, risk, and ability to unblock other work. Use repository evidence only: read the selected
 comment and explore its surrounding code, callers, tests, and local documentation until you have found as
 many answers as the codebase provides.
 

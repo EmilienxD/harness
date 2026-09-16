@@ -10,15 +10,13 @@ disable-model-invocation: true
 
 Turn the current conversation context and codebase understanding into a single GitHub spec issue. Do NOT interview the user; just synthesize what you already know.
 
-Use any details provided alongside the invocation as additional input.
-
 ## Process
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body. Use the project's domain glossary vocabulary throughout the spec if available.
+Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body, plus any relevant reference in that body. Use the project's domain glossary vocabulary throughout the spec if available.
 
-(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for pre-factoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
 ### 2. Pin down the spec
 
@@ -88,4 +86,4 @@ Any further notes about the feature.
 
 ### 4. Hand off to the user
 
-Tell the user the spec is ready and ask them if they want to proceed with implemention or something else.
+Tell the user the spec is ready and state that you are ready to move to the next steps.

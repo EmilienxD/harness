@@ -5,7 +5,6 @@ argument-hint: "[gotchas to report]"
 license: MIT
 metadata:
   author: EMB
-allowed-tools: Bash(harness-report-gotchas submit *) PowerShell(harness-report-gotchas submit *)
 ---
 
 # Report Gotchas

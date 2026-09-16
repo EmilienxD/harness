@@ -14,7 +14,7 @@ You may quickly search the codebase when its dependencies, versions, terminology
 
 Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Use any source that is relevant to the task and fetch it.
 
-If the user request you to use specific search tools, use them. Otherwise, default to use the Context7 npx CLI and complete the search with basic websearch if needed.
+If the user requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with basic websearch if needed.
 
 How to use the Context7 CLI:
 - Resolve a library name to a Context7 library ID: `npx ctx7@latest library <name> [topic]` where `name` is the library name to search for and `topic` is what to look up in the library's documentation.

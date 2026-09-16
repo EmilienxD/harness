@@ -16,10 +16,10 @@ This skill is part of an issue publishing system that uses a gateway for publish
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body.
+Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body, plus any relevant reference in that body.
 
 (optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
-Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+Look for refactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
 ### 3. Pin down the issue
 
@@ -42,11 +42,11 @@ If the user asks for extra labels, verify them before writing the file: run `gh 
 
 ### 2. Write one file
 
-Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
+Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediately and alert the user about the bug instead of finding a workaround.
 
 Do not spend time checking whether the folder exists or what it already contains — just trust the hook and write the file.
 
-Use the template bellow:
+Use the template below:
 <issue-template>
 # {Issue title}
 

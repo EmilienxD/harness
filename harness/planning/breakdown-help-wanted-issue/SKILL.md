@@ -1,21 +1,31 @@
 ---
 name: breakdown-help-wanted-issue
-description: Fetch and breakdown a [AI]-help-wanted labelled Github issue, explore, provide recommandations on what to build and agree with the user.
-argument-hint: "[request, issue, or file]"
+description: Break down an unclear request into a concrete solution, provide recommendations on what to build, and agree with the user.
+argument-hint: "[request]"
 license: MIT
 metadata:
   author: EMB
 disable-model-invocation: true
 ---
 
-Process the argument supplied by the user; read any referenced issue or file. With no argument, use the oldest open issue labelled `[AI]-help-wanted` in the current repository:
+Breakdown an unclear request and turn it into a clear solution.
 
-```bash
-gh api 'repos/{owner}/{repo}/issues' --method GET -f state=open -f 'labels=[AI]-help-wanted' -f sort=created -f direction=asc -f per_page=100 --paginate --jq '.[] | select(.pull_request == null) | {number,html_url,title,body}'
-```
+## Process
 
-The results are oldest first and exclude pull requests; use the first issue. Read its title and body, and comments when useful; link the source issue to the user. If no issue is found or the lookup fails, explain and ask for a request.
+### 1. Gather context
 
-Explore the relevant code, tests, and documentation first. Establish the underlying problem, current behavior, and what the request would change. Ask questions when intent or scope is uncertain, and give concrete recommendations grounded in what you found, including tradeoffs and simpler alternatives.
+If the user provided the request or passes a reference (a spec path, an issue number, or a URL) as an argument, fetch it and read its full body, plus any relevant reference in that body. Otherwise, treat the oldest open issue labelled `[AI]-help-wanted` as the request. Run: `gh api 'repos/{owner}/{repo}/issues' --method GET -f state=open -f 'labels=[AI]-help-wanted' -f sort=created -f direction=asc -f per_page=100 --paginate --jq '.[] | select(.pull_request == null) | {number,html_url,title,body}'` (or the PowerShell equivalent if you are running PowerShell). If no issue is found or the lookup fails, tell the user and ask for a request.
 
-Work with the user until you agree on the intended behavior, scope, and success criteria. Keep the discussion proportional to the request. This skill clarifies the work; implementation or GitHub changes require a subsequent user request.
+(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for refactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+
+### 2. Agree on a solution
+
+Establish the underlying problem, current behavior, and what the request would change. Ask questions when intent or scope is uncertain, and give concrete, concise recommendations grounded in what you found, including tradeoffs and simpler alternatives.
+
+Discuss with the user until you agree on the intended behavior, scope, and success criteria.
+
+The session is done when the solution is completely approved; nothing is left silently assumed. Do not act on it until the user confirms you have reached a shared understanding.
+
+### 3. Hand off to the user
+
+Tell the user that you have reached a shared understanding, summarize the core solution decided upon for the initial problem in 1–3 sentences, and state that you are ready to proceed to the next steps.
