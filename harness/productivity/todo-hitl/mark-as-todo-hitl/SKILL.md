@@ -1,6 +1,10 @@
 ---
 name: mark-as-todo-hitl
-description: Mark deferred code work with a concise TODO(HITL) comment.
+description: Mark deferred code work with a concise TODO(HITL) comment. Use when implementation must wait for a human decision.
+argument-hint: "[deferred work]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

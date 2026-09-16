@@ -1,6 +1,10 @@
 ---
 name: review-with-agent
-description: Launch a visible agent to review a pinned change through the review-this workflow.
+description: Launch a visible agent to review a pinned change. Use when the user wants a separate agent to inspect and validate a target.
+argument-hint: "[review target or expectations]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

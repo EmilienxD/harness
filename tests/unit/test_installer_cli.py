@@ -64,13 +64,13 @@ def test_list_json_reports_installed_catalogue_packages(tmp_path, monkeypatch, c
         {
             "name": "caveman",
             "available": True,
-            "version": "1.0.4",
+            "version": "1.0.5",
             "description": "Ultra-compressed communication mode (~75% fewer tokens)",
             "category": "productivity",
             "docs": "https://github.com/EmilienxD/harness/blob/main/harness/productivity/caveman/SKILL.md",
             "support": {"claude": {"status": "supported"}},
             "installed": [
-                {"platform": "claude", "version": "1.0.4", "ownership": "selected"}
+                {"platform": "claude", "version": "1.0.5", "ownership": "selected"}
             ],
         }
     ]
@@ -104,7 +104,7 @@ def test_list_installed_surfaces_packages_missing_from_the_pinned_catalogue(
         "name": "retired-caveman",
         "available": False,
         "installed": [
-            {"platform": "claude", "version": "1.0.4", "ownership": "selected"}
+            {"platform": "claude", "version": "1.0.5", "ownership": "selected"}
         ],
     }
 
@@ -194,11 +194,11 @@ def test_upgrade_reconciles_existing_selection_to_current_catalogue(tmp_path, mo
     result = json.loads(capsys.readouterr().out)
     assert result["command"] == "upgrade"
     assert result["results"][0]["changes"] == [
-        {"action": "upgrade", "package": "caveman", "reason": "0.9.0 -> 1.0.4"}
+        {"action": "upgrade", "package": "caveman", "reason": "0.9.0 -> 1.0.5"}
     ]
     updated = json.loads(receipts_path.read_text(encoding="utf-8"))
     installation = next(iter(updated["installations"].values()))
-    assert installation["packages"]["caveman"]["version"] == "1.0.4"
+    assert installation["packages"]["caveman"]["version"] == "1.0.5"
 
 
 def test_json_operational_errors_keep_stdout_machine_readable(capsys):

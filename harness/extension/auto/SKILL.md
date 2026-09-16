@@ -1,6 +1,10 @@
 ---
 name: auto
-description: Start an Aboard Auto Run, or forecast it with --dry.
+description: Start or forecast an Aboard Auto Run. Use when the user invokes the Auto command.
+argument-hint: "[--dry]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

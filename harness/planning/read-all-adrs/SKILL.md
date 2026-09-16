@@ -1,6 +1,10 @@
 ---
 name: read-all-adrs
-description: Read every ADR markdown file in the project's docs/adr/ folder so you have full context on past decisions. Use only when the user explicitly calls it.
+description: Load every project ADR to establish complete decision context. Use when the user explicitly asks to read all ADRs.
+argument-hint: "[focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,10 @@
 ---
 name: setup-help
 description: 'Walk the user through setting up anything step by step. Use when the user asks for help setting up, configuring, installing, or getting something working — "help me set up X", "walk me through this", "setup-help". Differentiator: gives one current step at a time, then always lists every remaining setup step after each response.'
+argument-hint: "[what to set up]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

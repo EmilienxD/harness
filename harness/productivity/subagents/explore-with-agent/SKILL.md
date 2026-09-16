@@ -1,6 +1,10 @@
 ---
 name: explore-with-agent
 description: Launch a visible read-only agent to explore a codebase and report its findings. Use when the user wants a separate agent to investigate without making changes.
+argument-hint: "[exploration task]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

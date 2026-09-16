@@ -1,6 +1,10 @@
 ---
 name: writing-adrs
 description: Write or edit architectural decision records (ADRs). Use whenever a task creates, changes, or supersedes an ADR.
+argument-hint: "[decision or ADR path]"
+license: MIT
+metadata:
+  author: EMB
 ---
 
 ## ADR authoring rules

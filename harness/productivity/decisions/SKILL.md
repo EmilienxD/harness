@@ -1,6 +1,10 @@
 ---
 name: decisions
-description: Review important decisions made during the current work and surface only those where confidence remains low. Explicit invocation only.
+description: Review important decisions made during the current work and surface only those where confidence remains low.
+argument-hint: "[focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

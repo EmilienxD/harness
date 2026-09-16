@@ -1,6 +1,10 @@
 ---
 name: brainstorm-with-agent
 description: Launch a visible interactive agent to brainstorm a plan or design with the user. Use when the user wants a separate agent to question, clarify, or stress-test their thinking.
+argument-hint: "[topic]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

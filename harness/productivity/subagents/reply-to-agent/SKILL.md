@@ -1,6 +1,10 @@
 ---
 name: reply-to-agent
-description: Conclude the current session so its work can continue in the parent session.
+description: Conclude the current agent session with a self-contained result. Use when the work must return to and continue in the parent session.
+argument-hint: "[conclusion focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

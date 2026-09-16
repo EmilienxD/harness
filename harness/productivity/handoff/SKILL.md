@@ -1,6 +1,10 @@
 ---
 name: handoff
-description: Compact the current conversation into a handoff document for another agent to pick up. Explicit invocation only.
+description: Compact the current conversation into a handoff document for another agent to pick up.
+argument-hint: "[next-session focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

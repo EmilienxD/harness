@@ -1,6 +1,10 @@
 ---
 name: stop-overthinking
-description: Manually-invoked skill that stops overthinking and forces a short, practical decision. Use only when the user explicitly invokes stop-overthinking.
+description: Force a short, practical decision and identify the next action. Use when the user explicitly wants to stop analyzing and proceed.
+argument-hint: "[decision or question]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

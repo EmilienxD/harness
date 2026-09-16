@@ -1,5 +1,5 @@
 name = "writing-adrs"
-version = "1.0.0"
+version = "1.0.1"
 description = "Writes architectural decision records as durable decision contracts"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/writing-adrs/SKILL.md"
 

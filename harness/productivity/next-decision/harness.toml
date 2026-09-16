@@ -1,5 +1,5 @@
 name = "next-decision"
-version = "1.0.1"
+version = "1.0.2"
 description = "Resolves a plan's open decisions one at a time with focused choices and a recommendation"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/next-decision/SKILL.md"
 

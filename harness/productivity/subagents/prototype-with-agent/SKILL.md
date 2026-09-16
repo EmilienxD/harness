@@ -1,6 +1,10 @@
 ---
 name: prototype-with-agent
 description: Launch a visible agent to build a focused prototype. Use when the user wants a separate agent to test an idea through a disposable implementation.
+argument-hint: "[prototype task]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

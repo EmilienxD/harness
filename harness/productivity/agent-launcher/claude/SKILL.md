@@ -1,6 +1,10 @@
 ---
 name: extend-claude-system-prompt
 description: Extend the project-specific Claude Code system prompt used by cch. Use when the user wants to add static or dynamically generated project context to Claude's system prompt.
+argument-hint: "[context to add]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

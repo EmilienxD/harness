@@ -1,6 +1,10 @@
 ---
 name: address-with-agent
-description: Launch a visible agent to implement a bounded change through the address-this workflow.
+description: Launch a visible agent to implement and validate a bounded change. Use when the user wants a separate agent to perform the work.
+argument-hint: "[implementation task]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,10 @@
 ---
 name: to-spec-draft-issue
-description: Turn the current conversation into a spec, as a draft issue — no interview, just synthesis of what you've already discussed.
+description: Synthesize the current conversation into a specification draft issue. Use when the user wants an editable spec issue without another interview.
+argument-hint: "[reference or focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

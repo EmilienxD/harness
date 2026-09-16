@@ -1,6 +1,10 @@
 ---
 name: publish-issues
-description: Publish or explicitly clean drafts in .issues-gateway/ through the installed lifecycle hook. Supports --dry, --discard-current, and --gc --older-than <duration>. Explicit invocation only.
+description: Publish or clean drafts from the issues gateway. Use after issue drafts have been reviewed and are ready for publication or removal.
+argument-hint: "[--dry | --discard-current | --gc --older-than <duration>]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

@@ -1,5 +1,5 @@
 name = "writing-for-agents"
-version = "1.0.1"
+version = "1.0.2"
 description = "Guidance for writing predictable documents consumed by agents"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/writing-for-agents/SKILL.md"
 
