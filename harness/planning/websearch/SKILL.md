@@ -8,31 +8,20 @@ metadata:
 disable-model-invocation: true
 ---
 
-Research the user's query and answer it directly in the end turn message. Except for the source index described below, this is a strictly read-only workflow: do not create, edit, or write files anywhere.
-
-Prefer any tool the user requests. Otherwise search in this order, moving to the next source only when the earlier one is unavailable or insufficient:
-
-1. Additional user-configured MCP servers or CLIs relevant to the query.
-2. Context7 for library and framework documentation.
-3. Built-in web tools.
+Research the user's query and answer it directly in the end turn message. This is a read-only workflow: do not create or edit source code.
 
 You may quickly search the codebase when its dependencies, versions, terminology, or implementation details would make the research more accurate.
 
-For current library documentation, use Context7 before built-in web tools. `library` resolves a human-readable package name and can use the optional topic to rank matches; its output includes the library ID needed by `docs`. `docs` requires that ID and one focused documentation question. Run separate `docs` queries for distinct topics unless the question is about how they interact.
+Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Use any source that is relevant to the task and fetch it.
 
-```bash
-npx ctx7@latest library <name> [topic]
-npx ctx7@latest docs <library-id> "<specific topic>"
-```
+If the user request you to use specific search tools, use them. Otherwise, default to use the Context7 npx CLI and complete the search with basic websearch if needed.
 
-Skip `library` when the Context7 library ID (for example, `/facebook/react`) is already known. Add `--json` when structured output is useful.
+How to use the Context7 CLI:
+- Resolve a library name to a Context7 library ID: `npx ctx7@latest library <name> [topic]` where `name` is the library name to search for and `topic` is what to look up in the library's documentation.
+- Query documentation for a library: `npx ctx7@latest docs <library-id> <query>` where library-id is the Context7 library ID (e.g., /facebook/react) and `query` is a single-topic question to get docs for (run a separate query per distinct concept, unless asking how they interact)
 
-The shared source index is at `<scope-root>/.harness/websearch/INDEX.md`, where `<scope-root>` is the project root for a project installation or the home directory for a user installation. Before doing any search, read that index to get a list of common, known, and validated sources. Use any source that is relevant to the task and fetch it. After every web search, add ONLY the relevant and trusted sources found during the search to the index. Use this format:
+Trace your sources in INDEX.md for the next sessions to pick up. ONLY save the relevant and trusted sources found during the search. Use 1 concise bullet point per source with the format `- title: source` where title is a title you define and source is the info needed to fetch (e.g. a Context7 id, or url)
 
-```markdown
-- Concise title: Source (e.g. URL, Context7 library id).
-```
-
-Avoid incidental findings, duplicates, and low-quality sources. Maintain the index in its correct format.
+Avoid incidental findings, duplicates, and low-quality sources.
 
 Return a complete synthesis that answers the request, cites the supporting sources, distinguishes uncertainty when necessary, and filters out non-essential research findings rather than recounting the search process.
