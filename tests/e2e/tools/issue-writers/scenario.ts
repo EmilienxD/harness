@@ -50,8 +50,8 @@ export function codexTransition(request: OpenAiResponsesRequest, repoRoot: strin
 }
 
 function writeFileCommand(path: string, content: string): string {
-  // The hook no longer pre-creates the session folder, so the first draft
-  // write creates it, exactly as a real agent's write tool would.
+  // mkdir -p first, exactly as a real agent's write tool would, so the draft
+  // lands whether or not the hook already created the directory.
   const script = "const fs=require('node:fs'),p=Buffer.from(process.argv[1],'base64').toString();fs.mkdirSync(require('node:path').dirname(p),{recursive:true});fs.writeFileSync(p,Buffer.from(process.argv[2],'base64'))";
   return `node -e \"${script}\" ${Buffer.from(path).toString("base64")} ${Buffer.from(content).toString("base64")}`;
 }
@@ -61,10 +61,11 @@ export function findDraftPath(text: string, repoRoot: string): string {
 }
 
 function draftPath(text: string, repoRoot: string, field: string, platform: "claude" | "codex"): string {
-  const match = /draft directory:\s+([^\s]+)/u.exec(text);
-  const relativePath = match?.[1];
-  if (relativePath && /^\.issues-gateway\/[0-9a-f-]{36}$/iu.test(relativePath)) {
-    const candidate = normalize(join(repoRoot, relativePath, DRAFT_NAME));
+  // The hook hands the agent a path template; "{i}" is the draft's index.
+  const match = /draft file path:\s+([^\s]+)/u.exec(text);
+  const template = match?.[1];
+  if (template && /^\.harness\/issue-drafts\/[0-9a-f-]{36}\.issue-\{i\}\.md$/iu.test(template)) {
+    const candidate = normalize(join(repoRoot, template.replace("{i}", "0")));
     const outside = relative(repoRoot, candidate);
     if (!outside.startsWith("..") && !isAbsolute(outside)) return candidate;
   }

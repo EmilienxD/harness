@@ -78,15 +78,14 @@ def test_drafting_prompt_injects_stable_session_and_next_index(
     first = _run(payload, monkeypatch, capsys)["hookSpecificOutput"][
         "additionalContext"
     ]
-    batch_id = adapter.gateway_session_id("thr_same-thread")
+    batch_id = adapter.issues_session_id("thr_same-thread")
 
     assert f"issues session id: {batch_id}" in first
     assert "next free issue index: 0" in first
-    assert (tmp_path / ".issues-gateway/.gitignore").read_text() == "*\n"
+    assert (tmp_path / ".harness/issue-drafts/.gitignore").read_text() == "*\n"
 
-    batch = tmp_path / ".issues-gateway" / batch_id
-    batch.mkdir(parents=True)
-    (batch / "issue-0.md").write_text("# Existing\n", encoding="utf-8")
+    drafts = tmp_path / ".harness/issue-drafts"
+    (drafts / f"{batch_id}.issue-0.md").write_text("# Existing\n", encoding="utf-8")
 
     second = _run(payload, monkeypatch, capsys)["hookSpecificOutput"][
         "additionalContext"
@@ -122,10 +121,11 @@ def test_all_explicit_drafting_spellings_trigger_context(
 def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
     tmp_path, monkeypatch, capsys
 ):
-    batch_id = adapter.gateway_session_id("thr_oversized")
-    batch = tmp_path / ".issues-gateway" / batch_id
-    batch.mkdir(parents=True)
-    (batch / "issue-0.md").write_text(
+    batch_id = adapter.issues_session_id("thr_oversized")
+    drafts = tmp_path / ".harness/issue-drafts"
+    drafts.mkdir(parents=True)
+    draft = drafts / f"{batch_id}.issue-0.md"
+    draft.write_text(
         "# Large issue\n\n> difficulty:advanced\n\n" + "x" * 70_000,
         encoding="utf-8",
     )
@@ -150,18 +150,19 @@ def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
     assert "2 parts (1 continuation comment(s))" in response["reason"]
     # A dry run touches nothing: the draft survives and no bookkeeping file
     # appears beside it.
-    assert [path.name for path in batch.iterdir()] == ["issue-0.md"]
+    assert [path.name for path in drafts.iterdir()] == [draft.name]
 
 
 def test_chatgpt_publish_is_scoped_to_the_current_session(
     tmp_path, monkeypatch, capsys
 ):
-    current = adapter.gateway_session_id("thr_current")
-    other = adapter.gateway_session_id("thr_other")
+    current = adapter.issues_session_id("thr_current")
+    other = adapter.issues_session_id("thr_other")
+    drafts = tmp_path / ".harness/issue-drafts"
+    drafts.mkdir(parents=True)
+    # Both sessions share one flat directory, so scoping is the filename's job.
     for batch_id, title in ((current, "Current"), (other, "Other")):
-        batch = tmp_path / ".issues-gateway" / batch_id
-        batch.mkdir(parents=True, exist_ok=True)
-        (batch / "issue-0.md").write_text(
+        (drafts / f"{batch_id}.issue-0.md").write_text(
             f"# {title}\n\n> mode:afk\n\nbody\n", encoding="utf-8"
         )
     monkeypatch.setattr(
@@ -188,7 +189,7 @@ def test_chatgpt_publish_is_scoped_to_the_current_session(
 def test_pending_notice_and_drafting_context_are_combined(
     tmp_path, monkeypatch, capsys
 ):
-    session_id = adapter.gateway_session_id("thr_notice")
+    session_id = adapter.issues_session_id("thr_notice")
     core.queue_notice(
         tmp_path, session_id, [{"number": "42", "title": "Spec"}], 0
     )

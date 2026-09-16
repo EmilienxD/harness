@@ -12,12 +12,15 @@ import { startFakeOpenAiServer } from "../../core/openai-server.js";
 import { DRAFT_MARKER, DRAFT_NAME, claudeTransition, codexTransition, scenarioCatalogHash } from "./scenario.js";
 import { copyTree, createFakeGh, findHarnessRoot, initializeRepository, isolatedCodexEnvironment, parseCodexThreadId, pythonCommand, readPublishedIssue, successfulOpenAiRequests, type FakeIssue, type IssuePlatform } from "../issues/support.js";
 
+/** Where drafts live, relative to the project root. */
+const DRAFTS_DIR = join(".harness", "issue-drafts");
+
 export interface IssueWritersJourneyResult {
   readonly checkpoints: readonly string[];
   readonly inferenceRequestsBeforePublish: number;
   readonly inferenceRequestsAfterPublish: number;
   readonly draftExistsAfterPublish: boolean;
-  readonly gatewayEntriesAfterPublish: readonly string[];
+  readonly draftDirEntriesAfterPublish: readonly string[];
   readonly published: FakeIssue;
   readonly unexpectedRequests: number;
 }
@@ -62,7 +65,7 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
         CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false", CLAUDE_CODE_MAX_RETRIES: "0", DISABLE_UPDATES: "1", DISABLE_AUTOUPDATER: "1",
       });
       const sessionId = randomUUID();
-      draftPath = join(projectRoot, ".issues-gateway", sessionId, DRAFT_NAME);
+      draftPath = join(projectRoot, DRAFTS_DIR, `${sessionId}.${DRAFT_NAME}`);
       const first = await runClaude(claudeArgs(`/draft-issue ${DRAFT_MARKER}`, ["--session-id", sessionId], "Write"), projectRoot, env);
       requireClaudeDraftSuccess(first);
       inferenceRequestsBeforePublish = claudeServer.assertions().inferenceRequests;
@@ -96,7 +99,7 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
       inferenceRequestsBeforePublish,
       inferenceRequestsAfterPublish,
       draftExistsAfterPublish: await exists(draftPath),
-      gatewayEntriesAfterPublish: await gatewayEntries(projectRoot),
+      draftDirEntriesAfterPublish: await draftDirectoryEntries(projectRoot),
       published: await readPublishedIssue(fakeGh.statePath),
       unexpectedRequests: assertions.unexpectedRequests,
     };
@@ -178,25 +181,20 @@ function requireSilentHookCompletion(code: number | null, timedOut: boolean, cli
 }
 
 async function onlyDraftPath(projectRoot: string): Promise<string> {
-  const gateway = join(projectRoot, ".issues-gateway");
-  const batches = (await readdir(gateway, { withFileTypes: true })).filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/iu.test(entry.name));
-  if (batches.length !== 1) throw new Error("ChatGPT drafting did not create exactly one session batch");
-  return join(gateway, batches[0]!.name, DRAFT_NAME);
+  const drafts = join(projectRoot, DRAFTS_DIR);
+  const written = (await readdir(drafts)).filter((name) => name.endsWith(DRAFT_NAME));
+  if (written.length !== 1) throw new Error("ChatGPT drafting did not write exactly one draft");
+  return join(drafts, written[0]!);
 }
 
-/** Every file the gateway leaves in the working tree, as posix-relative paths. */
-async function gatewayEntries(projectRoot: string): Promise<readonly string[]> {
-  const gateway = join(projectRoot, ".issues-gateway");
+/** Everything the tool leaves in the working tree, drafts directory included. */
+async function draftDirectoryEntries(projectRoot: string): Promise<readonly string[]> {
+  const drafts = join(projectRoot, DRAFTS_DIR);
   const found: string[] = [];
-  const walk = async (directory: string, prefix: string): Promise<void> => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const child = join(directory, entry.name);
-      const label = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) await walk(child, label);
-      else found.push(label);
-    }
-  };
-  await walk(gateway, "");
+  for (const entry of await readdir(drafts, { withFileTypes: true })) {
+    // A subdirectory would mean the flat-file layout regressed.
+    found.push(entry.isDirectory() ? `${entry.name}/` : entry.name);
+  }
   return found.sort();
 }
 

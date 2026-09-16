@@ -41,10 +41,6 @@ ISSUE_URL = re.compile(
 )
 # Same-repository references harvested from included bodies.
 BODY_REFERENCE = re.compile(r"(?<![A-Za-z0-9_/&-])#([1-9][0-9]*)\b")
-GATEWAY_MARKER_LINE = re.compile(
-    r"(?m)^[ \t]*<!-- issues-gateway:[^:\r\n]+:sha256:[0-9a-f]{64}:"
-    r"part:\d+/\d+ -->[ \t]*(?:\r?\n)?"
-)
 
 DEPTH_VARIABLE = "HARNESS_ISSUE_CONTEXT_DEPTH"
 DEFAULT_DEPTH = 1
@@ -112,11 +108,6 @@ ADDRESS_GIT = "a Git repository"
 
 def address_git(arguments: list[str], cwd: Path) -> str:
     return git(arguments, cwd, "address-this", ADDRESS_GIT)
-
-
-def strip_gateway_markers(text: str) -> str:
-    """Keep legacy publisher metadata out of model-facing issue context."""
-    return GATEWAY_MARKER_LINE.sub("", text).rstrip()
 
 
 def relation_depth() -> int:
@@ -207,7 +198,7 @@ def fetch_issue(repository: str, number: int, cwd: Path) -> dict | None:
         "repository": repository,
         "number": issue["number"],
         "title": issue.get("title") or "",
-        "body": strip_gateway_markers(issue.get("body") or ""),
+        "body": (issue.get("body") or "").rstrip(),
         "state": (issue.get("state") or "").upper(),
         "author": ((issue.get("author") or {}).get("login")) or "ghost",
         "labels": [node["name"] for node in (issue.get("labels") or {}).get("nodes", [])],
@@ -219,7 +210,7 @@ def fetch_issue(repository: str, number: int, cwd: Path) -> dict | None:
         "comments": [
             {
                 "author": ((node.get("author") or {}) or {}).get("login") or "ghost",
-                "body": strip_gateway_markers(node.get("body") or ""),
+                "body": (node.get("body") or "").rstrip(),
             }
             for node in comments.get("nodes", [])
         ],
