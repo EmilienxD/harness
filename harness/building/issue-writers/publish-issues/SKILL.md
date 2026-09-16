@@ -1,7 +1,7 @@
 ---
 name: publish-issues
-description: Publish or clean drafts from the issues gateway. Use after issue drafts have been reviewed and are ready for publication or removal.
-argument-hint: "[--dry | --discard-current | --gc --older-than <duration>]"
+description: Publish the current session's drafts from the issues gateway as GitHub issues. Use after issue drafts have been reviewed and are ready for publication.
+argument-hint: "[--dry]"
 license: MIT
 metadata:
   author: EMB

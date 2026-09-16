@@ -17,6 +17,7 @@ export interface IssueWritersJourneyResult {
   readonly inferenceRequestsBeforePublish: number;
   readonly inferenceRequestsAfterPublish: number;
   readonly draftExistsAfterPublish: boolean;
+  readonly gatewayEntriesAfterPublish: readonly string[];
   readonly published: FakeIssue;
   readonly unexpectedRequests: number;
 }
@@ -95,6 +96,7 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
       inferenceRequestsBeforePublish,
       inferenceRequestsAfterPublish,
       draftExistsAfterPublish: await exists(draftPath),
+      gatewayEntriesAfterPublish: await gatewayEntries(projectRoot),
       published: await readPublishedIssue(fakeGh.statePath),
       unexpectedRequests: assertions.unexpectedRequests,
     };
@@ -180,6 +182,22 @@ async function onlyDraftPath(projectRoot: string): Promise<string> {
   const batches = (await readdir(gateway, { withFileTypes: true })).filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/iu.test(entry.name));
   if (batches.length !== 1) throw new Error("ChatGPT drafting did not create exactly one session batch");
   return join(gateway, batches[0]!.name, DRAFT_NAME);
+}
+
+/** Every file the gateway leaves in the working tree, as posix-relative paths. */
+async function gatewayEntries(projectRoot: string): Promise<readonly string[]> {
+  const gateway = join(projectRoot, ".issues-gateway");
+  const found: string[] = [];
+  const walk = async (directory: string, prefix: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const child = join(directory, entry.name);
+      const label = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) await walk(child, label);
+      else found.push(label);
+    }
+  };
+  await walk(gateway, "");
+  return found.sort();
 }
 
 async function exists(path: string): Promise<boolean> {
