@@ -4,26 +4,7 @@ import { OpenAiProtocolError, type OpenAiResponseOutput, type OpenAiResponsesReq
 
 export const FIXTURE_FILE = "retry-imports.txt";
 export const FIXTURE_CONTENT = "Imports are retried by uploading the source file again.\n";
-export const REPORT = `## Request and purpose
-
-Issue #17 asks to let users retry failed imports without uploading the source file again.
-
-## Current behavior and evidence
-
-The fixture states that retries currently require another upload.
-
-## Proposed scope
-
-Preserve the uploaded source for a retry and expose a retry action for failed imports.
-
-## Blockers and open decisions
-
-The retention lifetime and authorization rules still need a product decision.
-
-## Recommendation
-
-Revise the request to specify retention and authorization, then proceed. Please validate or correct this report.
-`;
+export const REPORT = "Retries currently require another upload. I recommend preserving the source and exposing a retry action. How long should we retain the source, and who may retry?";
 export const scenarioCatalogHash = createHash("sha256").update("breakdown-help-wanted-issue:v1").digest("hex");
 const CLAUDE_READ = "toolu_e2e_breakdown_read";
 const CODEX_READ = "call_e2e_breakdown_read";

@@ -57,7 +57,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`audit`**: Performs a read-only general, security, architecture, quality, performance, reliability, testing, dependency, or privacy audit of a codebase or selected path. Findings include file-and-line evidence, severity, confidence, remediation difficulty, and a recommended order of work; larger scopes can be partitioned across explorer agents.
 
-- **`breakdown-help-wanted-issue`**: Investigates a vague request against the codebase, challenges its scope, and returns a report for your approval. With no supplied request, it can use the oldest open `[AI]-help-wanted` GitHub issue. It does not implement or publish anything.
+- **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 
