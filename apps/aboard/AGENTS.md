@@ -52,7 +52,7 @@ points.
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.harness/launch.json` version 3 is the launch authority and is re-read for every new launch, resume, and
+`.harness/launch.json` version 1 is the launch authority and is re-read for every new launch, resume, and
 reopen. `providers.claude` and `providers.chatgpt` are equal, independently validated configurations;
 neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
 the Run Agent view above the fleet offers one row per provider that launches the same interactive session
@@ -158,8 +158,8 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   accepted commit directly to the run branch and update the cumulative PR. Only the final run PR into the
   original target may need manual merging; `mergeRunPullRequest` controls its automatic merge.
 - File and Git changes, view refresh, and window focus wake acceptance observation; an internal timer
-  supplies a one-second fallback. Recovery uses version-4 records; versions 1–3 remain discardable but cannot
-  resume. Persist mutation intent, then observed postconditions, before clearing the journal. The HITL mixed
+  supplies a one-second fallback. Recovery uses version-1 records. Persist mutation intent, then observed
+  postconditions, before clearing the journal. The HITL mixed
   reset has its own pending action whose postcondition includes an index reset to `beforeSha`, and the
   temporary implementer checkpoint must never be published.
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.

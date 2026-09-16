@@ -3,7 +3,7 @@
   "displayName": "aboard; visible coding agents",
   "publisher": "aboard",
   "description": "VS Code integration for visible Claude Code and ChatGPT sessions, fleet tracking, and Auto Run orchestration.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "icon": "assets/aboard.png",
   "private": true,
   "repository": {
@@ -329,7 +329,7 @@
         },
         {
           "command": "aboard.discardAutoRun",
-          "when": "aboard.initialized && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken || aboard.autoRunCard == unsupported)"
+          "when": "aboard.initialized && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken)"
         },
         {
           "command": "aboard.autoRun.refresh",
@@ -431,7 +431,7 @@
         },
         {
           "command": "aboard.discardAutoRun",
-          "when": "viewItem =~ /aboard.autoRun.(recoverable|broken|unsupported)/",
+          "when": "viewItem =~ /aboard.autoRun.(recoverable|broken)/",
           "group": "inline@2"
         },
         {

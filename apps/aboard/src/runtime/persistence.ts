@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { AUTO_RUN_BRANCH_MODES, AUTO_RUN_PHASES, DEFAULT_ISSUE_CONTEXT_DEPTH, MAX_ISSUE_CONTEXT_DEPTH, MERGE_STRATEGIES, type AutoRunBranchMode, type AutoRunPhase, type IssueDisposition, type MergeStrategy } from "../domain/auto-run.js";
+import { AUTO_RUN_BRANCH_MODES, AUTO_RUN_PHASES, MAX_ISSUE_CONTEXT_DEPTH, MERGE_STRATEGIES, type AutoRunBranchMode, type AutoRunPhase, type IssueDisposition, type MergeStrategy } from "../domain/auto-run.js";
 import {
   RUN_CHECKPOINTS,
   type AutoRunRecord,
@@ -8,7 +8,6 @@ import {
   type FrozenRunSettings,
   type IssueProgress,
   type PendingAction,
-  type PersistedAutoRunRecord,
   type RunAttemptOutcome,
   type RunCheckpoint,
 } from "../domain/run-plan.js";
@@ -122,8 +121,8 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     : undefined;
   if (
     typeof value.review !== "boolean"
-    || (value.exploreBeforeImplement !== undefined && typeof value.exploreBeforeImplement !== "boolean")
-    || (value.issueContextDepth !== undefined && !isDepth(value.issueContextDepth))
+    || typeof value.exploreBeforeImplement !== "boolean"
+    || !isDepth(value.issueContextDepth)
     || typeof value.mergeRunPullRequest !== "boolean"
     || mergeStrategy === undefined
     || typeof worktree.enabled !== "boolean" || typeof worktree.root !== "string"
@@ -136,12 +135,12 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     || (value.additionalGuideline !== undefined && guideline === undefined)
   ) return undefined;
   const branchMode = (AUTO_RUN_BRANCH_MODES as readonly string[]).includes(value.branchMode as string) ? value.branchMode as AutoRunBranchMode : undefined;
-  if (value.branchMode !== undefined && branchMode === undefined) return undefined;
+  if (branchMode === undefined) return undefined;
   return {
-    ...(branchMode === undefined ? {} : { branchMode }),
+    branchMode,
     review: value.review,
-    exploreBeforeImplement: value.exploreBeforeImplement ?? false,
-    issueContextDepth: value.issueContextDepth ?? DEFAULT_ISSUE_CONTEXT_DEPTH,
+    exploreBeforeImplement: value.exploreBeforeImplement,
+    issueContextDepth: value.issueContextDepth,
     mergeStrategy,
     mergeRunPullRequest: value.mergeRunPullRequest,
     worktree: {
@@ -162,7 +161,7 @@ function parseFrozenIssue(value: unknown): FrozenIssue | undefined {
   const title = nonEmptyString(value.title);
   const branch = nonEmptyString(value.branch);
   const issueDisposition = disposition(value.disposition);
-  const dependsOn = numbers(value.dependsOn ?? []);
+  const dependsOn = numbers(value.dependsOn);
   if (number === undefined || title === undefined || branch === undefined || issueDisposition === undefined || (value.chrome !== undefined && value.chrome !== true) || dependsOn === undefined) {
     return undefined;
   }
@@ -309,13 +308,12 @@ function parseOutcome(value: unknown): RunAttemptOutcome | undefined {
   return reason === undefined ? undefined : { kind: "failed", reason };
 }
 
-export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | undefined {
+export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
   if (!isRecord(value)) return undefined;
   const runId = nonEmptyString(value.runId);
   const startedAt = timestamp(value.startedAt);
   if (runId === undefined || startedAt === undefined) return undefined;
-  if (value.version === 1 || value.version === 2 || value.version === 3) return { version: value.version, runId, startedAt };
-  if (value.version !== 4) return undefined;
+  if (value.version !== 1) return undefined;
 
   const settings = parseFrozenSettings(value.settings);
   const sessionBranch = nonEmptyString(value.sessionBranch);
@@ -373,7 +371,7 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
   )) return undefined;
   if (currentIssue !== undefined && (!issueNumbers.has(String(currentIssue)) || progress[String(currentIssue)]?.state !== "current")) return undefined;
   return {
-    version: 4,
+    version: 1,
     runId,
     startedAt,
     updatedAt,
@@ -403,7 +401,7 @@ export function parseAutoRunRecord(value: unknown): PersistedAutoRunRecord | und
   };
 }
 
-export class FileAutoRunStore extends AtomicJsonFile<PersistedAutoRunRecord> {
+export class FileAutoRunStore extends AtomicJsonFile<AutoRunRecord> {
   public constructor(runtime: RuntimeLayout, admission?: RuntimeAdmission) {
     super(runtime.state("auto-run.json"), parseAutoRunRecord, admission);
   }
@@ -421,9 +419,4 @@ export class PersistOnChange {
     this.#registration = register(() => { this.#pending = this.#pending.then(() => this.#disposed ? undefined : this.save()).catch(this.onError); });
   }
   public async dispose(): Promise<void> { this.#registration.dispose(); await this.#pending; await this.save(); this.#disposed = true; }
-}
-
-/** Narrowing helper so callers accept only the version-4 acceptance-driven shape. */
-export function isFixedPlanRecord(record: PersistedAutoRunRecord | undefined): record is AutoRunRecord {
-  return record?.version === 4;
 }

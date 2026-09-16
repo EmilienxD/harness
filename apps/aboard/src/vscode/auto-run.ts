@@ -1,13 +1,10 @@
 
 import {
   completedCount,
-  isUnsupportedRecord,
   issueProgress,
-  UNSUPPORTED_RECORD_REASON,
   type AutoRunRecord,
   type FrozenIssue,
   type IssueProgress,
-  type PersistedAutoRunRecord,
   type RecoveryEligibility,
 } from "../domain/run-plan.js";
 import type { AutoRunState } from "../auto/engine.js";
@@ -102,9 +99,7 @@ export type AutoRunCard =
   /** A record exists and its eligibility is still being computed. */
   | { readonly kind: "checking"; readonly record: AutoRunRecord }
   | { readonly kind: "recoverable"; readonly record: AutoRunRecord }
-  | { readonly kind: "broken"; readonly record: AutoRunRecord; readonly reason: string }
-  /** An unsupported pre-v4 record: nothing to continue, only something to forget. */
-  | { readonly kind: "unsupported"; readonly reason: string };
+  | { readonly kind: "broken"; readonly record: AutoRunRecord; readonly reason: string };
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
@@ -125,7 +120,7 @@ export interface AutoRunViewSources {
   readonly starting: () => boolean;
   readonly forecast: () => AutoRunForecast;
   readonly state: () => AutoRunState | undefined;
-  readonly persisted: () => PersistedAutoRunRecord | undefined;
+  readonly persisted: () => AutoRunRecord | undefined;
   readonly eligibility: () => RecoveryEligibility | undefined;
   /** Live issue titles, for display only; the plan's frozen titles do the work. */
   readonly titles: () => Readonly<Record<string, string>>;
@@ -136,9 +131,6 @@ export interface AutoRunViewSources {
 export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
   const persisted = sources.persisted();
   const state = sources.state();
-  if (persisted !== undefined && isUnsupportedRecord(persisted)) {
-    return { kind: "unsupported", reason: UNSUPPORTED_RECORD_REASON };
-  }
   if (state !== undefined && persisted !== undefined) {
     return { kind: state.waiting ? "waiting" : "active", state, record: persisted };
   }
@@ -175,7 +167,7 @@ export function autoRunCardMenuState(card: AutoRunCard): string {
 
 /** The record behind the card, when there is one. */
 export function cardRecord(card: AutoRunCard): AutoRunRecord | undefined {
-  return card.kind === "idle" || card.kind === "starting" || card.kind === "checking-next" || card.kind === "forecast" || card.kind === "unavailable" || card.kind === "unsupported"
+  return card.kind === "idle" || card.kind === "starting" || card.kind === "checking-next" || card.kind === "forecast" || card.kind === "unavailable"
     ? undefined
     : card.record;
 }
@@ -331,15 +323,6 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
         icon: "error",
         contextValue: "aboard.autoRun.broken",
         collapsible: true,
-      };
-    case "unsupported":
-      return {
-        label: "Interrupted auto-run",
-        description: `cannot be resumed; ${card.reason}`,
-        tooltip: "This record predates human-acceptance persistence version 4 and cannot be resumed. Its branches and pull requests are untouched; discard the record when you have finished with them.",
-        icon: "error",
-        contextValue: "aboard.autoRun.unsupported",
-        collapsible: false,
       };
   }
 }

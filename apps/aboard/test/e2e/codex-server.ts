@@ -481,8 +481,7 @@ async function readSpill(candidate: string): Promise<string> {
   const offset = relative(temporaryRoot, path);
   const parts = offset.split(/[\\/]/u);
   const activationRoot = parts[0] !== undefined && /^abd-[A-Za-z0-9]+$/u.test(parts[0]) && parts.length >= 3;
-  const legacyRoot = parts[0] === "abd-prompts" && parts.length >= 4;
-  if (offset === "" || offset === ".." || offset.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(offset) || !activationRoot && !legacyRoot) {
+  if (offset === "" || offset === ".." || offset.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(offset) || !activationRoot) {
     throw new ProtocolMismatch("$.input", "spilled prompt path escaped its dedicated root");
   }
   try { return await readFile(path, "utf8"); }

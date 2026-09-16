@@ -31,31 +31,6 @@ test("an activation owns a short isolated prompt root", async (t) => {
   );
 });
 
-test("short-root cleanup also removes the current workspace's legacy prompt files", async (t) => {
-  const parent = await mkdtemp(join(tmpdir(), "aboard-prompt-migration-test-"));
-  const runtimeRoot = join(parent, "runtime");
-  const promptRoot = await createPromptSpillRoot(parent);
-  const legacyRoot = promptSpillRoot(runtimeRoot);
-  t.after(async () => {
-    await rm(parent, { recursive: true, force: true });
-    await rm(legacyRoot, { recursive: true, force: true });
-  });
-
-  const agentId = "8" as AgentId;
-  const current = new FileSystemPromptSpillStore("C:/project", runtimeRoot, new Map(), { promptRoot });
-  const legacy = new FileSystemPromptSpillStore("C:/project", runtimeRoot, new Map());
-  const contents = "Review issue #8.\n";
-  const currentPath = join(promptRoot, agentId, "task.md");
-  const legacyPath = taskPromptPath(runtimeRoot, agentId);
-  await current.write({ agentId, relativePath: currentPath, contents });
-  await legacy.write({ agentId, relativePath: legacyPath, contents });
-
-  await current.remove(agentId);
-
-  await assert.rejects(readFile(currentPath), { code: "ENOENT" });
-  await assert.rejects(readFile(legacyPath), { code: "ENOENT" });
-});
-
 test("compaction restores an archived worker task into its activation root", async (t) => {
   const parent = await mkdtemp(join(tmpdir(), "aboard-task-reground-test-"));
   const runtimeRoot = join(parent, "runtime");

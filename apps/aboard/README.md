@@ -117,7 +117,7 @@ provider stored with the session:
 
 ```json
 {
-  "version": 3,
+  "version": 1,
   "autoRun": { "provider": "claude" },
   "providers": {
     "claude": { "command": ["claude"] },

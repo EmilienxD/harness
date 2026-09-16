@@ -26,7 +26,7 @@ export interface FrozenIssue {
 
 /** The settings a run is bound to for its whole life, including every resume. */
 export interface FrozenRunSettings {
-  readonly branchMode?: AutoRunBranchMode;
+  readonly branchMode: AutoRunBranchMode;
   readonly review: boolean;
   readonly exploreBeforeImplement: boolean;
   readonly issueContextDepth: number;
@@ -116,7 +116,7 @@ export type PendingAction =
   | { readonly kind: "merge-run-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string };
 
 export interface AutoRunRecord {
-  readonly version: 4;
+  readonly version: 1;
   readonly runId: string;
   readonly startedAt: string;
   readonly updatedAt: string;
@@ -158,21 +158,6 @@ export type RecoveryEligibility =
   | { readonly state: "checking" }
   | { readonly state: "resumable" }
   | { readonly state: "broken"; readonly reason: string };
-
-/** Approval-oriented records are shown as broken rather than migrated. */
-export const UNSUPPORTED_RECORD_REASON = "run predates human-acceptance persistence version 4; discard this unsupported record";
-
-export interface UnsupportedAutoRunRecord {
-  readonly version: 1 | 2 | 3;
-  readonly runId: string;
-  readonly startedAt: string;
-}
-
-export type PersistedAutoRunRecord = AutoRunRecord | UnsupportedAutoRunRecord;
-
-export function isUnsupportedRecord(record: PersistedAutoRunRecord): record is UnsupportedAutoRunRecord {
-  return record.version !== 4;
-}
 
 export function issueProgress(record: AutoRunRecord, issueNumber: number): IssueProgress {
   return record.progress[String(issueNumber)] ?? { state: "pending" };

@@ -38,12 +38,10 @@ import {
   type FrozenRunSettings,
   type IssueProgress,
   type PendingAction,
-  type PersistedAutoRunRecord,
   type RecoveryEligibility,
   type RunAttemptOutcome,
   type RunCheckpoint,
 } from "../domain/run-plan.js";
-import { isUnsupportedRecord, UNSUPPORTED_RECORD_REASON } from "../domain/run-plan.js";
 import { validateRun, type RunObservations } from "../domain/run-validation.js";
 import { planDiscard, type DiscardBehavior, type DiscardPlan, type DiscardResult } from "../domain/run-cleanup.js";
 import type { AgentSession, TerminalId } from "../domain/contracts.js";
@@ -110,8 +108,8 @@ export interface AutoRunTerminals {
 }
 
 export interface AutoRunStore {
-  load(): Promise<PersistedAutoRunRecord | undefined>;
-  save(record: PersistedAutoRunRecord): Promise<void>;
+  load(): Promise<AutoRunRecord | undefined>;
+  save(record: AutoRunRecord): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -125,7 +123,7 @@ export interface AutoRunNotifier {
 export interface AutoRunActivitySink {
   runStarted(record: AutoRunRecord, resumed: boolean): void;
   runEnded(record: AutoRunRecord, outcome: RunAttemptOutcome | "succeeded"): void;
-  runDiscarded(record: PersistedAutoRunRecord): void;
+  runDiscarded(record: AutoRunRecord): void;
 }
 
 export interface AutoRunEngineOptions {
@@ -227,7 +225,7 @@ export class AutoRunEngine {
   #controller: AbortController | undefined;
   #state: AutoRunState | undefined;
   #record: AutoRunRecord | undefined;
-  #persisted: PersistedAutoRunRecord | undefined;
+  #persisted: AutoRunRecord | undefined;
   #eligibility: RecoveryEligibility | undefined;
   #workspace: RunWorkspace | undefined;
   #loop: Promise<void> = Promise.resolve();
@@ -256,7 +254,7 @@ export class AutoRunEngine {
   }
 
   /** The persisted record as last read, without touching the filesystem. */
-  public persisted(): PersistedAutoRunRecord | undefined {
+  public persisted(): AutoRunRecord | undefined {
     return this.#persisted;
   }
 
@@ -307,10 +305,6 @@ export class AutoRunEngine {
     if (persisted === undefined) {
       this.#eligibility = undefined;
       return { state: "checking" };
-    }
-    if (isUnsupportedRecord(persisted)) {
-      this.#eligibility = { state: "broken", reason: UNSUPPORTED_RECORD_REASON };
-      return this.#eligibility;
     }
     if (!this.isActive() && persisted.outcome === undefined) {
       persisted = { ...persisted, updatedAt: this.#now().toISOString(), outcome: { kind: "interrupted" } };
@@ -537,7 +531,7 @@ export class AutoRunEngine {
     };
     const now = this.#now().toISOString();
     const record: AutoRunRecord = {
-      version: 4,
+      version: 1,
       runId,
       startedAt: now,
       updatedAt: now,
@@ -621,7 +615,6 @@ export class AutoRunEngine {
     const eligibility = await this.refresh();
     const persisted = this.#persisted;
     if (persisted === undefined) return { started: false, reason: "there is no recorded run to resume" };
-    if (isUnsupportedRecord(persisted)) return { started: false, reason: UNSUPPORTED_RECORD_REASON };
     if (eligibility?.state !== "resumable") {
       return { started: false, reason: eligibility?.state === "broken" ? eligibility.reason : "the run's state is still being checked" };
     }
@@ -688,9 +681,8 @@ export class AutoRunEngine {
   public async discard(behavior?: DiscardBehavior): Promise<DiscardResult> {
     const persisted = this.#persisted ?? await this.options.store.load().catch(() => undefined);
     const chosen = behavior ?? this.options.discardBehavior?.() ?? "record-only";
-    if (persisted === undefined || isUnsupportedRecord(persisted)) {
+    if (persisted === undefined) {
       await this.options.store.clear();
-      if (persisted !== undefined) this.options.activity?.runDiscarded(persisted);
       this.#persisted = undefined;
       this.#eligibility = undefined;
       this.options.onRecordChange?.();
@@ -709,7 +701,7 @@ export class AutoRunEngine {
 
   /** The cleanup the user is about to confirm, built from live observations. */
   public async planDiscard(behavior: DiscardBehavior, record?: AutoRunRecord): Promise<DiscardPlan> {
-    const persisted = record ?? (this.#persisted !== undefined && !isUnsupportedRecord(this.#persisted) ? this.#persisted : undefined);
+    const persisted = record ?? this.#persisted;
     if (persisted === undefined) {
       return { behavior, closeTerminals: false, removeWorkspace: false, localBranches: [], remoteBranches: [], pullRequests: [], retained: [] };
     }
@@ -811,7 +803,7 @@ export class AutoRunEngine {
     if (
       branch === undefined
       || this.#workspace?.isolated === true
-      || (this.#persisted !== undefined && !isUnsupportedRecord(this.#persisted) && this.#persisted.currentIssue !== undefined)
+      || this.#persisted?.currentIssue !== undefined
       || end === undefined
       || (end.outcome !== "succeeded" && end.outcome.kind === "failed")
     ) return;

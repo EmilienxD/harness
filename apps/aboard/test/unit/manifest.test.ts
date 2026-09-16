@@ -111,7 +111,7 @@ test("each provider is launched from its own row above the fleet, not a title ic
   }
 });
 
-test("the launch file has editor validation for the version 3 provider schema", async () => {
+test("the launch file has editor validation for the provider schema", async () => {
   const { contributes, files } = await manifest();
   assert.deepEqual(contributes.jsonValidation, [{ fileMatch: "**/.harness/launch.json", url: "./assets/launch.schema.json" }]);
   assert.ok(files.includes("assets/launch.schema.json"), "the registered schema must ship in the VSIX");
@@ -178,7 +178,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const resume = action("aboard.resumeAutoRun");
   assert.match(resume?.when ?? "", /aboard\.autoRun\.recoverable/);
   assert.match(resume?.group ?? "", /^inline@1$/);
-  for (const state of ["checking", "broken", "unsupported", "idle"]) {
+  for (const state of ["checking", "broken", "idle"]) {
     assert.doesNotMatch(resume?.when ?? "", new RegExp(`aboard\\.autoRun\\.${state}`), state);
   }
   // Discard is the card's inline action, never a 3-dots menu entry: it is the
@@ -186,7 +186,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   assert.equal(title.some((entry) => entry.command === "aboard.discardAutoRun"), false, "Discard must not sit in the view title");
   const discardInline = action("aboard.discardAutoRun");
   assert.match(discardInline?.group ?? "", /^inline@/, "Discard Auto Run must be the card's inline action");
-  for (const state of ["recoverable", "broken", "unsupported"]) {
+  for (const state of ["recoverable", "broken"]) {
     assert.match(discardInline?.when ?? "", new RegExp(state), state);
   }
   const stop = action("aboard.stopAutoRun");

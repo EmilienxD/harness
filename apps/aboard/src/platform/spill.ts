@@ -94,12 +94,12 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     this.#promptDirectory(agentId);
     await Promise.all([
       rm(join(this.runtimeRoot, "agents", agentId), { recursive: true, force: true }),
-      ...this.#promptRoots().map((root) => rm(join(root, agentId), { recursive: true, force: true })),
+      rm(join(this.#promptRoot, agentId), { recursive: true, force: true }),
     ]);
   }
 
   public async prune(retainedAgentIds: ReadonlySet<string>, retainedTaskAgentIds = retainedAgentIds): Promise<void> {
-    for (const root of [join(this.runtimeRoot, "agents"), ...this.#promptRoots()]) {
+    for (const root of [join(this.runtimeRoot, "agents"), this.#promptRoot]) {
       let entries: readonly import("node:fs").Dirent[];
       try { entries = await readdir(root, { withFileTypes: true }); }
       catch { continue; }
@@ -121,10 +121,6 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     return join(this.#promptRoot, agentId);
   }
 
-  #promptRoots(): readonly string[] {
-    return [...new Set([this.#promptRoot, promptSpillRoot(this.runtimeRoot)])];
-  }
-
   #resolvePath(candidate: string, allowedRoot = this.runtimeRoot): string {
     if (!isAbsolute(candidate)) throw new PromptSpillPathError(`Runtime file path must be absolute: ${candidate}`);
     const root = resolve(allowedRoot);
@@ -143,4 +139,3 @@ function replaceHookScript(value: unknown, script: string): unknown {
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replaceHookScript(entry, script)]));
 }
-

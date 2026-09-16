@@ -40,7 +40,7 @@ import {
 import { FileActivityStore, FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
 import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from "./domain/activity.js";
-import { completedCount, isUnsupportedRecord } from "./domain/run-plan.js";
+import { completedCount } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./platform/reopen.js";
 import { registerReopenCommand } from "./vscode/reopen.js";
@@ -507,9 +507,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       }),
       runDiscarded: (record) => activity.recordRun({
         runId: record.runId,
-        attempt: record.version === 4 ? record.attempt : 1,
+        attempt: record.attempt,
         outcome: "discarded",
-        ...(record.version === 4 ? { issueNumbers: record.plan.map((issue) => issue.number) } : {}),
+        issueNumbers: record.plan.map((issue) => issue.number),
       }),
     },
     settings: () => currentConfiguration.autoRun,

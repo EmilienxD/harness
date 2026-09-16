@@ -1182,7 +1182,7 @@ def test_oversized_dry_run_reports_parts_without_state_or_gh(tmp_path, monkeypat
     assert not (tmp_path / ".issues-gateway" / hook.STATE_NAME).exists()
 
 
-def test_state_migration_preserves_valid_maps_and_drops_bad_inflight(tmp_path):
+def test_state_reader_preserves_valid_maps_and_drops_bad_inflight(tmp_path):
     gateway = _gateway(tmp_path)
     hook._write_json_dict(
         gateway / hook.STATE_NAME,
@@ -1273,25 +1273,18 @@ def test_empty_state_file_is_removed_but_lock_is_retained(tmp_path):
     assert (gateway / hook.LOCK_NAME).exists()
 
 
-def test_legacy_state_is_migrated_once_and_temp_is_purged(tmp_path):
+def test_gateway_maintenance_purges_temporary_state(tmp_path):
     gateway = _gateway(tmp_path)
     batch = gateway / "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     batch.mkdir()
     (batch / "issue-0.md").write_text(
         f"# Child\n\n> mode:afk\n\nBlocked by {SID}/0\n", encoding="utf-8"
     )
-    hook._write_json_dict(gateway / hook.LEGACY_LEDGER_NAME, {f"{SID}/0": {"number": "42"}})
-    hook._write_json_dict(
-        gateway / hook.LEGACY_NOTICE_NAME,
-        {"created": [{"number": "42", "title": "T", "labels": []}], "failed": 0},
-    )
     (gateway / ".state.tmp").write_text("leftover", encoding="utf-8")
 
     hook.maintain_gateway(gateway)
 
-    assert hook.seed_from_state(gateway) == {f"{SID}/0": "42"}
-    assert not (gateway / hook.LEGACY_LEDGER_NAME).exists()
-    assert not (gateway / hook.LEGACY_NOTICE_NAME).exists()
+    assert hook.seed_from_state(gateway) == {}
     assert not (gateway / ".state.tmp").exists()
 
 
@@ -1325,17 +1318,6 @@ def test_seed_from_state_maps_keys_to_numbers(tmp_path):
         },
     )
     assert hook.seed_from_state(gateway) == {f"{SID}/0": "42", f"{SID}/1": "43"}
-
-
-def test_seed_from_state_reads_legacy_published_file(tmp_path):
-    gateway = tmp_path / ".issues-gateway"
-    gateway.mkdir()
-    hook._write_json_dict(
-        gateway / hook.LEGACY_LEDGER_NAME,
-        {f"{SID}/0": {"number": "42", "title": "Spec"}},
-    )
-
-    assert hook.seed_from_state(gateway) == {f"{SID}/0": "42"}
 
 
 def test_record_published_appends_to_shared_state(tmp_path):
@@ -1419,21 +1401,6 @@ def test_notice_stays_under_the_additional_context_cap(tmp_path):
     text = hook.format_notice(many, 0)
     assert f"and {120 - hook.MAX_NOTICE_ENTRIES} more" in text
     assert len(text) < 10_000
-
-
-def test_flush_notice_reads_legacy_notice_file(tmp_path):
-    gateway = _gateway(tmp_path)
-    hook._write_json_dict(
-        gateway / hook.LEGACY_NOTICE_NAME,
-        {"created": [{"number": "42", "title": "Spec", "labels": []}], "failed": 0},
-    )
-
-    notice = hook.flush_notice(gateway)
-
-    assert "#42" in notice
-    assert "pending_notice" not in _state(gateway)
-
-
 
 
 def _run_hook(tmp_path: Path, prompt: str):

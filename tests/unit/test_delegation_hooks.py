@@ -40,7 +40,7 @@ def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, mon
     launch = tmp_path / ".harness" / "launch.json"
     launch.parent.mkdir()
     launch.write_text(
-        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{}},"session":{"stopWaitHours":1.5}}',
+        '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{}},"session":{"stopWaitHours":1.5}}',
         encoding="utf-8",
     )
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))

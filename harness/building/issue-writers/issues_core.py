@@ -181,11 +181,6 @@ def publication_lock(batch_dir: Path):
             if token is not None:
                 PUBLICATION_STATE_LOCKED.reset(token)
 
-# Legacy files from versions before the state file was consolidated. They are
-# read as migration inputs only.
-LEGACY_LEDGER_NAME = ".published.json"
-LEGACY_NOTICE_NAME = ".pending-notice.json"
-
 # Keeps a huge batch well under the 10,000-character cap on additionalContext.
 MAX_NOTICE_ENTRIES = 50
 
@@ -383,7 +378,7 @@ def _locked_state(gateway_dir: Path = GATEWAY_DIR):
         return
     if PUBLICATION_STATE_LOCKED.get() == (gateway_dir / LOCK_NAME).resolve():
         state = _read_state(gateway_dir)
-        _migrate_generated_state(gateway_dir, path, state)
+        (gateway_dir / ".state.tmp").unlink(missing_ok=True)
         yield path, state
         return
     if "portalocker" not in sys.modules:
@@ -392,7 +387,7 @@ def _locked_state(gateway_dir: Path = GATEWAY_DIR):
                 yield None, {}
             else:
                 state = _read_state(gateway_dir)
-                _migrate_generated_state(gateway_dir, path, state)
+                (gateway_dir / ".state.tmp").unlink(missing_ok=True)
                 yield path, state
         return
     lock_path = gateway_dir / LOCK_NAME
@@ -408,23 +403,14 @@ def _locked_state(gateway_dir: Path = GATEWAY_DIR):
         return
     try:
         state = _read_state(gateway_dir)
-        _migrate_generated_state(gateway_dir, path, state)
+        (gateway_dir / ".state.tmp").unlink(missing_ok=True)
         yield path, state
     finally:
         lock.release()
 
 
-def _migrate_generated_state(gateway_dir: Path, path: Path, state: dict) -> None:
-    legacy = [gateway_dir / LEGACY_LEDGER_NAME, gateway_dir / LEGACY_NOTICE_NAME]
-    if any(item.exists() for item in legacy):
-        _write_state(path, state)
-        for item in legacy:
-            item.unlink(missing_ok=True)
-    (gateway_dir / ".state.tmp").unlink(missing_ok=True)
-
-
 def _read_state(gateway_dir: Path = GATEWAY_DIR) -> dict:
-    """Read the consolidated state file, with best-effort legacy migration."""
+    """Read and validate the consolidated state file."""
     path = gateway_dir / STATE_NAME
     state = _read_json_dict(path)
     published = state.get("published")
@@ -432,13 +418,13 @@ def _read_state(gateway_dir: Path = GATEWAY_DIR) -> dict:
     inflight = state.get("inflight")
 
     if not isinstance(published, dict):
-        published = _read_json_dict(gateway_dir / LEGACY_LEDGER_NAME)
+        published = {}
     if not isinstance(notice, dict):
-        notice = _read_json_dict(gateway_dir / LEGACY_NOTICE_NAME)
+        notice = {}
     if not isinstance(inflight, dict):
         inflight = {}
     else:
-        # A hand-edited or older state file must not poison every publish.
+        # A hand-edited state file must not poison every publish.
         inflight = {
             key: value
             for key, value in inflight.items()
@@ -511,23 +497,12 @@ def prune_published(gateway_dir: Path = GATEWAY_DIR) -> None:
 
 
 def maintain_gateway(gateway_dir: Path = GATEWAY_DIR) -> None:
-    """Migrate generated legacy state and remove safe crash leftovers."""
+    """Remove safe crash leftovers and prune unused publication state."""
     if not gateway_dir.is_dir():
         return
     with _locked_state(gateway_dir) as (path, state):
         if path is None:
             return
-        legacy_present = any(
-            (gateway_dir / name).exists()
-            for name in (LEGACY_LEDGER_NAME, LEGACY_NOTICE_NAME)
-        )
-        if legacy_present:
-            try:
-                _write_state(path, state)
-            except OSError:
-                return
-            for name in (LEGACY_LEDGER_NAME, LEGACY_NOTICE_NAME):
-                (gateway_dir / name).unlink(missing_ok=True)
         (gateway_dir / ".state.tmp").unlink(missing_ok=True)
     prune_published(gateway_dir)
     for batch in (path for path in gateway_dir.iterdir() if path.is_dir()):

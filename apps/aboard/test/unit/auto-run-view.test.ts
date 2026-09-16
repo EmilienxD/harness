@@ -4,18 +4,19 @@ import test from "node:test";
 import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, type AutoRunForecast, type AutoRunPreview, type AutoRunViewSources } from "../../src/vscode/auto-run.js";
 import type { AutoRunState } from "../../src/auto/engine.js";
 import type { AutoRunDryRunResult } from "../../src/domain/auto-run.js";
-import type { AutoRunRecord, PersistedAutoRunRecord, RecoveryEligibility } from "../../src/domain/run-plan.js";
+import type { AutoRunRecord, RecoveryEligibility } from "../../src/domain/run-plan.js";
 
 const SESSION = "run/test";
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 4,
+    version: 1,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     attempt: 1,
     settings: {
+      branchMode: "per-issue",
       review: false,
       exploreBeforeImplement: false,
       issueContextDepth: 1,
@@ -61,7 +62,7 @@ function sources(overrides: {
   readonly state?: AutoRunState | undefined;
   readonly starting?: boolean;
   readonly forecast?: AutoRunForecast;
-  readonly persisted?: PersistedAutoRunRecord | undefined;
+  readonly persisted?: AutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
   readonly liveHandoff?: (issueNumber: number) => { readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined;
@@ -412,7 +413,6 @@ test("every auto-run card is a status display with no row action", () => {
     { persisted: record({ outcome: { kind: "interrupted" } }), eligibility: { state: "resumable" } },
     { persisted: record({ outcome: { kind: "failed", reason: "push rejected" } }), eligibility: { state: "resumable" } },
     { persisted: record(), eligibility: { state: "broken", reason: "branch moved" } },
-    { persisted: { version: 1, runId: "old", startedAt: "2026-01-01T00:00:00.000Z" } },
   ];
   const statusIcons = new Set(["tasklist", "loading~spin", "sync~spin", "person", "error", "warning", "circle-slash"]);
   for (const input of cases) {
@@ -427,14 +427,6 @@ test("a broken run shows the short reason and nothing to resume with", () => {
   assert.equal(item.contextValue, "aboard.autoRun.broken");
   assert.match(item.description, /cannot be resumed; run\/test has moved/);
   assert.match(item.tooltip, /Nothing has been rolled back/);
-});
-
-test("a pre-v4 record is broken with the one reason it can have, and no plan to show", () => {
-  const { item, model, root } = rootItem({ persisted: { version: 1, runId: "run_old", startedAt: "2026-01-01T00:00:00.000Z" } });
-  assert.equal(item.contextValue, "aboard.autoRun.unsupported");
-  assert.match(item.description, /predates human-acceptance persistence version 4/);
-  assert.equal(item.collapsible, false);
-  assert.deepEqual(model.children(root), []);
 });
 
 test("the whole frozen plan renders in its immutable order, whatever its progress", () => {

@@ -14,3 +14,7 @@ commit-ai.key
 temp/
 .pytest*
 .tmp*
+.test*
+tmp*
+.temp*
+temp*

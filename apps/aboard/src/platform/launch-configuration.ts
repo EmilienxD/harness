@@ -71,11 +71,9 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   try { parsed = JSON.parse(text) as unknown; }
   catch (error) { throw new LaunchFileError(`launch.json contains invalid JSON: ${error instanceof Error ? error.message : "parse error"}`); }
   const root = object(parsed, "launch.json");
-  // Version 2 selected one global platform and configured only it. There is no
-  // compatibility layer, so it is rejected with the shape that replaces it.
-  if (root.version !== 3) {
+  if (root.version !== 1) {
     throw new LaunchFileError(
-      `launch.json version must be 3: {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}}; received ${JSON.stringify(root.version)}`,
+      `launch.json version must be 1: {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}}; received ${JSON.stringify(root.version)}`,
     );
   }
   const autoRun = object(root.autoRun, "launch.json autoRun");
@@ -122,7 +120,7 @@ export interface LaunchConfigurationPaths {
 }
 
 export function defaultLaunchFile(platform: AgentPlatformId = "claude"): ParsedLaunchFile {
-  return parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: platform }, providers: { claude: {}, chatgpt: {} } }));
+  return parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: platform }, providers: { claude: {}, chatgpt: {} } }));
 }
 
 export class FileLaunchConfigurationSource implements DelegationConfigurationSource {

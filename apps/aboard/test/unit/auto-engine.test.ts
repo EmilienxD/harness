@@ -653,7 +653,7 @@ function harness(options: HarnessOptions = {}): Harness {
       // The store is a real one, not a sink: fixed-plan recovery re-reads what
       // the engine wrote, so a fake that forgets would test nothing.
       save: async (record) => {
-        if (record.version !== 4) throw new Error("the engine must only ever write version-4 records");
+        if (record.version !== 1) throw new Error("the engine must only ever write version-1 records");
         if (options.interruptBeforeSave?.(record)) throw new Error("simulated extension interruption");
         stored = record;
         saved.push(record);
@@ -753,12 +753,13 @@ function endedWorkerSession(record: AutoRunRecord, issueNumber: number, terminal
 
 function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 4,
+    version: 1,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     attempt: 1,
     settings: {
+      branchMode: "per-issue",
       review: false,
       exploreBeforeImplement: false,
       issueContextDepth: 1,
@@ -2045,29 +2046,6 @@ test("a frozen-plan mismatch after a worker returns stops before the next side e
   const outcome = context.record()?.outcome;
   assert.equal(outcome?.kind, "failed");
   assert.match(outcome?.kind === "failed" ? outcome.reason : "", /now hitl rather than afk/);
-});
-
-test("a version-1 record is unsupported: it is neither resumed nor silently dropped", async () => {
-  const context = harness();
-  const legacy = parseAutoRunRecord({
-    version: 1,
-    runId: "run_legacy",
-    issueNumbers: [34],
-    currentIssue: 34,
-    phase: "branch",
-    branch: "issue/34-add-retry-backoff",
-    reviewMode: false,
-    startedAt: "2026-01-01T00:00:00.000Z",
-  });
-  assert.ok(legacy);
-  assert.equal(legacy.version, 1);
-  context.seed(legacy as never);
-
-  assert.equal((await context.engine.refresh())?.state, "broken");
-  const result = await context.engine.resume();
-  assert.equal(result.started, false);
-  assert.match((result as { reason: string }).reason, /predates human-acceptance persistence version 4/);
-  assert.equal(context.launches.length, 0);
 });
 
 test("a commit that failed to push resumes by pushing, not by reporting no changes", async () => {

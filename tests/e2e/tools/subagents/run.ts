@@ -75,7 +75,7 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
       terminalCommand: [process.execPath, bridge, "--spawn"],
     }, null, 2)}\n`, "utf8");
     await writeFile(join(projectRoot, ".harness", "launch.json"), `${JSON.stringify({
-      version: 3,
+      version: 1,
       autoRun: { provider: "claude" },
       providers: {
         claude: platform === "claude" ? { command: [providerCommand.file, ...providerCommand.args] } : {},

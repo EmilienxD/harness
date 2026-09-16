@@ -170,19 +170,19 @@ def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_pat
     monkeypatch.setattr(sessions.shutil, "which", lambda command: command)
 
     assert sessions.launch_configuration(project) == {
-        "version": 3,
+        "version": 1,
         "autoRun": {"provider": "claude"},
         "providers": {"claude": {}, "chatgpt": {}},
     }
     state.mkdir()
     (state / "launch.json").write_text(
-        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{"command":["global-codex"]}}}', encoding="utf-8"
+        '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{"command":["global-codex"]}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["global-codex"]
 
     (project / ".harness").mkdir()
     (project / ".harness" / "launch.json").write_text(
-        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{"command":["project-claude"]},"chatgpt":{}}}', encoding="utf-8"
+        '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{"command":["project-claude"]},"chatgpt":{}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "claude") == ["project-claude"]
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["codex"]
@@ -196,16 +196,16 @@ def test_launch_configuration_validates_v3_provider_and_session_shapes(tmp_path,
 
     for value in (
         {"version": 2, "platform": "claude"},
-        {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}}},
-        {"version": 3, "autoRun": {"provider": "codex"}, "providers": {"claude": {}, "chatgpt": {}}},
-        {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}, "session": {"stopWaitHours": -1}},
+        {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}}},
+        {"version": 1, "autoRun": {"provider": "codex"}, "providers": {"claude": {}, "chatgpt": {}}},
+        {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}, "session": {"stopWaitHours": -1}},
     ):
         launch.write_text(json.dumps(value), encoding="utf-8")
         with pytest.raises(sessions.SessionError):
             sessions.launch_configuration(project)
 
     launch.write_text(json.dumps({
-        "version": 3,
+        "version": 1,
         "autoRun": {"provider": "claude"},
         "providers": {"claude": {}, "chatgpt": {}},
         "session": {"stopWaitHours": 1.5},

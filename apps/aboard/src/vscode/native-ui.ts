@@ -90,7 +90,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const forecast = new AutoRunForecastController(() => renderAutoRun());
   const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined => {
     const persisted = engine.persisted();
-    const recorded = persisted?.version === 4 && persisted.workerSession?.issueNumber === issueNumber
+    const recorded = persisted?.workerSession?.issueNumber === issueNumber
       && (persisted.workerSession.type === "implementer" || persisted.workerSession.type === "reviewer")
       ? persisted.workerSession
       : undefined;
@@ -268,7 +268,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
         return;
       }
       const persisted = engine.persisted();
-      const candidate = persisted?.version === 4 ? continuationSessionFor(persisted, fleet.list()) : undefined;
+      const candidate = persisted === undefined ? undefined : continuationSessionFor(persisted, fleet.list());
       const cwd = candidate?.cwd ?? workspace.workspaceFolders?.[0]?.uri.fsPath;
       const canContinue = candidate !== undefined && cwd !== undefined
         ? await options.isResumable(candidate.platform, candidate.sessionId, cwd, candidate.identity.type)

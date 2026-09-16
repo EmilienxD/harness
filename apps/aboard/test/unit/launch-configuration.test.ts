@@ -12,7 +12,7 @@ import {
 } from "../../src/platform/launch-configuration.js";
 
 const defaults = `{
-  "version": 3,
+  "version": 1,
   "autoRun": { "provider": "claude" },
   "providers": {
     "claude": {
@@ -31,12 +31,12 @@ function settings(value: { readonly settings: unknown }): LaunchConfiguration {
 }
 
 function providerFile(provider: "claude" | "chatgpt", value: Record<string, unknown> = {}): string {
-  return JSON.stringify({ version: 3, autoRun: { provider }, providers: { claude: {}, chatgpt: {}, [provider]: value } });
+  return JSON.stringify({ version: 1, autoRun: { provider }, providers: { claude: {}, chatgpt: {}, [provider]: value } });
 }
 
 test("launch.json configures Claude and ChatGPT together while Claude defaults only Auto Run", () => {
   const parsed = parseLaunchFile(`{
-    "version": 3,
+    "version": 1,
     "autoRun": { "provider": "claude" },
     "providers": {
       "claude": { "command": ["wrapper", "claude"] },
@@ -225,7 +225,7 @@ test("a ChatGPT implementer profile is configurable independently of Claude rout
 
 test("missing profile fields use defaults and unsupported fields produce one warning", () => {
   const parsed = parseLaunchFile(JSON.stringify({
-    version: 3,
+    version: 1,
     autoRun: { provider: "claude" },
     providers: { claude: { command: ["wrapper", "claude"], interactive: { deniedTools: [], future: true } }, chatgpt: {} },
     futureRoot: true,
@@ -249,7 +249,7 @@ test("invalid known launch fields block configuration", () => {
     "not json",
     "[]",
     '{"version":2,"platform":"claude"}',
-    '{"version":3,"autoRun":{"provider":"codex"}}',
+    '{"version":1,"autoRun":{"provider":"codex"}}',
     providerFile("claude", { command: "claude" }),
     providerFile("claude", { command: [] }),
     providerFile("claude", { interactive: { model: "by-difficulty" } }),
@@ -263,19 +263,17 @@ test("invalid known launch fields block configuration", () => {
   }
 });
 
-test("version 3 requires both provider blocks and rejects version 2 with the shape that replaces it", () => {
-  // Version 2 selected one global platform; there is no compatibility layer, so
-  // the rejection has to show the replacement rather than only the number.
+test("version 1 requires both provider blocks and rejects other versions", () => {
   assert.throws(
     () => parseLaunchFile('{"version":2,"platform":"claude","command":["claude"]}'),
-    (error: LaunchFileError) => /version must be 3/u.test(error.message)
+    (error: LaunchFileError) => /version must be 1/u.test(error.message)
       && /"autoRun"/u.test(error.message)
       && /"providers"/u.test(error.message),
   );
   for (const missing of ["claude", "chatgpt"] as const) {
     const providers = missing === "claude" ? { chatgpt: {} } : { claude: {} };
     assert.throws(
-      () => parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers })),
+      () => parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers })),
       new RegExp(`providers\\.${missing} is required`, "u"),
     );
   }
@@ -291,14 +289,14 @@ test("a provider's own parse failures name the provider that owns them", () => {
 });
 
 test("shared session settings are validated without becoming provider configuration", () => {
-  const text = JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: 1.5 } });
+  const text = JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: 1.5 } });
   assert.equal(parseLaunchFile(text).diagnostics.length, 0);
-  assert.throws(() => parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: -1 } })), /stopWaitHours/u);
-  assert.match(parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, stopWaitHours: 1.5 })).diagnostics[0]!.message, /stopWaitHours/u);
+  assert.throws(() => parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: -1 } })), /stopWaitHours/u);
+  assert.match(parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, stopWaitHours: 1.5 })).diagnostics[0]!.message, /stopWaitHours/u);
 });
 
 test("provider diagnostics identify unknown and cross-platform settings", () => {
-  assert.throws(() => parseLaunchFile('{"version":3,"autoRun":{"provider":"codex"}}'), /autoRun\.provider must be.*claude.*chatgpt.*codex/u);
+  assert.throws(() => parseLaunchFile('{"version":1,"autoRun":{"provider":"codex"}}'), /autoRun\.provider must be.*claude.*chatgpt.*codex/u);
   assert.throws(
     () => parseLaunchFile(providerFile("claude", { implementer: { model: "gpt-5.6-sol" } })),
     /implementer\.model is not valid for platform claude/u,
@@ -335,7 +333,7 @@ test("launch configuration resolves project, then global, then built-in defaults
   assert.deepEqual(settings(await source.get("interactive")).declaredCommand, ["global-codex"]);
 
   await mkdir(join(root, "project", ".harness"), { recursive: true });
-  await writeFile(project, JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: { command: ["project-claude"] }, chatgpt: { command: ["project-codex"] } } }), "utf8");
+  await writeFile(project, JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: { command: ["project-claude"] }, chatgpt: { command: ["project-codex"] } } }), "utf8");
   assert.deepEqual(settings(await source.get("interactive")).declaredCommand, ["project-claude"]);
   assert.deepEqual(settings(await source.getFor("chatgpt", "General")).declaredCommand, ["project-codex"]);
 });

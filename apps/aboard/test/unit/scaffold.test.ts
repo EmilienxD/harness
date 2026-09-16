@@ -12,7 +12,7 @@ test("a flat .abd scaffold is recognized as initialized", async () => {
   const project = join(root, "project");
   await mkdir(join(assets, ".abd"), { recursive: true });
   await mkdir(join(assets, ".harness"), { recursive: true });
-  await writeFile(join(assets, ".harness", "launch.json"), '{"version":3,"providers":{"claude":{},"chatgpt":{}}}\n');
+  await writeFile(join(assets, ".harness", "launch.json"), '{"version":1,"providers":{"claude":{},"chatgpt":{}}}\n');
   await writeFile(join(assets, ".abd", "session-setup.ps1"), "");
 
   const revision = await scaffoldCatalogRevision(assets);

@@ -167,12 +167,13 @@ test("a plan freezes the title its branch is named from", () => {
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 4,
+    version: 1,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     attempt: 1,
     settings: {
+      branchMode: "per-issue",
       review: false,
       exploreBeforeImplement: false,
       issueContextDepth: 1,

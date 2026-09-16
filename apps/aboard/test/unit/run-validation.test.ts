@@ -15,12 +15,13 @@ const SHA = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 4,
+    version: 1,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     attempt: 2,
     settings: {
+      branchMode: "per-issue",
       review: false,
       exploreBeforeImplement: false,
       issueContextDepth: 1,

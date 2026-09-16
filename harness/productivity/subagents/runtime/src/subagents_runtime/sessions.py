@@ -195,7 +195,7 @@ def _config() -> dict[str, Any]:
 
 
 def launch_configuration(cwd: Path) -> dict[str, Any]:
-    """Resolve the version-3 project, global, then built-in launch configuration."""
+    """Resolve the project, global, then built-in launch configuration."""
     project = cwd.resolve() / ".harness" / "launch.json"
     global_path = state_dir() / "launch.json"
     for path in (project, global_path):
@@ -205,8 +205,8 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise SessionError(f"invalid Harness launch configuration {path}: {exc}") from exc
-        if not isinstance(value, dict) or value.get("version") != 3:
-            raise SessionError(f"Harness launch configuration {path} must be a version-3 JSON object")
+        if not isinstance(value, dict) or value.get("version") != 1:
+            raise SessionError(f"Harness launch configuration {path} must be a version-1 JSON object")
         auto_run = value.get("autoRun")
         providers = value.get("providers")
         if (
@@ -232,7 +232,7 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             raise SessionError(f"Harness launch configuration {path} session.stopWaitHours must be a non-negative finite number")
         return value
     return {
-        "version": 3,
+        "version": 1,
         "autoRun": {"provider": "claude"},
         "providers": {"claude": {}, "chatgpt": {}},
     }
