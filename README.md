@@ -87,18 +87,20 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`setup-help`**: Guides any installation or configuration one verified step at a time. Every response gives the current action and a short view of what remains, keeping the complete setup checklist synchronized as new prerequisites appear.
 
-- **`subagents`**: Launches separate, visible Claude Code or ChatGPT sessions through `work-with-agent` and the Explore, Prototype, Web Search, Brainstorm, Address, and Review variants. `reply-to-agent` explicitly returns an interactive child's result. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
+- **`subagents`**: Launches separate Claude Code or ChatGPT conversations, using background processes for automatic work and visible terminals for interactive work through `work-with-agent` and the Explore, Prototype, Web Search, Brainstorm, Address, and Review variants. `reply-to-agent` explicitly returns an interactive child's result. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
 
 The `subagents` package also installs persistent session commands. These are separate from the ephemeral installer commands above:
 
 ```bash
 harness run --provider claude|chatgpt [initial prompt]
-harness ask <grant-id>
+harness ask <session-id>
 harness reply
-harness resume <session-id>
+harness resume <session-id|agent-i> [next message...]
 ```
 
-`run` opens an independent visible terminal. Delegation is authorized only by a live invocation of a `*-with-agent` skill; direct `harness ask` calls without that grant are rejected. Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults. Version 3 configures both `providers.claude` and `providers.chatgpt`; `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
+`run` opens an independent visible terminal. The first explicit delegation skill invocation enables one persistent inbox for the saved conversation, shared across all task types. Request files and execution logs live under `~/.harness/runtime/sessions/` (`HARNESS_STATE_DIR` overrides `~/.harness`), never in the project. Automatic children run headlessly with native provider permissions; interactive children open visible sessions. Children receive stable `agent-i` identifiers scoped to the parent. Use `resume-agent` or `harness resume agent-i "next message"` inside the parent to continue an exited child, preserving its provider, mode, directory, and conversation. Running or uncertain executions refuse resume, including terminals whose children already replied. Results survive parent shutdown and replay after interrupted delivery. Full delegation instructions are reinjected after successful compaction.
+
+Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults. Version 1 configures both `providers.claude` and `providers.chatgpt`; `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
 
 ### Model-invoked skills
 

@@ -103,7 +103,6 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     ? []
     : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);
   const fixed = [
-    "--dangerously-bypass-hook-trust",
     "-c", "features.hooks=true",
     ...(explore && readOnlyFiles.length === 0 ? READ_ONLY_POLICY : []),
     ...permissionProfile,
@@ -153,7 +152,8 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         promptArgs = ["--", invocation === undefined ? reference : `${invocation} ${reference}`];
       }
     }
-    const args = [...(kind === "resume" ? ["resume", request.sessionId] : []), ...fixed, ...promptArgs];
+    const background = request.executionMode === "auto" || request.executionMode === "auto-run";
+    const args = [...(background ? ["exec"] : []), ...(kind === "resume" ? ["resume", request.sessionId] : []), ...(background ? ["--json"] : []), ...fixed, ...promptArgs];
     const wrapped = wrap(command, args, request.wrapper, request.agentId, request.sessionId, runtimeRoot);
     return {
       promptDelivery,

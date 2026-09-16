@@ -2,6 +2,8 @@ import {
   buildChangeDirectoryCommandLine,
   type ShellKind,
 } from "./shell.js";
+import { randomUUID } from "node:crypto";
+import { createBackgroundProcess } from "./background.js";
 
 import {
   isInteractiveAgentType,
@@ -68,6 +70,7 @@ export interface TerminalCreationOptions {
 
 export interface TerminalHost {
   createTerminal(options: TerminalCreationOptions): TerminalHandle;
+  createBackgroundProcess?(options: TerminalCreationOptions): TerminalHandle;
   onDidCloseTerminal(listener: (terminal: TerminalHandle) => void): { dispose(): void };
 }
 
@@ -121,6 +124,7 @@ export type TerminalLifecycleEvent =
     };
 
 export interface TerminalSnapshot {
+  readonly backend?: "terminal" | "process";
   readonly terminalId: TerminalId;
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
@@ -230,6 +234,7 @@ export class TerminalController {
       ABOARD_BRIDGE_PORT: String(environment.port),
       ABOARD_BRIDGE_TOKEN: environment.token,
       ABOARD_AGENT_ID: request.agentId,
+      ABOARD_EXECUTION_ID: randomUUID(),
       ABOARD_SESSION_ID: request.sessionId,
       ABOARD_AGENT_TYPE: request.agentType,
       ABOARD_WORKSPACE_ROOT: cwd,
@@ -252,9 +257,14 @@ export class TerminalController {
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
       ...(request.shellArgs === undefined ? {} : { shellArgs: request.shellArgs }),
     };
-    const handle = this.options.host.createTerminal(creationOptions);
+    const headless = request.executionMode === "auto" || request.executionMode === "auto-run";
+    const handle = headless
+      ? this.options.host.createBackgroundProcess?.(creationOptions)
+        ?? createBackgroundProcess(creationOptions, this.options.shell, (closed) => this.#onClosed(closed))
+      : this.options.host.createTerminal(creationOptions);
     const createdAt = this.#now().toISOString();
     const record: TerminalRecord = {
+      backend: headless ? "process" : "terminal",
       terminalId,
       agentId: request.agentId,
       sessionId: request.sessionId,
@@ -303,10 +313,10 @@ export class TerminalController {
 
     beforeCommand?.(this.#snapshot(record));
 
-    if (isUserFacing(request)) handle.show(false);
+    if (!headless && isUserFacing(request)) handle.show(false);
     // VS Code receives cwd too; this visible belt-and-braces cd prevents a
     // shell that starts elsewhere from launching an agent against another tree.
-    handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
+    if (!headless) handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
 
     return this.#snapshot(record);

@@ -32,7 +32,7 @@ test("the ChatGPT adapter launches a visible Codex session without imposing its 
   assert.equal(plan.platform, "chatgpt");
   assert.deepEqual(plan.command, ["wrapper", "codex"]);
   assert.equal(plan.args.includes("--session-id"), false);
-  assert.equal(plan.args.includes("--dangerously-bypass-hook-trust"), true);
+  assert.equal(plan.args.includes("--dangerously-bypass-hook-trust"), false);
   assert.deepEqual(plan.args.slice(-2), ["--", "Inspect the launch boundary."]);
   assert.equal(plan.args.at(-1), "Inspect the launch boundary.");
   assert.equal(plan.promptDelivery, "inline");

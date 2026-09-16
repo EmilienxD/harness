@@ -1,4 +1,4 @@
-"""Persistent visible-session commands for the subagents bundle."""
+"""Persistent session commands for the subagents bundle."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import sys
 
 from subagents_runtime import __version__
-from subagents_runtime.delegation import arm_reply, process_grant
+from subagents_runtime.delegation import arm_reply, process_inbox
 from subagents_runtime.sessions import SessionError, launch, launch_delegated, resume
 
 
@@ -18,10 +18,18 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
-    results = process_grant(args.grant_id, launch=launch_delegated)
+    results = process_inbox(args.session_id, launch=launch_delegated)
     launched = sum(result.status == "launched" for result in results)
     failed = sum(result.status == "failed" for result in results)
-    print(f"Processed {len(results)} requests: {launched} launched, {failed} failed")
+    uncertain = sum(result.status == "uncertain" for result in results)
+    print(
+        f"Processed {len(results)} requests: {launched} launched, {failed} failed, {uncertain} uncertain"
+    )
+    for result in results:
+        print(
+            f"{result.path.name}: {result.status}"
+            + (f" ({result.reason})" if result.reason else "")
+        )
     return 0
 
 
@@ -35,29 +43,40 @@ def cmd_reply(_args: argparse.Namespace) -> int:
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
-    resume(args.session_id)
-    print(f"Resumed visible session {args.session_id}")
+    resume(args.session_id, " ".join(args.message).strip() or None)
+    print(f"Resumed session {args.session_id}")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness",
-        description="Launch and manage persistent visible subagent sessions.",
+        description="Launch and continue persistent subagent conversations.",
     )
-    parser.add_argument("--version", action="version", version=f"harness subagents {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"harness subagents {__version__}"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
-    run_parser = commands.add_parser("run", help="open an independent visible agent session")
+    run_parser = commands.add_parser(
+        "run", help="open an independent visible agent session"
+    )
     run_parser.add_argument("--provider", choices=("claude", "chatgpt"), required=True)
     run_parser.add_argument("prompt", nargs="*")
     run_parser.set_defaults(func=cmd_run)
-    ask_parser = commands.add_parser("ask", help="process a task-bound request inbox")
-    ask_parser.add_argument("grant_id")
+    ask_parser = commands.add_parser(
+        "ask", help="process a saved conversation request inbox"
+    )
+    ask_parser.add_argument("session_id")
     ask_parser.set_defaults(func=cmd_ask)
-    reply_parser = commands.add_parser("reply", help="arm the next successful Stop as the parent reply")
+    reply_parser = commands.add_parser(
+        "reply", help="arm the next successful Stop as the parent reply"
+    )
     reply_parser.set_defaults(func=cmd_reply)
-    resume_parser = commands.add_parser("resume", help="resume a Harness-launched session")
+    resume_parser = commands.add_parser(
+        "resume", help="resume a Harness-launched session"
+    )
     resume_parser.add_argument("session_id")
+    resume_parser.add_argument("message", nargs="*")
     resume_parser.set_defaults(func=cmd_resume)
     return parser
 

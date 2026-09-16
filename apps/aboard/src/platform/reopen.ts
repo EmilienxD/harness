@@ -10,7 +10,7 @@ import {
 
 /** Why a recorded session cannot be reopened, as the user is told it. */
 export type UnresumableReason =
-  "no-transcript" | "inspection-failed";
+  "no-transcript" | "inspection-failed" | "execution-active" | "next-message-required";
 
 /** A candidate plus the answer to "would `--resume` actually find it?". */
 export interface ReopenOption {
@@ -43,6 +43,7 @@ export interface ReopenTerminals {
 }
 
 export interface ReopenCoordinatorOptions {
+  readonly nextMessage?: (candidate: ReopenCandidate) => Promise<string | undefined>;
   readonly activity: ReopenActivitySource;
   readonly fleet: FleetRegistry;
   readonly terminals: ReopenTerminals;
@@ -57,6 +58,10 @@ const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
   reviewer: "reviewer",
 };
 
+function requiresNextMessage(candidate: ReopenCandidate): boolean {
+  return candidate.type !== "interactive" || candidate.executionMode === "auto" || candidate.executionMode === "auto-run";
+}
+
 export class ReopenCoordinator {
   public constructor(private readonly options: ReopenCoordinatorOptions) {}
 
@@ -69,7 +74,9 @@ export class ReopenCoordinator {
     return Promise.all(candidates.map(async (candidate): Promise<ReopenOption> => {
       // A live session needs no transcript test: its conversation is in front of
       // the user, and reopening it means focusing the terminal it is already in.
-      if (candidate.origin === "live") return { candidate, resumable: true };
+      if (candidate.origin === "live") return requiresNextMessage(candidate)
+        ? { candidate, resumable: false, reason: "execution-active" }
+        : { candidate, resumable: true };
       try {
         const resumable = await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd, candidate.type);
         return resumable ? { candidate, resumable } : { candidate, resumable, reason: "no-transcript" };
@@ -88,6 +95,7 @@ export class ReopenCoordinator {
   public async reopen(candidate: ReopenCandidate): Promise<ReopenOutcome> {
     const live = this.options.terminals.liveTerminalFor(candidate.agentId);
     if (live !== undefined) {
+      if (requiresNextMessage(candidate)) return { action: "unresumable", candidate, reason: "execution-active" };
       this.options.terminals.show(live);
       return { action: "focused", candidate };
     }
@@ -106,7 +114,12 @@ export class ReopenCoordinator {
       };
     }
     if (!resumable) return { action: "unresumable", candidate, reason: "no-transcript" };
+    const message = requiresNextMessage(candidate)
+      ? await this.options.nextMessage?.(candidate) : undefined;
+    if (requiresNextMessage(candidate) && !message?.trim()) return { action: "unresumable", candidate, reason: "next-message-required" };
     const handles = await this.options.launcher.reopen({
+      ...(message === undefined ? {} : { prompt: message }),
+      ...(candidate.executionMode === undefined ? {} : { executionMode: candidate.executionMode }),
       platform: candidate.platform,
       agentId: candidate.agentId,
       type: candidate.type,
@@ -160,8 +173,12 @@ export function describeReopenOutcome(outcome: ReopenOutcome): string {
     case "focused":
       return `Focused the running ${outcome.candidate.type} terminal (agent ${outcome.candidate.agentId}).`;
     case "reopened":
-      return `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
+      return outcome.candidate.executionMode === "auto" || outcome.candidate.executionMode === "auto-run"
+        ? `Continued the ${outcome.candidate.type} conversation in the background (agent ${outcome.candidate.agentId}).`
+        : `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
     case "unresumable":
+      if (outcome.reason === "execution-active") return `Agent ${outcome.candidate.agentId} has a running or uncertain execution; resume refused.`;
+      if (outcome.reason === "next-message-required") return `Continuing agent ${outcome.candidate.agentId} requires a next message.`;
       return outcome.reason === "inspection-failed"
         ? `The conversation for agent ${outcome.candidate.agentId} could not be inspected: ${outcome.diagnostic ?? "unknown platform error"}`
         : `The selected agent platform no longer has the conversation for agent ${outcome.candidate.agentId}, so it cannot be reopened.`;

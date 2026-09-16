@@ -2203,17 +2203,21 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
     await context.engine.settle();
   });
 
-  test(`${branchMode}: closing the HITL terminal before acceptance stops without publishing`, async () => {
+  test(`${branchMode}: background worker exit preserves HITL waiting until a user acceptance commit`, async () => {
     const context = harness({ hitlUncommitted: true, settings: { branchMode },
       issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
     });
     await context.engine.start();
     await waitForCommit(context);
     context.engine.terminalClosed("terminal-1" as TerminalId);
-    await context.engine.settle();
-    assert.equal(context.record()?.outcome?.kind, "failed");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(context.engine.state()?.waiting, true);
     assert.deepEqual(context.createdPullRequests, []);
     assert.deepEqual(context.commitCalls, []);
+    await context.git.commit("User accepts background work", "");
+    await context.engine.settle();
+    assert.equal(context.state.cleared, true, context.notifications.join("\n"));
+    assert.deepEqual(context.closures.map((entry) => entry.issue), [35]);
   });
 
   test(`${branchMode}: switching branches during HITL is a structural failure`, async () => {

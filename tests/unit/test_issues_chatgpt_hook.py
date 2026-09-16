@@ -74,23 +74,19 @@ def test_drafting_prompt_injects_stable_session_and_next_index(
         "hook_event_name": "UserPromptSubmit",
         "prompt": "$draft-issue add native ChatGPT support",
     }
-    first = _run(payload, monkeypatch, capsys)["hookSpecificOutput"][
-        "additionalContext"
-    ]
+    first = _run(payload, monkeypatch, capsys)["hookSpecificOutput"]
     batch_id = adapter.issues_session_id("thr_same-thread")
 
-    assert f"issues session id: {batch_id}" in first
-    assert "next free issue index: 0" in first
+    assert first["hookEventName"] == "UserPromptSubmit"
+    assert core.next_draft_path(tmp_path, batch_id).name == f"{batch_id}.issue-0.md"
     assert (tmp_path / ".harness/issue-drafts/.gitignore").read_text() == "*\n"
 
     drafts = tmp_path / ".harness/issue-drafts"
     (drafts / f"{batch_id}.issue-0.md").write_text("# Existing\n", encoding="utf-8")
 
-    second = _run(payload, monkeypatch, capsys)["hookSpecificOutput"][
-        "additionalContext"
-    ]
-    assert f"issues session id: {batch_id}" in second
-    assert "next free issue index: 1" in second
+    second = _run(payload, monkeypatch, capsys)["hookSpecificOutput"]
+    assert second["hookEventName"] == "UserPromptSubmit"
+    assert core.next_draft_path(tmp_path, batch_id).name == f"{batch_id}.issue-1.md"
 
 
 @pytest.mark.parametrize(
@@ -201,7 +197,6 @@ def test_pending_notice_and_drafting_context_are_combined(
         monkeypatch,
         capsys,
     )
-    context = result["hookSpecificOutput"]["additionalContext"]
-
-    assert "#42" in context  # the notice
-    assert f"issues session id: {session_id}" in context  # the drafting context
+    assert result["hookSpecificOutput"]["additionalContext"]
+    assert not core.notice_path(tmp_path, session_id).exists()
+    assert core.next_draft_path(tmp_path, session_id).name == f"{session_id}.issue-0.md"

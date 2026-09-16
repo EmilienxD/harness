@@ -3,7 +3,7 @@
   "displayName": "aboard; visible coding agents",
   "publisher": "aboard",
   "description": "VS Code integration for visible Claude Code and ChatGPT sessions, fleet tracking, and Auto Run orchestration.",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "icon": "assets/aboard.png",
   "private": true,
   "repository": {
@@ -584,7 +584,9 @@
     "assets/aboard.svg",
     "assets/launch.schema.json",
     "assets/scaffold/",
-    "assets/runtime/",
+    "assets/runtime/abd_hook.py",
+    "assets/runtime/abd-hooks.json",
+    "assets/runtime/abd_wrapper.py",
     "README.md",
     "LICENSE"
   ],

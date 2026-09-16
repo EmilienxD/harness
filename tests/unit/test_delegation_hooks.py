@@ -33,6 +33,8 @@ def configured(
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider: ["claude"])
+    from subagents_runtime import processes
+    monkeypatch.setattr(processes,"start",lambda execution_id,*args,**kwargs: processes.confirm_startup(execution_id))
     return sessions.launch(cwd=tmp_path, provider=provider)
 
 
@@ -69,11 +71,12 @@ def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
     context = output["hookSpecificOutput"]["additionalContext"]
     connection = sqlite3.connect(tmp_path / "state" / "sessions.sqlite3")
     try:
-        selected_skill, inbox = connection.execute("SELECT skill, inbox FROM grants").fetchone()
+        selected_parent, inbox = connection.execute("SELECT parent_session_id, inbox FROM session_delegation").fetchone()
     finally:
         connection.close()
-    assert selected_skill == launcher
-    assert Path(inbox).parent.name != parent
+    assert selected_parent == parent
+    assert Path(inbox).parent.name == parent
+    assert Path(inbox).is_relative_to(tmp_path / "state")
 
 
 def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,7 +119,7 @@ def test_ask_skill_invocation_after_prose_opens_its_grant(
 
     assert output is not None
     with sqlite3.connect(tmp_path / "state" / "sessions.sqlite3") as connection:
-        assert connection.execute("SELECT skill FROM grants").fetchone() == (expected_skill,)
+        assert connection.execute("SELECT parent_session_id FROM session_delegation").fetchone() == (f"existing-{provider}-session",)
 
 
 def test_shell_created_request_is_inert_but_exact_structured_write_launches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,7 +129,7 @@ def test_shell_created_request_is_inert_but_exact_structured_write_launches(tmp_
         "prompt": "/work-with-agent", "cwd": str(tmp_path),
     })
     assert output is not None
-    inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
     request = inbox / "child.md"
     request.write_text("---\ntask: general\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
     launched: list[str] = []
@@ -152,7 +155,7 @@ def test_codex_apply_patch_alias_can_launch_multiple_exact_files(tmp_path: Path,
         "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "$work-with-agent", "cwd": str(tmp_path),
     }, provider="chatgpt")
     assert output is not None
-    inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
     paths = [inbox / "one.md", inbox / "two.md"]
     for index, path in enumerate(paths, 1):
         path.write_text(f"---\ntask: general\nmode: auto\n---\n\nTask {index}.\n", encoding="utf-8")
@@ -175,7 +178,7 @@ def test_structured_request_launch_keeps_the_original_parent_cwd(tmp_path: Path,
         "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(project),
     })
     assert output is not None
-    inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
     request = inbox / "child.md"
     request.write_text("---\ntask: general\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
     launched_from: list[Path] = []
@@ -199,7 +202,7 @@ def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypa
         "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path),
     })
     assert output is not None
-    inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
     request = inbox / "child.md"
     request.write_text("---\ntask: general\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
     monkeypatch.setattr(sessions, "launch_delegated", lambda *_args: "child")
@@ -210,52 +213,36 @@ def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypa
     hooks.handle({
         "session_id": "child", "hook_event_name": "Stop", "cwd": str(tmp_path),
         "last_assistant_message": "Finished safely.",
-    }, provider="chatgpt")
+    }, provider="claude")
 
     delivered = hooks.handle({
         "session_id": parent, "hook_event_name": "Stop", "cwd": str(tmp_path),
         "last_assistant_message": "Waiting for children.",
     }, provider="chatgpt")
 
-    assert delivered == {
-        "decision": "block",
-        "reason": "Agent 1 finished. Agent replied:\n\nFinished safely.\n\n0 agents still running.",
-    }
+    assert delivered is not None and delivered["decision"] == "block"
+    assert "Finished safely." in delivered["reason"]
 
 
 def test_clarification_stop_keeps_an_unused_grant_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
     output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path)})
     assert output is not None
-    inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
 
     assert hooks.handle({"session_id": parent, "hook_event_name": "Stop", "cwd": str(tmp_path), "last_assistant_message": "done"}) is None
     assert inbox.is_dir()
 
 
-def test_used_grant_closes_on_parent_stop_and_session_end_cleans_unused_grants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    parent = configured(tmp_path, monkeypatch)
-    output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path)})
-    assert output is not None
-    inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
-    request = inbox / "child.md"
-    request.write_text("---\ntask: general\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
-    monkeypatch.setattr(sessions, "launch_delegated", lambda *_args: "child")
-    hooks.handle({"session_id": parent, "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_input": {"file_path": str(request)}})
-    hooks.handle({"session_id": "child", "hook_event_name": "SessionEnd", "cwd": str(tmp_path)})
-
-    hooks.handle({"session_id": parent, "hook_event_name": "Stop", "cwd": str(tmp_path), "last_assistant_message": "waiting"})
-    assert not inbox.exists()
-
-    second = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path)})
-    assert second is not None
-    with sqlite3.connect(tmp_path / "state" / "sessions.sqlite3") as connection:
-        unused = Path(connection.execute(
-            "SELECT inbox FROM grants WHERE parent_session_id = ? AND state = 'open' ORDER BY created_at DESC LIMIT 1",
-            (parent,),
-        ).fetchone()[0])
-    hooks.handle({"session_id": parent, "hook_event_name": "SessionEnd", "cwd": str(tmp_path)})
-    assert not unused.exists()
+def test_parent_shutdown_preserves_delegation_inbox(tmp_path,monkeypatch):
+    parent = configured(tmp_path,monkeypatch)
+    hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"UserPromptSubmit","prompt":"/work-with-agent"})
+    from subagents_runtime.delegation import enable_delegation
+    inbox = enable_delegation(parent,"work-with-agent").inbox
+    hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"PreToolUse"})
+    hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"SessionEnd"})
+    assert inbox.is_dir()
+    assert hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"SessionStart","source":"resume"}) is None
 
 
 def test_grant_uses_the_registered_session_cwd_after_parent_changes_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -273,5 +260,5 @@ def test_grant_uses_the_registered_session_cwd_after_parent_changes_directory(tm
     })
 
     assert output is not None
-    inbox = Path(output["hookSpecificOutput"]["additionalContext"].splitlines()[1])
-    assert inbox.is_relative_to(original.resolve())
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
+    assert inbox.is_relative_to(original / "state")

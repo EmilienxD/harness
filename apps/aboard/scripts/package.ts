@@ -25,6 +25,8 @@ const forbidden = [
   /(^|\/)\.abd\/runtime(\/|$)/,
   /(^|\/)\.env(?:\.|$)/,
   /(^|\/)bridge\.json$/,
+  /(^|\/)__pycache__(\/|$)/,
+  /\.pyc$/,
 
   /(^|\/)fleet\.json$/,
   /(^|\/)prompts(\/|$)/,

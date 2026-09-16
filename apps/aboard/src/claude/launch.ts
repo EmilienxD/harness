@@ -463,7 +463,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
         ? { invocation: skillInvocation("/", configuration.skillName) }
         : request.skill === undefined ? {} : { invocation: skillInvocation("/", request.skill) }),
     });
-    const args = [...fixedArguments, ...plan.args];
+    const args = [...(request.executionMode === "auto" || request.executionMode === "auto-run" ? ["-p", "--output-format", "stream-json", "--verbose"] : []), ...fixedArguments, ...plan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       plan,
@@ -542,7 +542,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       stem: "continue",
       ...(request.promptRoot === undefined ? {} : { promptRoot: request.promptRoot }),
     });
-    const args = [...fixedArguments, ...promptPlan.args];
+    const args = [...(request.executionMode === "auto" || request.executionMode === "auto-run" ? ["-p", "--output-format", "stream-json", "--verbose"] : []), ...fixedArguments, ...promptPlan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       promptPlan,

@@ -79,6 +79,7 @@ export interface PlatformLaunchRequest {
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
   readonly shell: ShellKind;
+  readonly executionMode?: import("../domain/contracts.js").ExecutionMode | undefined;
   readonly attended?: boolean | undefined;
   readonly skill?: string | undefined;
   readonly autoRunRestricted?: true | undefined;

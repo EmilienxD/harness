@@ -1,4 +1,4 @@
-"""Provider hook entrypoint for delegation grants, requests, and results."""
+"""Provider hooks for saved-conversation delegation, context, and results."""
 
 from __future__ import annotations
 
@@ -11,25 +11,25 @@ from typing import Any
 
 from subagents_runtime import sessions
 from subagents_runtime.delegation import (
-    GRANT_POLICIES,
     arm_reply,
-    clear_reply_authorization,
+    claim_instructions,
     claim_parent_delivery,
-    close_parent_grants,
+    clear_reply_authorization,
+    enable_delegation,
     observe_parent_event,
-    open_grant,
-    process_grant,
+    process_inbox,
+    reconcile_inbox,
     report_child_stop,
     wait_parent_delivery,
 )
 
-
-SKILL_NAME = r"((?:work|explore|prototype|websearch|brainstorm|address|review)-with-agent|reply-to-agent)"
+SKILL_NAME = r"((?:work|explore|prototype|websearch|brainstorm|address|review)-with-agent|reply-to-agent|resume-agent)"
 INVOCATIONS = {
     "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
     "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),
 }
 STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
+
 
 def provider_from_argv(argv: list[str]) -> str | None:
     """The provider the installer wired this hook into, or None if it didn't say."""
@@ -66,24 +66,26 @@ def _written_paths(payload: dict[str, Any]) -> list[Path]:
         for key in ("file_path", "path"):
             value = tool_input.get(key)
             if isinstance(value, str):
-                paths.add(Path(value).resolve())
+                paths.add(Path(value).absolute())
     if tool in {"apply_patch", "ApplyPatch"}:
         for text in _strings(tool_input):
-            for match in re.finditer(r"^\*\*\* (?:Add|Update) File: (.+)$", text, re.MULTILINE):
-                paths.add(Path(match.group(1).strip()).resolve())
+            for match in re.finditer(
+                r"^\*\*\* (?:Add|Update) File: (.+)$", text, re.MULTILINE
+            ):
+                paths.add(Path(match.group(1).strip()).absolute())
     return sorted(paths)
 
 
-def _grant_for_path(session_id: str, path: Path) -> str | None:
+def _inbox_for_path(session_id: str, path: Path) -> str | None:
     with sessions._connect() as connection:
         rows = connection.execute(
-            "SELECT id, inbox FROM grants WHERE parent_session_id = ? AND state IN ('open', 'used')",
+            "SELECT parent_session_id, inbox FROM session_delegation WHERE parent_session_id = ?",
             (session_id,),
         ).fetchall()
-    for grant_id, inbox in rows:
+    for inbox_session_id, inbox in rows:
         try:
             if path.parent == Path(inbox).resolve():
-                return str(grant_id)
+                return str(inbox_session_id)
         except OSError:
             continue
     return None
@@ -99,7 +101,23 @@ def _stop_wait_seconds(cwd: Path) -> float:
         return 24 * 3600
 
 
-def handle(payload: dict[str, Any], provider: str | None = None) -> dict[str, Any] | None:
+def _processing_context(processed) -> str:
+    labels = []
+    with sessions._connect() as connection:
+        for item in processed:
+            row = connection.execute(
+                "SELECT agent_index FROM sessions WHERE id=?", (item.child_session_id,)
+            ).fetchone()
+            label = f"agent-{row[0]}" if row else item.path.name
+            labels.append(
+                f"{label}: {item.status}" + (f" ({item.reason})" if item.reason else "")
+            )
+    return "\n".join(labels)
+
+
+def handle(
+    payload: dict[str, Any], provider: str | None = None
+) -> dict[str, Any] | None:
     event = str(payload.get("hook_event_name", ""))
     session_id = payload.get("session_id") or os.environ.get("HARNESS_SESSION_ID")
     if not isinstance(session_id, str):
@@ -107,10 +125,43 @@ def handle(payload: dict[str, Any], provider: str | None = None) -> dict[str, An
     cwd = Path(payload.get("cwd") or Path.cwd())
     selected_provider = provider or os.environ.get("HARNESS_PROVIDER", "claude")
     execution_mode = os.environ.get("HARNESS_EXECUTION_MODE", "interactive")
-    session_id = sessions.bind_observed(session_id, cwd, selected_provider, execution_mode)
+    fresh = event == "SessionStart" and payload.get("source") in {"clear", "fork"}
+    if fresh:
+        # Providers assign a fresh conversation ID. Never bind it to an inherited parent ID.
+        sessions.register_observed(session_id, cwd, selected_provider, execution_mode)
+    else:
+        session_id = sessions.bind_observed(
+            session_id, cwd, selected_provider, execution_mode
+        )
+    observe_parent_event(session_id, event)
+    execution_id = os.environ.get("HARNESS_EXECUTION_ID")
+    if event == "SessionStart" and execution_id and not fresh:
+        from subagents_runtime.processes import confirm_startup
 
+        confirm_startup(execution_id)
     if event == "SessionStart":
-        return None
+        recovered = []
+        with sessions._connect() as connection:
+            enabled = connection.execute(
+                "SELECT 1 FROM session_delegation WHERE parent_session_id=?",
+                (session_id,),
+            ).fetchone()
+        if enabled:
+            recovered = reconcile_inbox(session_id, launch=sessions.launch_delegated)
+        instructions = claim_instructions(
+            session_id, compact=payload.get("source") == "compact"
+        )
+        delivery = claim_parent_delivery(session_id, event)
+        text = "\n\n".join(
+            item
+            for item in (
+                instructions,
+                delivery.text if delivery else None,
+                _processing_context(recovered) if recovered else None,
+            )
+            if item
+        )
+        return _context(event, text) if text else None
 
     if event == "UserPromptSubmit":
         # Codex has no StopFailure event. A new user turn is proof that a
@@ -125,21 +176,32 @@ def handle(payload: dict[str, Any], provider: str | None = None) -> dict[str, An
             skill = match.group(1)
             if skill == "reply-to-agent":
                 arm_reply(session_id)
-                context = "Reply armed. The next successful Stop will be sent to the parent."
-                return _context(event, context if delivery is None else f"{delivery.text}\n\n{context}")
-            grant = open_grant(session_id, skill)
-            context = (
-                "Delegation inbox opened. Write one Markdown file per child directly under:\n"
-                f"{grant.inbox}\n\n"
-                "Each file needs YAML frontmatter with task, optional provider, and mode, followed by a nonempty prompt. "
-                "Use only a structured Write/Edit/apply_patch tool; shell-created files are ignored."
+                context = (
+                    "Reply armed. The next successful Stop will be sent to the parent."
+                )
+                return _context(
+                    event,
+                    context if delivery is None else f"{delivery.text}\n\n{context}",
+                )
+            enable_delegation(session_id, skill)
+            instructions = claim_instructions(session_id)
+            text = "\n\n".join(
+                item
+                for item in (
+                    instructions,
+                    delivery.text if delivery else None,
+                )
+                if item
             )
-            return _context(event, context if delivery is None else f"{delivery.text}\n\n{context}")
-        if delivery is not None:
-            return _context(event, delivery.text)
+            return _context(event, text) if text else None
+        instructions = claim_instructions(session_id)
+        text = "\n\n".join(
+            item for item in (instructions, delivery.text if delivery else None) if item
+        )
+        if text:
+            return _context(event, text)
 
     if event == "PreToolUse":
-        observe_parent_event(session_id, event)
         return None
 
     if event == "Interrupt":
@@ -147,20 +209,41 @@ def handle(payload: dict[str, Any], provider: str | None = None) -> dict[str, An
         return None
 
     if event == "PostToolUse":
+        response = payload.get("tool_response")
+        if isinstance(response, dict) and (
+            response.get("isError") or response.get("error")
+        ):
+            return None
+        tool_input = payload.get("tool_input")
+        skill = tool_input.get("skill") if isinstance(tool_input, dict) else None
+        if (
+            payload.get("tool_name") == "Skill"
+            and isinstance(skill, str)
+            and re.fullmatch(SKILL_NAME, skill)
+        ):
+            if skill == "reply-to-agent":
+                arm_reply(session_id)
+            else:
+                enable_delegation(session_id, skill)
+                instructions = claim_instructions(session_id)
+                if instructions:
+                    return _context(event, instructions)
         processed = []
         for path in _written_paths(payload):
-            grant_id = _grant_for_path(session_id, path)
-            if grant_id is not None:
+            inbox_session_id = _inbox_for_path(session_id, path)
+            if inbox_session_id is not None:
                 processed.extend(
-                    process_grant(grant_id, launch=sessions.launch_delegated, request_paths={path})
+                    process_inbox(
+                        inbox_session_id,
+                        launch=sessions.launch_delegated,
+                        request_paths={path},
+                    )
                 )
         delivery = claim_parent_delivery(session_id, event)
         if delivery is not None:
             return _context(event, delivery.text)
         if processed:
-            launched = sum(item.status == "launched" for item in processed)
-            failed = sum(item.status == "failed" for item in processed)
-            return _context(event, f"Delegation requests processed: {launched} launched, {failed} failed.")
+            return _context(event, _processing_context(processed))
         return None
 
     if event in {"Stop", "StopFailure", "SessionEnd"}:
@@ -176,18 +259,14 @@ def handle(payload: dict[str, Any], provider: str | None = None) -> dict[str, An
             cancelled=event == "SessionEnd",
         )
         if event == "Stop":
-            close_parent_grants(session_id)
-            observe_parent_event(session_id, event)
             delivery = wait_parent_delivery(
                 session_id,
-                timeout_seconds=_stop_wait_seconds(Path(payload.get("cwd") or Path.cwd())),
+                timeout_seconds=_stop_wait_seconds(
+                    Path(payload.get("cwd") or Path.cwd())
+                ),
             )
             if delivery is not None:
-                if selected_provider == "chatgpt":
-                    return {"decision": "block", "reason": delivery.text}
-                return _context(event, delivery.text)
-        elif event == "SessionEnd":
-            close_parent_grants(session_id, include_open=True)
+                return {"decision": "block", "reason": delivery.text}
         return None
 
     return None
@@ -200,7 +279,7 @@ def main() -> int:
         output = handle(payload, provider) if isinstance(payload, dict) else None
         if output is not None:
             print(json.dumps(output))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - Provider entrypoint reports hook failures without a traceback.
         print(str(exc), file=sys.stderr)
         return 2
     return 0

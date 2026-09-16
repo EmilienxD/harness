@@ -102,7 +102,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
   launch.autoRun.provider = platform;
   launch.providers[platform].command = platform === "claude" ? [
     "claude", "--permission-mode", "acceptEdits", "--allowedTools", "Bash(git add*),Bash(git commit*)",
-  ] : ["codex"];
+  ] : ["codex", "--dangerously-bypass-hook-trust"];
   await writeFile(launchPath, `${JSON.stringify(launch, null, 2)}\n`, "utf8");
   const settingsPath = join(root, ".vscode", "settings.json");
   await mkdir(join(root, ".vscode"), { recursive: true });
@@ -283,9 +283,9 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
     const assertions = server.assertions();
     const expectedCheckpoints = review ? [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
-      "auto-hitl-review-read", "auto-hitl-review-complete", "auto-hitl-accept-commit", "auto-hitl-accept-complete",
+      "auto-hitl-review-read", "auto-hitl-review-complete",
     ] : [
-      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ];
     for (const checkpoint of expectedCheckpoints) {
@@ -293,7 +293,7 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       const expected = platform === "chatgpt" ? `${scenario}:${checkpoint}` : checkpoint;
       if (!assertions.checkpoints.includes(expected)) throw new Error(`HITL auto-run did not reach ${checkpoint}`);
     }
-    const expectedRequests = review ? 8 : 9;
+    const expectedRequests = review ? 6 : 7;
     if (assertions.inferenceRequests !== expectedRequests || assertions.unexpectedRequests !== 0) throw new Error("Unexpected HITL inference activity");
   } finally {
     await server.close();

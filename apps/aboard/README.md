@@ -1,12 +1,12 @@
 # Aboard
 
-Aboard is a VS Code extension for visible Claude Code and ChatGPT sessions. It keeps agent work in terminals the user can inspect, gives the user one place to track active and recent sessions, and runs issue-driven AUTO RUN workflows without hiding the work from the user.
+Aboard is a VS Code extension for Claude Code and ChatGPT conversations. It opens interactive work in visible terminals and automatic delegations and AUTO RUN workers in background processes, with fleet and activity tracking for both.
 
 Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
 ## At a glance
 
-Aboard launches Claude Code or ChatGPT through visible VS Code terminals. Its Fleet shows live sessions,
+Aboard launches interactive Claude Code or ChatGPT sessions through visible VS Code terminals. Automatic work uses detached processes with structured output and execution logs. Its Fleet shows live sessions,
 Recent Activity records useful completed work, and AUTO RUN coordinates the local Git checkout with GitHub
 issues and pull requests. An authenticated loopback bridge carries lifecycle events back to the extension.
 
@@ -21,15 +21,16 @@ future sessions use your latest choices.
 
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
-Focusing a live session reveals its existing terminal. Reopening an ended session asks that session's
-recorded provider to resume the conversation with its latest launch configuration; if that conversation is
+Focusing a live interactive session reveals its existing terminal. Background sessions have no terminal.
+Reopening an ended session preserves its provider, execution mode, working directory, and conversation;
+background continuation requires a next message. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
 Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Exploration sessions are read-only. AUTO RUN workers use stricter, extension-owned Git and GitHub restrictions.
 
 ## AUTO RUN
 
-AUTO RUN turns labelled GitHub issues into a visible, recoverable queue. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
+AUTO RUN turns labelled GitHub issues into a recoverable queue of background workers. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
 
 ### Full Workflow
 
@@ -96,8 +97,8 @@ flowchart TD
 - **Review** is mode-specific: an AFK reviewer contributes one fix or empty approval commit after publication; a HITL reviewer examines the uncommitted pinned code and leaves its fixes uncommitted for the user.
 - Aboard owns branch changes, publication, integration, and GitHub mutations. Workers may inspect, edit, stage, and commit within their assigned checkout.
 
-While HITL waits, focus the named implementer or reviewer handoff to inspect, continue, or ask that same
-conversation to create the acceptance commit. Stopping preserves recoverable state and the exact failed worker
+While HITL waits, inspect the worker's checkout and create the acceptance commit when the changes are ready.
+The background worker may exit after handing off; Aboard continues waiting for your commit. Stopping preserves recoverable state and the exact failed worker
 conversation. Resume is for stopped or interrupted attempts; a normal acceptance commit advances without it.
 Discard follows the configured cleanup policy and never removes dirty or moved work it can no longer prove it owns.
 
@@ -143,3 +144,5 @@ npm run package
 Use `npm run test:integration` for unit and VS Code integration tests. `npm run e2e:full` runs the complete disposable real-CLI journey.
 
 Aboard keeps its npm build and `aboard-v<version>` release history independent from the Python installer. The packaged VSIX includes this README and the extension runtime, never the Harness skill catalogue.
+
+Harness delegation uses persistent conversation inboxes outside the workspace. Children retain their Harness identities and execution modes across continuation. A caller-driven resume requires a next message and refuses running or uncertain executions, including interactive terminals that have already sent a reply. Delegation request IDs are stored in extension runtime storage so restarting Aboard cannot blindly launch a request twice; conflicting reuse of an ID is refused.

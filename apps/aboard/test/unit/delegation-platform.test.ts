@@ -30,6 +30,10 @@ class FakeTerminal implements TerminalHandle {
 class FakeTerminalHost implements TerminalHost {
   public readonly terminals: FakeTerminal[] = [];
   public readonly options: TerminalCreationOptions[] = [];
+  public createBackgroundProcess(options: TerminalCreationOptions): TerminalHandle {
+    return this.createTerminal(options);
+  }
+
   public createTerminal(options: TerminalCreationOptions): TerminalHandle {
     const terminal = new FakeTerminal();
     this.options.push(options);
@@ -106,7 +110,7 @@ test("shared delegation asks the selected platform for an executable launch plan
     agentIdFactory: () => "agent-1" as AgentId,
   });
 
-  const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell" }, "user");
+  const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell", harnessStateDirectory: "C:/isolated-state", harnessRuntimePath: "C:/installed-runtime" }, "user");
 
   assert.equal(planned.length, 1);
   assert.equal(createdSessions, 1);
@@ -119,6 +123,8 @@ test("shared delegation asks the selected platform for an executable launch plan
   assert.equal(fleet.get("agent-1" as AgentId)?.platform, "claude");
   assert.equal(fleet.get("agent-1" as AgentId)?.sessionBinding, "bound");
   assert.equal(fleet.get("agent-1" as AgentId)?.executionMode, "interactive");
+  assert.equal(host.options[0]?.env.HARNESS_STATE_DIR, "C:/isolated-state");
+  assert.ok(host.options[0]?.env.PYTHONPATH?.startsWith("C:/installed-runtime"));
 });
 
 test("shared delegation does not report a runtime-assigned session until its actual id is bound", async () => {

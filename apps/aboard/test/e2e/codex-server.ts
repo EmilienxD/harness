@@ -140,7 +140,6 @@ function parseRequest(value: unknown): ResponsesRequest {
   if (!Array.isArray(body.input)) throw new ProtocolMismatch("$.input", "must be an array");
   if (body.tools !== undefined && !Array.isArray(body.tools)) throw new ProtocolMismatch("$.tools", "must be an array when present");
   const input = body.input.map((item, index) => record(item, `$.input[${index}]`));
-  const codeMode = input.some((item) => item.type === "additional_tools");
   const topLevelTools = (body.tools ?? []).map((tool, index) => record(tool, `$.tools[${index}]`));
   const additionalTools = input.flatMap((item, inputIndex) => {
     if (item.type !== "additional_tools") return [];
@@ -148,6 +147,7 @@ function parseRequest(value: unknown): ResponsesRequest {
     return item.tools.map((tool, toolIndex) => record(tool, `$.input[${inputIndex}].tools[${toolIndex}]`));
   });
   const tools = [...topLevelTools, ...additionalTools];
+  const codeMode = tools.some((tool) => toolNames(tool).includes("exec")) && !topLevelTools.some((tool) => toolNames(tool).includes("exec_command"));
   const metadata = typeof body.client_metadata === "object" && body.client_metadata !== null && !Array.isArray(body.client_metadata) ? body.client_metadata as Record<string, unknown> : {};
   let sandboxMode: string | null = null;
   let sessionId: string | null = null;
@@ -198,7 +198,8 @@ function schemaFixture(schema: Record<string, unknown>): unknown {
 function toolNames(tool: Record<string, unknown>): string[] {
   const names: string[] = [];
   const visit = (value: unknown): void => {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return;
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (typeof value !== "object" || value === null) return;
     for (const [key, nested] of Object.entries(value)) {
       if (key === "name" && typeof nested === "string") names.push(nested);
       else visit(nested);
@@ -224,6 +225,7 @@ async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenar
 }
 
 function scenarioFromText(text: string): CodexScenario | undefined {
+  if (/Review issue #\d+; Accept deterministic (?:per-issue|single-branch) change after review in the exact range/u.test(text)) return "auto-run-hitl-review";
   if (text.includes(AUTO_RUN_FOLLOWUP_MARKER)) return "auto-run-followup";
   if (text.includes(AUTO_RUN_HITL_REVIEW_MARKER)) return "auto-run-hitl-review";
   if (text.includes(AUTO_RUN_HITL_MARKER)) return "auto-run-hitl";
@@ -250,7 +252,7 @@ function scenarioFromToolHistory(body: ResponsesRequest): CodexScenario | undefi
 
 function transition(body: ResponsesRequest, scenario: CodexScenario, text: string, repoRoot?: string): { readonly checkpoint: string; readonly output: ResponseOutput } {
   if (scenario === "auto-run-afk") return autoRunAfkTransition(body, text, requireRepoRoot(repoRoot));
-  if (scenario === "auto-run-hitl-review" && (text.includes("Aboard pinned ") || hitlRouteFromToolHistory(body) === "reviewer")) {
+  if (scenario === "auto-run-hitl-review" && (text.includes("in the exact range") || text.includes("Aboard pinned ") || hitlRouteFromToolHistory(body) === "reviewer")) {
     return autoRunHitlReviewTransition(body, requireRepoRoot(repoRoot));
   }
   if (scenario === "auto-run-hitl" || scenario === "auto-run-hitl-review") return autoRunSequentialTransition(body, text, requireRepoRoot(repoRoot), "auto-hitl", BEFORE_CONTENT, AFTER_CONTENT, scenario);
@@ -289,7 +291,7 @@ function transition(body: ResponsesRequest, scenario: CodexScenario, text: strin
 function autoRunAfkTransition(body: ResponsesRequest, text: string, repoRoot: string): { readonly checkpoint: string; readonly output: ResponseOutput } {
   const historyRoute = autoRunAfkRouteFromToolHistory(body);
   const route = text.includes("Review pull request") ? "review"
-    : text.includes("Explore implementation context") ? "explore"
+    : text.includes("<work-to-explore>") ? "explore"
       : historyRoute ?? "implementer";
   if (route === "review") {
     return commandSequence(body, [

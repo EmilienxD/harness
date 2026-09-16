@@ -36,6 +36,7 @@ export type RunOutcome =
 
 /** The launch facts a reopen replays. No prompt text, no conversation content. */
 export interface ReopenableSession {
+  readonly executionMode?: import("./contracts.js").ExecutionMode;
   readonly platform: AgentPlatformId;
   readonly sessionId: SessionId;
   readonly issueNumbers?: readonly number[];
@@ -138,6 +139,7 @@ export function agentActivity(
 
   const durationMs = elapsedMs(session.lifecycle.startedAt, at);
   const launchFacts: ReopenableSession = {
+    ...(session.executionMode === undefined ? {} : { executionMode: session.executionMode }),
     platform: session.platform,
     sessionId: session.sessionId,
     ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
@@ -231,6 +233,7 @@ export type ReopenOrigin =
   | "ended";
 
 export interface ReopenCandidate {
+  readonly executionMode?: import("./contracts.js").ExecutionMode;
   readonly platform: AgentPlatformId;
   readonly agentId: AgentId;
   readonly type: AgentType;
@@ -259,6 +262,7 @@ export function reopenCandidates(
     if (!canReopenSession(session) || !isReopenableType(type)) continue;
     if (!isTerminalOpen(session.terminal.terminalId)) continue;
     candidates.set(session.identity.agentId, {
+      ...(session.executionMode === undefined ? {} : { executionMode: session.executionMode }),
       platform: session.platform,
       agentId: session.identity.agentId,
       type,
@@ -279,6 +283,7 @@ export function reopenCandidates(
     // this version will not reopen may still be in it.
     if (!isReopenableType(entry.type) || candidates.has(entry.agentId)) continue;
     candidates.set(entry.agentId, {
+      ...(entry.reopen.executionMode === undefined ? {} : { executionMode: entry.reopen.executionMode }),
       platform: entry.reopen.platform,
       agentId: entry.agentId,
       type: entry.type,
