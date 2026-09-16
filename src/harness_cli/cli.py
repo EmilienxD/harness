@@ -286,10 +286,66 @@ def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> in
             _cancel(ui)
             return 0
 
-        changes_by_platform = {}
+        selected_updates: set[str] = set()
         for installer in installers:
-            _, changes = installer.plan(requests[installer.target.platform])
+            installer.update_packages = selected_updates
+        changes_by_platform = {}
+        resolved_by_platform = {}
+        update_versions: dict[str, list[str]] = {}
+        for installer in installers:
+            resolved, changes = installer.plan(requests[installer.target.platform])
             changes_by_platform[installer.target.platform] = changes
+            resolved_by_platform[installer.target.platform] = resolved
+            kept = {item.tool.name for item in resolved} | requests[installer.target.platform]
+            required = {change.package for change in changes if change.action == "upgrade"}
+            for name, receipt in installed_packages(installer.target, store).items():
+                if (
+                    name in kept
+                    and name not in required
+                    and name in available
+                    and receipt.get("version") is not None
+                    and receipt["version"] != available[name].version
+                ):
+                    update_versions.setdefault(name, []).append(
+                        f"{installer.target.adapter.product_name}: {receipt['version']} → {available[name].version}"
+                    )
+        if update_versions:
+            update_names = sorted(update_versions)
+            ui.note("Available updates", ["  Leave packages unselected to keep their installed versions."])
+            update_selection = ui.multiselect(
+                "Update existing packages (optional)",
+                [
+                    MenuOption(name, "; ".join(update_versions[name]), badge="optional update")
+                    for name in update_names
+                ],
+                selected=set(),
+                select_all=True,
+                required=False,
+            )
+            if update_selection is None:
+                _cancel(ui)
+                return 0
+            selected_updates.update(update_names[index] for index in update_selection)
+            for installer in installers:
+                resolved, changes = installer.plan(requests[installer.target.platform])
+                resolved_by_platform[installer.target.platform] = resolved
+                changes_by_platform[installer.target.platform] = changes
+        required_updates = []
+        for installer in installers:
+            resolved = resolved_by_platform[installer.target.platform]
+            changes = changes_by_platform[installer.target.platform]
+            for change in changes:
+                if change.action != "upgrade" or change.package in selected_updates:
+                    continue
+                parents = [
+                    item.tool.name for item in resolved
+                    if any(dependency.name == change.package and dependency.constraint for dependency in item.tool.dependencies)
+                ]
+                required_updates.append(
+                    f"  {installer.target.adapter.product_name}: {change.package} {change.reason} (required by {', '.join(parents)})"
+                )
+        if required_updates:
+            ui.note("Required dependency updates", required_updates)
         if not any(changes_by_platform.values()):
             ui.outro("Catalogue already matches that selection.")
             return 0
@@ -334,6 +390,8 @@ def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> in
                     CatalogueInstaller(available, target, locked_store)
                     for target in targets
                 ]
+                for installer in locked_installers:
+                    installer.update_packages = selected_updates
                 locked_changes = {
                     installer.target.platform: installer.plan(
                         requests[installer.target.platform]

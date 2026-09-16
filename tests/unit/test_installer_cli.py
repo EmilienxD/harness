@@ -4,6 +4,24 @@ from harness_cli.cli import main
 from harness_cli.host_actions import PreparedAction
 
 
+def test_install_and_uninstall_preserve_unrelated_installed_versions(tmp_path, monkeypatch, capsys):
+    from dataclasses import replace
+    from harness_cli.manifest import discover
+
+    available = discover()
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("harness_cli.installer_cli.discover", lambda: available)
+    assert main(["install", "caveman", "--platform", "claude", "--json"]) == 0
+    capsys.readouterr()
+    available["caveman"] = replace(available["caveman"], version="99.0.0")
+
+    for arguments in (["install", "tdd"], ["uninstall", "tdd"]):
+        assert main([*arguments, "--platform", "claude", "--json"]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert all(change["package"] != "caveman" for change in result["results"][0]["changes"])
+
+
 def test_interactive_root_is_passed_to_menu(tmp_path, monkeypatch):
     received = {}
 

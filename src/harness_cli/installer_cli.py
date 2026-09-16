@@ -170,6 +170,7 @@ def run_install(args: Namespace) -> int:
             for name in sorted(requested - compatible_requested)
         ]
         installer = CatalogueInstaller(available, target, store)
+        installer.update_packages = compatible_requested
         _, changes = installer.plan(selected)
         result = {
             "platform": target.platform.value,
@@ -241,6 +242,7 @@ def run_uninstall(args: Namespace) -> int:
             for name in sorted(requested - roots)
         ]
         installer = CatalogueInstaller(available, target, store)
+        installer.update_packages = set()
         _, changes = installer.plan(selected)
         result = {
             "platform": target.platform.value,

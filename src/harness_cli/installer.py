@@ -17,13 +17,13 @@ from pathlib import Path
 from typing import Any
 
 from harness_cli import gitignore, settings_merge
-from harness_cli.catalogue import CatalogueError, ResolvedPackage, resolve_dependencies
+from harness_cli.catalogue import CatalogueError, ResolvedPackage, resolve_dependencies, satisfies
 from harness_cli.host_actions import HostActionError, PreparedAction, apply as apply_host_action
 from harness_cli.host_actions import prepare as prepare_host_action
 from harness_cli.host_actions import describe as describe_host_action
 from harness_cli.host_actions import is_installed as host_action_is_installed
 from harness_cli.host_actions import uninstall as uninstall_host_action
-from harness_cli.manifest import ExpandedFile, HostAction, SupportStatus, Tool
+from harness_cli.manifest import ExpandedFile, HostAction, PackageDependency, PlatformSupport, SupportStatus, Tool
 from harness_cli.platforms import Platform, PlatformAdapter, get_adapter
 from harness_cli.receipts import ReceiptStore, package_ownership
 
@@ -293,6 +293,54 @@ class CatalogueInstaller:
         self.available = available
         self.target = target
         self.store = store or ReceiptStore.load()
+        # None reconciles the whole catalogue (the explicit upgrade command).
+        # A set opts into preserving installed packages except named updates.
+        self.update_packages: set[str] | None = None
+        self._preserved: set[str] = set()
+
+    def _selection_catalogue(self, requested_names: set[str]) -> dict[str, Tool]:
+        current = self.installation["packages"]
+        self._preserved = (
+            (set(current) & set(self.available)) - self.update_packages
+            if self.update_packages is not None else set()
+        )
+        while True:
+            available = dict(self.available)
+            for name in self._preserved:
+                receipt = current[name]
+                coupled = receipt.get("coupledDependencies", [])
+                available[name] = replace(
+                    available[name], version=receipt["version"], files=(), actions=(), requires=(),
+                    dependencies=tuple(
+                        PackageDependency(
+                            dependency, lifecycle="coupled" if dependency in coupled else "shared"
+                        )
+                        for dependency in receipt.get("dependencies", [])
+                    ),
+                    platform_support={self.target.platform: PlatformSupport(SupportStatus.SUPPORTED)},
+                )
+            # Promote only dependencies whose installed versions cannot satisfy
+            # the requirements of a newly installed or explicitly updated tool.
+            pending = list(requested_names)
+            visited: set[str] = set()
+            required: set[str] = set()
+            while pending:
+                name = pending.pop()
+                if name in visited or name not in available:
+                    continue
+                visited.add(name)
+                for dependency in available[name].dependencies:
+                    tool = available.get(dependency.name)
+                    if (
+                        tool is not None
+                        and dependency.name in self._preserved
+                        and not satisfies(tool.version, dependency.constraint)
+                    ):
+                        required.add(dependency.name)
+                    pending.append(dependency.name)
+            if not required:
+                return available
+            self._preserved.difference_update(required)
 
     @property
     def installation(self) -> dict[str, Any]:
@@ -372,7 +420,8 @@ class CatalogueInstaller:
         if missing:
             raise InstallError(f"unknown catalogue package(s): {', '.join(missing)}")
         try:
-            resolved = resolve_dependencies([self.available[name] for name in sorted(requested_names)], self.available)
+            available = self._selection_catalogue(requested_names)
+            resolved = resolve_dependencies([available[name] for name in sorted(requested_names)], available)
         except CatalogueError as exc:
             raise InstallError(str(exc)) from exc
         desired = {item.tool.name: item for item in resolved}
@@ -413,8 +462,8 @@ class CatalogueInstaller:
                 retained.add(name)
             if name in newly_retained:
                 resolved = resolve_dependencies(
-                    [self.available[name] for name in sorted(requested_names | retained)],
-                    self.available,
+                    [available[name] for name in sorted(requested_names | retained)],
+                    available,
                 )
                 desired = {item.tool.name: item for item in resolved}
         resolved = [
@@ -450,6 +499,8 @@ class CatalogueInstaller:
                 and item.tool.name not in newly_retained
             ):
                 changes.append(Change("ownership", item.tool.name, item.ownership))
+            elif item.tool.name in self._preserved:
+                continue
             elif any(
                 record.get("owned") and not Path(record["path"]).is_file()
                 for record in receipt.get("files", [])
@@ -618,6 +669,8 @@ class CatalogueInstaller:
             repairs: set[str] = set()
             for item in resolved:
                 current = packages.get(item.tool.name)
+                if item.tool.name in self._preserved:
+                    continue
                 if current is not None and current.get("version") == item.tool.version:
                     missing_files = any(
                         record.get("owned") and not Path(record["path"]).is_file()
@@ -645,6 +698,10 @@ class CatalogueInstaller:
                 self._remove(name, host_undo=host_undo, rollback_actions=rollback_prepared.get(name, []))
             for item in resolved:
                 current = packages.get(item.tool.name)
+                if item.tool.name in self._preserved:
+                    current.pop("explicit", None)
+                    current["ownership"] = item.ownership
+                    continue
                 if current is None or current.get("version") != item.tool.version:
                     replacing = current is not None
                     if current is not None:

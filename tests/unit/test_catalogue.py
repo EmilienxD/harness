@@ -17,6 +17,7 @@ from harness_cli.installer import (
     Target,
     UnownedFileError,
     UnownedHostProductError,
+    installed_packages,
     reconcile_targets,
 )
 from harness_cli.host_actions import (
@@ -774,6 +775,146 @@ def transactional_package(tmp_path, name, *, action=False):
         )
     (root / "harness.toml").write_text(manifest)
     return load_tool(root)
+
+
+def test_selection_changes_preserve_existing_version_and_payload(tmp_path):
+    from dataclasses import replace
+
+    old = transactional_package(tmp_path, "existing")
+    new = transactional_package(tmp_path, "addition")
+    project = tmp_path / "project"
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    target = Target.for_project(project, "claude")
+    CatalogueInstaller({old.name: old}, target, store).reconcile({old.name})
+    (old.root / "payload").write_text("updated payload")
+    latest = replace(old, version="2.0.0")
+    installer = CatalogueInstaller({old.name: latest, new.name: new}, target, store)
+    installer.update_packages = set()
+
+    changes = installer.reconcile({old.name, new.name})
+
+    assert [(change.action, change.package) for change in changes] == [("install", new.name)]
+    assert (target.install_root / "existing.txt").read_text() == "existing"
+    assert installed_packages(target, store)[old.name]["version"] == "1.0.0"
+
+
+@pytest.mark.parametrize("constraint, expected_version", [(">=1.0.0", "1.0.0"), (">=2.0.0", "2.0.0")])
+def test_new_selection_updates_dependency_only_when_required(tmp_path, constraint, expected_version):
+    from dataclasses import replace
+    from harness_cli.manifest import PackageDependency
+
+    old = transactional_package(tmp_path, "dependency")
+    parent = transactional_package(tmp_path, "parent")
+    project = tmp_path / "project"
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    target = Target.for_project(project, "claude")
+    CatalogueInstaller({old.name: old}, target, store).reconcile({old.name})
+    (old.root / "payload").write_text("updated dependency")
+    latest = replace(old, version="2.0.0")
+    parent = replace(parent, dependencies=(PackageDependency(old.name, constraint),))
+    installer = CatalogueInstaller({old.name: latest, parent.name: parent}, target, store)
+    installer.update_packages = set()
+
+    installer.reconcile({old.name, parent.name})
+
+    assert installed_packages(target, store)[old.name]["version"] == expected_version
+    assert (target.install_root / "dependency.txt").read_text() == (
+        "updated dependency" if expected_version == "2.0.0" else "dependency"
+    )
+
+
+def test_removing_selection_preserves_kept_packages_and_their_old_dependencies(tmp_path):
+    from dataclasses import replace
+    from harness_cli.manifest import PackageDependency
+
+    kept = transactional_package(tmp_path, "kept")
+    removed = transactional_package(tmp_path, "removed")
+    dependency = transactional_package(tmp_path, "dependency")
+    kept = replace(kept, dependencies=(PackageDependency(dependency.name, lifecycle="coupled"),))
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    target = Target.for_project(tmp_path / "project", "claude")
+    available = {tool.name: tool for tool in (kept, removed, dependency)}
+    CatalogueInstaller(available, target, store).reconcile({kept.name, removed.name})
+    available[kept.name] = replace(kept, version="2.0.0", dependencies=())
+    (kept.root / "payload").write_text("new kept")
+    # User edits to a package being kept must not prevent unrelated removal.
+    (target.install_root / "kept.txt").write_text("user edit")
+    installer = CatalogueInstaller(available, target, store)
+    installer.update_packages = set()
+
+    installer.reconcile({kept.name})
+
+    assert (target.install_root / "kept.txt").read_text() == "user edit"
+    assert not (target.install_root / "removed.txt").exists()
+    receipt = installed_packages(target, store)[kept.name]
+    assert receipt["version"] == "1.0.0"
+    assert receipt["dependencies"] == [dependency.name]
+    assert receipt["coupledDependencies"] == [dependency.name]
+    assert (target.install_root / "dependency.txt").is_file()
+
+
+@pytest.mark.parametrize("choose_update", [False, True])
+def test_menu_optional_updates_are_applied_only_when_selected(tmp_path, monkeypatch, choose_update):
+    from dataclasses import replace
+
+    old = transactional_package(tmp_path, "existing")
+    addition = transactional_package(tmp_path, "addition")
+    project = tmp_path / "project"
+    project.mkdir()
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    target = Target.for_project(project, "claude")
+    CatalogueInstaller({old.name: old}, target, store).reconcile({old.name})
+    (old.root / "payload").write_text("updated")
+    latest = replace(old, version="2.0.0")
+    update_screens = []
+
+    class FakeUI:
+        def __init__(self, read_key):
+            pass
+
+        def intro(self, message):
+            pass
+
+        def multiselect(self, title, options, selected=None, **settings):
+            if title == "Select providers":
+                return {0}
+            if title == "Select packages":
+                return set(range(len(options)))
+            update_screens.append((options, selected, settings))
+            return {0} if choose_update else set()
+
+        def select(self, *args, **kwargs):
+            return 0
+
+        def note(self, *args):
+            pass
+
+        def confirm(self, *args, **kwargs):
+            return True
+
+        def outro(self, *args):
+            pass
+
+        def progress(self, label, success, action):
+            action()
+
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(cli.sys, "stdin", InteractiveInput())
+    monkeypatch.setattr(cli, "terminal_keys", lambda: nullcontext(lambda: None))
+    monkeypatch.setattr(cli, "TerminalUI", FakeUI)
+    monkeypatch.setattr(cli, "discover", lambda: {old.name: latest, addition.name: addition})
+    monkeypatch.setattr(cli.ReceiptStore, "load", lambda: store)
+
+    assert cli.catalogue_menu() == 0
+    assert len(update_screens) == 1
+    options, selected, settings = update_screens[0]
+    assert [option.label for option in options] == [old.name]
+    assert selected == set()
+    assert settings["select_all"] is True
+    assert (target.install_root / "existing.txt").read_text() == ("updated" if choose_update else "existing")
+    assert installed_packages(target, store)[old.name]["version"] == ("2.0.0" if choose_update else "1.0.0")
+    assert (target.install_root / "addition.txt").is_file()
 
 
 def test_multi_target_reconciliation_rolls_every_target_back(tmp_path):
