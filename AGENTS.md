@@ -73,7 +73,7 @@ For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 - Run `uv run pytest` after catalogue or installer changes; the suite covers reconciliation and
   receipt-driven removal.
 - Use the `harness-e2e` skill for work under `tests/e2e/` or `apps/aboard/test/e2e/`.
-- Use the `tdd` skill before adding unit or E2E tests.
+- MANDATORY before writing unit or e2e tests: to know how to write tests and when, invoke the `tdd` skill. Skip for fast, obvious fixes; reserve it for large, complex work.
 - Consult the mirrored official references for product behavior instead of relying on memory.
 - Never assert exact or partial equality against agent prompt strings, because prompt text is not a meaningful contract and checks like the presence of "review" are useless.
 
