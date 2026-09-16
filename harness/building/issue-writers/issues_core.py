@@ -322,8 +322,8 @@ def run_gh(args, **kwargs):
 # Drafting context
 
 
-def prepare_drafting_context(root: Path, session_id: str) -> str:
-    """Prepare the drafts directory and return the values skills must use."""
+def next_draft_path(root: Path, session_id: str) -> Path:
+    """Prepare the draft store and return this session's next available path."""
     drafts = root / DRAFTS_DIR
     drafts.mkdir(parents=True, exist_ok=True)
     # Beside the drafts, never at .harness/ level: the sibling directories hold
@@ -341,7 +341,12 @@ def prepare_drafting_context(root: Path, session_id: str) -> str:
         if match and match["session"] == session_id:
             indexes.append(int(match["index"]))
     next_index = max(indexes, default=-1) + 1
-    template = (DRAFTS_DIR / draft_name(session_id, next_index)).as_posix()
+    return DRAFTS_DIR / draft_name(session_id, next_index)
+
+
+def prepare_drafting_context(root: Path, session_id: str) -> str:
+    """Prepare the drafts directory and return the values skills must use."""
+    template = next_draft_path(root, session_id).as_posix()
     return (
         f"Draft file path: {template}\n"
         "Increments the index by 1 gives you the next issue file path, counting up "

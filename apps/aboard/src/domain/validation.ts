@@ -757,6 +757,7 @@ function parseReopenable(value: unknown): ReopenableSession | undefined {
   return {
     platform,
     sessionId,
+    ...(value.executionMode === "interactive" || value.executionMode === "auto" || value.executionMode === "auto-run" ? { executionMode: value.executionMode } : {}),
     ...(issueNumbers === undefined ? {} : { issueNumbers }),
     ...(value.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
     ...(typeof value.cwd === "string" && value.cwd.trim().length > 0 ? { cwd: value.cwd } : {}),

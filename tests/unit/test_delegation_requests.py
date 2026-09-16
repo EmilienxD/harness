@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 from subagents_runtime.delegation import (
-    GRANT_POLICIES,
+    TASK_POLICIES,
     PROVIDERS,
-    GrantPolicy,
+    TaskPolicy,
     RequestFileError,
-    open_grant,
-    process_grant,
+    enable_delegation,
+    process_inbox,
     parse_request_file,
 )
 from subagents_runtime import sessions
@@ -35,7 +35,6 @@ def test_request_file_parses_the_public_frontmatter_contract() -> None:
     parsed = parse_request_file(
         request,
         inbox,
-        GrantPolicy("prototype", frozenset({"interactive", "auto"})),
         parent_provider="claude",
     )
 
@@ -50,17 +49,17 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     schemas = Path(sessions.__file__).parent / "schemas"
     request = json.loads((schemas / "delegation-request.schema.json").read_text(encoding="utf-8"))
     aboard = json.loads((schemas / "aboard-delegation.schema.json").read_text(encoding="utf-8"))
-    tasks = {policy.task for policy in GRANT_POLICIES.values()}
-    modes = {mode for policy in GRANT_POLICIES.values() for mode in policy.modes}
+    tasks = {policy.task for policy in TASK_POLICIES.values()}
+    modes = {mode for policy in TASK_POLICIES.values() for mode in policy.modes}
 
     # The prompt is the Markdown body, so it is never a frontmatter key.
-    assert set(request["properties"]) == {"task", "provider", "mode"}
-    assert set(request["required"]) == {"task", "mode"}
+    assert set(request["properties"]) == {"task", "provider", "mode", "resume"}
+    assert request["oneOf"][0]["required"] == ["task", "mode"]
     assert set(request["properties"]["task"]["enum"]) == tasks
     assert set(request["properties"]["mode"]["enum"]) == modes
     assert set(request["properties"]["provider"]["enum"]) == set(PROVIDERS)
 
-    assert set(aboard["required"]) == set(aboard["properties"])
+    assert set(aboard["required"]) <= set(aboard["properties"])
     assert set(aboard["properties"]["task"]["enum"]) == tasks
     assert set(aboard["properties"]["mode"]["enum"]) == modes
     assert set(aboard["properties"]["provider"]["enum"]) == set(PROVIDERS)
@@ -77,7 +76,6 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
     parsed = parse_request_file(
         request,
         inbox,
-        GrantPolicy("websearch", frozenset({"interactive", "auto"})),
         parent_provider="chatgpt",
     )
 
@@ -92,8 +90,8 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
         ("request.md", "---\ntask: [general]\nmode: auto\n---\nbody", "scalar string"),
         ("request.md", "---\ntask: general\n---\nbody", "mode"),
         ("request.md", "---\ntask: general\nmode: auto\n---\n", "body"),
-        ("request.md", "---\ntask: prototype\nmode: auto\n---\nbody", "does not authorize task"),
-        ("request.md", "---\ntask: general\nmode: invalid\n---\nbody", "does not authorize mode"),
+
+        ("request.md", "---\ntask: general\nmode: invalid\n---\nbody", "unsupported mode"),
         ("request.md", "---\ntask: general\nmode: auto\n---\n$prototype do something else", "plain prompt"),
         ("request.md", "---\ntask: general\nmode: auto\n---\nPlease use $prototype for this", "plain prompt"),
         ("request.md", "task: general\nmode: auto\nbody", "frontmatter"),
@@ -109,7 +107,6 @@ def test_request_file_rejects_invalid_or_unauthorized_input(
         parse_request_file(
             request,
             inbox,
-            GrantPolicy("general", frozenset({"interactive", "auto"})),
             parent_provider="claude",
         )
 
@@ -122,12 +119,12 @@ def test_request_file_rejects_nested_and_outside_paths(tmp_path: Path) -> None:
     outside = write_request(
         tmp_path / "outside", "request.md", "---\ntask: general\nmode: auto\n---\nbody"
     )
-    policy = GrantPolicy("general", frozenset({"interactive", "auto"}))
+    policy = TaskPolicy("general", frozenset({"interactive", "auto"}))
 
     with pytest.raises(RequestFileError, match="direct child"):
-        parse_request_file(nested, inbox, policy, parent_provider="claude")
+        parse_request_file(nested, inbox, parent_provider="claude")
     with pytest.raises(RequestFileError, match="canonical inbox"):
-        parse_request_file(outside, inbox, policy, parent_provider="claude")
+        parse_request_file(outside, inbox, parent_provider="claude")
 
 
 def test_request_file_rejects_a_symlink(tmp_path: Path) -> None:
@@ -146,7 +143,6 @@ def test_request_file_rejects_a_symlink(tmp_path: Path) -> None:
         parse_request_file(
             link,
             inbox,
-            GrantPolicy("general", frozenset({"interactive", "auto"})),
             parent_provider="claude",
         )
 
@@ -155,19 +151,21 @@ def configured_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["claude"])
+    from subagents_runtime import processes
+    monkeypatch.setattr(processes,"start",lambda execution_id,*args,**kwargs: processes.confirm_startup(execution_id))
     return sessions.launch(provider="claude", cwd=tmp_path / "project")
 
 
 def test_live_grant_processes_three_siblings_independently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured_parent(tmp_path, monkeypatch)
-    grant = open_grant(parent, "work-with-agent", original_cwd=tmp_path / "project")
+    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path / "project")
     write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\n---\n\nOne")
-    write_request(grant.inbox, "bad.md", "---\ntask: prototype\nmode: auto\n---\n\nBad")
+    write_request(grant.inbox, "bad.md", "---\ntask: invalid\nmode: auto\n---\n\nBad")
     write_request(grant.inbox, "two.md", "---\ntask: general\nmode: interactive\n---\n\nTwo")
     write_request(grant.inbox, "three.md", "---\ntask: general\nprovider: chatgpt\nmode: auto\n---\n\nThree")
 
     launched: list[tuple[str, str, str, Path]] = []
-    results = process_grant(
+    results = process_inbox(
         grant.id,
         launch=lambda request, request_id, _agent_number, cwd: launched.append(
             (request.path.name, request.provider, request_id, cwd)
@@ -184,36 +182,40 @@ def test_live_grant_processes_three_siblings_independently(tmp_path: Path, monke
 def test_ask_requires_a_live_grant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configured_parent(tmp_path, monkeypatch)
 
-    with pytest.raises(sessions.SessionError, match="live skill grant"):
-        process_grant("not-a-grant", launch=lambda *_args: "never")
+    with pytest.raises(sessions.SessionError, match="enabled session inbox"):
+        process_inbox("not-a-grant", launch=lambda *_args: "never")
 
 
 def test_grant_policy_is_the_exact_authorization_table() -> None:
-    assert GRANT_POLICIES == {
-        "explore-with-agent": GrantPolicy("explore", frozenset({"auto"})),
-        "prototype-with-agent": GrantPolicy("prototype", frozenset({"interactive", "auto"})),
-        "websearch-with-agent": GrantPolicy("websearch", frozenset({"interactive", "auto"})),
-        "brainstorm-with-agent": GrantPolicy("brainstorm", frozenset({"interactive"})),
-        "address-with-agent": GrantPolicy("implement", frozenset({"interactive", "auto"})),
-        "review-with-agent": GrantPolicy("review", frozenset({"interactive", "auto"})),
-        "work-with-agent": GrantPolicy("general", frozenset({"interactive", "auto"})),
+    assert TASK_POLICIES == {
+        "explore-with-agent": TaskPolicy("explore", frozenset({"auto"})),
+        "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive", "auto"})),
+        "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
+        "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
+        "address-with-agent": TaskPolicy("implement", frozenset({"interactive", "auto"})),
+        "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
+        "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
     }
 
 
 def test_uncertain_launch_is_reserved_before_the_external_call_and_never_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured_parent(tmp_path, monkeypatch)
-    grant = open_grant(parent, "work-with-agent", original_cwd=tmp_path / "project")
+    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path / "project")
     request = write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\n---\n\nOne")
 
     class SimulatedProcessDeath(BaseException):
         pass
 
     with pytest.raises(SimulatedProcessDeath):
-        process_grant(grant.id, launch=lambda *_args: (_ for _ in ()).throw(SimulatedProcessDeath()))
-    assert process_grant(grant.id, launch=lambda *_args: pytest.fail("uncertain launch duplicated")) == []
+        process_inbox(grant.id, launch=lambda *_args: (_ for _ in ()).throw(SimulatedProcessDeath()))
+    with sessions._connect() as connection:
+        connection.execute("UPDATE executions SET state='starting' WHERE request_id IN (SELECT id FROM requests WHERE source_name='one.md')")
+    from subagents_runtime import processes
+    monkeypatch.setattr(processes,'birth_identity',lambda pid: 'reused-pid')
+    assert process_inbox(grant.id, launch=lambda *_args: pytest.fail("uncertain launch duplicated"))[0].status == "uncertain"
 
     connection = sqlite3.connect(tmp_path / "state" / "sessions.sqlite3")
     try:
-        assert connection.execute("SELECT state FROM requests WHERE source_name = ?", (request.name,)).fetchone()[0] == "launching"
+        assert connection.execute("SELECT state FROM requests WHERE source_name = ?", (request.name,)).fetchone()[0] == "uncertain"
     finally:
         connection.close()

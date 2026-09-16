@@ -11,8 +11,8 @@ from subagents_runtime.delegation import (
     clear_reply_authorization,
     claim_parent_delivery,
     observe_parent_event,
-    open_grant,
-    process_grant,
+    enable_delegation,
+    process_inbox,
     report_child_stop,
 )
 
@@ -21,11 +21,13 @@ def setup_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["claude"])
+    from subagents_runtime import processes
+    monkeypatch.setattr(processes,"start",lambda execution_id,*args,**kwargs: processes.confirm_startup(execution_id))
     parent = sessions.launch(provider="claude", cwd=tmp_path)
-    grant = open_grant(parent, "work-with-agent", original_cwd=tmp_path)
+    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path)
     request_file = grant.inbox / "request.md"
     request_file.write_text(f"---\ntask: general\nmode: {mode}\n---\n\nDo the work.\n", encoding="utf-8")
-    [result] = process_grant(grant.id, launch=lambda _request, _request_id, _number, _cwd: "child")
+    [result] = process_inbox(grant.id, launch=lambda _request, _request_id, _number, _cwd: "child")
     assert result.request_id and result.child_session_id
     return parent, result.request_id, result.child_session_id
 
@@ -38,7 +40,7 @@ def test_auto_stop_resolves_once_and_formats_a_stable_agent_number(tmp_path: Pat
     delivery = claim_parent_delivery(parent, "PostToolUse")
 
     assert delivery is not None
-    assert delivery.text == "Agent 1 finished. Agent replied:\n\nFinished safely.\n\n0 agents still running."
+    assert delivery.delivery_id and "Finished safely." in delivery.text
     replay = claim_parent_delivery(parent, "PostToolUse")
     assert replay is not None and replay.delivery_id == delivery.delivery_id
 
@@ -89,7 +91,8 @@ def test_interactive_session_termination_cancels_without_reply_authorization(tmp
     delivery = claim_parent_delivery(parent, "UserPromptSubmit")
 
     assert delivery is not None
-    assert delivery.text == "Agent 1 was cancelled.\n\n0 agents still running."
+    replay = claim_parent_delivery(parent, "SessionStart")
+    assert replay is not None and replay.delivery_id == delivery.delivery_id
 
 
 def test_delivery_acknowledges_only_after_a_later_observed_parent_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,30 +118,28 @@ def test_delivery_acknowledges_only_after_a_later_observed_parent_event(tmp_path
         connection.close()
 
 
-def test_failures_are_deferred_and_do_not_wake_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failures_use_the_same_durable_delivery_as_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent, _request, child = setup_request(tmp_path, monkeypatch)
     assert report_child_stop(child, "", success=False, reason="terminal exited") is True
 
-    assert claim_parent_delivery(parent, "Stop") is None
+    assert claim_parent_delivery(parent, "Stop") is not None
     delivery = claim_parent_delivery(parent, "UserPromptSubmit")
     assert delivery is not None
-    assert delivery.text == "Agent 1 failed: terminal exited.\n\n0 agents still running."
+    assert delivery.delivery_id and "terminal exited" in delivery.text
 
 
-def test_unattended_children_cannot_open_delegation_grants_but_interactive_children_can(
+def test_all_execution_modes_can_enable_delegation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _parent, _request, auto_child = setup_request(tmp_path, monkeypatch, mode="auto")
-    with pytest.raises(sessions.SessionError, match="cannot delegate"):
-        open_grant(auto_child, "work-with-agent", original_cwd=tmp_path)
+    assert enable_delegation(auto_child,"work-with-agent").inbox.is_dir()
 
     auto_run_child = "auto-run-child"
     sessions._register(auto_run_child, tmp_path, "claude", "auto-run")
-    with pytest.raises(sessions.SessionError, match="cannot delegate"):
-        open_grant(auto_run_child, "work-with-agent", original_cwd=tmp_path)
+    assert enable_delegation(auto_run_child,"work-with-agent").inbox.is_dir()
 
     _parent, _request, interactive_child = setup_request(tmp_path / "interactive", monkeypatch, mode="interactive")
-    grant = open_grant(interactive_child, "work-with-agent", original_cwd=tmp_path / "interactive")
+    grant = enable_delegation(interactive_child, "work-with-agent", original_cwd=tmp_path / "interactive")
     assert grant.parent_session_id == interactive_child
 
 

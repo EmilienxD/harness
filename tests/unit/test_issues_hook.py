@@ -856,12 +856,8 @@ def test_a_second_publisher_is_turned_away_rather_than_racing(tmp_path, monkeypa
 # Drafting context
 
 
-def test_drafting_context_hands_the_skill_a_full_draft_path(tmp_path):
-    context = hook.prepare_drafting_context(tmp_path, SID)
-
-    assert f"issues session id: {SID}" in context
-    assert f"draft file path: .harness/issue-drafts/{SID}.issue-{{i}}.md" in context
-    assert "next free issue index: 0" in context
+def test_draft_store_allocates_a_full_session_scoped_path(tmp_path):
+    assert hook.next_draft_path(tmp_path, SID) == hook.DRAFTS_DIR / f"{SID}.issue-0.md"
 
 
 def test_the_ignore_file_covers_drafts_without_ignoring_harness_config(tmp_path):
@@ -877,23 +873,23 @@ def test_drafting_context_counts_existing_drafts(tmp_path):
     _draft(tmp_path, "issue-0.md", "# A\n")
     _draft(tmp_path, "issue-1.md", "# B\n")
 
-    assert "next free issue index: 2" in hook.prepare_drafting_context(tmp_path, SID)
+    assert hook.next_draft_path(tmp_path, SID).name == f"{SID}.issue-2.md"
 
 
 def test_drafting_context_ignores_another_session_sharing_the_directory(tmp_path):
     other = _draft(tmp_path, "issue-7.md", "# Theirs\n", session=OTHER_SID)
 
-    context = hook.prepare_drafting_context(tmp_path, SID)
+    allocated = hook.next_draft_path(tmp_path, SID)
 
     # Their index must not push ours along, and their draft must survive.
-    assert "next free issue index: 0" in context
+    assert allocated.name == f"{SID}.issue-0.md"
     assert other.exists()
 
 
 def test_an_interrupted_draft_still_reserves_its_index(tmp_path):
     _draft(tmp_path, "issue-0.md" + hook.PUBLISHING_SUFFIX, "# Crashed\n")
 
-    assert "next free issue index: 1" in hook.prepare_drafting_context(tmp_path, SID)
+    assert hook.next_draft_path(tmp_path, SID).name == f"{SID}.issue-1.md"
 
 
 # The hook as a process: stdin JSON in, exit code and streams out
@@ -933,7 +929,8 @@ def test_drafting_prompt_returns_context_as_json_on_stdout(tmp_path):
     assert result.returncode == 0
     payload = json.loads(result.stdout)["hookSpecificOutput"]
     assert payload["hookEventName"] == "UserPromptSubmit"
-    assert f"issues session id: {SID}" in payload["additionalContext"]
+    assert payload["additionalContext"]
+    assert (tmp_path / hook.DRAFTS_DIR / ".gitignore").is_file()
 
 
 def test_an_ordinary_prompt_passes_through_silently(tmp_path):

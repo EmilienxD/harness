@@ -100,9 +100,12 @@ def parse_request_file(
     inbox: Path,
     *,
     parent_provider: str,
+    claimed: bool = False,
 ) -> DelegationRequest:
     canonical_path, _ = _canonical_direct_child(path, inbox)
-    if canonical_path.suffix.lower() != ".md":
+    if canonical_path.suffix.lower() != ".md" and not (
+        claimed and canonical_path.name.endswith(".md.running")
+    ):
         raise RequestFileError("request file must be Markdown (*.md)")
     try:
         raw = canonical_path.read_text(encoding="utf-8")
@@ -223,7 +226,75 @@ def _load_inbox(session_id: str) -> DelegationInbox:
     return DelegationInbox(session_id, session_id, row[0], Path(row[1]), Path(row[2]))
 
 
-def reconcile_inbox(session_id: str) -> list[ProcessResult]:
+def _finish_launch(request, request_id, execution_id, child_id, number, cwd, path, launch):
+    from subagents_runtime import processes
+    sessions = _sessions_module()
+    launched_id = launch(request, request_id, number, cwd)
+    with sessions._connect() as connection:
+        if launched_id != child_id:
+            connection.execute("UPDATE sessions SET provider_session_id=? WHERE id=?", (launched_id, child_id))
+        connection.execute("UPDATE requests SET state='pending' WHERE id=? AND state='launching'", (request_id,))
+    processes.confirm_startup(execution_id)
+    with sessions._connect() as connection:
+        confirmed = connection.execute("SELECT state FROM executions WHERE id=?", (execution_id,)).fetchone()[0]
+        if confirmed not in {"running", "exited"}:
+            return ProcessResult(path, "uncertain", request_id, child_id, "Awaiting provider startup")
+        path.with_name(path.name + ".running").unlink(missing_ok=True)
+        connection.execute("UPDATE requests SET source_deleted_at=CURRENT_TIMESTAMP WHERE id=?", (request_id,))
+    return ProcessResult(path, "launched", request_id, child_id)
+
+
+def _fail_request(path, request_id, execution_id, child_id, exc, session_id):
+    sessions = _sessions_module()
+    claimed = path.with_name(path.name + ".running")
+    with sessions._connect() as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM requests WHERE id=?", (request_id,)
+        ).fetchone()
+        execution = connection.execute(
+            "SELECT state FROM executions WHERE id=?", (execution_id,)
+        ).fetchone()
+        uncertain = execution and execution[0] in {
+            "starting",
+            "running",
+            "uncertain",
+        }
+        state = "uncertain" if uncertain else "failed"
+        if exists:
+            connection.execute(
+                "UPDATE requests SET state=?,reason=?,delivery_id=CASE WHEN ?='failed' THEN COALESCE(delivery_id,?) ELSE delivery_id END,completed_at=CASE WHEN ?='failed' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=?",
+                (state, str(exc), state, str(uuid.uuid4()), state, request_id),
+            )
+            connection.execute(
+                "UPDATE executions SET state=? WHERE id=?",
+                ("uncertain" if uncertain else "failed", execution_id),
+            )
+        else:
+            connection.execute(
+                "INSERT OR IGNORE INTO requests(id,parent_session_id,source_name,state,reason,delivery_id,completed_at) VALUES (?,?,?,'failed',?,?,CURRENT_TIMESTAMP)",
+                (
+                    request_id,
+                    session_id,
+                    path.name,
+                    str(exc),
+                    str(uuid.uuid4()),
+                ),
+            )
+    if uncertain:
+        with sessions._connect() as connection:
+            connection.execute(
+                "UPDATE executions SET reservation_pid=NULL,reservation_birth=NULL WHERE id=?",
+                (execution_id,),
+            )
+    if not uncertain:
+        path.unlink(missing_ok=True)
+        claimed.unlink(missing_ok=True)
+        with sessions._connect() as connection:
+            connection.execute("UPDATE requests SET source_deleted_at=CURRENT_TIMESTAMP WHERE id=?", (request_id,))
+    return ProcessResult(path, state, request_id, child_id, str(exc))
+
+
+def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[ProcessResult]:
     """Recover claims conservatively: an unconfirmed spawn is never repeated."""
     from subagents_runtime import processes
 
@@ -232,6 +303,7 @@ def reconcile_inbox(session_id: str) -> list[ProcessResult]:
     if delegation.inbox.is_symlink() or delegation.inbox.resolve() != delegation.inbox:
         raise sessions.SessionError("The session inbox is no longer canonical")
     results = []
+    retries = []
     for path in delegation.inbox.glob("*.md.running"):
         source = path.name[:-8]
         with sessions._connect() as connection:
@@ -247,13 +319,18 @@ def reconcile_inbox(session_id: str) -> list[ProcessResult]:
                 path.replace(path.with_name(source))
                 continue
             execution = connection.execute(
-                "SELECT state,reservation_pid,reservation_birth FROM executions WHERE request_id=?",
+                "SELECT state,reservation_pid,reservation_birth,id FROM executions WHERE request_id=?",
                 (row[0],),
             ).fetchone()
+            if execution and execution[0] in {"failed", "cancelled"}:
+                connection.execute(
+                    "UPDATE requests SET state=?,reason=COALESCE(reason,?),delivery_id=COALESCE(delivery_id,?),completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP) WHERE id=? AND state IN ('launching','pending','uncertain')",
+                    (execution[0], "Provider startup failed" if execution[0] == "failed" else "Execution cancelled", str(uuid.uuid4()), row[0]),
+                )
             if (
                 row[1] in {"succeeded", "failed", "cancelled"}
                 or execution
-                and execution[0] in {"running", "exited"}
+                and execution[0] in {"running", "exited", "failed", "cancelled"}
             ):
                 path.unlink(missing_ok=True)
                 connection.execute(
@@ -264,9 +341,19 @@ def reconcile_inbox(session_id: str) -> list[ProcessResult]:
                 if (
                     execution
                     and execution[1]
-                    and execution[2]
-                    and processes.birth_identity(execution[1]) == execution[2]
+                    and ((execution[2] is not None and processes.birth_identity(execution[1]) == execution[2])
+                         or ((execution[2] is None or processes.birth_identity(execution[1]) is None) and processes.process_alive(execution[1])))
                 ):
+                    continue
+                if execution and execution[0] == "prepared" and launch is not None:
+                    # Every backend must commit 'starting' before spawn. A prepared
+                    # reservation whose owner is gone therefore cannot have spawned.
+                    connection.execute("UPDATE executions SET reservation_pid=?,reservation_birth=? WHERE id=?",
+                                       (os.getpid(), processes.birth_identity(os.getpid()), execution[3]))
+                    persisted = connection.execute(
+                        "SELECT r.task,r.provider,r.mode,r.prompt_hash,s.cwd,s.agent_index,r.kind FROM requests r JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?", (row[0],)
+                    ).fetchone()
+                    retries.append((path, row[0], execution[3], row[2], persisted))
                     continue
                 connection.execute(
                     "UPDATE requests SET state='uncertain',reason='Startup could not be verified' WHERE id=? AND state IN ('launching','pending')",
@@ -285,6 +372,22 @@ def reconcile_inbox(session_id: str) -> list[ProcessResult]:
                         "Startup could not be verified",
                     )
                 )
+    from dataclasses import replace
+    for claimed_path, request_id, execution_id, child_id, persisted in retries:
+        path = claimed_path.with_name(claimed_path.name[:-8])
+        try:
+            request = parse_request_file(claimed_path, delegation.inbox, parent_provider=delegation.provider, claimed=True)
+            task, provider, mode, prompt_hash, cwd, number, kind = persisted
+            if hashlib.sha256(request.prompt.encode()).hexdigest() != prompt_hash or bool(request.resume) != (kind == "resume"):
+                raise RequestFileError("Claimed request content changed after reservation")
+            if kind == "launch" and (request.task, request.provider, request.mode) != (task, provider, mode):
+                raise RequestFileError("Claimed request metadata changed after reservation")
+            if kind == "resume" and sessions.resolve_session(request.resume, session_id) != child_id:
+                raise RequestFileError("Claimed request child changed after reservation")
+            request = replace(request, path=path, task=task, provider=provider, mode=mode)
+            results.append(_finish_launch(request, request_id, execution_id, child_id, number, Path(cwd), path, launch))
+        except Exception as exc:
+            results.append(_fail_request(path, request_id, execution_id, child_id, exc, session_id))
     reported = {result.request_id for result in results}
     with sessions._connect() as connection:
         uncertain = connection.execute(
@@ -324,7 +427,7 @@ def process_inbox(
         raise sessions.SessionError(
             "the session inbox is missing or no longer canonical"
         )
-    results = reconcile_inbox(session_id)
+    results = reconcile_inbox(session_id, launch=launch)
     candidates = (
         None if request_paths is None else {p.absolute() for p in request_paths}
     )
@@ -420,85 +523,9 @@ def process_inbox(
                         processes.birth_identity(os.getpid()),
                     ),
                 )
-            launched_id = launch(request, request_id, number, cwd)
-            with sessions._connect() as connection:
-                # External launch adapters must preserve the reserved identity.
-                if launched_id != child_id:
-                    # Test/external adapters may bind another stable identity at this seam.
-                    connection.execute(
-                        "UPDATE sessions SET provider_session_id=? WHERE id=?",
-                        (launched_id, child_id),
-                    )
-                connection.execute(
-                    "UPDATE requests SET state='pending' WHERE id=? AND state='launching'",
-                    (request_id,),
-                )
-            processes.confirm_startup(execution_id)
-            with sessions._connect() as connection:
-                confirmed = connection.execute(
-                    "SELECT state FROM executions WHERE id=?", (execution_id,)
-                ).fetchone()[0]
-                if confirmed not in {"running", "exited"}:
-                    results.append(
-                        ProcessResult(
-                            path,
-                            "uncertain",
-                            request_id,
-                            child_id,
-                            "Awaiting provider startup",
-                        )
-                    )
-                    continue
-                claimed.unlink(missing_ok=True)
-                connection.execute(
-                    "UPDATE requests SET source_deleted_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (request_id,),
-                )
-            results.append(ProcessResult(path, "launched", request_id, child_id))
-        except Exception as exc:  # noqa: BLE001 - Persist arbitrary adapter failures as durable deliveries.
-            with sessions._connect() as connection:
-                exists = connection.execute(
-                    "SELECT 1 FROM requests WHERE id=?", (request_id,)
-                ).fetchone()
-                execution = connection.execute(
-                    "SELECT state FROM executions WHERE id=?", (execution_id,)
-                ).fetchone()
-                uncertain = execution and execution[0] in {
-                    "starting",
-                    "running",
-                    "uncertain",
-                }
-                state = "uncertain" if uncertain else "failed"
-                if exists:
-                    connection.execute(
-                        "UPDATE requests SET state=?,reason=?,delivery_id=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (state, str(exc), str(uuid.uuid4()), request_id),
-                    )
-                    connection.execute(
-                        "UPDATE executions SET state=? WHERE id=?",
-                        ("uncertain" if uncertain else "failed", execution_id),
-                    )
-                else:
-                    connection.execute(
-                        "INSERT OR IGNORE INTO requests(id,parent_session_id,source_name,state,reason,delivery_id,completed_at) VALUES (?,?,?,'failed',?,?,CURRENT_TIMESTAMP)",
-                        (
-                            request_id,
-                            session_id,
-                            path.name,
-                            str(exc),
-                            str(uuid.uuid4()),
-                        ),
-                    )
-            if uncertain:
-                with sessions._connect() as connection:
-                    connection.execute(
-                        "UPDATE executions SET reservation_pid=NULL,reservation_birth=NULL WHERE id=?",
-                        (execution_id,),
-                    )
-            if not uncertain:
-                path.unlink(missing_ok=True)
-                claimed.unlink(missing_ok=True)
-            results.append(ProcessResult(path, state, request_id, child_id, str(exc)))
+            results.append(_finish_launch(request, request_id, execution_id, child_id, number, cwd, path, launch))
+        except Exception as exc:  # Persist failures from validation or launch adapters.
+            results.append(_fail_request(path, request_id, execution_id, child_id, exc, session_id))
     return results
 
 
@@ -668,10 +695,11 @@ def _running_count(connection, parent_session_id: str) -> int:
 def _format_results(rows, running: int) -> str:
     messages: list[str] = []
     for row in rows:
-        _request_id, number, state, reply, reason, _delivery_id = row[:6]
+        _request_id, number, state, reply, reason, delivery_id = row[:6]
         identifier = (
             f"agent-{number}" if number is not None else f"Request {_request_id}"
         )
+        messages.append(f"Delivery ID: {delivery_id}")
         if state == "succeeded":
             messages.append(f"{identifier} finished. Agent replied:\n\n{reply}")
         elif state == "cancelled":

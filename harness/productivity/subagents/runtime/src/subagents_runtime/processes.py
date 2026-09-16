@@ -123,11 +123,11 @@ def require_exited(session_id: str) -> None:
                 (supervisor, supervisor_birth),
                 (provider, provider_birth),
             )
-            if pid and birth
+            if pid
         ]
         if not identities or any(
-            birth_identity(pid) == birth
-            or (birth_identity(pid) is None and process_alive(pid))
+            (birth is not None and birth_identity(pid) == birth)
+            or ((birth is None or birth_identity(pid) is None) and process_alive(pid))
             for pid, birth in identities
         ):
             raise SessionError(

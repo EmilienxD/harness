@@ -38,6 +38,10 @@ class FakeTerminalHost implements TerminalHost {
   public readonly created: Array<{ options: TerminalCreationOptions; terminal: FakeTerminal }> = [];
   #listener: ((terminal: TerminalHandle) => void) | undefined;
 
+  public createBackgroundProcess(options: TerminalCreationOptions): TerminalHandle {
+    return this.createTerminal(options);
+  }
+
   public createTerminal(options: TerminalCreationOptions): TerminalHandle {
     const terminal = new FakeTerminal();
     this.created.push({ options, terminal });
@@ -89,7 +93,9 @@ test("creates one real-terminal record with the complete aboard environment", ()
 
   assert.equal(created.terminalId, "terminal-1");
   // Exhaustive on purpose: terminals receive only the Aboard bridge/session environment.
-  assert.deepEqual(host.created[0]?.options.env, {
+  const { ABOARD_EXECUTION_ID, ...environment } = host.created[0]!.options.env;
+  assert.match(ABOARD_EXECUTION_ID!, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(environment, {
     ABOARD_BRIDGE_PORT: "4932",
     ABOARD_BRIDGE_TOKEN: "secret",
     ABOARD_AGENT_ID: "agent-6",
@@ -483,4 +489,16 @@ test("startup ownership is published after proof is armed and before the command
 
   assert.equal(published, true);
   assert.equal(host.created[0]?.terminal.sent.at(-1)?.text, "codex");
+});
+
+
+test("automatic executions use a process handle without creating or showing a terminal", () => {
+  const { controller, host } = setup();
+  const background = new FakeTerminal();
+  Object.assign(host, { createBackgroundProcess: () => background });
+  const created = controller.create({ agentId: agent("agent-auto"), sessionId: session("auto-session"), agentType: "General", executionMode: "auto", initialCommand: "provider task" });
+  assert.equal(host.created.length, 0);
+  assert.equal(created.backend, "process");
+  assert.deepEqual(background.shows, []);
+  assert.deepEqual(background.sent, [{ text: "provider task", addNewLine: true }]);
 });

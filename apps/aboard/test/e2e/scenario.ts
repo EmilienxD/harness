@@ -65,7 +65,7 @@ export function parseMessagesRequest(value: unknown, inference: boolean): Messag
 export function transition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
   const scenario = selectScenario(request.messages);
   if (scenario === "auto-run-afk") return autoRunAfkTransition(request, repoRoot);
-  if (scenario === "auto-run-hitl-review" && messageText(request.messages).includes("Aboard pinned ")) {
+  if (scenario === "auto-run-hitl-review" && (messageText(request.messages).includes("in the exact range") || messageText(request.messages).includes("Aboard pinned "))) {
     return autoRunHitlReviewTransition(request, repoRoot, scenario);
   }
   if (scenario === "auto-run-hitl" || scenario === "auto-run-hitl-review") return autoRunSequentialTransition(request, repoRoot, {
@@ -199,7 +199,7 @@ function autoRunHitlReviewTransition(request: MessagesRequest, repoRoot: string,
 function autoRunAfkTransition(request: MessagesRequest, repoRoot: string): ScenarioResponse {
   const scenario = "auto-run-afk" as const;
   const history = messageText(request.messages);
-  if (history.includes("Explore implementation context")) return autoRunExploreTransition(request, repoRoot);
+  if (history.includes("<work-to-explore>")) return autoRunExploreTransition(request, repoRoot);
   if (history.includes("Review pull request")) {
     const commitId = "toolu_e2e_auto_review_commit";
     const commit = scenarioSequenceResults(request.messages, [{ id: commitId, name: "Bash" }], scenario).get(commitId);
@@ -464,6 +464,7 @@ function flattenBlocks(messages: readonly Message[]): ContentBlock[] {
 
 function selectScenario(messages: readonly Message[]): ScenarioId {
   const text = messageText(messages);
+  if (/Review issue #\d+; Accept deterministic (?:per-issue|single-branch) change after review in the exact range/u.test(text)) return "auto-run-hitl-review";
   if (text.includes("Review pull request") && text.includes(AUTO_RUN_PERMANENT_NOTE)) return "auto-run-afk";
   const markers = [
     ["single-file-success", [SCENARIO_MARKER]],

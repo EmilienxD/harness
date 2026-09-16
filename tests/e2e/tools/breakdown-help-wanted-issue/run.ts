@@ -1,6 +1,6 @@
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { findFinalText, isolatedClaudeEnvironment, parseStreamJson, redactProcessError, runClaude, validateClaudeCli } from "../../core/claude.js";
 import { prepareCodexHome, redactCodexProcessError, runCodex, validateCodexCli } from "../../core/codex.js";
@@ -29,10 +29,16 @@ export async function runBreakdownHelpWantedIssueJourney(platform: IssuePlatform
       if (result.timedOut) throw new Error("Claude Code timed out during breakdown-help-wanted-issue"); if (result.code !== 0) throw new Error(`Claude Code exited ${result.code}: ${redactProcessError(result.stderr)}`);
       report = findFinalText(parseStreamJson(result.stdout), result.stdout);
     } else {
-      const codexServer = await startFakeOpenAiServer({ diagnosticsPath, scenarioCatalogHash, transition: codexTransition }); server = codexServer;
-      const codexHome = await prepareCodexHome({ root, baseUrl: codexServer.baseUrl, trustedProjects: [projectRoot] }); const env = isolatedCodexEnvironment(commonEnvironment, codexHome, codexServer.authToken, projectRoot); const output = join(root, "codex-report.txt");
+      const codexServer = await startFakeOpenAiServer({ diagnosticsPath, scenarioCatalogHash, transition: (request) => codexTransition(request, projectRoot) }); server = codexServer;
+      const codexHome = await prepareCodexHome({ root, baseUrl: codexServer.baseUrl, trustedProjects: [projectRoot] }); const env = isolatedCodexEnvironment(commonEnvironment, codexHome, codexServer.authToken, dirname(process.execPath)); const output = join(root, "codex-report.txt");
       const result = await runCodex(["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--output-last-message", output, "$breakdown-help-wanted-issue Let users retry failed imports without uploading the source file again."], projectRoot, env);
-      if (result.timedOut) throw new Error("Codex timed out during breakdown-help-wanted-issue"); if (result.code !== 0) throw new Error(`Codex exited ${result.code}: ${redactCodexProcessError(result.stderr)}`); report = await readFile(output, "utf8");
+      if (result.timedOut) throw new Error("Codex timed out during breakdown-help-wanted-issue");
+      if (result.code !== 0) {
+        const structure = codexServer.assertions().observations
+          .map((item) => `${String(item.httpStatus)}:${String(item.checkpoint ?? item.diagnostic ?? "unknown")}`).join(", ");
+        throw new Error(`Codex exited ${result.code}: ${redactCodexProcessError(result.stderr)}; endpoint: ${structure}`);
+      }
+      report = await readFile(output, "utf8");
     }
     const assertions = server.assertions(); const checkpoints = ["inspect-current-behavior", "report-complete"];
     if (checkpoints.some((checkpoint) => !assertions.checkpoints.includes(checkpoint))) throw new Error(`breakdown checkpoints incomplete: ${assertions.checkpoints.join(", ")}`);

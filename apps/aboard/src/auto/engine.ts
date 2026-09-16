@@ -234,7 +234,6 @@ export class AutoRunEngine {
   #observationTail: Promise<void> = Promise.resolve();
   #generation = 0;
   readonly #issuePullRequests = new Map<number, number>();
-  readonly #pending = new Map<number, TerminalId>();
   readonly #openTerminals = new Set<TerminalId>();
   readonly #now: () => Date;
   readonly #runId: () => string;
@@ -668,9 +667,7 @@ export class AutoRunEngine {
   /** Wake repository observation after a filesystem, lifecycle, focus, or refresh event. */
   public repositoryChanged(): void { this.#wake?.(); }
 
-  readonly #closedTerminals = new Set<TerminalId>();
-  public terminalClosed(terminalId: TerminalId): void {
-    this.#closedTerminals.add(terminalId);
+  public terminalClosed(_terminalId: TerminalId): void {
     this.repositoryChanged();
   }
 
@@ -1745,8 +1742,6 @@ export class AutoRunEngine {
           await this.#recordImplementation(issue, classified.sha);
           return classified.sha;
         }
-        const terminal = this.#pending.get(issue.number);
-        if (terminal !== undefined && this.#closedTerminals.has(terminal)) throw new Error("the HITL terminal closed before an acceptance commit; resume after reviewing the checkout");
         await this.#waitForRepositoryChange(signal);
       }
       throw new AutomatedWorkerCancelled();
@@ -2197,7 +2192,6 @@ export class AutoRunEngine {
   }
 
   async #remember(issue: FrozenIssue, outcome: AutomatedLaunchOutcome, type: "implementer" | "reviewer"): Promise<void> {
-    this.#pending.set(issue.number, outcome.terminalId);
     await this.#save({ ...this.#current, workerSession: {
       agentId: outcome.agentId,
       sessionId: outcome.sessionId,

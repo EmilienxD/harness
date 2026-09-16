@@ -8,7 +8,7 @@ import { OpenAiProtocolError, type OpenAiResponseOutput, type OpenAiResponsesReq
 export const DRAFT_MARKER = "[E2E:issue-writers:draft]";
 export const DRAFT_NAME = "issue-0.md";
 export const DRAFT_CONTENT = "# Document deterministic issue journeys\n\n> difficulty:routine, mode:afk\n\n## What to build\n\nExercise the real CLI and fake endpoint through a resumable session.\n\n## Acceptance criteria\n\n- Draft publishing is hook-only.\n";
-export const scenarioCatalogHash = createHash("sha256").update("issue-writers:v1").digest("hex");
+export const scenarioCatalogHash = createHash("sha256").update("issue-writers:v2").digest("hex");
 
 const CLAUDE_WRITE = "toolu_e2e_issue_writer_write";
 const CODEX_WRITE = "call_e2e_issue_writer_write";
@@ -61,11 +61,11 @@ export function findDraftPath(text: string, repoRoot: string): string {
 }
 
 function draftPath(text: string, repoRoot: string, field: string, platform: "claude" | "codex"): string {
-  // The hook hands the agent a path template; "{i}" is the draft's index.
-  const match = /draft file path:\s+([^\s]+)/u.exec(text);
-  const template = match?.[1];
-  if (template && /^\.harness\/issue-drafts\/[0-9a-f-]{36}\.issue-\{i\}\.md$/iu.test(template)) {
-    const candidate = normalize(join(repoRoot, template.replace("{i}", "0")));
+  // The hook allocates the concrete next path for this saved conversation.
+  const match = /draft file path:\s+([^\s]+)/iu.exec(text);
+  const allocated = match?.[1];
+  if (allocated && /^\.harness\/issue-drafts\/[0-9a-f-]{36}\.issue-\d+\.md$/iu.test(allocated)) {
+    const candidate = normalize(join(repoRoot, allocated));
     const outside = relative(repoRoot, candidate);
     if (!outside.startsWith("..") && !isAbsolute(outside)) return candidate;
   }

@@ -82,6 +82,25 @@ test("fake server supports aggregate and streaming responses with redacted diagn
   await rm(root, { recursive: true, force: true });
 });
 
+test("OpenAI emulator selects the offered direct tool despite additional metadata", async () => {
+  const server = await startFakeOpenAiServer({});
+  try {
+    const response = await fetch(`${server.baseUrl}/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "codex-e2e", stream: true, store: false,
+        input: [{ type: "additional_tools", tools: [{ type: "custom", name: "exec" }] }, { type: "message", role: "user", content: [{ type: "input_text", text: "[E2E:chatgpt-success]" }] }],
+        tools: [{ type: "namespace", name: "functions", tools: [{ type: "function", name: "exec_command", parameters: { type: "object" } }] }],
+      }),
+    });
+    assert.equal(response.status, 200);
+    const call = (completedResponse(await response.text()).output as Record<string, unknown>[])[0]!;
+    assert.equal(call.type, "function_call");
+    assert.equal(call.name, "exec_command");
+  } finally { await server.close(); }
+});
+
 test("OpenAI emulator drives a real Codex function turn and redacts diagnostics", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-codex-server-"));
   const diagnosticsPath = join(root, "diagnostics.json");

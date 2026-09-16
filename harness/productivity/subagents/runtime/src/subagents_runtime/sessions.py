@@ -533,6 +533,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
             "parentSessionId": reservation[2],
             "harnessStateDirectory": str(state_dir()),
             "harnessRuntimePath": str(Path(__file__).resolve().parent.parent),
+            "harnessPython": sys.executable,
         }
     )
     if getattr(request, "resume", None):

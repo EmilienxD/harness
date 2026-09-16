@@ -190,6 +190,7 @@ def main() -> int:
     write_marker(None)
     exit_code: int | None = None
     spawn_error: str | None = None
+    child = None
     try:
         try:
             child = subprocess.Popen(_executable(command))
@@ -200,6 +201,12 @@ def main() -> int:
             exit_code = 127
             return exit_code
         write_marker(child.pid)
+        execution_id = os.environ.get('HARNESS_EXECUTION_ID')
+        if execution_id:
+            from subagents_runtime.storage import connect
+            from subagents_runtime.processes import birth_identity
+            with connect() as connection:
+                connection.execute('UPDATE executions SET supervisor_pid=?,supervisor_birth=?,provider_pid=?,provider_birth=? WHERE id=?', (os.getpid(),birth_identity(os.getpid()),child.pid,birth_identity(child.pid),execution_id))
         while True:
             try:
                 exit_code = child.wait()
@@ -213,7 +220,23 @@ def main() -> int:
     finally:
         # Order matters: the exit record has to be readable by the time the
         # marker's removal wakes the extension.
+        provider_alive = child is not None and child.poll() is None
         write_exit(exit_code, spawn_error)
+        execution_id = os.environ.get('HARNESS_EXECUTION_ID')
+        if execution_id:
+            from subagents_runtime.storage import connect
+            with connect() as connection:
+                state = 'uncertain' if provider_alive else 'failed' if spawn_error else 'exited'
+                connection.execute("UPDATE executions SET state=?,exit_code=?,exited_at=CASE WHEN ?='uncertain' THEN NULL ELSE CURRENT_TIMESTAMP END WHERE id=?", (state,exit_code,state,execution_id))
+                session = connection.execute("SELECT session_id FROM executions WHERE id=?", (execution_id,)).fetchone()
+            if session and not provider_alive:
+                from subagents_runtime.delegation import report_child_stop
+                report_child_stop(session[0], "", success=False,
+                                  reason=spawn_error or "Provider process exited without delivering a result",
+                                  cancelled=not spawn_error and os.environ.get("HARNESS_EXECUTION_MODE") == "interactive")
+        if provider_alive:
+            # A broken wrapper is no proof that its provider exited. Keep the marker.
+            return 1
         try:
             os.remove(lock_path)
         except OSError:

@@ -1,5 +1,6 @@
 import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
-import { dirname } from "node:path";
+import { delimiter, dirname } from "node:path";
+import { existsSync } from "node:fs";
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
 
@@ -27,6 +28,13 @@ import { AUTO_RUN_RESTRICTIONS } from "../auto/permissions.js";
 import { isolationProtectedPaths, worktreeGitMetadataRoots } from "../auto/worktree.js";
 import type { IssueDifficulty } from "../shared/labels.js";
 
+function harnessEnvironment(input: { readonly harnessStateDirectory?: string; readonly harnessRuntimePath?: string }): Record<string, string> {
+  return {
+    ...(input.harnessStateDirectory === undefined ? {} : { HARNESS_STATE_DIR: input.harnessStateDirectory }),
+    ...(input.harnessRuntimePath === undefined ? {} : { PYTHONPATH: [input.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) }),
+  };
+}
+
 export interface LaunchIsolation {
   readonly cwd: string;
   readonly protectedPaths: readonly string[];
@@ -34,8 +42,12 @@ export interface LaunchIsolation {
 }
 
 export interface DelegationLaunchInput {
+  readonly harnessStateDirectory?: string;
+  readonly harnessRuntimePath?: string;
   /** Stable Harness request identity for idempotency and child hook binding. */
   readonly requestId?: string;
+  readonly harnessSessionId?: string;
+  readonly executionId?: string;
   readonly type: AgentType;
   readonly prompt?: string;
   /** Trusted skill invocation selected by a work-with-agent delegation boundary. */
@@ -74,6 +86,12 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly harnessStateDirectory?: string;
+  readonly harnessRuntimePath?: string;
+  readonly harnessSessionId?: string;
+  readonly executionId?: string;
+  readonly requestId?: string;
+  readonly executionMode?: ExecutionMode;
   readonly platform: AgentPlatformId;
   readonly agentId: AgentId;
   readonly type: AgentType;
@@ -247,12 +265,18 @@ export class DelegationCoordinator {
   }
 
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
+    if (this.options.terminals.liveTerminalForAgent(target.agentId) !== undefined || this.options.sessions?.observe(target.agentId) === "live" || (this.options.wrapper !== undefined && existsSync(this.options.wrapper.lockPathFor(target.agentId)))) {
+      throw new DelegationError("agent-active", `Agent ${target.agentId} still has a live or uncertain execution`);
+    }
+    const saved = this.options.fleet.get(target.agentId);
+    const executionMode = saved?.executionMode ?? target.executionMode ?? "interactive";
+    if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Background continuation requires a next message");
     const configured = await this.options.configurations.getFor(target.platform, target.type);
     const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
-    const attended = target.attended ?? true;
+    const attended = executionMode === "interactive";
     const writableRoots = target.autoRunRestricted === true && target.cwd !== undefined
       ? await (this.options.resolveWorktreeGitMetadataRoots ?? worktreeGitMetadataRoots)(target.cwd, this.options.workspaceRoot)
       : [];
@@ -263,6 +287,7 @@ export class DelegationCoordinator {
       agentType: target.type,
       shell: this.options.shell,
       attended,
+      executionMode,
       ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
       ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
@@ -322,9 +347,11 @@ export class DelegationCoordinator {
         ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
         initialCommand: plan.commandLine,
         attended,
+        executionMode,
         ...(target.focus === undefined ? {} : { focus: target.focus }),
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
-        ...(plan.providerEnvironment === undefined ? {} : { providerEnvironment: plan.providerEnvironment }),
+        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(target), ...(target.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: target.harnessSessionId }), ...(target.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: target.executionId }) },
+        ...(target.requestId === undefined ? {} : { harnessRequestId: target.requestId }),
       });
       terminalStarted = true;
       startedTerminalId = terminal.terminalId;
@@ -338,6 +365,7 @@ export class DelegationCoordinator {
           terminal: fleetTerminal,
           lifecycle: { status: "starting", startedAt: occurredAt },
           resultDelivery,
+          executionMode,
           ...(attended ? { attended: true as const } : {}),
           telemetry: EMPTY_TELEMETRY,
           ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
@@ -364,7 +392,7 @@ export class DelegationCoordinator {
           attended,
         );
       }
-      if (platform.capabilities.sessionIdentity === "runtime-assigned" && this.options.startupTimeoutMs !== undefined) {
+      if (this.options.startupTimeoutMs !== undefined) {
         const startup = this.options.terminals.waitForStartup(target.agentId);
         if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${target.agentId}`);
         await startup;
@@ -471,13 +499,14 @@ export class DelegationCoordinator {
     ]);
     const platform = this.#platform(configured.platform);
     const createdSession = platform.createSession();
-    const { sessionId } = createdSession;
+    const sessionId = (input.harnessSessionId ?? createdSession.sessionId) as SessionId;
     const plan = platform.planLaunch({
       agentId,
       sessionId,
       agentType,
       shell: this.options.shell,
       attended,
+      executionMode,
       ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
       ...(agentType === "implementer" && input.chrome === true ? { chrome: true } : {}),
       configuration: configured.settings,
@@ -522,10 +551,10 @@ export class DelegationCoordinator {
         attended,
         executionMode,
         ...(input.requestId === undefined ? {} : { harnessRequestId: input.requestId }),
+        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(input), ...(input.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: input.harnessSessionId }), ...(input.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: input.executionId }) },
         // A failed launch prints to the terminal and exits before any hook; the
         // platform's start observation is the only trustworthy proof the session is up.
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
-        ...(plan.providerEnvironment === undefined ? {} : { providerEnvironment: plan.providerEnvironment }),
       }, (createdTerminal) => {
         this.options.fleet.register({
           platform: platform.id,
@@ -547,7 +576,7 @@ export class DelegationCoordinator {
         }, occurredAt);
       });
       terminalStarted = true;
-      if (platform.capabilities.sessionIdentity === "runtime-assigned" && this.options.startupTimeoutMs !== undefined) {
+      if (this.options.startupTimeoutMs !== undefined) {
         const startup = this.options.terminals.waitForStartup(agentId);
         if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${agentId}`);
         await startup;

@@ -125,19 +125,17 @@ def handle(
     cwd = Path(payload.get("cwd") or Path.cwd())
     selected_provider = provider or os.environ.get("HARNESS_PROVIDER", "claude")
     execution_mode = os.environ.get("HARNESS_EXECUTION_MODE", "interactive")
-    session_id = sessions.bind_observed(
-        session_id, cwd, selected_provider, execution_mode
-    )
-
-    if event == "SessionStart" and payload.get("source") in {"clear", "fork"}:
+    fresh = event == "SessionStart" and payload.get("source") in {"clear", "fork"}
+    if fresh:
         # Providers assign a fresh conversation ID. Never bind it to an inherited parent ID.
-        sessions.register_observed(
-            str(payload.get("session_id")), cwd, selected_provider, execution_mode
+        sessions.register_observed(session_id, cwd, selected_provider, execution_mode)
+    else:
+        session_id = sessions.bind_observed(
+            session_id, cwd, selected_provider, execution_mode
         )
-        session_id = str(payload.get("session_id"))
     observe_parent_event(session_id, event)
     execution_id = os.environ.get("HARNESS_EXECUTION_ID")
-    if event == "SessionStart" and execution_id:
+    if event == "SessionStart" and execution_id and not fresh:
         from subagents_runtime.processes import confirm_startup
 
         confirm_startup(execution_id)
@@ -149,7 +147,7 @@ def handle(
                 (session_id,),
             ).fetchone()
         if enabled:
-            recovered = reconcile_inbox(session_id)
+            recovered = reconcile_inbox(session_id, launch=sessions.launch_delegated)
         instructions = claim_instructions(
             session_id, compact=payload.get("source") == "compact"
         )

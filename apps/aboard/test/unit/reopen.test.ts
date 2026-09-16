@@ -64,3 +64,19 @@ test("conversation inspection failures remain actionable instead of looking like
   assert.equal(direct.action === "unresumable" ? direct.reason : undefined, "inspection-failed");
   assert.match(describeReopenOutcome(direct), /failed to decode rollout/u);
 });
+
+test("interactive delegated continuations refuse a live terminal and require a next message after exit", async () => {
+  let live: TerminalId | undefined = "terminal-1" as TerminalId;
+  const coordinator = new ReopenCoordinator({
+    activity: { entries: endedActivity }, fleet: new FleetRegistry(),
+    terminals: { isOpen: () => live !== undefined, liveTerminalFor: () => live,
+      show: () => assert.fail("a continuation must not focus the child") },
+    launcher: { reopen: async () => { throw new Error("must not launch without a message"); } },
+    isResumable: async () => true,
+  });
+  const candidate = { platform: "claude" as const, agentId, type: "General" as const,
+    executionMode: "interactive" as const, sessionId, description: "General", origin: "ended" as const, at };
+  assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "execution-active" });
+  live = undefined;
+  assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "next-message-required" });
+});

@@ -7,7 +7,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def state_dir() -> Path:
@@ -52,7 +52,23 @@ def _migrate(connection):
     connection.execute("PRAGMA foreign_keys=OFF")
     connection.execute("BEGIN IMMEDIATE")
     try:
-        if connection.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version >= SCHEMA_VERSION:
+            connection.commit()
+            return
+        if version == 1:
+            # Rebuild only executions, preserving all identities and lifecycle state.
+            connection.execute("DROP INDEX executions_session_active")
+            connection.execute("ALTER TABLE executions RENAME TO executions_v1")
+            schema = (Path(__file__).parent / "resources" / "schema.sql").read_text(encoding="utf-8")
+            for statement in schema.split(";"):
+                if statement.strip().startswith(("CREATE TABLE executions (", "CREATE UNIQUE INDEX executions_session_active")):
+                    connection.execute(statement)
+            connection.execute("INSERT INTO executions SELECT * FROM executions_v1")
+            connection.execute("DROP TABLE executions_v1")
+            if connection.execute("PRAGMA foreign_key_check").fetchall():
+                raise sqlite3.IntegrityError("Invalid execution/request ownership")
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             connection.commit()
             return
         saved = {

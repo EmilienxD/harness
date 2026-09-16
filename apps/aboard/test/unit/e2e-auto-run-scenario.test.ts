@@ -78,7 +78,7 @@ test("auto-run AFK implementer reads, edits, and reports a valid completion", ()
 });
 
 test("auto-run Explore reads the checkout before returning bounded context", () => {
-  const initial: Message[] = [{ role: "user", content: `Explore implementation context. ${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_NESTED_CONTEXT}` }];
+  const initial: Message[] = [{ role: "user", content: `<work-to-explore>${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_NESTED_CONTEXT}</work-to-explore>` }];
   const read = transition(request(initial, ["Read"]), root);
   assert.equal(read.checkpoint, "auto-explore-read");
   const complete = transition(request([
@@ -135,7 +135,7 @@ test("single-branch HITL and follow-up workers apply sequential edits", () => {
 test("HITL reviewer inspects the reset implementation without committing, then accepts only on user request", () => {
   const initial: Message[] = [{
     role: "user",
-    content: `Review ${AUTO_RUN_HITL_REVIEW_MARKER}. Aboard pinned abc..def as the immutable review scope.`,
+    content: `Review issue #42; Accept deterministic single-branch change after review in the exact range abc..def. Leave the code and any review fixes uncommitted.`,
   }];
   const read = transition(request(initial), root);
   assert.equal(read.checkpoint, "auto-hitl-review-read");

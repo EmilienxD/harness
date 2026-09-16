@@ -30,7 +30,8 @@ CREATE TABLE executions (
  reservation_pid INTEGER, reservation_birth TEXT,
  supervisor_pid INTEGER, supervisor_birth TEXT, provider_pid INTEGER, provider_birth TEXT,
  aboard_agent_id TEXT, aboard_handle TEXT, exit_code INTEGER,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TEXT, exited_at TEXT
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TEXT, exited_at TEXT,
+ FOREIGN KEY(request_id,session_id) REFERENCES requests(id,child_session_id)
 );
 CREATE UNIQUE INDEX executions_session_active ON executions(session_id)
  WHERE state IN ('prepared','starting','running','uncertain');

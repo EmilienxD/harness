@@ -1,6 +1,8 @@
 import type { ExtensionContext } from "vscode";
 import { ProgressLocation, RelativePattern, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 
 import {
@@ -10,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
-import { createDelegationRoutes } from "./bridge/manual-delegation.js";
+import { continueHarnessDelegation, createDelegationRoutes, readDelegationBinding } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -21,7 +23,7 @@ import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
 import type { AgentPlatform, AgentPlatformId } from "./platform/agent-platform.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldCatalogRevision, scaffoldProject } from "./scaffold/project.js";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
 import { registerNativeFleetUi, type NativeFleetUiRegistration } from "./vscode/native-ui.js";
@@ -520,6 +522,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   });
   activeAutoRun = autoRun;
   const reopen = new ReopenCoordinator({
+    nextMessage: async (candidate) => window.showInputBox({ prompt: `Next message for ${candidate.agentId}`, ignoreFocusOut: true, validateInput: (message) => message.trim() ? undefined : "A continuation requires a next message" }),
     activity: { entries: () => activity.store() },
     fleet,
     terminals: {
@@ -527,7 +530,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       liveTerminalFor: (agentId) => terminals.liveTerminalForAgent(agentId),
       show: (terminalId) => terminals.show(terminalId),
     },
-    launcher: coordinator,
+    launcher: { reopen: async (target) => {
+      const handles = await continueHarnessDelegation(join(runtime.root, "delegations"), target, async (binding, message) => {
+        await promisify(execFile)(binding.harnessPython ?? "python", ["-m", "subagents_runtime.cli", "resume", binding.harnessSessionId!, message], {
+          cwd: binding.cwd, windowsHide: true, timeout: 30_000,
+          env: { ...process.env, HARNESS_SESSION_ID: binding.parentSessionId!,
+            ...(binding.harnessStateDirectory === undefined ? {} : { HARNESS_STATE_DIR: binding.harnessStateDirectory }),
+            ...(binding.harnessRuntimePath === undefined ? {} : { PYTHONPATH: [binding.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) }) },
+        });
+      });
+      return handles === undefined ? coordinator.reopen(target)
+        : { agentId: handles.agentId as AgentId, sessionId: handles.sessionId as SessionId, terminalId: handles.terminalId as TerminalId };
+    } },
     isResumable: (platform, sessionId, cwd, type) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot, type),
   });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
@@ -552,6 +566,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         const configured = await launchFile.getFor(request.provider, request.type);
         return coordinator.launchManual({
           requestId: request.requestId,
+          ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
+          ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+          ...(request.harnessSessionId === undefined ? {} : { harnessSessionId: request.harnessSessionId }),
+          ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
           type: request.type,
           prompt: request.prompt,
           ...(request.skill === undefined ? {} : { skill: request.skill }),
@@ -560,7 +578,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           executionMode: request.executionMode,
           configuration: configured,
         }, request.executionMode);
-      } }, { workspaceRoot }),
+      }, resume: async (request) => {
+        if (!request.harnessSessionId) throw new Error("Delegated resume requires its stable Harness identity");
+        const binding = await readDelegationBinding(join(runtime.root,"delegations"),request.harnessSessionId);
+        if (!binding || binding.agentId !== request.resumeAgentId || binding.sessionId !== request.resumeSessionId || binding.provider !== request.provider || binding.executionMode !== request.executionMode || binding.cwd !== request.cwd || binding.parentSessionId !== request.parentSessionId) throw new Error("Delegated session ownership or execution mode does not match");
+        if (lockMarkerPresent(wrapperLayout.lockPathFor(binding.agentId as AgentId))) throw new Error("Delegated execution is running or uncertain; resume refused");
+        const saved = fleet.get(binding.agentId as AgentId);
+        return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, sessionId: binding.sessionId as SessionId, terminalName: saved?.terminal.name ?? `aboard: ${binding.description}`, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });
+      } }, { workspaceRoot, stateDirectory: join(runtime.root, "delegations") }),
     ),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
@@ -668,6 +693,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
     for (const session of stale) {
+      if (session.executionMode === "auto" || session.executionMode === "auto-run") {
+        // Detached wrappers outlive the extension. Restore observation without spawning.
+        const lockFile = wrapperLayout.lockPathFor(session.identity.agentId);
+        sessionMonitor.track({ agentId: session.identity.agentId, sessionId: session.sessionId, lockFile });
+        continue;
+      }
       const at = new Date().toISOString() as IsoTimestamp;
       if (initialized) void rememberEndedSession(session, at, "interrupted", "the extension host restarted under it");
       // A lease held by an agent whose terminal is gone would block every later

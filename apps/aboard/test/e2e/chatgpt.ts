@@ -26,7 +26,8 @@ import { contains } from "./config.js";
 import { startFakeOpenAiServer } from "./codex-server.js";
 
 const PROVISIONAL = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
-const CODEX_COMMAND = ["codex", "exec", "--json"] as const;
+// These isolated fixtures vet their generated hooks; production retains native trust.
+const CODEX_COMMAND = ["codex", "exec", "--json", "--dangerously-bypass-hook-trust"] as const;
 const CODEX_MODEL = "codex-e2e";
 const OPENAI_KEY_ENV = "ABOARD_E2E_OPENAI_KEY";
 const execFileAsync = promisify(execFile);
@@ -41,7 +42,7 @@ export async function runChatGptSmoke(config: HarnessConfig): Promise<void> {
   await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: root, windowsHide: true });
   const diagnosticsPath = join(root, "responses-diagnostics.json");
   const server = await startFakeOpenAiServer({ diagnosticsPath });
-  const home = await prepareCodexHome(root, server.baseUrl);
+  const home = await prepareCodexHome(root, server.baseUrl, [root]);
   const previousHome = process.env.CODEX_HOME;
   const previousKey = process.env[OPENAI_KEY_ENV];
   process.env.CODEX_HOME = home;

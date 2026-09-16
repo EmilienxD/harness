@@ -51,8 +51,14 @@
       "type": "string",
       "minLength": 1
     },
-    "harnessStateDirectory": {"type": "string", "minLength": 1},
-    "harnessRuntimePath": {"type": "string", "minLength": 1},
+    "harnessStateDirectory": {
+      "type": "string",
+      "minLength": 1
+    },
+    "harnessRuntimePath": {
+      "type": "string",
+      "minLength": 1
+    },
     "executionId": {
       "type": "string",
       "minLength": 1
@@ -66,6 +72,10 @@
       "minLength": 1
     },
     "resumeSessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "harnessPython": {
       "type": "string",
       "minLength": 1
     }

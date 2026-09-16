@@ -7,17 +7,38 @@ const command = process.argv[3];
 const args = process.argv.slice(4);
 
 if (mode === "--spawn") {
+  const root = process.env.HARNESS_E2E_CLI_DIR!;
+  mkdirSync(root,{recursive:true});
+  const path = join(root,"visible.json");
+  let counts = { parent:0,child:0 };
+  try { counts = JSON.parse(readFileSync(path,"utf8")) as typeof counts; } catch { }
+  counts[process.env.HARNESS_REQUEST_ID ? "child" : "parent"] += 1;
+  writeFileSync(path,JSON.stringify(counts));
   const child = spawn(process.execPath, [process.argv[1]!, "--drive", command ?? "", ...args], {
     cwd: process.cwd(), env: process.env, detached: true, windowsHide: true, stdio: "ignore",
   });
   child.unref();
+} else if (mode === "--provider") {
+  const platform = command;
+  const file = args[0];
+  const baseArgs = /\.[cm]?js$/u.test(args[1] ?? "") ? [args[1]!] : [];
+  const providerArgs = args.slice(1 + baseArgs.length);
+  const interactive = process.env.HARNESS_EXECUTION_MODE === "interactive";
+  const prefix = interactive
+    ? platform === "claude" ? ["-p","--output-format","stream-json","--verbose"] : ["exec","--json"]
+    : [];
+  const native = platform === "claude"
+    ? ["--permission-prompts","none","--dangerously-skip-permissions","--prompt-suggestions","false","--tools","Write,Bash","--allowedTools","Write,Bash"]
+    : ["--dangerously-bypass-hook-trust","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check"];
+  const automaticCodex = !interactive && platform === "chatgpt" && providerArgs[0] === "exec";
+  void drive(file,automaticCodex ? [...baseArgs,"exec",...native,...providerArgs.slice(1)] : [...baseArgs,...prefix,...native,...providerArgs],true);
 } else if (mode === "--drive") {
   void drive(command, args);
 } else {
   process.exitCode = 2;
 }
 
-async function drive(file: string | undefined, commandArgs: readonly string[]): Promise<void> {
+async function drive(file: string | undefined, commandArgs: readonly string[], provider = false): Promise<void> {
   const role = process.env.HARNESS_REQUEST_ID ? "child" : "parent";
   const statusRoot = process.env.HARNESS_E2E_CLI_DIR;
   const marker = role === "child" ? process.env.HARNESS_E2E_CHILD_COMPLETE : process.env.HARNESS_E2E_PARENT_COMPLETE;
@@ -25,10 +46,7 @@ async function drive(file: string | undefined, commandArgs: readonly string[]): 
     writeStatus(statusRoot, role, { status: "invalid-environment", markerSeen: false, timedOut: false, exitCode: null });
     return;
   }
-  if (role === "child" && !await waitForCheckpoint()) {
-    writeStatus(statusRoot, role, { status: "checkpoint-timeout", markerSeen: false, timedOut: true, exitCode: null });
-    return;
-  }
+
 
   const child = spawn(file, [...commandArgs], {
     cwd: process.cwd(), env: process.env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
@@ -37,6 +55,7 @@ async function drive(file: string | undefined, commandArgs: readonly string[]): 
   let markerSeen = false;
   let timedOut = false;
   for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk: Buffer) => {
+    if (provider) (stream === child.stdout ? process.stdout : process.stderr).write(chunk);
     tail = `${tail}${chunk.toString("utf8")}`.slice(-128 * 1024);
     markerSeen ||= tail.includes(marker);
   });
@@ -64,20 +83,6 @@ async function drive(file: string | undefined, commandArgs: readonly string[]): 
   });
 }
 
-async function waitForCheckpoint(): Promise<boolean> {
-  const diagnostics = process.env.HARNESS_E2E_DIAGNOSTICS;
-  const checkpoint = process.env.HARNESS_E2E_CHILD_START_CHECKPOINT;
-  if (!diagnostics || !checkpoint) return true;
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      const value = JSON.parse(readFileSync(diagnostics, "utf8")) as { observations?: readonly { checkpoint?: unknown }[] };
-      if (value.observations?.some((item) => item.checkpoint === checkpoint)) return true;
-    } catch { }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  return false;
-}
 
 function writeStatus(root: string | undefined, role: string, value: Record<string, unknown>): void {
   if (!root) return;
