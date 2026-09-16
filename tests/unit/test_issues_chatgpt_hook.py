@@ -28,6 +28,12 @@ assert adapter_spec.loader is not None
 adapter_spec.loader.exec_module(adapter)
 
 
+@pytest.fixture(autouse=True)
+def isolated_store(tmp_path, monkeypatch):
+    """Keep locks and notices out of the developer's real home directory."""
+    monkeypatch.setenv(core.STATE_DIR_VARIABLE, str(tmp_path / "state"))
+
+
 def _run(payload, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
     adapter.main(["--chatgpt"])
@@ -69,18 +75,24 @@ def test_drafting_prompt_injects_stable_session_and_next_index(
         "hook_event_name": "UserPromptSubmit",
         "prompt": "$draft-issue add native ChatGPT support",
     }
-    result = _run(payload, monkeypatch, capsys)
-    context = result["hookSpecificOutput"]["additionalContext"]
+    first = _run(payload, monkeypatch, capsys)["hookSpecificOutput"][
+        "additionalContext"
+    ]
     batch_id = adapter.gateway_session_id("thr_same-thread")
 
-    assert context
-    batch = tmp_path / ".issues-gateway" / batch_id
-    assert batch.is_dir()
+    assert f"issues session id: {batch_id}" in first
+    assert "next free issue index: 0" in first
     assert (tmp_path / ".issues-gateway/.gitignore").read_text() == "*\n"
 
+    batch = tmp_path / ".issues-gateway" / batch_id
+    batch.mkdir(parents=True)
     (batch / "issue-0.md").write_text("# Existing\n", encoding="utf-8")
-    result = _run(payload, monkeypatch, capsys)
-    assert result["hookSpecificOutput"]["additionalContext"]
+
+    second = _run(payload, monkeypatch, capsys)["hookSpecificOutput"][
+        "additionalContext"
+    ]
+    assert f"issues session id: {batch_id}" in second
+    assert "next free issue index: 1" in second
 
 
 @pytest.mark.parametrize(
@@ -136,8 +148,9 @@ def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
     response = json.loads(capsys.readouterr().out)
     assert response["decision"] == "block"
     assert "2 parts (1 continuation comment(s))" in response["reason"]
-    assert (batch / "issue-0.md").is_file()
-    assert not (tmp_path / ".issues-gateway/.state.json").exists()
+    # A dry run touches nothing: the draft survives and no bookkeeping file
+    # appears beside it.
+    assert [path.name for path in batch.iterdir()] == ["issue-0.md"]
 
 
 def test_chatgpt_publish_is_scoped_to_the_current_session(
@@ -175,12 +188,9 @@ def test_chatgpt_publish_is_scoped_to_the_current_session(
 def test_pending_notice_and_drafting_context_are_combined(
     tmp_path, monkeypatch, capsys
 ):
-    gateway = tmp_path / ".issues-gateway"
-    gateway.mkdir()
+    session_id = adapter.gateway_session_id("thr_notice")
     core.queue_notice(
-        [{"number": "42", "url": "https://example.test/42", "title": "Spec"}],
-        0,
-        gateway,
+        tmp_path, session_id, [{"number": "42", "title": "Spec"}], 0
     )
 
     result = _run(
@@ -193,4 +203,6 @@ def test_pending_notice_and_drafting_context_are_combined(
         capsys,
     )
     context = result["hookSpecificOutput"]["additionalContext"]
-    assert context
+
+    assert "#42" in context  # the notice
+    assert f"issues session id: {session_id}" in context  # the drafting context

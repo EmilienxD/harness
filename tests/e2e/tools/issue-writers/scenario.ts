@@ -50,7 +50,9 @@ export function codexTransition(request: OpenAiResponsesRequest, repoRoot: strin
 }
 
 function writeFileCommand(path: string, content: string): string {
-  const script = "require('node:fs').writeFileSync(Buffer.from(process.argv[1],'base64').toString(),Buffer.from(process.argv[2],'base64'))";
+  // The hook no longer pre-creates the session folder, so the first draft
+  // write creates it, exactly as a real agent's write tool would.
+  const script = "const fs=require('node:fs'),p=Buffer.from(process.argv[1],'base64').toString();fs.mkdirSync(require('node:path').dirname(p),{recursive:true});fs.writeFileSync(p,Buffer.from(process.argv[2],'base64'))";
   return `node -e \"${script}\" ${Buffer.from(path).toString("base64")} ${Buffer.from(content).toString("base64")}`;
 }
 

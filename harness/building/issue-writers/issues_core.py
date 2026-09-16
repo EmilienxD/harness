@@ -2,14 +2,16 @@
 """Shared GitHub issue drafting and publishing implementation.
 
 Fires before Claude ever sees the prompt. When the prompt is "/publish-issues"
-or "/publish-issue" (optionally with "--dry"), this script does all the
-work itself with `gh` and exits 2, which erases the prompt and shows stderr to
-the user only - zero API calls for this step.
+(optionally with "--dry"), this script does all the work itself with `gh` and
+exits 2, which erases the prompt and shows stderr to the user only - zero API
+calls for this step.
 
 Design notes:
 - Each batch lives in its own directory: ".issues-gateway/{session-id}/".
-  Native UserPromptSubmit adapters prepare that directory and inject its
-  session id and next free draft index before a drafting skill runs.
+  Native UserPromptSubmit adapters inject that directory's session id and next
+  free draft index before a drafting skill runs. The directory itself is
+  created by the agent's first write, not by the hook, so an abandoned
+  drafting turn leaves nothing behind.
 - Draft files inside a batch dir are named "issue-{i}.md". Sorting by `i`
   gives a stable creation order, so an issue can only reference an issue
   created earlier in the same batch (no forward references), assuming
@@ -19,67 +21,62 @@ Design notes:
   non-empty line after that declares labels (see /draft-issues, /draft-issue,
   /to-spec-draft-issue): "> " followed by a comma-separated list of label
   tokens in any order. Every draft uses this same format - a spec is just a
-  draft whose tokens include "spec" (mandatory for /to-spec-draft-issue
-  output, alongside any extra labels, e.g. "> spec, security").
-  "difficulty:{level}" and "mode:{afk|hitl}" are each optional (the user can
-  ask for them to be left off), and extra labels the user asked for may be
-  added alongside (e.g. "> ci, difficulty:advanced"). Aliased tokens map to the
-  workflow's own "[AI]-" prefixed label names ("[AI]-advanced-difficulty",
-  "[AI]-afk", "[AI]-spec", ...) via LABEL_ALIASES, then are stripped from the
-  body that gets posted, since the labels carry that information from then
-  on. Extra (non-aliased) tokens pass through as-is - multi-word tokens are
-  fine ("good first issue" is a standard GitHub label) - and the drafting
-  skills are responsible for checking with `gh label list` that they exist.
+  draft whose tokens include "spec". "difficulty:{level}" and "mode:{afk|hitl}"
+  are each optional, and extra labels the user asked for may be added
+  alongside. Aliased tokens map to the workflow's own "[AI]-" prefixed label
+  names via LABEL_ALIASES, then are stripped from the body that gets posted.
+  Extra (non-aliased) tokens pass through as-is, and the drafting skills are
+  responsible for checking with `gh label list` that they exist.
 - A reference to another draft issue, written as plain text "{session-id}/{i}"
   in the body (no backticks, no braces - GitHub only autolinks a bare
   "#<number>", so the resolved replacement must not sit inside inline code),
   is rewritten to "#<real-issue-number>" once that draft has been published.
-  This is how "blocked by" links get resolved without creating issues
-  sequentially inside the agent loop.
 - Once an issue is published, its draft file is deleted immediately. If a
   later draft cannot publish in the same run, any references that are already
-  known are rewritten in that remaining draft before it is left in place, so
-  a rerun does not need an archive of successful drafts to resolve them.
+  known are rewritten *into* that remaining draft before it is left in place.
+  That is the whole cross-run memory: no ledger, no state file. A rerun
+  resolves references by reading the drafts that are still on disk.
 - Within a single run, unresolved references are retried in a worklist loop
-  rather than skipped once and left for a manual rerun - this self-heals
-  ordering mistakes (e.g. a diamond dependency the model numbered wrong)
-  and only reports a failure for references that are still unresolved after
-  every file that *could* make progress has been tried.
+  rather than skipped once, which self-heals ordering mistakes and only
+  reports a failure for references still unresolved after every file that
+  *could* make progress has been tried.
 - The body is always passed to `gh` via --body-file (a temp file), never
   inline on the command line. This is what avoids the Windows command-line
   length limit, on every platform, regardless of body size.
-- Every successful create is recorded in the shared state file,
-  ".issues-gateway/.state.json", under "published", keyed exactly like an
-  in-body reference. It is seeded back into the resolver at the start of a
-  run, so a reference to an issue published in an *earlier* run still
-  resolves. Reads and writes of the state file run under a file lock
-  (using native OS locking when portalocker is unavailable), so two
-  concurrent Claude Code sessions publishing in the same project cannot
-  lose each other's entries; the loser of the race gets a warning in the
-  report instead of clobbered state.
+- Crash safety costs no extra file and no extra `gh` call. A draft is renamed
+  to "issue-{i}.md.publishing" immediately before `gh issue create` and
+  removed once the issue exists; a failed create renames it back. A file left
+  in the ".publishing" state is therefore the only evidence of a crash mid
+  publish, and the next run resolves it with a single title search rather than
+  blindly creating a duplicate.
+- A body over GitHub's size limit is posted as one issue plus continuation
+  comments. If a continuation fails, the issue still exists, so the draft is
+  discarded and the gap is reported loudly - this tool does not resume a
+  partial publication.
 - A "## Parent" section whose first non-empty line is a bare reference
-  ("#42", an issue URL, or "{session-id}/{i}" - the same token used under
-  "Blocked by") makes the new issue a real GitHub sub-issue of that parent.
-  Parents are structural, not label-based: any draft can be a parent.
-  Knowing the number
-  is not enough: GitHub's sub-issue graph is structural, so the link is made
-  with `gh issue create --parent` (or, on a gh too old for that flag, a
-  follow-up `gh issue edit --parent`). The section is stripped from the
-  posted body once the link is made, since GitHub renders the parent
-  natively. Prose under "## Parent" is left exactly as written.
-- Publishing runs with no model turn at all (exit 2 erases the prompt), so
-  the agent would otherwise never learn the real issue numbers. Each run
-  appends what it created to the "pending_notice" section of the shared state
-  file; the next prompt that isn't a publish command flushes that section
-  into the model's context as `additionalContext` and clears it. It is
-  delivered exactly once, riding along with a prompt the user was sending
-  anyway, so it costs no extra API call - and it lets the next drafting turn
-  write a real "#42" under "## Parent".
-- "--dry" runs the exact same parse/resolve/chunk-count logic but never invokes
-  `gh`, never deletes files, never writes state, and
-  never queues a notice - it reports what would happen, so a bad label
-  line or a genuinely unresolvable reference can be caught before anything
-  touches the tracker.
+  ("#42", an issue URL, or "{session-id}/{i}") makes the new issue a real
+  GitHub sub-issue of that parent. Parents are structural, not label-based:
+  any draft can be a parent. Knowing the number is not enough, so the link is
+  made with `gh issue create --parent` (or, on a gh too old for that flag, a
+  follow-up `gh issue edit --parent`). The section is stripped from the posted
+  body once the link is made. Prose under "## Parent" is left as written.
+- Publishing runs with no model turn at all (exit 2 erases the prompt), so the
+  agent would otherwise never learn the real issue numbers. Each run writes
+  what it created to a notice file *outside* the repository; the next prompt
+  in that session that isn't a publish command delivers it as
+  `additionalContext` and deletes it. It rides along with a prompt the user
+  was sending anyway, so it costs no extra API call - and it lets the next
+  drafting turn write a real "#42" under "## Parent".
+- Nothing this tool needs to remember is kept inside the working tree. The
+  publish lock and the pending notice both live under HARNESS_STATE_DIR (or
+  ~/.harness), so a repository only ever holds drafts and a .gitignore.
+- Session folders untouched for SESSION_MAX_AGE are removed, along with notice
+  files that were never delivered. That is the only garbage collection, and it
+  runs automatically - there is no cleanup command to learn.
+- "--dry" runs the exact same parse/resolve/chunk-count logic but never
+  invokes `gh`, never deletes files, and never writes a notice - it reports
+  what would happen, so a bad label line or a genuinely unresolvable reference
+  can be caught before anything touches the tracker.
 """
 
 from __future__ import annotations
@@ -88,14 +85,15 @@ import argparse
 import contextlib
 import hashlib
 import json
+import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from contextvars import ContextVar
-from datetime import datetime, timezone
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -103,46 +101,169 @@ if sys.platform == "win32":
 else:
     import fcntl
 
-# The shared state is read and written by any session publishing in the
-# same project, so every read-modify-write cycle runs under a file lock
-# portalocker when installed, native OS locking otherwise.
-with contextlib.suppress(ImportError):
-    import portalocker
-
 GATEWAY_DIR = Path(".issues-gateway")
 GH_DEADLINE: ContextVar[float | None] = ContextVar("issues_gh_deadline", default=None)
-PUBLICATION_STATE_LOCKED: ContextVar[Path | None] = ContextVar(
-    "issues_publication_state_locked", default=None
+
+# Everything this tool remembers between runs lives here, never in the user's
+# repository. Mirrors the convention in src/harness_cli/receipts.py.
+STATE_DIR_VARIABLE = "HARNESS_STATE_DIR"
+
+# A draft mid-publish. The rename is the entire crash-recovery mechanism.
+PUBLISHING_SUFFIX = ".publishing"
+
+# Session folders idle this long are removed, drafts included.
+SESSION_MAX_AGE = 7 * 24 * 3600
+
+# Keeps a huge batch well under the 10,000-character cap on additionalContext.
+MAX_NOTICE_ENTRIES = 50
+
+# GitHub applies the same character limit to issue bodies and comments.
+GITHUB_BODY_LIMIT = 65_536
+CHUNK_TARGET = 60_000
+
+FENCE_PATTERN = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+
+# Provider skill invocations may appear at the start of a prompt or after
+# whitespace in a longer user message.
+PROMPT_PATTERN = re.compile(r"(?<!\S)[$@/]publish-issues?(?=\s|$)")
+DRAFT_PATTERN = re.compile(
+    r"(?<!\S)[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
 )
 
+# A batch directory name: a Claude Code session id (a UUID).
+SESSION_ID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
-def run_gh(args, **kwargs):
-    """Optionally bound all GitHub calls by one invocation's monotonic deadline."""
-    deadline = GH_DEADLINE.get()
-    if deadline is not None:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(args, 0)
-        kwargs["timeout"] = min(30, remaining)
-    return subprocess.run(args, **kwargs)
+# A reference to another draft issue, written as plain text
+# "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0" - in a body ("Blocked by") or under
+# "## Parent". {i} is the target draft's filename index. Matching the full UUID
+# keeps the pattern unambiguous without needing wrappers like "{...}".
+REF_PATTERN = re.compile(
+    r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/(\d+)\b"
+)
 
-# One state file for the whole project, at the gateway root. "published" is
-# durable reference resolution state; "pending_notice" is transient context
-# delivery state that is cleared after the next non-publish prompt.
-STATE_NAME = ".state.json"
+# The "## Parent" section (any heading level) and the reference forms allowed
+# as its first non-empty line.
+HEADING_PATTERN = re.compile(r"^\s*#{1,6}\s+\S")
+PARENT_HEADING_PATTERN = re.compile(r"^\s*#{1,6}\s+parent\s*$", re.IGNORECASE)
+PARENT_NUMBER_PATTERN = re.compile(r"^#?(\d+)$")
+PARENT_URL_PATTERN = re.compile(r"^<?https?://\S+?/issues/(\d+)/?>?$", re.IGNORECASE)
+PARENT_NONE_PATTERN = re.compile(r"^(none|n/a)\.?$", re.IGNORECASE)
 
-# Sidecar carrying the state file's lock. Keystone of the concurrency story:
-# never replaced or renamed, so a lock on it always names the same file,
-# unlike the state file itself.
-LOCK_NAME = ".state.lock"
-PUBLISH_LOCK_NAME = LOCK_NAME
+# The draft filename convention produced by /draft-issues: "issue-{i}.md"
+FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
+PUBLISHING_PATTERN = re.compile(
+    r"^issue-(\d+)\.md" + re.escape(PUBLISHING_SUFFIX) + r"$"
+)
+
+# The label declaration line every drafting skill produces - specs included:
+# "> " followed by a comma-separated list of label tokens in any order. A token
+# is one or more whitespace-separated words, each word carrying an optional
+# ":suffix" (the "difficulty:*" / "mode:*" form), so multi-word extra labels
+# like "good first issue" parse.
+_LABEL_WORD = r"[a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)?"
+_LABEL_TOKEN = rf"{_LABEL_WORD}(?:\s+{_LABEL_WORD})*"
+LABEL_LINE_PATTERN = re.compile(
+    rf"^\s*>(?:\s*{_LABEL_TOKEN}\s*,)*\s*{_LABEL_TOKEN}\s*$",
+    re.IGNORECASE,
+)
+
+# Canonical labels this workflow depends on: (color, description). They carry
+# an "[AI]-" prefix so they can't collide with a repo's own labels. They are
+# created immediately before the run's first remote mutation if missing;
+# existing labels are left alone, so the user's own styling is never
+# overwritten.
+CANONICAL_LABELS = {
+    "[AI]-routine-difficulty": (
+        "0E8A16",
+        "Low reasoning level work (renames, cleanups, missing type hints) - use rarely.",
+    ),
+    "[AI]-basic-difficulty": (
+        "FBCA04",
+        "Easy refactoring, missing tests, or documentation updates.",
+    ),
+    "[AI]-advanced-difficulty": (
+        "D93F0B",
+        "Multi-step work with expected outcomes, low chance of encountering "
+        "bugs, easy UI design.",
+    ),
+    "[AI]-expert-difficulty": (
+        "B60205",
+        "Multi-step complex work: careful judgment, complex UI design, wide "
+        "context, bug-prone.",
+    ),
+    "[AI]-afk": (
+        "1D76DB",
+        "The agent can be trusted to implement it in one shot with no review.",
+    ),
+    "[AI]-hitl": (
+        "5319E7",
+        "Sensitive or complex work requiring human review before landing.",
+    ),
+    "[AI]-chrome": (
+        "4285F4",
+        "Requires a real browser to test a design change end to end.",
+    ),
+    "[AI]-spec": ("7057FF", "A spec synthesized from conversation."),
+}
+
+# The declaration line uses the tokens below; the labels actually created and
+# applied are the names above. Any other token is applied as-is.
+LABEL_ALIASES = {
+    "difficulty:routine": "[AI]-routine-difficulty",
+    "difficulty:basic": "[AI]-basic-difficulty",
+    "difficulty:advanced": "[AI]-advanced-difficulty",
+    "difficulty:expert": "[AI]-expert-difficulty",
+    "mode:afk": "[AI]-afk",
+    "mode:hitl": "[AI]-hitl",
+    "chrome": "[AI]-chrome",
+    "spec": "[AI]-spec",
+}
+
+
+# The out-of-repo store
+
+
+def store_dir() -> Path:
+    """Where the publish lock and pending notices live, never in the repo."""
+    configured = os.environ.get(STATE_DIR_VARIABLE)
+    root = Path(configured).expanduser() if configured else Path.home() / ".harness"
+    return root / "issues"
+
+
+def _repo_id(root: Path) -> str:
+    """A stable, filename-safe identity for one working tree.
+
+    A digest rather than a sanitized path: the full path is too long for a
+    filename on Windows, and two different repositories must never collide.
+    """
+    try:
+        resolved = Path(root).resolve()
+    except OSError:
+        resolved = Path(root).absolute()
+    return hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
+
+
+def lock_path(root: Path) -> Path:
+    """One publish lock per repository. Sessions publish disjoint batches, but
+    label creation and the stale sweep are shared, so publishing serializes."""
+    return store_dir() / f"{_repo_id(root)}.lock"
+
+
+def notice_path(root: Path, session_id: str) -> Path:
+    """One pending notice per session, so a session only ever reads its own."""
+    return store_dir() / f"{_repo_id(root)}-{session_id}.notice.json"
 
 
 @contextlib.contextmanager
-def file_lock(lock_path: Path):
+def file_lock(path: Path):
     """Try an OS file lock that is released even if the process is killed."""
     try:
-        lock = lock_path.open("a+b", buffering=0)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock = path.open("a+b", buffering=0)
     except OSError:
         yield False
         return
@@ -163,92 +284,50 @@ def file_lock(lock_path: Path):
             yield True
         finally:
             lock.seek(0)
-            if sys.platform == "win32":
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            with contextlib.suppress(OSError):
+                if sys.platform == "win32":
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-@contextlib.contextmanager
-def publication_lock(batch_dir: Path):
-    """Serialize gateway mutations on the one stable, reusable lock file."""
-    lock_path = (batch_dir.parent / LOCK_NAME).resolve()
-    with file_lock(lock_path) as acquired:
-        token = PUBLICATION_STATE_LOCKED.set(lock_path) if acquired else None
-        try:
-            yield acquired
-        finally:
-            if token is not None:
-                PUBLICATION_STATE_LOCKED.reset(token)
+def run_gh(args, **kwargs):
+    """Optionally bound all GitHub calls by one invocation's monotonic deadline."""
+    deadline = GH_DEADLINE.get()
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(args, 0)
+        kwargs["timeout"] = min(30, remaining)
+    return subprocess.run(args, **kwargs)
 
-# Keeps a huge batch well under the 10,000-character cap on additionalContext.
-MAX_NOTICE_ENTRIES = 50
 
-# GitHub applies the same character limit to issue bodies and comments. Keep
-# continuation payloads comfortably below it so generated headings, retry
-# markers, and fence repairs can never push a post over the service limit.
-GITHUB_BODY_LIMIT = 65_536
-CHUNK_TARGET = 60_000
-
-FENCE_PATTERN = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
-ISSUE_MARKER_PATTERN = re.compile(
-    r"<!-- issues-gateway:(?P<key>[^:]+):sha256:(?P<digest>[0-9a-f]{64}):"
-    r"part:(?P<part>\d+)/(?P<total>\d+) -->"
-)
-
-# Provider skill invocations may appear at the start of a prompt or after
-# whitespace in a longer user message.
-PROMPT_PATTERN = re.compile(r"(?<!\S)[$@/]publish-issues?(?=\s|$)")
-DRAFT_PATTERN = re.compile(
-    r"(?<!\S)[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
-)
-
-# A batch directory name: a Claude Code session id (a UUID).
-SESSION_ID_PATTERN = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-)
-
-# A reference to another draft issue, written as plain text
-# "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0" - in a body ("Blocked by") or under
-# "## Parent". {i} is the target draft's filename index: one reference form
-# for every draft, whatever its labels. Matching the full UUID keeps the
-# pattern unambiguous without needing wrappers like "{...}", and the session
-# id must appear verbatim in the draft anyway for the reference to point at
-# the right batch.
-REF_PATTERN = re.compile(
-    r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/(\d+)\b"
-)
-
-# The "## Parent" section (any heading level) and the reference forms allowed
-# as its first non-empty line.
-HEADING_PATTERN = re.compile(r"^\s*#{1,6}\s+\S")
-PARENT_HEADING_PATTERN = re.compile(r"^\s*#{1,6}\s+parent\s*$", re.IGNORECASE)
-PARENT_NUMBER_PATTERN = re.compile(r"^#?(\d+)$")
-PARENT_URL_PATTERN = re.compile(r"^<?https?://\S+?/issues/(\d+)/?>?$", re.IGNORECASE)
-PARENT_NONE_PATTERN = re.compile(r"^(none|n/a)\.?$", re.IGNORECASE)
-
-# The draft filename convention produced by /draft-issues: "issue-{i}.md"
-FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
+# Drafting context
 
 
 def prepare_drafting_context(root: Path, session_id: str) -> str:
-    """Prepare one draft batch and return the values skills must use."""
+    """Prepare one draft batch and return the values skills must use.
+
+    The session directory is deliberately *not* created here. The agent's first
+    write creates it, so a drafting turn the user abandons leaves no empty
+    folder behind.
+    """
     gateway = root / GATEWAY_DIR
     gateway.mkdir(parents=True, exist_ok=True)
-    maintain_gateway(gateway)
-    batch = gateway / session_id
-    batch.mkdir(parents=True, exist_ok=True)
     ignore = gateway / ".gitignore"
     if not ignore.exists():
         ignore.write_text("*\n", encoding="utf-8", newline="\n")
+    sweep_stale(root)
 
+    batch = gateway / session_id
     indexes = []
-    for path in batch.glob("issue-*.md"):
-        match = FILENAME_PATTERN.match(path.name)
-        if match:
-            indexes.append(int(match.group(1)))
+    if batch.is_dir():
+        for path in batch.iterdir():
+            match = FILENAME_PATTERN.match(path.name) or PUBLISHING_PATTERN.match(
+                path.name
+            )
+            if match:
+                indexes.append(int(match.group(1)))
     next_index = max(indexes, default=-1) + 1
     relative = GATEWAY_DIR / session_id
     return (
@@ -257,306 +336,18 @@ def prepare_drafting_context(root: Path, session_id: str) -> str:
         f"- draft directory: {relative.as_posix()}\n"
         f"- next free issue index: {next_index}\n"
         "Use these exact values wherever the skill asks for its session id, "
-        "draft directory, or starting issue index. The directory and gateway "
-        ".gitignore already exist. If you need a fresh index later, inspect the "
+        "draft directory, or starting issue index. Writing the first draft "
+        "creates the directory. If you need a fresh index later, inspect the "
         "draft directory again before writing so you do not overwrite a draft."
     )
 
-# The label declaration line every drafting skill produces - specs included:
-# "> " followed by a comma-separated list of label tokens in any order, with
-# "difficulty:*" and "mode:*" each optional and extra labels allowed, e.g.
-# "> difficulty:advanced, mode:hitl", "> mode:afk", "> ci, difficulty:basic",
-# "> spec, security". A token is one or more whitespace-separated words, each
-# word carrying an optional ":suffix" (the "difficulty:*" / "mode:*" form), so
-# multi-word extra labels like "good first issue" parse. Tolerant of leading
-# whitespace before the ">" and of surrounding spaces around tokens and
-# commas.
-_LABEL_WORD = r"[a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)?"
-_LABEL_TOKEN = rf"{_LABEL_WORD}(?:\s+{_LABEL_WORD})*"
-LABEL_LINE_PATTERN = re.compile(
-    rf"^\s*>(?:\s*{_LABEL_TOKEN}\s*,)*\s*{_LABEL_TOKEN}\s*$",
-    re.IGNORECASE,
-)
 
-# Canonical labels this workflow depends on: (color, description). They carry
-# an "[AI]-" prefix so they can't collide with a repo's own labels, and so the
-# same labels can be shared across projects that use this tool as a dependency.
-# They are created immediately before the run's first remote mutation if
-# missing; a publication reserves state first. Existing labels are
-# left alone, so the user's own styling is never overwritten.
-CANONICAL_LABELS = {
-    "[AI]-routine-difficulty": (
-        "0E8A16",
-        "Low reasoning level work (renames, cleanups, missing type hints) - use rarely.",
-    ),
-    "[AI]-basic-difficulty": (
-        "FBCA04",
-        "Easy, small refactoring (splitting functions, updating a model or "
-        "signature), adding missing tests, writing or updating documentation.",
-    ),
-    "[AI]-advanced-difficulty": (
-        "D93F0B",
-        "Multi-step work with expected outcomes, low chance of encountering "
-        "bugs, easy UI design.",
-    ),
-    "[AI]-expert-difficulty": (
-        "B60205",
-        "Multi-step complex work: careful judgment, complex UI design, wide "
-        "context, bug-prone.",
-    ),
-    "[AI]-afk": (
-        "1D76DB",
-        "The agent can be trusted to implement it in one shot with no review.",
-    ),
-    "[AI]-hitl": (
-        "5319E7",
-        "Sensitive, touches frontend or UI design, or complex enough that a "
-        "human should review it before it lands.",
-    ),
-    "[AI]-chrome": (
-        "4285F4",
-        "Requires a real browser to test a design change end to end.",
-    ),
-    "[AI]-spec": ("7057FF", "A spec synthesized from conversation."),
-}
-
-# The declaration line uses the "difficulty:{level}" / "mode:{mode}" / "chrome"
-# / "spec" tokens below; the labels actually created and applied are the names
-# above.
-# Any other token on the line is applied as-is (the drafting skills check
-# those exist with `gh label list` before writing them).
-LABEL_ALIASES = {
-    "difficulty:routine": "[AI]-routine-difficulty",
-    "difficulty:basic": "[AI]-basic-difficulty",
-    "difficulty:advanced": "[AI]-advanced-difficulty",
-    "difficulty:expert": "[AI]-expert-difficulty",
-    "mode:afk": "[AI]-afk",
-    "mode:hitl": "[AI]-hitl",
-    "chrome": "[AI]-chrome",
-    "spec": "[AI]-spec",
-}
+# The pending notice, delivered on the next prompt
 
 
-def _read_json_dict(path: Path) -> dict:
-    """Best-effort read of a {str: object} JSON file. Never raises.
-
-    Corrupt or hand-mangled state must never block publishing, so any
-    read error degrades to "nothing is known yet".
-    """
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_json_dict(path: Path, data: dict) -> None:
-    """Persist JSON via a sibling temp file, so a concurrent reader never
-    sees a half-written document. The lock lives on a separate sidecar file,
-    so renaming over the state file is never lock-blocked."""
-    tmp = path.with_name(path.stem + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
-
-
-@contextlib.contextmanager
-def _locked_state(gateway_dir: Path = GATEWAY_DIR):
-    """Yield (path, state) under a file lock, or (None, {}).
-
-    The lock is taken on a sidecar file, ".state.lock" - locking the state
-    file itself would let Windows deny the state file's own atomic replace
-    (leaving it empty) and truncate it on contention, and a POSIX fcntl lock
-    would not survive the state file being unlinked by a replace. Failing to
-    take the lock gives the caller None, so it can retain a draft whose
-    publication cannot be reserved durably.
-    Read-modify-write happens entirely inside the lock, so two sessions
-    publishing at once merge instead of one clobbering the other's entries.
-    """
-    path = gateway_dir / STATE_NAME
-    if not gateway_dir.is_dir():
-        yield path, {}
-        return
-    if PUBLICATION_STATE_LOCKED.get() == (gateway_dir / LOCK_NAME).resolve():
-        state = _read_state(gateway_dir)
-        (gateway_dir / ".state.tmp").unlink(missing_ok=True)
-        yield path, state
-        return
-    if "portalocker" not in sys.modules:
-        with file_lock(gateway_dir / LOCK_NAME) as acquired:
-            if not acquired:
-                yield None, {}
-            else:
-                state = _read_state(gateway_dir)
-                (gateway_dir / ".state.tmp").unlink(missing_ok=True)
-                yield path, state
-        return
-    lock_path = gateway_dir / LOCK_NAME
-    lock = portalocker.Lock(str(lock_path), mode="a", timeout=10, fail_when_locked=True)
-    try:
-        lock_path.touch(exist_ok=True)
-        acquired_lock = lock.acquire()
-        if lock_path.stat().st_size == 0:
-            acquired_lock.write("\0")
-            acquired_lock.flush()
-    except (portalocker.exceptions.LockException, OSError):
-        yield None, {}
-        return
-    try:
-        state = _read_state(gateway_dir)
-        (gateway_dir / ".state.tmp").unlink(missing_ok=True)
-        yield path, state
-    finally:
-        lock.release()
-
-
-def _read_state(gateway_dir: Path = GATEWAY_DIR) -> dict:
-    """Read and validate the consolidated state file."""
-    path = gateway_dir / STATE_NAME
-    state = _read_json_dict(path)
-    published = state.get("published")
-    notice = state.get("pending_notice")
-    inflight = state.get("inflight")
-
-    if not isinstance(published, dict):
-        published = {}
-    if not isinstance(notice, dict):
-        notice = {}
-    if not isinstance(inflight, dict):
-        inflight = {}
-    else:
-        # A hand-edited state file must not poison every publish.
-        inflight = {
-            key: value
-            for key, value in inflight.items()
-            if isinstance(key, str) and isinstance(value, dict)
-        }
-
-    state = {}
-    if published:
-        state["published"] = published
-    if notice:
-        state["pending_notice"] = notice
-    if inflight:
-        state["inflight"] = inflight
-    return state
-
-
-def _write_state(path: Path, state: dict) -> None:
-    cleaned: dict = {}
-    published = state.get("published")
-    notice = state.get("pending_notice")
-    inflight = state.get("inflight")
-    if isinstance(published, dict) and published:
-        cleaned["published"] = published
-    if isinstance(notice, dict) and notice:
-        cleaned["pending_notice"] = notice
-    if isinstance(inflight, dict) and inflight:
-        cleaned["inflight"] = {
-            key: value
-            for key, value in inflight.items()
-            if isinstance(key, str) and isinstance(value, dict)
-        }
-    if cleaned:
-        _write_json_dict(path, cleaned)
-    else:
-        path.unlink(missing_ok=True)
-        path.with_name(path.stem + ".tmp").unlink(missing_ok=True)
-
-
-def _draft_reference_keys(gateway_dir: Path) -> set[str]:
-    """Return gateway keys still mentioned by user-authored Markdown drafts."""
-    referenced: set[str] = set()
-    for draft in gateway_dir.glob("*/issue-*.md"):
-        try:
-            text = draft.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        referenced.update(f"{match.group(1)}/{match.group(2)}" for match in REF_PATTERN.finditer(text))
-    return referenced
-
-
-def prune_published(gateway_dir: Path = GATEWAY_DIR) -> None:
-    """Drop resolver entries once neither drafts nor recovery state need them."""
-    referenced = _draft_reference_keys(gateway_dir)
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return
-        published = state.get("published")
-        inflight = state.get("inflight")
-        protected = set(inflight) if isinstance(inflight, dict) else set()
-        if isinstance(published, dict):
-            state["published"] = {
-                key: value
-                for key, value in published.items()
-                if key in referenced or key in protected
-            }
-        try:
-            _write_state(path, state)
-        except OSError:
-            pass
-
-
-def maintain_gateway(gateway_dir: Path = GATEWAY_DIR) -> None:
-    """Remove safe crash leftovers and prune unused publication state."""
-    if not gateway_dir.is_dir():
-        return
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return
-        (gateway_dir / ".state.tmp").unlink(missing_ok=True)
-    prune_published(gateway_dir)
-    for batch in (path for path in gateway_dir.iterdir() if path.is_dir()):
-        delete_empty_batch_dir(batch)
-
-
-def record_published(key: str, entry: dict, gateway_dir: Path = GATEWAY_DIR) -> bool:
-    """Append one published issue to the shared state, immediately.
-
-    Written after every single create rather than once at the end of the
-    run, so an interrupted batch still leaves behind the numbers it did
-    create - that is what a rerun needs to resolve references to them.
-    Returns False when the write could not happen (lock held by another
-    session, or an OS error): the issue exists on the tracker, so a
-    missing state entry is a warning, not a failure.
-    """
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return False
-        published = state.get("published")
-        if not isinstance(published, dict):
-            published = {}
-        published[key] = entry
-        state["published"] = published
-        try:
-            _write_state(path, state)
-        except OSError:
-            return False
-    return True
-
-
-def seed_from_state(gateway_dir: Path = GATEWAY_DIR) -> dict[str, str]:
-    """Build the resolved map from the shared state on disk.
-
-    Maps "{session-id}/{i}" -> issue number, exactly like the in-run map.
-    Reference keys carry their own session id, so one flat file can hold
-    every session's numbers without collisions.
-    """
-    resolved: dict[str, str] = {}
-    with _locked_state(gateway_dir) as (_, state):
-        published = state.get("published")
-        if not isinstance(published, dict):
-            published = {}
-        for key, entry in published.items():
-            if not isinstance(entry, dict):
-                continue
-            number = entry.get("number")
-            if not number:
-                continue
-            resolved[key] = str(number)
-    return resolved
-
-
-def queue_notice(created: list[dict], failed: int, gateway_dir: Path = GATEWAY_DIR) -> None:
+def queue_notice(
+    root: Path, session_id: str, created: list[dict], failed: int
+) -> None:
     """Stage what this run published for delivery on the next prompt.
 
     Appends rather than overwrites: two publish runs in a row (the second
@@ -565,28 +356,62 @@ def queue_notice(created: list[dict], failed: int, gateway_dir: Path = GATEWAY_D
     """
     if not created and not failed:
         return
-    pending = {"created": [], "failed": 0, "omitted": 0}
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return
-        existing = state.get("pending_notice")
-        if isinstance(existing, dict):
-            if isinstance(existing.get("created"), list):
-                pending["created"] = existing["created"]
-            if isinstance(existing.get("failed"), int):
-                pending["failed"] = existing["failed"]
-            if isinstance(existing.get("omitted"), int):
-                pending["omitted"] = existing["omitted"]
-        available = max(0, MAX_NOTICE_ENTRIES - len(pending["created"]))
-        pending["created"].extend(created[:available])
-        pending["omitted"] += max(0, len(created) - available)
-        pending["failed"] += failed
-        pending["queued_at"] = datetime.now(timezone.utc).isoformat()
-        state["pending_notice"] = pending
-        try:
-            _write_state(path, state)
-        except OSError:
-            pass
+    path = notice_path(root, session_id)
+    pending = _read_notice(path)
+    entries = pending.get("created", [])
+    available = max(0, MAX_NOTICE_ENTRIES - len(entries))
+    entries.extend(
+        {
+            "number": entry.get("number"),
+            "title": entry.get("title"),
+            "labels": entry.get("labels") or [],
+        }
+        for entry in created[:available]
+    )
+    payload = {
+        "created": entries,
+        "failed": pending.get("failed", 0) + failed,
+        "omitted": pending.get("omitted", 0) + max(0, len(created) - available),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _read_notice(path: Path) -> dict:
+    """Best-effort read. A damaged notice must never block a prompt."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    created = data.get("created")
+    return {
+        "created": [entry for entry in created if isinstance(entry, dict)]
+        if isinstance(created, list)
+        else [],
+        "failed": data.get("failed") if isinstance(data.get("failed"), int) else 0,
+        "omitted": data.get("omitted") if isinstance(data.get("omitted"), int) else 0,
+    }
+
+
+def flush_notice(root: Path, session_id: str) -> str | None:
+    """Consume this session's pending notice, if any. Delivered exactly once."""
+    path = notice_path(root, session_id)
+    if not path.is_file():
+        return None
+    pending = _read_notice(path)
+    with contextlib.suppress(OSError):
+        path.unlink()
+    created = pending.get("created", [])
+    failed = pending.get("failed", 0)
+    omitted = pending.get("omitted", 0)
+    if not created and not failed and not omitted:
+        return None
+    return format_notice(created, failed, omitted)
 
 
 def format_notice(created: list[dict], failed: int, omitted: int = 0) -> str:
@@ -629,59 +454,43 @@ def format_notice(created: list[dict], failed: int, omitted: int = 0) -> str:
     return "\n".join(lines)
 
 
-def flush_notice(gateway_dir: Path = GATEWAY_DIR) -> str | None:
-    """Consume the pending notice, if any. Delivered exactly once."""
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return None
-        pending = state.pop("pending_notice", None)
-        try:
-            _write_state(path, state)
-        except OSError:
-            pass
-    if not isinstance(pending, dict):
-        return None
-    created = pending.get("created")
-    created = created if isinstance(created, list) else []
-    failed = pending.get("failed")
-    failed = failed if isinstance(failed, int) else 0
-    omitted = pending.get("omitted")
-    omitted = omitted if isinstance(omitted, int) else 0
-    if not created and not failed and not omitted:
-        return None
-    notice = format_notice(created, failed, omitted)
-    prune_published(gateway_dir)
-    return notice
+# Automatic cleanup
 
 
-def ensure_labels(dry: bool) -> list[str]:
-    """Create the canonical labels that are missing; never touch existing ones.
+def sweep_stale(root: Path, now: float | None = None) -> None:
+    """Remove session folders and notices nothing has touched in a week.
 
-    "gh label create" exits non-zero with an "already exists" error when the
-    label is present, so a plain create is create-only: an existing label's
-    color and description are left exactly as the user has them."""
-    if dry:
-        return []
+    Age-based rather than "empty right now", so it can never race with a
+    drafting turn that is midway through writing its files.
+    """
+    now = time.time() if now is None else now
+    cutoff = now - SESSION_MAX_AGE
+    gateway = root / GATEWAY_DIR
+    if gateway.is_dir():
+        for batch in gateway.iterdir():
+            if not batch.is_dir() or not SESSION_ID_PATTERN.fullmatch(batch.name):
+                continue
+            try:
+                newest = max(
+                    (item.stat().st_mtime for item in batch.iterdir()),
+                    default=batch.stat().st_mtime,
+                )
+            except OSError:
+                continue
+            if newest <= cutoff:
+                shutil.rmtree(batch, ignore_errors=True)
+    store = store_dir()
+    if store.is_dir():
+        prefix = f"{_repo_id(root)}-"
+        for notice in store.glob(f"{prefix}*.notice.json"):
+            try:
+                if notice.stat().st_mtime <= cutoff:
+                    notice.unlink()
+            except OSError:
+                continue
 
-    warnings = []
-    for name, (color, description) in CANONICAL_LABELS.items():
-        result = run_gh(
-            [
-                "gh", "label", "create", name,
-                "--color", color,
-                "--description", description,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0 and "already exists" in (result.stderr or result.stdout):
-            continue  # already there - leave it untouched
-        if result.returncode != 0:
-            warnings.append(
-                f"  WARN  could not ensure label '{name}': "
-                f"{(result.stderr or result.stdout).strip()}"
-            )
-    return warnings
+
+# Draft parsing - the format the SKILL.md files document
 
 
 def parse_issue_file(path: Path) -> tuple[str, str]:
@@ -707,14 +516,10 @@ def parse_issue_file(path: Path) -> tuple[str, str]:
 def extract_labels(rest: str) -> tuple[list[str], str]:
     """Pull the label declaration line out of the body.
 
-    One format covers every draft, specs included: "> " followed by a
-    comma-separated list of label tokens in any order - "difficulty:*" and
-    "mode:*" are each optional, "spec" marks a spec (and may sit alongside
-    extra labels), and any other token passes through as-is. Returns (labels,
-    remaining_body). labels is empty if the line is missing or malformed
-    (e.g. a ">" quote, or a list carrying a token that can't be a label -
-    the whole line is left in the body untouched rather than silently
-    applying a partial set of labels).
+    Returns (labels, remaining_body). labels is empty if the line is missing or
+    malformed (e.g. a ">" quote, or a list carrying a token that can't be a
+    label) - the whole line is left in the body untouched rather than silently
+    applying a partial set of labels.
     """
     lines = rest.splitlines()
     idx = 0
@@ -757,12 +562,10 @@ def parse_parent_ref(text: str) -> str | None:
 def extract_parent(body: str) -> tuple[str | None, str]:
     """Pull a parent reference out of the body's "## Parent" section.
 
-    Returns (reference, remaining_body). The section is removed only when
-    its first non-empty line is a reference (or an explicit "none"), since
-    that is the case where the information moves into GitHub's own sub-issue
-    link and repeating it in the body adds nothing. A section holding prose
-    - including the template's own placeholder text - is left untouched and
-    yields no parent.
+    The section is removed only when its first non-empty line is a reference
+    (or an explicit "none"), since that is the case where the information moves
+    into GitHub's own sub-issue link. A section holding prose - including the
+    template's own placeholder text - is left untouched and yields no parent.
     """
     lines = body.splitlines()
     for idx, line in enumerate(lines):
@@ -793,9 +596,8 @@ def resolve_parent(ref: str, resolved: dict[str, str]) -> tuple[str | None, bool
     """Turn a parent reference into an issue number.
 
     Returns (number, retryable). A direct "#42" always resolves; a session
-    reference resolves once the issue it points at has been published, and
-    is retryable until then - the parent may simply be later in this same
-    run, whichever draft it is.
+    reference resolves once the issue it points at has been published, and is
+    retryable until then - the parent may simply be later in this same run.
     """
     if ref.isdigit():
         return ref, False
@@ -824,21 +626,45 @@ def resolve_references(body: str, resolved: dict[str, str]) -> tuple[str, list[s
 def gather_draft_files(batch_dir: Path) -> list[Path]:
     """List draft files in a batch, in stable, dependency-safe order."""
     ordered = []
-    for path in batch_dir.glob("*.md"):
-        m = FILENAME_PATTERN.match(path.name)
-        if not m:
+    if not batch_dir.is_dir():
+        return []
+    for path in batch_dir.iterdir():
+        match = FILENAME_PATTERN.match(path.name)
+        if not match:
             continue  # e.g. stray files, not drafts
-        ordered.append((int(m.group(1)), path))
-    ordered.sort(key=lambda t: t[0])
-    return [p for _, p in ordered]
+        ordered.append((int(match.group(1)), path))
+    ordered.sort(key=lambda item: item[0])
+    return [path for _, path in ordered]
+
+
+def gather_interrupted_files(batch_dir: Path) -> list[Path]:
+    """List drafts a crash left mid-publish, in the same stable order."""
+    ordered = []
+    if not batch_dir.is_dir():
+        return []
+    for path in batch_dir.iterdir():
+        match = PUBLISHING_PATTERN.match(path.name)
+        if not match:
+            continue
+        ordered.append((int(match.group(1)), path))
+    ordered.sort(key=lambda item: item[0])
+    return [path for _, path in ordered]
 
 
 def rewrite_known_references(path: Path, resolved: dict[str, str]) -> None:
-    """Persist any known reference rewrites in a draft that remains pending."""
+    """Persist any known reference rewrites in a draft that remains pending.
+
+    This is what lets a rerun resolve a reference to an issue published in an
+    earlier run: the number is written into the draft that still needs it, so
+    no separate ledger has to survive between runs.
+    """
     if not resolved:
         return
 
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
 
     def _sub(match: re.Match) -> str:
         key = f"{match.group(1)}/{match.group(2)}"
@@ -848,58 +674,11 @@ def rewrite_known_references(path: Path, resolved: dict[str, str]) -> None:
 
     rewritten = REF_PATTERN.sub(_sub, text)
     if rewritten != text:
-        path.write_text(rewritten, encoding="utf-8")
+        with contextlib.suppress(OSError):
+            path.write_text(rewritten, encoding="utf-8")
 
 
-def delete_published_draft(path: Path) -> None:
-    """Remove a draft after gh confirms the issue exists."""
-    path.unlink()
-
-
-def delete_empty_batch_dir(batch_dir: Path) -> None:
-    """Remove a completed batch, but preserve it if anything remains."""
-    try:
-        batch_dir.rmdir()
-    except OSError:
-        # A failed/unknown draft or a concurrently created file still needs
-        # the directory. Leaving it in place is the safe outcome.
-        pass
-
-
-_parent_flag_supported: bool | None = None
-
-
-def parent_flag_supported() -> bool:
-    """Whether this gh can create a sub-issue in one call.
-
-    `gh issue create --parent` landed relatively recently; on an older gh the
-    same link is made afterwards with `gh issue edit --parent`. Probed once
-    per run, and only when a draft actually declares a parent.
-    """
-    global _parent_flag_supported
-    if _parent_flag_supported is None:
-        try:
-            result = run_gh(
-                ["gh", "issue", "create", "--help"], capture_output=True, text=True
-            )
-            _parent_flag_supported = "--parent" in (
-                (result.stdout or "") + (result.stderr or "")
-            )
-        except OSError:
-            _parent_flag_supported = False
-    return _parent_flag_supported
-
-
-def gh_link_parent(child: str, parent: str) -> tuple[bool, str]:
-    """Attach an existing issue to a parent (the older-gh fallback path)."""
-    result = run_gh(
-        ["gh", "issue", "edit", child, "--parent", parent],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return False, (result.stderr or result.stdout or "unknown gh error").strip()
-    return True, ""
+# Splitting a body that exceeds GitHub's limit
 
 
 def _fence_at(text: str, end: int) -> tuple[str, str] | None:
@@ -985,36 +764,25 @@ def chunk_markdown(body: str, limit: int) -> list[str]:
     return chunks
 
 
-def content_digest(body: str) -> str:
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()
-
-
-def part_marker(key: str, digest: str, part: int, total: int) -> str:
-    return (
-        f"<!-- issues-gateway:{key}:sha256:{digest}:"
-        f"part:{part}/{total} -->"
-    )
-
-
-def render_oversized_parts(body: str, key: str) -> list[str]:
-    """Render an oversized body as one issue body plus continuation comments."""
-    digest = content_digest(body)
-    # 512 comfortably covers headings and markers even for very large counts.
+def render_parts(body: str) -> list[str]:
+    """Render a body as one issue body plus any continuation comments."""
+    if len(body) <= GITHUB_BODY_LIMIT:
+        return [body]
+    # 512 comfortably covers the generated headings even for large counts.
     content_limit = CHUNK_TARGET - 512
     while True:
         chunks = chunk_markdown(body, content_limit)
         total = len(chunks)
         rendered = []
         for index, chunk in enumerate(chunks, 1):
-            marker = part_marker(key, digest, index, total)
             if index == 1:
                 heading = (
                     f"> **Part 1 of {total}.** The remaining parts follow in "
                     "continuation comments."
                 )
             else:
-                heading = f"## Continuation — Part {index} of {total}"
-            rendered.append(f"{heading}\n\n{chunk}\n\n{marker}")
+                heading = f"## Continuation - Part {index} of {total}"
+            rendered.append(f"{heading}\n\n{chunk}")
         largest = max(map(len, rendered))
         if largest <= CHUNK_TARGET:
             if any(len(payload) > GITHUB_BODY_LIMIT for payload in rendered):
@@ -1025,33 +793,62 @@ def render_oversized_parts(body: str, key: str) -> list[str]:
             raise ValueError("generated continuation metadata exceeds payload target")
 
 
-def render_publication_parts(body: str, key: str) -> list[str]:
-    marked = f"{body}\n\n{part_marker(key, content_digest(body), 1, 1)}"
-    if len(marked) <= GITHUB_BODY_LIMIT:
-        return [marked]
-    return render_oversized_parts(body, key)
+# The gh boundary
 
 
-def marker_free_part(payload: str, marker: str) -> str:
-    """Remove one generated trailing marker without touching authored content."""
-    suffix = f"\n\n{marker}"
-    if not payload.endswith(suffix):
-        raise ValueError("publication part does not end with its recovery marker")
-    return payload[:-len(suffix)]
+def ensure_labels(dry: bool) -> list[str]:
+    """Create the canonical labels that are missing; never touch existing ones.
+
+    "gh label create" exits non-zero with an "already exists" error when the
+    label is present, so a plain create is create-only: an existing label's
+    color and description are left exactly as the user has them.
+    """
+    if dry:
+        return []
+
+    warnings = []
+    for name, (color, description) in CANONICAL_LABELS.items():
+        result = run_gh(
+            [
+                "gh", "label", "create", name,
+                "--color", color,
+                "--description", description,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 and "already exists" in (result.stderr or result.stdout):
+            continue  # already there - leave it untouched
+        if result.returncode != 0:
+            warnings.append(
+                f"  WARN  could not ensure label '{name}': "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+    return warnings
 
 
-def publication_fingerprint(
-    repository: str, title: str, labels: list[str], parent: str | None, body: str
-) -> str:
-    data = {
-        "repository": repository,
-        "title": title,
-        "labels": labels,
-        "parent": parent,
-        "body": body,
-    }
-    encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+_parent_flag_supported: bool | None = None
+
+
+def parent_flag_supported() -> bool:
+    """Whether this gh can create a sub-issue in one call.
+
+    `gh issue create --parent` landed relatively recently; on an older gh the
+    same link is made afterwards with `gh issue edit --parent`. Probed once
+    per run, and only when a draft actually declares a parent.
+    """
+    global _parent_flag_supported
+    if _parent_flag_supported is None:
+        try:
+            result = run_gh(
+                ["gh", "issue", "create", "--help"], capture_output=True, text=True
+            )
+            _parent_flag_supported = "--parent" in (
+                (result.stdout or "") + (result.stderr or "")
+            )
+        except OSError:
+            _parent_flag_supported = False
+    return _parent_flag_supported
 
 
 def _run_with_body_file(args: list[str], body: str) -> subprocess.CompletedProcess:
@@ -1087,22 +884,7 @@ def gh_create_issue(
     stdout = result.stdout.strip()
     url = stdout.splitlines()[-1] if stdout else ""
     if not re.fullmatch(r"https://[^/]+/[^/]+/[^/]+/issues/\d+", url):
-        return False, "gh returned no valid issue URL; rerun to recover the reserved issue"
-    verified = run_gh(
-        ["gh", "issue", "view", url, "--json", "title,body"],
-        capture_output=True, text=True, encoding="utf-8",
-    )
-    try:
-        issue = json.loads(verified.stdout)
-    except (ValueError, TypeError):
-        issue = None
-    if (
-        verified.returncode != 0
-        or not isinstance(issue, dict)
-        or issue.get("title") != title
-        or str(issue.get("body", "")).replace("\r\n", "\n").rstrip() != body.rstrip()
-    ):
-        return False, f"could not verify created issue content at {url}; rerun to recover"
+        return False, "gh returned no valid issue URL"
     return True, url
 
 
@@ -1113,65 +895,34 @@ def gh_comment_issue(issue_url: str, body: str) -> tuple[bool, str]:
     return True, (result.stdout or "").strip()
 
 
-def gh_replace_issue_body(
-    issue_url: str, expected_body: str, clean_body: str
-) -> tuple[bool, str]:
-    """Replace a marker-bearing issue body, safely and idempotently."""
-    viewed = run_gh(
-        ["gh", "issue", "view", issue_url, "--json", "body"],
-        capture_output=True, text=True, encoding="utf-8",
-    )
-    try:
-        current = json.loads(viewed.stdout).get("body")
-    except (ValueError, AttributeError):
-        current = None
-    if viewed.returncode != 0 or not isinstance(current, str):
-        return False, f"could not inspect issue body at {issue_url}"
-    current = current.replace("\r\n", "\n").rstrip()
-    if current == clean_body.rstrip():
-        return True, ""
-    if current != expected_body.rstrip():
-        return (
-            False,
-            f"issue body changed before recovery metadata could be removed at {issue_url}",
-        )
-
-    edited = _run_with_body_file(
-        ["gh", "issue", "edit", issue_url], clean_body
-    )
-    if edited.returncode != 0:
-        return False, (edited.stderr or edited.stdout or "unknown gh error").strip()
-
-    verified = run_gh(
-        ["gh", "issue", "view", issue_url, "--json", "body"],
-        capture_output=True, text=True, encoding="utf-8",
-    )
-    try:
-        updated = json.loads(verified.stdout).get("body")
-    except (ValueError, AttributeError):
-        updated = None
-    if (
-        verified.returncode != 0
-        or not isinstance(updated, str)
-        or updated.replace("\r\n", "\n").rstrip() != clean_body.rstrip()
-    ):
-        return False, f"could not verify recovery metadata cleanup at {issue_url}"
-    return True, ""
-
-
-def gh_repository() -> tuple[bool, str]:
+def gh_link_parent(child: str, parent: str) -> tuple[bool, str]:
+    """Attach an existing issue to a parent (the older-gh fallback path)."""
     result = run_gh(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+        ["gh", "issue", "edit", child, "--parent", parent],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         return False, (result.stderr or result.stdout or "unknown gh error").strip()
-    return True, result.stdout.strip()
+    return True, ""
 
 
-def _gh_json(args: list[str]) -> tuple[bool, list[dict] | str]:
-    result = run_gh(args, capture_output=True, text=True)
+def gh_find_issues_by_title(title: str) -> tuple[bool, list[dict] | str]:
+    """Find issues whose title matches exactly. The crash-recovery query.
+
+    Runs only for a draft a crash left in the ".publishing" state, so it costs
+    nothing on the happy path.
+    """
+    result = run_gh(
+        [
+            "gh", "issue", "list", "--search", f"{title} in:title",
+            "--state", "all", "--limit", "50",
+            "--json", "number,title,url",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
     if result.returncode != 0:
         return False, (result.stderr or result.stdout or "unknown gh error").strip()
     try:
@@ -1180,453 +931,111 @@ def _gh_json(args: list[str]) -> tuple[bool, list[dict] | str]:
         return False, "gh returned malformed JSON"
     if not isinstance(data, list):
         return False, "gh returned an unexpected JSON shape"
-    return True, data
-
-
-def gh_find_reserved_issue(
-    repository: str, started_at: str, marker: str
-) -> tuple[bool, dict | None | str]:
-    ok, data = _gh_json(
-        [
-            "gh", "issue", "list", "--repo", repository, "--state", "all",
-            "--limit", "1000",
-            "--json", "number,url,body,createdAt",
-        ]
-    )
-    if not ok:
-        return False, data
-    matches = []
-    for issue in data:
-        if not isinstance(issue, dict) or marker not in str(issue.get("body") or ""):
-            continue
-        if str(issue.get("createdAt") or "") >= started_at:
-            matches.append(issue)
-    if len(matches) > 1:
-        return False, "multiple issues carry this draft marker; reconcile them before retrying"
-    if matches:
-        return True, matches[0]
-    if len(data) >= 1000:
-        return False, "issue recovery scan reached its limit; refusing a potentially duplicate create"
-    return True, None
-
-
-def gh_existing_comment_parts(
-    repository: str, issue_number: str, key: str, digest: str, total: int
-) -> tuple[bool, set[int] | str]:
-    found: set[int] = set()
-    page_number = 1
-    while True:
-        ok, page = _gh_json(
-            [
-                "gh", "api",
-                f"repos/{repository}/issues/{issue_number}/comments"
-                f"?per_page=100&page={page_number}",
-            ]
-        )
-        if not ok:
-            return False, page
-        for comment in page:
-            body = str(comment.get("body") or "") if isinstance(comment, dict) else ""
-            for match in ISSUE_MARKER_PATTERN.finditer(body):
-                if (
-                    match.group("key") == key
-                    and match.group("digest") == digest
-                    and int(match.group("total")) == total
-                ):
-                    found.add(int(match.group("part")))
-        if len(page) < 100:
-            break
-        page_number += 1
-    return True, found
-
-
-def gh_list_issue_comments(
-    repository: str, issue_number: str
-) -> tuple[bool, list[dict] | str]:
-    comments: list[dict] = []
-    page_number = 1
-    while True:
-        ok, page = _gh_json(
-            [
-                "gh", "api",
-                f"repos/{repository}/issues/{issue_number}/comments"
-                f"?per_page=100&page={page_number}",
-            ]
-        )
-        if not ok:
-            return False, page
-        comments.extend(value for value in page if isinstance(value, dict))
-        if len(page) < 100:
-            return True, comments
-        page_number += 1
-
-
-def gh_replace_comment_body(
-    repository: str, comment_id: int, expected_body: str, clean_body: str
-) -> tuple[bool, str]:
-    """Replace one known marker-bearing comment body."""
-    endpoint = f"repos/{repository}/issues/comments/{comment_id}"
-    viewed = run_gh(
-        ["gh", "api", endpoint],
-        capture_output=True, text=True, encoding="utf-8",
-    )
-    try:
-        current = json.loads(viewed.stdout).get("body")
-    except (ValueError, AttributeError):
-        current = None
-    if viewed.returncode != 0 or not isinstance(current, str):
-        return False, f"could not inspect continuation comment {comment_id}"
-    current = current.replace("\r\n", "\n").rstrip()
-    if current == clean_body.rstrip():
-        return True, ""
-    if current != expected_body.rstrip():
-        return False, f"continuation comment {comment_id} changed before cleanup"
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8", newline="\n"
-    ) as tmp:
-        json.dump({"body": clean_body}, tmp, ensure_ascii=False)
-        tmp_path = tmp.name
-    try:
-        result = run_gh(
-            [
-                "gh", "api", "--method", "PATCH",
-                endpoint,
-                "--input", tmp_path,
-            ],
-            capture_output=True, text=True, encoding="utf-8",
-        )
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-    if result.returncode != 0:
-        return False, (result.stderr or result.stdout or "unknown gh error").strip()
-    try:
-        updated = json.loads(result.stdout).get("body")
-    except (ValueError, AttributeError):
-        updated = None
-    if (
-        not isinstance(updated, str)
-        or updated.replace("\r\n", "\n").rstrip() != clean_body.rstrip()
-    ):
-        return False, f"could not verify recovery metadata cleanup on comment {comment_id}"
-    return True, ""
-
-
-def clean_publication_parts(
-    repository: str,
-    issue_number: str,
-    issue_url: str,
-    key: str,
-    digest: str,
-    parts: list[str],
-) -> tuple[bool, str]:
-    """Remove temporary recovery markers after every part is durable."""
-    total = len(parts)
-    clean_parts = [
-        marker_free_part(payload, part_marker(key, digest, index, total))
-        for index, payload in enumerate(parts, 1)
+    return True, [
+        issue
+        for issue in data
+        if isinstance(issue, dict) and issue.get("title") == title
     ]
-    cleaned, error = gh_replace_issue_body(issue_url, parts[0], clean_parts[0])
-    if not cleaned:
-        return False, error
-    if total == 1:
-        return True, ""
-
-    inspected, comments_or_error = gh_list_issue_comments(repository, issue_number)
-    if not inspected:
-        return False, f"could not inspect continuation comments: {comments_or_error}"
-    comments = comments_or_error
-    for index in range(2, total + 1):
-        expected = parts[index - 1].replace("\r\n", "\n").rstrip()
-        clean = clean_parts[index - 1]
-        clean_normalized = clean.replace("\r\n", "\n").rstrip()
-        marked_matches = []
-        clean_matches = []
-        for comment in comments:
-            body = str(comment.get("body") or "").replace("\r\n", "\n").rstrip()
-            if body == expected:
-                marked_matches.append(comment)
-            elif body == clean_normalized:
-                clean_matches.append(comment)
-        if clean_matches:
-            continue
-        if len(marked_matches) != 1:
-            return False, (
-                f"continuation part {index} changed or is missing; "
-                "recovery metadata was not removed"
-            )
-        comment_id = marked_matches[0].get("id")
-        if not isinstance(comment_id, int):
-            return False, f"continuation part {index} has no usable comment id"
-        cleaned, error = gh_replace_comment_body(
-            repository, comment_id, parts[index - 1], clean
-        )
-        if not cleaned:
-            return False, error
-    return True, ""
 
 
-def reserve_inflight(
-    key: str, reservation: dict, gateway_dir: Path
-) -> tuple[bool, dict | None]:
-    """Durably reserve a publication before any remote mutation."""
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return False, None
-        inflight = state.get("inflight")
-        if not isinstance(inflight, dict):
-            inflight = {}
-        existing = inflight.get(key)
-        if isinstance(existing, dict):
-            return True, existing
-        inflight[key] = reservation
-        state["inflight"] = inflight
-        try:
-            _write_state(path, state)
-        except OSError:
-            return False, None
-    return True, reservation
+# Publishing
 
 
-def read_inflight(key: str, gateway_dir: Path) -> dict | None:
-    with _locked_state(gateway_dir) as (_, state):
-        inflight = state.get("inflight")
-        if not isinstance(inflight, dict):
-            return None
-        entry = inflight.get(key)
-        return entry if isinstance(entry, dict) else None
+def recover_interrupted(
+    batch_dir: Path, resolved: dict[str, str], report: list[str]
+) -> int:
+    """Resolve drafts a crash left mid-publish. Returns the failure count.
 
-
-def record_inflight_issue(
-    key: str, record: dict, gateway_dir: Path, completed: set[int]
-) -> bool:
-    """Record the created issue in published and inflight in one state write."""
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return False
-        inflight = state.get("inflight")
-        if not isinstance(inflight, dict) or not isinstance(inflight.get(key), dict):
-            return False
-        entry = inflight[key]
-        entry["issue_url"] = record["url"]
-        entry["issue_number"] = record["number"]
-        entry["completed_parts"] = sorted(completed)
-        published = state.get("published")
-        if not isinstance(published, dict):
-            published = {}
-        published[key] = record
-        state["published"] = published
-        try:
-            _write_state(path, state)
-        except OSError:
-            return False
-    return True
-
-
-def record_inflight_progress(
-    key: str, completed: set[int], gateway_dir: Path
-) -> bool:
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return False
-        inflight = state.get("inflight")
-        if not isinstance(inflight, dict) or not isinstance(inflight.get(key), dict):
-            return False
-        inflight[key]["completed_parts"] = sorted(completed)
-        try:
-            _write_state(path, state)
-        except OSError:
-            return False
-    return True
-
-
-def finish_inflight(key: str, gateway_dir: Path) -> bool:
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return False
-        inflight = state.get("inflight")
-        if not isinstance(inflight, dict) or key not in inflight:
-            return False
-        del inflight[key]
-        state["inflight"] = inflight
-        try:
-            _write_state(path, state)
-        except OSError:
-            return False
-    return True
-
-
-def mark_creation_attempted(key: str, gateway_dir: Path) -> bool:
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            return False
-        entry = state.get("inflight", {}).get(key)
-        if not isinstance(entry, dict) or entry.get("creation_attempted"):
-            return False
-        entry["creation_attempted"] = True
-        try:
-            _write_state(path, state)
-        except OSError:
-            return False
-    return True
-
-
-def publish_reserved_issue(
-    *,
-    key: str,
-    title: str,
-    body: str,
-    labels: list[str],
-    parent: str | None,
-    gateway_dir: Path,
-    report: list[str],
-    mutation_prelude=None,
-) -> tuple[bool, dict | None, str]:
-    """Create or resume one marker-backed issue publication of any size."""
-    parts = render_publication_parts(body, key)
-    digest = content_digest(body)
-    ok, repository_or_error = gh_repository()
-    if not ok:
-        return False, None, f"could not determine repository: {repository_or_error}"
-    repository = repository_or_error
-    fingerprint = publication_fingerprint(repository, title, labels, parent, body)
-    started_at = (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
-    reservation = {
-        "repository": repository,
-        "started_at": started_at,
-        "fingerprint": fingerprint,
-        "content_sha256": digest,
-        "title": title,
-        "labels": labels,
-        "parent": parent,
-        "part_count": len(parts),
-        "issue_url": None,
-        "issue_number": None,
-        "completed_parts": [],
-    }
-    reserved, entry = reserve_inflight(key, reservation, gateway_dir)
-    if not reserved or entry is None:
-        return False, None, "could not reserve shared state; no GitHub changes were made"
-    if (
-        entry.get("fingerprint") != fingerprint
-        or entry.get("repository") != repository
-        or entry.get("part_count") != len(parts)
-    ):
-        partial_url = entry.get("issue_url") or "(issue URL not recorded yet)"
-        return (
-            False,
-            None,
-            "draft changed while publication is incomplete; refusing to mix versions. "
-            f"Existing partial issue: {partial_url}",
-        )
-    if mutation_prelude is not None:
-        report.extend(mutation_prelude())
-
-    issue_url = str(entry.get("issue_url") or "")
-    issue_number = str(entry.get("issue_number") or "")
-    completed = {
-        int(value)
-        for value in entry.get("completed_parts", [])
-        if isinstance(value, int) or (isinstance(value, str) and value.isdigit())
-    }
-    recovered = False
-    if not issue_url:
-        found, issue_or_error = gh_find_reserved_issue(
-            repository, str(entry["started_at"]), part_marker(key, digest, 1, len(parts))
-        )
-        if not found:
-            return False, None, f"could not inspect reserved issues: {issue_or_error}"
-        if isinstance(issue_or_error, dict):
-            issue_url = str(issue_or_error.get("url") or "")
-            issue_number = str(issue_or_error.get("number") or "")
-            recovered = True
-
-    keep_parent_in_body = bool(parent) and not parent_flag_supported()
-    if not issue_url:
-        if entry.get("creation_attempted"):
-            return False, None, (
-                "a previous create may have succeeded, but its marker was not found; "
-                "refusing another create. Retry recovery later or reconcile the reserved draft."
-            )
-        if not mark_creation_attempted(key, gateway_dir):
-            return False, None, "could not record creation attempt; no issue was created"
-        created_ok, info = gh_create_issue(title, parts[0], labels, parent)
-        if not created_ok:
-            return False, None, f"issue creation failed: {info}"
-        issue_url = info
-        number_match = re.search(r"/issues/(\d+)", info)
-        issue_number = number_match.group(1) if number_match else "?"
-    completed.add(1)
-    record = {
-        "number": issue_number,
-        "url": issue_url,
-        "title": title,
-        "labels": labels,
-        "parent": parent,
-    }
-    if not record_inflight_issue(key, record, gateway_dir, completed):
-        return (
-            False,
-            record,
-            f"issue exists at {issue_url}, but its URL could not be recorded; rerun to recover",
-        )
-    if recovered:
-        report.append(f"  Recovered partial issue: {issue_url}")
-
-    if parent and (keep_parent_in_body or recovered):
-        linked, error = gh_link_parent(issue_number, parent)
-        if not linked:
-            record["parent"] = None
-            record_inflight_issue(key, record, gateway_dir, completed)
+    A ".publishing" file means `gh issue create` may or may not have run. One
+    title search settles it: if the issue exists the draft has done its job and
+    is discarded, otherwise it goes back to being an ordinary draft.
+    """
+    failures = 0
+    for path in gather_interrupted_files(batch_dir):
+        match = PUBLISHING_PATTERN.match(path.name)
+        original = path.with_name(f"issue-{match.group(1)}.md")
+        title, _ = parse_issue_file(path)
+        ok, matches = gh_find_issues_by_title(title)
+        if not ok:
             report.append(
-                f"  WARN  #{issue_number} created, but linking it under #{parent} failed: {error}"
+                f"  FAIL  {original.name} was interrupted mid-publish and GitHub "
+                f"could not be queried: {matches}"
             )
-
-    if len(parts) == 1:
-        cleaned, error = clean_publication_parts(
-            repository, issue_number, issue_url, key, digest, parts
-        )
-        if not cleaned:
-            return False, record, f"could not remove recovery metadata: {error}"
-        return True, record, ""
-
-    inspected, existing_or_error = gh_existing_comment_parts(
-        repository, issue_number, key, digest, len(parts)
-    )
-    if not inspected:
-        return False, record, f"could not inspect comments on {issue_url}: {existing_or_error}"
-    completed.update(existing_or_error)
-    if not record_inflight_progress(key, completed, gateway_dir):
-        return False, record, f"could not record continuation progress for {issue_url}"
-
-    for index in range(2, len(parts) + 1):
-        if index in completed:
+            failures += 1
             continue
-        comment_ok, error = gh_comment_issue(issue_url, parts[index - 1])
-        if not comment_ok:
-            return (
-                False,
-                record,
-                f"partial issue {issue_url}: continuation part {index} failed: {error}",
+        if len(matches) > 1:
+            report.append(
+                f"  FAIL  {original.name} was interrupted mid-publish and several "
+                f"issues share the title \"{title}\". Reconcile them, then remove "
+                f"{path.name}."
             )
-        completed.add(index)
-        if not record_inflight_progress(key, completed, gateway_dir):
-            return (
-                False,
-                record,
-                f"partial issue {issue_url}: part {index} posted but progress could not be recorded",
+            failures += 1
+            continue
+        if matches:
+            number = str(matches[0].get("number"))
+            resolved[f"{batch_dir.name}/{match.group(1)}"] = number
+            report.append(
+                f"  Recovered: {original.name} was already published as "
+                f"#{number}; discarding the draft."
             )
+            with contextlib.suppress(OSError):
+                path.unlink()
+            continue
+        with contextlib.suppress(OSError):
+            path.rename(original)
+        report.append(
+            f"  Recovered: {original.name} was interrupted before it reached "
+            "GitHub; publishing it now."
+        )
+    return failures
 
-    cleaned, error = clean_publication_parts(
-        repository, issue_number, issue_url, key, digest, parts
-    )
-    if not cleaned:
-        return False, record, f"could not remove recovery metadata: {error}"
+
+def publish_one(
+    title: str, body: str, labels: list[str], parent: str | None, path: Path
+) -> tuple[bool, dict | None, str]:
+    """Create one issue, renaming the draft across the unsafe window.
+
+    The rename is the crash record: between it and the unlink, a dead process
+    leaves a ".publishing" file that the next run resolves with a title search
+    instead of blindly creating a duplicate.
+    """
+    parts = render_parts(body)
+    publishing = path.with_name(path.name + PUBLISHING_SUFFIX)
+    try:
+        path.rename(publishing)
+    except OSError as exc:
+        return False, None, f"could not claim the draft for publishing: {exc}"
+
+    created, info = gh_create_issue(title, parts[0], labels, parent)
+    if not created:
+        with contextlib.suppress(OSError):
+            publishing.rename(path)
+        return False, None, f"issue creation failed: {info}"
+
+    url = info
+    number_match = re.search(r"/issues/(\d+)", url)
+    number = number_match.group(1) if number_match else "?"
+    record = {
+        "number": number,
+        "url": url,
+        "title": title,
+        "labels": labels,
+        "parent": parent,
+        "parts": len(parts),
+    }
+    # The issue exists, so the draft has done its job either way.
+    with contextlib.suppress(OSError):
+        publishing.unlink()
+
+    for index, payload in enumerate(parts[1:], 2):
+        posted, error = gh_comment_issue(url, payload)
+        if not posted:
+            record["truncated"] = index
+            return False, record, (
+                f"{url} exists but continuation part {index} of {len(parts)} "
+                f"failed: {error}. The remaining parts were not posted and the "
+                "draft is gone - repost them by hand or redraft the issue."
+            )
     return True, record, ""
 
 
@@ -1635,56 +1044,33 @@ def publish_batch(
     dry: bool,
     report: list[str],
     created: list[dict] | None = None,
-    seed: dict[str, str] | None = None,
-    mutation_prelude=None,
-) -> tuple[int, int]:
-    if dry:
-        return _publish_batch(batch_dir, dry, report, created, seed, mutation_prelude)
-    with publication_lock(batch_dir) as acquired:
-        if not acquired:
-            report.append("  SKIP  Another publisher is already processing this batch. Retry after it finishes.")
-            return 0, 1
-        return _publish_batch(batch_dir, dry, report, created, seed, mutation_prelude)
-
-
-def _publish_batch(
-    batch_dir: Path,
-    dry: bool,
-    report: list[str],
-    created: list[dict] | None = None,
-    seed: dict[str, str] | None = None,
     mutation_prelude=None,
 ) -> tuple[int, int]:
     """Publish (or dry-run) every draft file in one batch directory.
 
-    `created` collects one record per published issue, for durable reference
-    resolution and for the notice delivered to the agent on the next prompt.
-    `seed` is the resolved map built from the shared state on disk; when omitted, it is
-    loaded here, so references to issues published in an earlier run still
-    resolve.
+    `created` collects one record per published issue, for the notice
+    delivered to the agent on the next prompt.
 
     Returns (published_count, failed_count) for this batch.
     """
+    # Entries published here are added as the run proceeds, so later drafts in
+    # this batch can resolve references to earlier ones.
+    resolved: dict[str, str] = {}
+    recovery_failures = 0 if dry else recover_interrupted(batch_dir, resolved, report)
+
     files = gather_draft_files(batch_dir)
     if not files:
-        return 0, 0
+        return 0, recovery_failures
 
-    gateway_dir = batch_dir.parent
-    # Entries published here are added as the run proceeds, so later drafts
-    # in this batch can resolve references without re-reading shared state.
-    resolved = seed if seed is not None else seed_from_state(gateway_dir)
-    if seed is not None:
-        resolved.update(seed_from_state(gateway_dir))
-    batch_header = f"Batch: {len(files)} draft issue(s)"
-    report.append(batch_header)
+    report.append(f"Batch: {len(files)} draft issue(s)")
     report.append("")
 
     # Worklist retry: a file with an unresolved reference goes back on the
-    # queue instead of being skipped permanently, so ordering mistakes
-    # (e.g. a diamond dependency numbered out of order) self-heal within
-    # this run. Bounded to len(files) passes - a true cycle or a reference
-    # to something outside the batch will still be unresolved after that
-    # many attempts and gets reported as a real failure.
+    # queue instead of being skipped permanently, so ordering mistakes (e.g. a
+    # diamond dependency numbered out of order) self-heal within this run.
+    # Bounded to len(files) passes - a true cycle or a reference to something
+    # outside the batch will still be unresolved after that many attempts and
+    # gets reported as a real failure.
     pending = files
     published = 0
     failed_entries: list[str] = []
@@ -1727,15 +1113,15 @@ def _publish_batch(
                 still_pending.append(path)
                 continue
 
-            m = FILENAME_PATTERN.match(path.name)
-            if not m:
+            match = FILENAME_PATTERN.match(path.name)
+            if not match:
                 continue
-            i = m.group(1)
-            key = f"{batch_dir.name}/{i}"
+            index = match.group(1)
+            key = f"{batch_dir.name}/{index}"
 
             if dry:
                 suffix = f" -> sub-issue of #{parent_number}" if parent_number else ""
-                part_count = len(render_publication_parts(body, key))
+                part_count = len(render_parts(body))
                 if part_count > 1:
                     suffix += (
                         f" -> {part_count} parts "
@@ -1744,55 +1130,54 @@ def _publish_batch(
                 report.append(
                     f"  Would create: \"{title}\" [{', '.join(labels)}]{suffix}"
                 )
-                # Fabricate a placeholder so later dry-run references in
-                # this batch resolve too, for a fuller preview.
-                resolved[key] = f"NEW-{i}"
+                # Fabricate a placeholder so later dry-run references in this
+                # batch resolve too, for a fuller preview.
+                resolved[key] = f"NEW-{index}"
                 published += 1
                 made_progress = True
                 continue
 
-            # On a gh without `--parent`, the reference stays in the posted
-            # body as a fallback, since the follow-up link can still fail.
+            # On a gh without `--parent`, the reference stays in the posted body
+            # as a fallback, since the follow-up link can still fail.
             keep_parent_in_body = bool(parent_number) and not parent_flag_supported()
             if keep_parent_in_body:
                 body, _ = resolve_references(body_keeping_parent, resolved)
 
-            ok, record, error = publish_reserved_issue(
-                key=key,
-                title=title,
-                body=body,
-                labels=labels,
-                parent=parent_number,
-                gateway_dir=gateway_dir,
-                report=report,
-                mutation_prelude=mutation_prelude,
-            )
+            if mutation_prelude is not None:
+                report.extend(mutation_prelude())
+
+            ok, record, error = publish_one(title, body, labels, parent_number, path)
             if record is not None:
                 resolved[key] = str(record["number"])
             if ok and record is not None:
-                part_count = len(render_publication_parts(body, key))
-                suffix = f" ({part_count} parts)" if part_count > 1 else ""
+                suffix = f" ({record['parts']} parts)" if record["parts"] > 1 else ""
                 report.append(f"  Created: {record['url']}{suffix}")
+                if parent_number and keep_parent_in_body:
+                    linked, link_error = gh_link_parent(record["number"], parent_number)
+                    if not linked:
+                        record["parent"] = None
+                        report.append(
+                            f"  WARN  #{record['number']} created, but linking it "
+                            f"under #{parent_number} failed: {link_error}"
+                        )
                 if record.get("parent"):
                     report.append(f"        sub-issue of #{record['parent']}")
                 if created is not None:
                     created.append(record)
-                # Keep recovery state until deletion succeeds, including a crash
-                # after GitHub creation or a Windows file-sharing violation.
-                delete_published_draft(path)
-                if not finish_inflight(key, gateway_dir):
-                    report.append(f"  WARN  Could not clear recovery state for {record['url']}")
                 published += 1
             else:
                 failed_entries.append(f"  FAIL  {path.name}: {error}")
+                if record is not None and created is not None:
+                    # The issue exists, so the agent must still learn its number.
+                    created.append(record)
             made_progress = True
 
         pending = still_pending
         if not made_progress:
             break
 
-    # Anything still pending after the retry loop is a genuine problem:
-    # either a reference outside this batch, or a real dependency cycle.
+    # Anything still pending after the retry loop is a genuine problem: either
+    # a reference outside this batch, or a real dependency cycle.
     for path in pending:
         if not dry:
             rewrite_known_references(path, resolved)
@@ -1807,166 +1192,42 @@ def _publish_batch(
         )
 
     report.extend(failed_entries)
-    return published, len(failed_entries)
+    return published, len(failed_entries) + recovery_failures
 
 
-def parse_duration(value: str) -> float:
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)([smhdw])", value.strip().lower())
-    if not match:
-        raise ValueError("duration must use s, m, h, d, or w (for example 30d)")
-    unit = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[match.group(2)]
-    return float(match.group(1)) * unit
-
-
-def discard_current(session_id: str, gateway_dir: Path = GATEWAY_DIR) -> str:
-    if not SESSION_ID_PATTERN.fullmatch(session_id):
-        return "Invalid or missing issues session id. Nothing was discarded."
-    batch = gateway_dir / session_id
-    drafts = gather_draft_files(batch) if batch.is_dir() else []
-    for draft in drafts:
-        draft.unlink()
-    delete_empty_batch_dir(batch)
-    prune_published(gateway_dir)
-    return f"Discarded {len(drafts)} draft(s) from the current session."
-
-
-def _entry_age(entry: dict, now: float) -> float | None:
-    value = entry.get("started_at")
-    if not isinstance(value, str):
-        return None
-    try:
-        return now - datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
-def reconcile_old_inflight(gateway_dir: Path, older_than: float, report: list[str]) -> None:
-    """Inspect old reservations remotely; ambiguous outcomes are always retained."""
-    now = time.time()
-    with _locked_state(gateway_dir) as (path, state):
-        if path is None:
-            report.append("Could not lock recovery state; no recovery records changed.")
-            return
-        inflight = state.get("inflight")
-        if not isinstance(inflight, dict):
-            return
-        for key, entry in list(inflight.items()):
-            age = _entry_age(entry, now)
-            if age is None or age < older_than:
-                continue
-            if entry.get("issue_url"):
-                report.append(f"Retained unresolved recovery record {key}: {entry['issue_url']}")
-                continue
-            digest = entry.get("content_sha256")
-            repository = entry.get("repository")
-            started = entry.get("started_at")
-            part_count = entry.get("part_count")
-            if not all((digest, repository, started, part_count)):
-                report.append(f"Retained recovery record {key}: insufficient data for reconciliation")
-                continue
-            found, remote = gh_find_reserved_issue(
-                str(repository), str(started), part_marker(key, str(digest), 1, int(part_count))
-            )
-            if found and isinstance(remote, dict):
-                entry["issue_url"] = remote.get("url")
-                entry["issue_number"] = remote.get("number")
-                report.append(f"Reconciled {key} to {remote.get('url')}; retained for completion")
-            elif not found:
-                report.append(f"Retained recovery record {key}: remote inspection failed: {remote}")
-            elif entry.get("creation_attempted"):
-                report.append(f"Retained recovery record {key}: prior create outcome cannot be proven")
-            else:
-                del inflight[key]
-                report.append(f"Removed unused recovery reservation {key}")
-        state["inflight"] = inflight
-        _write_state(path, state)
-
-
-def garbage_collect(
-    *, dry: bool, older_than: float, gateway_dir: Path = GATEWAY_DIR
-) -> str:
-    if not gateway_dir.is_dir():
-        return "No .issues-gateway/ folder found. Nothing to clean."
-    report = ["Gateway cleanup preview" if dry else "Cleaning issues gateway", ""]
-    cutoff = time.time() - older_than
-    with publication_lock(gateway_dir / "gc") as acquired:
-        if not acquired:
-            return "Another publisher is using the issues gateway. Retry cleanup later."
-        if not dry:
-            maintain_gateway(gateway_dir)
-            reconcile_old_inflight(gateway_dir, older_than, report)
-            for old_lock in gateway_dir.glob(".publish-*.lock"):
-                old_lock.unlink(missing_ok=True)
-        for batch in (path for path in gateway_dir.iterdir() if path.is_dir()):
-            for draft in gather_draft_files(batch):
-                if draft.stat().st_mtime <= cutoff:
-                    if dry:
-                        report.append(f"Would discard old draft: {draft.relative_to(gateway_dir)}")
-                    else:
-                        draft.unlink()
-                        report.append(f"Discarded old draft: {draft.relative_to(gateway_dir)}")
-            unknown = [path for path in batch.iterdir() if path.is_file() and not FILENAME_PATTERN.match(path.name)]
-            for path in unknown:
-                report.append(f"Retained unknown file: {path.relative_to(gateway_dir)}")
-            if not dry:
-                delete_empty_batch_dir(batch)
-        if not dry:
-            prune_published(gateway_dir)
-    if len(report) == 2:
-        report.append("Nothing eligible for cleanup.")
-    return "\n".join(report)
-
-
-def run_publish_command(prompt: str, session_id: str) -> str:
-    """Parse and execute the hook's user-facing publish maintenance interface."""
-    invocation = PROMPT_PATTERN.search(prompt)
-    if invocation is None:
-        return "Invalid publish command: invocation not found"
-    try:
-        tokens = shlex.split(prompt[invocation.start():])
-    except ValueError as exc:
-        return f"Invalid publish command: {exc}"
-    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
-    parser.add_argument("--dry", action="store_true")
-    parser.add_argument("--discard-current", action="store_true")
-    parser.add_argument("--gc", action="store_true")
-    parser.add_argument("--older-than", default="30d")
-    try:
-        options, extras = parser.parse_known_args(tokens[1:])
-        if extras:
-            raise ValueError(f"unknown option: {' '.join(extras)}")
-        age = parse_duration(options.older_than)
-    except (argparse.ArgumentError, ValueError) as exc:
-        return f"Invalid publish command: {exc}"
-    if options.discard_current:
-        if options.gc or options.dry or "--older-than" in tokens:
-            return "Invalid publish command: --discard-current cannot be combined with cleanup options."
-        return discard_current(session_id)
-    if options.gc:
-        return garbage_collect(dry=options.dry, older_than=age)
-    if "--older-than" in tokens:
-        return "Invalid publish command: --older-than requires --gc."
-    return publish_issues(options.dry, session_id)
-
-
-def publish_issues(dry: bool, session_id: str) -> str:
+def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
     """Publish drafts belonging to the current agent session only."""
-    if not GATEWAY_DIR.is_dir():
+    root = Path.cwd() if root is None else root
+    gateway = root / GATEWAY_DIR
+    if not gateway.is_dir():
         return (
             "No .issues-gateway/ folder found. Run /draft-issue, /draft-issues, "
             "or /draft-audit-issues first."
         )
 
-    if not dry:
-        maintain_gateway(GATEWAY_DIR)
-
     if not SESSION_ID_PATTERN.fullmatch(session_id):
         return "Invalid or missing issues session id. Nothing was published."
 
-    batch_dir = GATEWAY_DIR / session_id
+    batch_dir = gateway / session_id
     if not batch_dir.is_dir():
         return "No draft batch found for this session. Nothing to publish."
 
+    if dry:
+        return _run_publish(batch_dir, True, root, session_id)
+
+    with file_lock(lock_path(root)) as acquired:
+        if not acquired:
+            return (
+                "Another publish is already running for this repository. "
+                "Retry once it finishes."
+            )
+        sweep_stale(root)
+        if not batch_dir.is_dir():
+            return "No draft batch found for this session. Nothing to publish."
+        return _run_publish(batch_dir, False, root, session_id)
+
+
+def _run_publish(batch_dir: Path, dry: bool, root: Path, session_id: str) -> str:
     header = "Dry run -- nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
     labels_ensured = False
@@ -1978,46 +1239,57 @@ def publish_issues(dry: bool, session_id: str) -> str:
         labels_ensured = True
         return ensure_labels(False)
 
-    # The shared state is loaded up front: reference keys carry their own
-    # session id, so a draft can point at an issue another batch published
-    # in an earlier run.
-    seed = seed_from_state(GATEWAY_DIR)
-
-    total_published = 0
-    total_failed = 0
     created: list[dict] = []
-    p, f = publish_batch(
-        batch_dir,
-        dry,
-        report,
-        created,
-        seed,
-        mutation_prelude=ensure_labels_once,
+    published, failed = publish_batch(
+        batch_dir, dry, report, created, mutation_prelude=ensure_labels_once
     )
-    total_published += p
-    total_failed += f
-    if not dry and f == 0:
-        delete_empty_batch_dir(batch_dir)
     report.append("")
 
     if not dry:
-        queue_notice(created, total_failed)
-        prune_published(GATEWAY_DIR)
+        queue_notice(root, session_id, created, failed)
+        if failed == 0:
+            # Safe even if a drafting turn is mid-flight: the agent's Write
+            # recreates the directory, and rmdir refuses a non-empty folder.
+            with contextlib.suppress(OSError):
+                batch_dir.rmdir()
 
     if dry:
+        report.append(f"Dry run complete: {published} issue(s) ready to publish.")
+        if failed:
+            report.append(f"{failed} would be skipped (see above).")
+    elif failed:
         report.append(
-            f"Dry run complete: {total_published} issue(s) ready to publish."
-        )
-        if total_failed:
-            report.append(f"{total_failed} would be skipped (see above).")
-    elif total_failed:
-        report.append(
-            f"Published {total_published} issue(s). {total_failed} failed or were skipped."
+            f"Published {published} issue(s). {failed} failed or were skipped."
         )
         report.append("Failed drafts remain in .issues-gateway/ -- fix and rerun.")
     else:
-        report.append(f"Published {total_published} issue(s) successfully.")
+        report.append(f"Published {published} issue(s) successfully.")
 
     return "\n".join(report)
 
 
+def run_publish_command(prompt: str, session_id: str, root: Path | None = None) -> str:
+    """Parse and execute the hook's user-facing publish interface.
+
+    The whole surface is "/publish-issues" and "/publish-issues --dry".
+    Cleanup is automatic, so there is no cleanup command to learn.
+    """
+    invocation = PROMPT_PATTERN.search(prompt)
+    if invocation is None:
+        return "Invalid publish command: invocation not found"
+    try:
+        tokens = shlex.split(prompt[invocation.start():])
+    except ValueError as exc:
+        return f"Invalid publish command: {exc}"
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    parser.add_argument("--dry", action="store_true")
+    try:
+        options, extras = parser.parse_known_args(tokens[1:])
+        if extras:
+            raise ValueError(
+                f"unknown option: {' '.join(extras)}. Use /publish-issues or "
+                "/publish-issues --dry."
+            )
+    except (argparse.ArgumentError, ValueError) as exc:
+        return f"Invalid publish command: {exc}"
+    return publish_issues(options.dry, session_id, root)
