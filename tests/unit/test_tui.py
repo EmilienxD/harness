@@ -207,6 +207,21 @@ def test_multiselect_uses_the_skills_style_select_all_flow():
     assert "◇  Select packages" in rendered
 
 
+def test_multiselect_marks_deselected_installed_packages_as_removals():
+    ui = TerminalUI(iter((SPACE, ESCAPE)).__next__, io.StringIO(), color=True)
+
+    ui.multiselect(
+        "Select packages",
+        (MenuOption("websearch", installed=True),),
+        selected={0},
+    )
+
+    removal_line = next(
+        line for line in ui.output.getvalue().splitlines() if "\x1b[31m○\x1b[0m" in line
+    )
+    assert "websearch" in removal_line
+
+
 def test_clearing_select_all_preserves_previously_installed_packages():
     ui, _ = ui_for(SPACE, ENTER)
     package_options = (

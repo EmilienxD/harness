@@ -547,6 +547,8 @@ class TerminalUI:
                 if indices and count == len(indices)
                 else self._paint("◐", self.YELLOW)
                 if count
+                else self._paint("○", self.RED)
+                if kind == "option" and options[indices[0]].installed
                 else self._paint("○", self.DIM)
             )
             if kind == "all":
