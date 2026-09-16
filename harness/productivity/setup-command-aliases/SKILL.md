@@ -1,5 +1,5 @@
 ---
-name: command-aliases
+name: setup-command-aliases
 description: Add or change cross-platform shell command aliases when the user asks for a new alias or shortcut command.
 disable-model-invocation: true
 ---

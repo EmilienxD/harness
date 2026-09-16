@@ -65,9 +65,9 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`todo-hitl`**: `mark-as-todo-hitl` leaves a focused `TODO(HITL)` for work that needs a human decision; `address-todo-hitl` investigates the highest-priority marker, agrees on a resolution with you, and then implements it.
 
-- **`command-aliases`**: Adds or updates shell aliases in PowerShell, Bash, or Zsh while preserving existing configuration.
+- **`setup-command-aliases`**: Adds or updates shell aliases in PowerShell, Bash, or Zsh while preserving existing configuration.
 
-- **`text-replacements`**: Adds or updates system-wide AutoHotkey text replacements and reloads the startup script. Windows only.
+- **`setup-text-replacements`**: Adds or updates system-wide AutoHotkey text replacements and reloads the startup script. Windows only.
 
 - **`agent-launcher`**: Installs `cch` and `cxh`, project-configurable wrappers for launching Claude Code and ChatGPT/Codex. A starter `.harness/agent-launcher/` configuration can add a Claude system prompt, provider settings, and standard-library Python extensions; the Claude-only `extend-claude-system-prompt` skill helps maintain and validate that prompt.
 

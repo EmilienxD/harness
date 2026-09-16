@@ -1,5 +1,5 @@
-name = "command-aliases"
-version = "1.0.2"
+name = "setup-command-aliases"
+version = "1.0.3"
 description = "Add or modify cross-platform shell command aliases (PowerShell, Bash, Zsh)"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -11,11 +11,11 @@ status = "supported"
 
 [[files]]
 src = "SKILL.md"
-dest = "command-aliases/SKILL.md"
+dest = "setup-command-aliases/SKILL.md"
 root = "skills"
 
 [[files]]
 src = "chatgpt/openai.yaml"
-dest = "command-aliases/agents/openai.yaml"
+dest = "setup-command-aliases/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

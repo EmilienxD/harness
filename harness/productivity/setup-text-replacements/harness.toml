@@ -1,5 +1,5 @@
-name = "text-replacements"
-version = "1.0.2"
+name = "setup-text-replacements"
+version = "1.0.3"
 description = "Add or change always-on AutoHotkey text replacements (Windows only)"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -11,11 +11,11 @@ status = "supported"
 
 [[files]]
 src = "SKILL.md"
-dest = "text-replacements/SKILL.md"
+dest = "setup-text-replacements/SKILL.md"
 root = "skills"
 
 [[files]]
 src = "chatgpt/openai.yaml"
-dest = "text-replacements/agents/openai.yaml"
+dest = "setup-text-replacements/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

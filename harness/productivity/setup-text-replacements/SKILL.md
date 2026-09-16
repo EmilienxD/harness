@@ -1,5 +1,5 @@
 ---
-name: text-replacements
+name: setup-text-replacements
 description: Add or change always-on AutoHotkey text replacements when the user asks for a new trigger or expansion.
 disable-model-invocation: true
 ---
