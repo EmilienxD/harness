@@ -1,6 +1,10 @@
 ---
 name: draft-audit-issues
-description: Turn an existing codebase audit into one evidence-preserving GitHub issue draft per finding, ready for review and publication through the issues gateway.
+description: Convert audit findings into evidence-preserving GitHub issue drafts. Use when an existing audit is ready to become reviewable tickets.
+argument-hint: "[audit report or scope]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,10 @@
 ---
 name: address-todo-hitl
-description: Investigate and address the most important TODO(HITL) with human agreement.
+description: Investigate and address the most important TODO(HITL) with human agreement. Use when deferred work is ready for a human decision and implementation.
+argument-hint: "[TODO(HITL) or scope]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

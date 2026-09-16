@@ -1,5 +1,5 @@
 name = "prototype"
-version = "1.2.1"
+version = "1.2.2"
 description = "Build throwaway design prototypes outside the codebase"
 
 [platforms.claude]

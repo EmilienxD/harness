@@ -1,6 +1,10 @@
 ---
 name: draft-issues
-description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, written to markdown files for the user to review and edit before publishing.
+description: Break a plan or specification into connected tracer-bullet issue drafts. Use when the work needs multiple reviewable tickets before publication.
+argument-hint: "[plan, spec, issue, or request]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

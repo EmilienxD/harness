@@ -1,6 +1,10 @@
 ---
 name: to-spec
-description: Turn the current conversation into a spec, delivered directly in chat — no interview, just synthesis of what you've already discussed.
+description: Synthesize the current conversation into a specification in chat. Use when the user wants a spec without another interview or an issue draft.
+argument-hint: "[reference or focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

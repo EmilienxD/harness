@@ -1,6 +1,10 @@
 ---
 name: websearch-with-agent
 description: Launch a visible agent to research the web and report sourced findings. Use when the user wants a separate agent to investigate current or externally documented information.
+argument-hint: "[research task]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

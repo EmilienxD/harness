@@ -1,6 +1,10 @@
 ---
 name: work-with-agent
 description: Launch a visible general-purpose agent for a delegated task. Use when the user wants a separate agent to handle work that does not fit a more specific delegation skill.
+argument-hint: "[task and mode/provider preferences]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

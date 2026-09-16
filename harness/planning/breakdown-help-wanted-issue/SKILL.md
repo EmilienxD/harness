@@ -1,6 +1,10 @@
 ---
 name: breakdown-help-wanted-issue
-description: Clarify a vague request, investigate its fit with the codebase, and challenge its scope and assumptions before presenting a report for user validation.
+description: Investigate and clarify a vague request before producing a validation report. Use when scope, assumptions, or codebase fit must be resolved before implementation.
+argument-hint: "[request, issue, or file]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

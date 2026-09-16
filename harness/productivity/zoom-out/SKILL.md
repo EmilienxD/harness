@@ -1,6 +1,10 @@
 ---
 name: zoom-out
 description: Tell the agent to zoom out and give broader context or a higher-level perspective. Use when the user is unfamiliar with a section of code or needs to understand how it fits into the bigger picture.
+argument-hint: "[code area]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

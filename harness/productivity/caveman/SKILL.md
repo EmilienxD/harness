@@ -5,6 +5,10 @@ description: >
   filler, articles, and pleasantries while keeping full technical accuracy.
   Use when the user says "caveman mode", "talk like caveman", "use caveman",
   "less tokens", "be brief", or invokes the skill explicitly.
+argument-hint: "[request]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

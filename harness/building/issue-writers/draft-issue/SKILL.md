@@ -1,6 +1,10 @@
 ---
 name: draft-issue
-description: Turn a request, a plan, or the current conversation into one tracer-bullet ticket declaring its blocking edges, written to a markdown file for the user to review and edit before publishing. Use when a single issue is wanted, with no multi-issue breakdown.
+description: Turn a request or plan into one tracer-bullet issue draft. Use when the work belongs in a single reviewable ticket.
+argument-hint: "[request, plan, spec, or reference]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 
