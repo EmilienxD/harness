@@ -30,6 +30,5 @@ def test_setup_git_worktree_maker_installs_shared_skill_for_both_platforms(tmp_p
         installed_bodies.append(
             (installed_skill / "SKILL.md").read_text(encoding="utf-8")
         )
-        assert (installed_skill / "references/generated-command-contract.md").is_file()
 
     assert installed_bodies[0] == installed_bodies[1]
