@@ -112,7 +112,7 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
 async function stageIssueWriters(platform: IssuePlatform, harnessRoot: string, projectRoot: string, python: string): Promise<void> {
   const source = join(harnessRoot, "harness", "building", "issue-writers");
   const HOOK = "issue_writers_hook.py";
-  const skills = ["draft-issue", "draft-issues", "draft-audit-issues", "publish-issues", "to-spec", "to-spec-draft-issue"];
+  const skills = ["draft-issue", "draft-issues", "publish-issues", "to-spec", "to-spec-draft-issue"];
   if (platform === "claude") {
     const claudeRoot = join(projectRoot, ".claude");
     const hookRoot = join(claudeRoot, "hooks");

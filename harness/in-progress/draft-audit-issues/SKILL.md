@@ -8,8 +8,6 @@ metadata:
 disable-model-invocation: true
 ---
 
-Use what the user provided alongside the invocation as this skill's input. A provider-specific hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
-
 Turn the findings from an existing audit into GitHub issue drafts. Preserve a strict one-finding-to-one-issue mapping and the audit's evidence-oriented format.
 
 This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as markdown files. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.

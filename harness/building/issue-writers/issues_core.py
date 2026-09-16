@@ -130,7 +130,7 @@ FENCE_PATTERN = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 # whitespace in a longer user message.
 PROMPT_PATTERN = re.compile(r"(?<!\S)[$@/]publish-issues?(?=\s|$)")
 DRAFT_PATTERN = re.compile(
-    r"(?<!\S)[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
+    r"(?<!\S)[$@/](draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
 )
 
 # An issues session id: a Claude Code session id (a UUID), or the UUID a
@@ -1209,7 +1209,7 @@ def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
     if not drafts_dir.is_dir():
         return (
             f"No {DRAFTS_DIR.as_posix()}/ folder found. Run /draft-issue, "
-            "/draft-issues, or /draft-audit-issues first."
+            "/draft-issues first."
         )
 
     if not SESSION_ID_PATTERN.fullmatch(session_id):
