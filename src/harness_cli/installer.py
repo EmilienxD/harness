@@ -316,19 +316,23 @@ class CatalogueInstaller:
             for installation in self.store.data["installations"].values()
         )
 
-    def _file_owned_in_another_installation(self, path: str) -> bool:
+    def _owned_file_in_another_installation(self, path: str) -> dict[str, Any] | None:
         canonical = _canonical_path(path)
         current = self.installation
-        return any(
-            installation is not current
-            and any(
-                record.get("owned")
-                and _canonical_path(record["path"]) == canonical
+        return next(
+            (
+                record
+                for installation in self.store.data["installations"].values()
+                if installation is not current
                 for receipt in installation.get("packages", {}).values()
                 for record in receipt.get("files", [])
-            )
-            for installation in self.store.data["installations"].values()
+                if record.get("owned") and _canonical_path(record["path"]) == canonical
+            ),
+            None,
         )
+
+    def _file_owned_in_another_installation(self, path: str) -> bool:
+        return self._owned_file_in_another_installation(path) is not None
 
     def _validate_receipt_paths(self, packages: dict[str, Any]) -> None:
         """Reject receipt paths that could make an operation touch elsewhere."""
@@ -732,11 +736,13 @@ class CatalogueInstaller:
         for payload in self._payloads(tool):
             destination = self.target.destination_path(payload.root, payload.dest)
             if destination.exists() and payload.starter:
+                other_record = self._owned_file_in_another_installation(str(destination))
+                managed_digest = other_record.get("digest") if other_record else None
                 files.append({
                     "path": str(destination.resolve()),
-                    "digest": sha256(destination),
+                    "digest": managed_digest or sha256(destination),
                     "starter": True,
-                    "owned": self._file_owned_in_another_installation(str(destination)),
+                    "owned": other_record is not None,
                 })
                 continue
             if destination.exists() and sha256(destination) == sha256(payload.source):

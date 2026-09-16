@@ -1,5 +1,5 @@
 name = "websearch"
-version = "1.3.0"
+version = "1.3.2"
 description = "Web research with concise answers and a Markdown source index"
 
 [platforms.claude]
@@ -15,8 +15,8 @@ root = "skills"
 
 [[files]]
 src = "INDEX.md"
-dest = "websearch/INDEX.md"
-root = "skills"
+dest = ".harness/websearch/INDEX.md"
+root = "workspace"
 starter = true
 
 [[files]]

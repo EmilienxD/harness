@@ -15,7 +15,7 @@ npx ctx7@latest library <name> "<specific topic>"    # Skip when the library id 
 npx ctx7@latest docs <library-id> "<specific topic>"
 ```
 
-Before doing any search, read INDEX.md to get a list of common, known, and validated sources. Use any source that is relevant to the task and fetch it. After every web search, add ONLY the relevant and trusted sources found during the search to the index. Use this format:
+The shared source index is at `<scope-root>/.harness/websearch/INDEX.md`, where `<scope-root>` is the project root for a project installation or the home directory for a user installation. Before doing any search, read that index to get a list of common, known, and validated sources. Use any source that is relevant to the task and fetch it. After every web search, add ONLY the relevant and trusted sources found during the search to the index. Use this format:
 
 ```markdown
 - Concise title: Source (e.g. URL, Context7 library id).
