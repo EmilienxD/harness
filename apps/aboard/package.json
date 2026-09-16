@@ -393,11 +393,11 @@
         },
         {
           "command": "aboard.focusAgent",
-          "when": "viewItem == aboard.agent.active"
+          "when": "viewItem == aboard.agent.interactive"
         },
         {
           "command": "aboard.killAgent",
-          "when": "viewItem == aboard.agent.active"
+          "when": "viewItem == aboard.agent.interactive || viewItem == aboard.agent.background"
         },
         {
           "command": "aboard.startAutoRun",

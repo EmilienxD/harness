@@ -207,6 +207,20 @@ test("the terminal leaves title policy to VS Code; the aboard label stays on the
   assert.equal(created.name, "aboard: implementer");
 });
 
+test("a visible agent exposes its provider to the terminal host without taking over the title", () => {
+  const { controller, host } = setup();
+  controller.create({
+    agentId: agent("agent-codex"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "interactive",
+    provider: "chatgpt",
+    executionMode: "interactive",
+  });
+
+  assert.equal(host.created[0]?.options.provider, "chatgpt");
+  assert.equal("name" in (host.created[0]?.options ?? {}), false);
+});
+
 test("a closed terminal frees the agent for relaunch but keeps session identity fixed", async () => {
   const { controller, host } = setup();
   const agentId = agent("interactive-1");

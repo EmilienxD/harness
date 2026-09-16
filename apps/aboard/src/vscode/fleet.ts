@@ -12,7 +12,7 @@ export interface FleetTreeItem {
   readonly description: string;
   readonly tooltip: string;
   readonly icon: string;
-  readonly contextValue: "aboard.agent.active";
+  readonly contextValue: "aboard.agent.interactive" | "aboard.agent.background";
   readonly collapsible: boolean;
   readonly command?:
     | { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
@@ -47,8 +47,10 @@ export class FleetTreeModel {
   public item(node: FleetTreeNode): FleetTreeItem {
 
     const { session } = node;
+    const background = isBackground(session);
     const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
     const markers = [
+      providerLabel(session.platform),
       session.lifecycle.status,
       node.leaseHolder ? "lease holder" : "",
     ].filter(Boolean);
@@ -57,9 +59,9 @@ export class FleetTreeModel {
       description: markers.join(" · "),
       tooltip: agentTooltip(session, node.leaseHolder),
       icon: agentIcon(session),
-      contextValue: "aboard.agent.active",
+      contextValue: background ? "aboard.agent.background" : "aboard.agent.interactive",
       collapsible: false,
-      command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const },
+      ...(background ? {} : { command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const } }),
     };
   }
 
@@ -103,7 +105,17 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
   return { dispose: () => registrations.forEach((entry) => entry.dispose()) };
 }
 
-function agentIcon(_session: AgentSession): string { return "sparkle-filled"; }
+function agentIcon(session: AgentSession): string {
+  return isBackground(session) ? "lock" : "sparkle-filled";
+}
+
+function isBackground(session: AgentSession): boolean {
+  return session.executionMode === "auto" || session.executionMode === "auto-run";
+}
+
+function providerLabel(platform: AgentSession["platform"]): "Claude" | "Codex" {
+  return platform === "claude" ? "Claude" : "Codex";
+}
 
 /** Lifecycle states that describe an agent still doing something. */
 export function isLiveSession(session: AgentSession): boolean {
@@ -116,6 +128,8 @@ function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "a
 // reliable source yet, and a wrong number is worse than no number.
 function agentTooltip(session: AgentSession, leaseHolder: boolean): string {
   return [
+    `Provider: ${providerLabel(session.platform)}`,
+    `Mode: ${isBackground(session) ? "Background" : "Interactive"}`,
     `Session: ${session.sessionId}`,
     `Status: ${session.lifecycle.status}`,
     leaseHolder ? "Holds the write lease" : "",

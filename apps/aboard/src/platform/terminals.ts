@@ -8,6 +8,7 @@ import { createBackgroundProcess } from "./background.js";
 import {
   isInteractiveAgentType,
   type AgentId,
+  type AgentPlatformId,
   type AgentType,
   type ExecutionMode,
   type SessionId,
@@ -62,6 +63,7 @@ export interface TerminalHandle {
 
 export interface TerminalCreationOptions {
   readonly cwd: string;
+  readonly provider?: AgentPlatformId;
   readonly name?: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
@@ -85,6 +87,7 @@ export interface CreateAboardTerminalRequest {
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
+  readonly provider?: AgentPlatformId;
   readonly issueNumbers?: readonly number[];
   readonly name?: string;
   readonly cwd?: string;
@@ -254,6 +257,7 @@ export class TerminalController {
     const creationOptions: TerminalCreationOptions = {
       cwd,
       env,
+      ...(request.provider === undefined ? {} : { provider: request.provider }),
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
       ...(request.shellArgs === undefined ? {} : { shellArgs: request.shellArgs }),
     };
