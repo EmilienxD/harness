@@ -212,10 +212,14 @@ def _adoption_lines(products: dict[str, set[str]]) -> list[str]:
     ]
 
 
-def catalogue_menu() -> int:
+def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> int:
     if not sys.stdin.isatty():
         raise InstallError("the catalogue is interactive; run `harness` in a terminal")
-    available = discover()
+    available = discover(local=local) if local is not None else discover()
+    if root is not None:
+        root = root.expanduser().resolve()
+        if not root.is_dir():
+            raise UsageError(f"project root is not an existing directory: {root}")
     tools = sorted(
         (tool for tool in available.values() if tool.selectable),
         key=lambda tool: (_category_rank(tool), tool.name),
@@ -248,7 +252,10 @@ def catalogue_menu() -> int:
             _cancel(ui)
             return 0
 
-        targets = _targets(scope, platforms)
+        targets = (
+            [Target.for_project(root, platform) for platform in platforms]
+            if scope == 0 and root is not None else _targets(scope, platforms)
+        )
         installed = _root_packages(targets, store)
         package_selection = ui.multiselect(
             "Select packages",
@@ -357,6 +364,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Install and reconcile the Harness catalogue.",
     )
     parser.add_argument("--version", action="version", version=f"harness {__version__}")
+    parser.add_argument("--local", type=Path, help="use a local Harness checkout and its Python runtimes")
+    parser.add_argument("--root", type=Path, help="project root (default: current directory)")
     commands = parser.add_subparsers(dest="command")
     install = commands.add_parser(
         "install",
@@ -373,7 +382,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    install.add_argument("--root", type=Path, help="project root (default: current directory)")
+    install.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     install.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
     install.add_argument(
         "--overwrite", action="store_true",
@@ -399,7 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    uninstall.add_argument("--root", type=Path, help="project root (default: current directory)")
+    uninstall.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     uninstall.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
     uninstall.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     uninstall.set_defaults(operation="uninstall")
@@ -415,7 +424,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    upgrade.add_argument("--root", type=Path, help="project root (default: current directory)")
+    upgrade.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     upgrade.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
     upgrade.add_argument(
         "--overwrite", action="store_true",
@@ -437,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    list_parser.add_argument("--root", type=Path, help="project root (default: current directory)")
+    list_parser.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     list_parser.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     list_parser.set_defaults(operation="list")
     info = commands.add_parser("info", help="show package details")
@@ -457,6 +466,8 @@ def main(argv: list[str] | None = None) -> int:
         args = build_parser().parse_args(raw_args)
         if args.command is not None:
             return run_installer_command(args)
+        if args.local is not None or args.root is not None:
+            return catalogue_menu(local=args.local, root=args.root)
         return catalogue_menu()
     except UsageError as exc:
         if "--json" in raw_args:

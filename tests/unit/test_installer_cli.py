@@ -4,6 +4,52 @@ from harness_cli.cli import main
 from harness_cli.host_actions import PreparedAction
 
 
+def test_interactive_root_is_passed_to_menu(tmp_path, monkeypatch):
+    received = {}
+
+    def menu(**kwargs):
+        received.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("harness_cli.cli.catalogue_menu", menu)
+    assert main(["--root", str(tmp_path)]) == 0
+    assert received["root"] == tmp_path
+
+
+def test_global_root_is_used_by_install(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    assert main([
+        "--root", str(tmp_path), "install", "caveman", "--platform", "claude", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["root"] == str(tmp_path.resolve())
+
+
+def test_local_install_uses_checkout_runtime(tmp_path, monkeypatch, capsys):
+    import subprocess
+    from pathlib import Path
+
+    checkout = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("harness_cli.host_actions.subprocess.run", run)
+    monkeypatch.setattr("harness_cli.host_actions.shutil.which", lambda name: name)
+    assert main([
+        "--local", str(checkout), "install", "report-gotchas",
+        "--root", str(tmp_path), "--platform", "claude", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+    install = next(command for command in commands if command[1:3] == ["tool", "install"])
+    assert install[install.index("--from") + 1] == str(
+        checkout / "harness/productivity/report-gotchas/runtime"
+    )
+    assert "--no-cache" in install
+
+
 def test_install_is_non_interactive_and_emits_one_json_result(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))

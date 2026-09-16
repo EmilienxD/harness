@@ -172,6 +172,23 @@ uv run pytest
 uv run harness --help
 ```
 
+To try an unpushed checkout against another project, use `--local` before the
+installer subcommand (or omit the subcommand for the interactive menu):
+
+```powershell
+$checkout = "C:\Users\emb\Desktop\dev\projects\harness"
+uvx --no-cache --from "$checkout" harness --local "$checkout" --root "C:\Users\emb\dev\unloopedit"
+# Non-interactive installation:
+uvx --no-cache --from "$checkout" harness --local "$checkout" install report-gotchas subagents --root "C:\Users\emb\dev\unloopedit"
+```
+
+`--local` reads the checkout's catalogue and installs its Python runtime tools
+from local directories, including uncommitted changes. Without it, runtime tools
+use the GitHub commits pinned in the manifests. `--no-cache` rebuilds the installer
+from the current checkout; local runtime installations also bypass the build cache.
+Host tools are installed for your user even when the selected scope is Project.
+Aboard still uses its published VSIX; see its README for extension development.
+
 The shared deterministic E2E core uses the real Claude Code or ChatGPT CLI and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
 
 ```bash
