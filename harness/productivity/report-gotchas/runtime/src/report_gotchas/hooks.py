@@ -46,7 +46,9 @@ def _launch_worker(receipt: str) -> None:
         return
     flags = 0
     if os.name == "nt":
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        # DETACHED_PROCESS makes Windows ignore CREATE_NO_WINDOW, allowing
+        # Python's launcher to allocate a visible console for its child.
+        flags = subprocess.CREATE_NO_WINDOW
     subprocess.Popen(
         [sys.executable, "-m", "report_gotchas.cli", "deliver", receipt],
         stdin=subprocess.DEVNULL,

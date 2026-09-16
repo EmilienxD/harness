@@ -101,6 +101,7 @@ def _git(cwd: Path) -> GitState:
             encoding="utf-8",
             errors="replace",
             timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
 

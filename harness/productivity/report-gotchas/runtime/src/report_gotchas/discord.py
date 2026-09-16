@@ -60,8 +60,11 @@ def _header(report: QueuedReport) -> str:
         if git.remote:
             lines.append(f"**Origin:** {_inline(git.remote)}")
 
-        if git.status:
-            lines.extend(_inline(line) for line in git.status.splitlines())
+        changed = [line for line in git.status.splitlines() if line and not line.startswith("##")]
+        lines.append(f"**Changed files:** {len(changed)}")
+        lines.extend(_inline(line) for line in changed[:10])
+        if len(changed) > 10:
+            lines.append(f"… truncated: {len(changed) - 10} more files")
 
     return "\n".join(lines)
 
