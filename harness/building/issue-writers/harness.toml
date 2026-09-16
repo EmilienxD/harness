@@ -1,6 +1,6 @@
 name = "issue-writers"
-version = "1.2.1"
-description = "Draft, publish, and directly copy responses to GitHub issues"
+version = "1.2.2"
+description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -11,17 +11,6 @@ fragment = "claude/settings.fragment.json"
 [platforms.chatgpt]
 status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
-
-[[files]]
-src = "copy_message_as_issue.py"
-dest = "copy_message_as_issue.py"
-root = "hooks"
-executable = true
-
-[[files]]
-src = "copy-message-as-issue"
-dest = "copy-message-as-issue"
-root = "skills"
 
 [[files]]
 src = "issues_core.py"
@@ -64,12 +53,6 @@ root = "skills"
 src = "to-spec-draft-issue"
 dest = "to-spec-draft-issue"
 root = "skills"
-
-[[files]]
-src = "chatgpt/agents/copy-message-as-issue.yaml"
-dest = "copy-message-as-issue/agents/openai.yaml"
-root = "skills"
-platforms = ["chatgpt"]
 
 [[files]]
 src = "chatgpt/agents/draft-issue.yaml"

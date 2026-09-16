@@ -14,7 +14,6 @@ from harness_cli.receipts import ReceiptStore
 
 ROOT = Path(__file__).resolve().parents[2]
 CORE = ROOT / "harness/building/issue-writers/issues_core.py"
-COPY = ROOT / "harness/building/issue-writers/copy_message_as_issue.py"
 ADAPTER = ROOT / "harness/building/issue-writers/issue_writers_hook.py"
 
 core_spec = importlib.util.spec_from_file_location("issues_core", CORE)
@@ -22,12 +21,6 @@ core = importlib.util.module_from_spec(core_spec)
 sys.modules["issues_core"] = core
 assert core_spec.loader is not None
 core_spec.loader.exec_module(core)
-
-copy_spec = importlib.util.spec_from_file_location("copy_message_as_issue", COPY)
-copy_hook = importlib.util.module_from_spec(copy_spec)
-sys.modules["copy_message_as_issue"] = copy_hook
-assert copy_spec.loader is not None
-copy_spec.loader.exec_module(copy_hook)
 
 adapter_spec = importlib.util.spec_from_file_location("issue_writers_hook", ADAPTER)
 adapter = importlib.util.module_from_spec(adapter_spec)
@@ -49,9 +42,7 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
 
     assert (tmp_path / ".codex/hooks/issues_core.py").is_file()
     assert (tmp_path / ".codex/hooks/issue_writers_hook.py").is_file()
-    assert (tmp_path / ".codex/hooks/copy_message_as_issue.py").is_file()
     for name in (
-        "copy-message-as-issue",
         "draft-audit-issues",
         "draft-issue",
         "draft-issues",
@@ -69,72 +60,6 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
     assert any("issue_writers_hook.py" in command for command in commands)
     assert any("--chatgpt" in command for command in commands)
     assert all("${" not in command for command in commands)
-    for event in ("Stop", "SessionEnd"):
-        event_commands = [hook["command"] for hook in hooks["hooks"][event][0]["hooks"]]
-        assert any("issue_writers_hook.py" in command for command in event_commands)
-        assert any("--chatgpt" in command for command in event_commands)
-
-
-def test_chatgpt_copies_the_latest_response_without_using_the_gateway(
-    tmp_path, monkeypatch, capsys
-):
-    cache_root = tmp_path / "provider-cache"
-    monkeypatch.setenv("HARNESS_COPY_MESSAGE_CACHE_DIR", str(cache_root))
-    created = []
-    monkeypatch.setattr(
-        copy_hook,
-        "gh_create_issue",
-        lambda title, body: (created.append((title, body)) or True, "https://github.com/o/r/issues/9"),
-    )
-    base = {
-        "session_id": "thr_copy",
-        "cwd": str(tmp_path),
-        "transcript_path": str(tmp_path / "rollout.jsonl"),
-    }
-
-    assert _run(
-        {**base, "hook_event_name": "Stop", "last_assistant_message": "Latest answer"},
-        monkeypatch,
-        capsys,
-    ) == {}
-    result = _run(
-        {
-            **base,
-            "hook_event_name": "UserPromptSubmit",
-            "prompt": "Please use $copy-message-as-issue for that response",
-        },
-        monkeypatch,
-        capsys,
-    )
-
-    assert result == {"decision": "block", "reason": "Saved: https://github.com/o/r/issues/9"}
-    assert created == [("Report thr_copy", "Latest answer")]
-    assert not (tmp_path / ".issues-gateway").exists()
-    assert not copy_hook.cache_path(base).exists()
-
-
-def test_chatgpt_session_end_cleans_cache_after_the_workspace_is_removed(
-    tmp_path, monkeypatch, capsys
-):
-    monkeypatch.setenv("HARNESS_COPY_MESSAGE_CACHE_DIR", str(tmp_path / "provider-cache"))
-    workspace = tmp_path / "removed-worktree"
-    workspace.mkdir()
-    payload = {
-        "session_id": "thr_removed",
-        "cwd": str(workspace),
-        "hook_event_name": "Stop",
-        "last_assistant_message": "Latest answer",
-    }
-    copy_hook.capture(payload)
-    cache = copy_hook.cache_path(payload)
-    workspace.rmdir()
-
-    assert _run(
-        {**payload, "hook_event_name": "SessionEnd"}, monkeypatch, capsys
-    ) is None
-    assert not cache.exists()
-
-
 def test_drafting_prompt_injects_stable_session_and_next_index(
     tmp_path, monkeypatch, capsys
 ):

@@ -172,7 +172,7 @@ def test_first_party_tools_use_root_shared_shallow_platform_overlays():
             )
 
 
-def test_no_catalogue_or_archive_package_has_a_shared_payload_directory():
+def test_no_catalogue_or_archived_package_has_a_shared_payload_directory():
     shared_directories = [
         path
         for path in (ROOT / "harness").rglob("shared")

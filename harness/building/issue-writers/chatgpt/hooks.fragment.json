@@ -1,25 +1,5 @@
 {
   "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/issue_writers_hook.py\" --chatgpt"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/issue_writers_hook.py\" --chatgpt"
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [

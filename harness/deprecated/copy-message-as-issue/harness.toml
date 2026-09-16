@@ -1,0 +1,21 @@
+name = "copy-message-as-issue"
+version = "1.0.0"
+description = "Deprecated direct publication of assistant responses as GitHub issues"
+requires = ["git", "gh"]
+
+[[files]]
+src = "copy_message_as_issue.py"
+dest = "copy_message_as_issue.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "SKILL.md"
+dest = "copy-message-as-issue/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "copy-message-as-issue/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

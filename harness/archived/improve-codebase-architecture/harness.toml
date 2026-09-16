@@ -1,7 +1,7 @@
 name = "improve-codebase-architecture"
 version = "1.0.4"
 description = "Finds architectural friction and proposes concrete refactors"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/archive/improve-codebase-architecture/SKILL.md"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/archived/improve-codebase-architecture/SKILL.md"
 
 [platforms.claude]
 status = "supported"

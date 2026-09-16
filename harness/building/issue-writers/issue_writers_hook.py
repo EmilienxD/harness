@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Draft, cache, and publish GitHub issues without a model call.
+"""Draft and publish GitHub issues without a model call.
 
 One hook for the whole tool. The installer passes `--claude` or `--chatgpt`,
 which picks the section that knows how that product identifies a session and
 what it does between turns:
 
-* Both providers wire lifecycle events so the final assistant message can be
-  published verbatim by ``copy-message-as-issue``.
 * ChatGPT thread ids are mapped onto the UUID form that draft references use.
 
 Publishing, drafting context, and the issue gateway itself all live in
@@ -20,7 +18,6 @@ import sys
 import uuid
 from pathlib import Path
 
-import copy_message_as_issue as copy_hook
 import issues_core as core
 
 
@@ -49,45 +46,15 @@ def additional_context(text: str) -> None:
     )
 
 
-def claude_lifecycle(payload: dict) -> None:
-    """Keep the response cache honest across provider lifecycle events."""
-    if payload.get("agent_id"):
-        return
-    if payload.get("cwd"):
-        os.chdir(payload["cwd"])
-    try:
-        if payload.get("hook_event_name") == "Stop":
-            copy_hook.capture(payload)
-        elif payload.get("hook_event_name") in ("SessionStart", "SessionEnd", "StopFailure"):
-            copy_hook.invalidate(payload)
-    except Exception as exc:
-        # Cache maintenance must never request another model turn.
-        sys.stderr.write(f"copy-message-as-issue response cache unavailable: {exc}\n")
-
-
 def claude_prompt(payload: dict) -> None:
     prompt = payload.get("prompt", "").strip()
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
-
-    if copy_hook.PROMPT_PATTERN.search(prompt):
-        try:
-            if payload.get("cwd"):
-                os.chdir(payload["cwd"])
-        except OSError as exc:
-            sys.stderr.write(f"Save failed: {exc}\n")
-            raise SystemExit(2)
-        copy_hook.handle_save(payload)
 
     if core.PROMPT_PATTERN.search(prompt):
         session_id = str(payload.get("session_id") or "")
         result = core.run_publish_command(prompt, session_id)
         sys.stderr.write("\n\n" + result)
         raise SystemExit(2)
-
-    try:
-        copy_hook.invalidate(payload)
-    except (OSError, ValueError):
-        pass
 
     contexts: list[str] = []
     try:
@@ -110,7 +77,7 @@ def claude_prompt(payload: dict) -> None:
         additional_context("\n\n".join(contexts))
 
 
-# ChatGPT lifecycle, prompt handling, and thread-id mapping
+# ChatGPT prompt handling and thread-id mapping
 
 def gateway_session_id(session_id: str) -> str:
     """Map ChatGPT thread ids to the UUID form used by draft references."""
@@ -119,33 +86,14 @@ def gateway_session_id(session_id: str) -> str:
 
 def chatgpt_prompt(payload: dict) -> None:
     prompt = str(payload.get("prompt") or "").strip()
-    event = payload.get("hook_event_name")
-    if event == "Stop":
-        copy_hook.capture(payload)
-        json.dump({}, sys.stdout)
-        return
-    if event in {"SessionStart", "SessionEnd", "Interrupt"}:
-        copy_hook.invalidate(payload)
-        return
-
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
     os.chdir(cwd)
-
-    if copy_hook.PROMPT_PATTERN.search(prompt):
-        result = copy_hook.save(payload)
-        json.dump({"decision": "block", "reason": result}, sys.stdout)
-        return
 
     if core.PROMPT_PATTERN.search(prompt):
         session_id = str(payload.get("session_id") or "")
         result = core.run_publish_command(prompt, gateway_session_id(session_id))
         json.dump({"decision": "block", "reason": result}, sys.stdout)
         return
-
-    try:
-        copy_hook.invalidate(payload)
-    except (OSError, ValueError):
-        pass
 
     contexts: list[str] = []
     try:
@@ -176,9 +124,6 @@ def main(argv: list[str] | None = None) -> None:
     payload = json.load(sys.stdin)
     if provider == CHATGPT:
         chatgpt_prompt(payload)
-        return
-    if payload.get("hook_event_name") in ("Stop", "StopFailure", "SessionStart", "SessionEnd"):
-        claude_lifecycle(payload)
         return
     claude_prompt(payload)
 

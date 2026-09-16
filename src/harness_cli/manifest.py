@@ -397,7 +397,7 @@ def discover(root: Path | None = None) -> dict[str, Tool]:
     base = root or tools_root()
     found: dict[str, Tool] = {}
     for manifest_path in sorted(base.rglob("harness.toml")):
-        if manifest_path.relative_to(base).parts[0] in {"archive", "deprecated"}:
+        if manifest_path.relative_to(base).parts[0] in {"archived", "deprecated"}:
             continue
         directory = manifest_path.parent
         tool = load_tool(directory)

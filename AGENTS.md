@@ -33,7 +33,7 @@ Each installable tool lives below a category directory and has a `harness.toml` 
 `description`, and at least one
 `[[files]]` or `[[actions]]` entry. Bump `version` whenever its payload, fragment, dependency, or action
 changes; a tool without a manifest is invisible to the installer.
-Packages below `harness/archive/` are retained for reference and excluded from catalogue discovery.
+Packages below `harness/archived/` and `harness/deprecated/` are retained for reference and excluded from catalogue discovery.
 
 Shared payloads live at the package root; shallow product folders are overlays:
 
