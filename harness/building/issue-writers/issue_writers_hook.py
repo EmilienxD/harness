@@ -7,7 +7,7 @@ what it does between turns:
 
 * ChatGPT thread ids are mapped onto the UUID form that draft references use.
 
-Publishing, drafting context, and the issue gateway itself all live in
+Publishing, drafting context, and the drafts directory itself all live in
 ``issues_core``.
 """
 from __future__ import annotations
@@ -70,7 +70,7 @@ def claude_prompt(payload: dict) -> None:
         try:
             contexts.append(core.prepare_drafting_context(cwd, session_id))
         except Exception as exc:  # Drafting cannot safely continue without it.
-            sys.stderr.write(f"issues gateway setup failed: {exc}")
+            sys.stderr.write(f"issue drafting setup failed: {exc}")
             raise SystemExit(2) from exc
 
     if contexts:
@@ -79,7 +79,7 @@ def claude_prompt(payload: dict) -> None:
 
 # ChatGPT prompt handling and thread-id mapping
 
-def gateway_session_id(session_id: str) -> str:
+def issues_session_id(session_id: str) -> str:
     """Map ChatGPT thread ids to the UUID form used by draft references."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"harness:issues:chatgpt:{session_id}"))
 
@@ -88,7 +88,7 @@ def chatgpt_prompt(payload: dict) -> None:
     prompt = str(payload.get("prompt") or "").strip()
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
     os.chdir(cwd)
-    session_id = gateway_session_id(str(payload.get("session_id") or "unknown"))
+    session_id = issues_session_id(str(payload.get("session_id") or "unknown"))
 
     if core.PROMPT_PATTERN.search(prompt):
         result = core.run_publish_command(prompt, session_id, cwd)
@@ -107,7 +107,7 @@ def chatgpt_prompt(payload: dict) -> None:
         try:
             contexts.append(core.prepare_drafting_context(cwd, session_id))
         except Exception as exc:  # Drafting cannot safely continue without it.
-            sys.stderr.write(f"issues gateway setup failed: {exc}")
+            sys.stderr.write(f"issue drafting setup failed: {exc}")
             raise SystemExit(2) from exc
 
     if contexts:

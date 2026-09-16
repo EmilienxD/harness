@@ -468,8 +468,8 @@ def _scan_writes(transcript_path: str, repo_root: str) -> WriteScan | None:
     for path in succeeded:
         (inside if _is_within(path, repo_root) else outside).append(path)
 
-    # Drop gitignored paths next -- .issues-gateway/ scratch, build output,
-    # and the like, which Claude touching does not make commit-worthy.
+    # Drop gitignored paths next -- .harness/issue-drafts/ scratch, build
+    # output, and the like, which Claude touching does not make commit-worthy.
     paths, ignored = filter_ignored(inside, repo_root)
 
     # A command that failed wrote nothing, so it is not an unreadable write.
@@ -608,7 +608,7 @@ def resolve_stage_set(paths: Sequence[str], cwd: str) -> tuple[list[str], list[s
 def filter_ignored(paths: Sequence[str], cwd: str) -> tuple[list[str], list[str]]:
     """
     Split `paths` into (kept, ignored), where `ignored` matches a gitignore
-    rule -- `.issues-gateway/` scratch, build output, and the like, which
+    rule -- `.harness/issue-drafts/` scratch, build output, and the like, which
     Claude touching does not make commit-worthy.
 
     `git add -A -- <ignored untracked path>` exits 1, so one ignored path

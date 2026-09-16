@@ -1,10 +1,12 @@
 """Tests for the issue-writers drafting and publishing pipeline.
 
 The tool has one job: the agent writes Markdown drafts into
-`.issues-gateway/<session-id>/`, and `/publish-issues` turns them into real
-GitHub issues. Everything it needs to remember between runs lives either in
-the drafts themselves or outside the repository, so a working tree only ever
-holds drafts and a `.gitignore`.
+`.harness/issue-drafts/<session-id>.issue-<i>.md`, and `/publish-issues` turns
+them into real GitHub issues. Drafts are flat files rather than per-session
+folders, so no session owns a container another session could remove.
+Everything the tool remembers between runs lives either in the drafts
+themselves or outside the repository, so a working tree only ever holds drafts
+and a `.gitignore`.
 
 Tests here exercise the public seams: the publish command surface, the
 drafting context handed to skills, the draft format the SKILL.md files
@@ -39,9 +41,10 @@ def isolated_store(tmp_path, monkeypatch):
 
 
 def _draft(root: Path, name: str, text: str, session: str = SID) -> Path:
-    batch = root / ".issues-gateway" / session
-    batch.mkdir(parents=True, exist_ok=True)
-    path = batch / name
+    """Write one draft. `name` is the "issue-{i}.md" half of the filename."""
+    drafts = root / ".harness" / "issue-drafts"
+    drafts.mkdir(parents=True, exist_ok=True)
+    path = drafts / f"{session}.{name}"
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -72,7 +75,7 @@ def test_lock_and_notice_live_outside_the_repository(tmp_path, monkeypatch):
     lock = hook.lock_path(tmp_path)
     notice = hook.notice_path(tmp_path, SID)
 
-    assert hook.GATEWAY_DIR.name not in lock.parts
+    assert hook.DRAFTS_DIR.name not in lock.parts
     assert lock.parent == hook.store_dir()
     assert lock.suffix == ".lock"
     assert notice.name.endswith(".notice.json")
@@ -94,13 +97,13 @@ def test_successful_publish_leaves_only_drafts_and_gitignore_in_the_repo(
     monkeypatch.chdir(tmp_path)
     _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
     draft = _draft(tmp_path, "issue-0.md", "# T\n\n> mode:afk\n\nbody\n")
-    gateway = draft.parent.parent
-    (gateway / ".gitignore").write_text("*\n", encoding="utf-8")
+    drafts = draft.parent
+    (drafts / ".gitignore").write_text("*\n", encoding="utf-8")
 
     result = hook.publish_issues(False, SID)
 
     assert "Published 1 issue(s) successfully" in result
-    assert {path.name for path in gateway.iterdir()} == {".gitignore"}
+    assert {path.name for path in drafts.iterdir()} == {".gitignore"}
 
 
 # Crash recovery: the draft's own filename is the only record
@@ -126,7 +129,7 @@ def test_draft_is_renamed_across_the_create_and_removed_on_success(
     hook.publish_issues(False, SID)
 
     assert seen == {"claimed": True, "original": False}
-    assert not draft.parent.exists()
+    assert not draft.exists()
 
 
 def test_failed_create_restores_the_draft_for_a_rerun(tmp_path, monkeypatch):
@@ -578,16 +581,17 @@ def test_notice_stays_under_the_additional_context_cap(tmp_path):
 # Automatic cleanup: no command to learn
 
 
-def test_idle_session_folders_are_swept_after_a_week(tmp_path):
+def test_idle_drafts_are_swept_after_a_week(tmp_path):
     stale = _draft(tmp_path, "issue-0.md", "# Old\n", session=OTHER_SID)
     fresh = _draft(tmp_path, "issue-0.md", "# New\n")
     old = time.time() - hook.SESSION_MAX_AGE - 60
     os.utime(stale, (old, old))
-    os.utime(stale.parent, (old, old))
 
     hook.sweep_stale(tmp_path)
 
-    assert not stale.parent.exists()
+    # Each draft's own mtime decides its fate, so a session that is still
+    # drafting cannot be swept along with an abandoned neighbour.
+    assert not stale.exists()
     assert fresh.exists()
 
 
@@ -602,14 +606,17 @@ def test_undelivered_notices_are_swept_after_a_week(tmp_path):
     assert not path.exists()
 
 
-def test_sweep_keeps_a_folder_whose_drafts_are_still_recent(tmp_path):
+def test_sweep_never_deletes_a_file_the_tool_did_not_write(tmp_path):
     draft = _draft(tmp_path, "issue-0.md", "# Recent\n")
+    stray = draft.parent / "notes.md"
+    stray.write_text("a user's own file\n", encoding="utf-8")
     old = time.time() - hook.SESSION_MAX_AGE - 60
-    os.utime(draft.parent, (old, old))  # folder mtime is old, the draft is not
+    os.utime(stray, (old, old))
 
     hook.sweep_stale(tmp_path)
 
     assert draft.exists()
+    assert stray.exists()
 
 
 # The command surface is exactly /publish-issues and --dry
@@ -849,12 +856,21 @@ def test_a_second_publisher_is_turned_away_rather_than_racing(tmp_path, monkeypa
 # Drafting context
 
 
-def test_drafting_context_does_not_create_the_session_folder(tmp_path):
+def test_drafting_context_hands_the_skill_a_full_draft_path(tmp_path):
     context = hook.prepare_drafting_context(tmp_path, SID)
 
+    assert f"issues session id: {SID}" in context
+    assert f"draft file path: .harness/issue-drafts/{SID}.issue-{{i}}.md" in context
     assert "next free issue index: 0" in context
-    assert (tmp_path / ".issues-gateway" / ".gitignore").read_text() == "*\n"
-    assert not (tmp_path / ".issues-gateway" / SID).exists()
+
+
+def test_the_ignore_file_covers_drafts_without_ignoring_harness_config(tmp_path):
+    # .harness/ also holds guard policies and launcher config the user commits
+    # on purpose, so the "*" must never sit at the .harness/ level.
+    hook.prepare_drafting_context(tmp_path, SID)
+
+    assert (tmp_path / ".harness/issue-drafts/.gitignore").read_text() == "*\n"
+    assert not (tmp_path / ".harness/.gitignore").exists()
 
 
 def test_drafting_context_counts_existing_drafts(tmp_path):
@@ -864,13 +880,14 @@ def test_drafting_context_counts_existing_drafts(tmp_path):
     assert "next free issue index: 2" in hook.prepare_drafting_context(tmp_path, SID)
 
 
-def test_drafting_context_does_not_reach_into_another_session(tmp_path):
-    other = tmp_path / ".issues-gateway" / OTHER_SID
-    other.mkdir(parents=True)
+def test_drafting_context_ignores_another_session_sharing_the_directory(tmp_path):
+    other = _draft(tmp_path, "issue-7.md", "# Theirs\n", session=OTHER_SID)
 
-    hook.prepare_drafting_context(tmp_path, SID)
+    context = hook.prepare_drafting_context(tmp_path, SID)
 
-    assert other.is_dir()
+    # Their index must not push ours along, and their draft must survive.
+    assert "next free issue index: 0" in context
+    assert other.exists()
 
 
 def test_an_interrupted_draft_still_reserves_its_index(tmp_path):
@@ -903,7 +920,7 @@ def test_publish_result_reaches_the_user_only_and_erases_the_prompt(tmp_path):
     # Exit code 2 is what erases the prompt and shows stderr to the user
     # without ever putting it in the transcript.
     assert result.returncode == 2
-    assert "No .issues-gateway/" in result.stderr
+    assert "No .harness/issue-drafts/" in result.stderr
     assert result.stdout == ""
 
 
@@ -927,7 +944,7 @@ def test_an_ordinary_prompt_passes_through_silently(tmp_path):
 
     assert result.returncode == 0
     assert result.stdout == ""
-    assert not (tmp_path / ".issues-gateway").exists()
+    assert not (tmp_path / ".harness" / "issue-drafts").exists()
 
 
 def test_a_queued_notice_is_delivered_on_the_next_ordinary_prompt(tmp_path):

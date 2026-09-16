@@ -7,16 +7,17 @@ exits 2, which erases the prompt and shows stderr to the user only - zero API
 calls for this step.
 
 Design notes:
-- Each batch lives in its own directory: ".issues-gateway/{session-id}/".
-  Native UserPromptSubmit adapters inject that directory's session id and next
-  free draft index before a drafting skill runs. The directory itself is
-  created by the agent's first write, not by the hook, so an abandoned
-  drafting turn leaves nothing behind.
-- Draft files inside a batch dir are named "issue-{i}.md". Sorting by `i`
-  gives a stable creation order, so an issue can only reference an issue
-  created earlier in the same batch (no forward references), assuming
-  /draft-issues emitted a correct topological order. This script no longer
-  *assumes* that ordering is perfect - see the retry pass below.
+- Every draft is one flat file in ".harness/issue-drafts/", named
+  "{session-id}.issue-{i}.md". The session id in the filename is the only
+  thing that groups a batch: there is no per-session folder, so no session can
+  ever create, remove, or race a container another session is writing into.
+  Native UserPromptSubmit adapters inject the session id and next free draft
+  index before a drafting skill runs.
+- Sorting a session's files by `i` gives a stable creation order, so an issue
+  can only reference an issue created earlier in the same batch (no forward
+  references), assuming /draft-issues emitted a correct topological order.
+  This script no longer *assumes* that ordering is perfect - see the retry
+  pass below.
 - The first "# " header line in a draft file is the issue title. The first
   non-empty line after that declares labels (see /draft-issues, /draft-issue,
   /to-spec-draft-issue): "> " followed by a comma-separated list of label
@@ -44,7 +45,7 @@ Design notes:
   inline on the command line. This is what avoids the Windows command-line
   length limit, on every platform, regardless of body size.
 - Crash safety costs no extra file and no extra `gh` call. A draft is renamed
-  to "issue-{i}.md.publishing" immediately before `gh issue create` and
+  with a ".publishing" suffix immediately before `gh issue create` and
   removed once the issue exists; a failed create renames it back. A file left
   in the ".publishing" state is therefore the only evidence of a crash mid
   publish, and the next run resolves it with a single title search rather than
@@ -70,9 +71,10 @@ Design notes:
 - Nothing this tool needs to remember is kept inside the working tree. The
   publish lock and the pending notice both live under HARNESS_STATE_DIR (or
   ~/.harness), so a repository only ever holds drafts and a .gitignore.
-- Session folders untouched for SESSION_MAX_AGE are removed, along with notice
-  files that were never delivered. That is the only garbage collection, and it
-  runs automatically - there is no cleanup command to learn.
+- Drafts untouched for SESSION_MAX_AGE are deleted, along with notice files
+  that were never delivered. Per-file, because there is no folder whose mtime
+  could stand in for a batch. That is the only garbage collection, and it runs
+  automatically - there is no cleanup command to learn.
 - "--dry" runs the exact same parse/resolve/chunk-count logic but never
   invokes `gh`, never deletes files, and never writes a notice - it reports
   what would happen, so a bad label line or a genuinely unresolvable reference
@@ -88,7 +90,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -101,7 +102,9 @@ if sys.platform == "win32":
 else:
     import fcntl
 
-GATEWAY_DIR = Path(".issues-gateway")
+# Beside the other per-project Harness configuration (.harness/guards/ and
+# friends), so a project grows one dot-folder rather than one per tool.
+DRAFTS_DIR = Path(".harness/issue-drafts")
 GH_DEADLINE: ContextVar[float | None] = ContextVar("issues_gh_deadline", default=None)
 
 # Everything this tool remembers between runs lives here, never in the user's
@@ -111,7 +114,7 @@ STATE_DIR_VARIABLE = "HARNESS_STATE_DIR"
 # A draft mid-publish. The rename is the entire crash-recovery mechanism.
 PUBLISHING_SUFFIX = ".publishing"
 
-# Session folders idle this long are removed, drafts included.
+# Drafts idle this long are deleted.
 SESSION_MAX_AGE = 7 * 24 * 3600
 
 # Keeps a huge batch well under the 10,000-character cap on additionalContext.
@@ -130,11 +133,13 @@ DRAFT_PATTERN = re.compile(
     r"(?<!\S)[$@/](draft-audit-issues|draft-issue|draft-issues|to-spec-draft-issue)(?=\s|$)"
 )
 
-# A batch directory name: a Claude Code session id (a UUID).
-SESSION_ID_PATTERN = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+# An issues session id: a Claude Code session id (a UUID), or the UUID a
+# ChatGPT thread id is mapped onto by the adapter.
+_SESSION_ID = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
+SESSION_ID_PATTERN = re.compile(rf"^{_SESSION_ID}$")
 
 # A reference to another draft issue, written as plain text
 # "6b1f0c2e-5a3d-4c19-9f7b-2e8a1d0c4f55/0" - in a body ("Blocked by") or under
@@ -153,11 +158,23 @@ PARENT_NUMBER_PATTERN = re.compile(r"^#?(\d+)$")
 PARENT_URL_PATTERN = re.compile(r"^<?https?://\S+?/issues/(\d+)/?>?$", re.IGNORECASE)
 PARENT_NONE_PATTERN = re.compile(r"^(none|n/a)\.?$", re.IGNORECASE)
 
-# The draft filename convention produced by /draft-issues: "issue-{i}.md"
-FILENAME_PATTERN = re.compile(r"^issue-(\d+)\.md$")
-PUBLISHING_PATTERN = re.compile(
-    r"^issue-(\d+)\.md" + re.escape(PUBLISHING_SUFFIX) + r"$"
+# The draft filename convention produced by the drafting skills:
+# "{session-id}.issue-{i}.md". "." separates the two fields because it is the
+# one character a UUID cannot contain - "-" appears inside the id itself.
+# Groups are named: positional order would be an easy thing to get wrong.
+FILENAME_PATTERN = re.compile(
+    rf"^(?P<session>{_SESSION_ID})\.issue-(?P<index>\d+)\.md$"
 )
+PUBLISHING_PATTERN = re.compile(
+    rf"^(?P<session>{_SESSION_ID})\.issue-(?P<index>\d+)\.md"
+    + re.escape(PUBLISHING_SUFFIX)
+    + r"$"
+)
+
+
+def draft_name(session_id: str, index: int | str) -> str:
+    """The filename one draft of a session takes."""
+    return f"{session_id}.issue-{index}.md"
 
 # The label declaration line every drafting skill produces - specs included:
 # "> " followed by a comma-separated list of label tokens in any order. A token
@@ -306,39 +323,36 @@ def run_gh(args, **kwargs):
 
 
 def prepare_drafting_context(root: Path, session_id: str) -> str:
-    """Prepare one draft batch and return the values skills must use.
-
-    The session directory is deliberately *not* created here. The agent's first
-    write creates it, so a drafting turn the user abandons leaves no empty
-    folder behind.
-    """
-    gateway = root / GATEWAY_DIR
-    gateway.mkdir(parents=True, exist_ok=True)
-    ignore = gateway / ".gitignore"
+    """Prepare the drafts directory and return the values skills must use."""
+    drafts = root / DRAFTS_DIR
+    drafts.mkdir(parents=True, exist_ok=True)
+    # Beside the drafts, never at .harness/ level: the sibling directories hold
+    # guard policies and launcher configuration the user commits on purpose.
+    ignore = drafts / ".gitignore"
     if not ignore.exists():
         ignore.write_text("*\n", encoding="utf-8", newline="\n")
     sweep_stale(root)
 
-    batch = gateway / session_id
     indexes = []
-    if batch.is_dir():
-        for path in batch.iterdir():
-            match = FILENAME_PATTERN.match(path.name) or PUBLISHING_PATTERN.match(
-                path.name
-            )
-            if match:
-                indexes.append(int(match.group(1)))
+    for path in drafts.iterdir():
+        match = FILENAME_PATTERN.match(path.name) or PUBLISHING_PATTERN.match(
+            path.name
+        )
+        if match and match["session"] == session_id:
+            indexes.append(int(match["index"]))
     next_index = max(indexes, default=-1) + 1
-    relative = GATEWAY_DIR / session_id
+    template = (DRAFTS_DIR / draft_name(session_id, "{i}")).as_posix()
     return (
-        "Issues gateway drafting context:\n"
+        "Issue drafting context:\n"
         f"- issues session id: {session_id}\n"
-        f"- draft directory: {relative.as_posix()}\n"
+        f"- draft file path: {template}\n"
         f"- next free issue index: {next_index}\n"
-        "Use these exact values wherever the skill asks for its session id, "
-        "draft directory, or starting issue index. Writing the first draft "
-        "creates the directory. If you need a fresh index later, inspect the "
-        "draft directory again before writing so you do not overwrite a draft."
+        "Replace {i} with the index of the draft you are writing, counting up "
+        "from the next free index. Use these exact values wherever the skill "
+        "asks for its session id, draft path, or starting issue index. The "
+        f"directory already exists. If you need a fresh index later, list "
+        f"{DRAFTS_DIR.as_posix()}/ again before writing so you do not "
+        "overwrite a draft."
     )
 
 
@@ -434,7 +448,7 @@ def format_notice(created: list[dict], failed: int, omitted: int = 0) -> str:
         lines.append("")
         lines.append(
             f"{failed} draft(s) failed or were skipped and are still in "
-            ".issues-gateway/ awaiting a rerun."
+            f"{DRAFTS_DIR.as_posix()}/ awaiting a rerun."
         )
     lines.append("")
     if created:
@@ -458,27 +472,27 @@ def format_notice(created: list[dict], failed: int, omitted: int = 0) -> str:
 
 
 def sweep_stale(root: Path, now: float | None = None) -> None:
-    """Remove session folders and notices nothing has touched in a week.
+    """Delete drafts and notices nothing has touched in a week.
 
-    Age-based rather than "empty right now", so it can never race with a
-    drafting turn that is midway through writing its files.
+    Age-based and per-file, so it can never race with a drafting turn that is
+    midway through writing its files, and a draft's own mtime decides its fate
+    rather than a directory's.
     """
     now = time.time() if now is None else now
     cutoff = now - SESSION_MAX_AGE
-    gateway = root / GATEWAY_DIR
-    if gateway.is_dir():
-        for batch in gateway.iterdir():
-            if not batch.is_dir() or not SESSION_ID_PATTERN.fullmatch(batch.name):
-                continue
+    drafts = root / DRAFTS_DIR
+    if drafts.is_dir():
+        for path in drafts.iterdir():
+            if not (
+                FILENAME_PATTERN.match(path.name)
+                or PUBLISHING_PATTERN.match(path.name)
+            ):
+                continue  # never touch a file this tool did not write
             try:
-                newest = max(
-                    (item.stat().st_mtime for item in batch.iterdir()),
-                    default=batch.stat().st_mtime,
-                )
+                if path.stat().st_mtime <= cutoff:
+                    path.unlink()
             except OSError:
                 continue
-            if newest <= cutoff:
-                shutil.rmtree(batch, ignore_errors=True)
     store = store_dir()
     if store.is_dir():
         prefix = f"{_repo_id(root)}-"
@@ -623,32 +637,29 @@ def resolve_references(body: str, resolved: dict[str, str]) -> tuple[str, list[s
     return REF_PATTERN.sub(_sub, body), unresolved
 
 
-def gather_draft_files(batch_dir: Path) -> list[Path]:
-    """List draft files in a batch, in stable, dependency-safe order."""
+def _gather(drafts_dir: Path, session_id: str, pattern: re.Pattern) -> list[Path]:
+    """One session's files matching `pattern`, in stable index order."""
     ordered = []
-    if not batch_dir.is_dir():
+    if not drafts_dir.is_dir():
         return []
-    for path in batch_dir.iterdir():
-        match = FILENAME_PATTERN.match(path.name)
-        if not match:
-            continue  # e.g. stray files, not drafts
-        ordered.append((int(match.group(1)), path))
-    ordered.sort(key=lambda item: item[0])
-    return [path for _, path in ordered]
-
-
-def gather_interrupted_files(batch_dir: Path) -> list[Path]:
-    """List drafts a crash left mid-publish, in the same stable order."""
-    ordered = []
-    if not batch_dir.is_dir():
-        return []
-    for path in batch_dir.iterdir():
-        match = PUBLISHING_PATTERN.match(path.name)
-        if not match:
+    for path in drafts_dir.iterdir():
+        match = pattern.match(path.name)
+        # Stray files, and every other session's drafts, are not ours to read.
+        if not match or match["session"] != session_id:
             continue
-        ordered.append((int(match.group(1)), path))
+        ordered.append((int(match["index"]), path))
     ordered.sort(key=lambda item: item[0])
     return [path for _, path in ordered]
+
+
+def gather_draft_files(drafts_dir: Path, session_id: str) -> list[Path]:
+    """List a session's drafts, in stable, dependency-safe order."""
+    return _gather(drafts_dir, session_id, FILENAME_PATTERN)
+
+
+def gather_interrupted_files(drafts_dir: Path, session_id: str) -> list[Path]:
+    """List drafts a crash left mid-publish, in the same stable order."""
+    return _gather(drafts_dir, session_id, PUBLISHING_PATTERN)
 
 
 def rewrite_known_references(path: Path, resolved: dict[str, str]) -> None:
@@ -942,7 +953,7 @@ def gh_find_issues_by_title(title: str) -> tuple[bool, list[dict] | str]:
 
 
 def recover_interrupted(
-    batch_dir: Path, resolved: dict[str, str], report: list[str]
+    drafts_dir: Path, session_id: str, resolved: dict[str, str], report: list[str]
 ) -> int:
     """Resolve drafts a crash left mid-publish. Returns the failure count.
 
@@ -951,9 +962,9 @@ def recover_interrupted(
     is discarded, otherwise it goes back to being an ordinary draft.
     """
     failures = 0
-    for path in gather_interrupted_files(batch_dir):
+    for path in gather_interrupted_files(drafts_dir, session_id):
         match = PUBLISHING_PATTERN.match(path.name)
-        original = path.with_name(f"issue-{match.group(1)}.md")
+        original = path.with_name(draft_name(session_id, match["index"]))
         title, _ = parse_issue_file(path)
         ok, matches = gh_find_issues_by_title(title)
         if not ok:
@@ -973,7 +984,7 @@ def recover_interrupted(
             continue
         if matches:
             number = str(matches[0].get("number"))
-            resolved[f"{batch_dir.name}/{match.group(1)}"] = number
+            resolved[f"{session_id}/{match['index']}"] = number
             report.append(
                 f"  Recovered: {original.name} was already published as "
                 f"#{number}; discarding the draft."
@@ -1040,13 +1051,14 @@ def publish_one(
 
 
 def publish_batch(
-    batch_dir: Path,
+    drafts_dir: Path,
+    session_id: str,
     dry: bool,
     report: list[str],
     created: list[dict] | None = None,
     mutation_prelude=None,
 ) -> tuple[int, int]:
-    """Publish (or dry-run) every draft file in one batch directory.
+    """Publish (or dry-run) every draft belonging to one session.
 
     `created` collects one record per published issue, for the notice
     delivered to the agent on the next prompt.
@@ -1056,9 +1068,11 @@ def publish_batch(
     # Entries published here are added as the run proceeds, so later drafts in
     # this batch can resolve references to earlier ones.
     resolved: dict[str, str] = {}
-    recovery_failures = 0 if dry else recover_interrupted(batch_dir, resolved, report)
+    recovery_failures = (
+        0 if dry else recover_interrupted(drafts_dir, session_id, resolved, report)
+    )
 
-    files = gather_draft_files(batch_dir)
+    files = gather_draft_files(drafts_dir, session_id)
     if not files:
         return 0, recovery_failures
 
@@ -1116,8 +1130,8 @@ def publish_batch(
             match = FILENAME_PATTERN.match(path.name)
             if not match:
                 continue
-            index = match.group(1)
-            key = f"{batch_dir.name}/{index}"
+            index = match["index"]
+            key = f"{session_id}/{index}"
 
             if dry:
                 suffix = f" -> sub-issue of #{parent_number}" if parent_number else ""
@@ -1198,22 +1212,26 @@ def publish_batch(
 def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
     """Publish drafts belonging to the current agent session only."""
     root = Path.cwd() if root is None else root
-    gateway = root / GATEWAY_DIR
-    if not gateway.is_dir():
+    drafts_dir = root / DRAFTS_DIR
+    if not drafts_dir.is_dir():
         return (
-            "No .issues-gateway/ folder found. Run /draft-issue, /draft-issues, "
-            "or /draft-audit-issues first."
+            f"No {DRAFTS_DIR.as_posix()}/ folder found. Run /draft-issue, "
+            "/draft-issues, or /draft-audit-issues first."
         )
 
     if not SESSION_ID_PATTERN.fullmatch(session_id):
         return "Invalid or missing issues session id. Nothing was published."
 
-    batch_dir = gateway / session_id
-    if not batch_dir.is_dir():
-        return "No draft batch found for this session. Nothing to publish."
+    def nothing_to_publish() -> bool:
+        return not gather_draft_files(
+            drafts_dir, session_id
+        ) and not gather_interrupted_files(drafts_dir, session_id)
+
+    if nothing_to_publish():
+        return "No drafts found for this session. Nothing to publish."
 
     if dry:
-        return _run_publish(batch_dir, True, root, session_id)
+        return _run_publish(drafts_dir, True, root, session_id)
 
     with file_lock(lock_path(root)) as acquired:
         if not acquired:
@@ -1222,12 +1240,12 @@ def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
                 "Retry once it finishes."
             )
         sweep_stale(root)
-        if not batch_dir.is_dir():
-            return "No draft batch found for this session. Nothing to publish."
-        return _run_publish(batch_dir, False, root, session_id)
+        if nothing_to_publish():
+            return "No drafts found for this session. Nothing to publish."
+        return _run_publish(drafts_dir, False, root, session_id)
 
 
-def _run_publish(batch_dir: Path, dry: bool, root: Path, session_id: str) -> str:
+def _run_publish(drafts_dir: Path, dry: bool, root: Path, session_id: str) -> str:
     header = "Dry run -- nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
     labels_ensured = False
@@ -1241,17 +1259,12 @@ def _run_publish(batch_dir: Path, dry: bool, root: Path, session_id: str) -> str
 
     created: list[dict] = []
     published, failed = publish_batch(
-        batch_dir, dry, report, created, mutation_prelude=ensure_labels_once
+        drafts_dir, session_id, dry, report, created, mutation_prelude=ensure_labels_once
     )
     report.append("")
 
     if not dry:
         queue_notice(root, session_id, created, failed)
-        if failed == 0:
-            # Safe even if a drafting turn is mid-flight: the agent's Write
-            # recreates the directory, and rmdir refuses a non-empty folder.
-            with contextlib.suppress(OSError):
-                batch_dir.rmdir()
 
     if dry:
         report.append(f"Dry run complete: {published} issue(s) ready to publish.")
@@ -1261,7 +1274,9 @@ def _run_publish(batch_dir: Path, dry: bool, root: Path, session_id: str) -> str
         report.append(
             f"Published {published} issue(s). {failed} failed or were skipped."
         )
-        report.append("Failed drafts remain in .issues-gateway/ -- fix and rerun.")
+        report.append(
+            f"Failed drafts remain in {DRAFTS_DIR.as_posix()}/ -- fix and rerun."
+        )
     else:
         report.append(f"Published {published} issue(s) successfully.")
 
