@@ -18,9 +18,7 @@ This skill is part of an issue publishing system that uses a gateway for publish
 
 Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body.
 
-### 2. Explore the codebase (optional)
-
-If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
+(optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
 Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
 ### 3. Pin down the issue

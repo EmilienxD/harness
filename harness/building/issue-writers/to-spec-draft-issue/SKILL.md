@@ -8,9 +8,7 @@ metadata:
 disable-model-invocation: true
 ---
 
-Use what the user provided alongside the invocation as this skill's input. A provider-specific hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
-
-Turn the current conversation context and codebase understanding into a single GitHub **spec issue**. Do NOT interview the user; just synthesize what you already know.
+Turn the current conversation context and codebase understanding into a single GitHub spec issue. Do NOT interview the user; just synthesize what you already know.
 
 This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at spec drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
 
@@ -20,18 +18,15 @@ This skill is part of an issue publishing system that uses a gateway for publish
 
 Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body. Use the project's domain glossary vocabulary throughout the spec if available.
 
-### 2. Explore the codebase (optional)
+(Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
-If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
-Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
-
-### 3. Pin down the spec
+### 2. Pin down the spec
 
 Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better — the ideal number is one. Check with the user that these seams match their expectations.
 
 If the feature is too unclear to write a useful spec, say what is missing instead of inventing requirements.
 
-### 2. Write 1 file
+### 3. Write 1 file
 
 Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediatly and alert the user about the bug instead of finding a workaround.
 
@@ -112,7 +107,7 @@ Examples:
 > spec, good first issue
 ```
 
-### 3. Hand off to the user
+### 4. Hand off to the user
 
 Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview what would be created without touching the tracker, or without `--dry` to publish for real.
 
