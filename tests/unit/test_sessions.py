@@ -171,11 +171,7 @@ def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_pat
     monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
     monkeypatch.setattr(sessions.shutil, "which", lambda command: command)
 
-    assert sessions.launch_configuration(project) == {
-        "version": 1,
-        "autoRun": {"provider": "claude"},
-        "providers": {"claude": {}, "chatgpt": {}},
-    }
+    assert sessions.launch_configuration(project) == {"version": 1}
     state.mkdir()
     (state / "launch.json").write_text(
         '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{"command":["global-codex"]}}}', encoding="utf-8"
@@ -190,7 +186,7 @@ def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_pat
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["codex"]
 
 
-def test_launch_configuration_validates_v3_provider_and_session_shapes(tmp_path, monkeypatch):
+def test_launch_configuration_validates_sparse_provider_and_session_shapes(tmp_path, monkeypatch):
     project = tmp_path / "project"
     launch = project / ".harness" / "launch.json"
     launch.parent.mkdir(parents=True)
@@ -198,7 +194,6 @@ def test_launch_configuration_validates_v3_provider_and_session_shapes(tmp_path,
 
     for value in (
         {"version": 2, "platform": "claude"},
-        {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}}},
         {"version": 1, "autoRun": {"provider": "codex"}, "providers": {"claude": {}, "chatgpt": {}}},
         {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}, "session": {"stopWaitHours": -1}},
     ):
@@ -213,3 +208,57 @@ def test_launch_configuration_validates_v3_provider_and_session_shapes(tmp_path,
         "session": {"stopWaitHours": 1.5},
     }), encoding="utf-8")
     assert sessions.launch_configuration(project)["session"]["stopWaitHours"] == 1.5
+
+
+def test_standalone_delegation_profiles_use_task_defaults_and_sparse_overrides():
+    sparse = {"version": 1}
+    assert sessions.delegation_profile_arguments(sparse, "chatgpt", "explore") == [
+        "--model", "gpt-5.6-luna", "-c", 'model_reasoning_effort="low"'
+    ]
+    assert sessions.delegation_profile_arguments(sparse, "chatgpt", "prototype") == []
+    configured = {
+        "version": 1,
+        "providers": {"claude": {"delegations": {"review": {"model": "opus", "effort": "high"}}}},
+    }
+    assert sessions.delegation_profile_arguments(configured, "claude", "review") == [
+        "--model", "opus", "--effort", "high"
+    ]
+
+
+def test_standalone_claude_delegation_profile_applies_tool_denials():
+    configured = {
+        "version": 1,
+        "providers": {
+            "claude": {
+                "delegations": {
+                    "review": {"deniedTools": ["Agent", "WebSearch", "Agent"]}
+                }
+            }
+        },
+    }
+
+    assert sessions.delegation_profile_arguments(
+        configured, "claude", "review"
+    ) == ["--disallowedTools", "Agent,WebSearch"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "profile"),
+    [
+        ("claude", {"model": "gpt-5.6-sol"}),
+        ("claude", {"effort": "minimal"}),
+        ("chatgpt", {"model": "opus"}),
+        ("chatgpt", {"model": "by-difficulty"}),
+        ("chatgpt", {"effort": "max"}),
+    ],
+)
+def test_standalone_delegation_profiles_reject_provider_invalid_values(
+    provider, profile
+):
+    configured = {
+        "version": 1,
+        "providers": {provider: {"delegations": {"review": profile}}},
+    }
+
+    with pytest.raises(sessions.SessionError):
+        sessions.delegation_profile_arguments(configured, provider, "review")

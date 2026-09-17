@@ -1,5 +1,6 @@
 import type { AgentPlatformId } from "../platform/agent-platform.js";
 import type { AgentType, ExecutionMode } from "../domain/contracts.js";
+import type { DelegationTask } from "../platform/launch-configuration.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
@@ -41,6 +42,7 @@ export interface ManualDelegationLaunch {
   readonly resumeSessionId?: string;
   readonly requestId: string;
   readonly type: AgentType;
+  readonly task: DelegationTask;
   readonly provider: AgentPlatformId;
   readonly executionMode: Exclude<ExecutionMode, "auto-run">;
   readonly prompt: string;
@@ -64,6 +66,7 @@ export interface DelegationBinding {
   readonly agentId: string;
   readonly sessionId: string;
   readonly type: AgentType;
+  readonly task: DelegationTask;
   readonly provider: AgentPlatformId;
   readonly executionMode: "interactive" | "auto";
   readonly cwd: string;
@@ -125,6 +128,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
     ...Object.fromEntries(identities.filter((key) => value[key] !== undefined).map((key) => [key, value[key]])),
     requestId: value.requestId,
     type: task.type,
+    task: value.task as DelegationTask,
     provider: value.provider,
     executionMode: value.mode,
     prompt: value.prompt,
@@ -210,7 +214,7 @@ export function createDelegationRoutes(
           : launcher.resume?.(parsed) ?? Promise.reject(new Error("Delegation resume is unavailable")));
         if (recordPath !== undefined) {
           if (parsed.harnessSessionId !== undefined && options.stateDirectory !== undefined) {
-            const binding: DelegationBinding = { harnessSessionId: parsed.harnessSessionId, terminalId: launched.terminalId, agentId: launched.agentId, sessionId: launched.sessionId, type: parsed.type, provider: parsed.provider, executionMode: parsed.executionMode, cwd: parsed.cwd, description: parsed.description, ...(parsed.harnessPython === undefined ? {} : { harnessPython: parsed.harnessPython }), ...(parsed.parentSessionId === undefined ? {} : { parentSessionId: parsed.parentSessionId }), ...(parsed.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: parsed.harnessStateDirectory }), ...(parsed.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: parsed.harnessRuntimePath }) };
+            const binding: DelegationBinding = { harnessSessionId: parsed.harnessSessionId, terminalId: launched.terminalId, agentId: launched.agentId, sessionId: launched.sessionId, type: parsed.type, task: parsed.task, provider: parsed.provider, executionMode: parsed.executionMode, cwd: parsed.cwd, description: parsed.description, ...(parsed.harnessPython === undefined ? {} : { harnessPython: parsed.harnessPython }), ...(parsed.parentSessionId === undefined ? {} : { parentSessionId: parsed.parentSessionId }), ...(parsed.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: parsed.harnessStateDirectory }), ...(parsed.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: parsed.harnessRuntimePath }) };
             const destination = bindingPath(options.stateDirectory, parsed.harnessSessionId);
             await writeFile(`${destination}.tmp`, JSON.stringify(binding), { mode: 0o600 });
             await rename(`${destination}.tmp`, destination);

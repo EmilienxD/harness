@@ -26,7 +26,7 @@ Reopening an ended session preserves its provider, execution mode, working direc
 background continuation requires a next message. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
-Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Exploration sessions are read-only. AUTO RUN workers use stricter, extension-owned Git and GitHub restrictions.
+Interactive sessions and manual delegation tasks have independent launch profiles. Their omitted model and effort settings inherit your native Claude Code or ChatGPT configuration, except exploration, which defaults to Haiku/low for Claude and GPT-5.6 Luna/low for ChatGPT. Exploration sessions are read-only. AUTO RUN workers use separate profiles and stricter, extension-owned Git and GitHub restrictions.
 
 ## AUTO RUN
 
@@ -112,20 +112,33 @@ Discard follows the configured cleanup policy and never removes dirty or moved w
 
 Non-launch settings resolve from VS Code workspace settings, then `.abd/settings.json`, then user or profile settings and defaults. AUTO RUN freezes RUN-specific settings for recovery; it reads launch configuration again whenever it starts or resumes an agent.
 
-The scaffold configures both providers. Claude is only the default for AUTO RUN; **Run Agent** asks for a
-provider explicitly, the **Run Claude Code** and **Run Codex** rows each name one, and reopening follows the
-provider stored with the session:
+The scaffold is intentionally sparse. Omitted settings use product defaults, including Claude as the AUTO RUN provider and the native `claude` and `codex` commands:
+
+```json
+{
+  "version": 1
+}
+```
+
+Add only the overrides the project needs. Delegation profiles are independent from interactive sessions and AUTO RUN workers:
 
 ```json
 {
   "version": 1,
-  "autoRun": { "provider": "claude" },
   "providers": {
-    "claude": { "command": ["claude"] },
-    "chatgpt": { "command": ["codex"] }
+    "chatgpt": {
+      "delegations": {
+        "websearch": {
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      }
+    }
   }
 }
 ```
+
+The available manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general`. AUTO RUN has separate `explore`, `address`, and `review` keys under each provider's `autoRun` object. The JSON schema supplies completion and documents key defaults; Aboard resolves the effective values in code.
 
 Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without overwriting tracked files. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
 

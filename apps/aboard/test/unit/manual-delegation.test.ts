@@ -19,7 +19,7 @@ test("manual delegation maps task identity and explicit execution mode", async (
 
   assert.equal(response.status, 201);
   assert.deepEqual(launches, [{
-    requestId: "request-1", type: "websearch", provider: "chatgpt", executionMode: "auto",
+    requestId: "request-1", type: "websearch", task: "websearch", provider: "chatgpt", executionMode: "auto",
     prompt: "Find primary sources.", skill: "websearch", cwd: "C:\\work", description: "websearch",
   }]);
 });
@@ -43,11 +43,11 @@ test("manual issue delegation invokes the reader worker skills", async () => {
 
   assert.deepEqual(launches, [
     {
-      requestId: "request-0", type: "general", provider: "chatgpt", executionMode: "auto",
+      requestId: "request-0", type: "general", task: "address", provider: "chatgpt", executionMode: "auto",
       prompt: "Do it.", skill: "address-this", cwd: "C:\\work", description: "Address",
     },
     {
-      requestId: "request-1", type: "general", provider: "chatgpt", executionMode: "auto",
+      requestId: "request-1", type: "general", task: "review", provider: "chatgpt", executionMode: "auto",
       prompt: "Do it.", skill: "review-this", cwd: "C:\\work", description: "Review",
     },
   ]);
@@ -178,6 +178,7 @@ test("caller-driven reopen continues through the child's saved Harness state aft
       assert.equal(binding.parentSessionId, "parent");
       assert.equal(binding.harnessStateDirectory, join(root, "state"));
       assert.equal(binding.executionMode, "interactive");
+      assert.equal(binding.task, "general");
       assert.equal(message, "Next task");
       const restarted = createDelegationRoutes({ launch: async () => assert.fail("must resume"), resume: async () => ({ agentId: "agent-1", sessionId: "native", terminalId: "terminal-2" }) }, { stateDirectory: root });
       assert.equal((await restarted({ ...request, body: { ...body, requestId: "next", resumeAgentId: "agent-1", resumeSessionId: "native" } })).status, 201);

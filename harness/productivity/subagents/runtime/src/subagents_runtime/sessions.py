@@ -23,6 +23,10 @@ class SessionError(RuntimeError):
 from subagents_runtime.storage import connect as _connect
 from subagents_runtime.storage import state_dir
 
+_CLAUDE_MODELS = frozenset({"haiku", "sonnet", "opus"})
+_CLAUDE_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
+_CHATGPT_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+
 
 def _config() -> dict[str, Any]:
     path = state_dir() / "config.json"
@@ -54,17 +58,21 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             raise SessionError(
                 f"Harness launch configuration {path} must be a version-1 JSON object"
             )
-        auto_run = value.get("autoRun")
-        providers = value.get("providers")
-        if (
-            not isinstance(auto_run, dict)
-            or auto_run.get("provider") not in {"claude", "chatgpt"}
-            or not isinstance(providers, dict)
-            or not isinstance(providers.get("claude"), dict)
-            or not isinstance(providers.get("chatgpt"), dict)
+        auto_run = value.get("autoRun", {})
+        providers = value.get("providers", {})
+        if not isinstance(auto_run, dict) or (
+            "provider" in auto_run
+            and auto_run.get("provider") not in {"claude", "chatgpt"}
         ):
             raise SessionError(
-                f"Harness launch configuration {path} must configure autoRun.provider and both providers.claude and providers.chatgpt"
+                f"Harness launch configuration {path} autoRun.provider must be claude or chatgpt"
+            )
+        if not isinstance(providers, dict) or any(
+            name in providers and not isinstance(providers[name], dict)
+            for name in ("claude", "chatgpt")
+        ):
+            raise SessionError(
+                f"Harness launch configuration {path} providers must contain JSON objects"
             )
         session = value.get("session", {})
         if not isinstance(session, dict):
@@ -82,11 +90,7 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
                 f"Harness launch configuration {path} session.stopWaitHours must be a non-negative finite number"
             )
         return value
-    return {
-        "version": 1,
-        "autoRun": {"provider": "claude"},
-        "providers": {"claude": {}, "chatgpt": {}},
-    }
+    return {"version": 1}
 
 
 def _split_command(value: str) -> list[str]:
@@ -133,6 +137,83 @@ def _command_from_config(config: dict[str, Any], provider: str) -> list[str]:
 
 def _provider_command(config: dict[str, Any], provider: str) -> list[str]:
     return _command_from_config(config, provider)
+
+
+def delegation_profile_arguments(
+    config: dict[str, Any], provider: str, task: str
+) -> list[str]:
+    """Resolve one manual task without coupling it to another launch profile."""
+    providers = config.get("providers", {})
+    provider_config = providers.get(provider, {}) if isinstance(providers, dict) else {}
+    delegations = provider_config.get("delegations", {})
+    if not isinstance(delegations, dict):
+        raise SessionError(f"providers.{provider}.delegations must be a JSON object")
+    selected = delegations.get(task, {})
+    if not isinstance(selected, dict):
+        raise SessionError(
+            f"providers.{provider}.delegations.{task} must be a JSON object"
+        )
+    if provider == "chatgpt" and task == "explore":
+        model, effort = "gpt-5.6-luna", "low"
+    elif provider == "claude" and task == "explore":
+        model, effort = "haiku", "low"
+    else:
+        model = effort = None
+    model = selected.get("model", model)
+    effort = selected.get("effort", effort)
+    model = None if model == "inherit" else model
+    effort = None if effort == "inherit" else effort
+    model_invalid = (
+        model is not None
+        and (
+            not isinstance(model, str)
+            or not model.strip()
+            or (provider == "claude" and model not in _CLAUDE_MODELS)
+            or (
+                provider == "chatgpt"
+                and (model in _CLAUDE_MODELS or model == "by-difficulty")
+            )
+        )
+    )
+    if model_invalid:
+        raise SessionError(
+            f"providers.{provider}.delegations.{task}.model is not valid for {provider}"
+        )
+    effort_invalid = effort is not None and (
+        not isinstance(effort, str)
+        or effort
+        not in (_CLAUDE_EFFORTS if provider == "claude" else _CHATGPT_EFFORTS)
+    )
+    if effort_invalid:
+        raise SessionError(
+            f"providers.{provider}.delegations.{task}.effort is not valid for {provider}"
+        )
+    arguments: list[str] = []
+    if provider == "claude":
+        denied_tools = selected.get("deniedTools", [])
+        if task == "explore" and "deniedTools" in selected:
+            raise SessionError(
+                f"providers.{provider}.delegations.{task}.deniedTools is not supported"
+            )
+        if not isinstance(denied_tools, list) or not all(
+            isinstance(rule, str) and rule.strip() for rule in denied_tools
+        ):
+            raise SessionError(
+                f"providers.{provider}.delegations.{task}.deniedTools must be an array of non-empty strings"
+            )
+        if denied_tools:
+            arguments.extend(
+                ["--disallowedTools", ",".join(dict.fromkeys(denied_tools))]
+            )
+    if model is not None:
+        arguments.extend(["--model", model])
+    if effort is not None:
+        arguments.extend(
+            ["--effort", effort]
+            if provider == "claude"
+            else ["-c", f"model_reasoning_effort={json.dumps(effort)}"]
+        )
+    return arguments
 
 
 def _harness_environment(environment: dict[str, str]) -> dict[str, str]:
@@ -345,6 +426,7 @@ def provider_arguments(
     resume: bool = False,
     fork: bool = False,
     fork_id: str | None = None,
+    launch_options: list[str] | None = None,
 ) -> list[str]:
     """Native provider arguments, with permissions supplied by native configuration.
 
@@ -368,6 +450,7 @@ def provider_arguments(
         arguments.append("--json")
     elif fork or resume:
         arguments.extend(["fork" if fork else "resume", conversation])
+    arguments.extend(launch_options or [])
     if prompt:
         arguments.append("--")
         arguments.append(prompt)
@@ -410,8 +493,9 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             connection.execute(
                 "UPDATE sessions SET provider_session_id=? WHERE id=?", (forked, child_id)
             )
+        launch_config = launch_configuration(cwd)
         command = [
-            *_provider_command(launch_configuration(cwd), request.provider),
+            *_provider_command(launch_config, request.provider),
             *provider_arguments(
                 request.provider,
                 request.mode,
@@ -419,6 +503,9 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
                 request.prompt,
                 fork=True,
                 fork_id=forked,
+                launch_options=delegation_profile_arguments(
+                    launch_config, request.provider, request.task
+                ),
             ),
         ]
         processes.start(
@@ -455,12 +542,20 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     )
     if not continuing and request.provider == "claude":
         conversation = child_id
-    command = _provider_command(launch_configuration(cwd), request.provider)
+    launch_config = launch_configuration(cwd)
+    command = _provider_command(launch_config, request.provider)
     if not continuing and request.provider == "claude":
         command.extend(["--name", f"agent-{agent_number}"])
     command.extend(
         provider_arguments(
-            request.provider, request.mode, conversation, prompt, resume=continuing
+            request.provider,
+            request.mode,
+            conversation,
+            prompt,
+            resume=continuing,
+            launch_options=delegation_profile_arguments(
+                launch_config, request.provider, request.task
+            ),
         )
     )
     processes.start(

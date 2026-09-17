@@ -52,14 +52,17 @@ points.
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.harness/launch.json` version 1 is the launch authority and is re-read for every new launch, resume, and
-reopen. `providers.claude` and `providers.chatgpt` are equal, independently validated configurations;
-neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
+`.harness/launch.json` is a sparse launch authority and is re-read for every new launch, resume, and
+reopen. Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
+independently validated configurations; neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
 the Run Agent view above the fleet offers one row per provider that launches the same interactive session
 without the prompt, and `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
 provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
-configuration. Profiles select model and effort independently and may use `inherit`; Auto Run workers may
-use `by-difficulty`. Platform-specific values must be validated before a terminal is created.
+configuration. Interactive, manual-delegation, and Auto Run profiles select model and effort independently.
+Manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and
+`general`; their task identity must survive launch and resume instead of collapsing configuration to the
+runtime `general` identity. Profiles may use `inherit`; Auto Run workers may use `by-difficulty`.
+Platform-specific values must be validated before a terminal is created.
 
 Difficulty routing:
 
@@ -71,7 +74,8 @@ Difficulty routing:
 | `[AI]-expert-difficulty` or none | `opus`, high | `gpt-5.6-sol`, high |
 
 Interactive and manual sessions inherit the user's native Claude Code or Codex tool settings, including
-built-in subagents and web search. Auto Run workers deny those tools regardless of permissive launch-profile
+built-in subagents and web search, when their exact profile omits an override. Claude exploration defaults
+to Haiku/low and ChatGPT exploration defaults to GPT-5.6 Luna/low. Auto Run workers deny those tools regardless of permissive launch-profile
 settings, with extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT explore must pass
 managed-policy checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` workers
 require `chrome` in `BROWSER_USE_AVAILABLE_BACKENDS` before launch.

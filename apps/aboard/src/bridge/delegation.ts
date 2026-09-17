@@ -27,6 +27,7 @@ import {
 import { AUTO_RUN_RESTRICTIONS } from "../auto/permissions.js";
 import { isolationProtectedPaths, worktreeGitMetadataRoots } from "../auto/worktree.js";
 import type { IssueDifficulty } from "../shared/labels.js";
+import type { DelegationTask } from "../platform/launch-configuration.js";
 
 function harnessEnvironment(input: { readonly harnessStateDirectory?: string; readonly harnessRuntimePath?: string }): Record<string, string> {
   return {
@@ -95,6 +96,7 @@ export interface ReopenTarget {
   readonly platform: AgentPlatformId;
   readonly agentId: AgentId;
   readonly type: AgentType;
+  readonly delegationTask?: DelegationTask;
   readonly sessionId: SessionId;
   readonly resultDelivery?: AgentSession["resultDelivery"]; 
   /** The terminal name, already carrying aboard's own prefix. */
@@ -131,6 +133,7 @@ export interface DelegationConfigurationSource {
   get(type: AgentType): Promise<ConfiguredLaunch>;
   /** Resolves one explicit or session-owned provider without consulting the Auto Run default. */
   getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch>;
+  getDelegationFor?(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch>;
 }
 
 export interface DelegationPromptResolver {
@@ -273,7 +276,9 @@ export class DelegationCoordinator {
     const saved = this.options.fleet.get(target.agentId);
     const executionMode = saved?.executionMode ?? target.executionMode ?? "interactive";
     if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Background continuation requires a next message");
-    const configured = await this.options.configurations.getFor(target.platform, target.type);
+    const configured = target.delegationTask === undefined || this.options.configurations.getDelegationFor === undefined
+      ? await this.options.configurations.getFor(target.platform, target.type)
+      : await this.options.configurations.getDelegationFor(target.platform, target.delegationTask);
     const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
