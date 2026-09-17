@@ -275,7 +275,7 @@ export class DelegationCoordinator {
       throw new DelegationError("agent-active", `Agent ${target.agentId} still has a live or uncertain execution`);
     }
     const saved = this.options.fleet.get(target.agentId);
-    const executionMode = saved?.executionMode ?? target.executionMode ?? "interactive";
+    const executionMode = target.executionMode ?? saved?.executionMode ?? "interactive";
     if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Background continuation requires a next message");
     const configured = target.delegationTask === undefined || this.options.configurations.getDelegationFor === undefined
       ? await this.options.configurations.getFor(target.platform, target.type)
@@ -390,6 +390,7 @@ export class DelegationCoordinator {
           target.sessionId,
           attended,
           resultDelivery,
+          executionMode,
         );
       } else {
         this.options.fleet.reattach(
@@ -399,6 +400,7 @@ export class DelegationCoordinator {
           target.sessionId,
           resultDelivery,
           attended,
+          executionMode,
         );
       }
       if (this.options.startupTimeoutMs !== undefined) {

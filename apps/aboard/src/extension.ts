@@ -12,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
-import { continueHarnessDelegation, createDelegationRoutes, readDelegationBinding } from "./bridge/manual-delegation.js";
+import { createDelegationRoutes, readDelegationBinding } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -535,7 +535,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   });
   activeAutoRun = autoRun;
   const reopen = new ReopenCoordinator({
-    nextMessage: async (candidate) => window.showInputBox({ prompt: `Next message for ${candidate.agentId}`, ignoreFocusOut: true, validateInput: (message) => message.trim() ? undefined : "A continuation requires a next message" }),
     activity: { entries: () => activity.store() },
     fleet,
     terminals: {
@@ -543,18 +542,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       liveTerminalFor: (agentId) => terminals.liveTerminalForAgent(agentId),
       show: (terminalId) => terminals.show(terminalId),
     },
-    launcher: { reopen: async (target) => {
-      const handles = await continueHarnessDelegation(join(runtime.root, "delegations"), target, async (binding, message) => {
-        await promisify(execFile)(binding.harnessPython ?? "python", ["-m", "subagents_runtime.cli", "resume", binding.harnessSessionId!, message], {
-          cwd: binding.cwd, windowsHide: true, timeout: 30_000,
-          env: { ...process.env, HARNESS_SESSION_ID: binding.parentSessionId!,
-            ...(binding.harnessStateDirectory === undefined ? {} : { HARNESS_STATE_DIR: binding.harnessStateDirectory }),
-            ...(binding.harnessRuntimePath === undefined ? {} : { PYTHONPATH: [binding.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) }) },
-        });
-      });
-      return handles === undefined ? coordinator.reopen(target)
-        : { agentId: handles.agentId as AgentId, sessionId: handles.sessionId as SessionId, terminalId: handles.terminalId as TerminalId };
-    } },
+    launcher: { reopen: (target) => coordinator.reopen(target) },
     isResumable: (platform, sessionId, cwd, type) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot, type),
   });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });

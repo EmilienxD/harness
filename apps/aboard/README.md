@@ -23,8 +23,8 @@ future sessions use your latest choices.
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
 Focusing a live interactive session reveals its existing terminal. Background sessions have no terminal.
-Reopening an ended session preserves its provider, execution mode, working directory, and conversation;
-background continuation requires a next message. If that conversation is
+Reopening an ended session preserves its provider, working directory, and conversation, and opens an
+interactive terminal ready for you to type. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
 Interactive sessions and manual delegation tasks have independent launch profiles. Their omitted model and

@@ -65,37 +65,30 @@ test("conversation inspection failures remain actionable instead of looking like
   assert.match(describeReopenOutcome(direct), /failed to decode rollout/u);
 });
 
-test("interactive delegated continuations refuse a live terminal and require a next message after exit", async () => {
-  let live: TerminalId | undefined = "terminal-1" as TerminalId;
+test("reopening workers and delegated sessions waits for user input in an interactive terminal", async () => {
+  const targets: import("../../src/bridge/delegation.js").ReopenTarget[] = [];
   const coordinator = new ReopenCoordinator({
-    activity: { entries: endedActivity }, fleet: new FleetRegistry(),
-    terminals: { isOpen: () => live !== undefined, liveTerminalFor: () => live,
-      show: () => assert.fail("a continuation must not focus the child") },
-    launcher: { reopen: async () => { throw new Error("must not launch without a message"); } },
-    isResumable: async () => true,
-  });
-  const candidate = { platform: "claude" as const, agentId, type: "general" as const,
-    executionMode: "interactive" as const, sessionId, description: "general", origin: "ended" as const, at };
-  assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "execution-active" });
-  live = undefined;
-  assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "next-message-required" });
-});
-
-test("continuations are described by where the user will find them", async () => {
-  const coordinator = new ReopenCoordinator({
-    nextMessage: async () => "Finish the remaining review fix.",
     activity: { entries: endedActivity }, fleet: new FleetRegistry(),
     terminals: { isOpen: () => false, liveTerminalFor: () => undefined, show: () => undefined },
-    launcher: { reopen: async () => ({ agentId, sessionId, terminalId: "terminal-2" as TerminalId }) },
+    launcher: { reopen: async (target) => {
+      targets.push(target);
+      return { agentId, sessionId, terminalId: "terminal-2" as TerminalId };
+    } },
     isResumable: async () => true,
   });
   const candidate = { platform: "claude" as const, agentId, sessionId, description: "worker", origin: "ended" as const, at };
-
-  const worker = await coordinator.reopen({ ...candidate, type: "address", executionMode: "auto-run" });
-  const delegated = await coordinator.reopen({ ...candidate, type: "general", executionMode: "auto" });
-
-  assert.equal(worker.action, "reopened");
-  assert.match(describeReopenOutcome(worker), /terminal/u);
-  assert.equal(delegated.action, "reopened");
-  assert.match(describeReopenOutcome(delegated), /background/u);
+  for (const session of [
+    { type: "address" as const, executionMode: "auto-run" as const },
+    { type: "general" as const, executionMode: "auto" as const },
+    { type: "general" as const, executionMode: "interactive" as const },
+  ]) {
+    const outcome = await coordinator.reopen({ ...candidate, ...session });
+    assert.equal(outcome.action, "reopened");
+    const target = targets.at(-1)!;
+    assert.equal(target.executionMode, "interactive");
+    assert.equal(target.prompt, undefined);
+    assert.equal(target.sessionId, sessionId);
+    assert.equal(target.type, session.type);
+    assert.match(describeReopenOutcome(outcome), /handed it back to you/u);
+  }
 });

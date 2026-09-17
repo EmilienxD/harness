@@ -231,6 +231,7 @@ export class FleetRegistry {
     sessionId?: SessionId,
     attended?: boolean,
     resultDelivery?: AgentSession["resultDelivery"],
+    executionMode?: AgentSession["executionMode"],
   ): void {
     const session = this.requireSession(agentId);
     if (session.lifecycle.status !== "completed" && session.lifecycle.status !== "failed") {
@@ -251,6 +252,7 @@ export class FleetRegistry {
       ...(attended === undefined ? (session.attended === true ? { attended: true as const } : {}) : attended ? { attended: true as const } : {}),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(resultDelivery === undefined ? {} : { resultDelivery }),
+      ...(executionMode === undefined ? {} : { executionMode }),
       terminal,
       lifecycle: { status: "starting", startedAt },
     });
@@ -265,6 +267,7 @@ export class FleetRegistry {
     sessionId?: SessionId,
     resultDelivery?: AgentSession["resultDelivery"],
     attended?: boolean,
+    executionMode?: AgentSession["executionMode"],
   ): void {
     const session = this.requireSession(agentId);
     if (
@@ -289,6 +292,7 @@ export class FleetRegistry {
       ...(attended === undefined ? (session.attended === true ? { attended: true as const } : {}) : attended ? { attended: true as const } : {}),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(resultDelivery === undefined ? {} : { resultDelivery }),
+      ...(executionMode === undefined ? {} : { executionMode }),
       terminal,
       lifecycle: { status: "starting", startedAt },
     });
