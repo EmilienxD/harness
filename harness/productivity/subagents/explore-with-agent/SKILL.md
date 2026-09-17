@@ -8,13 +8,13 @@ metadata:
 disable-model-invocation: true
 ---
 
-# Explore with an Agent
+Run a subagent with the `explore` task.
 
-Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
+Follow the *Multi Provider Subagent System Guideline* and inbox previously supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
 Request parameters:
 - task: explore
 - mode: auto
-- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
+- provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 
 Ask the child to inspect the codebase and report findings without editing files. The task param already tells the agent how to explore, not what to explore.

@@ -8,13 +8,13 @@ metadata:
 disable-model-invocation: true
 ---
 
-# Address with an Agent
+Run a subagent with the `address` task.
 
-Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
+Follow the *Multi Provider Subagent System Guideline* and inbox previously supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
 Request parameters:
 - task: address
 - mode: interactive or auto (default auto)
-- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
+- provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 
 Give the child a bounded task and the relevant project context. The task param already tells the agent how to address something, not what to address.

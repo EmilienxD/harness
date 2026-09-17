@@ -8,8 +8,6 @@ metadata:
 disable-model-invocation: true
 ---
 
-# setup-help
-
 Guide the user through any setup, one step at a time, in plain English.
 
 ## Response format (every single response)

@@ -7,8 +7,6 @@ metadata:
   author: EMB
 ---
 
-# Report Gotchas
-
 After completing an ambiguous task, if there are remaining gotchas, caveats, unverified work, unrelated errors, bugs, failed tests, or incomplete work, notify the user by submitting a Markdown gotcha report.
 
 Never report a gotcha already reported during the session. Finish normally without submitting a report if there are no new gotchas to report.

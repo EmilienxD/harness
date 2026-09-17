@@ -8,13 +8,13 @@ metadata:
 disable-model-invocation: true
 ---
 
-# Review with an Agent
+Run a subagent with the `review` task.
 
-Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
+Follow the *Multi Provider Subagent System Guideline* and inbox previously supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
 Request parameters:
 - task: review
 - mode: interactive or auto (default auto)
-- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
+- provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 
 State the review scope, relevant changes, and validation expectations. The task param already tells the agent how to review, not what to review.

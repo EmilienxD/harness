@@ -8,7 +8,9 @@ metadata:
 disable-model-invocation: true
 ---
 
-# Extend Claude System Prompt
+Extend Claude system prompt.
+
+## Process
 
 1. Inspect `.harness/agent-launcher/config.py`, `.harness/agent-launcher/system-prompt.md`, and existing modules in `.harness/agent-launcher/extensions/`.
 2. For static instructions, edit `system-prompt.md`. For generated context, create a named module under `extensions/`, import it in `config.py`, and use its output only for `claude.system_prompt` in the returned `LaunchConfiguration`.

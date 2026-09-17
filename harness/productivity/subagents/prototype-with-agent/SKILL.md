@@ -8,13 +8,13 @@ metadata:
 disable-model-invocation: true
 ---
 
-# Prototype with an Agent
+Run a subagent with the `prototype` task.
 
-Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
+Follow the *Multi Provider Subagent System Guideline* and inbox previously supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
 Request parameters:
 - task: prototype
 - mode: interactive
-- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
+- provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 
 Describe the disposable experiment and its success criteria. The task param already tells the agent how to prototype, not what to prototype.

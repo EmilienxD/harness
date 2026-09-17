@@ -8,13 +8,13 @@ metadata:
 disable-model-invocation: true
 ---
 
-# Work with an Agent
+Run an agent with the `general` task.
 
 Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
 Request parameters:
 - task: general
 - mode: interactive or auto (default auto)
-- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
+- provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 
 Give the child a bounded task and the relevant project context.
