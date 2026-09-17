@@ -15,6 +15,6 @@ Follow the shared delegation workflow and inbox supplied by the hook. If no hook
 Request parameters:
 - task: websearch
 - mode: interactive or auto (default auto)
-- provider (Optional): `claude` or `chatgpt`
+- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
 
 State the research question, source requirements, and requested output. The task param already tells the agent how to websearch, not what to websearch.

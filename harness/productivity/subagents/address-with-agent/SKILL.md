@@ -15,6 +15,6 @@ Follow the shared delegation workflow and inbox supplied by the hook. If no hook
 Request parameters:
 - task: address
 - mode: interactive or auto (default auto)
-- provider (Optional): `claude` or `chatgpt`
+- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
 
 Give the child a bounded task and the relevant project context. The task param already tells the agent how to address something, not what to address.

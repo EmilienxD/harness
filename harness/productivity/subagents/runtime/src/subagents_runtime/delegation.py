@@ -14,7 +14,14 @@ from pathlib import Path
 import yaml
 
 PROVIDERS = frozenset({"claude", "chatgpt"})
+# Request frontmatter spells ChatGPT as "chatgpt" or "codex"; both normalize to
+# the canonical provider name before validation, storage, and launch.
+PROVIDER_ALIASES = {"codex": "chatgpt"}
 SKILL_INVOCATION = re.compile(r"(?<!\S)[/\$][A-Za-z0-9_-]+(?=\s|$)")
+
+
+def normalize_provider(provider: str) -> str:
+    return PROVIDER_ALIASES.get(provider, provider)
 
 
 class RequestFileError(ValueError):
@@ -153,7 +160,7 @@ def parse_request_file(
             )
     task = metadata["task"].strip()
     mode = metadata["mode"].strip()
-    provider = metadata.get("provider", parent_provider).strip()
+    provider = normalize_provider(metadata.get("provider", parent_provider).strip())
     task_policy = next(
         (item for item in TASK_POLICIES.values() if item.task == task), None
     )

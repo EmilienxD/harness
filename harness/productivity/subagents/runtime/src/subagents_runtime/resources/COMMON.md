@@ -12,7 +12,7 @@ Launch frontmatter schema (`|` separates supported values and is not literal req
 ---
 task: general|explore|prototype|websearch|brainstorm|address|review # Required. Selects the agent workflow.
 mode: interactive|auto # Required. explore uses auto; brainstorm uses interactive; every other task supports both.
-provider: claude|chatgpt # Optional. Defaults to this conversation's provider.
+provider: claude|chatgpt|codex # Optional. Defaults to this conversation's provider. codex is an alias of chatgpt.
 ---
 
 <prompt for the new agent>

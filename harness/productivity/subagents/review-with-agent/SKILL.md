@@ -15,6 +15,6 @@ Follow the shared delegation workflow and inbox supplied by the hook. If no hook
 Request parameters:
 - task: review
 - mode: interactive or auto (default auto)
-- provider (Optional): `claude` or `chatgpt`
+- provider (Optional): `claude`, `chatgpt`, or `codex` (alias of `chatgpt`)
 
 State the review scope, relevant changes, and validation expectations. The task param already tells the agent how to review, not what to review.

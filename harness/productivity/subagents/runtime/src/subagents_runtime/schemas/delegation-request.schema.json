@@ -18,10 +18,11 @@
       ]
     },
     "provider": {
-      "description": "Defaults to the parent session's provider when omitted.",
+      "description": "Defaults to the parent session's provider when omitted. 'codex' is an alias of 'chatgpt' and is normalized to it.",
       "enum": [
         "claude",
-        "chatgpt"
+        "chatgpt",
+        "codex"
       ]
     },
     "mode": {

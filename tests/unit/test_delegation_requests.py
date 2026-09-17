@@ -9,6 +9,7 @@ import pytest
 from subagents_runtime.delegation import (
     TASK_POLICIES,
     PROVIDERS,
+    PROVIDER_ALIASES,
     TaskPolicy,
     RequestFileError,
     enable_delegation,
@@ -57,12 +58,30 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     assert request["oneOf"][0]["required"] == ["task", "mode"]
     assert set(request["properties"]["task"]["enum"]) == tasks
     assert set(request["properties"]["mode"]["enum"]) == modes
-    assert set(request["properties"]["provider"]["enum"]) == set(PROVIDERS)
+    # Frontmatter accepts provider aliases; the wire schema stays canonical.
+    assert set(request["properties"]["provider"]["enum"]) == set(PROVIDERS) | set(PROVIDER_ALIASES)
 
     assert set(aboard["required"]) <= set(aboard["properties"])
     assert set(aboard["properties"]["task"]["enum"]) == tasks
     assert set(aboard["properties"]["mode"]["enum"]) == modes
     assert set(aboard["properties"]["provider"]["enum"]) == set(PROVIDERS)
+
+
+def test_codex_is_an_alias_of_chatgpt(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    request = write_request(
+        inbox,
+        "research.md",
+        "---\ntask: websearch\nprovider: codex\nmode: auto\n---\n\nFind primary sources.\n",
+    )
+
+    parsed = parse_request_file(
+        request,
+        inbox,
+        parent_provider="claude",
+    )
+
+    assert parsed.provider == "chatgpt"
 
 
 def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
